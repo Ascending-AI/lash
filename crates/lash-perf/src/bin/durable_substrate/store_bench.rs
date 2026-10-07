@@ -17,7 +17,9 @@ use lash_durable::{
     ActorKey, CommitLabel, DurableStore, FormatSet, MailTx, NodeId, NodeLease, NodeSpec, Release,
     Signal, Signals, WakeBatch,
 };
-use lash_postgres_store::{PostgresStorage, PostgresStoreConfig, PostgresStoreSet};
+use lash_postgres_store::{
+    PostgresEndpoints, PostgresHostConfig, PostgresStorage, PostgresStoreSet,
+};
 use serde::Serialize;
 
 use crate::deploy::micros;
@@ -35,15 +37,14 @@ struct BenchNode {
 async fn nodes(url: &str, count: usize, tag: &str, formats: &FormatSet) -> Result<Vec<BenchNode>> {
     let mut nodes = Vec::new();
     for index in 0..count {
-        let storage = PostgresStorage::connect_with(
-            url,
-            PostgresStoreConfig {
-                max_connections: 4,
-                ..PostgresStoreConfig::default()
-            },
-        )
-        .await
-        .map_err(|error| anyhow::anyhow!("connect: {error}"))?;
+        let mut config = PostgresHostConfig::default();
+        config.roles.work.max_connections = 4;
+        config.roles.max_store_operations = 4;
+        let endpoints = PostgresEndpoints::from_url(url)
+            .map_err(|error| anyhow::anyhow!("connect: {error}"))?;
+        let storage = PostgresStorage::connect(&endpoints, &config, Default::default())
+            .await
+            .map_err(|error| anyhow::anyhow!("connect: {error}"))?;
         let set = PostgresStoreSet::new(
             &storage,
             Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),

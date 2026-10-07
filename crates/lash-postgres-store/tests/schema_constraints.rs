@@ -445,7 +445,7 @@ async fn trigger_retention_uses_typed_outcomes() {
         &lash_postgres_store::testing::required_database_url(),
     )
     .await;
-    let storage = PostgresStorage::connect(database.url())
+    let storage = lash_postgres_store::testing::connect(database.url())
         .await
         .expect("open isolated PostgreSQL");
     let store = storage.trigger_store();
@@ -503,7 +503,7 @@ async fn dropped_trigger_occurrences_cannot_be_reclaimed_or_have_deliveries() {
         &lash_postgres_store::testing::required_database_url(),
     )
     .await;
-    let storage = PostgresStorage::connect(database.url())
+    let storage = lash_postgres_store::testing::connect(database.url())
         .await
         .expect("open isolated PostgreSQL");
     let record = lash_core::testing::record_trigger_occurrence(
@@ -543,7 +543,7 @@ async fn dropped_trigger_occurrences_cannot_be_reclaimed_or_have_deliveries() {
 async fn turn_cancellation_shape_is_guarded() {
     let url = lash_postgres_store::testing::required_database_url();
     let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
-    let storage = PostgresStorage::connect(database.url())
+    let storage = lash_postgres_store::testing::connect(database.url())
         .await
         .expect("open cancellation fixture");
     let mut conn = storage.pool().acquire().await.expect("acquire connection");

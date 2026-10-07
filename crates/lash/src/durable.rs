@@ -25,6 +25,10 @@ pub use lash_core::{
 pub struct DurableBackendBuilder {
     stores: Arc<dyn StoreSet>,
     settings: DurableSettings,
+    /// Whether a host configuration owns `settings`, so that
+    /// [`config`](Self::config) is a second, refused source of them.
+    host_settings: bool,
+    overridden: bool,
     engines: Vec<Arc<dyn ProcessEngine>>,
     #[cfg(feature = "rlm")]
     providers: Vec<Arc<dyn lashlang::ProjectionProvider>>,
@@ -37,16 +41,40 @@ impl DurableBackendBuilder {
         Self {
             stores,
             settings: DurableSettings::default(),
+            host_settings: false,
+            overridden: false,
             engines: Vec::new(),
             #[cfg(feature = "rlm")]
             providers: Vec::new(),
         }
     }
 
-    /// The substrate's parameters; [`build`](Self::build) validates them.
+    /// A builder of the durable backend over `host`'s PostgreSQL store set,
+    /// writing attachment bytes to `attachments`, under the durable
+    /// settings of `host.effective_config.node`: the one place a PostgreSQL
+    /// host's durable settings live.
+    #[cfg(feature = "postgres")]
+    pub fn postgres(
+        host: &crate::postgres::PostgresHost,
+        attachments: Arc<dyn crate::persistence::AttachmentStore>,
+    ) -> Self {
+        Self {
+            settings: host.effective_config.node,
+            host_settings: true,
+            ..Self::new(Arc::new(crate::postgres::PostgresStoreSet::new(
+                &host.storage,
+                attachments,
+            )))
+        }
+    }
+
+    /// The substrate's parameters; [`build`](Self::build) validates them. A
+    /// builder from [`postgres`](Self::postgres) refuses them at build:
+    /// they belong to the host configuration.
     #[must_use]
     pub fn config(mut self, settings: DurableSettings) -> Self {
         self.settings = settings;
+        self.overridden = true;
         self
     }
 
@@ -70,6 +98,9 @@ impl DurableBackendBuilder {
     /// # Errors
     /// [`DurableBuildError`] when the backend cannot be assembled.
     pub fn build(self) -> Result<Backend, DurableBuildError> {
+        if self.host_settings && self.overridden {
+            return Err(DurableBuildError::SettingsOwnedByHost);
+        }
         Backend::assemble(BackendParts {
             #[cfg(feature = "rlm")]
             providers: projection_catalog(self.providers)?,

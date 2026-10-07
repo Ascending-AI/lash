@@ -21,17 +21,16 @@
 //!
 //! **Credentials never leave.** A preflight report is operator-facing output
 //! that lands in logs and tickets, so the location this handle reports is
-//! derived from the connection string by keeping only `host[:port]/dbname` and
-//! discarding everything before the credentials separator. A string that does
-//! not parse yields a fixed placeholder rather than being echoed: a report that
-//! cannot name the target is a smaller loss than one that leaks a password.
+//! built from the parsed endpoint's host, port and database alone: the user,
+//! password and options are never read. A handle over a host's own pool
+//! reports a fixed placeholder.
 
 use async_trait::async_trait;
 use lash_core_execution::{
     DurableScan, DurableScanPage, StoreBackend, StoreError, StorePreflight, StoreSchemaDatabase,
     StoreSchemaStatus, StoreSchemaVerdict,
 };
-use sqlx::postgres::{PgPool, PgPoolOptions};
+use sqlx::postgres::{PgConnectOptions, PgPool};
 
 use crate::schema::SchemaObservation;
 use lash_core_execution::compat::{self, CompatAdmission, ComponentId, StampRead};
@@ -46,8 +45,8 @@ pub(crate) mod walk;
 /// exactly one row.
 const COMPONENT_DATABASE_NAME: &str = "component schema";
 
-/// What the reported location falls back to when the connection string cannot
-/// be parsed. Deliberately content-free — see the module documentation.
+/// The location a handle over a host's own pool reports. Deliberately
+/// content-free — see the module documentation.
 const REDACTED_PLACEHOLDER: &str = "postgres";
 
 /// A read-only handle over a PostgreSQL deployment, built from raw connection
@@ -60,45 +59,40 @@ pub struct PostgresStorePreflight {
 }
 
 impl PostgresStorePreflight {
-    /// Construction validates the URL and sizes a pool for one probe — a couple
-    /// of connections and a short acquire timeout, so a probe against an
-    /// unreachable or saturated server fails fast instead of stalling the boot
-    /// it was supposed to protect. It deliberately does not connect: a handle
-    /// that failed to *exist* because the server was down would push the
-    /// diagnosis back into the boot path, whereas
+    /// A probe of the deployment `endpoints` reach, on a pool sized by
+    /// `config.maintenance.preflight_pool` (a couple of connections and a
+    /// short acquire timeout by default, so a probe against an unreachable
+    /// or saturated server fails fast instead of stalling the boot it was
+    /// supposed to protect) and named `<prefix>/preflight`. It deliberately
+    /// does not connect: a handle that failed to *exist* because the server
+    /// was down would push the diagnosis back into the boot path, whereas
     /// [`StorePreflight::schema_status`] has a documented place to report
-    /// exactly that. Per-connection `lock_timeout` and `statement_timeout` are
-    /// likewise not set — the reads are catalog reads under a shared lock, and a
-    /// probe that timed out mid-read would report drift it did not observe.
-    pub fn for_database_url(database_url: &str) -> Result<Self, StoreError> {
-        let pool = PgPoolOptions::new()
-            .max_connections(2)
-            .min_connections(0)
-            .acquire_timeout(std::time::Duration::from_secs(5))
-            .connect_lazy(database_url)
-            .map_err(|err| StoreError::Backend(err.to_string()))?;
-        Ok(Self {
+    /// exactly that. No `lock_timeout` or `statement_timeout` is installed —
+    /// the reads are catalog reads under a shared lock, and a probe that
+    /// timed out mid-read would report drift it did not observe.
+    pub fn connect_lazy(
+        endpoints: &crate::PostgresEndpoints,
+        config: &crate::PostgresHostConfig,
+    ) -> Self {
+        let factory =
+            crate::PostgresConnectionFactory::new(endpoints.clone(), config.connection.clone());
+        let pool = factory.pool(
+            crate::ConnectionRole::Preflight,
+            &config.maintenance.preflight_pool,
+            None,
+        );
+        Self {
             pool,
-            location: redact_location(database_url),
+            location: redact_options(endpoints.primary()),
             owns_pool: true,
-        })
+        }
     }
 
     /// Read server-wide capacity, including slots unavailable to normal clients.
     pub async fn connection_capacity(
         &self,
     ) -> Result<crate::PostgresConnectionCapacity, StoreError> {
-        let (max_connections, reserved_connections): (i64, i64) = sqlx::query_as(
-            "SELECT MAX(setting::bigint) FILTER (WHERE name = 'max_connections'),
-                    COALESCE(SUM(setting::bigint) FILTER (WHERE name IN ('superuser_reserved_connections', 'reserved_connections')), 0)::bigint
-             FROM pg_settings WHERE name IN ('max_connections', 'superuser_reserved_connections', 'reserved_connections')",
-        ).fetch_one(&self.pool).await.map_err(crate::store_sqlx_error)?;
-        Ok(crate::PostgresConnectionCapacity {
-            max_connections: u32::try_from(max_connections)
-                .map_err(|error| StoreError::Backend(error.to_string()))?,
-            reserved_connections: u32::try_from(reserved_connections)
-                .map_err(|error| StoreError::Backend(error.to_string()))?,
-        })
+        crate::host::connection_capacity(&self.pool).await
     }
 
     /// Probe over a pool the caller already owns.
@@ -118,7 +112,7 @@ impl PostgresStorePreflight {
 
     /// Release the connections this handle opened.
     ///
-    /// Only closes a pool created by [`PostgresStorePreflight::for_database_url`]. A
+    /// Only closes a pool created by [`PostgresStorePreflight::connect_lazy`]. A
     /// borrowed pool is left alone; see [`PostgresStorePreflight::from_pool`].
     pub async fn close(&self) {
         if self.owns_pool {
@@ -127,47 +121,15 @@ impl PostgresStorePreflight {
     }
 }
 
-/// Keep `host[:port]/dbname` and discard everything that could carry a secret.
-///
-/// The authority is isolated *first*, at the first `/` after the scheme, and only
-/// then split at its last `@`. Order is the whole correctness argument: a
-/// password may contain `@`, `?` or `#`, and trimming the query string before
-/// the credentials would end a `postgres://user:pa?ss@host/db` at the `?` and
-/// publish `user:pa`. A host component can contain none of those characters, so
-/// the last `@` inside the authority is always the credentials separator, and
-/// the query string can only be trimmed from what is left after it.
-///
-/// Anything without a scheme separator — a libpq key/value DSN, say, whose
-/// `password=` keyword this would have to understand to strip — is not parsed at
-/// all but replaced wholesale.
-fn redact_location(database_url: &str) -> String {
-    let Some((_scheme, rest)) = database_url.split_once("://") else {
-        return REDACTED_PLACEHOLDER.to_string();
-    };
-    let (authority, path) = match rest.split_once('/') {
-        Some((authority, path)) => (authority, Some(path)),
-        None => (rest, None),
-    };
-    let host = match authority.rsplit_once('@') {
-        Some((_credentials, host)) => host,
-        None => authority,
-    };
-    if host.is_empty() {
-        return REDACTED_PLACEHOLDER.to_string();
-    }
-    // Only now is it safe to drop the query string: everything that could have
-    // been a credential is already gone.
-    let database = path
-        .map(|path| {
-            path.split_once(['?', '#'])
-                .map(|(head, _tail)| head)
-                .unwrap_or(path)
-        })
-        .filter(|database| !database.is_empty());
-    match database {
-        Some(database) => format!("{host}/{database}"),
-        None => host.to_string(),
-    }
+/// `host:port/dbname` of `options`: never the user, password or options, so
+/// a report built from it carries no secret.
+pub(crate) fn redact_options(options: &PgConnectOptions) -> String {
+    format!(
+        "{}:{}/{}",
+        options.get_host(),
+        options.get_port(),
+        options.get_database().unwrap_or("")
+    )
 }
 
 fn project_schema_status(
@@ -275,56 +237,5 @@ impl StorePreflight for PostgresStorePreflight {
     /// the way it is, lives in the `walk` submodule.
     async fn scan_durable(&self, scan: &DurableScan) -> Result<DurableScanPage, StoreError> {
         walk::scan_durable(&self.pool, scan).await
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_reported_location_never_carries_the_credentials() {
-        let redacted =
-            redact_location("postgres://lash:hunter2@db.internal:5432/lash?sslmode=require");
-        assert_eq!(redacted, "db.internal:5432/lash");
-        assert!(!redacted.contains("hunter2"), "{redacted}");
-        assert!(!redacted.contains("lash:"), "{redacted}");
-    }
-
-    #[test]
-    fn a_password_containing_an_at_sign_is_still_stripped() {
-        let redacted = redact_location("postgresql://admin:p@ss@w0rd@10.0.0.4/lash");
-        assert_eq!(redacted, "10.0.0.4/lash");
-        assert!(!redacted.contains("p@ss"), "{redacted}");
-    }
-
-    #[test]
-    fn a_password_containing_a_query_or_fragment_marker_is_still_stripped() {
-        // The defect this pins: trimming the query string before the credentials
-        // ended the string at the `?` inside the password and published the
-        // user name with the first half of it.
-        let query_marker = redact_location("postgres://user:pa?ss@db.internal/lash");
-        assert_eq!(query_marker, "db.internal/lash");
-        assert!(!query_marker.contains("pa"), "{query_marker}");
-        assert!(!query_marker.contains("user"), "{query_marker}");
-
-        let fragment_marker =
-            redact_location("postgres://user:pa#ss@db.internal/lash?sslmode=require");
-        assert_eq!(fragment_marker, "db.internal/lash");
-        assert!(!fragment_marker.contains("pa"), "{fragment_marker}");
-
-        // A query string on the authority alone, with no path, is still not a
-        // place credentials may survive.
-        assert_eq!(
-            redact_location("postgres://user:pa?ss@db.internal"),
-            "db.internal"
-        );
-    }
-
-    #[test]
-    fn an_unparseable_connection_string_is_replaced_rather_than_echoed() {
-        let redacted = redact_location("host=db.internal user=lash password=hunter2");
-        assert_eq!(redacted, REDACTED_PLACEHOLDER);
-        assert_eq!(redact_location("postgres://"), REDACTED_PLACEHOLDER);
     }
 }

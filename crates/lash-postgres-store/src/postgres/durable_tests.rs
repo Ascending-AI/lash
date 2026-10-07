@@ -11,7 +11,6 @@ use std::time::Duration;
 use lash_core_execution::testing::TestClock;
 use lash_durable::laws;
 
-use crate::PostgresStorage;
 use crate::testing::IsolatedDatabase;
 
 macro_rules! law {
@@ -23,7 +22,7 @@ macro_rules! law {
                 return;
             };
             let database = IsolatedDatabase::create(&database_url).await;
-            let storage = PostgresStorage::connect(database.url())
+            let storage = crate::testing::connect(database.url())
                 .await
                 .expect("open the isolated store");
             let clock = Arc::new(TestClock::new(1_000_000));

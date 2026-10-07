@@ -1168,7 +1168,7 @@ impl BackendRunner {
                         self.factory.take();
                         self.raw_reader.detach_store();
 
-                        let storage = PostgresStorage::connect(&database_url)
+                        let storage = lash_postgres_store::testing::connect(&database_url)
                             .await
                             .expect("connect independent Postgres storage");
                         let pool = storage.pool().clone();
@@ -1874,7 +1874,7 @@ async fn open_postgres_differential()
     sqlx::raw_sql(PostgresStorage::schema_ddl())
         .execute(&mut database_lock)
         .await?;
-    let postgres = PostgresStorage::connect(&database_url).await?;
+    let postgres = lash_postgres_store::testing::connect(&database_url).await?;
     Ok((database_lock, postgres, database_url))
 }
 

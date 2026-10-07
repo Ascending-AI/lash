@@ -10,9 +10,7 @@ use lash_conformance::{FleetFormatDeployment, fleet_format_conformance};
 use lash_core_execution::{
     FLEET_FORMAT_VERSION, FleetFormat, StoreError, StorePreflight, StoreSchemaStatus, WriterPin,
 };
-use lash_postgres_store::{
-    PostgresStorage, PostgresStoreConfig, PostgresStorePreflight, SchemaCheck,
-};
+use lash_postgres_store::{PostgresStorePreflight, SchemaCheck};
 use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
 use sqlx::{Connection, Executor, PgConnection};
 
@@ -36,11 +34,11 @@ impl FleetFormatDeployment for PostgresDeployment {
         &self,
         writable: lash_core_execution::compat::VersionRange,
     ) -> Result<FleetFormat, StoreError> {
-        PostgresStorage::from_pool_with_fleet_writable_range_for_testing(
+        lash_postgres_store::testing::from_pool_as(
             self.scratch.pool.clone(),
-            PostgresStoreConfig {
+            &lash_postgres_store::PostgresHostConfig {
                 schema_check: SchemaCheck::Enforce,
-                ..PostgresStoreConfig::default()
+                ..lash_postgres_store::PostgresHostConfig::default()
             },
             writable,
         )
@@ -190,11 +188,11 @@ async fn a_select_only_role_reads_the_fleet_format_and_is_refused_on_write() {
         .await
         .expect("build the select-only pool");
 
-    let storage = PostgresStorage::from_pool_with(
+    let storage = lash_postgres_store::testing::from_pool(
         reader_pool.clone(),
-        PostgresStoreConfig {
+        &lash_postgres_store::PostgresHostConfig {
             schema_check: SchemaCheck::Enforce,
-            ..PostgresStoreConfig::default()
+            ..lash_postgres_store::PostgresHostConfig::default()
         },
     )
     .await

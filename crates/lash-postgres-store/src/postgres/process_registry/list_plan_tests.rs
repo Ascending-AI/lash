@@ -23,7 +23,7 @@ use super::*;
 async fn plan_for(filter: &lash_core_execution::ProcessListFilter) -> Option<String> {
     let url = crate::testing::required_database_url();
     let database = crate::testing::IsolatedDatabase::create(&url).await;
-    let storage = crate::PostgresStorage::connect(database.url())
+    let storage = crate::testing::connect(database.url())
         .await
         .expect("connect the planner-witness database");
     let sql = list_processes_sql(filter);

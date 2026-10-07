@@ -197,15 +197,24 @@ older than 17 is supported.
 
 ### Connections
 
-Each node opens three kinds of connection:
+One `PostgresHostConfig` sizes and guards every connection
+([`postgres.md`](postgres.md) is the reference). Each process opens:
 
-- the shared pool (`PostgresStoreConfig::max_connections`);
-- four reserved connections for lease, terminal and cancel commits, so a burst
-  of ordinary commits cannot starve the heartbeat;
-- one listener connection, which receives wake hints (`LISTEN`) and holds the
-  node's liveness lock, a session advisory lock.
+- the work pool (`roles.work`, 16) for store calls and ordinary durable
+  commits, behind `roles.max_store_operations` admission;
+- the scheduler pool (`roles.scheduler`, 1) for claims, adoption, liveness
+  and drain marks, and the critical pool (`roles.critical`, 3) for reaps,
+  releases, hand-backs, cancels and terminals, so a burst of ordinary commits
+  can neither starve a claim nor hold back an ending;
+- per served node, a renewal connection for its lease's registration and
+  heartbeat, and one listener session, which receives wake hints (`LISTEN`)
+  and holds the node's liveness lock, a session advisory lock.
 
-Budget `max_connections + 5` server connections per node.
+One default node costs 24 server connections; declare `deployment` and the
+connect checks the whole rolling budget against the server before any other
+pool opens. Build the durable backend with
+`DurableBackendBuilder::postgres(&host, attachments)`, which takes the
+durable settings from the host configuration's `node` section.
 
 **`LISTEN` and advisory locks need session-mode connections.** Connect the
 listener directly or through a pooler in session mode. A transaction-mode

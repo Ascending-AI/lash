@@ -13,7 +13,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash::postgres::{PostgresLiveReplayConfig, PostgresLiveReplayStore};
+use lash::postgres::{
+    PostgresEndpoints, PostgresHostConfig, PostgresLiveReplayStore, ReplayDataPolicy,
+    ReplaySchemaMode,
+};
 use lash_core::{
     LiveReplayEventDraft, LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore,
     LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription, SessionCursor,
@@ -28,16 +31,30 @@ mod bench;
 #[path = "live_replay/schema.rs"]
 mod schema;
 
-/// A fresh schema's configuration: a short tick so laws run quickly, and a
-/// small pool so many stores fit the server's connection limit.
-fn config(schema: &str) -> PostgresLiveReplayConfig {
-    PostgresLiveReplayConfig {
-        schema: schema.to_string(),
-        publish_tick: Duration::from_millis(1),
-        publish_concurrency: 2,
-        pool_max_connections: 4,
-        ..PostgresLiveReplayConfig::default()
+/// A fresh schema's configuration: the store installs its tables, a short
+/// tick so laws run quickly, and a small data pool so many stores fit the
+/// server's connection limit.
+fn config(schema: &str) -> PostgresHostConfig {
+    with_data(schema, |_| {})
+}
+
+/// [`config`] with `adjust` applied to its replay data policy.
+fn with_data(schema: &str, adjust: impl FnOnce(&mut ReplayDataPolicy)) -> PostgresHostConfig {
+    let mut policy = lash::postgres::LiveReplayPolicy::default();
+    policy.data.schema = schema.to_string();
+    policy.data.schema_mode = ReplaySchemaMode::Install;
+    policy.data.publish_tick = Duration::from_millis(1);
+    policy.data.publish_concurrency = 2;
+    policy.pool.max_connections = 3;
+    adjust(&mut policy.data);
+    PostgresHostConfig {
+        live_replay: Some(policy),
+        ..PostgresHostConfig::default()
     }
+}
+
+fn endpoints(url: &str) -> PostgresEndpoints {
+    PostgresEndpoints::from_url(url).expect("the database URL parses")
 }
 
 fn fresh_schema() -> String {
@@ -45,12 +62,12 @@ fn fresh_schema() -> String {
 }
 
 /// Connect a store from synchronous code, as the law factories are.
-fn connect(url: &str, config: PostgresLiveReplayConfig) -> Arc<dyn LiveReplayStore> {
+fn connect(url: &str, config: PostgresHostConfig) -> Arc<dyn LiveReplayStore> {
     let handle = tokio::runtime::Handle::current();
     tokio::task::block_in_place(|| {
         handle.block_on(async {
             Arc::new(
-                PostgresLiveReplayStore::connect(url, config)
+                PostgresLiveReplayStore::connect(&endpoints(url), &config)
                     .await
                     .expect("connect the PostgreSQL live replay store"),
             ) as Arc<dyn LiveReplayStore>
@@ -74,20 +91,16 @@ lash_conformance::live_replay_tests!({
         move || {
             connect(
                 &capacity_url,
-                PostgresLiveReplayConfig {
-                    max_events_per_session: 1,
-                    ..config(&fresh_schema())
-                },
+                with_data(&fresh_schema(), |data| data.max_events_per_session = 1),
             )
         },
         move || {
             connect(
                 &ttl_url,
-                PostgresLiveReplayConfig {
-                    max_events_per_session: 16,
-                    max_age: Duration::from_millis(1),
-                    ..config(&fresh_schema())
-                },
+                with_data(&fresh_schema(), |data| {
+                    data.max_events_per_session = 16;
+                    data.max_age = Duration::from_millis(1);
+                }),
             )
         },
         Duration::from_millis(20),

@@ -72,6 +72,15 @@ pub enum DurableError {
         /// The node.
         node: NodeId,
     },
+    /// The store serves no more nodes than it was configured for, and that
+    /// many already listen through it: the node cannot serve here.
+    #[error("node {node} exceeds the {served_nodes} served nodes this store is configured for")]
+    NodeCapacityExceeded {
+        /// The refused node.
+        node: NodeId,
+        /// The store's configured served-node count.
+        served_nodes: u32,
+    },
     /// A mailbox transaction broke a mailbox rule.
     #[error(transparent)]
     MailRefused(MailRefusal),

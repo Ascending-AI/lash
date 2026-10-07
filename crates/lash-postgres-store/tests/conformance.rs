@@ -119,7 +119,7 @@ fn sync_await<T: Send + 'static>(
 async fn storage() -> Option<(IsolatedDatabase, PostgresStorage)> {
     let url = database_url()?;
     let database_fixture = IsolatedDatabase::create(&url).await;
-    let storage = PostgresStorage::connect(database_fixture.url())
+    let storage = lash_postgres_store::testing::connect(database_fixture.url())
         .await
         .expect("connect postgres");
     Some((database_fixture, storage))
@@ -171,7 +171,7 @@ lash_conformance::fence_integrity_tests!({
             let database_fixture = IsolatedDatabase::create(&database_url).await;
             let database_url = database_fixture.url().to_owned();
             let storage = Arc::new(
-                PostgresStorage::connect(&database_url)
+                lash_postgres_store::testing::connect(&database_url)
                     .await
                     .expect("open Postgres fence fixture"),
             );
@@ -229,7 +229,7 @@ lash_conformance::store_recovery_tests!({
         move |_session_id: &str| {
             let database_url = database_url.clone();
             let storage = sync_await(async move {
-                PostgresStorage::connect(&database_url)
+                lash_postgres_store::testing::connect(&database_url)
                     .await
                     .expect("construct fresh Postgres store-recovery pool")
             });
@@ -251,7 +251,7 @@ lash_conformance::checkpoint_component_reopen_tests!({
     (_database_fixture, move || {
         let database_url = database_url.clone();
         let storage = sync_await(async move {
-            PostgresStorage::connect(&database_url)
+            lash_postgres_store::testing::connect(&database_url)
                 .await
                 .expect("construct post-write Postgres checkpoint pool")
         });
@@ -378,7 +378,7 @@ lash_conformance::artifact_store_reopenable_tests!({
         let database_url = database_url.clone();
         sync_await(async move {
             reset(storage.pool()).await;
-            let open_storage = PostgresStorage::connect(&database_url)
+            let open_storage = lash_postgres_store::testing::connect(&database_url)
                 .await
                 .expect("open first Postgres artifact pool");
             let open = lash_conformance::fused_artifact_store::ArtifactStoreHandles {
@@ -395,7 +395,7 @@ lash_conformance::artifact_store_reopenable_tests!({
                 reopen: Arc::new(move || {
                     let reopen_url = reopen_url.clone();
                     let reopened = sync_await(async move {
-                        PostgresStorage::connect(&reopen_url)
+                        lash_postgres_store::testing::connect(&reopen_url)
                             .await
                             .expect("construct post-write Postgres artifact pool")
                     });
@@ -653,7 +653,11 @@ async fn postgres_from_pool_rejects_unstamped_existing_schema_when_configured() 
         .await
         .expect("remove component version stamp");
 
-    let result = PostgresStorage::from_pool(pool.clone()).await;
+    let result = lash_postgres_store::testing::from_pool(
+        pool.clone(),
+        &lash_postgres_store::PostgresHostConfig::default(),
+    )
+    .await;
     scratch.cleanup().await;
     assert!(matches!(
         result,
@@ -1000,7 +1004,7 @@ async fn fenced_process_and_trigger_registration_stays_typed() {
         return;
     };
     let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
-    let storage = PostgresStorage::connect(database.url())
+    let storage = lash_postgres_store::testing::connect(database.url())
         .await
         .expect("open older writer");
     // An epoch past this build's writable range: a newer release finalized.

@@ -65,7 +65,7 @@ async fn configured_storage(test_name: &str) -> Option<(SharedDatabaseLock, Post
         return None;
     };
     let lock = SharedDatabaseLock::acquire(&url).await;
-    let storage = PostgresStorage::connect(&url)
+    let storage = lash_postgres_store::testing::connect(&url)
         .await
         .expect("connect PostgreSQL clock-contract storage");
     Some((lock, storage))

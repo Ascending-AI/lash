@@ -12,7 +12,9 @@
 //!   subscribes to both channels, then takes its boot's liveness lock, a
 //!   session advisory lock, before [`Signals::listen`] returns. When its
 //!   session is lost it reconnects, subscribes and locks again, and only then
-//!   reports [`Signal::Resubscribed`], so the runner rescans after it.
+//!   reports [`Signal::Resubscribed`], so the runner rescans after it. Its
+//!   reconnects back off under the host's `signals.reconnect` policy, and a
+//!   store opens at most `roles.served_nodes` listeners at once.
 //! - **Liveness.** A boot's lock is free exactly when no session of it
 //!   lives. A crashed node's session ends with its process, so a watcher
 //!   sees the lock free within one probe and reaps the boot at once. A node
@@ -29,12 +31,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use lash_durable::{
-    ActorKey, BootLiveness, DurableError, NodeId, NodeLease, Owner, Reaped, Signal, SignalFeed,
-    Signals, WakeBatch,
+    ActorKey, BootLiveness, CommitCapacity, DurableError, NodeId, NodeLease, Owner, Reaped, Signal,
+    SignalFeed, Signals, WakeBatch,
 };
 use sqlx::PgPool;
 use sqlx::postgres::{PgListener, PgNotification, PgPoolOptions};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{OwnedSemaphorePermit, mpsc, oneshot};
+
+use crate::host::ReconnectPolicy;
 
 use super::{PostgresDurableStore, SQL, sqlx_failure};
 
@@ -44,9 +48,6 @@ pub(crate) const READY_CHANNEL: &str = "lash_ready";
 /// The most bytes one notification's payload carries; PostgreSQL refuses
 /// payloads of 8000 bytes or more.
 const PAYLOAD_LIMIT: usize = 7_900;
-
-/// How long a listener waits between attempts to reopen a lost session.
-const RECONNECT_DELAY: Duration = Duration::from_millis(250);
 
 /// A node's own channel: `lash_node_<id>`, or a digest of the id when the id
 /// does not fit a channel name.
@@ -123,25 +124,36 @@ impl PostgresSignals {
 
 /// How one boot's listener (re)opens its session.
 struct Session {
-    /// A pool of one, over the store's connect options, that the listener
-    /// alone uses.
+    /// A pool of one listener-role connection that the listener alone
+    /// uses.
     pool: PgPool,
     channels: [String; 2],
     boot: String,
+    /// How long one open may take, connecting and the lock wait included.
+    open_within: Duration,
+    reconnect: ReconnectPolicy,
+    /// The served-node slot this listener occupies until its session ends.
+    _slot: OwnedSemaphorePermit,
 }
 
 impl Session {
-    /// Subscribe, then hold the boot's liveness lock.
+    /// Subscribe, then hold the boot's liveness lock, within the listener's
+    /// startup bound.
     async fn open(&self) -> Result<PgListener, sqlx::Error> {
-        let mut listener = PgListener::connect_with(&self.pool).await?;
-        listener
-            .listen_all(self.channels.iter().map(String::as_str))
-            .await?;
-        sqlx::query(SQL.postgres.hold_liveness.sql())
-            .bind(&self.boot)
-            .execute(&mut listener)
-            .await?;
-        Ok(listener)
+        let open = async {
+            let mut listener = PgListener::connect_with(&self.pool).await?;
+            listener
+                .listen_all(self.channels.iter().map(String::as_str))
+                .await?;
+            sqlx::query(SQL.postgres.hold_liveness.sql())
+                .bind(&self.boot)
+                .execute(&mut listener)
+                .await?;
+            Ok(listener)
+        };
+        tokio::time::timeout(self.open_within, open)
+            .await
+            .unwrap_or(Err(sqlx::Error::PoolTimedOut))
     }
 }
 
@@ -186,6 +198,7 @@ async fn forward(
         // open another, so the lock and both subscriptions are taken anew.
         lost.fetch_add(1, Ordering::AcqRel);
         drop(listener);
+        let mut failures = 0;
         listener = loop {
             let opened = tokio::select! {
                 biased;
@@ -194,11 +207,15 @@ async fn forward(
             };
             match opened {
                 Ok(listener) => break listener,
-                Err(_) => tokio::select! {
-                    biased;
-                    _ = &mut shutdown => break 'serve,
-                    () = tokio::time::sleep(RECONNECT_DELAY) => {}
-                },
+                Err(_) => {
+                    let wait = session.reconnect.wait(failures);
+                    failures = failures.saturating_add(1);
+                    tokio::select! {
+                        biased;
+                        _ = &mut shutdown => break 'serve,
+                        () = tokio::time::sleep(wait) => {}
+                    }
+                }
             }
         };
         if signals.send(Signal::Resubscribed).is_err() {
@@ -243,25 +260,45 @@ impl Signals for PostgresSignals {
         if channels.is_empty() {
             return Ok(());
         }
-        sqlx::query(SQL.postgres.notify.sql())
-            .bind(&channels)
-            .bind(&payloads)
-            .execute(&self.store.pool)
+        self.store
+            .within(CommitCapacity::Work, async {
+                sqlx::query(SQL.postgres.notify.sql())
+                    .bind(&channels)
+                    .bind(&payloads)
+                    .execute(&self.store.pools.work)
+                    .await
+                    .map_err(sqlx_failure)?;
+                Ok(())
+            })
             .await
-            .map_err(sqlx_failure)?;
-        Ok(())
     }
 
     async fn listen(&self, lease: &NodeLease) -> Result<Box<dyn SignalFeed>, DurableError> {
+        let pools = &self.store.pools;
+        let open_within = pools.listener_policy.acquire_timeout;
+        // A listener that just stopped frees its slot when its session task
+        // ends; a replacement waits that moment out, no longer.
+        let slot = tokio::time::timeout(open_within, Arc::clone(&pools.listeners).acquire_owned())
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .ok_or_else(|| DurableError::NodeCapacityExceeded {
+                node: lease.owner.node.clone(),
+                served_nodes: pools.served_nodes,
+            })?;
         let session = Session {
             pool: PgPoolOptions::new()
                 .max_connections(1)
                 .min_connections(0)
+                .acquire_timeout(open_within)
                 .idle_timeout(None)
                 .max_lifetime(None)
-                .connect_lazy_with((*self.store.pool.connect_options()).clone()),
+                .connect_lazy_with(pools.listener.clone()),
             channels: [READY_CHANNEL.to_owned(), node_channel(&lease.owner.node)],
             boot: lease.owner.boot.as_str().to_owned(),
+            open_within,
+            reconnect: pools.reconnect,
+            _slot: slot,
         };
         let listener = match session.open().await {
             Ok(listener) => listener,

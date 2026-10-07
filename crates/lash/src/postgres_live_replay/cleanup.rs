@@ -16,9 +16,6 @@ use super::codec::Doorbell;
 use super::heads::{Attempt, Heads, attempt};
 use super::schema::{column, db_error, micros, notify, position};
 
-/// Sessions one cleanup transaction expires or forgets.
-const CHUNK: i64 = 256;
-
 pub(super) async fn run(shared: Arc<Shared>) {
     loop {
         tokio::time::sleep(shared.config.cleanup_interval + jitter(shared.config.cleanup_jitter))
@@ -27,6 +24,12 @@ pub(super) async fn run(shared: Arc<Shared>) {
             tracing::warn!(%error, "live replay cleanup failed; the next pass retries");
         }
     }
+}
+
+/// Sessions one cleanup statement expires or forgets, as its bind.
+fn chunk(shared: &Shared) -> i64 {
+    // `validate` bounds the batch at 65536.
+    i64::try_from(shared.config.cleanup_batch).unwrap_or(i64::MAX)
 }
 
 /// A uniform draw in `0..=bound`.
@@ -44,7 +47,7 @@ async fn clean(shared: &Shared) -> Result<(), LiveReplayStoreError> {
     loop {
         let sessions = sqlx::query(&shared.sql.expired_heads)
             .bind(micros(shared.config.max_age))
-            .bind(CHUNK)
+            .bind(chunk(shared))
             .fetch_all(&shared.pool)
             .await
             .map_err(db_error("find expired sessions"))?
@@ -55,7 +58,7 @@ async fn clean(shared: &Shared) -> Result<(), LiveReplayStoreError> {
             break;
         }
         expire(shared, &sessions).await?;
-        if sessions.len() < CHUNK as usize {
+        if sessions.len() < shared.config.cleanup_batch {
             break;
         }
     }
@@ -67,7 +70,10 @@ pub(super) async fn expire(
     shared: &Shared,
     sessions: &[String],
 ) -> Result<(), LiveReplayStoreError> {
-    for _ in 0..8 {
+    for retry in 0..shared.retry.attempts {
+        if retry > 0 {
+            tokio::time::sleep(shared.retry.pause(retry - 1)).await;
+        }
         match expire_once(shared, sessions).await {
             Ok(doorbells) => {
                 shared.ring_mirror(&doorbells);
@@ -83,7 +89,11 @@ pub(super) async fn expire(
 }
 
 async fn expire_once(shared: &Shared, sessions: &[String]) -> Result<Vec<Doorbell>, Attempt> {
-    let mut tx = shared.pool.begin().await.map_err(attempt("begin"))?;
+    let mut tx = shared
+        .prelude
+        .begin(&shared.pool)
+        .await
+        .map_err(attempt("begin"))?;
     let mut heads =
         Heads::lock(&mut tx, &shared.sql, sessions, shared.config.max_age, false).await?;
     heads.heads.retain(|_, head| head.expiring);
@@ -104,10 +114,14 @@ async fn expire_once(shared: &Shared, sessions: &[String]) -> Result<Vec<Doorbel
 /// above every position it ever had (P6).
 async fn forget(shared: &Shared) -> Result<(), LiveReplayStoreError> {
     loop {
-        let mut tx = shared.pool.begin().await.map_err(db_error("begin"))?;
+        let mut tx = shared
+            .prelude
+            .begin(&shared.pool)
+            .await
+            .map_err(db_error("begin"))?;
         let forgotten = sqlx::query(&shared.sql.forget_heads)
             .bind(micros(shared.config.max_age))
-            .bind(CHUNK)
+            .bind(chunk(shared))
             .fetch_all(&mut *tx)
             .await
             .map_err(db_error("forget sessions"))?;
@@ -138,7 +152,7 @@ async fn forget(shared: &Shared) -> Result<(), LiveReplayStoreError> {
         tx.commit().await.map_err(db_error("commit"))?;
         shared.ring_mirror(&doorbells);
         shared.ring_sessions(&doorbells);
-        if forgotten.len() < CHUNK as usize {
+        if forgotten.len() < shared.config.cleanup_batch {
             return Ok(());
         }
     }

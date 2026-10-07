@@ -54,7 +54,7 @@ async fn inject(pool: &PgPool, kind: &str, id: &str, payload: &str) {
 async fn storage() -> Option<(SharedDatabaseLock, PostgresStorage, PgPool)> {
     let url = database_url()?;
     let database_lock = SharedDatabaseLock::acquire(&url).await;
-    let storage = PostgresStorage::connect(&url)
+    let storage = lash_postgres_store::testing::connect(&url)
         .await
         .expect("connect postgres");
     let pool = sqlx::postgres::PgPoolOptions::new()

@@ -252,12 +252,9 @@ async fn small_pool(
     })
     .join()
     .expect("the isolated database is created");
-    let storage = lash_postgres_store::PostgresStorage::connect_with(
+    let storage = lash_postgres_store::testing::connect_with(
         isolated.url(),
-        lash_postgres_store::PostgresStoreConfig {
-            max_connections: POOL,
-            ..lash_postgres_store::PostgresStoreConfig::default()
-        },
+        &lash_postgres_store::testing::work_pool_of(POOL),
     )
     .await
     .expect("the isolated database opens");

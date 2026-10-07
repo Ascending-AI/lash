@@ -72,13 +72,16 @@ impl NodeConfig {
     }
 }
 
-/// The settings every node runs with: the defaults, with the notifier the
-/// case names.
+/// The host configuration every node runs with: the defaults, with the
+/// notifier the case names.
 #[must_use]
-pub fn settings(notifier: Notifier) -> DurableSettings {
-    DurableSettings {
-        notifier,
-        ..DurableSettings::default()
+pub fn host_config(notifier: Notifier) -> lash_postgres_store::PostgresHostConfig {
+    lash_postgres_store::PostgresHostConfig {
+        node: DurableSettings {
+            notifier,
+            ..DurableSettings::default()
+        },
+        ..lash_postgres_store::PostgresHostConfig::default()
     }
 }
 
@@ -90,9 +93,15 @@ pub fn settings(notifier: Notifier) -> DurableSettings {
 /// The node could not connect or assemble, or the store refused its
 /// registration.
 pub async fn run(config: NodeConfig) -> Result<Stopped, String> {
-    let storage = PostgresStorage::connect(&config.database_url)
-        .await
+    let endpoints = lash_postgres_store::PostgresEndpoints::from_url(&config.database_url)
         .map_err(|error| format!("connect the lash database: {error}"))?;
+    let storage = PostgresStorage::connect(
+        &endpoints,
+        &host_config(config.notifier),
+        Default::default(),
+    )
+    .await
+    .map_err(|error| format!("connect the lash database: {error}"))?;
     let stores: Arc<dyn StoreSet> = Arc::new(PostgresStoreSet::new(
         &storage,
         Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
@@ -103,7 +112,7 @@ pub async fn run(config: NodeConfig) -> Result<Stopped, String> {
         // Its cells run on the RLM worker path: actors hold the VM's state.
         formats: lash::formats::actor_state_surfaces(),
         stores: Arc::new(recorded),
-        settings: settings(config.notifier),
+        settings: storage.effective_config().node,
         engines: vec![Arc::new(WorkerEngine)],
         providers: Arc::new(NoProjectionProviders),
     })

@@ -38,6 +38,7 @@ mod error;
 mod formats;
 mod ids;
 mod labels;
+pub use labels::CommitCapacity;
 #[cfg(feature = "testing")]
 pub mod laws;
 mod port;

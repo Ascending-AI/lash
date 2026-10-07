@@ -13,7 +13,7 @@ lash_conformance::abandoned_attachment_recovery_tests!({
         let make_bytes = Arc::clone(&make_bytes);
         async move {
             let reopen_url = database_url.clone();
-            let storage = PostgresStorage::connect(&database_url)
+            let storage = lash_postgres_store::testing::connect(&database_url)
                 .await
                 .expect("connect initial Postgres attachment recovery authority");
             reset(storage.pool()).await;
@@ -22,7 +22,7 @@ lash_conformance::abandoned_attachment_recovery_tests!({
                 make_bytes,
                 move || async move {
                     storage.pool().close().await;
-                    let reopened = PostgresStorage::connect(&reopen_url)
+                    let reopened = lash_postgres_store::testing::connect(&reopen_url)
                         .await
                         .expect("reconnect Postgres attachment recovery authority");
                     Arc::new(reopened.session_store_factory()) as Arc<dyn DeploymentStore>
@@ -38,7 +38,7 @@ lash_conformance::attachment_condemnation_recovery_tests!({
     };
     let database_fixture = IsolatedDatabase::create(&database_url).await;
     let database_url = database_fixture.url().to_owned();
-    let storage = PostgresStorage::connect(&database_url)
+    let storage = lash_postgres_store::testing::connect(&database_url)
         .await
         .expect("connect initial Postgres attachment condemnation authority");
     reset(storage.pool()).await;
@@ -51,7 +51,7 @@ lash_conformance::attachment_condemnation_recovery_tests!({
         make_bytes,
         move || async move {
             storage.pool().close().await;
-            let reopened = PostgresStorage::connect(&reopen_url)
+            let reopened = lash_postgres_store::testing::connect(&reopen_url)
                 .await
                 .expect("reconnect Postgres attachment condemnation authority");
             Arc::new(reopened.session_store_factory()) as Arc<dyn DeploymentStore>

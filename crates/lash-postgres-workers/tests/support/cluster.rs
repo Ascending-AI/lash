@@ -17,9 +17,9 @@ use lash_core_execution::{
     ProcessRecord, ProcessRegistration, StoreSet,
 };
 use lash_durable::{DurableStore, Notifier};
-use lash_postgres_store::{PostgresStorage, PostgresStoreSet};
+use lash_postgres_store::PostgresStoreSet;
 use lash_postgres_workers::events::{Command, Event, Report};
-use lash_postgres_workers::node::settings;
+use lash_postgres_workers::node::host_config;
 use lash_postgres_workers::process::WorkerEngine;
 use lash_postgres_workers::witness::Hold;
 use sqlx::postgres::PgPool;
@@ -113,9 +113,12 @@ impl Cluster {
     pub async fn start(nodes: &[&str], notifier: Notifier, hold: Hold) -> Self {
         let server = Server::start().await;
         let witness = server.pool("lash_witness").await.expect("open the witness");
-        let storage = PostgresStorage::connect(&server.url("lash", "lash"))
-            .await
-            .expect("open the lash store");
+        let storage = lash_postgres_store::testing::connect_with(
+            &server.url("lash", "lash"),
+            &host_config(notifier),
+        )
+        .await
+        .expect("open the lash store");
         let stores = PostgresStoreSet::new(
             &storage,
             Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
@@ -124,7 +127,7 @@ impl Cluster {
         let backend = Backend::assemble(BackendParts {
             formats: Vec::new(),
             stores: Arc::new(stores),
-            settings: settings(notifier),
+            settings: storage.effective_config().node,
             engines: vec![Arc::new(WorkerEngine)],
             providers: Arc::new(NoProjectionProviders),
         })

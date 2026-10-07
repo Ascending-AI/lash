@@ -3,7 +3,7 @@
 //!
 //! Every case runs through the public open path against a throwaway PostgreSQL
 //! schema, so what is asserted is what a host actually experiences: a mis-ported
-//! vendored schema fails at `PostgresStorage::from_pool_with` with the drifted
+//! vendored schema fails at `PostgresStorage::from_pool_set` with the drifted
 //! object named, and an equivalent schema built by `ALTER` — different column
 //! order, host-chosen constraint names, identity instead of `BIGSERIAL` — opens
 //! clean.
@@ -19,8 +19,7 @@
 
 use lash_core_execution::{StoreError, compat::CompatRefusal};
 use lash_postgres_store::{
-    ColumnValueSource, ForeignKeyAction, PostgresStorage, PostgresStoreConfig, SchemaCheck,
-    SchemaFinding,
+    ColumnValueSource, ForeignKeyAction, PostgresStorage, SchemaCheck, SchemaFinding,
 };
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Connection, Executor, PgConnection};
@@ -574,11 +573,9 @@ async fn worker_open_needs_no_ddl_privilege() {
         .connect(&reader_url)
         .await
         .expect("connect as the read-only role");
-    let storage = PostgresStorage::from_pool_with(
+    let storage = lash_postgres_store::testing::from_pool(
         reader_pool.clone(),
-        PostgresStoreConfig {
-            ..PostgresStoreConfig::default()
-        },
+        &lash_postgres_store::PostgresHostConfig::default(),
     )
     .await
     .unwrap_or_else(|error| panic!("worker open must need no privilege beyond SELECT: {error}"));
@@ -628,11 +625,9 @@ async fn worker_open_rejects_an_unprovisioned_database() {
         .connect(&database_url)
         .await
         .expect("build empty-schema pool");
-    let error = PostgresStorage::from_pool_with(
+    let error = lash_postgres_store::testing::from_pool(
         pool.clone(),
-        PostgresStoreConfig {
-            ..PostgresStoreConfig::default()
-        },
+        &lash_postgres_store::PostgresHostConfig::default(),
     )
     .await
     .err()
@@ -716,11 +711,9 @@ async fn a_partial_installation_fronting_a_complete_one_is_rejected() {
          next schema on the search_path: {:?}",
         report.findings
     );
-    let error = PostgresStorage::from_pool_with(
+    let error = lash_postgres_store::testing::from_pool(
         pool.clone(),
-        PostgresStoreConfig {
-            ..PostgresStoreConfig::default()
-        },
+        &lash_postgres_store::PostgresHostConfig::default(),
     )
     .await
     .err()
@@ -785,11 +778,9 @@ async fn a_lash_table_shadowing_the_anchored_installation_is_reported() {
         "a lash table resolving outside the anchored namespace must be reported: {:?}",
         report.findings
     );
-    let error = PostgresStorage::from_pool_with(
+    let error = lash_postgres_store::testing::from_pool(
         pool.clone(),
-        PostgresStoreConfig {
-            ..PostgresStoreConfig::default()
-        },
+        &lash_postgres_store::PostgresHostConfig::default(),
     )
     .await
     .err()
@@ -820,11 +811,11 @@ async fn a_raised_reader_floor_is_fatal_in_every_mode() {
         ))
         .await;
     for check in [SchemaCheck::Enforce, SchemaCheck::WarnOnly] {
-        let error = PostgresStorage::from_pool_with(
+        let error = lash_postgres_store::testing::from_pool(
             scratch.pool.clone(),
-            PostgresStoreConfig {
+            &lash_postgres_store::PostgresHostConfig {
                 schema_check: check,
-                ..PostgresStoreConfig::default()
+                ..lash_postgres_store::PostgresHostConfig::default()
             },
         )
         .await
@@ -871,11 +862,11 @@ async fn pre_queued_work_cutover_install_is_refused_even_under_warn_only() {
         )
         .await;
 
-    let error = PostgresStorage::from_pool_with(
+    let error = lash_postgres_store::testing::from_pool(
         scratch.pool.clone(),
-        PostgresStoreConfig {
+        &lash_postgres_store::PostgresHostConfig {
             schema_check: SchemaCheck::WarnOnly,
-            ..PostgresStoreConfig::default()
+            ..lash_postgres_store::PostgresHostConfig::default()
         },
     )
     .await
@@ -910,10 +901,13 @@ async fn an_expanded_stamp_cannot_hide_queued_work_drift() {
         )
         .await;
 
-    let error = PostgresStorage::from_pool(scratch.pool.clone())
-        .await
-        .err()
-        .unwrap_or_else(|| panic!("missing queued-work shape must be refused"));
+    let error = lash_postgres_store::testing::from_pool(
+        scratch.pool.clone(),
+        &lash_postgres_store::PostgresHostConfig::default(),
+    )
+    .await
+    .err()
+    .unwrap_or_else(|| panic!("missing queued-work shape must be refused"));
     assert!(
         matches!(
             error,
@@ -965,11 +959,11 @@ async fn a_raised_reader_floor_is_rejected_without_adding_check_constraints() {
         .await;
 
     for check in [SchemaCheck::Enforce, SchemaCheck::WarnOnly] {
-        let error = PostgresStorage::from_pool_with(
+        let error = lash_postgres_store::testing::from_pool(
             scratch.pool.clone(),
-            PostgresStoreConfig {
+            &lash_postgres_store::PostgresHostConfig {
                 schema_check: check,
-                ..PostgresStoreConfig::default()
+                ..lash_postgres_store::PostgresHostConfig::default()
             },
         )
         .await

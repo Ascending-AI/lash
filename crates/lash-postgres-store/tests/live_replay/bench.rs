@@ -88,9 +88,16 @@ fn percentile(sorted: &[Duration], fraction: f64) -> Duration {
 async fn streaming_runs_publish_to_deliver() {
     let database = IsolatedDatabase::create(&required_database_url()).await;
     // Both replicas run the production defaults.
-    let production = lash::postgres::PostgresLiveReplayConfig {
-        schema: fresh_schema(),
-        ..lash::postgres::PostgresLiveReplayConfig::default()
+    let production = lash::postgres::PostgresHostConfig {
+        live_replay: Some(lash::postgres::LiveReplayPolicy {
+            data: lash::postgres::ReplayDataPolicy {
+                schema: fresh_schema(),
+                schema_mode: lash::postgres::ReplaySchemaMode::Install,
+                ..lash::postgres::ReplayDataPolicy::default()
+            },
+            ..lash::postgres::LiveReplayPolicy::default()
+        }),
+        ..lash::postgres::PostgresHostConfig::default()
     };
     let a = connect(database.url(), production.clone());
     let b = connect(database.url(), production.clone());
@@ -218,14 +225,14 @@ async fn streaming_runs_publish_to_deliver() {
         "measured": latencies.len(),
         "elapsed_s": elapsed.as_secs_f64(),
         "events_per_s": events as f64 / elapsed.as_secs_f64(),
-        "publish_tick_ms": production.publish_tick.as_millis(),
+        "publish_tick_ms": lash::postgres::ReplayDataPolicy::default().publish_tick.as_millis(),
         "transactions_per_s": (commits_after - commits_before) as f64 / elapsed.as_secs_f64(),
         "p50_ms": percentile(&latencies, 0.50).as_secs_f64() * 1e3,
         "p99_ms": percentile(&latencies, 0.99).as_secs_f64() * 1e3,
         "max_ms": latencies.last().map_or(0.0, |max| max.as_secs_f64() * 1e3),
         "publish_p50_ms": percentile(&publish_latencies, 0.50).as_secs_f64() * 1e3,
         "publish_p99_ms": percentile(&publish_latencies, 0.99).as_secs_f64() * 1e3,
-        "publish_concurrency": production.publish_concurrency,
+        "publish_concurrency": lash::postgres::ReplayDataPolicy::default().publish_concurrency,
         "cpus": std::thread::available_parallelism().map_or(0, std::num::NonZero::get),
         "db_cpu_s": cpu,
         "db_cpu_cores": cpu.map(|cpu| cpu / elapsed.as_secs_f64()),

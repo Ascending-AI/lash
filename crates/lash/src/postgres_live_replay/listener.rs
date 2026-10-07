@@ -19,14 +19,14 @@ use super::codec::unpack_doorbells;
 use super::schema::{db_error, ensure_incarnation, position};
 
 pub(super) async fn run(shared: Arc<Shared>) {
-    let mut backoff = shared.config.listener_backoff_initial;
+    let mut failures = 0_u32;
     let mut epoch = 0_u64;
     loop {
         match connect(&shared).await {
             Ok(mut listener) => {
                 epoch += 1;
                 shared.listening.send_replace(Some(epoch));
-                backoff = shared.config.listener_backoff_initial;
+                failures = 0;
                 shared.ring_all();
                 loop {
                     match listener.try_recv().await {
@@ -49,14 +49,14 @@ pub(super) async fn run(shared: Arc<Shared>) {
                 tracing::warn!(%error, "the live replay listener could not connect");
             }
         }
-        tokio::time::sleep(backoff).await;
-        backoff = (backoff * 2).min(shared.config.listener_backoff_max);
+        tokio::time::sleep(shared.reconnect.wait(failures)).await;
+        failures = failures.saturating_add(1);
     }
 }
 
 /// Listen, confirmed, then load what the tables hold.
 async fn connect(shared: &Shared) -> Result<PgListener, LiveReplayStoreError> {
-    let mut listener = PgListener::connect_with(&shared.pool)
+    let mut listener = PgListener::connect_with(&shared.listener_pool)
         .await
         .map_err(db_error("listen"))?;
     listener

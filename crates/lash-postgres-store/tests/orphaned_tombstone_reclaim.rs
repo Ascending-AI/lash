@@ -14,7 +14,7 @@ use crate::support::database_url;
 async fn storage() -> Option<(IsolatedDatabase, PostgresStorage)> {
     let url = database_url()?;
     let database = IsolatedDatabase::create(&url).await;
-    let storage = PostgresStorage::connect(database.url())
+    let storage = lash_postgres_store::testing::connect(database.url())
         .await
         .expect("connect postgres");
     Some((database, storage))

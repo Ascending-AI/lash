@@ -1,5 +1,5 @@
 //! Deployment recovery through the same core API embedders use.
-use super::{CliError, Exit, OPERATOR_POOL_MAX, USAGE, stalled_result};
+use super::{CliError, Exit, USAGE, stalled_result};
 use lash::{ObligationId, ObligationKind};
 use serde_json::{Value, json};
 use std::num::NonZeroUsize;
@@ -132,15 +132,13 @@ pub(super) async fn open_stores(
                 .map_err(|error| CliError::new(Exit::Unexpected, error.to_string()))?,
         )
     } else {
-        let storage = lash::postgres::PostgresStorage::connect_with(
-            &super::database_url()?,
-            lash::postgres::PostgresStoreConfig {
-                max_connections: OPERATOR_POOL_MAX,
-                ..Default::default()
-            },
+        let storage = lash::postgres::PostgresStorage::connect(
+            &super::endpoints()?,
+            &super::host_config()?,
+            Default::default(),
         )
         .await
-        .map_err(CliError::store)?;
+        .map_err(|error| CliError::new(Exit::Unexpected, error.to_string()))?;
         Arc::new(lash::postgres::PostgresStoreSet::new(
             &storage,
             Arc::new(lash::persistence::FileAttachmentStore::new(

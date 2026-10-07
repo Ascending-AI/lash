@@ -86,7 +86,7 @@ async fn stamp_one_preflight_open_and_migrate_agree() {
         "{database_url}{separator}options=-csearch_path%3D{}",
         scratch.name
     );
-    let migrated = PostgresStorage::migrate(&url, MigrationPhase::Expand)
+    let migrated = lash_postgres_store::testing::migrate(&url, MigrationPhase::Expand)
         .await
         .expect("migrate the accepted stamp-1 catalog");
     assert_eq!(
@@ -110,7 +110,7 @@ async fn stamp_one_preflight_open_and_migrate_agree() {
         .await
         .expect("the migrated catalog opens");
     assert!(
-        PostgresStorage::migrate(&url, MigrationPhase::Expand)
+        lash_postgres_store::testing::migrate(&url, MigrationPhase::Expand)
             .await
             .expect("migration rerun")
             .executed
@@ -730,26 +730,22 @@ async fn status_preserves_expanded_and_synthetic_policy_without_writes() {
 
 #[tokio::test]
 async fn store_components_share_one_bounded_pool_under_load() {
-    use lash_postgres_store::PostgresStoreConfig;
     let Some(url) = database_url() else {
         return;
     };
     let scratch = ScratchSchema::provision(&url).await;
     let separator = if url.contains('?') { '&' } else { '?' };
-    let application = format!("budget_{}", scratch.name);
-    let url = format!(
-        "{url}{separator}options=-csearch_path%3D{}&application_name={application}",
-        scratch.name
+    let prefix = format!(
+        "budget-{}",
+        &scratch.name[scratch.name.len().saturating_sub(16)..]
     );
-    let storage = PostgresStorage::connect_with(
-        &url,
-        PostgresStoreConfig {
-            max_connections: 3,
-            ..Default::default()
-        },
-    )
-    .await
-    .expect("bounded storage");
+    let application = format!("{prefix}/work");
+    let url = format!("{url}{separator}options=-csearch_path%3D{}", scratch.name);
+    let mut config = lash_postgres_store::testing::work_pool_of(3);
+    config.connection.application_name_prefix = prefix;
+    let storage = lash_postgres_store::testing::connect_with(&url, &config)
+        .await
+        .expect("bounded storage");
     let clone = storage.clone();
     let _store = storage.store();
     let _processes = storage.process_registry();

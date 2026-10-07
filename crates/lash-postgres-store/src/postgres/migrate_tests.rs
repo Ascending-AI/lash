@@ -56,8 +56,8 @@ mod rollout {
         StoreError,
     };
 
+    use crate::PostgresStorage;
     use crate::testing::IsolatedDatabase;
-    use crate::{PostgresStorage, PostgresStoreConfig};
 
     /// N's writable range, and N+1's.
     const N: VersionRange = VersionRange::exactly(1);
@@ -76,12 +76,7 @@ mod rollout {
         let pool = sqlx::PgPool::connect(url)
             .await
             .map_err(crate::store_sqlx_error)?;
-        PostgresStorage::from_pool_with_fleet_writable_range_for_testing(
-            pool,
-            PostgresStoreConfig::default(),
-            writable,
-        )
-        .await
+        crate::testing::from_pool_as(pool, &crate::PostgresHostConfig::default(), writable).await
     }
 
     /// N and N+1 over one freshly provisioned store. In the synthetic build N+1
@@ -184,7 +179,17 @@ mod rollout {
         {
             use crate::migrate::{MigrationRefusal, run_phase};
             use crate::{MigrateError, MigrationPhase};
-            match run_phase(next.pool(), MigrationPhase::Backfill, &next.fence, 3).await {
+            match run_phase(
+                next.pool(),
+                MigrationPhase::Backfill,
+                &next.fence,
+                crate::migrate::MigrationLimits {
+                    batch_rows: 3,
+                    ..Default::default()
+                },
+            )
+            .await
+            {
                 Err(MigrateError::Refused(MigrationRefusal::BackfillBeforeFinalize {
                     recorded: 1,
                     requires: 2,
@@ -192,7 +197,17 @@ mod rollout {
                 })) => {}
                 other => panic!("a backfill before finalize must refuse: {other:?}"),
             }
-            match run_phase(next.pool(), MigrationPhase::Contract, &next.fence, 3).await {
+            match run_phase(
+                next.pool(),
+                MigrationPhase::Contract,
+                &next.fence,
+                crate::migrate::MigrationLimits {
+                    batch_rows: 3,
+                    ..Default::default()
+                },
+            )
+            .await
+            {
                 Err(MigrateError::Refused(MigrationRefusal::ContractBeforeFinalize { .. })) => {}
                 other => panic!("a contract before finalize must refuse: {other:?}"),
             }
@@ -302,7 +317,7 @@ mod rollout {
     .expect("N+1 writes a row in the new shape after finalize");
 
         let backfill = &crate::migrate::BACKFILL_MIGRATIONS[0];
-        crate::migrate::start_backfill(next.pool(), &next.fence, backfill)
+        crate::migrate::start_backfill(next.pool(), &next.fence, backfill, Default::default())
             .await
             .expect("the backfill starts");
         crate::migrate::backfill_batch(next.pool(), &next.fence, backfill, 3)
@@ -340,8 +355,22 @@ mod rollout {
 
         // Two runs resume at once; the ledger row serializes them.
         let (left, right) = tokio::join!(
-            crate::migrate::run_backfills(next.pool(), &next.fence, 3),
-            crate::migrate::run_backfills(next.pool(), &next.fence, 3),
+            crate::migrate::run_backfills(
+                next.pool(),
+                &next.fence,
+                crate::migrate::MigrationLimits {
+                    batch_rows: 3,
+                    ..Default::default()
+                }
+            ),
+            crate::migrate::run_backfills(
+                next.pool(),
+                &next.fence,
+                crate::migrate::MigrationLimits {
+                    batch_rows: 3,
+                    ..Default::default()
+                }
+            ),
         );
         left.expect("a resumed run completes");
         right.expect("a concurrent resumed run completes");
@@ -365,10 +394,17 @@ mod rollout {
 
         // A rerun changes nothing.
         assert!(
-            crate::migrate::run_backfills(next.pool(), &next.fence, 3)
-                .await
-                .expect("rerun")
-                .is_empty()
+            crate::migrate::run_backfills(
+                next.pool(),
+                &next.fence,
+                crate::migrate::MigrationLimits {
+                    batch_rows: 3,
+                    ..Default::default()
+                }
+            )
+            .await
+            .expect("rerun")
+            .is_empty()
         );
         assert_eq!(backfill_ledger(&next).await.2, 7);
     }
@@ -389,8 +425,16 @@ mod rollout {
         let (n, next) = fleet(&database).await;
         old_sessions(&n, 5).await;
 
-        let before_finalize =
-            run_phase(next.pool(), MigrationPhase::Contract, &next.fence, 2).await;
+        let before_finalize = run_phase(
+            next.pool(),
+            MigrationPhase::Contract,
+            &next.fence,
+            crate::migrate::MigrationLimits {
+                batch_rows: 2,
+                ..Default::default()
+            },
+        )
+        .await;
         assert!(
             matches!(
                 before_finalize,
@@ -410,8 +454,17 @@ mod rollout {
             pending: pending.clone(),
         };
         for outcome in [
-            run_phase(next.pool(), MigrationPhase::Contract, &next.fence, 2).await,
-            plan_on(next.pool(), MigrationPhase::Contract).await,
+            run_phase(
+                next.pool(),
+                MigrationPhase::Contract,
+                &next.fence,
+                crate::migrate::MigrationLimits {
+                    batch_rows: 2,
+                    ..Default::default()
+                },
+            )
+            .await,
+            plan_on(next.pool(), MigrationPhase::Contract, Default::default()).await,
         ] {
             match outcome {
                 Err(MigrateError::Refused(refusal)) => assert_eq!(refusal, expected),
@@ -421,13 +474,23 @@ mod rollout {
 
         // Part-way through the backfill, contract still waits.
         let backfill = &crate::migrate::BACKFILL_MIGRATIONS[0];
-        crate::migrate::start_backfill(next.pool(), &next.fence, backfill)
+        crate::migrate::start_backfill(next.pool(), &next.fence, backfill, Default::default())
             .await
             .expect("the backfill starts");
         crate::migrate::backfill_batch(next.pool(), &next.fence, backfill, 2)
             .await
             .expect("one batch");
-        match run_phase(next.pool(), MigrationPhase::Contract, &next.fence, 2).await {
+        match run_phase(
+            next.pool(),
+            MigrationPhase::Contract,
+            &next.fence,
+            crate::migrate::MigrationLimits {
+                batch_rows: 2,
+                ..Default::default()
+            },
+        )
+        .await
+        {
             Err(MigrateError::Refused(refusal)) => assert_eq!(refusal, expected),
             other => panic!("contract during the backfill must refuse: {other:?}"),
         }
@@ -444,14 +507,30 @@ mod rollout {
             "a refused contract moved no floor"
         );
 
-        let backfilled = run_phase(next.pool(), MigrationPhase::Backfill, &next.fence, 2)
-            .await
-            .expect("the backfill completes");
+        let backfilled = run_phase(
+            next.pool(),
+            MigrationPhase::Backfill,
+            &next.fence,
+            crate::migrate::MigrationLimits {
+                batch_rows: 2,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("the backfill completes");
         assert_eq!(backfilled.executed.len(), 1);
         assert_eq!(backfilled.executed[0].state, "applied");
-        let contracted = run_phase(next.pool(), MigrationPhase::Contract, &next.fence, 2)
-            .await
-            .expect("contract runs once its backfill is applied");
+        let contracted = run_phase(
+            next.pool(),
+            MigrationPhase::Contract,
+            &next.fence,
+            crate::migrate::MigrationLimits {
+                batch_rows: 2,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("contract runs once its backfill is applied");
         assert_eq!(contracted.executed.len(), 1);
         assert_eq!(contracted.executed[0].migration, "synthetic-next-contract");
         let (min_reader, validated): (i32, bool) = sqlx::query_as(
@@ -470,11 +549,19 @@ mod rollout {
             "contract validated the constraint the backfill added"
         );
         assert!(
-            run_phase(next.pool(), MigrationPhase::Contract, &next.fence, 2)
-                .await
-                .expect("rerun")
-                .executed
-                .is_empty()
+            run_phase(
+                next.pool(),
+                MigrationPhase::Contract,
+                &next.fence,
+                crate::migrate::MigrationLimits {
+                    batch_rows: 2,
+                    ..Default::default()
+                }
+            )
+            .await
+            .expect("rerun")
+            .executed
+            .is_empty()
         );
         // This synthetic build links N+1's descriptor, so the raised reader
         // floor admits it; a fence of N's writable range `[1,1]` stands for N

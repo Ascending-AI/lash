@@ -127,15 +127,13 @@ Configuration is read from `.env` or the process environment:
   unknown or out-of-range field refuses startup. `memory` takes
   `max_events_per_session` (2048), `max_age_ms` (120000), `max_sessions`
   (4096) and `max_retained_bytes` (67108864). `postgresql` takes
-  `lash::postgres::PostgresLiveReplayConfig`: `schema` (`lash_live_replay`),
-  `schema_mode` (`install`; `verify_only` runs no DDL and refuses tables that
-  differ from `crates/lash/postgres-live-replay-schema.sql`), `publish_tick_ms` (5), `publish_concurrency` (4), `max_batch_events` (1024),
-  `max_events_per_session` (2048), `max_age_ms` (120000),
-  `max_bytes_per_session` (8388608), `cleanup_interval_ms` (30000),
-  `cleanup_jitter_ms` (10000), `listener_backoff_initial_ms` (100),
-  `listener_backoff_max_ms` (5000), `pool_max_connections` (8),
-  `pool_min_connections` (0), `pool_acquire_timeout_ms` (5000) and
-  `pool_idle_timeout_ms` (600000).
+  `lash::postgres::LiveReplayPolicy`, the `live_replay` section of the host
+  configuration (`docs/operations/postgres.md`): `data` (`schema`,
+  `schema_mode`, `publish_tick_ms`, `publish_concurrency`, retention and
+  cleanup), `pool` (the data pool, 7 connections), `listener` and
+  `reconnect`. The workbench defaults `data.schema_mode` to `install`;
+  `verify_only` runs no DDL and refuses tables that differ from
+  `crates/lash/postgres-live-replay-schema.sql`.
 - `AGENT_WORKBENCH_DATABASE_URL`: use the `lash-postgres-store` session, process,
   trigger, artifact, and process-environment stores at this URL. Unset defaults to
   SQLite.

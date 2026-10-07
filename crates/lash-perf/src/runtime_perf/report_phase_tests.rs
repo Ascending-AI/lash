@@ -35,7 +35,7 @@ fn postgres_database_url() -> String {
 async fn postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads() {
     let database =
         lash_postgres_store::testing::IsolatedDatabase::create(&postgres_database_url()).await;
-    let storage = lash_postgres_store::PostgresStorage::connect(database.url())
+    let storage = lash_postgres_store::testing::connect(database.url())
         .await
         .expect("provision PostgreSQL store");
     let store = storage.store();
@@ -61,7 +61,7 @@ async fn postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads() {
 async fn affected_postgres_scenarios_leave_base_database_clean() {
     let base_database =
         lash_postgres_store::testing::IsolatedDatabase::create(&postgres_database_url()).await;
-    let base_storage = lash_postgres_store::PostgresStorage::connect(base_database.url())
+    let base_storage = lash_postgres_store::testing::connect(base_database.url())
         .await
         .expect("provision clean PostgreSQL base database");
     let base_factory = base_storage.store();

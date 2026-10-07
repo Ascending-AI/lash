@@ -36,9 +36,15 @@ impl WorkbenchStores {
             !database_url.trim().is_empty(),
             "AGENT_WORKBENCH_DATABASE_URL must not be empty"
         );
-        let storage = lash::postgres::PostgresStorage::connect(database_url)
-            .await
+        let endpoints = lash::postgres::PostgresEndpoints::from_url(database_url)
             .context("open Postgres workbench storage")?;
+        let storage = lash::postgres::PostgresStorage::connect(
+            &endpoints,
+            &lash::postgres::PostgresHostConfig::default(),
+            Default::default(),
+        )
+        .await
+        .context("open Postgres workbench storage")?;
         let stores = lash::postgres::PostgresStoreSet::new(
             &storage,
             Arc::new(lash::persistence::FileAttachmentStore::new(

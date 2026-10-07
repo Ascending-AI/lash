@@ -15,7 +15,7 @@ lash_conformance::tool_material_tests!({
         let database_url = database_url.clone();
         sync_await(async move {
             reset(storage.pool()).await;
-            let open = PostgresStorage::connect(&database_url)
+            let open = lash_postgres_store::testing::connect(&database_url)
                 .await
                 .expect("open first Postgres tool-material pool");
             let reopen_url = database_url.clone();
@@ -25,7 +25,7 @@ lash_conformance::tool_material_tests!({
                 reopen: Arc::new(move || {
                     let reopen_url = reopen_url.clone();
                     let reopened = sync_await(async move {
-                        PostgresStorage::connect(&reopen_url)
+                        lash_postgres_store::testing::connect(&reopen_url)
                             .await
                             .expect("reopen Postgres tool-material pool")
                     });
@@ -51,7 +51,7 @@ lash_conformance::artifact_referrer_tests!({
         let database_url = database_url.clone();
         sync_await(async move {
             reset(storage.pool()).await;
-            let open_storage = PostgresStorage::connect(&database_url)
+            let open_storage = lash_postgres_store::testing::connect(&database_url)
                 .await
                 .expect("open first Postgres artifact pool");
             let open = lash_conformance::fused_artifact_store::ArtifactStoreHandles {
@@ -68,7 +68,7 @@ lash_conformance::artifact_referrer_tests!({
                 reopen: Arc::new(move || {
                     let reopen_url = reopen_url.clone();
                     let reopened = sync_await(async move {
-                        PostgresStorage::connect(&reopen_url)
+                        lash_postgres_store::testing::connect(&reopen_url)
                             .await
                             .expect("construct post-write Postgres artifact pool")
                     });

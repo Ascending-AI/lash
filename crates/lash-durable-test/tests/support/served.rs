@@ -67,7 +67,7 @@ pub async fn stores(tier: Tier) -> Option<(Arc<dyn StoreSet>, Keep)> {
                 .ok()
                 .filter(|url| !url.trim().is_empty())?;
             let isolated = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
-            let storage = lash_postgres_store::PostgresStorage::connect(isolated.url())
+            let storage = lash_postgres_store::testing::connect(isolated.url())
                 .await
                 .expect("the isolated database opens");
             let stores = lash_postgres_store::PostgresStoreSet::new(

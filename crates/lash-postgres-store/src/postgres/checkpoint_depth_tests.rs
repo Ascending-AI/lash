@@ -94,7 +94,7 @@ async fn checkpoint_component_statement_count_is_depth_invariant_when_configured
         return;
     };
     let isolated_database = crate::testing::IsolatedDatabase::create(&database_url).await;
-    let storage = PostgresStorage::connect(isolated_database.url())
+    let storage = crate::testing::connect(isolated_database.url())
         .await
         .expect("connect checkpoint depth-invariance storage");
     let mut observed = Vec::new();

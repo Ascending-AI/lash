@@ -35,7 +35,7 @@ for the landing commit, so alpha.113 predates it). Figments' pinned revision
   — the byte-exact artifact host migration tooling applies. Copy it; never transcribe.
 - `PostgresStorage::verify_schema_for(&PgPool) -> SchemaReport` — the read-only CI gate;
   `SchemaReport::is_conformant()` is the verdict, `Display` renders the per-object diff.
-- `PostgresStorage::from_pool_with` / `connect` — the runtime open: no DDL, hard
+- `PostgresStorage::connect` / `from_pool_set` — the runtime open: no DDL, hard
   failure on drift or a version outside the supported range. Worker opens never
   run DDL at all (FIG-3797).
 - `lashctl migrate` (FIG-3816) — the lash-owned operational step as an alternative
@@ -114,10 +114,10 @@ above, and follows the same contract (FIG-5220):
   creation-only, idempotent and schema-unqualified: the host's migration creates
   the configured schema, sets `search_path` to it and applies the file verbatim.
   It seeds no rows; the store mints its incarnation row itself.
-- `PostgresLiveReplayConfig::schema_mode` picks who provisions. `install` (the
-  default) creates the schema and tables when absent by executing those same
-  bytes, and needs `CREATE` on the database. `verify_only` runs no DDL: the host
-  applied the artifact.
+- `live_replay.data.schema_mode` of the host configuration picks who
+  provisions. `install` creates the schema and tables when absent by executing
+  those same bytes, and needs `CREATE` on the database. `verify_only` (the
+  default) runs no DDL: the host applied the artifact.
 - Every connect, in either mode, checks the tables against the generated
   `crates/lash/postgres-live-replay-schema-shape.txt` (persistence, columns by
   name with type and nullability, unique guards by key column set and predicate)

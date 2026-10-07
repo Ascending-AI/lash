@@ -181,8 +181,34 @@ static CONTRACT_MIGRATIONS: &[ContractMigration] = &[
     },
 ];
 
-/// The rows one backfill batch covers when the operator binary runs it.
-pub(crate) const BACKFILL_BATCH_ROWS: i64 = 500;
+/// The limits a migrate run holds itself to, from the host's
+/// [`MaintenancePolicy`](crate::host::MaintenancePolicy).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct MigrationLimits {
+    /// How long a schema advisory-lock acquisition waits.
+    pub(crate) lock_timeout: std::time::Duration,
+    /// The `statement_timeout` the run's statements carry once it holds the
+    /// lock.
+    pub(crate) statement_timeout: crate::host::ServerTimeout,
+    /// The rows one backfill batch covers.
+    pub(crate) batch_rows: i64,
+}
+
+impl MigrationLimits {
+    pub(crate) fn of(policy: &crate::host::MaintenancePolicy) -> Self {
+        Self {
+            lock_timeout: policy.migration_lock_timeout,
+            statement_timeout: policy.migration_statement_timeout,
+            batch_rows: i64::from(policy.migration_batch_rows),
+        }
+    }
+}
+
+impl Default for MigrationLimits {
+    fn default() -> Self {
+        Self::of(&crate::host::MaintenancePolicy::default())
+    }
+}
 
 /// The phase a migrate run is asked to execute (ADR 0106 §5).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -759,7 +785,9 @@ pub(crate) async fn expand_for_testing(
     pool: &PgPool,
     fence: &WriterFence,
 ) -> Result<(), StoreError> {
-    expand_on(pool, fence).await.map(drop)
+    expand_on(pool, fence, MigrationLimits::default())
+        .await
+        .map(drop)
 }
 
 /// Seeds `F` at this build's [`FleetFormat::seed`] when the store records
@@ -800,24 +828,33 @@ fn report(state: &MigrationState, executed: Vec<MigrationStep>) -> MigrationRepo
 }
 
 /// Takes the advisory lock in the requested mode on a detached connection.
-/// PostgreSQL bounds this lock wait at 30 seconds, independent of inherited
-/// timeouts. Committing the acquisition transaction restores those timeouts
-/// while retaining the session lock for the migration work.
+/// PostgreSQL bounds this lock wait at `limits.lock_timeout`, independent of
+/// inherited timeouts. Committing the acquisition transaction restores those
+/// timeouts while retaining the session lock for the migration work; the
+/// run's own `statement_timeout`, when the policy sets one, is then installed
+/// for the rest of the session.
 ///
 /// Session-scoped locks demand this shape — the connection is owned, so a
 /// cancelled future or an error path still releases the lock when the session
 /// closes rather than handing a locked connection back to the pool. See
 /// [`verify_schema_under_advisory_lock`] for the full reasoning.
-async fn lock_connection(pool: &PgPool, shared: bool) -> Result<sqlx::PgConnection, StoreError> {
+async fn lock_connection(
+    pool: &PgPool,
+    shared: bool,
+    limits: MigrationLimits,
+) -> Result<sqlx::PgConnection, StoreError> {
     let (lock_namespace, lock_key) = SCHEMA_ADVISORY_LOCK_KEY;
     let mut connection = pool.acquire().await.map_err(store_sqlx_error)?.detach();
     let locked = async {
         let begin = sqlx::Connection::begin(&mut connection);
         let mut tx = begin.await.map_err(store_sqlx_error)?;
-        sqlx::raw_sql("SET LOCAL lock_timeout = '30s'; SET LOCAL statement_timeout = 0")
-            .execute(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
+        sqlx::raw_sql(&format!(
+            "SET LOCAL lock_timeout = {}; SET LOCAL statement_timeout = 0",
+            limits.lock_timeout.as_millis()
+        ))
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
         sqlx::query(if shared {
             "SELECT pg_advisory_lock_shared($1, $2)"
         } else {
@@ -828,7 +865,17 @@ async fn lock_connection(pool: &PgPool, shared: bool) -> Result<sqlx::PgConnecti
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
-        tx.commit().await.map_err(store_sqlx_error)
+        tx.commit().await.map_err(store_sqlx_error)?;
+        let statement_timeout = match limits.statement_timeout {
+            crate::host::ServerTimeout::Inherit => return Ok(()),
+            crate::host::ServerTimeout::Disabled => 0,
+            crate::host::ServerTimeout::Limit(limit) => limit.as_millis(),
+        };
+        sqlx::raw_sql(&format!("SET statement_timeout = {statement_timeout}"))
+            .execute(&mut connection)
+            .await
+            .map_err(store_sqlx_error)
+            .map(|_| ())
     }
     .await;
     match locked {
@@ -981,8 +1028,9 @@ fn contract_admitted(
 pub(crate) async fn plan_on(
     pool: &PgPool,
     phase: MigrationPhase,
+    limits: MigrationLimits,
 ) -> Result<MigrationReport, MigrateError> {
-    let mut connection = lock_connection(pool, true).await?;
+    let mut connection = lock_connection(pool, true, limits).await?;
     let result = async {
         let state = read_state_under_lock(&mut connection).await?;
         let version = written_version()?;
@@ -1013,19 +1061,14 @@ pub(crate) async fn plan_on(
 }
 
 /// Runs `phase` as this build: expand under the exclusive advisory lock,
-/// backfill in batches of [`BACKFILL_BATCH_ROWS`], contract under the
-/// exclusive lock.
+/// backfill in batches of `limits.batch_rows`, contract under the exclusive
+/// lock.
 pub(crate) async fn migrate_on(
     pool: &PgPool,
     phase: MigrationPhase,
+    limits: MigrationLimits,
 ) -> Result<MigrationReport, MigrateError> {
-    run_phase(
-        pool,
-        phase,
-        &WriterFence::of_this_build(),
-        BACKFILL_BATCH_ROWS,
-    )
-    .await
+    run_phase(pool, phase, &WriterFence::of_this_build(), limits).await
 }
 
 /// Runs `phase` as the build whose writer fence is `fence`.
@@ -1033,12 +1076,12 @@ pub(crate) async fn run_phase(
     pool: &PgPool,
     phase: MigrationPhase,
     fence: &WriterFence,
-    batch_rows: i64,
+    limits: MigrationLimits,
 ) -> Result<MigrationReport, MigrateError> {
     match phase {
-        MigrationPhase::Expand => Ok(expand_on(pool, fence).await?),
-        MigrationPhase::Backfill => backfill_on(pool, fence, batch_rows).await,
-        MigrationPhase::Contract => contract_on(pool, fence).await,
+        MigrationPhase::Expand => Ok(expand_on(pool, fence, limits).await?),
+        MigrationPhase::Backfill => backfill_on(pool, fence, limits).await,
+        MigrationPhase::Contract => contract_on(pool, fence, limits).await,
     }
 }
 
@@ -1047,8 +1090,12 @@ pub(crate) async fn run_phase(
 /// The lock is the same key every verifying open holds while it reads the
 /// catalog, so a worker can never verify against a half-applied batch and a
 /// second `lashctl migrate` queues behind rather than racing this one.
-async fn expand_on(pool: &PgPool, fence: &WriterFence) -> Result<MigrationReport, StoreError> {
-    let mut connection = lock_connection(pool, false).await?;
+async fn expand_on(
+    pool: &PgPool,
+    fence: &WriterFence,
+    limits: MigrationLimits,
+) -> Result<MigrationReport, StoreError> {
+    let mut connection = lock_connection(pool, false, limits).await?;
     let result = async {
         let state = read_state_under_lock(&mut connection).await?;
         let pending = plan(&state)?;
@@ -1127,6 +1174,7 @@ pub(crate) async fn start_backfill(
     pool: &PgPool,
     fence: &WriterFence,
     backfill: &BackfillMigration,
+    limits: MigrationLimits,
 ) -> Result<(), MigrateError> {
     let started: Option<String> = sqlx::query_scalar(
         "SELECT state FROM lash_migrations WHERE phase = 'backfill' AND migration = $1",
@@ -1138,7 +1186,7 @@ pub(crate) async fn start_backfill(
     if started.is_some() {
         return Ok(());
     }
-    let mut connection = lock_connection(pool, false).await?;
+    let mut connection = lock_connection(pool, false, limits).await?;
     let result = async {
         let mut tx = crate::guarded_tx::begin_migration(&mut connection, fence).await?;
         let recorded = tx.fleet().version();
@@ -1297,7 +1345,7 @@ async fn ledger_row(
 pub(crate) async fn run_backfills(
     pool: &PgPool,
     fence: &WriterFence,
-    batch_rows: i64,
+    limits: MigrationLimits,
 ) -> Result<Vec<MigrationStep>, MigrateError> {
     let mut executed = Vec::new();
     for backfill in BACKFILL_MIGRATIONS {
@@ -1311,9 +1359,9 @@ pub(crate) async fn run_backfills(
         if recorded.as_deref() == Some("applied") {
             continue;
         }
-        start_backfill(pool, fence, backfill).await?;
+        start_backfill(pool, fence, backfill, limits).await?;
         while let BatchOutcome::Progressed =
-            backfill_batch(pool, fence, backfill, batch_rows).await?
+            backfill_batch(pool, fence, backfill, limits.batch_rows).await?
         {}
         executed.push(ledger_row(pool, MigrationPhase::Backfill, backfill.id).await?);
     }
@@ -1325,10 +1373,10 @@ pub(crate) async fn run_backfills(
 async fn backfill_on(
     pool: &PgPool,
     fence: &WriterFence,
-    batch_rows: i64,
+    limits: MigrationLimits,
 ) -> Result<MigrationReport, MigrateError> {
     let state = {
-        let mut connection = lock_connection(pool, true).await?;
+        let mut connection = lock_connection(pool, true, limits).await?;
         let state = read_state_under_lock(&mut connection).await;
         let _ = sqlx::Connection::close(connection).await;
         state?
@@ -1339,7 +1387,7 @@ async fn backfill_on(
         }
         .into());
     }
-    let executed = run_backfills(pool, fence, batch_rows).await?;
+    let executed = run_backfills(pool, fence, limits).await?;
     Ok(report(&state, executed))
 }
 
@@ -1347,8 +1395,12 @@ async fn backfill_on(
 /// one fenced transaction under the exclusive schema lock, refused typed
 /// until `F` has reached its epoch and the ledger shows its backfills
 /// applied. The step raises the component's reader floor in the same commit.
-async fn contract_on(pool: &PgPool, fence: &WriterFence) -> Result<MigrationReport, MigrateError> {
-    let mut connection = lock_connection(pool, false).await?;
+async fn contract_on(
+    pool: &PgPool,
+    fence: &WriterFence,
+    limits: MigrationLimits,
+) -> Result<MigrationReport, MigrateError> {
+    let mut connection = lock_connection(pool, false, limits).await?;
     let result = async {
         let state = read_state_under_lock(&mut connection).await?;
         if state.installation.is_none() {
@@ -1445,40 +1497,74 @@ async fn apply_contract(
     })
 }
 
-/// Runs `phase` for `database_url` with default pool settings — what
+/// Runs `phase` through `endpoints` under `config.maintenance`: its pool,
+/// lock wait, statement timeout, batch size and whole-job deadline — what
 /// `lashctl migrate` invokes.
 pub async fn migrate(
-    database_url: &str,
+    endpoints: &crate::PostgresEndpoints,
+    config: &crate::PostgresHostConfig,
     phase: MigrationPhase,
 ) -> Result<MigrationReport, MigrateError> {
-    let pool = migrate_pool(database_url).await?;
-    let result = migrate_on(&pool, phase).await;
+    let limits = MigrationLimits::of(&config.maintenance);
+    let pool = migrate_pool(endpoints, config)?;
+    let result = within_deadline(config, migrate_on(&pool, phase, limits)).await;
     pool.close().await;
     result
 }
 
 /// Plans what [`migrate`] would apply without changing the database.
 pub async fn plan_migrations(
-    database_url: &str,
+    endpoints: &crate::PostgresEndpoints,
+    config: &crate::PostgresHostConfig,
     phase: MigrationPhase,
 ) -> Result<MigrationReport, MigrateError> {
-    let pool = migrate_pool(database_url).await?;
-    let result = plan_on(&pool, phase).await;
+    let limits = MigrationLimits::of(&config.maintenance);
+    let pool = migrate_pool(endpoints, config)?;
+    let result = within_deadline(config, plan_on(&pool, phase, limits)).await;
     pool.close().await;
     result
 }
 
-/// The migrate runner needs two connections at most: one holds the advisory
-/// lock while it works. Migration statements inherit deployment timeouts;
-/// [`lock_connection`] bounds advisory acquisition separately.
-async fn migrate_pool(database_url: &str) -> Result<PgPool, StoreError> {
-    postgres_pool_options(&PostgresStoreConfig {
-        max_connections: 2,
-        ..PostgresStoreConfig::default()
-    })
-    .connect(database_url)
-    .await
-    .map_err(store_sqlx_error)
+/// `run` within `maintenance.migration_deadline`, when one is set.
+async fn within_deadline(
+    config: &crate::PostgresHostConfig,
+    run: impl std::future::Future<Output = Result<MigrationReport, MigrateError>>,
+) -> Result<MigrationReport, MigrateError> {
+    match config.maintenance.migration_deadline {
+        Some(deadline) => tokio::time::timeout(deadline, run)
+            .await
+            .unwrap_or_else(|_| {
+                Err(MigrateError::Store(StoreError::StorageFailure {
+                    backend: crate::POSTGRES_BACKEND,
+                    message: format!(
+                        "migration did not finish within its {} ms deadline",
+                        deadline.as_millis()
+                    ),
+                }))
+            }),
+        None => run.await,
+    }
+}
+
+/// The migrate runner's pool, `maintenance.migration_pool` (two connections
+/// by default: one holds the advisory lock while it works), named
+/// `<prefix>/migration`. Migration statements inherit deployment timeouts
+/// unless the policy sets one; [`lock_connection`] bounds advisory
+/// acquisition separately.
+fn migrate_pool(
+    endpoints: &crate::PostgresEndpoints,
+    config: &crate::PostgresHostConfig,
+) -> Result<PgPool, MigrateError> {
+    config
+        .validate()
+        .map_err(|error| MigrateError::Store(StoreError::Backend(error.to_string())))?;
+    let factory =
+        crate::PostgresConnectionFactory::new(endpoints.clone(), config.connection.clone());
+    Ok(factory.pool(
+        crate::ConnectionRole::Migration,
+        &config.maintenance.migration_pool,
+        None,
+    ))
 }
 
 #[cfg(test)]

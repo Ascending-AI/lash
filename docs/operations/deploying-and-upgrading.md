@@ -68,18 +68,18 @@ routing, backups and worker lifecycle.
 
 ## Connect PostgreSQL nodes
 
-Several lash nodes can serve one PostgreSQL store (ADR 0132 §3). Each node
-uses three kinds of connection:
-
-- the shared pool (`PostgresStoreConfig::max_connections`);
-- four reserved connections for its lease, terminal and cancel commits, so a
-  burst of ordinary commits cannot starve its heartbeat;
-- one listener connection, which receives wake hints (`LISTEN`) and holds the
-  node's liveness lock, a session advisory lock.
-
-Budget `max_connections + 5` server connections per node. The listener needs
-a session of its own: connect directly or through a pooler in session mode.
-A transaction-mode pooler silently drops both `LISTEN` and the session lock.
+Several lash nodes can serve one PostgreSQL store (ADR 0132 §3). One
+validated `PostgresHostConfig` sizes, guards and names every connection a
+process opens: the work, scheduler and critical pools, a renewal connection
+and a listener session per served node, the detached schema and sweep
+sessions and, when configured, the live replay store's pool and listener.
+[`postgres.md`](postgres.md) is the reference: every field, the sizing
+formula (24 server connections for one default node, 32 with live replay),
+the declared deployment budget a connect checks against the server, and the
+pooler rules. The listener needs a session of its own: connect directly or
+through a pooler in session mode, or give a transaction-mode pooler's
+deployment a separate session endpoint. A transaction-mode pooler silently
+drops both `LISTEN` and the session lock.
 
 When a node's process dies, its listener session ends and the other nodes
 reap it within a claim poll (250 ms by default) instead of waiting for its

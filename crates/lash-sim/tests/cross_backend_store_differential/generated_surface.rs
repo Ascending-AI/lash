@@ -582,7 +582,9 @@ async fn generated_cross_backend_surface_differential_agrees() {
         .execute(&mut database_lock)
         .await
         .unwrap();
-    let storage = PostgresStorage::connect(&database_url).await.unwrap();
+    let storage = lash_postgres_store::testing::connect(&database_url)
+        .await
+        .unwrap();
     // CI seed 852 minimized to occurrence ingestion with no subscription state.
     if let Some(divergence) = Box::pin(first_divergence(
         &storage,

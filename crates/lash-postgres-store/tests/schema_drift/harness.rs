@@ -4,7 +4,7 @@
 //! scratch-schema lifecycle and the rejection assertion are machinery every case
 //! reuses, not evidence any one case carries.
 
-use lash_postgres_store::{PostgresStorage, PostgresStoreConfig, SchemaCheck, SchemaFinding};
+use lash_postgres_store::{PostgresStorage, SchemaCheck, SchemaFinding};
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::{Connection, Executor, PgConnection};
 
@@ -71,11 +71,11 @@ impl ScratchSchema {
         &self,
         check: SchemaCheck,
     ) -> Result<PostgresStorage, lash_core_execution::StoreError> {
-        PostgresStorage::from_pool_with(
+        lash_postgres_store::testing::from_pool(
             self.pool.clone(),
-            PostgresStoreConfig {
+            &lash_postgres_store::PostgresHostConfig {
                 schema_check: check,
-                ..PostgresStoreConfig::default()
+                ..lash_postgres_store::PostgresHostConfig::default()
             },
         )
         .await

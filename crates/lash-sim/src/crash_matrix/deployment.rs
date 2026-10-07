@@ -159,7 +159,7 @@ async fn postgres(
     })
     .join()
     .map_err(|_| "the isolated database's setup panicked".to_owned())??;
-    let storage = lash_postgres_store::PostgresStorage::connect(isolated.url())
+    let storage = lash_postgres_store::testing::connect(isolated.url())
         .await
         .map_err(|error| error.to_string())?;
     // Every port reads the virtual clock, the durable store's included: a

@@ -359,7 +359,7 @@ async fn host_register_trigger_realizes_and_fires_in_sqlite() -> Result<()> {
 async fn host_register_trigger_realizes_and_fires_in_postgres() -> Result<()> {
     let url = lash_postgres_store::testing::required_database_url();
     let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
-    let storage = lash_postgres_store::PostgresStorage::connect(database.url()).await?;
+    let storage = lash_postgres_store::testing::connect(database.url()).await?;
     let attachments = tempfile::tempdir().expect("PostgreSQL attachment directory");
     let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
         &storage,

@@ -8,7 +8,6 @@
 //! digest.
 
 use lash_core_execution::{StoreError, compat::CompatRefusal};
-use lash_postgres_store::PostgresStorage;
 
 use crate::support::{IsolatedSchema, database_url};
 
@@ -35,7 +34,11 @@ async fn postgres_refuses_pre_submission_digest_catalog_at_open() {
     .await
     .expect("stamp a compatible expansion");
 
-    let result = PostgresStorage::from_pool(pool.clone()).await;
+    let result = lash_postgres_store::testing::from_pool(
+        pool.clone(),
+        &lash_postgres_store::PostgresHostConfig::default(),
+    )
+    .await;
     scratch.cleanup().await;
     match result {
         Err(StoreError::Incompatible {

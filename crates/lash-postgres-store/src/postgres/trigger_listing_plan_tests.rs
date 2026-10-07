@@ -58,7 +58,7 @@ fn epoch(value: i64) -> Param {
 async fn plan_for(sql: &str, params: &[Param]) -> Option<String> {
     let url = crate::testing::required_database_url();
     let database = crate::testing::IsolatedDatabase::create(&url).await;
-    let storage = crate::PostgresStorage::connect(database.url())
+    let storage = crate::testing::connect(database.url())
         .await
         .expect("connect the planner-witness database");
     let mut connection = storage

@@ -43,7 +43,7 @@ async fn postgres_backend() -> (
 ) {
     let url = lash_postgres_store::testing::required_database_url();
     let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
-    let storage = lash_postgres_store::PostgresStorage::connect(database.url())
+    let storage = lash_postgres_store::testing::connect(database.url())
         .await
         .expect("connect PostgreSQL");
     let attachments = tempfile::tempdir().expect("PostgreSQL attachment directory");

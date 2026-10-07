@@ -18,7 +18,9 @@ use lash_core_execution::{
 };
 use lash_durable::runner::{Drain, Stopped};
 use lash_durable::{DurableError, NoProbe, NodeId};
-use lash_postgres_store::{PostgresStorage, PostgresStoreConfig, PostgresStoreSet};
+use lash_postgres_store::{
+    PostgresEndpoints, PostgresHostConfig, PostgresStorage, PostgresStoreSet,
+};
 use serde::Serialize;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -125,16 +127,15 @@ impl Deployment {
                 None,
             ),
             Database::Postgres(url) => {
-                let storage = PostgresStorage::connect_with(
-                    url,
-                    PostgresStoreConfig {
-                        max_connections: self.pool.max,
-                        min_connections: self.pool.min,
-                        ..PostgresStoreConfig::default()
-                    },
-                )
-                .await
-                .map_err(|error| anyhow::anyhow!("connect PostgreSQL: {error}"))?;
+                let mut config = PostgresHostConfig::default();
+                config.roles.work.max_connections = self.pool.max;
+                config.roles.work.min_connections = self.pool.min;
+                config.roles.max_store_operations = self.pool.max as usize;
+                let endpoints = PostgresEndpoints::from_url(url)
+                    .map_err(|error| anyhow::anyhow!("connect PostgreSQL: {error}"))?;
+                let storage = PostgresStorage::connect(&endpoints, &config, Default::default())
+                    .await
+                    .map_err(|error| anyhow::anyhow!("connect PostgreSQL: {error}"))?;
                 let stores = PostgresStoreSet::new(
                     &storage,
                     Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),

@@ -21,8 +21,8 @@ use lash_core_execution::{
     ProcessExecutionEnvStore as _, RuntimeSessionState, RuntimeStore, SessionId, StoreError,
 };
 
+use crate::PostgresStorage;
 use crate::testing::IsolatedDatabase;
-use crate::{PostgresStorage, PostgresStoreConfig};
 
 const N: VersionRange = VersionRange::exactly(1);
 const NEXT: VersionRange = VersionRange::between(1, 2);
@@ -50,13 +50,9 @@ async fn isolated() -> Option<IsolatedDatabase> {
 
 async fn open_as(url: &str, writable: VersionRange) -> PostgresStorage {
     let pool = sqlx::PgPool::connect(url).await.expect("connect");
-    PostgresStorage::from_pool_with_fleet_writable_range_for_testing(
-        pool,
-        PostgresStoreConfig::default(),
-        writable,
-    )
-    .await
-    .expect("open the store")
+    crate::testing::from_pool_as(pool, &crate::PostgresHostConfig::default(), writable)
+        .await
+        .expect("open the store")
 }
 
 /// N and N+1 over one freshly provisioned store. In the synthetic build N+1

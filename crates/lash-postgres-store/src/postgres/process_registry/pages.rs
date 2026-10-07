@@ -162,7 +162,7 @@ mod tests {
             return;
         };
         let database = crate::testing::IsolatedDatabase::create(&database_url).await;
-        let storage = crate::PostgresStorage::connect(database.url())
+        let storage = crate::testing::connect(database.url())
             .await
             .expect("connect PostgreSQL non-terminal page plan database");
         let mut tx = storage

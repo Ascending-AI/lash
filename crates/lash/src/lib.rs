@@ -83,6 +83,8 @@ pub mod formats;
 mod observation_feed;
 mod parked_work;
 #[cfg(feature = "postgres")]
+mod postgres_host;
+#[cfg(feature = "postgres")]
 mod postgres_live_replay;
 pub mod preflight;
 pub(crate) mod process_admin;
@@ -1284,14 +1286,17 @@ pub mod sqlite {
 /// PostgreSQL durable store backend.
 #[cfg(feature = "postgres")]
 pub mod postgres {
+    pub use lash_postgres_store::host::*;
     pub use lash_postgres_store::*;
 
+    /// A host's whole PostgreSQL wiring from one validated configuration
+    /// (FIG-5240).
+    pub use crate::postgres_host::{PostgresHost, PostgresHostConnectError};
     /// The live replay store every replica of a host shares through one
     /// PostgreSQL database (FIG-5101).
     pub use crate::postgres_live_replay::{
-        PostgresLiveReplayConfig, PostgresLiveReplayConfigError, PostgresLiveReplayError,
-        PostgresLiveReplaySchemaFinding, PostgresLiveReplaySchemaMode,
-        PostgresLiveReplaySchemaReport, PostgresLiveReplayStore,
+        PostgresLiveReplayError, PostgresLiveReplaySchemaFinding, PostgresLiveReplaySchemaReport,
+        PostgresLiveReplayStore,
     };
 }
 

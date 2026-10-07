@@ -41,7 +41,7 @@ async fn postgres_seed_round_trips_through_a_fresh_store_when_configured() {
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     recreate_fixture_schema(&database_url).await;
     let fixture_database_url = fixture_database_url(&database_url);
-    let storage = PostgresStorage::connect(&fixture_database_url)
+    let storage = lash_postgres_store::testing::connect(&fixture_database_url)
         .await
         .expect("provision the Postgres round-trip schema");
     let written_now = {
@@ -49,7 +49,7 @@ async fn postgres_seed_round_trips_through_a_fresh_store_when_configured() {
         Box::pin(fixture::seed(&handles)).await
     };
     storage.pool().close().await;
-    let storage = PostgresStorage::connect(&fixture_database_url)
+    let storage = lash_postgres_store::testing::connect(&fixture_database_url)
         .await
         .expect("reopen the Postgres round-trip schema");
     let handles = open_handles(&storage, fixture::FIXTURE_READ_MS);
@@ -72,7 +72,7 @@ async fn regenerate_postgres_durable_fixture() {
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     recreate_fixture_schema(&database_url).await;
     let fixture_database_url = fixture_database_url(&database_url);
-    let storage = PostgresStorage::connect(&fixture_database_url)
+    let storage = lash_postgres_store::testing::connect(&fixture_database_url)
         .await
         .expect("provision Postgres durable-fixture schema");
     install_fixed_catalog_identity(&storage).await;
@@ -138,7 +138,7 @@ async fn release_postgres_fixture_reads_retained_semantics() {
         .await
         .expect("restore the retained PostgreSQL dump without reseeding");
     pool.close().await;
-    let storage = PostgresStorage::connect(&fixture_database_url(&database_url))
+    let storage = lash_postgres_store::testing::connect(&fixture_database_url(&database_url))
         .await
         .expect("open the restored release catalog");
     let handles = open_handles(&storage, fixture::FIXTURE_READ_MS);

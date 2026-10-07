@@ -155,7 +155,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
         let database = postgres_database
             .as_ref()
             .expect("PostgreSQL database created for PostgreSQL scenario");
-        let postgres = lash_postgres_store::PostgresStorage::connect(database.url())
+        let postgres = lash_postgres_store::testing::connect(database.url())
             .await
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
         durable_postgres_session_store_factory_without_commit_measurement(&postgres)

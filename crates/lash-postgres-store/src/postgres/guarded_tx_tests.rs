@@ -14,8 +14,8 @@ use lash_core_execution::{
 };
 
 use super::WriterFence;
+use crate::PostgresStorage;
 use crate::testing::{AfterFence, HeldFinalize, IsolatedDatabase, finalize_fleet_epoch};
-use crate::{PostgresStorage, PostgresStoreConfig};
 
 /// The epoch the synthetic next release finalizes to.
 const NEXT: u32 = 2;
@@ -39,7 +39,12 @@ fn standing(
     writable: VersionRange,
     opened: FleetFormat,
 ) -> PostgresStorage {
-    storage.fence = WriterFence::new(writable, opened);
+    storage.fence = WriterFence::guarded(
+        writable,
+        opened,
+        storage.fence.prelude().clone(),
+        crate::host::RetryPolicies::default().store,
+    );
     storage
 }
 
@@ -96,7 +101,7 @@ async fn pg_fence_orders_a_writer_before_finalize() {
         return;
     };
     let seam = AfterFence::new();
-    let storage = PostgresStorage::connect(database.url())
+    let storage = crate::testing::connect(database.url())
         .await
         .expect("open the isolated store")
         .with_after_fence_for_testing(seam.clone());
@@ -149,7 +154,7 @@ async fn pg_fence_refuses_a_writer_after_finalize_with_zero_writes() {
     let Some(database) = isolated().await else {
         return;
     };
-    let storage = PostgresStorage::connect(database.url())
+    let storage = crate::testing::connect(database.url())
         .await
         .expect("open the isolated store");
     let seeded = storage.fleet_format().version();
@@ -219,7 +224,7 @@ async fn pg_fence_encodes_again_when_f_moves() {
         version: PINNED,
     }]);
     let storage = standing(
-        PostgresStorage::connect(database.url())
+        crate::testing::connect(database.url())
             .await
             .expect("open the isolated store"),
         VersionRange::between(1, NEXT),
@@ -279,13 +284,12 @@ async fn pg_fence_retries_contended_with_a_fresh_read() {
     };
     let seam = AfterFence::new();
     let storage = standing(
-        PostgresStorage::connect_with(
-            database.url(),
-            PostgresStoreConfig {
-                lock_timeout: Some(Duration::from_millis(100)),
-                ..PostgresStoreConfig::default()
-            },
-        )
+        crate::testing::connect_with(database.url(), &{
+            let mut config = crate::PostgresHostConfig::default();
+            config.guards.ordinary.lock =
+                crate::host::ServerTimeout::Limit(Duration::from_millis(100));
+            config
+        })
         .await
         .expect("open the isolated store"),
         VersionRange::between(1, NEXT),

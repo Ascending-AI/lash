@@ -33,7 +33,7 @@ async fn open_ingress_reads_seek_state_indexes_with_settled_history() {
         return;
     };
     let database = crate::testing::IsolatedDatabase::create(&url).await;
-    let storage = crate::PostgresStorage::connect(database.url())
+    let storage = crate::testing::connect(database.url())
         .await
         .expect("connect ingress plan database");
     let mut connection = storage

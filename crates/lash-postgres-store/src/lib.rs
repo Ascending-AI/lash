@@ -1,9 +1,11 @@
 //! PostgreSQL durable storage for Lash.
 //!
-//! One [`PostgresStorage`] owns a shared [`sqlx::PgPool`] and creates durable
-//! implementations for the runtime session store, process registry, trigger
-//! store, Lashlang artifact store, process execution environment store, and
-//! attachment manifest.
+//! One [`PostgresStorage`] owns the role pools of one [`PostgresHostConfig`]
+//! and creates durable implementations for the runtime session store, process
+//! registry, trigger store, Lashlang artifact store, process execution
+//! environment store, and attachment manifest. Every connection it opens is
+//! made by the role-aware factory in [`host`]: named, sized and guarded by the
+//! one validated configuration (FIG-5240).
 //!
 //! # Who provisions the schema
 //!
@@ -35,7 +37,6 @@ mod observed_sql;
 
 use lash_core_execution::facade_support::StoreObserver;
 use std::sync::Arc;
-use std::time::Duration;
 
 use lash_core_execution::runtime::{
     AdmissionBoundary, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
@@ -65,7 +66,7 @@ use lash_core_execution::{
     TriggerStore, TriggerSubscriptionFilter, TriggerSubscriptionRecord,
 };
 use sqlx::pool::PoolConnection;
-use sqlx::postgres::{PgPool, PgPoolOptions, PgRow};
+use sqlx::postgres::{PgPool, PgRow};
 use sqlx::{Acquire, Executor, Postgres, Row};
 
 const SCHEMA_COMPONENT: &str = "lash-postgres-store";
@@ -129,7 +130,13 @@ const MIN_SUPPORTED_SCHEMA_VERSION: i32 = SCHEMA_VERSION;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
+    /// The work pool: every store component's connections.
     pool: PgPool,
+    /// Every role pool, the work pool's handle included.
+    pools: Arc<host::RolePools>,
+    /// The configuration this storage runs under, with an imported pool
+    /// set's real sizing.
+    config: Arc<PostgresHostConfig>,
     observer: StoreObserver,
     /// The random identity of the catalog this storage opened, from
     /// `lash_catalog_identity`: what a session catalog registers under with
@@ -139,9 +146,6 @@ pub struct PostgresStorage {
     /// this build's writable range and the fleet epoch `F` its fences last
     /// read, seeded with the open transaction's admitted `F`.
     fence: guarded_tx::WriterFence,
-    /// The durability engine's reserved connections, shared by every
-    /// durable store handle of this storage.
-    durable_reserve: durable::Reserve,
 }
 
 #[derive(Clone)]
@@ -149,6 +153,7 @@ pub struct PostgresStore {
     #[cfg(any(test, feature = "testing"))]
     lease_clock_for_testing: Option<Arc<dyn lash_core_execution::Clock>>,
     pool: PgPool,
+    pools: Arc<host::RolePools>,
     observer: StoreObserver,
     catalog_id: Arc<str>,
     fence: guarded_tx::WriterFence,
@@ -166,6 +171,7 @@ pub struct PostgresStore {
 #[derive(Clone)]
 pub struct PostgresProcessRegistry {
     pool: PgPool,
+    pools: Arc<host::RolePools>,
     clock: Arc<dyn lash_core_execution::Clock>,
     /// Effect hosts whose scope fence registration lifts (ADR 0049). The
     /// PostgreSQL journal's own fence rows share the pool and are cleared in
@@ -224,131 +230,184 @@ pub struct PostgresLashlangArtifactStore {
     fence: guarded_tx::WriterFence,
 }
 
-/// Connection-pool and per-connection timeout knobs for [`PostgresStorage`].
-///
-/// Mutating session work first claims the durable session execution lease.
-/// History commits and deletion share a session-keyed transaction lock, then
-/// existing-session commits lock and verify the head revision before changing
-/// reachability counts. The final conditional write remains a stale-writer
-/// fence. `lock_timeout` caps lock waits before surfacing retryable contention.
-#[derive(Clone, Debug)]
-pub struct PostgresStoreConfig {
-    /// Physical resource observations, using the same handle as every store backend.
-    pub observer: StoreObserver,
-    /// Maximum connections across every store component using this pool.
-    /// Open one storage per process and clone it for its components.
-    pub max_connections: u32,
-    pub min_connections: u32,
-    /// How long `acquire` may take before erroring, including pool waits and
-    /// establishing a fresh TCP/TLS/Postgres connection. Default 30s.
-    pub acquire_timeout: Duration,
-    /// Close a connection after this idle period.
-    pub idle_timeout: Option<Duration>,
-    /// Recycle a connection after this lifetime.
-    pub max_lifetime: Option<Duration>,
-    /// Postgres `lock_timeout` applied to every connection. Default 10s.
-    pub lock_timeout: Option<Duration>,
-    /// Postgres `statement_timeout` applied to every connection. Default 30s — a
-    /// backstop so a wedged query can never hold a connection indefinitely.
-    pub statement_timeout: Option<Duration>,
-    /// What open does when the live schema drifts from the shape this build
-    /// expects. Default [`SchemaCheck::Enforce`].
-    ///
-    /// There is no provisioning knob: open never runs DDL. The schema arrives
-    /// through `lash migrate` or the host's own tooling before any worker
-    /// starts (FIG-3797, FIG-3816).
-    pub schema_check: SchemaCheck,
-}
-
-impl Default for PostgresStoreConfig {
-    fn default() -> Self {
-        Self {
-            observer: StoreObserver::default(),
-            max_connections: 16,
-            min_connections: 0,
-            acquire_timeout: Duration::from_secs(30),
-            idle_timeout: Some(Duration::from_secs(600)),
-            max_lifetime: Some(Duration::from_secs(1800)),
-            lock_timeout: Some(Duration::from_secs(10)),
-            statement_timeout: Some(Duration::from_secs(30)),
-            schema_check: SchemaCheck::default(),
-        }
-    }
-}
-
-fn postgres_pool_options(config: &PostgresStoreConfig) -> PgPoolOptions {
-    let mut options = PgPoolOptions::new()
-        .max_connections(config.max_connections)
-        .min_connections(config.min_connections)
-        .acquire_timeout(config.acquire_timeout);
-    if let Some(timeout) = config.idle_timeout {
-        options = options.idle_timeout(timeout);
-    }
-    if let Some(timeout) = config.max_lifetime {
-        options = options.max_lifetime(timeout);
-    }
-    options
-}
-
 impl PostgresStorage {
-    /// Connect with [`PostgresStoreConfig::default`] pool/timeout settings.
-    pub async fn connect(database_url: &str) -> Result<Self, StoreError> {
-        Self::connect_with(database_url, PostgresStoreConfig::default()).await
+    /// Connect through `endpoints` under `config`.
+    ///
+    /// The configuration is validated before anything connects. When it
+    /// declares its deployment, the server's capacity is read on the first
+    /// work connection and the whole rolling budget checked before any other
+    /// pool opens; every role pool is lazy. The open, schema gate included,
+    /// runs within `guards.store_startup_ms`.
+    ///
+    /// # Errors
+    ///
+    /// [`PostgresHostError`]: a refused configuration or budget, a session
+    /// endpoint over another catalog, a timed-out open, or the store's own
+    /// refusal.
+    pub async fn connect(
+        endpoints: &PostgresEndpoints,
+        config: &PostgresHostConfig,
+        observer: StoreObserver,
+    ) -> Result<Self, PostgresHostError> {
+        config.validate()?;
+        if config.connection.topology == ConnectionTopology::TransactionPool
+            && endpoints.session().is_none()
+        {
+            return Err(PostgresHostError::Config(PostgresHostConfigError {
+                field: "connection.topology".to_owned(),
+                reason: "transaction_pool needs a session endpoint for the listener, schema, sweep, preflight and migration sessions".to_owned(),
+            }));
+        }
+        let factory = PostgresConnectionFactory::new(endpoints.clone(), config.connection.clone());
+        let pools = host::factory_pool_set(&factory, config);
+        let has_session_endpoint = endpoints.session().is_some();
+        let startup = config.guards.store_startup;
+        tokio::time::timeout(startup, async {
+            let storage = Box::pin(Self::open(
+                pools,
+                config.clone(),
+                observer,
+                lash_core_execution::FleetFormat::writable(),
+            ))
+            .await?;
+            if has_session_endpoint {
+                let session = crate::schema::read_catalog_id(&storage.pools.session)
+                    .await
+                    .map_err(store_sqlx_error)?
+                    .ok_or_else(crate::schema::missing_catalog_identity_error)?;
+                if *session != *storage.catalog_id {
+                    return Err(PostgresHostError::EndpointCatalogMismatch {
+                        primary: storage.catalog_id.to_string(),
+                        session,
+                    });
+                }
+            }
+            Ok(storage)
+        })
+        .await
+        .unwrap_or(Err(PostgresHostError::StartupTimedOut { after: startup }))
     }
 
-    /// Connect with explicit pool sizing and per-connection timeouts.
-    pub async fn connect_with(
-        database_url: &str,
-        config: PostgresStoreConfig,
-    ) -> Result<Self, StoreError> {
-        let lock_ms = config.lock_timeout.map(|d| d.as_millis().max(1) as u64);
-        let statement_ms = config
-            .statement_timeout
-            .map(|d| d.as_millis().max(1) as u64);
-        let pool = postgres_pool_options(&config)
-            .after_connect(move |conn, _meta| {
-                Box::pin(async move {
-                    if let Some(ms) = lock_ms {
-                        sqlx::query(connection_sql::connection_sql().set_lock_timeout.sql())
-                            .bind(ms.to_string())
-                            .execute(&mut *conn)
-                            .await?;
-                    }
-                    if let Some(ms) = statement_ms {
-                        sqlx::query(connection_sql::connection_sql().set_statement_timeout.sql())
-                            .bind(ms.to_string())
-                            .execute(&mut *conn)
-                            .await?;
-                    }
-                    Ok(())
+    /// Build storage over pools the host built itself.
+    ///
+    /// Each pool keeps its own hooks, TLS identity and sizing, and the
+    /// effective configuration records its real sizing; every transaction
+    /// still begins with its role's guards, so the guard profile holds
+    /// whatever the pools' own hooks set. The configuration is validated, the
+    /// declared budget checked against the server, and the schema gate run,
+    /// exactly as [`connect`](Self::connect) does.
+    ///
+    /// # Errors
+    ///
+    /// [`PostgresHostError`] as for [`connect`](Self::connect), and a
+    /// renewal pool smaller than `roles.served_nodes`.
+    pub async fn from_pool_set(
+        pools: PostgresPoolSet,
+        config: &PostgresHostConfig,
+        observer: StoreObserver,
+    ) -> Result<Self, PostgresHostError> {
+        let config = host::effective_config(&pools, config)?;
+        config.validate()?;
+        Box::pin(Self::open(
+            pools,
+            config,
+            observer,
+            lash_core_execution::FleetFormat::writable(),
+        ))
+        .await
+    }
+
+    /// [`from_pool_set`](Self::from_pool_set), admitting `writable` as the
+    /// opening build's fleet-format writable range.
+    ///
+    /// Testing seam for FIG-3796's rollout proofs: the recorded fleet-format
+    /// row is read against `writable` rather than this binary's own
+    /// [`lash_core_execution::FleetFormat::writable_range`], so a test can
+    /// stand in for a build whose range does — or does not — still write the
+    /// generation the fleet recorded. Production opens always pass this
+    /// build's range.
+    #[cfg(feature = "testing")]
+    pub async fn from_pool_set_with_fleet_writable_range_for_testing(
+        pools: PostgresPoolSet,
+        config: &PostgresHostConfig,
+        writable: lash_core_execution::compat::VersionRange,
+    ) -> Result<Self, PostgresHostError> {
+        let config = host::effective_config(&pools, config)?;
+        config.validate()?;
+        Box::pin(Self::open(
+            pools,
+            config,
+            StoreObserver::default(),
+            writable,
+        ))
+        .await
+    }
+
+    /// The validated open every constructor shares: the budget check, then
+    /// the schema gate.
+    async fn open(
+        pools: PostgresPoolSet,
+        config: PostgresHostConfig,
+        observer: StoreObserver,
+        writable: lash_core_execution::compat::VersionRange,
+    ) -> Result<Self, PostgresHostError> {
+        if let Some(deployment) = &config.deployment {
+            let capacity = host::connection_capacity(&pools.work).await?;
+            let per_process = config.connections_per_process().ok_or_else(|| {
+                PostgresHostError::Config(PostgresHostConfigError {
+                    field: "roles".to_owned(),
+                    reason: "the per-process connection count overflows".to_owned(),
                 })
-            })
-            .connect(database_url)
-            .await
-            .map_err(store_sqlx_error)?;
-        let writable = lash_core_execution::FleetFormat::writable();
+            })?;
+            deployment
+                .connection_budget(per_process)
+                .check(capacity)
+                .map_err(PostgresHostError::Budget)?;
+        }
+        let pool = pools.work.clone();
         let (catalog_id, fleet_format) =
             ensure_schema(&pool, config.schema_check, writable).await?;
+        let pools = Arc::new(host::RolePools::new(pools, &config));
         Ok(Self {
             pool,
-            observer: config.observer,
+            fence: guarded_tx::WriterFence::guarded(
+                writable,
+                fleet_format,
+                pools.preludes.ordinary.clone(),
+                config.retry.store,
+            ),
+            pools,
+            config: Arc::new(config),
+            observer,
             catalog_id: catalog_id.into(),
-            fence: guarded_tx::WriterFence::new(writable, fleet_format),
-            durable_reserve: durable::Reserve::default(),
         })
     }
 
+    /// The configuration this storage runs under: the host's, validated,
+    /// with an imported pool set's real sizing.
+    pub fn effective_config(&self) -> &PostgresHostConfig {
+        &self.config
+    }
+
+    /// Per-role pool state, for a host's metrics.
+    pub fn pool_metrics(&self) -> PostgresPoolMetrics {
+        self.pools.metrics()
+    }
+
     /// Run one phase of the schema's expand/backfill/contract discipline for
-    /// `database_url`: `lashctl migrate`'s engine (FIG-3816, FIG-3817).
+    /// the database `endpoints` reach: `lashctl migrate`'s engine (FIG-3816,
+    /// FIG-3817).
     ///
     /// This is the separate operational step the open path deliberately is
     /// not. [`MigrationPhase::Expand`] takes the schema advisory lock
     /// exclusively, applies the pending expand migrations this build declares
     /// — or provisions an unprovisioned database outright — and records each
     /// applied step in the `lash_migrations` ledger.
-    /// Each schema advisory-lock acquisition waits up to 30 seconds before
+    /// Each schema advisory-lock acquisition waits up to
+    /// `maintenance.migration_lock_timeout_ms` (30 seconds by default) before
     /// returning [`StoreError::Contended`]. Migration statements retain the
-    /// deployment's inherited timeouts. See ADR 0106 §5.
+    /// deployment's inherited timeouts unless
+    /// `maintenance.migration_statement_timeout` sets one. See ADR 0106 §5.
     /// [`MigrationPhase::Backfill`] resumes every pending backfill from its
     /// ledger cursor and runs it to completion, and is refused typed before
     /// finalize. [`MigrationPhase::Contract`] is refused typed until finalize
@@ -358,10 +417,11 @@ impl PostgresStorage {
     /// DDL, so a database that needs this is one that has not been provisioned
     /// or migrated yet.
     pub async fn migrate(
-        database_url: &str,
+        endpoints: &PostgresEndpoints,
+        config: &PostgresHostConfig,
         phase: MigrationPhase,
     ) -> Result<MigrationReport, MigrateError> {
-        migrate::migrate(database_url, phase).await
+        migrate::migrate(endpoints, config, phase).await
     }
 
     /// Plan what [`Self::migrate`] would apply without changing the database.
@@ -371,73 +431,11 @@ impl PostgresStorage {
     /// cannot describe a half-applied state. A backfill or contract step whose
     /// gate is closed is refused as the run would refuse it.
     pub async fn plan_migrations(
-        database_url: &str,
+        endpoints: &PostgresEndpoints,
+        config: &PostgresHostConfig,
         phase: MigrationPhase,
     ) -> Result<MigrationReport, MigrateError> {
-        migrate::plan_migrations(database_url, phase).await
-    }
-
-    /// Build storage over an already-constructed pool.
-    ///
-    /// This runs the same schema gate `connect`/`connect_with` do, so every public
-    /// construction path enforces both the supported component-version range and
-    /// the structural shape: a pre-cutover (e.g. version-10) database is rejected
-    /// loudly with the same out-of-range refusal rather than silently used, which
-    /// would resurrect the cross-version hazards the version gate exists to
-    /// prevent. The gate never runs DDL — the schema must already have been
-    /// provisioned by `lash migrate` or the host's own tooling.
-    ///
-    /// Use [`PostgresStorage::from_pool_with`] to choose how a structural
-    /// mismatch is handled.
-    pub async fn from_pool(pool: PgPool) -> Result<Self, StoreError> {
-        Self::from_pool_with(pool, PostgresStoreConfig::default()).await
-    }
-
-    /// Build storage over an already-constructed pool, choosing how a structural
-    /// mismatch is handled.
-    ///
-    /// Schema policy and the neutral resource observer come from `config`.
-    /// The existing pool keeps its sizing and connection timeouts.
-    pub async fn from_pool_with(
-        pool: PgPool,
-        config: PostgresStoreConfig,
-    ) -> Result<Self, StoreError> {
-        let writable = lash_core_execution::FleetFormat::writable();
-        let (catalog_id, fleet_format) =
-            ensure_schema(&pool, config.schema_check, writable).await?;
-        Ok(Self {
-            pool,
-            observer: config.observer,
-            catalog_id: catalog_id.into(),
-            fence: guarded_tx::WriterFence::new(writable, fleet_format),
-            durable_reserve: durable::Reserve::default(),
-        })
-    }
-
-    /// Build storage over an already-constructed pool, admitting `writable`
-    /// as the opening build's fleet-format writable range.
-    ///
-    /// Testing seam for FIG-3796's rollout proofs: the recorded fleet-format
-    /// row is read against `writable` rather than this binary's own
-    /// [`lash_core_execution::FleetFormat::writable_range`], so a test can
-    /// stand in for a build whose range does — or does not — still write the
-    /// generation the fleet recorded. Production opens always pass this
-    /// build's range.
-    #[cfg(feature = "testing")]
-    pub async fn from_pool_with_fleet_writable_range_for_testing(
-        pool: PgPool,
-        config: PostgresStoreConfig,
-        writable: lash_core_execution::compat::VersionRange,
-    ) -> Result<Self, StoreError> {
-        let (catalog_id, fleet_format) =
-            ensure_schema(&pool, config.schema_check, writable).await?;
-        Ok(Self {
-            pool,
-            observer: config.observer,
-            catalog_id: catalog_id.into(),
-            fence: guarded_tx::WriterFence::new(writable, fleet_format),
-            durable_reserve: durable::Reserve::default(),
-        })
+        migrate::plan_migrations(endpoints, config, phase).await
     }
 
     /// Construct storage after the caller has already structurally verified this
@@ -469,15 +467,19 @@ impl PostgresStorage {
             }
             _ => crate::fleet_format::unrecorded(lash_core_execution::FleetFormat::writable())?,
         };
+        let pools = Arc::new(host::RolePools::sharing(pool.clone()));
         Ok(Self {
             pool,
-            observer: StoreObserver::default(),
-            catalog_id: catalog_id.into(),
-            fence: guarded_tx::WriterFence::new(
+            fence: guarded_tx::WriterFence::guarded(
                 lash_core_execution::FleetFormat::writable(),
                 fleet_format,
+                pools.preludes.ordinary.clone(),
+                pools.store_retry,
             ),
-            durable_reserve: durable::Reserve::default(),
+            pools,
+            config: Arc::new(PostgresHostConfig::default()),
+            observer: StoreObserver::default(),
+            catalog_id: catalog_id.into(),
         })
     }
 
@@ -543,7 +545,13 @@ impl PostgresStorage {
     /// Use [`PostgresStorage::verify_schema_for`] to inspect a database that is
     /// too broken to open, which is most of the ones worth inspecting.
     pub async fn verify_schema(&self) -> Result<SchemaReport, StoreError> {
-        Self::verify_schema_for(&self.pool).await
+        let _session = self
+            .pools
+            .schema_sessions
+            .acquire()
+            .await
+            .map_err(|_| StoreError::Backend("the schema session limit is closed".into()))?;
+        Self::verify_schema_for(&self.pools.session).await
     }
 
     /// Constructing a [`PostgresStorage`] is strictly harder than verifying one:
@@ -679,6 +687,7 @@ impl PostgresStorage {
     pub fn store(&self) -> PostgresStore {
         PostgresStore {
             pool: self.pool.clone(),
+            pools: Arc::clone(&self.pools),
             observer: self.observer.clone(),
             catalog_id: Arc::clone(&self.catalog_id),
             fence: self.fence.clone(),
@@ -699,6 +708,7 @@ impl PostgresStorage {
     pub fn process_registry(&self) -> PostgresProcessRegistry {
         PostgresProcessRegistry {
             pool: self.pool.clone(),
+            pools: Arc::clone(&self.pools),
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             process_id_mint: lash_core_execution::ProcessIdMint::default(),
             fence: self.fence.clone(),
@@ -740,9 +750,8 @@ impl PostgresStorage {
     /// The durability engine's store over this catalog.
     pub fn durable_store(&self) -> PostgresDurableStore {
         PostgresDurableStore::new(
-            self.pool.clone(),
+            Arc::clone(&self.pools),
             self.fence.clone(),
-            self.durable_reserve.clone(),
             self.observer.clone(),
         )
     }
@@ -776,21 +785,6 @@ impl PostgresStorage {
 }
 
 impl PostgresStore {
-    /// Open one multi-session store over a provisioned PostgreSQL catalog.
-    pub async fn open(database_url: &str) -> Result<Self, StoreError> {
-        Ok(PostgresStorage::connect(database_url).await?.store())
-    }
-
-    /// Open with explicit connection policy and schema-check configuration.
-    pub async fn open_with(
-        database_url: &str,
-        config: PostgresStoreConfig,
-    ) -> Result<Self, StoreError> {
-        Ok(PostgresStorage::connect_with(database_url, config)
-            .await?
-            .store())
-    }
-
     pub fn new(storage: &PostgresStorage) -> Self {
         storage.store()
     }
@@ -897,8 +891,14 @@ mod trigger_store;
 mod turn_ingress;
 
 pub use backend::PostgresStoreSet;
+pub mod host;
 pub use durable::{PostgresDurableStore, PostgresSignals};
 use guarded_tx::begin_guarded;
+pub use host::{
+    ConnectionRole, ConnectionTopology, PostgresConnectionFactory, PostgresEndpoints,
+    PostgresHostConfig, PostgresHostConfigError, PostgresHostError, PostgresPoolMetrics,
+    PostgresPoolSet, PostgresRolePoolMetrics, TransactionPrelude,
+};
 pub use migrate::{MigrateError, MigrationPhase, MigrationRefusal, MigrationReport, MigrationStep};
 mod connection_budget;
 pub use connection_budget::{
@@ -927,37 +927,3 @@ mod postgres_test_support;
 
 #[cfg(test)]
 mod tests;
-
-#[cfg(test)]
-mod acquire_timeout_tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn acquire_timeout_bounds_a_stalled_postgres_handshake() {
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
-            .await
-            .expect("bind stalled Postgres peer");
-        let port = listener.local_addr().expect("read listener address").port();
-        let stalled_peer = tokio::spawn(async move {
-            let (_socket, _) = listener.accept().await.expect("accept Postgres connection");
-            std::future::pending::<()>().await;
-        });
-        let config = PostgresStoreConfig {
-            acquire_timeout: Duration::from_millis(100),
-            ..PostgresStoreConfig::default()
-        };
-        let database_url = format!("postgres://postgres@127.0.0.1:{port}/postgres");
-
-        let result = tokio::time::timeout(
-            Duration::from_millis(400),
-            postgres_pool_options(&config).connect(&database_url),
-        )
-        .await;
-        stalled_peer.abort();
-
-        assert!(
-            matches!(result, Ok(Err(sqlx::Error::PoolTimedOut))),
-            "acquire timeout did not bound the stalled handshake: {result:?}"
-        );
-    }
-}

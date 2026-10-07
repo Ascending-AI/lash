@@ -7,9 +7,6 @@
 
 use super::*;
 
-/// Rows one release round reads and rewrites.
-const RELEASE_PAGE_ROWS: i64 = 256;
-
 /// The highest sequence `process_id` released, `0` when it released none.
 pub(crate) async fn released_through_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -51,7 +48,9 @@ pub(super) async fn release_process_events(
             .bind(process_id.as_str())
             .bind(clamp_sequence_bound(after))
             .bind(target_bound)
-            .bind(RELEASE_PAGE_ROWS)
+            .bind(i64::from(
+                registry.pools.maintenance.process_event_release_page_rows,
+            ))
             .fetch_all(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?;

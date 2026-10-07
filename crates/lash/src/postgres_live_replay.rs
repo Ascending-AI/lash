@@ -9,7 +9,8 @@
 //!   and rings one `pg_notify`. The row lock serialises one session's
 //!   writers on every replica, so commit order is position order and no
 //!   position is reserved and abandoned.
-//! - **Subscribe.** One LISTEN connection per replica. A subscriber
+//! - **Subscribe.** One LISTEN connection per replica, on a session of its
+//!   own beside the data pool (the host's `live_replay.listener`). A subscriber
 //!   registers its session's doorbell, refcounted by the replica's
 //!   subscribers, only once the LISTEN is confirmed; then it reads the rows
 //!   past its cursor, and each doorbell after that re-reads past the last
@@ -40,15 +41,20 @@ use lash_core::{
     LiveReplaySubscribeOutcome, LiveReplaySubscription, SessionCursor, SessionObservationEvent,
     SessionRevision,
 };
+use lash_postgres_store::host::{
+    ConnectionRole, PostgresHostConfig, ReconnectPolicy, ReplayDataPolicy, ReplaySchemaMode,
+    RetryPolicy,
+};
+use lash_postgres_store::{
+    PostgresConnectionFactory, PostgresEndpoints, PostgresHostConfigError, TransactionPrelude,
+};
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt as _;
-use sqlx::postgres::PgPoolOptions;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 
 mod cleanup;
 mod codec;
-mod config;
 mod heads;
 mod listener;
 mod mirror;
@@ -57,23 +63,21 @@ mod schema;
 mod schema_shape;
 mod subscription;
 
-pub use config::{
-    PostgresLiveReplayConfig, PostgresLiveReplayConfigError, PostgresLiveReplaySchemaMode,
-};
 pub use schema_shape::{PostgresLiveReplaySchemaFinding, PostgresLiveReplaySchemaReport};
 
 use codec::Doorbell;
 use mirror::Mirror;
-use schema::{Incarnation, Statements, db_error};
+use schema::{Incarnation, Statements};
 use subscription::Read;
 
 /// Why a [`PostgresLiveReplayStore`] could not start.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum PostgresLiveReplayError {
-    /// A configuration value is outside its range.
+    /// A configuration value is outside its range, or the configuration
+    /// has no `live_replay` section.
     #[error(transparent)]
-    Config(#[from] PostgresLiveReplayConfigError),
+    Config(#[from] PostgresHostConfigError),
     /// The database refused the connection, the tables or the listener.
     #[error(transparent)]
     Database(#[from] LiveReplayStoreError),
@@ -102,8 +106,18 @@ impl std::fmt::Debug for PostgresLiveReplayStore {
 
 /// What the store's tasks and subscriptions share.
 struct Shared {
+    /// Publication, reads, cleanup and reloads.
     pool: sqlx::PgPool,
-    config: PostgresLiveReplayConfig,
+    /// The listener's own session.
+    listener_pool: sqlx::PgPool,
+    config: ReplayDataPolicy,
+    /// How long a subscribe or a connect waits for the listener.
+    listener_wait: std::time::Duration,
+    reconnect: ReconnectPolicy,
+    retry: RetryPolicy,
+    /// The replay guard profile each publication and cleanup transaction
+    /// begins with.
+    prelude: TransactionPrelude,
     sql: Statements,
     mirror: StdMutex<Mirror>,
     /// `Some(epoch)` while the listener's LISTEN is confirmed.
@@ -214,17 +228,14 @@ impl Shared {
         session_id: &SessionId,
     ) -> Result<BellGuard, LiveReplayStoreError> {
         let mut listening = self.listening.subscribe();
-        tokio::time::timeout(
-            self.config.pool_acquire_timeout,
-            listening.wait_for(Option::is_some),
-        )
-        .await
-        .map_err(|_| {
-            LiveReplayStoreError::Store(
-                "postgres live replay listener is not connected".to_string(),
-            )
-        })?
-        .map_err(|_| LiveReplayStoreError::Closed)?;
+        tokio::time::timeout(self.listener_wait, listening.wait_for(Option::is_some))
+            .await
+            .map_err(|_| {
+                LiveReplayStoreError::Store(
+                    "postgres live replay listener is not connected".to_string(),
+                )
+            })?
+            .map_err(|_| LiveReplayStoreError::Closed)?;
         let mut bells = self.bells.lock_recover();
         let bell = bells.entry(session_id.clone()).or_insert_with(|| Bell {
             sender: watch::channel(0).0,
@@ -242,47 +253,53 @@ impl Shared {
 }
 
 impl PostgresLiveReplayStore {
-    /// Connect to `database_url`, create the store's tables when absent (in
-    /// the `install` schema mode), refuse when they differ from the published
-    /// artifact, confirm the listener, and start the replica's publisher and
-    /// cleanup. Out-of-range configuration is refused before anything
-    /// connects.
+    /// Connect through `endpoints` under `config.live_replay`, create the
+    /// store's tables when absent (in the `install` schema mode), refuse
+    /// when they differ from the published artifact, confirm the listener,
+    /// and start the replica's publisher and cleanup. The configuration is
+    /// validated before anything connects; one without a `live_replay`
+    /// section is refused.
     pub async fn connect(
-        database_url: &str,
-        config: PostgresLiveReplayConfig,
+        endpoints: &PostgresEndpoints,
+        config: &PostgresHostConfig,
     ) -> Result<Self, PostgresLiveReplayError> {
         config.validate()?;
-        let pool = PgPoolOptions::new()
-            .max_connections(config.pool_max_connections)
-            .min_connections(config.pool_min_connections)
-            .acquire_timeout(config.pool_acquire_timeout)
-            .idle_timeout(Some(config.pool_idle_timeout))
-            // No ping per checkout: every publish and every tail read would
-            // pay a round trip for it. A connection that died fails its one
-            // statement; the publication answers the error and a tail
-            // resubscribes.
-            .test_before_acquire(false)
-            .connect(database_url)
-            .await
-            .map_err(db_error("connect"))?;
-        let report = match config.schema_mode {
-            PostgresLiveReplaySchemaMode::Install => schema::install(&pool, &config.schema).await?,
-            PostgresLiveReplaySchemaMode::VerifyOnly => {
-                schema::verify(&pool, &config.schema).await?
-            }
+        let policy = config
+            .live_replay
+            .clone()
+            .ok_or_else(|| PostgresHostConfigError {
+                field: "live_replay".to_owned(),
+                reason: "is required to open a live replay store".to_owned(),
+            })?;
+        let factory = PostgresConnectionFactory::new(endpoints.clone(), config.connection.clone());
+        let pool = factory.pool(
+            ConnectionRole::Replay,
+            &policy.pool,
+            Some(&config.guards.replay),
+        );
+        let listener_pool =
+            factory.dedicated(ConnectionRole::ReplayListener, &policy.listener, 1, None);
+        let report = match policy.data.schema_mode {
+            ReplaySchemaMode::Install => schema::install(&pool, &policy.data.schema).await?,
+            ReplaySchemaMode::VerifyOnly => schema::verify(&pool, &policy.data.schema).await?,
         };
         if !report.is_conformant() {
             return Err(PostgresLiveReplayError::SchemaDrift(report));
         }
-        let sql = Statements::new(&config.schema);
+        let sql = Statements::new(&policy.data.schema);
         let incarnation = schema::ensure_incarnation(&pool, &sql).await?;
         let shared = Arc::new(Shared {
             pool,
+            listener_pool,
             sql,
             mirror: StdMutex::new(Mirror::new(incarnation)),
             listening: watch::channel(None).0,
             bells: StdMutex::new(HashMap::new()),
-            config,
+            listener_wait: policy.listener.acquire_timeout,
+            reconnect: policy.reconnect,
+            retry: config.retry.live_replay,
+            prelude: TransactionPrelude::new(&config.guards.replay),
+            config: policy.data,
         });
         let (publisher, requests) = mpsc::unbounded_channel();
         let store = Self {
@@ -298,7 +315,7 @@ impl PostgresLiveReplayStore {
         // handed out after `connect` knows every head.
         let mut listening = store.shared.listening.subscribe();
         tokio::time::timeout(
-            store.shared.config.pool_acquire_timeout,
+            store.shared.listener_wait,
             listening.wait_for(Option::is_some),
         )
         .await
@@ -316,7 +333,7 @@ impl PostgresLiveReplayStore {
     /// migrations vendors them rather than transcribing them, applies them
     /// into the configured `schema` (they are schema-unqualified and
     /// provision into whichever schema `search_path` resolves), and runs the
-    /// store in the `verify_only` mode. Every statement is creation-only and
+    /// store in the `verify_only` mode, the default. Every statement is creation-only and
     /// idempotent.
     pub fn schema_ddl() -> &'static str {
         schema_shape::SCHEMA_DDL
@@ -340,8 +357,8 @@ impl PostgresLiveReplayStore {
         schema::verify(pool, schema).await
     }
 
-    /// The configuration this store runs with.
-    pub fn config(&self) -> &PostgresLiveReplayConfig {
+    /// The data policy this store runs with.
+    pub fn config(&self) -> &ReplayDataPolicy {
         &self.shared.config
     }
 }

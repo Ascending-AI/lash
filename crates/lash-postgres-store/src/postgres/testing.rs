@@ -20,6 +20,135 @@ use sqlx::{Connection, PgConnection};
 mod database_url;
 pub use database_url::required_database_url;
 
+/// The nodes a fixture may serve over one storage: a failover deployment's
+/// primary and standby, a drain law's nodes.
+pub const FIXTURE_SERVED_NODES: u32 = 4;
+
+/// The attachment sweeps a fixture may hold open at once over one storage:
+/// the recovery laws race sweepers and leave a crashed one's session held.
+pub const FIXTURE_SWEEP_SESSIONS: u32 = 4;
+
+/// The default [`PostgresHostConfig`](crate::PostgresHostConfig), serving
+/// [`FIXTURE_SERVED_NODES`] nodes and [`FIXTURE_SWEEP_SESSIONS`] sweeps: the
+/// configuration of laws that do not exercise it.
+pub fn fixture_config() -> crate::PostgresHostConfig {
+    let mut config = crate::PostgresHostConfig::default();
+    config.roles.served_nodes = FIXTURE_SERVED_NODES;
+    config.maintenance.max_sweep_sessions = FIXTURE_SWEEP_SESSIONS;
+    config
+}
+
+/// Open storage over `database_url` under [`fixture_config`]: the fixture
+/// open of laws that do not exercise the host configuration. A refusal that
+/// is not the store's own is reported as a backend error.
+pub async fn connect(database_url: &str) -> Result<crate::PostgresStorage, crate::StoreError> {
+    connect_with(database_url, &fixture_config()).await
+}
+
+/// [`fixture_config`] with a work pool of `max_connections`, its admission
+/// narrowed to fit: the small-pool laws' configuration.
+pub fn work_pool_of(max_connections: u32) -> crate::PostgresHostConfig {
+    let mut config = fixture_config();
+    config.roles.work.max_connections = max_connections;
+    config.roles.max_store_operations = max_connections as usize;
+    config
+}
+
+/// [`connect`] under `config`.
+pub async fn connect_with(
+    database_url: &str,
+    config: &crate::PostgresHostConfig,
+) -> Result<crate::PostgresStorage, crate::StoreError> {
+    let endpoints = crate::PostgresEndpoints::from_url(database_url)
+        .map_err(|error| crate::StoreError::Backend(error.to_string()))?;
+    crate::PostgresStorage::connect(&endpoints, config, Default::default())
+        .await
+        .map_err(store_error)
+}
+
+/// Open storage over a host-built `pool` that every role shares, under
+/// `config` with its admission narrowed to the pool: the fixture open of
+/// laws that hook their pool (a scratch `search_path`, an observed
+/// `application_name`).
+pub async fn from_pool(
+    pool: sqlx::PgPool,
+    config: &crate::PostgresHostConfig,
+) -> Result<crate::PostgresStorage, crate::StoreError> {
+    let config = fitted(&pool, config);
+    crate::PostgresStorage::from_pool_set(
+        crate::PostgresPoolSet::sharing_for_testing(pool),
+        &config,
+        Default::default(),
+    )
+    .await
+    .map_err(store_error)
+}
+
+/// [`from_pool`] as a build whose writable range is `writable`.
+#[cfg(feature = "testing")]
+pub async fn from_pool_as(
+    pool: sqlx::PgPool,
+    config: &crate::PostgresHostConfig,
+    writable: lash_core_execution::compat::VersionRange,
+) -> Result<crate::PostgresStorage, crate::StoreError> {
+    let config = fitted(&pool, config);
+    crate::PostgresStorage::from_pool_set_with_fleet_writable_range_for_testing(
+        crate::PostgresPoolSet::sharing_for_testing(pool),
+        &config,
+        writable,
+    )
+    .await
+    .map_err(store_error)
+}
+
+/// `config` with its admission narrowed to fit `pool`.
+fn fitted(pool: &sqlx::PgPool, config: &crate::PostgresHostConfig) -> crate::PostgresHostConfig {
+    let mut config = config.clone();
+    config.roles.max_store_operations = config
+        .roles
+        .max_store_operations
+        .min(pool.options().get_max_connections() as usize);
+    config
+}
+
+/// [`PostgresStorage::migrate`](crate::PostgresStorage::migrate) of
+/// `database_url` under the default configuration.
+pub async fn migrate(
+    database_url: &str,
+    phase: crate::MigrationPhase,
+) -> Result<crate::MigrationReport, crate::MigrateError> {
+    let endpoints = crate::PostgresEndpoints::from_url(database_url).map_err(|error| {
+        crate::MigrateError::Store(crate::StoreError::Backend(error.to_string()))
+    })?;
+    crate::PostgresStorage::migrate(&endpoints, &crate::PostgresHostConfig::default(), phase).await
+}
+
+/// [`PostgresStorage::plan_migrations`](crate::PostgresStorage::plan_migrations)
+/// of `database_url` under the default configuration.
+pub async fn plan_migrations(
+    database_url: &str,
+    phase: crate::MigrationPhase,
+) -> Result<crate::MigrationReport, crate::MigrateError> {
+    let endpoints = crate::PostgresEndpoints::from_url(database_url).map_err(|error| {
+        crate::MigrateError::Store(crate::StoreError::Backend(error.to_string()))
+    })?;
+    crate::PostgresStorage::plan_migrations(
+        &endpoints,
+        &crate::PostgresHostConfig::default(),
+        phase,
+    )
+    .await
+}
+
+/// A host open's refusal as the store error a fixture propagates: the
+/// store's own as it is, any other as a backend error naming it.
+pub fn store_error(error: crate::PostgresHostError) -> crate::StoreError {
+    match error {
+        crate::PostgresHostError::Store(error) => error,
+        other => crate::StoreError::Backend(other.to_string()),
+    }
+}
+
 /// Arm (`true`) or disarm a cut of every session-mail producer transaction
 /// at the session actor's wake, over `pool`: the producer's transaction
 /// rolls back before it commits.

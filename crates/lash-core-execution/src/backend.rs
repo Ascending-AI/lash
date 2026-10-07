@@ -65,6 +65,10 @@ pub enum DurableBuildError {
     /// The substrate parameters break a rule.
     #[error("invalid durable configuration: {0}")]
     InvalidConfig(#[from] DurableConfigError),
+    /// Settings were given to a builder whose host configuration already
+    /// owns them: a host's durable settings live in one place.
+    #[error("the durable settings belong to the host configuration; set them there")]
+    SettingsOwnedByHost,
 }
 
 /// What a durable backend is assembled from.

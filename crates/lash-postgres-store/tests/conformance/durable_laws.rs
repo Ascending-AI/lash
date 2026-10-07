@@ -157,10 +157,10 @@ mod runtime_persistence {
                 let clock = Arc::clone(&clock);
                 let request = root_session_request(session_id);
                 sync_await(async move {
-                    let open_storage = PostgresStorage::connect(&database_url)
+                    let open_storage = lash_postgres_store::testing::connect(&database_url)
                         .await
                         .expect("open first Postgres conformance pool");
-                    let reopen_storage = PostgresStorage::connect(&database_url)
+                    let reopen_storage = lash_postgres_store::testing::connect(&database_url)
                         .await
                         .expect("open independent Postgres conformance pool");
                     let open_factory = open_storage

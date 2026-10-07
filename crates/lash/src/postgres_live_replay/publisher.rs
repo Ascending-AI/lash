@@ -40,9 +40,6 @@ enum Planned {
     Refused(LiveReplayStoreError),
 }
 
-/// How many times a tick starts over after a race or a rotation.
-const ATTEMPTS: usize = 8;
-
 pub(super) async fn run(
     shared: Arc<Shared>,
     mut requests: mpsc::UnboundedReceiver<PublishRequest>,
@@ -88,7 +85,12 @@ async fn write(shared: &Shared, batch: Vec<PublishRequest>) {
     let mut outcome = Err(LiveReplayStoreError::Store(
         "postgres live replay publication kept racing; giving up".into(),
     ));
-    for _ in 0..ATTEMPTS {
+    // A tick starts over after a race or a rotation, up to the host's
+    // `retry.live_replay` attempts.
+    for retry in 0..shared.retry.attempts {
+        if retry > 0 {
+            tokio::time::sleep(shared.retry.pause(retry - 1)).await;
+        }
         match write_once(shared, &batch).await {
             Ok(written) => {
                 outcome = Ok(written);
@@ -330,7 +332,11 @@ async fn write_once(shared: &Shared, batch: &[PublishRequest]) -> Result<Written
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
-    let mut tx = shared.pool.begin().await.map_err(attempt("begin"))?;
+    let mut tx = shared
+        .prelude
+        .begin(&shared.pool)
+        .await
+        .map_err(attempt("begin"))?;
     let mut heads = Heads::lock(&mut tx, sql, &sessions, config.max_age, true).await?;
     let Some(Some(incarnation)) = heads.incarnation.clone() else {
         return Err(Attempt::Retry(Retry::Rotate));

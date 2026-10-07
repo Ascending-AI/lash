@@ -5,6 +5,19 @@
 
 use crate::ids::CommitLabel;
 
+/// Which connection capacity serves a commit: see [`CommitLabel::capacity`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CommitCapacity {
+    /// The node lease's registration and renewal.
+    Renewal,
+    /// Claims, adoption, liveness and drain marks.
+    Scheduler,
+    /// Reaps, releases, hand-backs, cancels and terminals.
+    Critical,
+    /// Everything else.
+    Work,
+}
+
 impl CommitLabel {
     // Turns (V0, then L3).
     /// `turn.accept`: A session input accepted into the mailbox (C0).
@@ -112,24 +125,27 @@ impl CommitLabel {
     /// runner whose activation stopped without giving it up.
     pub const DRAIN_RELEASE: Self = Self::new("drain.release");
 
-    /// The commits a store serves from reserved connection capacity (L8,
-    /// FIG-5178): the node lease's and every terminal and cancel write, so
-    /// a burst of ordinary commits (model results, round outcomes) can
-    /// neither starve a heartbeat into a self-stop nor hold back an ending.
-    pub const RESERVED: [Self; 7] = [
-        Self::HEARTBEAT,
-        Self::REAP,
-        Self::NODE_REGISTER,
-        Self::NODE_RELEASE,
-        Self::TURN_CANCEL,
-        Self::PROCESS_CANCEL,
-        Self::PROCESS_TERMINAL,
-    ];
-
-    /// Whether a store serves this commit from its reserved capacity.
+    /// The connection capacity a store serves this commit from (FIG-5240).
+    ///
+    /// The routing is the library's, never the host's: the node lease's
+    /// own commits have per-node renewal capacity, the scheduler's claims
+    /// and drain marks a small pool of their own, and every reap, release,
+    /// hand-back, cancel and terminal a critical pool, so a burst of
+    /// ordinary commits (model results, round outcomes) can neither starve a
+    /// heartbeat into a self-stop nor hold back an ending.
     #[must_use]
-    pub fn is_reserved(self) -> bool {
-        Self::RESERVED.contains(&self)
+    pub fn capacity(self) -> CommitCapacity {
+        match self {
+            Self::HEARTBEAT | Self::NODE_REGISTER => CommitCapacity::Renewal,
+            Self::CLAIM | Self::NODE_DRAIN => CommitCapacity::Scheduler,
+            Self::REAP
+            | Self::NODE_RELEASE
+            | Self::DRAIN_RELEASE
+            | Self::TURN_CANCEL
+            | Self::PROCESS_CANCEL
+            | Self::PROCESS_TERMINAL => CommitCapacity::Critical,
+            _ => CommitCapacity::Work,
+        }
     }
 
     /// Every label in the catalog, L1's lease labels first.

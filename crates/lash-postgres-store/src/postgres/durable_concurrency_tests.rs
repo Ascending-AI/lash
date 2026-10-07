@@ -38,7 +38,7 @@ async fn storage(law: &str) -> Option<(IsolatedDatabase, PostgresStorage)> {
         return None;
     };
     let database = IsolatedDatabase::create(&database_url).await;
-    let storage = PostgresStorage::connect(database.url())
+    let storage = crate::testing::connect(database.url())
         .await
         .expect("open the isolated store");
     Some((database, storage))
@@ -270,7 +270,7 @@ async fn sixteen_claimers_on_a_hot_set_take_disjoint_actors() {
     let mut claimers = tokio::task::JoinSet::new();
     for lease in leases {
         // Each claimer is a node with a pool of its own, as in a deployment.
-        let store = PostgresStorage::connect(database.url())
+        let store = crate::testing::connect(database.url())
             .await
             .expect("open a claimer's store")
             .durable_store();

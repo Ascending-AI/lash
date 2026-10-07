@@ -395,7 +395,7 @@ impl Scenario for Proof {
             Dialect::Postgres => {
                 let url = self.postgres_url.clone().expect("a PostgreSQL URL");
                 let isolated = isolated_database(url);
-                let storage = lash_postgres_store::PostgresStorage::connect(isolated.url())
+                let storage = lash_postgres_store::testing::connect(isolated.url())
                     .await
                     .expect("the isolated database opens");
                 let database: Arc<dyn DurableStore> =

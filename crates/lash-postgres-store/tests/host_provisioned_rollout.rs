@@ -16,7 +16,7 @@
 
 use std::str::FromStr;
 
-use lash_postgres_store::{PostgresStorage, PostgresStoreConfig, SchemaCheck};
+use lash_postgres_store::{PostgresStorage, SchemaCheck};
 use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
 use sqlx::{Connection, Executor, PgConnection, Row};
 
@@ -31,10 +31,10 @@ mod harness;
 
 use harness::ScratchSchema;
 
-fn host_provisioned_config() -> PostgresStoreConfig {
-    PostgresStoreConfig {
+fn host_provisioned_config() -> lash_postgres_store::PostgresHostConfig {
+    lash_postgres_store::PostgresHostConfig {
         schema_check: SchemaCheck::Enforce,
-        ..PostgresStoreConfig::default()
+        ..lash_postgres_store::PostgresHostConfig::default()
     }
 }
 
@@ -159,9 +159,10 @@ async fn a_host_provisioned_schema_opens_under_a_role_without_ddl_privileges() {
         "expected a privilege refusal, got: {ddl_error}"
     );
 
-    let storage = PostgresStorage::from_pool_with(runtime_pool.clone(), host_provisioned_config())
-        .await
-        .expect("a conformant host-provisioned schema must open without DDL");
+    let storage =
+        lash_postgres_store::testing::from_pool(runtime_pool.clone(), &host_provisioned_config())
+            .await
+            .expect("a conformant host-provisioned schema must open without DDL");
 
     // Open ran the verification itself; the pool the store holds can also read
     // and write rows — the only privileges the runtime actually needs.

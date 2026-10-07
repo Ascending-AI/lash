@@ -33,7 +33,6 @@ use serde_json::{Value, json};
 /// version_surface = "coexist"
 /// format_outside_manifest = "operator CLI wire: gates a --json consumer, not state lash reopens"
 const LASHCTL_JSON_SCHEMA_VERSION: u32 = 1;
-const OPERATOR_POOL_MAX: u32 = 2;
 const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | preflight [--processes-per-generation <n> --pool-max <n> --generations <n> --workers <n> --admin-headroom <n>] | stalled list <kind> [--after <id>] [--limit <n>] | stalled rearm <kind> <id> | deployment-status --accepting-new-work <bool> (recovery commands accept --sqlite-path <database-file>) | version>";
 
 #[derive(Clone, Copy)]
@@ -351,23 +350,45 @@ fn database_url() -> Result<String, CliError> {
     })
 }
 
+/// The endpoints `LASH_POSTGRES_DATABASE_URL` names.
+/// The endpoint `LASH_POSTGRES_DATABASE_URL` names. A URL that does not
+/// parse fails as the connect it stands for did, unexpectedly.
+fn endpoints() -> Result<lash::postgres::PostgresEndpoints, CliError> {
+    lash::postgres::PostgresEndpoints::from_url(&database_url()?)
+        .map_err(|error| CliError::new(Exit::Unexpected, error.to_string()))
+}
+
+/// The host configuration in `LASH_POSTGRES_CONFIG` (its JSON form), or the
+/// default one: the same document a deployment's workers run under, so the
+/// operator's pools are sized and named by it.
+fn host_config() -> Result<lash::postgres::PostgresHostConfig, CliError> {
+    let Ok(json) = std::env::var("LASH_POSTGRES_CONFIG") else {
+        return Ok(lash::postgres::PostgresHostConfig::default());
+    };
+    let config: lash::postgres::PostgresHostConfig = serde_json::from_str(&json)
+        .map_err(|error| CliError::new(Exit::Refused, format!("LASH_POSTGRES_CONFIG: {error}")))?;
+    config
+        .validate()
+        .map_err(|error| CliError::new(Exit::Refused, error.to_string()))?;
+    Ok(config)
+}
+
 async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
     let outcome = match command {
         Command::Recovery(invocation) => (invocation.run().await?, Exit::Done),
         Command::Version => (version_result(), Exit::Done),
         Command::Migrate { phase, dry_run } => {
-            let url = database_url()?;
+            let (endpoints, config) = (endpoints()?, host_config()?);
             let report = if *dry_run {
-                PostgresStorage::plan_migrations(&url, *phase).await
+                PostgresStorage::plan_migrations(&endpoints, &config, *phase).await
             } else {
-                PostgresStorage::migrate(&url, *phase).await
+                PostgresStorage::migrate(&endpoints, &config, *phase).await
             }
             .map_err(CliError::migrate)?;
             (migration_result(&report, *dry_run), Exit::Done)
         }
         Command::Preflight { budget } => {
-            let url = database_url()?;
-            let probe = PostgresStorePreflight::for_database_url(&url).map_err(CliError::store)?;
+            let probe = PostgresStorePreflight::connect_lazy(&endpoints()?, &host_config()?);
             let capacity = if let Some(budget) = budget {
                 let checked = probe
                     .connection_capacity()

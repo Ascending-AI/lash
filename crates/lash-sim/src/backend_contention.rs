@@ -84,7 +84,7 @@ pub async fn run_backend_contention_report_against(
     match postgres_database_url {
         Some(database_url) => {
             let storage = Arc::new(
-                lash_postgres_store::PostgresStorage::connect(&database_url)
+                lash_postgres_store::testing::connect(&database_url)
                     .await
                     .map_err(|err| format!("connect postgres contention store: {err}"))?,
             );

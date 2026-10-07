@@ -8,20 +8,19 @@
 use std::str::FromStr as _;
 
 use lash::postgres::{
-    PostgresLiveReplayConfig, PostgresLiveReplayError, PostgresLiveReplaySchemaFinding,
-    PostgresLiveReplaySchemaMode, PostgresLiveReplayStore,
+    PostgresHostConfig, PostgresLiveReplayError, PostgresLiveReplaySchemaFinding,
+    PostgresLiveReplayStore, ReplaySchemaMode,
 };
 use lash_postgres_store::testing::{IsolatedDatabase, required_database_url};
 use sqlx::postgres::PgConnectOptions;
 use sqlx::{ConnectOptions as _, Connection as _, PgConnection, PgPool};
 
-use super::{config, fresh_schema, publish};
+use super::{config, endpoints, fresh_schema, publish, with_data};
 
-fn verify_only(schema: &str) -> PostgresLiveReplayConfig {
-    PostgresLiveReplayConfig {
-        schema_mode: PostgresLiveReplaySchemaMode::VerifyOnly,
-        ..config(schema)
-    }
+fn verify_only(schema: &str) -> PostgresHostConfig {
+    with_data(schema, |data| {
+        data.schema_mode = ReplaySchemaMode::VerifyOnly
+    })
 }
 
 /// What a host's migration tooling does: create the schema and apply the
@@ -50,11 +49,8 @@ async fn execute(url: &str, statement: &str) {
         .unwrap_or_else(|error| panic!("{statement}: {error}"));
 }
 
-async fn refusal(
-    url: &str,
-    config: PostgresLiveReplayConfig,
-) -> Vec<PostgresLiveReplaySchemaFinding> {
-    match PostgresLiveReplayStore::connect(url, config).await {
+async fn refusal(url: &str, config: PostgresHostConfig) -> Vec<PostgresLiveReplaySchemaFinding> {
+    match PostgresLiveReplayStore::connect(&endpoints(url), &config).await {
         Err(PostgresLiveReplayError::SchemaDrift(report)) => report.findings().to_vec(),
         Err(other) => panic!("expected a schema drift refusal, got {other}"),
         Ok(_) => panic!("expected a schema drift refusal, the store connected"),
@@ -104,7 +100,7 @@ async fn the_install_mode_provisions_exactly_the_committed_shape() {
     let schema = fresh_schema();
     for _ in 0..2 {
         drop(
-            PostgresLiveReplayStore::connect(database.url(), config(&schema))
+            PostgresLiveReplayStore::connect(&endpoints(database.url()), &config(&schema))
                 .await
                 .expect("install connects"),
         );
@@ -175,7 +171,7 @@ async fn a_host_provisioned_schema_serves_verify_only_under_a_role_without_ddl_p
     drop(runtime);
 
     let store: std::sync::Arc<dyn lash_core::LiveReplayStore> = std::sync::Arc::new(
-        PostgresLiveReplayStore::connect(&runtime_url, verify_only(&schema))
+        PostgresLiveReplayStore::connect(&endpoints(&runtime_url), &verify_only(&schema))
             .await
             .expect("a host-provisioned schema connects verify-only"),
     );

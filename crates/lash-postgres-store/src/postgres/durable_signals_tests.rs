@@ -16,8 +16,8 @@ use lash_durable::{
 use tokio::sync::mpsc;
 
 use super::*;
+use crate::PostgresStorage;
 use crate::testing::IsolatedDatabase;
-use crate::{PostgresStorage, PostgresStoreConfig};
 
 const TTL: Duration = Duration::from_secs(15);
 
@@ -38,7 +38,7 @@ async fn database(law: &str) -> Option<IsolatedDatabase> {
 }
 
 async fn storage(database: &IsolatedDatabase) -> PostgresStorage {
-    PostgresStorage::connect(database.url())
+    crate::testing::connect(database.url())
         .await
         .expect("open the isolated store")
 }
@@ -424,36 +424,35 @@ async fn a_dead_node_is_reaped_through_its_lock_long_before_its_lease_lapses() {
     survivor.task.abort();
 }
 
-/// A node's lease renews on a task of its own: with every shared connection
-/// held, so the runner's claim waits on the pool, and the reserved
-/// connections busy with other work, the node keeps serving across three
+/// A node's lease renews on a task of its own over its renewal connection:
+/// with every work, scheduler and critical connection held, so the runner's
+/// claim waits on the scheduler pool, the node keeps serving across three
 /// self-stop windows, so it renewed at least three times. Its stored lease
-/// lives two seconds and a second node reaps expired leases every 250 ms,
-/// so those renewals reached the database: a reaped node's next heartbeat
-/// answers `Reaped` and its runner stops (FIG-5241).
+/// lives two seconds and a watcher on a second storage reaps expired leases
+/// every 250 ms, so those renewals reached the database: a reaped node's
+/// next heartbeat answers `Reaped` and its runner stops (FIG-5241,
+/// FIG-5240).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_saturated_shared_pool_cannot_starve_the_heartbeat() {
     let Some(database) = database("a_saturated_shared_pool_cannot_starve_the_heartbeat").await
     else {
         return;
     };
-    let storage = PostgresStorage::connect_with(
-        database.url(),
-        PostgresStoreConfig {
-            max_connections: 2,
-            ..PostgresStoreConfig::default()
-        },
-    )
-    .await
-    .expect("open the isolated store");
+    let storage = crate::testing::connect_with(database.url(), &crate::testing::work_pool_of(2))
+        .await
+        .expect("open the isolated store");
     let store = storage.durable_store();
+    let watching = crate::testing::connect(database.url())
+        .await
+        .expect("open the watcher's store");
+    let watching = watching.durable_store();
     let lease = LeaseSettings {
         ttl: Duration::from_secs(2),
         heartbeat_every: Duration::from_millis(300),
         self_stop_after: Duration::from_millis(1_500),
         ..LeaseSettings::default()
     };
-    let watcher = store
+    let watcher = watching
         .register_node(&NodeSpec {
             node: NodeId::new("watcher"),
             decodes: vec![formats()],
@@ -461,14 +460,12 @@ async fn a_saturated_shared_pool_cannot_starve_the_heartbeat() {
         })
         .await
         .expect("register the watcher");
-    let _shared: Vec<_> = vec![
-        storage.pool().acquire().await.expect("hold a connection"),
-        storage.pool().acquire().await.expect("hold a connection"),
-    ];
-    let reserve = store.reserve.pool(&store.pool);
-    let mut reserved = Vec::new();
-    for _ in 1..super::super::RESERVED_CONNECTIONS {
-        reserved.push(reserve.acquire().await.expect("hold a reserved connection"));
+    let pools = &store.pools;
+    let mut held = Vec::new();
+    for pool in [&pools.work, &pools.scheduler, &pools.critical] {
+        for _ in 0..pool.options().get_max_connections() {
+            held.push(pool.acquire().await.expect("hold a connection"));
+        }
     }
     let node = start(&storage, "busy", lease, false);
     let started = Instant::now();
@@ -476,12 +473,12 @@ async fn a_saturated_shared_pool_cannot_starve_the_heartbeat() {
         tokio::time::sleep(Duration::from_millis(250)).await;
         assert!(
             matches!(
-                store.heartbeat(&watcher).await,
+                watching.heartbeat(&watcher).await,
                 Ok(HeartbeatOutcome::Renewed { .. })
             ),
             "the watcher renews"
         );
-        store.reap(&watcher).await.expect("reap expired leases");
+        watching.reap(&watcher).await.expect("reap expired leases");
         assert!(
             !node.task.is_finished(),
             "the busy node stopped {:?} in: {:?}",

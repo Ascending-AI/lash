@@ -137,33 +137,6 @@ lash_store_sql::statements! {
         select_statement_epoch_ms =
             "SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT";
 
-        /// Lower this transaction's `lock_timeout` to ten seconds unless it is
-        /// already lower, leaving an operator's stricter setting alone.
-        ///
-        /// `0` means "wait forever", which is why it is treated as the largest
-        /// value rather than the smallest.
-        clamp_lock_timeout = "SELECT set_config(
-             'lock_timeout',
-             CASE
-                 WHEN current_setting('lock_timeout') = '0'
-                   OR current_setting('lock_timeout')::interval > INTERVAL '10 seconds'
-                 THEN '10s'
-                 ELSE current_setting('lock_timeout')
-             END,
-             TRUE
-         )";
-
-        /// `set_config` rather than `SET`: PostgreSQL's `SET` takes no bound
-        /// parameter, so a deployment's configured timeout would have to be
-        /// interpolated into the statement text — a per-connection `format!`
-        /// in place of one named statement, which is the shape this arc
-        /// exists to delete.
-        set_lock_timeout = "SELECT set_config('lock_timeout', ?1, false)";
-
-        /// Set this connection's `statement_timeout` to `?1` milliseconds, for
-        /// the same reason.
-        set_statement_timeout = "SELECT set_config('statement_timeout', ?1, false)";
-
         /// The lease instant a test harness pinned on this session, or `NULL`
         /// when none is pinned.
         ///

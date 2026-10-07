@@ -22,7 +22,7 @@ pub(crate) enum WorkbenchLiveReplay {
     /// carries every replica's events.
     Postgresql {
         database_url: String,
-        config: lash::postgres::PostgresLiveReplayConfig,
+        config: Box<lash::postgres::PostgresHostConfig>,
     },
 }
 
@@ -104,10 +104,27 @@ impl WorkbenchLiveReplay {
                     .resolve()?,
             )),
             Some("postgresql") => {
-                let config: lash::postgres::PostgresLiveReplayConfig = serde_json::from_str(config)
-                    .with_context(|| {
+                // The workbench provisions its own replay tables unless the
+                // configuration says otherwise.
+                let mut policy: serde_json::Value =
+                    serde_json::from_str(config).with_context(|| {
                         format!("{LIVE_REPLAY_CONFIG_ENV} for the postgresql store")
                     })?;
+                if let Some(policy) = policy.as_object_mut() {
+                    let data = policy
+                        .entry("data")
+                        .or_insert_with(|| serde_json::json!({}));
+                    if let Some(data) = data.as_object_mut() {
+                        data.entry("schema_mode")
+                            .or_insert_with(|| serde_json::json!("install"));
+                    }
+                }
+                let config = lash::postgres::PostgresHostConfig {
+                    live_replay: Some(serde_json::from_value(policy).with_context(|| {
+                        format!("{LIVE_REPLAY_CONFIG_ENV} for the postgresql store")
+                    })?),
+                    ..lash::postgres::PostgresHostConfig::default()
+                };
                 config.validate()?;
                 let database_url = database_url.ok_or_else(|| {
                     anyhow!(
@@ -116,7 +133,7 @@ impl WorkbenchLiveReplay {
                 })?;
                 Ok(Self::Postgresql {
                     database_url: database_url.to_string(),
-                    config,
+                    config: Box::new(config),
                 })
             }
             Some(other) => Err(anyhow!(
@@ -132,9 +149,13 @@ impl WorkbenchLiveReplay {
                 database_url,
                 config,
             } => Arc::new(
-                lash::postgres::PostgresLiveReplayStore::connect(&database_url, config)
-                    .await
-                    .context("connect the postgresql live replay store")?,
+                lash::postgres::PostgresLiveReplayStore::connect(
+                    &lash::postgres::PostgresEndpoints::from_url(&database_url)
+                        .context("connect the postgresql live replay store")?,
+                    &config,
+                )
+                .await
+                .context("connect the postgresql live replay store")?,
             ),
         })
     }

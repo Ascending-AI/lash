@@ -14,6 +14,8 @@ use lash_core_execution::TurnId;
 use lash_core_execution::TurnInputStore as _;
 use lash_core_execution::store::RunStore as _;
 use lash_core_execution::{SessionCatalogStore as _, SessionHistoryStore as _};
+use sqlx::postgres::PgPoolOptions;
+use std::time::Duration;
 
 #[tokio::test(flavor = "current_thread")]
 async fn runtime_pool_failures_observe_the_injected_store_instruments() {
@@ -77,7 +79,7 @@ async fn postgres_persisted_record_decode_classification_head_when_configured() 
         return;
     };
     let isolated_database = crate::testing::IsolatedDatabase::create(&database_url).await;
-    let storage = PostgresStorage::connect(isolated_database.url())
+    let storage = crate::testing::connect(isolated_database.url())
         .await
         .expect("connect persisted-record decode storage");
 
@@ -114,7 +116,7 @@ async fn postgres_persisted_record_decode_classification_checkpoint_when_configu
         return;
     };
     let isolated_database = crate::testing::IsolatedDatabase::create(&database_url).await;
-    let storage = PostgresStorage::connect(isolated_database.url())
+    let storage = crate::testing::connect(isolated_database.url())
         .await
         .expect("connect persisted-record decode storage");
 
@@ -165,7 +167,7 @@ async fn seed_failure_evidence_session(
     let database_url = postgres_test_support::database_url()
         .expect("receipt refusal tests require LASH_POSTGRES_DATABASE_URL");
     let database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
-    let storage = PostgresStorage::connect(&database_url)
+    let storage = crate::testing::connect(&database_url)
         .await
         .expect("connect receipt-refusal storage");
 
@@ -334,7 +336,7 @@ async fn direct_session_store_defers_missing_identity_validation() {
         return;
     };
     let database = crate::testing::IsolatedDatabase::create(&database_url).await;
-    let storage = PostgresStorage::connect(database.url())
+    let storage = crate::testing::connect(database.url())
         .await
         .expect("connect direct-session-store contract storage");
     let missing = SessionId::from("missing");
@@ -378,7 +380,7 @@ async fn postgres_graph_generation_uniqueness_is_typed() {
         return;
     };
     let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
-    let storage = PostgresStorage::connect(&database_url)
+    let storage = crate::testing::connect(&database_url)
         .await
         .expect("connect graph-generation error storage");
     let nonce = uuid::Uuid::new_v4().simple().to_string();
@@ -431,7 +433,7 @@ lash_conformance::checkpoint_admission_probe_tests!({
         return;
     };
     let database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
-    let storage = PostgresStorage::connect(&database_url)
+    let storage = crate::testing::connect(&database_url)
         .await
         .expect("connect checkpoint counter storage");
     let session_id = SessionId::fixture(format!(
@@ -478,7 +480,7 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
         return;
     };
     let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
-    let storage = PostgresStorage::connect(&database_url)
+    let storage = crate::testing::connect(&database_url)
         .await
         .expect("connect attachment fence database");
     let session_id = SessionId::fixture(format!(
@@ -631,7 +633,7 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
         return;
     };
     let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
-    let storage = PostgresStorage::connect(&database_url)
+    let storage = crate::testing::connect(&database_url)
         .await
         .expect("connect empty attachment-root database");
     sqlx::query("DELETE FROM lash_attachment_referrer_edges")
@@ -801,7 +803,7 @@ async fn postgres_settlement_locks_the_admitted_row() {
         return;
     };
     let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
-    let storage = PostgresStorage::connect(&database_url)
+    let storage = crate::testing::connect(&database_url)
         .await
         .expect("connect settlement-lock storage");
     let run = TurnId::from("settlement-lock-run");
@@ -864,7 +866,7 @@ async fn postgres_settlement_verdict_decides_before_the_settlement_write() {
         return;
     };
     let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
-    let storage = PostgresStorage::connect(&database_url)
+    let storage = crate::testing::connect(&database_url)
         .await
         .expect("connect settlement-order storage");
     let run = TurnId::from("settlement-order-run");
@@ -978,6 +980,9 @@ fn postgres_statement_name(query: &str) -> &'static str {
     let collapsed: String = query.split_whitespace().collect::<Vec<_>>().join(" ");
     match collapsed.as_str() {
         "BEGIN" => "begin",
+        // The guard prelude's limits: sent with `BEGIN` in one simple query,
+        // so they ride its round trip (FIG-5240).
+        q if q.starts_with("SET LOCAL ") => "begin-guards",
         "COMMIT" => "commit",
         q if q.starts_with("SELECT format_version FROM lash_fleet_format")
             && q.ends_with("FOR SHARE") =>
@@ -1061,12 +1066,14 @@ fn postgres_statement_name(query: &str) -> &'static str {
 /// The statement map `gc_unreachable` must answer for, whatever the dead
 /// set's size: the revision release in its own fenced transaction
 /// (FIG-4731), then fence, table lock, run read, one manifest read per live
-/// run, the edge sever, the single sweep, commit. A per-dead-body deletion loop
+/// run, the edge sever, the single sweep, commit. Each `BEGIN` carries the
+/// ordinary profile's three limits in its own round trip. A per-dead-body deletion loop
 /// would grow `blob-sweep` past 1, and the all-hashes scan would land as a
 /// `blob-lock` row the pin does not expect.
 fn expected_gc_statements(rooted: bool) -> std::collections::BTreeMap<&'static str, i64> {
     let mut expected = std::collections::BTreeMap::from([
         ("begin", 2),
+        ("begin-guards", 6),
         ("commit", 2),
         ("writer-fence", 2),
         ("revision-release", 1),
@@ -1089,16 +1096,11 @@ async fn gc_statement_pin_storage(
     // `run_admission_and_head_commit_round_trips_are_pinned`, for the same
     // reason: a pool free to grow may connect inside a measured window and
     // charge that connection's `after_connect` probes to the operation.
-    let storage = PostgresStorage::connect_with(
-        isolated_database.url(),
-        PostgresStoreConfig {
-            max_connections: 1,
-            min_connections: 1,
-            ..PostgresStoreConfig::default()
-        },
-    )
-    .await
-    .expect("connect gc statement-pin storage");
+    let mut config = crate::testing::work_pool_of(1);
+    config.roles.work.min_connections = 1;
+    let storage = crate::testing::connect_with(isolated_database.url(), &config)
+        .await
+        .expect("connect gc statement-pin storage");
     sqlx::query("CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
         .execute(storage.pool())
         .await
@@ -1275,16 +1277,11 @@ async fn postgres_commit_meta_preflight_answers_on_a_pool_of_one_when_configured
         return;
     };
     let isolated_database = crate::testing::IsolatedDatabase::create(&database_url).await;
-    let storage = PostgresStorage::connect_with(
-        isolated_database.url(),
-        PostgresStoreConfig {
-            max_connections: 1,
-            acquire_timeout: Duration::from_secs(5),
-            ..PostgresStoreConfig::default()
-        },
-    )
-    .await
-    .expect("connect pool-of-one storage");
+    let mut config = crate::testing::work_pool_of(1);
+    config.roles.work.acquire_timeout = Duration::from_secs(5);
+    let storage = crate::testing::connect_with(isolated_database.url(), &config)
+        .await
+        .expect("connect pool-of-one storage");
     let session_id = SessionId::fixture(format!("pool-of-one:{}", uuid::Uuid::new_v4()));
     let store = storage.store();
     store
@@ -1315,12 +1312,10 @@ async fn durable_labels_observe_physical_cost_and_group_members() {
     let database = crate::testing::IsolatedDatabase::create(&url).await;
     let runtime =
         lash_core::trace::TraceRuntime::new(Arc::new(lash_core::facade_support::SystemClock));
-    let storage = PostgresStorage::connect_with(
-        database.url(),
-        PostgresStoreConfig {
-            observer: StoreObserver::new(runtime.metrics().clone()),
-            ..PostgresStoreConfig::default()
-        },
+    let storage = PostgresStorage::connect(
+        &crate::PostgresEndpoints::from_url(database.url()).expect("parse the database URL"),
+        &crate::testing::fixture_config(),
+        StoreObserver::new(runtime.metrics().clone()),
     )
     .await
     .expect("open observed store");

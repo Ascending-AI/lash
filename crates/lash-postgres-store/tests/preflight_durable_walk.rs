@@ -22,7 +22,7 @@ use lash_core_execution::{
     DurableSurface, HostArtifactPin, ModuleArtifactStore, ReferrerClaim, ScanCoverage,
     StorePreflight,
 };
-use lash_postgres_store::{PostgresStorage, PostgresStoreConfig, PostgresStorePreflight};
+use lash_postgres_store::PostgresStorePreflight;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 
@@ -98,11 +98,9 @@ async fn module_artifact_surface_reads_the_persisted_json() {
         return;
     };
     let scratch = ScratchSchema::provision(&database_url).await;
-    let storage = PostgresStorage::from_pool_with(
+    let storage = lash_postgres_store::testing::from_pool(
         scratch.pool.clone(),
-        PostgresStoreConfig {
-            ..PostgresStoreConfig::default()
-        },
+        &lash_postgres_store::PostgresHostConfig::default(),
     )
     .await
     .expect("open provisioned Postgres storage");

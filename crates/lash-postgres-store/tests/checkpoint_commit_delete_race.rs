@@ -10,9 +10,7 @@ use lash_core_execution::{
     SessionCommitStore, SessionCreationHead, SessionRelation, SessionStoreCreateRequest,
     StoreError,
 };
-use lash_postgres_store::{
-    PostgresStorage, PostgresStoreConfig, SchemaCheck, testing::IsolatedDatabase,
-};
+use lash_postgres_store::{SchemaCheck, testing::IsolatedDatabase};
 use sqlx::postgres::PgPoolOptions;
 
 use crate::support::database_url;
@@ -57,7 +55,7 @@ async fn commit_waits_for_delete_then_refuses(branch: ReuseBranch) {
         return;
     };
     let database = IsolatedDatabase::create(&database_url).await;
-    let storage = PostgresStorage::connect(database.url())
+    let storage = lash_postgres_store::testing::connect(database.url())
         .await
         .expect("connect Postgres commit-vs-delete fixture");
     let factory = storage.session_store_factory();
@@ -155,11 +153,11 @@ async fn commit_waits_for_delete_then_refuses(branch: ReuseBranch) {
         .connect(database.url())
         .await
         .expect("connect tagged commit pool");
-    let commit_storage = PostgresStorage::from_pool_with(
+    let commit_storage = lash_postgres_store::testing::from_pool(
         commit_pool.clone(),
-        PostgresStoreConfig {
+        &lash_postgres_store::PostgresHostConfig {
             schema_check: SchemaCheck::Enforce,
-            ..PostgresStoreConfig::default()
+            ..lash_postgres_store::PostgresHostConfig::default()
         },
     )
     .await

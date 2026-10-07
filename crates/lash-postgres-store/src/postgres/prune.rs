@@ -89,7 +89,7 @@ mod tests {
         };
         let _database_lock =
             crate::postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
-        let storage = PostgresStorage::connect(&database_url)
+        let storage = crate::testing::connect(&database_url)
             .await
             .expect("connect prune rollback storage");
         let ghost_id = lash_core_execution::mint_process_id();

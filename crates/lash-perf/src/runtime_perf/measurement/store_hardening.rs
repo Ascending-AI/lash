@@ -80,15 +80,11 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
             let sqlite_stores =
                 lash_sqlite_store::SqliteStoreSet::open(sqlite_root.join("lash.db")).await?;
             let sqlite_factory = sqlite_stores.session_store_factory();
-            let postgres = lash_postgres_store::PostgresStorage::connect_with(
-                postgres_database.url(),
-                lash_postgres_store::PostgresStoreConfig {
-                    min_connections: 1,
-                    max_connections: 4,
-                    ..lash_postgres_store::PostgresStoreConfig::default()
-                },
-            )
-            .await?;
+            let mut config = lash_postgres_store::testing::work_pool_of(4);
+            config.roles.work.min_connections = 1;
+            let postgres =
+                lash_postgres_store::testing::connect_with(postgres_database.url(), &config)
+                    .await?;
             let postgres_factory = postgres.store();
 
             let memory_session_id = SessionId::fixture(format!("perf-hardening-memory-{run_id}"));
@@ -172,11 +168,11 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
                     async {
                         // This arm measures the structural verification gate alone:
                         // the open never runs DDL, so what remains is the catalog read.
-                        lash_postgres_store::PostgresStorage::from_pool_with(
+                        lash_postgres_store::testing::from_pool(
                             postgres.pool().clone(),
-                            lash_postgres_store::PostgresStoreConfig {
+                            &lash_postgres_store::PostgresHostConfig {
                                 schema_check: lash_postgres_store::SchemaCheck::Enforce,
-                                ..lash_postgres_store::PostgresStoreConfig::default()
+                                ..lash_postgres_store::PostgresHostConfig::default()
                             },
                         )
                         .await

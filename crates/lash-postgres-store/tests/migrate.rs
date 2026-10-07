@@ -238,7 +238,7 @@ async fn migrate_on_a_fresh_schema_creates_the_schema_and_the_ledger() {
     let schema = create_scratch_schema(&database_url).await;
     let url = scratch_url(&database_url, &schema);
 
-    let report = PostgresStorage::migrate(&url, MigrationPhase::Expand)
+    let report = lash_postgres_store::testing::migrate(&url, MigrationPhase::Expand)
         .await
         .expect("migrate a fresh schema");
 
@@ -284,7 +284,7 @@ async fn migrate_on_a_fresh_schema_creates_the_schema_and_the_ledger() {
     );
 
     // And the provisioned catalog is openable: the gate a worker takes passes.
-    PostgresStorage::connect(&url)
+    lash_postgres_store::testing::connect(&url)
         .await
         .expect("a migrated fresh schema must open")
         .pool()
@@ -303,10 +303,10 @@ async fn a_migrate_rerun_is_a_no_op() {
     let schema = create_scratch_schema(&database_url).await;
     let url = scratch_url(&database_url, &schema);
 
-    PostgresStorage::migrate(&url, MigrationPhase::Expand)
+    lash_postgres_store::testing::migrate(&url, MigrationPhase::Expand)
         .await
         .expect("first migrate");
-    let rerun = PostgresStorage::migrate(&url, MigrationPhase::Expand)
+    let rerun = lash_postgres_store::testing::migrate(&url, MigrationPhase::Expand)
         .await
         .expect("rerun migrate");
 
@@ -359,7 +359,7 @@ async fn migrate_seeds_the_fleet_epoch_and_an_open_never_records_one() {
     let seed = lash_core_execution::FleetFormat::seed(lash_core_execution::FleetFormat::writable());
     let seeded = i32::try_from(seed.version()).expect("epoch fits");
 
-    PostgresStorage::migrate(&url, MigrationPhase::Expand)
+    lash_postgres_store::testing::migrate(&url, MigrationPhase::Expand)
         .await
         .expect("migrate a fresh schema");
     assert_eq!(
@@ -376,7 +376,7 @@ async fn migrate_seeds_the_fleet_epoch_and_an_open_never_records_one() {
         .await
         .expect("drop the fleet epoch");
     admin.close().await.expect("close scratch");
-    let refused = PostgresStorage::connect(&url)
+    let refused = lash_postgres_store::testing::connect(&url)
         .await
         .err()
         .expect("an open with no recorded F must refuse");
@@ -396,7 +396,7 @@ async fn migrate_seeds_the_fleet_epoch_and_an_open_never_records_one() {
         "a refused open records no F"
     );
 
-    let rerun = PostgresStorage::migrate(&url, MigrationPhase::Expand)
+    let rerun = lash_postgres_store::testing::migrate(&url, MigrationPhase::Expand)
         .await
         .expect("rerun migrate");
     assert!(
@@ -408,7 +408,7 @@ async fn migrate_seeds_the_fleet_epoch_and_an_open_never_records_one() {
         Some(seeded),
         "a migrate rerun seeds a catalog that records no F"
     );
-    let storage = PostgresStorage::connect(&url)
+    let storage = lash_postgres_store::testing::connect(&url)
         .await
         .expect("the seeded catalog opens");
     assert_eq!(storage.fleet_format(), seed);
@@ -426,7 +426,7 @@ async fn a_dry_run_reports_the_plan_and_changes_nothing() {
     let schema = create_scratch_schema(&database_url).await;
     let url = scratch_url(&database_url, &schema);
 
-    let plan = PostgresStorage::plan_migrations(&url, MigrationPhase::Expand)
+    let plan = lash_postgres_store::testing::plan_migrations(&url, MigrationPhase::Expand)
         .await
         .expect("plan a fresh migrate");
     assert_eq!(
@@ -441,10 +441,10 @@ async fn a_dry_run_reports_the_plan_and_changes_nothing() {
         "a dry run must not provision"
     );
 
-    PostgresStorage::migrate(&url, MigrationPhase::Expand)
+    lash_postgres_store::testing::migrate(&url, MigrationPhase::Expand)
         .await
         .expect("migrate after the dry run");
-    let replan = PostgresStorage::plan_migrations(&url, MigrationPhase::Expand)
+    let replan = lash_postgres_store::testing::plan_migrations(&url, MigrationPhase::Expand)
         .await
         .expect("replan after migrate");
     assert!(
@@ -476,19 +476,19 @@ async fn a_database_stamped_with_an_unknown_version_is_refused() {
     let catalog_before = catalog_definitions(&url).await;
 
     assert!(
-        PostgresStorage::connect(&url).await.is_err(),
+        lash_postgres_store::testing::connect(&url).await.is_err(),
         "a database stamped with an unknown version must not open"
     );
     for (what, refused) in [
         (
             "plan",
-            PostgresStorage::plan_migrations(&url, MigrationPhase::Expand)
+            lash_postgres_store::testing::plan_migrations(&url, MigrationPhase::Expand)
                 .await
                 .map(|_| ()),
         ),
         (
             "migrate",
-            PostgresStorage::migrate(&url, MigrationPhase::Expand)
+            lash_postgres_store::testing::migrate(&url, MigrationPhase::Expand)
                 .await
                 .map(|_| ()),
         ),
@@ -535,10 +535,13 @@ async fn later_phases_refuse_an_uninstalled_catalog_and_wait_for_finalize() {
 
     for phase in [MigrationPhase::Backfill, MigrationPhase::Contract] {
         for (label, outcome) in [
-            ("migrate", PostgresStorage::migrate(&url, phase).await),
+            (
+                "migrate",
+                lash_postgres_store::testing::migrate(&url, phase).await,
+            ),
             (
                 "plan_migrations",
-                PostgresStorage::plan_migrations(&url, phase).await,
+                lash_postgres_store::testing::plan_migrations(&url, phase).await,
             ),
         ] {
             match outcome {
@@ -555,12 +558,12 @@ async fn later_phases_refuse_an_uninstalled_catalog_and_wait_for_finalize() {
     // And the refusal ran no DDL.
     assert_eq!(scratch_lash_table_count(&database_url, &schema).await, 0);
 
-    PostgresStorage::migrate(&url, MigrationPhase::Expand)
+    lash_postgres_store::testing::migrate(&url, MigrationPhase::Expand)
         .await
         .expect("expand provisions the catalog");
     let ledger_before = ledger_rows(&url).await;
     for phase in [MigrationPhase::Backfill, MigrationPhase::Contract] {
-        let outcome = PostgresStorage::migrate(&url, phase).await;
+        let outcome = lash_postgres_store::testing::migrate(&url, phase).await;
         if cfg!(feature = "synthetic-next") {
             // The synthetic catalog carries a backfill and a contract step,
             // and `F` still records the release before it: both wait.
@@ -605,8 +608,8 @@ async fn concurrent_migrates_serialize_and_converge() {
     // verifying open holds; whichever runs second sees a committed catalog and
     // does nothing.
     let (first, second) = tokio::join!(
-        PostgresStorage::migrate(&url, MigrationPhase::Expand),
-        PostgresStorage::migrate(&url, MigrationPhase::Expand),
+        lash_postgres_store::testing::migrate(&url, MigrationPhase::Expand),
+        lash_postgres_store::testing::migrate(&url, MigrationPhase::Expand),
     );
     let first = first.expect("first concurrent migrate");
     let second = second.expect("second concurrent migrate");
@@ -657,10 +660,10 @@ async fn a_fresh_store_and_an_expanded_store_reach_one_stamp_through_the_catalog
     // catalog from the version the bootstrap stamped.
     let fresh = create_scratch_schema(&database_url).await;
     let fresh_url = scratch_url(&database_url, &fresh);
-    let plan = PostgresStorage::plan_migrations(&fresh_url, MigrationPhase::Expand)
+    let plan = lash_postgres_store::testing::plan_migrations(&fresh_url, MigrationPhase::Expand)
         .await
         .expect("plan the fresh store");
-    let run = PostgresStorage::migrate(&fresh_url, MigrationPhase::Expand)
+    let run = lash_postgres_store::testing::migrate(&fresh_url, MigrationPhase::Expand)
         .await
         .expect("migrate the fresh store");
     let expected: Vec<_> = std::iter::once(bootstrap).chain(catalog.clone()).collect();
@@ -684,11 +687,11 @@ async fn a_fresh_store_and_an_expanded_store_reach_one_stamp_through_the_catalog
         .expect("provision the store from schema.sql");
     admin.close().await.expect("close scratch provisioner");
     assert_eq!(compat_stamp(&expanded_url).await, provisioned_stamp());
-    let plan = PostgresStorage::plan_migrations(&expanded_url, MigrationPhase::Expand)
+    let plan = lash_postgres_store::testing::plan_migrations(&expanded_url, MigrationPhase::Expand)
         .await
         .expect("plan the provisioned store");
     assert_eq!(plan.found_version, Some(provisioned_stamp().0));
-    let run = PostgresStorage::migrate(&expanded_url, MigrationPhase::Expand)
+    let run = lash_postgres_store::testing::migrate(&expanded_url, MigrationPhase::Expand)
         .await
         .expect("migrate the provisioned store");
     assert_eq!(steps(&plan, true), catalog, "the provisioned store's plan");
@@ -713,12 +716,12 @@ async fn a_fresh_store_and_an_expanded_store_reach_one_stamp_through_the_catalog
     );
     assert_eq!(ledger_rows(&expanded_url).await, component_expand_rows());
     for url in [&fresh_url, &expanded_url] {
-        let replan = PostgresStorage::plan_migrations(url, MigrationPhase::Expand)
+        let replan = lash_postgres_store::testing::plan_migrations(url, MigrationPhase::Expand)
             .await
             .expect("replan a migrated store");
         assert_eq!(replan.found_version, Some(written_version()));
         assert!(replan.planned.is_empty(), "nothing remains: {replan:?}");
-        PostgresStorage::connect(url)
+        lash_postgres_store::testing::connect(url)
             .await
             .expect("a migrated store opens")
             .pool()
@@ -786,7 +789,7 @@ async fn migrate_waits_past_inherited_timeouts(dry_run: bool) {
     let database_url = database.url();
     let schema = create_scratch_schema(database_url).await;
     let url = scratch_url(database_url, &schema);
-    PostgresStorage::migrate(&url, MigrationPhase::Expand)
+    lash_postgres_store::testing::migrate(&url, MigrationPhase::Expand)
         .await
         .expect("provision before testing advisory acquisition");
     let ledger_before = ledger_rows(&url).await;
@@ -797,9 +800,9 @@ async fn migrate_waits_past_inherited_timeouts(dry_run: bool) {
     let mut holder = hold_migrator_lock(database_url).await;
     let runner = async {
         if dry_run {
-            PostgresStorage::plan_migrations(&url, MigrationPhase::Expand).await
+            lash_postgres_store::testing::plan_migrations(&url, MigrationPhase::Expand).await
         } else {
-            PostgresStorage::migrate(&url, MigrationPhase::Expand).await
+            lash_postgres_store::testing::migrate(&url, MigrationPhase::Expand).await
         }
     };
     let (namespace, key) = PostgresStorage::schema_advisory_lock_key();
@@ -852,7 +855,10 @@ async fn migrate_refuses_a_holder_only_after_the_documented_bound() {
     let url = scratch_url(database_url, &schema);
     let mut holder = hold_migrator_lock(database_url).await;
     let started = Instant::now();
-    let mut runner = Box::pin(PostgresStorage::migrate(&url, MigrationPhase::Expand));
+    let mut runner = Box::pin(lash_postgres_store::testing::migrate(
+        &url,
+        MigrationPhase::Expand,
+    ));
     tokio::select! {
         result = &mut runner => panic!("migrator must queue before refusing: {result:?}"),
         () = observe_migrator_wait(&mut holder) => {},
@@ -891,14 +897,17 @@ async fn cancelling_a_queued_migrator_leaves_no_lock_behind() {
     let schema = create_scratch_schema(database_url).await;
     let url = scratch_url(database_url, &schema);
     let mut holder = hold_migrator_lock(database_url).await;
-    let mut runner = Box::pin(PostgresStorage::migrate(&url, MigrationPhase::Expand));
+    let mut runner = Box::pin(lash_postgres_store::testing::migrate(
+        &url,
+        MigrationPhase::Expand,
+    ));
     tokio::select! {
         result = &mut runner => panic!("migrator must queue before cancellation: {result:?}"),
         () = observe_migrator_wait(&mut holder) => {},
     }
     drop(runner);
     holder.close().await.expect("release the migrator lock");
-    let report = PostgresStorage::migrate(&url, MigrationPhase::Expand)
+    let report = lash_postgres_store::testing::migrate(&url, MigrationPhase::Expand)
         .await
         .expect("the next migrator acquires the lock and provisions the catalog");
     assert_eq!(report.executed.len(), 1 + component_expands().len());

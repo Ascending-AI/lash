@@ -30,13 +30,17 @@
 //!
 //! A refused transaction wrote nothing: the fence ran first, and dropping the
 //! transaction rolls back the rest.
+//!
+//! The fence is the first *data* statement, not the first statement: the
+//! transaction's guard profile ([`TransactionPrelude`]) is sent with its
+//! `BEGIN` in the same simple query, so the fence's own share-lock wait is
+//! already bounded by the profile's `lock_timeout` (FIG-5240).
 
 use std::future::Future;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::Duration;
 
 use lash_core_execution::compat::{CompatRefusal, ComponentId, VersionRange};
 use lash_core_execution::store::plugin_writers::{
@@ -45,15 +49,9 @@ use lash_core_execution::store::plugin_writers::{
 use lash_core_execution::{FleetFormat, StoreError};
 use sqlx::{Acquire, PgConnection, PgPool, Postgres, Transaction};
 
+use crate::host::{RetryPolicies, RetryPolicy, TransactionPrelude};
 use crate::session_sql::session_sql;
 use crate::store_sqlx_error;
-
-/// How many times [`guarded`] runs a transaction that meets contention before
-/// it surfaces [`StoreError::Contended`] to the caller's own retry.
-const CONTENDED_ATTEMPTS: u32 = 4;
-
-/// The first pause between contended attempts; each later one doubles it.
-const CONTENDED_BACKOFF: Duration = Duration::from_millis(5);
 
 /// One storage's writer fence: the writable range its build declares and the
 /// fleet epoch its fences last observed.
@@ -77,23 +75,51 @@ struct FenceState {
     /// table a test may have stood the store up on; a fence that reads the same
     /// epoch keeps it.
     opened: FleetFormat,
+    /// The guard profile every ordinary transaction begins with.
+    prelude: TransactionPrelude,
+    /// How [`guarded`] retries a contended transaction.
+    retry: RetryPolicy,
     #[cfg(any(test, feature = "testing"))]
     after_fence: std::sync::Mutex<Option<crate::testing::AfterFence>>,
 }
 
 impl WriterFence {
     /// The fence of a storage that admitted `opened` against `writable` at
-    /// open.
+    /// open, installing no guards: the migrate runner's and the tests'.
     pub(crate) fn new(writable: VersionRange, opened: FleetFormat) -> Self {
+        Self::guarded(
+            writable,
+            opened,
+            TransactionPrelude::inherit(),
+            RetryPolicies::default().store,
+        )
+    }
+
+    /// The fence of a storage whose ordinary transactions begin with
+    /// `prelude` and retry contention under `retry`.
+    pub(crate) fn guarded(
+        writable: VersionRange,
+        opened: FleetFormat,
+        prelude: TransactionPrelude,
+        retry: RetryPolicy,
+    ) -> Self {
         Self {
             state: Arc::new(FenceState {
                 writable,
                 observed: AtomicU32::new(opened.version()),
                 opened,
+                prelude,
+                retry,
                 #[cfg(any(test, feature = "testing"))]
                 after_fence: std::sync::Mutex::new(None),
             }),
         }
+    }
+
+    /// The guard profile ordinary transactions begin with.
+    #[cfg(test)]
+    pub(crate) fn prelude(&self) -> &TransactionPrelude {
+        &self.state.prelude
     }
 
     /// The last `F` this storage's fences observed: what its writers encode
@@ -133,7 +159,12 @@ impl WriterFence {
     /// the recorded epoch is `opened`'s.
     #[cfg(any(test, feature = "testing"))]
     pub(crate) fn standing_on(&self, opened: FleetFormat) -> Self {
-        Self::new(self.state.writable, opened)
+        Self::guarded(
+            self.state.writable,
+            opened,
+            self.state.prelude.clone(),
+            self.state.retry,
+        )
     }
 
     /// Install the `AfterFence` seam every transaction of this storage passes.
@@ -393,17 +424,59 @@ impl DerefMut for GuardedTx<'_> {
     }
 }
 
-/// `BEGIN`, then the fence as the transaction's first statement.
-///
-/// `acquire` is the pool, or a connection the caller already checked out.
-pub(crate) async fn begin_guarded<'c, A>(
-    acquire: A,
+/// Where a guarded transaction begins: the pool, or a connection the caller
+/// already checked out.
+pub(crate) enum GuardedEntry<'c, 'p> {
+    /// A checkout of its own, which the transaction owns: it outlives the
+    /// borrow of the pool.
+    Pool(&'p PgPool),
+    Connection(&'c mut PgConnection),
+}
+
+impl<'p> From<&'p PgPool> for GuardedEntry<'_, 'p> {
+    fn from(pool: &'p PgPool) -> Self {
+        Self::Pool(pool)
+    }
+}
+
+impl<'c> From<&'c mut PgConnection> for GuardedEntry<'c, 'c> {
+    fn from(connection: &'c mut PgConnection) -> Self {
+        Self::Connection(connection)
+    }
+}
+
+impl<'c> GuardedEntry<'c, '_> {
+    /// Begin with `statement`, the prelude's `BEGIN` and its guards.
+    async fn begin_with(self, statement: String) -> Result<Transaction<'c, Postgres>, sqlx::Error> {
+        match self {
+            Self::Pool(pool) => pool.begin_with(statement).await,
+            Self::Connection(connection) => {
+                sqlx::Connection::begin_with(connection, statement).await
+            }
+        }
+    }
+}
+
+/// `BEGIN` with the fence's guard profile, then the fence as the
+/// transaction's first data statement.
+pub(crate) async fn begin_guarded<'c, 'p>(
+    entry: impl Into<GuardedEntry<'c, 'p>>,
     fence: &WriterFence,
-) -> Result<GuardedTx<'c>, StoreError>
-where
-    A: Acquire<'c, Database = Postgres>,
-{
-    let mut tx = acquire.begin().await.map_err(store_sqlx_error)?;
+) -> Result<GuardedTx<'c>, StoreError> {
+    begin_guarded_with(entry, fence, &fence.state.prelude).await
+}
+
+/// [`begin_guarded`] under `prelude`'s guard profile instead of the fence's.
+pub(crate) async fn begin_guarded_with<'c, 'p>(
+    entry: impl Into<GuardedEntry<'c, 'p>>,
+    fence: &WriterFence,
+    prelude: &TransactionPrelude,
+) -> Result<GuardedTx<'c>, StoreError> {
+    let mut tx = entry
+        .into()
+        .begin_with(prelude.statement().to_owned())
+        .await
+        .map_err(store_sqlx_error)?;
     let fleet = fence.admit(&mut tx).await?;
     Ok(GuardedTx {
         tx,
@@ -412,17 +485,20 @@ where
     })
 }
 
-/// Durable entry with checkout observed separately from the transaction.
+/// Durable entry with checkout observed separately from the transaction:
+/// `BEGIN` with `prelude`'s guards, then the fence.
 pub(crate) async fn begin_durable(
     pool: &PgPool,
     fence: &WriterFence,
+    prelude: &TransactionPrelude,
 ) -> Result<GuardedTx<'static>, StoreError> {
     let started = std::time::Instant::now();
     let connection = pool.acquire().await;
     crate::observed_sql::acquired(started.elapsed());
     let connection = connection.map_err(store_sqlx_error)?;
     crate::observed_sql::transaction_started();
-    let mut tx = crate::observed_sql::control("BEGIN", Transaction::begin(connection, None))
+    let begin = Transaction::begin(connection, Some(prelude.statement().to_owned().into()));
+    let mut tx = crate::observed_sql::control("BEGIN", begin)
         .await
         .map_err(store_sqlx_error)?;
     let fleet = fence.admit(&mut tx).await?;
@@ -525,8 +601,10 @@ pub(crate) type GuardedBody<'t, T> =
 
 /// `body` in a guarded transaction, committed, and retried per §2.4: an
 /// attempt that meets contention anywhere, the fence included, rolls back and
-/// runs again from a fresh `BEGIN`, so the retry reads `F` afresh. After
-/// [`CONTENDED_ATTEMPTS`] the contention is the caller's.
+/// runs again from a fresh `BEGIN`, so the retry reads `F` afresh. After the
+/// fence's retry policy's attempts the contention is the caller's, and the
+/// whole loop, pauses included, runs within the ordinary profile's operation
+/// deadline.
 ///
 /// The transaction is typed at `'a`, the lifetime of what `body` borrows, so
 /// the body's future may hold both.
@@ -538,27 +616,46 @@ pub(crate) async fn guarded<'a, T, F>(
 where
     F: for<'t> FnMut(&'t mut GuardedTx<'a>) -> GuardedBody<'t, T>,
 {
-    let mut backoff = CONTENDED_BACKOFF;
-    let mut attempt = 1;
-    loop {
-        let outcome = match begin_guarded(pool, fence).await {
-            Ok(tx) => {
-                let mut tx: GuardedTx<'a> = tx;
-                match body(&mut tx).await {
-                    Ok(value) => tx.commit().await.map_err(store_sqlx_error).map(|()| value),
-                    Err(error) => Err(error),
+    let retry = fence.state.retry;
+    let attempts = async {
+        let mut attempt = 1;
+        loop {
+            let outcome = match begin_guarded(pool, fence).await {
+                Ok(tx) => {
+                    let mut tx: GuardedTx<'a> = tx;
+                    match body(&mut tx).await {
+                        Ok(value) => tx.commit().await.map_err(store_sqlx_error).map(|()| value),
+                        Err(error) => Err(error),
+                    }
                 }
+                Err(error) => Err(error),
+            };
+            match outcome {
+                Err(StoreError::Contended) if attempt < retry.attempts => {
+                    tokio::time::sleep(retry.pause(attempt - 1)).await;
+                    attempt += 1;
+                }
+                outcome => return outcome,
             }
-            Err(error) => Err(error),
-        };
-        match outcome {
-            Err(StoreError::Contended) if attempt < CONTENDED_ATTEMPTS => {
-                tokio::time::sleep(backoff).await;
-                backoff *= 2;
-                attempt += 1;
-            }
-            outcome => return outcome,
         }
+    };
+    fence
+        .state
+        .prelude
+        .bounded(attempts)
+        .await
+        .unwrap_or_else(|deadline| Err(operation_deadline_exceeded(deadline)))
+}
+
+/// A store operation that did not finish within its whole-operation
+/// deadline: whether its last attempt committed is unknown.
+pub(crate) fn operation_deadline_exceeded(deadline: std::time::Duration) -> StoreError {
+    StoreError::StorageFailure {
+        backend: crate::POSTGRES_BACKEND,
+        message: format!(
+            "operation did not finish within its {} ms deadline",
+            deadline.as_millis()
+        ),
     }
 }
 

@@ -11,8 +11,8 @@ use std::sync::Arc;
 use lash_core_execution::runtime::actor::process_laws;
 use lash_core_execution::{Backend, BackendParts, NoProjectionProviders};
 
+use crate::PostgresStoreSet;
 use crate::testing::IsolatedDatabase;
-use crate::{PostgresStorage, PostgresStoreSet};
 
 macro_rules! law {
     ($($name:ident),* $(,)?) => {$(
@@ -23,7 +23,7 @@ macro_rules! law {
                 return;
             };
             let database = IsolatedDatabase::create(&database_url).await;
-            let storage = PostgresStorage::connect(database.url())
+            let storage = crate::testing::connect(database.url())
                 .await
                 .expect("open the isolated store");
             let backend = Backend::assemble(BackendParts {
@@ -57,7 +57,7 @@ async fn a_deadlock_inside_a_process_terminal_is_retried() {
     let database_url =
         crate::postgres_test_support::database_url().expect("hermetic PostgreSQL URL");
     let database = IsolatedDatabase::create(&database_url).await;
-    let storage = PostgresStorage::connect(database.url())
+    let storage = crate::testing::connect(database.url())
         .await
         .expect("isolated store");
     sqlx::raw_sql(

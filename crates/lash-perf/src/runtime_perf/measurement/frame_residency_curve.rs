@@ -54,7 +54,7 @@ async fn open_catalog(
 ) -> anyhow::Result<Arc<dyn lash_core::DeploymentStore>> {
     if scenario.uses_postgres() {
         let url = postgres_url.ok_or_else(|| anyhow::anyhow!("PostgreSQL URL is required"))?;
-        let storage = lash_postgres_store::PostgresStorage::connect(url).await?;
+        let storage = lash_postgres_store::testing::connect(url).await?;
         Ok(Arc::new(storage.store()))
     } else {
         let root = sqlite_root.ok_or_else(|| anyhow::anyhow!("SQLite root is required"))?;

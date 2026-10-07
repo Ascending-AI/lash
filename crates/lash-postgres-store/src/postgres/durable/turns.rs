@@ -367,7 +367,6 @@ pub(super) async fn turn(
 mod ddl_tests {
     use sqlx::Connection as _;
 
-    use crate::PostgresStorage;
     use crate::testing::IsolatedDatabase;
 
     async fn connection() -> Option<(IsolatedDatabase, sqlx::PgConnection)> {
@@ -376,7 +375,7 @@ mod ddl_tests {
             return None;
         };
         let database = IsolatedDatabase::create(&database_url).await;
-        PostgresStorage::connect(database.url())
+        crate::testing::connect(database.url())
             .await
             .expect("provision the isolated store");
         let connection = sqlx::PgConnection::connect(database.url())

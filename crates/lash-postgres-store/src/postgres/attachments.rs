@@ -247,13 +247,6 @@ pub(crate) async fn lock_attachment_fence_tx(
 /// so a probe that acquires it has proven the pass dead.
 pub(crate) const ATTACHMENT_SWEEP_LIVENESS_LOCK_NAMESPACE: i32 = 715_424;
 
-/// How long an adoption probe waits for a pass's liveness key before it
-/// treats the pass as live. A closing connection releases its lock a moment
-/// after the client drops it, so the probe waits that moment out rather than
-/// deferring a just-crashed pass's rows. The wait decides nothing on expiry:
-/// a probe that times out leaves the rows to their pass.
-const ATTACHMENT_SWEEP_LIVENESS_PROBE_TIMEOUT: &str = "500ms";
-
 /// How many generations a pass mints before giving up on a liveness key no
 /// other live pass shares. Keys are hashed, so a collision is possible and
 /// astronomically rare; minting again sidesteps it.
@@ -267,16 +260,32 @@ fn sweep_liveness_key(catalog_id: &str, generation: i64) -> String {
 /// connection, and the server releases the pass's liveness key with it.
 struct PostgresSweepLiveness {
     _connection: std::sync::Mutex<sqlx::PgConnection>,
+    /// The pass's place among `maintenance.max_sweep_sessions`.
+    _session: tokio::sync::OwnedSemaphorePermit,
 }
 
-/// Mint a sweep generation and take its liveness key on a dedicated
-/// connection held for the pass's life.
+/// Mint a sweep generation and take its liveness key on a dedicated session
+/// connection held for the pass's life, within the storage's sweep-session
+/// limit: a pass beyond it waits for the session pool's acquire timeout,
+/// then is refused contended.
 pub(crate) async fn begin_attachment_sweep(
-    pool: &PgPool,
+    pools: &crate::host::RolePools,
     fence: &crate::guarded_tx::WriterFence,
     catalog_id: &str,
 ) -> Result<lash_core_execution::AttachmentSweepGeneration, StoreError> {
-    let mut connection = pool.acquire().await.map_err(store_sqlx_error)?.detach();
+    let session = tokio::time::timeout(
+        pools.session.options().get_acquire_timeout(),
+        std::sync::Arc::clone(&pools.sweep_sessions).acquire_owned(),
+    )
+    .await
+    .map_err(|_| StoreError::Contended)?
+    .map_err(|_| StoreError::Backend("the sweep session limit is closed".into()))?;
+    let mut connection = pools
+        .session
+        .acquire()
+        .await
+        .map_err(store_sqlx_error)?
+        .detach();
     for _ in 0..ATTACHMENT_SWEEP_MINT_ATTEMPTS {
         let mut tx = crate::begin_guarded(&mut connection, fence).await?;
         let generation: i64 =
@@ -306,6 +315,7 @@ pub(crate) async fn begin_attachment_sweep(
                 generation,
                 Box::new(PostgresSweepLiveness {
                     _connection: std::sync::Mutex::new(connection),
+                    _session: session,
                 }),
             ));
         }
@@ -318,8 +328,15 @@ pub(crate) async fn begin_attachment_sweep(
 /// Whether generation `generation`'s pass has provably ended: its liveness
 /// key can be taken. A dead pass never becomes live again, because no pass
 /// takes another generation's key, so the answer stays true once given.
+///
+/// The probe waits `probe_timeout` for the key: a closing connection releases
+/// its lock a moment after the client drops it, so the probe waits that
+/// moment out rather than deferring a just-crashed pass's rows. The wait
+/// decides nothing on expiry: a probe that times out leaves the rows to
+/// their pass.
 async fn sweep_pass_is_dead(
     pool: &PgPool,
+    probe_timeout: std::time::Duration,
     catalog_id: &str,
     generation: i64,
 ) -> Result<bool, StoreError> {
@@ -329,7 +346,7 @@ async fn sweep_pass_is_dead(
             .set_local_lock_timeout
             .sql(),
     )
-    .bind(ATTACHMENT_SWEEP_LIVENESS_PROBE_TIMEOUT)
+    .bind(format!("{}ms", probe_timeout.as_millis()))
     .execute(&mut *tx)
     .await
     .map_err(store_sqlx_error)?;
@@ -359,6 +376,7 @@ async fn sweep_pass_is_dead(
 /// one CAS per row under the digest's fence lock.
 pub(crate) async fn adopt_attachment_condemnations(
     pool: &PgPool,
+    probe_timeout: std::time::Duration,
     fence: &crate::guarded_tx::WriterFence,
     catalog_id: &str,
     generation: &lash_core_execution::AttachmentSweepGeneration,
@@ -398,7 +416,7 @@ pub(crate) async fn adopt_attachment_condemnations(
         let owner_dead = match dead.get(&owner) {
             Some(owner_dead) => *owner_dead,
             None => {
-                let owner_dead = sweep_pass_is_dead(pool, catalog_id, owner).await?;
+                let owner_dead = sweep_pass_is_dead(pool, probe_timeout, catalog_id, owner).await?;
                 dead.insert(owner, owner_dead);
                 owner_dead
             }

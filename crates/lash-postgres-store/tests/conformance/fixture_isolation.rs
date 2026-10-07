@@ -63,7 +63,7 @@ async fn conformance_resets_and_reopens_stay_in_the_laws_database() {
             .expect("insert the same key in independent laws");
     }
     reset(second.pool()).await;
-    let reopened = PostgresStorage::connect(_first_guard.url())
+    let reopened = lash_postgres_store::testing::connect(_first_guard.url())
         .await
         .expect("reopen the first law on an independent pool");
     assert_eq!(reopened.catalog_id(), first.catalog_id());

@@ -74,7 +74,7 @@ pub async fn open(
         Dialect::Postgres => {
             let url = postgres_url.expect("a PostgreSQL URL").to_owned();
             let isolated = isolated_database(url);
-            let storage = lash_postgres_store::PostgresStorage::connect(isolated.url())
+            let storage = lash_postgres_store::testing::connect(isolated.url())
                 .await
                 .expect("the isolated database opens");
             // Every port reads the virtual clock, the durable store's

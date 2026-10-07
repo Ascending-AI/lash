@@ -245,7 +245,7 @@ impl BackendFaultLane {
                     &lash_postgres_store::testing::required_database_url(),
                 )
                 .await;
-                let storage = lash_postgres_store::PostgresStorage::connect(database.url())
+                let storage = lash_postgres_store::testing::connect(database.url())
                     .await
                     .map_err(|error| format!("connect postgres fault store: {error}"))?;
                 Ok(Some(Self {
