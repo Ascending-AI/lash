@@ -137,6 +137,21 @@ lash_store_sql::statements! {
         select_statement_epoch_ms =
             "SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT";
 
+        /// The server's instant now, as [`select_statement_epoch_ms`]
+        /// reads it, and this transaction's id: a durable commit's clock
+        /// read and the id its `COMMIT` is reconciled by, in one exchange.
+        select_statement_epoch_ms_and_xact_id =
+            "SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
+                    pg_current_xact_id()::text";
+
+        /// This transaction's id, assigned now if it has none yet: what a
+        /// `COMMIT` whose answer was lost is reconciled by.
+        select_xact_id = "SELECT pg_current_xact_id()::text";
+
+        /// Whether transaction `?1` committed: `committed`, `aborted`,
+        /// `in progress`, or `NULL` once the server no longer knows it.
+        select_xact_status = "SELECT pg_xact_status(?1::text::xid8)";
+
         /// The lease instant a test harness pinned on this session, or `NULL`
         /// when none is pinned.
         ///

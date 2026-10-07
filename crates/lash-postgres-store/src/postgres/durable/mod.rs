@@ -62,6 +62,8 @@ use crate::support::store_sqlx_error;
 
 mod park_events;
 pub(crate) mod processes;
+#[path = "../durable_replay.rs"]
+mod replay;
 mod run_records;
 mod session_close;
 mod session_mail;
@@ -191,6 +193,9 @@ pub struct PostgresDurableStore {
     /// The clock a test stands in for the database's.
     #[cfg(any(test, feature = "testing"))]
     clock: Option<std::sync::Arc<dyn lash_core_execution::Clock>>,
+    /// A connection a test loses at the next commit's `COMMIT`.
+    #[cfg(any(test, feature = "testing"))]
+    commit_fault: Option<Arc<crate::testing::CommitFault>>,
 }
 
 impl std::fmt::Debug for PostgresDurableStore {
@@ -308,6 +313,8 @@ impl PostgresDurableStore {
             observer,
             #[cfg(any(test, feature = "testing"))]
             clock: None,
+            #[cfg(any(test, feature = "testing"))]
+            commit_fault: None,
         }
     }
 
@@ -319,6 +326,16 @@ impl PostgresDurableStore {
         clock: std::sync::Arc<dyn lash_core_execution::Clock>,
     ) -> Self {
         self.clock = Some(clock);
+        self
+    }
+
+    /// Lose the connection of the next commit's `COMMIT` as `fault` says.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn with_commit_fault_for_testing(
+        mut self,
+        fault: Arc<crate::testing::CommitFault>,
+    ) -> Self {
+        self.commit_fault = Some(fault);
         self
     }
 
@@ -1258,21 +1275,7 @@ impl DurableStore for PostgresDurableStore {
     }
 
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
-        self.within(label.capacity(), async {
-            crate::observed_sql::measure(&self.observer, label, group_members(&tx), async {
-                if tx.ack().is_some_and(|through| through > tx.seen()) {
-                    return Err(DurableError::AckBeyondRead {
-                        actor: tx.actor().clone(),
-                    });
-                }
-                let (mut guarded, now) = self.open(label).await?;
-                let outcome =
-                    Box::pin(apply_owner(&mut guarded, &tx, now, self.fence.fleet())).await;
-                finish(guarded, outcome).await
-            })
-            .await
-        })
-        .await
+        self.commit_owner(tx, label).await
     }
 
     async fn commit_mail(
@@ -1280,16 +1283,7 @@ impl DurableStore for PostgresDurableStore {
         tx: MailTx,
         label: CommitLabel,
     ) -> Result<MailCommit, DurableError> {
-        self.within(label.capacity(), async {
-            crate::observed_sql::measure(&self.observer, label, 0, async {
-                let (mut guarded, now) = self.open(label).await?;
-                let outcome =
-                    Box::pin(apply_mail(&mut guarded, &tx, now, self.fence.fleet())).await;
-                finish(guarded, outcome).await
-            })
-            .await
-        })
-        .await
+        self.commit_mailbox(tx, label).await
     }
 
     async fn actor(&self, actor: &ActorKey) -> Result<Option<ActorSnapshot>, DurableError> {
@@ -1475,6 +1469,10 @@ mod concurrency_tests;
 #[cfg(test)]
 #[path = "../host_guard_tests.rs"]
 mod host_guard_tests;
+
+#[cfg(test)]
+#[path = "../durable_retry_tests.rs"]
+mod retry_tests;
 
 #[cfg(test)]
 mod constraint_tests {

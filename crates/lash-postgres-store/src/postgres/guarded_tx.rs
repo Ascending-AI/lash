@@ -50,6 +50,7 @@ use lash_core_execution::{FleetFormat, StoreError};
 use sqlx::{Acquire, PgConnection, PgPool, Postgres, Transaction};
 
 use crate::host::{RetryPolicies, RetryPolicy, TransactionPrelude};
+use crate::replayable::{Attempt, Settle, Uncommitted, XactId, commit_reconciled};
 use crate::session_sql::session_sql;
 use crate::store_sqlx_error;
 
@@ -250,6 +251,9 @@ pub(crate) struct GuardedTx<'c> {
     /// Whether the epoch the fence read is the top of this build's writable
     /// range: the fleet is finalized at this build's epoch.
     finalized: bool,
+    /// The transaction's id, once read: what a lost `COMMIT` is reconciled
+    /// by.
+    xact: Option<XactId>,
 }
 
 /// A plugin writer range the fleet record does not admit, as the store's
@@ -405,6 +409,28 @@ impl GuardedTx<'_> {
         crate::observed_sql::control("COMMIT", self.tx.commit()).await
     }
 
+    /// Record the transaction's id, read with another statement: the
+    /// commit then needs no read of its own.
+    pub(crate) fn note_xact(&mut self, xact: XactId) {
+        self.xact = Some(xact);
+    }
+
+    /// `COMMIT`, reconciling a lost answer from the transaction's recorded
+    /// outcome ([`commit_reconciled`]). The transaction's id is read first
+    /// when it is not yet known.
+    pub(crate) async fn commit_reconciled(
+        mut self,
+        settle: &Settle<'_>,
+    ) -> Result<(), Uncommitted> {
+        let xact = match self.xact.take() {
+            Some(xact) => xact,
+            None => XactId::of(&mut self.tx)
+                .await
+                .map_err(Uncommitted::RolledBack)?,
+        };
+        commit_reconciled(self.tx, &xact, settle).await
+    }
+
     pub(crate) async fn rollback(self) -> Result<(), sqlx::Error> {
         crate::observed_sql::control("ROLLBACK", self.tx.rollback()).await
     }
@@ -482,6 +508,7 @@ pub(crate) async fn begin_guarded_with<'c, 'p>(
         tx,
         fleet,
         finalized: fleet.version() == fence.state.writable.max(),
+        xact: None,
     })
 }
 
@@ -506,6 +533,7 @@ pub(crate) async fn begin_durable(
         tx,
         fleet,
         finalized: fleet.version() == fence.state.writable.max(),
+        xact: None,
     })
 }
 
@@ -540,6 +568,7 @@ pub(crate) async fn begin_migration<'c>(
         tx,
         fleet,
         finalized: fleet.version() == fence.state.writable.max(),
+        xact: None,
     })
 }
 
@@ -599,52 +628,76 @@ pub(crate) async fn begin_fleet_row(
 pub(crate) type GuardedBody<'t, T> =
     Pin<Box<dyn Future<Output = Result<T, StoreError>> + Send + 't>>;
 
-/// `body` in a guarded transaction, committed, and retried per §2.4: an
-/// attempt that meets contention anywhere, the fence included, rolls back and
-/// runs again from a fresh `BEGIN`, so the retry reads `F` afresh. After the
-/// fence's retry policy's attempts the contention is the caller's, and the
-/// whole loop, pauses included, runs within the ordinary profile's operation
-/// deadline.
+/// `body` in a guarded transaction, committed, and retried per §2.4 under
+/// the storage's store retry policy ([`RetryPolicy::run`]): an attempt that
+/// meets contention anywhere, the fence included, rolls back and runs again
+/// from a fresh `BEGIN`, so the retry reads `F` afresh. A `COMMIT` whose
+/// answer was lost is reconciled, never run again blind. After the policy's
+/// attempts the contention is the caller's, and the whole loop, pauses
+/// included, runs within the ordinary profile's operation deadline.
 ///
 /// The transaction is typed at `'a`, the lifetime of what `body` borrows, so
 /// the body's future may hold both.
 pub(crate) async fn guarded<'a, T, F>(
     pool: &PgPool,
     fence: &WriterFence,
-    mut body: F,
+    body: F,
 ) -> Result<T, StoreError>
 where
-    F: for<'t> FnMut(&'t mut GuardedTx<'a>) -> GuardedBody<'t, T>,
+    F: for<'t> Fn(&'t mut GuardedTx<'a>) -> GuardedBody<'t, T>,
 {
-    let retry = fence.state.retry;
-    let attempts = async {
-        let mut attempt = 1;
-        loop {
-            let outcome = match begin_guarded(pool, fence).await {
-                Ok(tx) => {
-                    let mut tx: GuardedTx<'a> = tx;
-                    match body(&mut tx).await {
-                        Ok(value) => tx.commit().await.map_err(store_sqlx_error).map(|()| value),
-                        Err(error) => Err(error),
-                    }
-                }
-                Err(error) => Err(error),
-            };
-            match outcome {
-                Err(StoreError::Contended) if attempt < retry.attempts => {
-                    tokio::time::sleep(retry.pause(attempt - 1)).await;
-                    attempt += 1;
-                }
-                outcome => return outcome,
+    let prelude = &fence.state.prelude;
+    let retry = &fence.state.retry;
+    let deadline = prelude
+        .deadline()
+        .map(|deadline| tokio::time::Instant::now() + deadline);
+    let body = &body;
+    let attempts = retry.run(deadline, Attempt::is_aborted, || async move {
+        let mut tx: GuardedTx<'a> = begin_guarded(pool, fence).await.map_err(attempt)?;
+        let value = match body(&mut tx).await {
+            Ok(value) => value,
+            Err(error) => {
+                let _ = tx.rollback().await;
+                return Err(attempt(error));
+            }
+        };
+        let settle = Settle {
+            pool,
+            retry,
+            deadline,
+            #[cfg(any(test, feature = "testing"))]
+            fault: None,
+        };
+        match tx.commit_reconciled(&settle).await {
+            Ok(()) => Ok(value),
+            Err(Uncommitted::RolledBack(error)) => Err(attempt(store_sqlx_error(error))),
+            Err(Uncommitted::Lost(error)) => Err(Attempt::Aborted(StoreError::StorageFailure {
+                backend: crate::POSTGRES_BACKEND,
+                message: format!("the connection was lost at COMMIT, which rolled back: {error}"),
+            })),
+            Err(Uncommitted::Unknown(message)) => {
+                Err(Attempt::Failed(StoreError::StorageFailure {
+                    backend: crate::POSTGRES_BACKEND,
+                    message,
+                }))
             }
         }
-    };
-    fence
-        .state
-        .prelude
+    });
+    prelude
         .bounded(attempts)
         .await
-        .unwrap_or_else(|deadline| Err(operation_deadline_exceeded(deadline)))
+        .unwrap_or_else(|deadline| Err(Attempt::Failed(operation_deadline_exceeded(deadline))))
+        .map_err(Attempt::into_error)
+}
+
+/// A store refusal as an attempt's failure: contention rolled the attempt
+/// back, and anything else is the operation's answer.
+fn attempt(error: StoreError) -> Attempt<StoreError> {
+    if matches!(error, StoreError::Contended) {
+        Attempt::Aborted(error)
+    } else {
+        Attempt::Failed(error)
+    }
 }
 
 /// A store operation that did not finish within its whole-operation

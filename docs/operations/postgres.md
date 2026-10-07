@@ -147,11 +147,27 @@ The durable substrate's `DurableSettings`, unchanged: `lease` (`ttl_ms`
 database work only, never a tool or model call. The pause doubles from the
 initial delay to the maximum; jitter draws it from its upper half.
 
+Each operation has one retry owner. An attempt is one complete transaction
+from a fresh `BEGIN`: the writer fence and, for an owner commit, its epoch
+fence run again, so an attempt fenced out stops the retries. The failed
+transaction is rolled back before the pause, and the attempts and pauses
+share the operation's deadline (`guards.<role>.operation_deadline_ms`): a
+pause that would end past it is not taken, and the contention is the
+answer. Contention is SQLSTATE `40001`, `40P01` or `55P03`; a statement
+timeout (`57014`) is not.
+
+A durable or store commit whose `COMMIT` answer is lost (the connection
+breaks) is not a known rollback. Lash reads the transaction's recorded
+outcome (`pg_xact_status`) on a fresh connection: a commit that landed
+answers once, one that rolled back runs again under the same policy, and
+an outcome it cannot learn before the deadline is answered as unavailable,
+never re-applied.
+
 | Policy | Default | Used by |
 |---|---|---|
-| `store` | 4 attempts, 5–20 ms | Contended store transactions; the loop runs within the ordinary operation deadline. |
-| `durable` | 4, 5–20 ms | Durable commit retries. |
-| `wait_resolution` | 3, 5–20 ms | Wait resolution. |
+| `store` | 4 attempts, 5–20 ms | Contended store maintenance transactions. |
+| `durable` | 4, 5–20 ms | Durable owner and mailbox commits. |
+| `wait_resolution` | 3, 5–20 ms | Wait resolutions (`wait.resolve`) and due-wait settlements (`wait.timeout`). |
 | `live_replay` | 8, 5–100 ms | Live replay publications and trims. |
 
 ### `signals`

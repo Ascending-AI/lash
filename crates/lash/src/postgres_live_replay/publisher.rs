@@ -82,36 +82,35 @@ pub(super) async fn run(
 /// Write one tick's requests and answer each.
 async fn write(shared: &Shared, batch: Vec<PublishRequest>) {
     let started = std::time::Instant::now();
-    let mut outcome = Err(LiveReplayStoreError::Store(
-        "postgres live replay publication kept racing; giving up".into(),
-    ));
     // A tick starts over after a race or a rotation, up to the host's
-    // `retry.live_replay` attempts.
-    for retry in 0..shared.retry.attempts {
-        if retry > 0 {
-            tokio::time::sleep(shared.retry.pause(retry - 1)).await;
-        }
-        match write_once(shared, &batch).await {
-            Ok(written) => {
-                outcome = Ok(written);
-                break;
-            }
-            Err(Attempt::Retry(Retry::Race)) => {}
-            Err(Attempt::Retry(Retry::Rotate)) => {
-                match ensure_incarnation(&shared.pool, &shared.sql).await {
-                    Ok(incarnation) => shared.adopt(incarnation),
-                    Err(error) => {
-                        outcome = Err(error);
-                        break;
+    // `retry.live_replay` attempts, within the replay profile's deadline.
+    let deadline = shared
+        .prelude
+        .deadline()
+        .map(|deadline| tokio::time::Instant::now() + deadline);
+    let batch_ref = &batch;
+    let outcome = shared
+        .retry
+        .run(
+            deadline,
+            |failed| matches!(failed, Attempt::Retry(_)),
+            || async move {
+                match write_once(shared, batch_ref).await {
+                    Err(Attempt::Retry(Retry::Rotate)) => {
+                        shared.adopt(ensure_incarnation(&shared.pool, &shared.sql).await?);
+                        Err(Attempt::Retry(Retry::Rotate))
                     }
+                    written => written,
                 }
-            }
-            Err(Attempt::Failed(error)) => {
-                outcome = Err(error);
-                break;
-            }
-        }
-    }
+            },
+        )
+        .await
+        .map_err(|failed| match failed {
+            Attempt::Retry(_) => LiveReplayStoreError::Store(
+                "postgres live replay publication kept racing; giving up".into(),
+            ),
+            Attempt::Failed(error) => error,
+        });
     let (incarnation, plans, doorbells) = match outcome {
         Ok(written) => written,
         Err(error) => {

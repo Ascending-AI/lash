@@ -556,6 +556,10 @@ pub(crate) struct RolePools {
     pub(crate) sweep_sessions: Arc<Semaphore>,
     pub(crate) maintenance: MaintenancePolicy,
     pub(crate) store_retry: RetryPolicy,
+    /// How a contended durable commit runs again.
+    pub(crate) durable_retry: RetryPolicy,
+    /// How a contended wait resolution or due settlement runs again.
+    pub(crate) wait_retry: RetryPolicy,
 }
 
 impl RolePools {
@@ -582,6 +586,8 @@ impl RolePools {
             )),
             maintenance: config.maintenance,
             store_retry: config.retry.store,
+            durable_retry: config.retry.durable,
+            wait_retry: config.retry.wait_resolution,
         }
     }
 

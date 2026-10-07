@@ -847,6 +847,8 @@ mod recovery_leader;
 mod release_stamp;
 #[cfg(test)]
 mod rendered_statement_sets_tests;
+#[path = "postgres/replayable.rs"]
+mod replayable;
 #[path = "postgres/revisions.rs"]
 mod revisions;
 #[path = "postgres/runtime_persistence/mod.rs"]

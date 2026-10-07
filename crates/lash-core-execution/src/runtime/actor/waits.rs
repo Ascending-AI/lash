@@ -10,8 +10,9 @@
 //!   with `ReservedKind` and writes nothing.
 //! - A resolution's lock order is the wait row, then the actor row. An owner
 //!   commit fences its own actor row first, so on PostgreSQL a resolve and
-//!   an owner's `Due` can deadlock; the database aborts one, and every
-//!   writer here retries a contended transaction unchanged.
+//!   an owner's `Due` can deadlock; the database aborts one, and the store's
+//!   commit, the one retry owner of each transaction, runs it again
+//!   unchanged. Nothing here retries on top of it.
 //! - A host-resolvable wait's completion key is its wait id: 128 random
 //!   bits from the operating system's CSPRNG. It is a bearer capability:
 //!   lash keeps no completion secret, and the host decides who may resolve
@@ -43,10 +44,6 @@ pub use lash_core_effect::Resolution;
 pub use lash_durable::domain::{ResolveAnswer, WaitId, WaitKind};
 
 pub use super::wait_effects::{race_timer, sleep_until_timer, timer};
-
-/// How many times a resolve or a due settlement tries a contended
-/// transaction.
-const RESOLVE_ATTEMPTS: usize = 3;
 
 /// A host-resolvable wait's completion key: its wait id's 32 lowercase hex
 /// digits. The id is 128 random bits, so the key is unguessable, and whoever
@@ -334,26 +331,18 @@ pub async fn resolve_host(
     .await
 }
 
-/// Resolve one wait from outside its owner, retrying a contended
-/// transaction.
+/// Resolve one wait from outside its owner, in one mailbox transaction
+/// the store retries while contended.
 async fn resolve_row(
     backend: &Backend,
     resolution: WaitResolution,
 ) -> Result<ResolveAnswer, DurableError> {
-    let mut attempt = 0;
-    loop {
-        let mut tx = MailTx::new();
-        tx.write(MailDomainWrite::ResolveWait(resolution.clone()));
-        match backend.commit_mail(tx, CommitLabel::WAIT_RESOLVE).await {
-            Ok(commit) => {
-                return match commit.answers.first() {
-                    Some(MailAnswer::ResolveWait(answer)) => Ok(*answer),
-                    _ => Err(corrupt("a wait resolution's commit carried no answer")),
-                };
-            }
-            Err(error) if contended(&error) && attempt + 1 < RESOLVE_ATTEMPTS => attempt += 1,
-            Err(error) => return Err(error),
-        }
+    let mut tx = MailTx::new();
+    tx.write(MailDomainWrite::ResolveWait(resolution));
+    let commit = backend.commit_mail(tx, CommitLabel::WAIT_RESOLVE).await?;
+    match commit.answers.first() {
+        Some(MailAnswer::ResolveWait(answer)) => Ok(*answer),
+        _ => Err(corrupt("a wait resolution's commit carried no answer")),
     }
 }
 
@@ -471,13 +460,9 @@ async fn look(cx: &ActorContext, waits: &[WaitRef]) -> Result<Look, DurableError
         .filter_map(|(_, row)| row.purpose.deadline())
         .min();
     if earliest.is_some_and(|due| due <= now) {
-        match settle_rows(cx, tx, rows.iter().map(|(_, row)| row), now).await {
-            Ok(()) => {}
-            // A resolver holding the wait row lost a deadlock to this
-            // commit or won one: re-read and settle again.
-            Err(error) if contended(&error) => {}
-            Err(error) => return Err(error),
-        }
+        // The settle re-checks each row under its lock: a resolution that
+        // committed first wins, and the next look reads it.
+        settle_rows(cx, tx, rows.iter().map(|(_, row)| row), now).await?;
         return Ok(Look::Settled);
     }
     for (_, row) in &rows {
@@ -514,14 +499,8 @@ pub async fn settle_due(cx: &ActorContext) -> Result<Vec<WaitRef>, DurableError>
         .map(|row| WaitRef::new(row.id, row.purpose.kind()))
         .collect();
     if !due.is_empty() {
-        let mut attempt = 1;
-        loop {
-            let tx = cx.begin().await?;
-            match settle_rows(cx, tx, pending.iter(), now).await {
-                Err(error) if contended(&error) && attempt < RESOLVE_ATTEMPTS => attempt += 1,
-                settled => break settled?,
-            }
-        }
+        let tx = cx.begin().await?;
+        settle_rows(cx, tx, pending.iter(), now).await?;
     }
     refresh_wait_dues(cx).await?;
     Ok(due)
@@ -873,20 +852,6 @@ pub fn process_outcome(resolution: Resolution) -> Result<ProcessOutcome, Durable
             "a process-terminal wait resolved as {other:?}"
         ))),
     }
-}
-
-/// A transaction that lost to lock contention: on PostgreSQL a resolve
-/// (wait row, then actor row) and an owner commit (its fenced actor row,
-/// then its wait rows) can deadlock, and the database aborts one. Both are
-/// conditional, so the loser retries unchanged.
-fn contended(error: &DurableError) -> bool {
-    matches!(
-        error,
-        DurableError::Store(StoreFailure {
-            kind: StoreFailureKind::Contended,
-            ..
-        })
-    )
 }
 
 fn corrupt(message: &str) -> DurableError {

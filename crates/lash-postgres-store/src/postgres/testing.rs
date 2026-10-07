@@ -426,6 +426,70 @@ impl HeldFinalize {
     }
 }
 
+/// Where a [`CommitFault`] loses a durable commit's connection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LostCommit {
+    /// The server session ends before `COMMIT` reaches it: the transaction
+    /// rolls back, and the client's `COMMIT` fails on a dead connection.
+    BeforeCommit,
+    /// `COMMIT` lands, and its acknowledgement is lost on the way back.
+    AfterCommit,
+}
+
+/// A connection lost at the next durable commit's `COMMIT`, once: the
+/// client cannot tell from the error whether the transaction committed.
+///
+/// Install it on a durable store with
+/// [`PostgresDurableStore::with_commit_fault_for_testing`](crate::PostgresDurableStore::with_commit_fault_for_testing).
+#[derive(Debug)]
+pub struct CommitFault {
+    lost: LostCommit,
+    armed: std::sync::atomic::AtomicBool,
+}
+
+impl CommitFault {
+    /// Lose the next commit's connection where `lost` says.
+    pub fn new(lost: LostCommit) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            lost,
+            armed: std::sync::atomic::AtomicBool::new(true),
+        })
+    }
+
+    /// Whether the fault has been taken.
+    pub fn taken(&self) -> bool {
+        !self.armed.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// `COMMIT` `tx`, losing its connection the first time.
+    pub(crate) async fn commit(
+        &self,
+        mut tx: sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<(), sqlx::Error> {
+        if !self.armed.swap(false, std::sync::atomic::Ordering::AcqRel) {
+            return tx.commit().await;
+        }
+        match self.lost {
+            LostCommit::BeforeCommit => {
+                // The session ends itself; the statement's own error is the
+                // fatal notice, and the `COMMIT` after it meets a dead
+                // connection.
+                let _ = sqlx::query("SELECT pg_terminate_backend(pg_backend_pid())")
+                    .execute(&mut *tx)
+                    .await;
+                tx.commit().await
+            }
+            LostCommit::AfterCommit => {
+                tx.commit().await?;
+                Err(sqlx::Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionReset,
+                    "injected: the acknowledgement of COMMIT was lost",
+                )))
+            }
+        }
+    }
+}
+
 /// Move `F` to `epoch` in one transaction (see [`HeldFinalize`]).
 pub async fn finalize_fleet_epoch(
     pool: &sqlx::PgPool,

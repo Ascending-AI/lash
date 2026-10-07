@@ -70,22 +70,26 @@ pub(super) async fn expire(
     shared: &Shared,
     sessions: &[String],
 ) -> Result<(), LiveReplayStoreError> {
-    for retry in 0..shared.retry.attempts {
-        if retry > 0 {
-            tokio::time::sleep(shared.retry.pause(retry - 1)).await;
-        }
-        match expire_once(shared, sessions).await {
-            Ok(doorbells) => {
-                shared.ring_mirror(&doorbells);
-                return Ok(());
-            }
-            Err(Attempt::Retry(_)) => {}
-            Err(Attempt::Failed(error)) => return Err(error),
-        }
-    }
-    Err(LiveReplayStoreError::Store(
-        "postgres live replay trim kept racing; giving up".into(),
-    ))
+    let deadline = shared
+        .prelude
+        .deadline()
+        .map(|deadline| tokio::time::Instant::now() + deadline);
+    let doorbells = shared
+        .retry
+        .run(
+            deadline,
+            |failed| matches!(failed, Attempt::Retry(_)),
+            || expire_once(shared, sessions),
+        )
+        .await
+        .map_err(|failed| match failed {
+            Attempt::Retry(_) => LiveReplayStoreError::Store(
+                "postgres live replay trim kept racing; giving up".into(),
+            ),
+            Attempt::Failed(error) => error,
+        })?;
+    shared.ring_mirror(&doorbells);
+    Ok(())
 }
 
 async fn expire_once(shared: &Shared, sessions: &[String]) -> Result<Vec<Doorbell>, Attempt> {

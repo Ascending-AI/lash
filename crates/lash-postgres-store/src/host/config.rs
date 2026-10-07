@@ -362,7 +362,9 @@ impl Default for GuardPolicies {
 }
 
 /// A bounded retry of database work whose attempt is known to have rolled
-/// back. Never a retry of a tool or model call.
+/// back, run by [`RetryPolicy::run`] around one complete, immutable
+/// transaction. Never a retry of a tool or model call, and never of a
+/// `COMMIT` whose outcome is unknown.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RetryPolicy {
@@ -394,11 +396,14 @@ impl RetryPolicy {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RetryPolicies {
-    /// Contended store transactions. Default 4 attempts, 5 to 20 ms.
+    /// Contended store maintenance transactions. Default 4 attempts, 5 to
+    /// 20 ms.
     pub store: RetryPolicy,
-    /// Contended durable commits. Default 4 attempts, 5 to 20 ms.
+    /// Contended durable owner and mailbox commits. Default 4 attempts, 5
+    /// to 20 ms.
     pub durable: RetryPolicy,
-    /// Contended wait resolutions. Default 3 attempts, 5 to 20 ms.
+    /// Contended wait resolutions and due-wait settlements. Default 3
+    /// attempts, 5 to 20 ms.
     pub wait_resolution: RetryPolicy,
     /// Contended live replay publications and trims. Default 8 attempts,
     /// 5 to 100 ms.
