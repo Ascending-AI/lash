@@ -274,16 +274,15 @@ about its journey. Each passage introduces a named person and one other entity,
 with factual attributes drawn from seeded vocabularies: age, a place's gate code,
 an object's colour or material, or a dog's name. Names are reserved across the
 path and every sibling before exposing a destination; collisions receive a
-numeric suffix. Only those nodes are allocated, never a subtree. Coins start at
-zero and a passage's delta is applied when
-the agent leaves it. Each round permits exactly one choice; `choose` returns the
-next round's passage, whose delta has not yet been applied.
+numeric suffix. Only those nodes are allocated, never a subtree. Each fact is
+a plain sentence naming the full entity. Each round permits exactly one choice;
+`choose` returns the next passage.
 
 At boot, `AGENT_WORKBENCH_STORY=on` registers the tools and their prompt for every
 new session. RLM uses `await story.read({})` and
 `await story.choose({ option: "A" })`; standard uses `story__read` and
 `story__choose`. `read` returns top-level `passage`, `facts`, `choices` (option and label),
-`coins`, `round`, `passage_round`, `round_finished`, `choice` and `path`; `choose` returns the new passage with `round_finished=true`; work steps
+`round`, `passage_round`, `round_finished`, `choice` and `path`; `choose` returns the new passage with `round_finished=true`; work steps
 are never new user rounds. Invalid options are errors
 and change nothing. Tools never expose the path log, questions or answer key.
 
@@ -305,22 +304,28 @@ outcomes and continuation counts are retained, including failed initial turns.
 | `--out DIR` | required | evidence directory, with fresh data/session |
 | `--seed`, `--branching`, `--vocabulary-seed` | `1`, `3`, `1` | world variables; seed also seeds the quiz |
 | `--rounds`, `--questions` | `12`, `12` | positive counts |
-| `--types` | `fact,order,state,negative` | cyclic type mix; repeat entries for weights |
-| `--told` | false | round 1 adds “At the end I will quiz you on details of your journey: ages, codes, objects, pets, coins and the order of people.” |
+| `--types` | `fact,fact,negative,order` | cyclic type mix; repeat entries for weights |
+| `--told` | false | round 1 adds “At the end I will quiz you on details of your journey: ages, codes, objects, pets and the order of people.” |
 | `--delivery` | `tool` | `tool`: read through tools; `message`: passage and choices in the round's user message |
 | `--policy`, `--channel` | `relay`, `native` | relay, chronological `rlm`, standard; relay requires native, standard has no channel |
 | `--model`, `--upstream` | `z-ai/glm-5.3-flash`, `z-ai` | model and OpenRouter provider pin |
 | `--port`, `--env-file`, `--budget` | `4492`, none, `$0.15` | port, key file, budget guard; reserve enough for the next turn before starting it |
 
 The generator samples without replacement from finite pools of facts, unordered
-person pairs, coin states and visited/unvisited people. Every question names an
-entity or the final total; questions never refer to rounds or turns. Negative
-questions alternate unvisited sibling people (`NO`) and visited people (`YES`).
-For R completed passages the capacities are 2R facts, R(R−1)/2 order pairs,
-R states, and 2R negatives (2R+1 with branching greater than two, keeping the
-NO/YES mix balanced). The final coin state is phrased as either “now” or an
-entity anchor, never both in one quiz. Both the driver and server refuse counts beyond the
-requested type mix's capacity, empty mixes, zero questions and unfinished paths.
+person pairs and visited/unvisited people. Every question names a full entity;
+questions never use pronouns, rounds, turns, coins, “when”, “now” or “currently”.
+Fact candidates are admitted only if the answer appears verbatim exactly once
+in one visited passage and in no reserved sibling or final destination passage.
+Repeated short values are excluded. Negative questions alternate unvisited
+sibling people (`NO`) and visited people (`YES`). Both people in an order
+question were met exactly once in different passages.
+
+For Q=12 the default mix is six facts, three negatives and three orders.
+For R completed passages the capacities are at most 2R facts (the actual pool
+excludes repeated answers), R(R−1)/2 order pairs, and 2R negatives (2R+1 with
+branching greater than two, keeping the NO/YES mix balanced). The driver refuses
+counts beyond these upper bounds; the server refuses a mix that the actual
+path cannot supply, empty mixes, zero questions and unfinished paths.
 
 Run every policy/told variant with `env.sh` sourced and a key exported, or with
 `--env-file /workspace/code/lash/.env`. Both RLM baselines use native:
@@ -334,8 +339,8 @@ for policy in relay rlm standard; do
 done
 ```
 
-Add `--delivery message` to test message delivery. Use `--types fact,state`
-for a restricted mix or `--types fact,fact,order,state,negative` to weight
+Add `--delivery message` to test message delivery. Use `--types fact,negative`
+for a restricted mix or `--types fact,fact,fact,negative,order` to weight
 facts. `--rounds`, `--questions`, seeds, branching, model and upstream are
 independent settings subject to the validation above.
 
@@ -354,20 +359,18 @@ the last two take `{seed, questions, types}` (score also takes `answer`).
 - Fact answers are each named entity's attribute value: strings for colours,
   materials and pet names; integers for ages and gate codes. Order asks whether
   one named person was met before another, with `YES` or `NO` as the answer.
-- State answers are integers: the final coin total, or the total immediately
-  after the delta of the passage introducing the named person.
 - Negative answers are exactly `YES` or `NO`. A `NO` person comes from an
   unchosen sibling, whose reserved name cannot appear elsewhere on the path.
 - Lookback is R minus the source passage's internal round number; the last
   completed passage has lookback 0. Order uses the earlier person's passage;
   an unvisited negative uses its parent branchpoint. These numbers appear in
   evidence only, never question text.
-- The scorer reads the first JSON object, including inside fences, and scores
-  each key independently. Missing,
-  nonscalar, wrongly typed or malformed values score zero. Strings ignore case
-  and repeated whitespace; integer values also accept trimmed integer strings.
-  Fractions, booleans, number separators and yes/no aliases are rejected.
-  Additional keys do not change the score. Buckets are 0–3, 4–7 and 8+.
+- The scorer accepts exactly a JSON object and scores each key independently.
+  Each answer must equal the expected JSON value, including type, spelling,
+  case and whitespace. Missing, wrongly typed or malformed values score zero;
+  fenced JSON, trailing prose, numeric strings, fractions, booleans and yes/no
+  aliases are rejected. Additional keys do not change the score. Buckets are
+  0–3, 4–7 and 8+.
 - An unfinished round invalidates the run and is never scored. Every failed
   turn must be explained from the preserved response and workbench log.
 - Spend uses provider-reported usage, and every request must be served by the
@@ -376,9 +379,9 @@ the last two take `{seed, questions, types}` (score also takes `answer`).
 The story laws are in `story::tests` in
 `//examples/agent-workbench:agent-workbench__unit_test`: seeded reproducibility,
 invalid choice leaves state unchanged, log matches moves, unique entity names
-across the path and siblings, no round/turn labels in questions, distinct
-questions and capacity refusal, typed scoring including malformed values, and
-entity-anchored coin totals. Run each changed/new law by its full test path.
+across the path and siblings, plain question wording, distinct questions and
+capacity refusal, exact typed scoring including malformed values, one literal
+source per factual answer, and the default 6/3/3 mix. Run each changed/new law by its full test path.
 
 Failed model requests remain in the usage tables. When their trace lacks usage,
 the shared live driver reconciles the failed generation through OpenRouter's

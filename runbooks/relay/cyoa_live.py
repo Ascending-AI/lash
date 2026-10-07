@@ -7,8 +7,9 @@ import sys
 from extract_live import extract
 from live_common import POLICIES, Workbench, environment, launcher, collect_usage
 
-KINDS = ("fact", "order", "state", "negative")
-WARNING = "At the end I will quiz you on details of your journey: ages, codes, objects, pets, coins and the order of people."
+KINDS = ("fact", "negative", "order")
+DEFAULT_TYPES = ("fact", "fact", "negative", "order")
+WARNING = "At the end I will quiz you on details of your journey: ages, codes, objects, pets and the order of people."
 
 
 def settings():
@@ -16,7 +17,7 @@ def settings():
     p.add_argument("--out", required=True, type=pathlib.Path)
     p.add_argument("--rounds", type=int, default=12)
     p.add_argument("--questions", type=int, default=12)
-    p.add_argument("--types", default=",".join(KINDS), help="cyclic type mix; repeat a type for greater weight")
+    p.add_argument("--types", default=",".join(DEFAULT_TYPES), help="cyclic type mix; repeat a type for greater weight")
     p.add_argument("--told", action="store_true")
     p.add_argument("--delivery", choices=("tool", "message"), default="tool")
     p.add_argument("--policy", choices=sorted(POLICIES), default="relay")
@@ -32,13 +33,13 @@ def settings():
     args = p.parse_args()
     args.types = [kind.strip() for kind in args.types.split(",")]
     if not args.types or any(kind not in KINDS for kind in args.types):
-        p.error("--types must be a comma list of fact,order,state,negative")
+        p.error("--types must be a comma list of fact,negative,order")
     if args.rounds < 1 or args.questions < 1 or not 2 <= args.branching <= 26:
         p.error("rounds/questions must be positive; branching must be 2..26")
     if not all(0 <= n < 2**64 for n in (args.seed, args.vocabulary_seed)):
         p.error("seeds must be unsigned 64-bit integers")
     capacities = {"fact": 2 * args.rounds, "order": args.rounds * (args.rounds - 1) // 2,
-                  "state": args.rounds, "negative": 2 * args.rounds + (args.branching > 2)}
+                  "negative": 2 * args.rounds + (args.branching > 2)}
     for kind, capacity in capacities.items():
         count = sum(args.types[i % len(args.types)] == kind for i in range(args.questions))
         if count > capacity:
@@ -62,8 +63,8 @@ def round_prompt(args, number, passage):
 def final_prompt(questions):
     return ('Answer these questions about your journey. Reply with exactly a JSON object '
             'keyed q1..qQ (use each question\'s id). For order and negative questions use "YES" or "NO". '
-            'For ages, gate codes and coin counts use integers; for other facts use strings. '
-            'Coin totals associated with meeting a person include that passage\'s coin change.\n' +
+            'For ages and gate codes use integers; for other facts use strings. Copy stated values exactly. '
+            '\n' +
             "\n".join(f"{q['id']}: {q['prompt']}" for q in questions))
 
 

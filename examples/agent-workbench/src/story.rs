@@ -120,7 +120,7 @@ struct Entity {
 impl Entity {
     fn statement(&self) -> String {
         match self.attribute {
-            Attribute::Age => format!("You meet {} who just turned {}.", self.name, self.value),
+            Attribute::Age => format!("{} just turned {}.", self.name, self.value),
             Attribute::DoorCode => format!("The gate of {} opens with {}.", self.name, self.value),
             Attribute::Color => format!(
                 "{} is {}.",
@@ -142,7 +142,7 @@ impl Entity {
     fn question(&self) -> String {
         match self.attribute {
             Attribute::Age => format!("How old is {}?", self.name),
-            Attribute::DoorCode => format!("What opens the gate of {}?", self.name),
+            Attribute::DoorCode => format!("What number opens the gate of {}?", self.name),
             Attribute::Color => format!("What colour is {}?", self.name),
             Attribute::Material => format!("What is {} made of?", self.name),
             Attribute::PetName => format!("What is {} called?", self.name),
@@ -152,7 +152,6 @@ impl Entity {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 struct Facts {
     entities: Vec<Entity>,
-    coin_delta: i64,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 struct Choice {
@@ -215,13 +214,12 @@ fn node(config: &StoryConfig, path: &[usize], used: &mut BTreeSet<String>) -> No
     };
     let facts = Facts {
         entities: vec![age, other],
-        coin_delta: rng.index(41) as i64 - 20,
     };
     let passage = format!(
-        "{} {} Your coins change by {:+} when you leave.",
+        "You meet {}. {} {}",
+        person,
         facts.entities[0].statement(),
-        facts.entities[1].statement(),
-        facts.coin_delta
+        facts.entities[1].statement()
     );
     let choices = (0..config.branching)
         .map(|i| Choice {
@@ -245,13 +243,11 @@ struct Round {
     round: usize,
     node: Node,
     choice: Option<String>,
-    coins: i64,
 }
 #[derive(Default)]
 struct WorldState {
     path: Vec<usize>,
     rounds: Vec<Round>,
-    coins: i64,
     calls: BTreeMap<String, Result<Value, String>>,
     nodes: BTreeMap<Vec<usize>, Node>,
     names: BTreeSet<String>,
@@ -279,7 +275,6 @@ impl StoryWorld {
             round: state.rounds.len() + 1,
             node: state.nodes[&path].clone(),
             choice: None,
-            coins: state.coins,
         };
         state.rounds.push(round);
         Ok(self.read_in(&state))
@@ -301,7 +296,7 @@ impl StoryWorld {
         json!({
             "round": state.rounds.len(), "round_finished": choice.is_some(),
             "passage_round": state.rounds.len() + usize::from(choice.is_some()),
-            "choice": choice, "coins": state.coins, "path": current.path,
+            "choice": choice, "path": current.path,
             "passage": current.passage, "facts": current.facts, "choices": current.choices,
         })
     }
@@ -330,8 +325,6 @@ impl StoryWorld {
             .position(|c| c.option == option)
             .ok_or("invalid option; choose one of the listed option labels")?;
         round.choice = Some(option.to_owned());
-        state.coins += round.node.facts.coin_delta;
-        round.coins = state.coins;
         let parent_path = state.path.clone();
         for option in 0..self.config.branching {
             let mut path = parent_path.clone();
@@ -354,7 +347,6 @@ impl StoryWorld {
 enum Kind {
     Fact,
     Order,
-    State,
     Negative,
 }
 impl Kind {
@@ -362,7 +354,6 @@ impl Kind {
         match self {
             Self::Fact => "fact",
             Self::Order => "order",
-            Self::State => "state",
             Self::Negative => "negative",
         }
     }
@@ -372,7 +363,11 @@ impl Kind {
 struct QuizRequest {
     seed: u64,
     questions: usize,
+    #[serde(default = "default_types")]
     types: Vec<Kind>,
+}
+fn default_types() -> Vec<Kind> {
+    vec![Kind::Fact, Kind::Fact, Kind::Negative, Kind::Order]
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 struct Question {
@@ -399,7 +394,6 @@ fn questions(
     }
     let mut facts = Vec::new();
     let mut orders = Vec::new();
-    let mut states = Vec::new();
     let mut visited = Vec::new();
     let mut unvisited = Vec::new();
     let mut rng = Random(request.seed ^ 0x5155_495A);
@@ -423,17 +417,6 @@ fn questions(
                 round.node.path.clone(),
             ));
         }
-        states.push(question(
-            Kind::State,
-            if i + 1 == log.len() && rng.index(2) == 0 {
-                "How many coins do you have now?".into()
-            } else {
-                format!("How many coins did you have when you met {person}?")
-            },
-            json!(round.coins),
-            round,
-            round.node.path.clone(),
-        ));
         visited.push(question(
             Kind::Negative,
             format!("Did you meet {person}?"),
@@ -479,6 +462,19 @@ fn questions(
             ));
         }
     }
+    // An answer must have one literal source, including every reserved sibling
+    // and the final destination already exposed by choose.
+    facts.retain(|q| {
+        let answer = q
+            .expected
+            .as_str()
+            .map_or_else(|| q.expected.to_string(), str::to_owned);
+        nodes
+            .values()
+            .map(|node| node.passage.matches(&answer).count())
+            .sum::<usize>()
+            == 1
+    });
     // Every pool is finite and each fact/unordered pair is present once.
     let count = |kind| {
         (0..request.questions)
@@ -488,7 +484,6 @@ fn questions(
     let negatives = count(Kind::Negative);
     if count(Kind::Fact) > facts.len()
         || count(Kind::Order) > orders.len()
-        || count(Kind::State) > states.len()
         || negatives.div_ceil(2) > unvisited.len()
         || negatives / 2 > visited.len()
     {
@@ -503,7 +498,6 @@ fn questions(
         let pool = match kind {
             Kind::Fact => &mut facts,
             Kind::Order => &mut orders,
-            Kind::State => &mut states,
             Kind::Negative => {
                 let no = negative_index.is_multiple_of(2);
                 negative_index += 1;
@@ -516,36 +510,16 @@ fn questions(
     }
     Ok(result)
 }
-fn normalize(value: &Value, expected: &Value) -> Option<String> {
-    match expected {
-        Value::Number(_) => match value {
-            Value::Number(n) => n.as_i64().map(|n| n.to_string()),
-            Value::String(s) => s.trim().parse::<i64>().ok().map(|n| n.to_string()),
-            _ => None,
-        },
-        Value::String(_) => value.as_str().map(|s| {
-            s.split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ")
-                .to_lowercase()
-        }),
-        _ => None,
-    }
-}
 fn score(answer: &str, questions: &[Question]) -> Value {
-    let object = answer.match_indices('{').find_map(|(start, _)| {
-        serde_json::Deserializer::from_str(&answer[start..])
-            .into_iter::<Value>()
-            .next()
-            .and_then(Result::ok)
-            .filter(Value::is_object)
-    });
+    let object = serde_json::from_str::<Value>(answer)
+        .ok()
+        .filter(Value::is_object);
     let mut by_type: BTreeMap<String, (usize, usize)> = BTreeMap::new();
     let mut by_lookback: BTreeMap<String, (usize, usize)> = BTreeMap::new();
     let mut correct_count = 0;
     let rows: Vec<Value> = questions.iter().map(|q| {
         let given = object.as_ref().and_then(|o| o.get(&q.id));
-        let correct = given.and_then(|v| normalize(v,&q.expected)).is_some_and(|v| Some(v)==normalize(&q.expected,&q.expected));
+        let correct = given == Some(&q.expected);
         correct_count += usize::from(correct);
         let bucket = match q.lookback { 0..=3 => "0-3", 4..=7 => "4-7", _ => "8+" };
         for counter in [by_type.entry(q.kind.label().into()).or_default(), by_lookback.entry(bucket.into()).or_default()] { counter.0 += usize::from(correct); counter.1 += 1; }
@@ -564,7 +538,7 @@ fn score(answer: &str, questions: &[Question]) -> Value {
 fn definition(operation: &str) -> ToolDefinition {
     let choose = operation == "choose";
     ToolDefinition::raw(format!("tool:story__{operation}"), format!("story__{operation}"),
-        if choose { "Choose exactly one listed option (A, B, ...). Returns the next round's passage with round_finished=true. That completes this user round: answer now and wait for the next USER turn. Execution steps are not new rounds. Invalid options change nothing." } else { "Read the current story: passage, facts, choices (option and label), coins, round (user round), passage_round and round_finished. If round_finished=true, answer now; wait for the next USER turn. Current node only; no history." },
+        if choose { "Choose exactly one listed option (A, B, ...). Returns the next round's passage with round_finished=true. That completes this user round: answer now and wait for the next USER turn. Execution steps are not new rounds. Invalid options change nothing." } else { "Read the current story: passage, facts, choices (option and label), round (user round), passage_round and round_finished. If round_finished=true, answer now; wait for the next USER turn. Current node only; no history." },
         if choose { json!({"type":"object","properties":{"option":{"type":"string"}},"required":["option"],"additionalProperties":false}) } else { json!({"type":"object","properties":{},"additionalProperties":false}) }, json!({"type":"object"}))
         .expect("valid story schema").with_execution_policy(if choose { ExecutionPolicy::Once } else { ExecutionPolicy::repeatable(std::num::NonZeroU32::new(3).expect("nonzero"),25,250) })
         .with_tool_binding(ToolBinding::new(["story"],operation))
@@ -614,7 +588,7 @@ pub(crate) fn prompt(protocol: crate::session_protocol::SessionProtocol) -> Stri
         crate::session_protocol::SessionProtocol::Standard => ("story__read", "story__choose"),
     };
     format!(
-        "Choose-your-own-adventure: start with zero coins. {read} reads your current passage and labelled choices. {choose} selects a listed option and returns the new passage. Choose exactly once per USER turn, then answer immediately. The result sets round_finished=true. Your execution steps are not new rounds: do not make another choice until the user sends the next round. Read returns top-level passage, facts, choices, coins, round, passage_round, round_finished and choice. The choices array contains option and label. The coins of the passage you leave are added on choosing; the returned passage belongs to the next round. An invalid choice changes nothing. No tool exposes past nodes or the journey log. If the passage is supplied in the user's message, you may choose directly."
+        "Choose-your-own-adventure: {read} reads your current passage and labelled choices. {choose} selects a listed option and returns the new passage. Choose exactly once per USER turn, then answer immediately. The result sets round_finished=true. Your execution steps are not new rounds: do not make another choice until the user sends the next round. Read returns top-level passage, facts, choices, round, passage_round, round_finished and choice. The choices array contains option and label. The returned passage belongs to the next round. An invalid choice changes nothing. No tool exposes past nodes or the journey log. If the passage is supplied in the user's message, you may choose directly."
     )
 }
 pub(crate) fn router(world: StoryWorld) -> Router {
@@ -647,6 +621,7 @@ struct ScoreRequest {
     answer: String,
     seed: u64,
     questions: usize,
+    #[serde(default = "default_types")]
     types: Vec<Kind>,
 }
 async fn score_route(
@@ -686,7 +661,7 @@ mod tests {
         QuizRequest {
             seed: 1,
             questions: 12,
-            types: vec![Kind::Fact, Kind::Order, Kind::State, Kind::Negative],
+            types: default_types(),
         }
     }
     #[test]
@@ -735,17 +710,13 @@ mod tests {
         );
         let world = played();
         let mut path = Vec::new();
-        let mut coins = 0;
         for (i, round) in world.log().iter().enumerate() {
             assert_eq!(round.round, i + 1);
             assert_eq!(round.node.path, path);
             assert_eq!(round.choice.as_deref(), Some(["A", "B", "C"][i % 3]));
-            coins += round.node.facts.coin_delta;
-            assert_eq!(round.coins, coins);
             path.push(i % 3);
         }
         assert_eq!(world.state.lock_recover().path, path);
-        assert_eq!(world.state.lock_recover().coins, coins);
     }
     #[test]
     fn seeded_journeys_reproduce_passages_and_questions() {
@@ -786,13 +757,23 @@ mod tests {
         }
     }
     #[test]
-    fn questions_never_mention_rounds_or_turns() {
+    fn questions_use_plain_names_without_temporal_or_coin_wording() {
         for q in played().questions(&quiz()).expect("quiz") {
-            let words: Vec<_> = q.prompt.split(|c: char| !c.is_alphabetic()).collect();
+            let lower = q.prompt.to_lowercase();
+            let words: Vec<_> = lower.split(|c: char| !c.is_alphabetic()).collect();
             assert!(
-                !words
-                    .iter()
-                    .any(|word| matches!(*word, "round" | "rounds" | "turn" | "turns")),
+                !words.iter().any(|word| matches!(
+                    *word,
+                    "round"
+                        | "rounds"
+                        | "turn"
+                        | "turns"
+                        | "coin"
+                        | "coins"
+                        | "when"
+                        | "now"
+                        | "currently"
+                )),
                 "{}",
                 q.prompt
             );
@@ -803,9 +784,8 @@ mod tests {
         let world = played();
         let log = world.log();
         for (kind, capacity) in [
-            (Kind::Fact, 24),
+            (Kind::Fact, fact_capacity(&world)),
             (Kind::Order, 66),
-            (Kind::State, 12),
             (Kind::Negative, 25),
         ] {
             let request = QuizRequest {
@@ -816,10 +796,6 @@ mod tests {
             let qs = world.questions(&request).expect("full pool");
             let prompts: BTreeSet<_> = qs.iter().map(|q| &q.prompt).collect();
             assert_eq!(prompts.len(), capacity);
-            if kind == Kind::State {
-                let sources: BTreeSet<_> = qs.iter().map(|q| q.fact_round).collect();
-                assert_eq!(sources.len(), qs.len(), "one question per coin-state fact");
-            }
             for q in &qs {
                 assert_eq!(q.lookback, 12 - q.fact_round);
                 if kind == Kind::Negative && q.expected == json!("NO") {
@@ -857,13 +833,12 @@ mod tests {
         assert!(unfinished.questions(&quiz()).is_err());
     }
     #[test]
-    fn typed_answers_normalize_case_and_whitespace_and_reject_malformed_values() {
+    fn answers_require_exact_typed_values_and_malformed_answers_score_zero() {
         let world = played();
         let mut qs = Vec::new();
         for (kind, count) in [
-            (Kind::Fact, 24),
+            (Kind::Fact, fact_capacity(&world)),
             (Kind::Order, 66),
-            (Kind::State, 12),
             (Kind::Negative, 25),
         ] {
             for mut q in world
@@ -878,51 +853,56 @@ mod tests {
                 qs.push(q);
             }
         }
-        let answers: serde_json::Map<String, Value> = qs
-            .iter()
-            .map(|q| {
-                (
-                    q.id.clone(),
-                    match &q.expected {
-                        Value::String(s) => {
-                            json!(format!("  {}  ", s.to_uppercase().replace(' ', "  ")))
-                        }
-                        Value::Number(n) => json!(format!(" {n} ")),
-                        _ => panic!("typed key"),
-                    },
-                )
-            })
-            .collect();
-        assert_eq!(
-            score(&Value::Object(answers).to_string(), &qs)["correct"],
-            json!(qs.len())
-        );
         let exact: serde_json::Map<String, Value> = qs
             .iter()
             .map(|q| (q.id.clone(), q.expected.clone()))
             .collect();
-        assert_eq!(
-            score(&format!("```json\n{}\n```", Value::Object(exact)), &qs)["correct"],
-            json!(qs.len())
-        );
+        let answer = Value::Object(exact).to_string();
+        assert_eq!(score(&answer, &qs)["correct"], json!(qs.len()));
         for malformed in [
-            "garbage",
-            "{not json}",
-            "[]",
-            "{}",
-            "{\"q1\":{},\"q2\":null}",
+            "garbage".to_owned(),
+            "{not json}".to_owned(),
+            "[]".to_owned(),
+            "{}".to_owned(),
+            format!("```json\n{answer}\n```"),
+            format!("{answer} trailing"),
         ] {
-            assert_eq!(score(malformed, &qs)["correct"], json!(0));
+            assert_eq!(score(&malformed, &qs)["correct"], json!(0));
         }
+        assert!(qs.iter().any(|q| q.expected.is_number()));
+        assert!(
+            qs.iter()
+                .any(|q| q.kind == Kind::Fact && q.expected.is_string())
+        );
         for q in &qs {
-            for value in [
+            let mut wrong = vec![
                 json!(true),
                 json!(null),
                 json!([]),
                 json!({}),
                 json!(1.5),
                 json!("wrong"),
-            ] {
+            ];
+            if let Some(text) = q.expected.as_str() {
+                wrong.extend(
+                    [
+                        json!(text.to_lowercase()),
+                        json!(format!(" {text} ")),
+                        json!(text.to_uppercase()),
+                    ]
+                    .into_iter()
+                    .filter(|v| v != &q.expected),
+                );
+            } else {
+                wrong.extend([
+                    json!(q.expected.to_string()),
+                    json!(q.expected.as_f64().expect("number")),
+                ]);
+            }
+            if matches!(q.kind, Kind::Order | Kind::Negative) {
+                wrong.extend([json!(1), json!("true"), json!("y"), json!("0")]);
+            }
+            for value in wrong {
                 assert_eq!(
                     score(
                         &json!({q.id.clone():value}).to_string(),
@@ -931,57 +911,107 @@ mod tests {
                     json!(0)
                 );
             }
-            if q.expected.is_number() {
-                for value in [json!("12.0"), json!("1,234"), json!("NaN")] {
-                    assert_eq!(normalize(&value, &q.expected), None);
-                }
-            }
-            if matches!(q.kind, Kind::Order | Kind::Negative) {
-                for value in [json!(1), json!("true"), json!("y"), json!("0")] {
-                    assert_eq!(
-                        score(
-                            &json!({q.id.clone():value}).to_string(),
-                            std::slice::from_ref(q)
-                        )["correct"],
-                        json!(0)
-                    );
-                }
-            }
         }
     }
+    fn fact_capacity(world: &StoryWorld) -> usize {
+        let state = world.state.lock_recover();
+        state
+            .rounds
+            .iter()
+            .flat_map(|r| &r.node.facts.entities)
+            .filter(|entity| {
+                let value = entity
+                    .value
+                    .as_str()
+                    .map_or_else(|| entity.value.to_string(), str::to_owned);
+                state
+                    .nodes
+                    .values()
+                    .map(|n| n.passage.matches(&value).count())
+                    .sum::<usize>()
+                    == 1
+            })
+            .count()
+    }
     #[test]
-    fn state_anchors_use_the_total_right_after_the_entity_passage_delta() {
+    fn fact_answers_have_exactly_one_literal_passage_source_and_no_sibling_source() {
         let world = played();
+        let qs = world
+            .questions(&QuizRequest {
+                seed: 1,
+                questions: fact_capacity(&world),
+                types: vec![Kind::Fact],
+            })
+            .expect("facts");
+        assert!(qs.len() >= 6);
         let log = world.log();
-        let mut final_phrasings = BTreeSet::new();
-        for seed in 0..8 {
-            let qs = world
-                .questions(&QuizRequest {
-                    seed,
-                    questions: 12,
-                    types: vec![Kind::State],
-                })
-                .expect("quiz");
-            let mut total = 0;
-            for round in &log {
-                total += round.node.facts.coin_delta;
-                let q = qs
-                    .iter()
-                    .find(|q| q.fact_round == round.round)
-                    .expect("coin-state fact");
-                if q.prompt == "How many coins do you have now?" {
-                    assert_eq!(round.round, 12);
-                    final_phrasings.insert("now");
-                } else {
-                    assert!(q.prompt.contains(&round.node.facts.entities[0].name));
-                    if round.round == 12 {
-                        final_phrasings.insert("entity");
-                    }
-                }
-                assert_eq!(q.expected, json!(total));
-                assert_eq!(q.lookback, 12 - round.round);
+        let state = world.state.lock_recover();
+        let mut attributes = BTreeSet::new();
+        for q in qs {
+            let source = log
+                .iter()
+                .find(|r| r.node.path == q.source_path)
+                .expect("visited source");
+            let entity = source
+                .node
+                .facts
+                .entities
+                .iter()
+                .find(|e| e.question() == q.prompt)
+                .expect("full name and direct attribute");
+            attributes.insert(format!("{:?}", entity.attribute));
+            assert_eq!(entity.value, q.expected);
+            assert!(source.node.passage.contains(&entity.statement()));
+            let answer = q
+                .expected
+                .as_str()
+                .map_or_else(|| q.expected.to_string(), str::to_owned);
+            assert_eq!(
+                log.iter()
+                    .map(|r| r.node.passage.matches(&answer).count())
+                    .sum::<usize>(),
+                1
+            );
+            for node in state.nodes.values().filter(|n| n.path != q.source_path) {
+                assert!(
+                    !node.passage.contains(&answer),
+                    "{} in {}",
+                    answer,
+                    node.passage
+                );
             }
         }
-        assert_eq!(final_phrasings.len(), 2);
+        assert!(attributes.len() >= 2);
+    }
+    #[test]
+    fn default_mix_is_six_facts_three_negatives_three_orders_and_refuses_short_paths() {
+        let request: QuizRequest =
+            serde_json::from_value(json!({"seed":1,"questions":12})).expect("default mix");
+        let qs = played().questions(&request).expect("quiz");
+        for (kind, expected) in [(Kind::Fact, 6), (Kind::Negative, 3), (Kind::Order, 3)] {
+            assert_eq!(qs.iter().filter(|q| q.kind == kind).count(), expected);
+        }
+        let world = StoryWorld::new(config());
+        world.start().expect("start");
+        world.choose("one", &json!({"option":"A"})).expect("choose");
+        assert!(world.questions(&request).is_err());
+        assert!(
+            world
+                .questions(&QuizRequest {
+                    seed: 1,
+                    questions: 0,
+                    types: default_types()
+                })
+                .is_err()
+        );
+        assert!(
+            world
+                .questions(&QuizRequest {
+                    seed: 1,
+                    questions: 1,
+                    types: vec![]
+                })
+                .is_err()
+        );
     }
 }
