@@ -95,12 +95,63 @@ fn token(rng: &mut Random, ends: &[&str]) -> String {
         ends[rng.index(ends.len())]
     )
 }
+const MATERIALS: [&str; 8] = [
+    "copper", "oak", "silver", "brass", "glass", "iron", "clay", "silk",
+];
+const PETS: [&str; 16] = [
+    "Pepper", "Biscuit", "Clover", "Mango", "Pip", "Sunny", "Scout", "Mochi", "Olive", "Pebble",
+    "Ruby", "Socks", "Toffee", "Waffle", "Willow", "Ziggy",
+];
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum Attribute {
+    Age,
+    DoorCode,
+    Color,
+    Material,
+    PetName,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct Entity {
+    name: String,
+    attribute: Attribute,
+    value: Value,
+}
+impl Entity {
+    fn statement(&self) -> String {
+        match self.attribute {
+            Attribute::Age => format!("You meet {} who just turned {}.", self.name, self.value),
+            Attribute::DoorCode => format!("The gate of {} opens with {}.", self.name, self.value),
+            Attribute::Color => format!(
+                "{} is {}.",
+                self.name,
+                self.value.as_str().unwrap_or_default()
+            ),
+            Attribute::Material => format!(
+                "{} is made of {}.",
+                self.name,
+                self.value.as_str().unwrap_or_default()
+            ),
+            Attribute::PetName => format!(
+                "{} is called {}.",
+                self.name,
+                self.value.as_str().unwrap_or_default()
+            ),
+        }
+    }
+    fn question(&self) -> String {
+        match self.attribute {
+            Attribute::Age => format!("How old is {}?", self.name),
+            Attribute::DoorCode => format!("What opens the gate of {}?", self.name),
+            Attribute::Color => format!("What colour is {}?", self.name),
+            Attribute::Material => format!("What is {} made of?", self.name),
+            Attribute::PetName => format!("What is {} called?", self.name),
+        }
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 struct Facts {
-    place: String,
-    person: String,
-    item: String,
-    code: u64,
+    entities: Vec<Entity>,
     coin_delta: i64,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -115,21 +166,62 @@ struct Node {
     passage: String,
     choices: Vec<Choice>,
 }
-fn node(config: &StoryConfig, path: &[usize]) -> Node {
+fn unique_name(rng: &mut Random, ends: &[&str], used: &mut BTreeSet<String>) -> String {
+    let base = token(rng, ends);
+    let mut name = base.clone();
+    let mut suffix = 2;
+    while !used.insert(name.clone()) {
+        name = format!("{base} {suffix}");
+        suffix += 1;
+    }
+    name
+}
+fn node(config: &StoryConfig, path: &[usize], used: &mut BTreeSet<String>) -> Node {
     let mut rng = Random(config.seed ^ config.vocabulary_seed.wrapping_mul(0xD1B5_4A32_D192_ED03));
     for &option in path {
         rng.0 = rng.next() ^ (option as u64).wrapping_mul(0x94D0_49BB_1331_11EB);
     }
+    let person = unique_name(&mut rng, &PEOPLE, used);
+    let age = Entity {
+        name: person.clone(),
+        attribute: Attribute::Age,
+        value: json!(18 + rng.index(68)),
+    };
+    let other = match rng.index(4) {
+        0 => Entity {
+            name: unique_name(&mut rng, &PLACES, used),
+            attribute: Attribute::DoorCode,
+            value: json!(10000 + rng.next() % 90000),
+        },
+        1 => Entity {
+            name: unique_name(&mut rng, &ITEMS, used),
+            attribute: Attribute::Color,
+            value: json!(COLORS[rng.index(COLORS.len())].to_lowercase()),
+        },
+        2 => Entity {
+            name: unique_name(&mut rng, &ITEMS, used),
+            attribute: Attribute::Material,
+            value: json!(MATERIALS[rng.index(MATERIALS.len())]),
+        },
+        _ => {
+            let name = format!("{person}'s dog");
+            used.insert(name.clone());
+            Entity {
+                name,
+                attribute: Attribute::PetName,
+                value: json!(unique_name(&mut rng, &PETS, used)),
+            }
+        }
+    };
     let facts = Facts {
-        place: token(&mut rng, &PLACES),
-        person: token(&mut rng, &PEOPLE),
-        item: token(&mut rng, &ITEMS),
-        code: 10000 + rng.next() % 90000,
+        entities: vec![age, other],
         coin_delta: rng.index(41) as i64 - 20,
     };
     let passage = format!(
-        "At {}, you meet {} carrying a {}. The door code is {}. Your coins change by {:+} when you leave.",
-        facts.place, facts.person, facts.item, facts.code, facts.coin_delta
+        "{} {} Your coins change by {:+} when you leave.",
+        facts.entities[0].statement(),
+        facts.entities[1].statement(),
+        facts.coin_delta
     );
     let choices = (0..config.branching)
         .map(|i| Choice {
@@ -161,6 +253,8 @@ struct WorldState {
     rounds: Vec<Round>,
     coins: i64,
     calls: BTreeMap<String, Result<Value, String>>,
+    nodes: BTreeMap<Vec<usize>, Node>,
+    names: BTreeSet<String>,
 }
 #[derive(Clone)]
 pub(crate) struct StoryWorld {
@@ -171,7 +265,7 @@ impl StoryWorld {
     pub(crate) fn new(config: StoryConfig) -> Self {
         Self {
             config,
-            state: Arc::default(),
+            state: Arc::new(Mutex::new(WorldState::default())),
         }
     }
     fn start(&self) -> Result<Value, String> {
@@ -179,17 +273,30 @@ impl StoryWorld {
         if state.rounds.last().is_some_and(|r| r.choice.is_none()) {
             return Err("the current round is unfinished".into());
         }
+        let path = state.path.clone();
+        self.reserve_node(&mut state, &path);
         let round = Round {
             round: state.rounds.len() + 1,
-            node: node(&self.config, &state.path),
+            node: state.nodes[&path].clone(),
             choice: None,
             coins: state.coins,
         };
         state.rounds.push(round);
         Ok(self.read_in(&state))
     }
+    // Reserve a branch's siblings together, before any destination is exposed.
+    // Names belong to one node for the entire journey, including unseen branches.
+    fn reserve_node(&self, state: &mut WorldState, path: &[usize]) {
+        if !state.nodes.contains_key(path) {
+            state
+                .nodes
+                .insert(path.to_vec(), node(&self.config, path, &mut state.names));
+        }
+    }
     fn read_in(&self, state: &WorldState) -> Value {
-        let current = node(&self.config, &state.path);
+        let Some(current) = state.nodes.get(&state.path) else {
+            return json!({"error": "no round has started"});
+        };
         let choice = state.rounds.last().and_then(|r| r.choice.as_ref());
         json!({
             "round": state.rounds.len(), "round_finished": choice.is_some(),
@@ -225,6 +332,12 @@ impl StoryWorld {
         round.choice = Some(option.to_owned());
         state.coins += round.node.facts.coin_delta;
         round.coins = state.coins;
+        let parent_path = state.path.clone();
+        for option in 0..self.config.branching {
+            let mut path = parent_path.clone();
+            path.push(option);
+            self.reserve_node(state, &path);
+        }
         state.path.push(index);
         Ok(self.read_in(state))
     }
@@ -232,13 +345,14 @@ impl StoryWorld {
         self.state.lock_recover().rounds.clone()
     }
     fn questions(&self, request: &QuizRequest) -> Result<Vec<Question>, String> {
-        questions(&self.config, &self.log(), request)
+        let state = self.state.lock_recover();
+        questions(&self.config, &state.rounds, &state.nodes, request)
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum Kind {
-    Recall,
+    Fact,
     Order,
     State,
     Negative,
@@ -246,7 +360,7 @@ enum Kind {
 impl Kind {
     fn label(self) -> &'static str {
         match self {
-            Self::Recall => "recall",
+            Self::Fact => "fact",
             Self::Order => "order",
             Self::State => "state",
             Self::Negative => "negative",
@@ -274,6 +388,7 @@ struct Question {
 fn questions(
     config: &StoryConfig,
     log: &[Round],
+    nodes: &BTreeMap<Vec<usize>, Node>,
     request: &QuizRequest,
 ) -> Result<Vec<Question>, String> {
     if log.is_empty() || log.iter().any(|r| r.choice.is_none()) {
@@ -282,160 +397,144 @@ fn questions(
     if request.questions == 0 || request.types.is_empty() {
         return Err("questions and type mix must be nonempty".into());
     }
-    let mut seen = BTreeSet::new();
-    let visits: Vec<usize> = log
-        .iter()
-        .enumerate()
-        .filter(|(_, round)| seen.insert(&round.node.facts.place))
-        .map(|(index, _)| index)
-        .collect();
-    let mut pairs = Vec::new();
-    for (index, &a) in visits.iter().enumerate() {
-        for &b in &visits[index + 1..] {
-            pairs.push((a, b));
+    let mut facts = Vec::new();
+    let mut orders = Vec::new();
+    let mut states = Vec::new();
+    let mut visited = Vec::new();
+    let mut unvisited = Vec::new();
+    let mut rng = Random(request.seed ^ 0x5155_495A);
+    let question = |kind, prompt, expected, round: &Round, source_path| Question {
+        id: String::new(),
+        kind,
+        prompt,
+        expected,
+        lookback: log.len() - round.round,
+        fact_round: round.round,
+        source_path,
+    };
+    for (i, round) in log.iter().enumerate() {
+        let person = &round.node.facts.entities[0].name;
+        for entity in &round.node.facts.entities {
+            facts.push(question(
+                Kind::Fact,
+                entity.question(),
+                entity.value.clone(),
+                round,
+                round.node.path.clone(),
+            ));
+        }
+        states.push(question(
+            Kind::State,
+            format!("How many coins did you have when you met {person}?"),
+            json!(round.coins),
+            round,
+            round.node.path.clone(),
+        ));
+        visited.push(question(
+            Kind::Negative,
+            format!("Did you meet {person}?"),
+            json!("YES"),
+            round,
+            round.node.path.clone(),
+        ));
+        for later in &log[i + 1..] {
+            let later_person = &later.node.facts.entities[0].name;
+            let yes = rng.index(2) == 0;
+            let (first, second) = if yes {
+                (person, later_person)
+            } else {
+                (later_person, person)
+            };
+            orders.push(question(
+                Kind::Order,
+                format!("Did you meet {first} before you met {second}?"),
+                json!(if yes { "YES" } else { "NO" }),
+                round,
+                round.node.path.clone(),
+            ));
+        }
+        let chosen = round
+            .node
+            .choices
+            .iter()
+            .position(|c| Some(&c.option) == round.choice.as_ref())
+            .ok_or("missing logged choice")?;
+        for option in 0..config.branching {
+            if option == chosen {
+                continue;
+            }
+            let mut path = round.node.path.clone();
+            path.push(option);
+            let sibling = nodes.get(&path).ok_or("missing reserved sibling")?;
+            unvisited.push(question(
+                Kind::Negative,
+                format!("Did you meet {}?", sibling.facts.entities[0].name),
+                json!("NO"),
+                round,
+                path,
+            ));
         }
     }
-    let orders = (0..request.questions)
-        .filter(|i| request.types[i % request.types.len()] == Kind::Order)
-        .count();
-    if orders > pairs.len() {
-        return Err("more order questions than distinct path pairs".into());
+    let last = &log[log.len() - 1];
+    states.push(question(
+        Kind::State,
+        "How many coins do you have now?".into(),
+        json!(last.coins),
+        last,
+        last.node.path.clone(),
+    ));
+    // Every pool is finite and each fact/unordered pair is present once.
+    let count = |kind| {
+        (0..request.questions)
+            .filter(|i| request.types[i % request.types.len()] == kind)
+            .count()
+    };
+    let negatives = count(Kind::Negative);
+    if count(Kind::Fact) > facts.len()
+        || count(Kind::Order) > orders.len()
+        || count(Kind::State) > states.len()
+        || negatives.div_ceil(2) > unvisited.len()
+        || negatives / 2 > visited.len()
+    {
+        return Err(
+            "more questions than distinct facts or pairs for the requested type mix".into(),
+        );
     }
-    let mut rng = Random(request.seed ^ 0x5155_495A);
     let mut result = Vec::new();
+    let mut negative_index: usize = 0;
     for i in 0..request.questions {
         let kind = request.types[i % request.types.len()];
-        let index = rng.index(log.len());
-        let round = &log[index];
-        let facts = &round.node.facts;
-        let mut source_path = round.node.path.clone();
-        let (prompt, expected, fact_round) = match kind {
-            Kind::Recall => match rng.index(4) {
-                0 => (
-                    format!("Who did you meet in round {}?", round.round),
-                    json!(facts.person),
-                    round.round,
-                ),
-                1 => (
-                    format!("What item did you see in round {}?", round.round),
-                    json!(facts.item),
-                    round.round,
-                ),
-                2 => (
-                    format!(
-                        "What was the door code in round {} at {}?",
-                        round.round, facts.place
-                    ),
-                    json!(facts.code),
-                    round.round,
-                ),
-                _ => (
-                    format!("Which place did you visit in round {}?", round.round),
-                    json!(facts.place),
-                    round.round,
-                ),
-            },
-            Kind::Order => {
-                let (a, b) = pairs.swap_remove(rng.index(pairs.len()));
-                source_path = log[a].node.path.clone();
-                let (x, y) = if rng.index(2) == 0 { (a, b) } else { (b, a) };
-                (
-                    format!(
-                        "Which did you visit first, {} or {}?",
-                        log[x].node.facts.place, log[y].node.facts.place
-                    ),
-                    json!(log[a].node.facts.place),
-                    log[a].round,
-                )
-            }
-            Kind::State => (
-                format!("How many coins did you have after round {}?", round.round),
-                json!(round.coins),
-                round.round,
-            ),
+        let pool = match kind {
+            Kind::Fact => &mut facts,
+            Kind::Order => &mut orders,
+            Kind::State => &mut states,
             Kind::Negative => {
-                let no = (i / request.types.len()).is_multiple_of(2);
-                if no {
-                    // A sibling of the chosen destination, never the destination itself.
-                    let mut candidates = Vec::new();
-                    for parent in log {
-                        let chosen = parent
-                            .node
-                            .choices
-                            .iter()
-                            .position(|c| Some(&c.option) == parent.choice.as_ref())
-                            .ok_or("missing logged choice")?;
-                        for option in 0..config.branching {
-                            if option == chosen {
-                                continue;
-                            }
-                            let mut path = parent.node.path.clone();
-                            path.push(option);
-                            let sibling = node(config, &path);
-                            if !log
-                                .iter()
-                                .any(|r| r.node.facts.place == sibling.facts.place)
-                            {
-                                candidates.push((parent.round, sibling));
-                            }
-                        }
-                    }
-                    if candidates.is_empty() {
-                        return Err("no unvisited sibling place available".into());
-                    }
-                    let (seen, sibling) = candidates.swap_remove(rng.index(candidates.len()));
-                    source_path = sibling.path;
-                    (
-                        format!("Did you visit {}? Answer YES or NO.", sibling.facts.place),
-                        json!("NO"),
-                        seen,
-                    )
-                } else {
-                    (
-                        format!("Did you visit {}? Answer YES or NO.", facts.place),
-                        json!("YES"),
-                        round.round,
-                    )
-                }
+                let no = negative_index.is_multiple_of(2);
+                negative_index += 1;
+                if no { &mut unvisited } else { &mut visited }
             }
         };
-        result.push(Question {
-            id: format!("q{}", i + 1),
-            kind,
-            prompt,
-            lookback: log.len() - fact_round,
-            fact_round,
-            expected,
-            source_path,
-        });
+        let mut q = pool.swap_remove(rng.index(pool.len()));
+        q.id = format!("q{}", i + 1);
+        result.push(q);
     }
     Ok(result)
 }
-fn normalize(value: &Value, kind: Kind) -> Option<String> {
-    let text = match value {
-        Value::String(s) => s.clone(),
-        Value::Number(n) => n.to_string(),
-        _ => return None,
-    };
-    let text = text
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_lowercase();
-    if kind == Kind::Negative {
-        return match text.as_str() {
-            "yes" | "y" | "true" | "1" => Some("yes".into()),
-            "no" | "n" | "false" | "0" => Some("no".into()),
+fn normalize(value: &Value, expected: &Value) -> Option<String> {
+    match expected {
+        Value::Number(_) => match value {
+            Value::Number(n) => n.as_i64().map(|n| n.to_string()),
+            Value::String(s) => s.trim().parse::<i64>().ok().map(|n| n.to_string()),
             _ => None,
-        };
+        },
+        Value::String(_) => value.as_str().map(|s| {
+            s.split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase()
+        }),
+        _ => None,
     }
-    let numeric = text.replace([',', '_', ' '], "");
-    if let Ok(n) = numeric.parse::<f64>()
-        && n.is_finite()
-    {
-        return Some(n.to_string());
-    }
-    Some(text)
 }
 fn score(answer: &str, questions: &[Question]) -> Value {
     let object = answer.match_indices('{').find_map(|(start, _)| {
@@ -450,7 +549,7 @@ fn score(answer: &str, questions: &[Question]) -> Value {
     let mut correct_count = 0;
     let rows: Vec<Value> = questions.iter().map(|q| {
         let given = object.as_ref().and_then(|o| o.get(&q.id));
-        let correct = given.and_then(|v| normalize(v,q.kind)).is_some_and(|v| Some(v)==normalize(&q.expected,q.kind));
+        let correct = given.and_then(|v| normalize(v,&q.expected)).is_some_and(|v| Some(v)==normalize(&q.expected,&q.expected));
         correct_count += usize::from(correct);
         let bucket = match q.lookback { 0..=3 => "0-3", 4..=7 => "4-7", _ => "8+" };
         for counter in [by_type.entry(q.kind.label().into()).or_default(), by_lookback.entry(bucket.into()).or_default()] { counter.0 += usize::from(correct); counter.1 += 1; }
@@ -591,35 +690,8 @@ mod tests {
         QuizRequest {
             seed: 1,
             questions: 12,
-            types: vec![Kind::Recall, Kind::Order, Kind::State, Kind::Negative],
+            types: vec![Kind::Fact, Kind::Order, Kind::State, Kind::Negative],
         }
-    }
-    #[test]
-    fn the_same_seed_gives_the_same_tree_and_passages() {
-        for path in [vec![], vec![0], vec![2, 1, 0], vec![1; 10000]] {
-            assert_eq!(node(&config(), &path), node(&config(), &path));
-            assert_ne!(
-                node(&config(), &path),
-                node(
-                    &StoryConfig {
-                        seed: 2,
-                        ..config()
-                    },
-                    &path
-                )
-            );
-            assert_ne!(
-                node(&config(), &path),
-                node(
-                    &StoryConfig {
-                        vocabulary_seed: 2,
-                        ..config()
-                    },
-                    &path
-                )
-            );
-        }
-        assert_ne!(node(&config(), &[0]), node(&config(), &[1]));
     }
     #[test]
     fn an_invalid_choice_changes_nothing() {
@@ -670,7 +742,7 @@ mod tests {
         let mut coins = 0;
         for (i, round) in world.log().iter().enumerate() {
             assert_eq!(round.round, i + 1);
-            assert_eq!(round.node, node(&config(), &path));
+            assert_eq!(round.node.path, path);
             assert_eq!(round.choice.as_deref(), Some(["A", "B", "C"][i % 3]));
             coins += round.node.facts.coin_delta;
             assert_eq!(round.coins, coins);
@@ -680,167 +752,231 @@ mod tests {
         assert_eq!(world.state.lock_recover().coins, coins);
     }
     #[test]
-    fn the_question_generator_is_reproducible_and_uses_only_the_path_or_unvisited_siblings() {
-        let world = played();
-        let log = world.log();
-        let questions = world.questions(&quiz()).expect("quiz");
-        assert_eq!(questions, world.questions(&quiz()).expect("repeat"));
-        assert!(questions.iter().any(|q| q.expected == json!("YES")));
-        assert!(questions.iter().any(|q| q.expected == json!("NO")));
-        for q in &questions {
-            if q.kind == Kind::Negative && q.expected == json!("NO") {
-                assert!(!log.iter().any(|r| r.node.path == q.source_path));
-                assert!(
-                    log.iter()
-                        .any(|r| r.node.path == q.source_path[..q.source_path.len() - 1])
-                );
-                let place = node(&config(), &q.source_path).facts.place;
-                assert!(q.prompt.contains(&place));
-                assert!(!log.iter().any(|r| r.node.facts.place == place));
-            } else {
-                assert!(log.iter().any(|r| r.node.path == q.source_path));
-            }
-            match q.kind {
-                Kind::State => assert_eq!(q.expected, json!(log[q.fact_round - 1].coins)),
-                Kind::Order => {
-                    let first = &log[q.fact_round - 1];
-                    assert_eq!(q.expected, json!(first.node.facts.place));
-                    assert!(
-                        log.iter().any(
-                            |r| r.round > first.round && q.prompt.contains(&r.node.facts.place)
-                        )
-                    );
-                }
-                Kind::Recall => {
-                    let facts = &log[q.fact_round - 1].node.facts;
-                    assert!(
-                        [
-                            json!(facts.person),
-                            json!(facts.item),
-                            json!(facts.place),
-                            json!(facts.code)
-                        ]
-                        .contains(&q.expected)
-                    );
-                }
-                Kind::Negative => {}
-            }
-        }
-        // Place tokens may repeat on a long path: order means first visit.
-        let repeated = StoryWorld::new(config());
+    fn seeded_journeys_reproduce_passages_and_questions() {
+        let a = played();
+        let b = played();
+        assert_eq!(a.log(), b.log());
+        assert_eq!(
+            a.questions(&quiz()).expect("quiz"),
+            b.questions(&quiz()).expect("quiz")
+        );
+        let other = StoryWorld::new(StoryConfig {
+            seed: 2,
+            ..config()
+        });
+        assert_ne!(
+            a.log()[0].node.passage,
+            other.start().expect("start")["passage"]
+        );
+    }
+    #[test]
+    fn entity_names_are_unique_across_the_path_and_unvisited_siblings() {
+        let world = StoryWorld::new(config());
         for i in 0..500 {
-            repeated.start().expect("start");
-            repeated
-                .choose(&format!("repeat-{i}"), &json!({"option":"A"}))
+            world.start().expect("start");
+            world
+                .choose(&format!("c{i}"), &json!({"option":"A"}))
                 .expect("choose");
         }
-        let repeated_log = repeated.log();
-        let mut first_visits = BTreeMap::new();
-        for r in &repeated_log {
-            first_visits
-                .entry(r.node.facts.place.as_str())
-                .or_insert(r.round);
+        let state = world.state.lock_recover();
+        let mut names = BTreeSet::new();
+        for node in state.nodes.values() {
+            for entity in &node.facts.entities {
+                assert!(names.insert(entity.name.clone()), "{}", entity.name);
+                if entity.attribute == Attribute::PetName {
+                    assert!(names.insert(entity.value.as_str().expect("pet").to_owned()));
+                }
+            }
         }
-        assert!(
-            first_visits.len() < repeated_log.len(),
-            "seeded repeated place fixture"
-        );
-        for q in repeated
-            .questions(&QuizRequest {
+        // This journey exceeds the person vocabulary's birthday-collision threshold.
+        assert!(names.iter().any(|name| name.ends_with(" 2")));
+    }
+    #[test]
+    fn questions_never_mention_rounds_or_turns() {
+        for q in played().questions(&quiz()).expect("quiz") {
+            let words: Vec<_> = q.prompt.split(|c: char| !c.is_alphabetic()).collect();
+            assert!(
+                !words
+                    .iter()
+                    .any(|word| matches!(*word, "round" | "rounds" | "turn" | "turns")),
+                "{}",
+                q.prompt
+            );
+        }
+    }
+    #[test]
+    fn quizzes_use_distinct_facts_and_pairs_and_refuse_exhausted_pools() {
+        let world = played();
+        let log = world.log();
+        for (kind, capacity) in [
+            (Kind::Fact, 24),
+            (Kind::Order, 66),
+            (Kind::State, 13),
+            (Kind::Negative, 25),
+        ] {
+            let request = QuizRequest {
                 seed: 1,
-                questions: 200,
-                types: vec![Kind::Order],
-            })
-            .expect("order quiz")
-        {
-            let first = first_visits
-                .iter()
-                .filter(|(place, _)| q.prompt.contains(**place))
-                .min_by_key(|(_, round)| **round)
-                .expect("a visited place");
-            assert_eq!(q.expected, json!(first.0));
-            assert_eq!(q.fact_round, *first.1);
+                questions: capacity,
+                types: vec![kind],
+            };
+            let qs = world.questions(&request).expect("full pool");
+            let prompts: BTreeSet<_> = qs.iter().map(|q| &q.prompt).collect();
+            assert_eq!(prompts.len(), capacity);
+            for q in &qs {
+                assert_eq!(q.lookback, 12 - q.fact_round);
+                if kind == Kind::Negative && q.expected == json!("NO") {
+                    assert!(!log.iter().any(|r| r.node.path == q.source_path));
+                    assert!(
+                        log.iter()
+                            .any(|r| r.node.path == q.source_path[..q.source_path.len() - 1])
+                    );
+                } else {
+                    assert!(log.iter().any(|r| r.node.path == q.source_path));
+                }
+                if kind == Kind::Order {
+                    let mentioned: Vec<_> = log
+                        .iter()
+                        .filter(|r| q.prompt.contains(&r.node.facts.entities[0].name))
+                        .collect();
+                    assert_eq!(mentioned.len(), 2);
+                    let yes = q.prompt.find(&mentioned[0].node.facts.entities[0].name)
+                        < q.prompt.find(&mentioned[1].node.facts.entities[0].name);
+                    assert_eq!(q.expected, json!(if yes { "YES" } else { "NO" }));
+                    assert_eq!(q.fact_round, mentioned[0].round);
+                }
+            }
+            assert!(
+                world
+                    .questions(&QuizRequest {
+                        questions: capacity + 1,
+                        ..request
+                    })
+                    .is_err()
+            );
         }
-        let too_many = QuizRequest {
-            seed: 1,
-            questions: 67,
-            types: vec![Kind::Order],
-        };
-        assert!(world.questions(&too_many).is_err());
         let unfinished = StoryWorld::new(config());
         unfinished.start().expect("start");
         assert!(unfinished.questions(&quiz()).is_err());
     }
     #[test]
-    fn the_scorer_normalizes_answers_and_handles_malformed_answers() {
-        let qs = played().questions(&quiz()).expect("quiz");
+    fn typed_answers_normalize_case_and_whitespace_and_reject_malformed_values() {
+        let world = played();
+        let mut qs = Vec::new();
+        for (kind, count) in [
+            (Kind::Fact, 24),
+            (Kind::Order, 66),
+            (Kind::State, 13),
+            (Kind::Negative, 25),
+        ] {
+            for mut q in world
+                .questions(&QuizRequest {
+                    seed: 1,
+                    questions: count,
+                    types: vec![kind],
+                })
+                .expect("quiz")
+            {
+                q.id = format!("q{}", qs.len() + 1);
+                qs.push(q);
+            }
+        }
         let answers: serde_json::Map<String, Value> = qs
             .iter()
             .map(|q| {
-                let value = match &q.expected {
-                    Value::String(s) if q.kind == Kind::Negative => {
-                        json!(if s == "YES" { " true " } else { " n " })
-                    }
-                    Value::String(s) => {
-                        json!(format!("  {}  ", s.to_uppercase().replace(' ', "  ")))
-                    }
-                    Value::Number(n) => json!(format!("{n}.00")),
-                    _ => panic!("scalar key"),
-                };
-                (q.id.clone(), value)
+                (
+                    q.id.clone(),
+                    match &q.expected {
+                        Value::String(s) => {
+                            json!(format!("  {}  ", s.to_uppercase().replace(' ', "  ")))
+                        }
+                        Value::Number(n) => json!(format!(" {n} ")),
+                        _ => panic!("typed key"),
+                    },
+                )
             })
             .collect();
-        let text = format!("```json\n{}\n```", Value::Object(answers.clone()));
-        assert_eq!(score(&text, &qs)["correct"], json!(12));
-        for malformed in ["garbage", "{not json}", "[]", "{\"q1\":{},\"q2\":null}"] {
+        assert_eq!(
+            score(&Value::Object(answers).to_string(), &qs)["correct"],
+            json!(qs.len())
+        );
+        let exact: serde_json::Map<String, Value> = qs
+            .iter()
+            .map(|q| (q.id.clone(), q.expected.clone()))
+            .collect();
+        assert_eq!(
+            score(&format!("```json\n{}\n```", Value::Object(exact)), &qs)["correct"],
+            json!(qs.len())
+        );
+        for malformed in [
+            "garbage",
+            "{not json}",
+            "[]",
+            "{}",
+            "{\"q1\":{},\"q2\":null}",
+        ] {
             assert_eq!(score(malformed, &qs)["correct"], json!(0));
         }
-        let one = json!({qs[0].id.clone(): answers[&qs[0].id].clone()});
-        assert_eq!(score(&one.to_string(), &qs)["correct"], json!(1));
-        assert_eq!(
-            normalize(&json!(" 12,345.00 "), Kind::Recall),
-            Some("12345".into())
-        );
-        assert_eq!(
-            normalize(&json!("false"), Kind::Negative),
-            Some("no".into())
-        );
-        assert_eq!(normalize(&json!("maybe"), Kind::Negative), None);
+        for q in &qs {
+            for value in [
+                json!(true),
+                json!(null),
+                json!([]),
+                json!({}),
+                json!(1.5),
+                json!("wrong"),
+            ] {
+                assert_eq!(
+                    score(
+                        &json!({q.id.clone():value}).to_string(),
+                        std::slice::from_ref(q)
+                    )["correct"],
+                    json!(0)
+                );
+            }
+            if q.expected.is_number() {
+                for value in [json!("12.0"), json!("1,234"), json!("NaN")] {
+                    assert_eq!(normalize(&value, &q.expected), None);
+                }
+            }
+            if matches!(q.kind, Kind::Order | Kind::Negative) {
+                for value in [json!(1), json!("true"), json!("y"), json!("0")] {
+                    assert_eq!(
+                        score(
+                            &json!({q.id.clone():value}).to_string(),
+                            std::slice::from_ref(q)
+                        )["correct"],
+                        json!(0)
+                    );
+                }
+            }
+        }
     }
     #[test]
-    fn lookback_is_rounds_before_the_end_and_order_uses_the_first_place() {
+    fn state_anchors_use_the_total_right_after_the_entity_passage_delta() {
         let world = played();
+        let log = world.log();
         let qs = world
             .questions(&QuizRequest {
                 seed: 1,
-                questions: 100,
+                questions: 13,
                 types: vec![Kind::State],
             })
-            .expect("questions");
-        for q in &qs {
-            assert_eq!(q.lookback, 12 - q.fact_round);
-        }
-        assert!(qs.iter().any(|q| q.lookback == 0));
-        assert!(qs.iter().any(|q| q.lookback == 11));
-        let scored = score("", &qs);
-        for bucket in ["0-3", "4-7", "8+"] {
-            let expected = qs
+            .expect("quiz");
+        let mut total = 0;
+        for round in &log {
+            total += round.node.facts.coin_delta;
+            let q = qs
                 .iter()
-                .filter(|q| match bucket {
-                    "0-3" => (0..=3).contains(&q.lookback),
-                    "4-7" => (4..=7).contains(&q.lookback),
-                    _ => (8..).contains(&q.lookback),
-                })
-                .count();
-            assert_eq!(scored["by_lookback"][bucket]["total"], json!(expected));
+                .find(|q| q.prompt.contains(&round.node.facts.entities[0].name))
+                .expect("entity anchor");
+            assert_eq!(q.expected, json!(total));
+            assert_eq!(q.lookback, 12 - round.round);
         }
-        for q in world
-            .questions(&quiz())
-            .expect("quiz")
+        let final_q = qs
             .iter()
-            .filter(|q| q.kind == Kind::Order)
-        {
-            assert_eq!(q.lookback, 12 - q.fact_round);
-        }
+            .find(|q| q.prompt == "How many coins do you have now?")
+            .expect("final total");
+        assert_eq!(final_q.expected, json!(total));
+        assert_eq!(final_q.lookback, 0);
     }
 }

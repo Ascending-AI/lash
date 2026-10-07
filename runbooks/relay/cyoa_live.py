@@ -7,8 +7,8 @@ import sys
 from extract_live import extract
 from live_common import POLICIES, Workbench, environment, launcher, collect_usage
 
-KINDS = ("recall", "order", "state", "negative")
-WARNING = "At the end I will quiz you on details of your journey: names, codes, coins and the order of places."
+KINDS = ("fact", "order", "state", "negative")
+WARNING = "At the end I will quiz you on details of your journey: ages, codes, objects, pets, coins and the order of people."
 
 
 def settings():
@@ -32,14 +32,17 @@ def settings():
     args = p.parse_args()
     args.types = [kind.strip() for kind in args.types.split(",")]
     if not args.types or any(kind not in KINDS for kind in args.types):
-        p.error("--types must be a comma list of recall,order,state,negative")
+        p.error("--types must be a comma list of fact,order,state,negative")
     if args.rounds < 1 or args.questions < 1 or not 2 <= args.branching <= 26:
         p.error("rounds/questions must be positive; branching must be 2..26")
     if not all(0 <= n < 2**64 for n in (args.seed, args.vocabulary_seed)):
         p.error("seeds must be unsigned 64-bit integers")
-    orders = sum(args.types[i % len(args.types)] == "order" for i in range(args.questions))
-    if orders > args.rounds * (args.rounds - 1) // 2:
-        p.error("more order questions than path pairs")
+    capacities = {"fact": 2 * args.rounds, "order": args.rounds * (args.rounds - 1) // 2,
+                  "state": args.rounds + 1, "negative": 2 * args.rounds + (args.branching > 2)}
+    for kind, capacity in capacities.items():
+        count = sum(args.types[i % len(args.types)] == kind for i in range(args.questions))
+        if count > capacity:
+            p.error(f"more {kind} questions than distinct facts or pairs ({capacity})")
     if args.policy == "relay" and args.channel != "native":
         p.error("relay requires --channel native")
     if args.budget <= 0:
@@ -57,9 +60,10 @@ def round_prompt(args, number, passage):
 
 
 def final_prompt(questions):
-    return ('Answer these questions about the rounds you completed. Reply with exactly a JSON object '
-            'keyed q1..qQ (use each question\'s id). For negative questions use exactly "YES" or "NO". '
-            'For order questions use the full place name; for codes and coin counts use numbers.\n' +
+    return ('Answer these questions about your journey. Reply with exactly a JSON object '
+            'keyed q1..qQ (use each question\'s id). For order and negative questions use "YES" or "NO". '
+            'For ages, gate codes and coin counts use integers; for other facts use strings. '
+            'Coin totals associated with meeting a person include that passage\'s coin change.\n' +
             "\n".join(f"{q['id']}: {q['prompt']}" for q in questions))
 
 
