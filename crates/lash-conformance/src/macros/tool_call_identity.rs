@@ -26,10 +26,6 @@ macro_rules! tool_call_identity_tests {
             reported_failure_retry_preserves_call_id);
         $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
             code_cells_keep_identity_and_distinguish_fresh_calls);
-        $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
-            frames_keep_identity_and_distinguish_fresh_calls);
-        $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
-            compaction_keeps_identity_and_distinguishes_fresh_calls);
     };
     (@law [$($attr:tt)*] $fixture:block; fork_inherits_history_without_execution_queues_waits_or_journals) => {
         $($attr)*

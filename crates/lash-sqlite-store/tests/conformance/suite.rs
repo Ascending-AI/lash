@@ -30,16 +30,12 @@ use lash_core_execution::{
 use super::SUBSTRATE;
 use crate::backend_fixture::{Substrate, TestBackend, sync_await};
 
-// The ownership law where every await suspends and every resumption replays
-// the handler's journal from its start (FIG-4514): a run replayed after its
-// terminal-checkpoint follow-on committed names that follow-on's effects as
-// its first execution did, so the shift ends.
-mod driver_turn_ownership_under_replay {}
-
 #[path = "admission_atomicity.rs"]
 mod admission_atomicity;
 #[path = "attachment_store.rs"]
 mod attachment_store;
+#[path = "durable_laws.rs"]
+mod durable_laws;
 #[path = "lineage.rs"]
 mod lineage;
 #[path = "obligation_relay.rs"]
@@ -1038,5 +1034,3 @@ async fn nested_process_arguments_reject_forged_aliases_and_try_later_union_arms
     let backend = TestBackend::open(SUBSTRATE).await;
     lash_lashlang_runtime::testing::nested_process_arguments_reject_forged_aliases_and_try_later_union_arms(artifact_store_handles(&backend).artifacts).await;
 }
-
-mod session_commands {}

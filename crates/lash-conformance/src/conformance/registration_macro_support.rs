@@ -1,16 +1,13 @@
 //! Implementation paths used only by exported conformance registration macros.
 
-pub use super::admitted_head_redrive::*;
 pub use super::artifact_store::*;
 pub use super::attachment_adoption::*;
 pub use super::attachment_condemnation_recovery::*;
 pub use super::attachment_referrers::*;
 pub use super::attachment_store::*;
 pub use super::batch_sugar::*;
-pub use super::bound_trigger_duplicate::*;
 pub use super::declared_start::*;
 pub use super::definitions::*;
-pub use super::direct_turn_acceptance::*;
 pub use super::fence_integrity::*;
 pub use super::hostile_input::*;
 pub use super::lineage::*;
@@ -32,14 +29,11 @@ pub use super::queue_observation::*;
 pub use super::retention::*;
 pub use super::revision_pins::*;
 pub use super::runtime_persistence::*;
-pub use super::segment_redrive::*;
-pub use super::served_process_start::*;
 pub use super::session_delete_blob_reclaim::*;
 pub use super::session_graph_append::*;
 pub use super::session_graph_state_machine::*;
 pub use super::session_ingress::*;
 pub use super::session_store_factory::*;
-pub use super::session_store_factory_failure_evidence::*;
 pub use super::store_contract_state_machine::*;
 pub use super::store_maintenance_outcome::*;
 pub use super::store_recovery::*;

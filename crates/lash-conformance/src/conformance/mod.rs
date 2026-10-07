@@ -33,20 +33,18 @@ mod attachment_read_budgets;
 mod attachment_store;
 pub mod material_retention;
 pub use attachment_read_budgets::*;
-mod bound_trigger_duplicate;
 mod law_backend;
 pub use law_backend::backend_over;
 pub(crate) use law_backend::{
     LawBackend, StoreLawBackend, law_session_store, law_session_store_with_config,
 };
 mod admission_support;
-mod admitted_head_redrive;
 mod commit_receipts;
 mod declared_start;
 mod definitions;
 mod deployment_view;
-mod direct_turn_acceptance;
 use deployment_view::DeploymentViewExt;
+mod batch_sugar;
 mod fence_integrity;
 mod fleet_format;
 mod helpers;
@@ -71,31 +69,22 @@ mod queue_observation;
 pub mod registration_macro_support;
 mod release_stamp;
 mod retention;
+mod revision_pins;
 mod run_shape;
 mod runtime_persistence;
-mod segment_budget;
-mod segment_redrive;
-mod trace_provenance;
-pub use segment_budget::{
-    SegmentBudgetHarness, SegmentBudgetObservation,
-    segment_budget_and_continuation_preserve_results_across_waits,
-};
-mod batch_sugar;
-mod revision_pins;
-mod served_process_start;
 mod session_delete_blob_reclaim;
 mod session_graph_append;
 mod session_graph_state_machine;
 mod session_history;
 mod session_ingress;
 mod session_mail;
+mod trace_provenance;
 pub use session_mail::{
     WakeCut, a_producer_commits_its_row_and_its_wake_together,
     a_producer_wakes_no_absent_or_deleted_session, two_claimers_racing_admission_admit_one_run,
 };
 mod session_store_factory;
 mod session_store_factory_enumeration;
-mod session_store_factory_failure_evidence;
 mod session_store_factory_vacuum;
 mod store_contract_state_machine;
 mod store_maintenance_outcome;
@@ -112,7 +101,6 @@ mod turn_config;
 mod turn_runner;
 
 pub(crate) use admission_support::*;
-pub use admitted_head_redrive::*;
 #[cfg(feature = "lashlang")]
 pub use artifact_referrers::*;
 pub use artifact_store::*;
@@ -123,7 +111,6 @@ pub use declared_start::{
     DeclaredStartTier, SubagentPlugin, a_session_lifetime_subagent_survives_its_waiting_turn,
 };
 pub use definitions::*;
-pub use direct_turn_acceptance::*;
 pub use fence_integrity::*;
 pub use fleet_format::{FleetFormatDeployment, fleet_format_conformance};
 pub use helpers::*;
@@ -142,7 +129,6 @@ pub use release_stamp::{ReleaseStampDeployment, release_stamp_conformance};
 pub use retention::*;
 pub use revision_pins::*;
 pub use runtime_persistence::*;
-pub use served_process_start::SubagentFactories;
 pub use session_delete_blob_reclaim::*;
 pub use session_graph_append::*;
 pub use session_graph_state_machine::*;
@@ -152,7 +138,6 @@ pub use session_ingress::{
     SessionIngressHandles, session_ingress_session_request,
 };
 pub use session_store_factory::*;
-pub use session_store_factory_failure_evidence::*;
 pub use store_contract_state_machine::*;
 pub use store_maintenance_outcome::*;
 pub use store_recovery::*;

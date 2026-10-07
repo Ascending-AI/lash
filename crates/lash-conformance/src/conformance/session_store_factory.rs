@@ -63,7 +63,6 @@ where
     session_store_factory_create_is_idempotent(make()).await;
     session_store_factory_enumeration_is_read_only_and_keeps_tombstones(make()).await;
     session_store_factory_admissible_queued_work_peek(make()).await;
-    config_commands::session_store_factory_runs_every_config_command_alone(make()).await;
     session_store_factory_never_used_delete_is_noop(make()).await;
     session_store_factory_rejects_writes_after_delete(make()).await;
     let (factory, attachments) = make_attached();

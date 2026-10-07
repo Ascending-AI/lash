@@ -1,11 +1,11 @@
 //! Where a turn-executing law runs its turn.
 //!
-//! A tier scopes a turn on the host the runtime runs on and executes it in the
-//! test task. The deployment-level host refuses every effect that has not
-//! entered a scoped controller, so a law that executes a real turn takes the
-//! turn as a [`ConformanceTurnAttempt`] and hands it to the tier's
-//! [`ConformanceTurnRunner`], which supplies the scoped controller the turn
-//! runs on, so one law body states the contract on every tier.
+//! A law that executes a real turn takes the turn as a
+//! [`ConformanceTurnAttempt`] and hands it to the tier's
+//! [`ConformanceTurnRunner`], which supplies the [`ActorContext`] the turn
+//! runs on, so one law body states the contract on every store tier. The
+//! durable tiers run it in process ([`HostTurnRunner`]) over the durable
+//! backend of the store set under test (ADR 0132 §14).
 //!
 //! # Crashing a turn
 //!
@@ -27,21 +27,9 @@
 //!   [`ConformanceTurnRunner::run_turn`] of the same scope, which is the tier's
 //!   recovery of the crashed turn.
 //!
-//! The recovery is the tier's own: a fresh driver over the same host and
-//! store, which resumes from the state the crashed execution committed. The
-//! law asserts only the outcome recovery must reach.
-//!
-//! # Process segments
-//!
-//! A runner that runs process segments on its engine serves a law's body for a
-//! process's segments ([`ConformanceTurnRunner::serve_segments`]), starts one
-//! and kills its execution where the law's crash fires
-//! ([`ConformanceTurnRunner::run_segment_until_crash`]), and recovers it
-//! ([`ConformanceTurnRunner::recover_segment`]) one of two ways
-//! ([`SegmentRecovery`]): the engine delivers the execution again over its
-//! surviving record, or the record is gone and a fresh execution of the
-//! segment arrives. The body is a [`ConformanceTurnAttempt`] over the
-//! process-scoped controller the engine lends each execution.
+//! The recovery is the tier's own: in process it is a fresh driver over the
+//! same backend and store, which restores the turn from committed state. The
+//! law asserts only the outcome.
 
 use crate::ActorContext;
 use std::future::Future;
@@ -119,42 +107,12 @@ impl ConformanceCrash {
     }
 }
 
-/// How a tier recovers a process segment whose execution a crash killed
-/// ([`ConformanceTurnRunner::recover_segment`]).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SegmentRecovery {
-    /// The engine delivers the crashed execution again, and its record of the
-    /// segment's effects survives for the redelivery to replay.
-    Replay,
-    /// The engine's record of the crashed execution is gone — retention
-    /// purged it — and a fresh execution of the same segment arrives.
-    SubstrateLost,
-}
-
 /// Runs a [`ConformanceTurnAttempt`] where the tier runs turns.
 #[async_trait::async_trait]
 pub trait ConformanceTurnRunner: Send + Sync {
     /// Runs `attempt` to its end on a controller admitted for `admitted`,
     /// once per execution the tier gives it.
     async fn run_turn(&self, admitted: crate::AdmittedScope, attempt: ConformanceTurnAttempt);
-
-    /// Runs `attempt` on every retry the tier's engine gives a turn that
-    /// parks on each run, until the engine rests the turn, and returns how
-    /// many times it ran. A parked turn leaves its execution open (see
-    /// [`ConformanceTurnEnd`]); nothing in process retries it, so there it
-    /// runs once. A tier whose engine retries a parked turn runs it on every
-    /// retry until its attempt budget rests the turn, returns once the turn
-    /// rests, and panics when a run settled instead of parking. Only a run
-    /// that returned is counted: an engine that fails an attempt inside a
-    /// step ends that run beneath the attempt, which then reports nothing.
-    async fn run_parking_turn_until_rested(
-        &self,
-        admitted: crate::AdmittedScope,
-        attempt: ConformanceTurnAttempt,
-    ) -> usize {
-        self.run_turn(admitted, attempt).await;
-        1
-    }
 
     /// Runs one turn across a crash: `crashing` must panic before its turn
     /// commits, and the tier then redelivers the same turn to `redrive` the
@@ -190,32 +148,10 @@ pub trait ConformanceTurnRunner: Send + Sync {
     /// (FIG-4068). Nothing a later scenario observes may change.
     async fn scenario_finished(&self) {}
 
-    /// Waits until every dispatch and child invocation for these groups completed.
-    /// A seated cancellation is insufficient: a late child callback may
-    /// still be running and attempting to publish its final.
-    async fn await_group_quiescence(&self, _group_keys: &[String]) {
-        panic!("this tier must expose group invocation quiescence for the cancellation law");
-    }
-
     /// The replay keys of every effect the tier journaled for `scope`'s
     /// turn, or `None` when this runner cannot read them.
     async fn recorded_replay_keys(&self, _scope: &crate::ExecutionScope) -> Option<Vec<String>> {
         None
-    }
-
-    /// Serves every execution of the segments of the process a start keyed
-    /// `start_key` registers with `body`, in place of any body served before:
-    /// the tier runs a fresh `body` on the process-scoped controller its
-    /// engine lends each execution, and a body that ends
-    /// [`Settled`](ConformanceTurnEnd::Settled) settles the process
-    /// successfully. For a process the law starts some other way — a child
-    /// that one of its effects starts, whose id the start mints, so the law
-    /// names it by the key it started it under (ADR 0107). A runner that
-    /// cannot run process segments says so by panicking.
-    async fn serve_segments(&self, start_key: &crate::StartKey, _body: ConformanceTurnAttempt) {
-        panic!(
-            "this tier's turn runner cannot serve the segments of the process started under `{start_key}`"
-        );
     }
 
     /// Kills every execution of a process segment the tier is running now,
@@ -226,36 +162,6 @@ pub trait ConformanceTurnRunner: Send + Sync {
     /// A runner that cannot kill a process's worker says so by panicking.
     async fn kill_process_workers(&self) -> usize {
         panic!("this tier's turn runner cannot kill a process's worker");
-    }
-
-    /// Starts `registration` on the tier's engine, serving its segment with
-    /// `body` until `crash` fires, then kills that execution where it stands,
-    /// the way the process running it dies, and leaves the segment open for
-    /// [`recover_segment`](Self::recover_segment). The registration must
-    /// already be recorded, as `process_id`, in the process registry the
-    /// tier's engine reads.
-    /// Panics when the segment ended before the crash fired. A runner that
-    /// cannot run process segments says so by panicking.
-    async fn run_segment_until_crash(
-        &self,
-        process_id: &crate::ProcessId,
-        _registration: crate::ProcessRegistration,
-        _body: ConformanceTurnAttempt,
-        _crash: ConformanceCrash,
-    ) {
-        panic!("this tier's turn runner cannot crash a segment of process `{process_id}`");
-    }
-
-    /// Recovers the segment of `process_id` a crash left open, the way
-    /// `recovery` names, serving any further execution of it with `body`, and
-    /// returns once the process reached its terminal.
-    async fn recover_segment(
-        &self,
-        process_id: &crate::ProcessId,
-        recovery: SegmentRecovery,
-        _body: ConformanceTurnAttempt,
-    ) {
-        panic!("this tier's turn runner cannot recover process `{process_id}` by {recovery:?}");
     }
 
     /// The process-work wiring for a runtime whose process segments run on

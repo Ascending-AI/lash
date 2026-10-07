@@ -5,7 +5,6 @@ mod obligation_relay;
 mod session_ingress;
 mod tool_batch;
 mod tool_call_identity;
-mod turn_ingress;
 mod turn_runner;
 
 /// Expansion machinery for the runtime-persistence registration macros.
@@ -136,11 +135,6 @@ macro_rules! runtime_persistence_tests {
             (concurrent_queued_work_source_key_enqueues_report_one_inserted_and_one_existing, "concurrent-queued-work-source-key"),
             (decorated_queued_work_source_key_replay_reports_absorbed, "decorated-queued-work-source-key"),
             (pending_session_work_ordering_agrees_across_ingress_families, "pending-work-ordering"),
-            (checkpoint_admission_takes_both_families_once, "checkpoint-work"),
-            (checkpoint_admission_is_idempotent_by_run_and_step, "checkpoint-step-idempotence"),
-            (checkpoint_budget_refusal_preserves_active_turn_input, "checkpoint-budget-atomicity"),
-            (checkpoint_admissions_honor_min_boundary_at_every_checkpoint, "checkpoint-min-boundary"),
-            (a_checkpoint_admitted_input_is_listed_admitted_to_its_run, "checkpoint-admitted-listing"),
             (host_cancelled_wake_is_not_redelivered, "root"),
             (delete_then_enqueue_never_reuses_ingress_sequences, "root"),
             (pending_turn_inputs_source_keys_order_cancel_and_cross_session, "root"),
@@ -149,10 +143,7 @@ macro_rules! runtime_persistence_tests {
             (a_turn_input_batch_enqueues_new_ids_contiguously_in_request_order, "turn-input-batches"),
             (a_resent_turn_input_batch_answers_its_existing_ids_and_enqueues_the_rest, "turn-input-batch-retries"),
             (a_conflict_or_a_repeated_id_refuses_the_whole_turn_input_batch, "turn-input-batch-refusals"),
-            (pending_turn_input_bulk_and_suffix_cancellation, "pending-bulk-cancel"),
             (a_changed_resubmission_is_a_typed_conflict_for_every_kind, "ingress-content-conflict"),
-            (every_terminal_ingress_item_leaves_a_tombstone,
-             "ingress-tombstones"),
             (a_recorded_queued_batch_refuses_multiple_payloads, "ingress-one-payload"),
             (a_settled_command_resubmitted_under_its_key_is_not_a_new_command, "ingress-command-resubmission"),
             ]
@@ -457,25 +448,6 @@ macro_rules! store_maintenance_fault_tests {
                 let (_fixture_guard, backend, make, fault) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(backend, make(), fault.as_ref()).await;
-            }
-        )*
-    };
-}
-
-#[macro_export]
-macro_rules! effect_host_cold_await_event_tests {
-    ($fixture:block) => {
-        $crate::effect_host_cold_await_event_tests!(@catalogue $fixture; [
-            (effect_host_await_events_cold_instance, "effect-host-cold-await-event"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_fixture_guard, make, make_catalog) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(make, make_catalog).await;
             }
         )*
     };
@@ -881,64 +853,6 @@ macro_rules! trigger_occurrence_listing_tests {
     };
 }
 
-/// Register the portable durable effect-controller replay laws.
-#[macro_export]
-macro_rules! effect_controller_replay_tests {
-    ($fixture:block) => {
-        $crate::effect_controller_replay_tests!(@catalogue $fixture; [
-            (effect_controller_journaled_effect_replay, "effect-controller-journaled-replay"),
-            (effect_controller_concurrent_replay_deterministic, "effect-controller-concurrent-replay"),
-            (effect_controller_code_cell_replays_by_reexecution, "effect-controller-code-cell-reexecution"),
-        ]);
-    };
-    ($fixture:block, $verify:expr) => {
-        $crate::effect_controller_replay_tests!(@catalogue $fixture, $verify; [
-            (effect_controller_journaled_effect_replay, "effect-controller-journaled-replay"),
-            (effect_controller_concurrent_replay_deterministic, "effect-controller-concurrent-replay"),
-            (effect_controller_code_cell_replays_by_reexecution, "effect-controller-code-cell-reexecution"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_fixture_guard, make) = $fixture;
-                $crate::registration_macro_support::$law(make).await;
-            }
-        )*
-    };
-    (@catalogue $fixture:block, $verify:expr; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (fixture_guard, make) = $fixture;
-                $crate::registration_macro_support::$law(make).await;
-                ($verify)($label, &fixture_guard);
-            }
-        )*
-    };
-}
-
-/// Register effect-controller replay-mismatch diagnostics.
-#[macro_export]
-macro_rules! effect_controller_replay_mismatch_tests {
-    ($fixture:block) => {
-        $crate::effect_controller_replay_mismatch_tests!(@catalogue $fixture; [
-            (effect_controller_replay_mismatch_diagnostics, "effect-controller-replay-mismatch"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_fixture_guard, make, mismatch_code) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(make, mismatch_code).await;
-            }
-        )*
-    };
-}
-
 /// Expansion machinery for process-prune reclamation registration.
 #[macro_export]
 macro_rules! __process_prune_reclaim_register {
@@ -1324,35 +1238,6 @@ macro_rules! session_read_view_tests {
     };
 }
 
-/// Register the mid-stream failure-evidence law: it runs a turn, so it needs
-/// a backend with an effect engine.
-///
-/// The fixture yields `(guard, Backend, advance-commit-clock)`.
-/// A tier that must park the law writes
-/// `session_failure_evidence_tests!(#[ignore = "why"] { fixture })`.
-#[macro_export]
-macro_rules! session_failure_evidence_tests {
-    ($(#[$attr:meta])* $fixture:block) => {
-        $crate::session_failure_evidence_tests!(@catalogue [$(#[$attr])*] $fixture; [
-            (session_store_factory_mid_stream_failure_evidence, "session-read-mid-stream-failure"),
-        ]);
-    };
-    (@catalogue $attrs:tt $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            $crate::session_failure_evidence_tests!(@law $attrs $fixture; ($law, $label));
-        )*
-    };
-    (@law [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
-        $($attr)*
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn $law() {
-            let (_fixture_guard, backend, advance) = $fixture;
-            let _ = $label;
-            $crate::registration_macro_support::$law(backend, advance).await;
-        }
-    };
-}
-
 #[macro_export]
 macro_rules! process_prune_session_store_tests {
     ($fixture:block) => {
@@ -1593,66 +1478,6 @@ macro_rules! checkpoint_admission_probe_tests {
                 $crate::registration_macro_support::$law(store, &session_id, counts).await;
                 teardown.await;
             }
-        )*
-    };
-}
-
-/// Expansion machinery for await-event witness registration.
-#[macro_export]
-macro_rules! __effect_host_await_event_witness_register {
-    ([$($attr:tt)*] $fixture:block; warm $law:ident, $label:literal) => {
-        $($attr)*
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn $law() {
-            let (_guard, deadline, make, _make_catalog, witness, finish) = $fixture;
-            ::tokio::time::timeout(
-                deadline,
-                $crate::registration_macro_support::$law(make, witness),
-            )
-            .await
-            .unwrap_or_else(|_| panic!("{} exceeded {deadline:?}", $label));
-            finish.await;
-        }
-    };
-    ([$($attr:tt)*] $fixture:block; cold $law:ident, $label:literal) => {
-        $($attr)*
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn $law() {
-            let (_guard, deadline, make, make_catalog, witness, finish) = $fixture;
-            ::tokio::time::timeout(
-                deadline,
-                $crate::registration_macro_support::$law(make, make_catalog, witness),
-            )
-            .await
-            .unwrap_or_else(|_| panic!("{} exceeded {deadline:?}", $label));
-            finish.await;
-        }
-    };
-}
-
-/// The fixture supplies the backend's host maker, a maker of session-store
-/// factories over the same substrate, and its own post-condition witness.
-#[macro_export]
-macro_rules! effect_host_await_event_witness_tests {
-    ($fixture:block) => {
-        $crate::effect_host_await_event_witness_tests!(@catalogue [] $fixture);
-    };
-    ($(#[$attr:meta])+ $fixture:block) => {
-        $crate::effect_host_await_event_witness_tests!(@catalogue [$(#[$attr])*] $fixture);
-    };
-    (@catalogue $attrs:tt $fixture:block) => {
-        $crate::effect_host_await_event_witness_tests!(@expand $attrs $fixture; warm [
-            (effect_host_await_events_with_active_wait_witness, "await-event-warm-witness"),
-        ]);
-        $crate::effect_host_await_event_witness_tests!(@expand $attrs $fixture; cold [
-            (effect_host_await_events_cold_instance_with_active_wait_witness, "await-event-cold-witness"),
-        ]);
-    };
-    (@expand $attrs:tt $fixture:block; $kind:ident [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            $crate::__effect_host_await_event_witness_register!(
-                $attrs $fixture; $kind $law, $label
-            );
         )*
     };
 }

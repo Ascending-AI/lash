@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1379 rows over 808 files, 3686 laws.
-# By class: mechanical 143, semantic 99, delete 735, replace 402.
-# By lane: L1b 11, L3 16, L3s 57, L4 19, L5 2, L6b 9, L7 25, L7b 22, L7p 8, L9b 67, L9c 325, L9d 72, L9e 90, L9f 124, L9g 64, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49.
-# By status: todo 451, ported 52, deleted 876.
+# 1425 rows over 815 files, 3734 laws.
+# By class: mechanical 143, semantic 101, delete 761, replace 420.
+# By lane: L1b 11, L3 18, L3s 57, L4 19, L5 2, L6b 9, L7 25, L7b 22, L7p 8, L9b 67, L9c 341, L9d 72, L9e 90, L9f 124, L9g 92, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49.
+# By status: todo 449, ported 56, deleted 920.
 #
 # New laws owed (replace rows), by owning lane:
 # - L11: crates/lash-conformance/src/conformance/generation_drain.rs::in_flight_turns_follow_their_admitting_generation
@@ -2182,7 +2182,8 @@ laws = [
   "lash_conformance::worker_recovery_tests!",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "L9g (FIG-5185): every surviving law of this row runs on the durable backend on PostgreSQL: the store laws in place, and runtime_persistence_reopenable_tests!, session_store_factory_tests!, process_prune_session_store_tests!, turn_config_tests! and session_config_settlement_tests! in crates/lash-postgres-store/tests/conformance/durable_laws.rs, each effect context an ActorContext over the backend. The laws that are not ported have their own rows: deleted ones with a disposition, the blocked one as todo."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/dialect.rs"
@@ -2685,6 +2686,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "L9g (FIG-5185): not ported. Every law here drives its turn in process through the runtime (LashRuntime::execute_turn and its kin) over the tier's runner. Since L3s (FIG-5196) a turn input is session mail the session actor admits and runs, so on the durable backend that call answers SessionRunPending, as it does for the turn laws L9g ran on the SQLite tiers (turn_config, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence). Each law must be rewritten to send() its input and let a served node run the turn, or be deleted with a disposition; owed."
 
 [[row]]
 path = "crates/lash-protocol-rlm/tests/protocol_drivers/budget_warning_runbook.rs"
@@ -2726,6 +2728,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "L9g (FIG-5185): not ported. Every law here drives its turn in process through the runtime (LashRuntime::execute_turn and its kin) over the tier's runner. Since L3s (FIG-5196) a turn input is session mail the session actor admits and runs, so on the durable backend that call answers SessionRunPending, as it does for the turn laws L9g ran on the SQLite tiers (turn_config, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence). Each law must be rewritten to send() its input and let a served node run the turn, or be deleted with a disposition; owed."
 
 [[row]]
 path = "crates/lash-protocol-standard/src/prompt_tests.rs"
@@ -2937,6 +2940,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "L9g (FIG-5185): not ported. Every law here drives its turn in process through the runtime (LashRuntime::execute_turn and its kin) over the tier's runner. Since L3s (FIG-5196) a turn input is session mail the session actor admits and runs, so on the durable backend that call answers SessionRunPending, as it does for the turn laws L9g ran on the SQLite tiers (turn_config, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence). Each law must be rewritten to send() its input and let a served node run the turn, or be deleted with a disposition; owed."
 
 [[row]]
 path = "crates/lash-provider-google/src/runtime_reasoning_tests.rs"
@@ -4566,6 +4570,7 @@ laws = [
 ]
 disposition = "covered-by:crates/lash-conformance"
 status = "deleted"
+note = "L9g (FIG-5185): each lash-conformance law this row names is now instantiated on the durable backend (SQLite file, SQLite memory and PostgreSQL, in crates/lash-sqlite-store/tests/conformance/durable_laws.rs and crates/lash-postgres-store/tests/conformance/durable_laws.rs), or deleted with a row of its own (L3s deleted the shift-era turn laws; L9g deleted segment_redrive, served_process_start, bound_trigger_duplicate, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence and the turn_config laws that drive a turn in process, and the effect_controller_replay, effect_controller_replay_mismatch, effect_controller_response_derivation, effect_host_await_event_witness and effect_host_cold_await_event macros, whose laws earlier lanes had already deleted), or not ported yet: the laws that drive a turn in process from a crate above lash-conformance (tool_batch_parallelism, batch_sugar, tool_call_limit, declared_start, tool_call_identity, turn_runner, migrated_tools_redrive) answer SessionRunPending on the durable backend and are owed, see the protocol and subagent rows."
 
 [[row]]
 path = "crates/lash-restate/src/tests/conformance_and_poison.rs"
@@ -4848,6 +4853,7 @@ laws = [
 ]
 disposition = "covered-by:crates/lash-conformance"
 status = "deleted"
+note = "L9g (FIG-5185): each lash-conformance law this row names is now instantiated on the durable backend (SQLite file, SQLite memory and PostgreSQL, in crates/lash-sqlite-store/tests/conformance/durable_laws.rs and crates/lash-postgres-store/tests/conformance/durable_laws.rs), or deleted with a row of its own (L3s deleted the shift-era turn laws; L9g deleted segment_redrive, served_process_start, bound_trigger_duplicate, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence and the turn_config laws that drive a turn in process, and the effect_controller_replay, effect_controller_replay_mismatch, effect_controller_response_derivation, effect_host_await_event_witness and effect_host_cold_await_event macros, whose laws earlier lanes had already deleted), or not ported yet: the laws that drive a turn in process from a crate above lash-conformance (tool_batch_parallelism, batch_sugar, tool_call_limit, declared_start, tool_call_identity, turn_runner, migrated_tools_redrive) answer SessionRunPending on the durable backend and are owed, see the protocol and subagent rows."
 
 [[row]]
 path = "crates/lash-restate/src/tests/durable_wait_source_seal.rs"
@@ -5091,8 +5097,9 @@ lane = "L9g"
 laws = [
   "lash_conformance::served_process_start_tests!",
 ]
-disposition = "covered-by:crates/lash-conformance"
+disposition = "covered-by:row:crates/lash-conformance/src/conformance/served_process_start.rs"
 status = "deleted"
+note = "L9g (FIG-5185) deleted the laws; see their row"
 
 [[row]]
 path = "crates/lash-restate/src/tests/journal_cut_runner.rs"
@@ -5252,6 +5259,7 @@ laws = [
 ]
 disposition = "covered-by:crates/lash-conformance"
 status = "deleted"
+note = "L9g (FIG-5185): each lash-conformance law this row names is now instantiated on the durable backend (SQLite file, SQLite memory and PostgreSQL, in crates/lash-sqlite-store/tests/conformance/durable_laws.rs and crates/lash-postgres-store/tests/conformance/durable_laws.rs), or deleted with a row of its own (L3s deleted the shift-era turn laws; L9g deleted segment_redrive, served_process_start, bound_trigger_duplicate, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence and the turn_config laws that drive a turn in process, and the effect_controller_replay, effect_controller_replay_mismatch, effect_controller_response_derivation, effect_host_await_event_witness and effect_host_cold_await_event macros, whose laws earlier lanes had already deleted), or not ported yet: the laws that drive a turn in process from a crate above lash-conformance (tool_batch_parallelism, batch_sugar, tool_call_limit, declared_start, tool_call_identity, turn_runner, migrated_tools_redrive) answer SessionRunPending on the durable backend and are owed, see the protocol and subagent rows."
 
 [[row]]
 path = "crates/lash-restate/src/tests/postgres_ingress.rs"
@@ -6779,8 +6787,9 @@ lane = "L9g"
 laws = [
   "lash_conformance::segment_redrive_tests!",
 ]
-disposition = "covered-by:crates/lash-conformance"
+disposition = "covered-by:row:crates/lash-conformance/src/conformance/segment_redrive.rs"
 status = "deleted"
+note = "L9g (FIG-5185) deleted the law; see its row"
 
 [[row]]
 path = "crates/lash-restate/src/tests/session_failure_evidence_on_the_double.rs"
@@ -6794,6 +6803,7 @@ laws = [
 ]
 disposition = "covered-by:crates/lash-conformance"
 status = "deleted"
+note = "L9g (FIG-5185): each lash-conformance law this row names is now instantiated on the durable backend (SQLite file, SQLite memory and PostgreSQL, in crates/lash-sqlite-store/tests/conformance/durable_laws.rs and crates/lash-postgres-store/tests/conformance/durable_laws.rs), or deleted with a row of its own (L3s deleted the shift-era turn laws; L9g deleted segment_redrive, served_process_start, bound_trigger_duplicate, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence and the turn_config laws that drive a turn in process, and the effect_controller_replay, effect_controller_replay_mismatch, effect_controller_response_derivation, effect_host_await_event_witness and effect_host_cold_await_event macros, whose laws earlier lanes had already deleted), or not ported yet: the laws that drive a turn in process from a crate above lash-conformance (tool_batch_parallelism, batch_sugar, tool_call_limit, declared_start, tool_call_identity, turn_runner, migrated_tools_redrive) answer SessionRunPending on the durable backend and are owed, see the protocol and subagent rows."
 
 [[row]]
 path = "crates/lash-restate/src/tests/session_shift_roll_on_the_double.rs"
@@ -6843,6 +6853,7 @@ laws = [
 ]
 disposition = "covered-by:crates/lash-conformance"
 status = "deleted"
+note = "L9g (FIG-5185): each lash-conformance law this row names is now instantiated on the durable backend (SQLite file, SQLite memory and PostgreSQL, in crates/lash-sqlite-store/tests/conformance/durable_laws.rs and crates/lash-postgres-store/tests/conformance/durable_laws.rs), or deleted with a row of its own (L3s deleted the shift-era turn laws; L9g deleted segment_redrive, served_process_start, bound_trigger_duplicate, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence and the turn_config laws that drive a turn in process, and the effect_controller_replay, effect_controller_replay_mismatch, effect_controller_response_derivation, effect_host_await_event_witness and effect_host_cold_await_event macros, whose laws earlier lanes had already deleted), or not ported yet: the laws that drive a turn in process from a crate above lash-conformance (tool_batch_parallelism, batch_sugar, tool_call_limit, declared_start, tool_call_identity, turn_runner, migrated_tools_redrive) answer SessionRunPending on the durable backend and are owed, see the protocol and subagent rows."
 
 [[row]]
 path = "crates/lash-restate/src/tests/singleton_tool_run_on_the_double.rs"
@@ -7099,6 +7110,7 @@ laws = [
 ]
 disposition = "covered-by:crates/lash-conformance"
 status = "deleted"
+note = "L9g (FIG-5185): each lash-conformance law this row names is now instantiated on the durable backend (SQLite file, SQLite memory and PostgreSQL, in crates/lash-sqlite-store/tests/conformance/durable_laws.rs and crates/lash-postgres-store/tests/conformance/durable_laws.rs), or deleted with a row of its own (L3s deleted the shift-era turn laws; L9g deleted segment_redrive, served_process_start, bound_trigger_duplicate, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence and the turn_config laws that drive a turn in process, and the effect_controller_replay, effect_controller_replay_mismatch, effect_controller_response_derivation, effect_host_await_event_witness and effect_host_cold_await_event macros, whose laws earlier lanes had already deleted), or not ported yet: the laws that drive a turn in process from a crate above lash-conformance (tool_batch_parallelism, batch_sugar, tool_call_limit, declared_start, tool_call_identity, turn_runner, migrated_tools_redrive) answer SessionRunPending on the durable backend and are owed, see the protocol and subagent rows."
 
 [[row]]
 path = "crates/lash-restate/src/tests/tool_call_identity_on_the_double.rs"
@@ -7114,6 +7126,7 @@ laws = [
 ]
 disposition = "covered-by:crates/lash-conformance"
 status = "deleted"
+note = "L9g (FIG-5185): each lash-conformance law this row names is now instantiated on the durable backend (SQLite file, SQLite memory and PostgreSQL, in crates/lash-sqlite-store/tests/conformance/durable_laws.rs and crates/lash-postgres-store/tests/conformance/durable_laws.rs), or deleted with a row of its own (L3s deleted the shift-era turn laws; L9g deleted segment_redrive, served_process_start, bound_trigger_duplicate, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence and the turn_config laws that drive a turn in process, and the effect_controller_replay, effect_controller_replay_mismatch, effect_controller_response_derivation, effect_host_await_event_witness and effect_host_cold_await_event macros, whose laws earlier lanes had already deleted), or not ported yet: the laws that drive a turn in process from a crate above lash-conformance (tool_batch_parallelism, batch_sugar, tool_call_limit, declared_start, tool_call_identity, turn_runner, migrated_tools_redrive) answer SessionRunPending on the durable backend and are owed, see the protocol and subagent rows."
 
 [[row]]
 path = "crates/lash-restate/src/tests/tool_context_conformance.rs"
@@ -7340,6 +7353,7 @@ laws = [
 ]
 disposition = "covered-by:crates/lash-conformance"
 status = "deleted"
+note = "L9g (FIG-5185): each lash-conformance law this row names is now instantiated on the durable backend (SQLite file, SQLite memory and PostgreSQL, in crates/lash-sqlite-store/tests/conformance/durable_laws.rs and crates/lash-postgres-store/tests/conformance/durable_laws.rs), or deleted with a row of its own (L3s deleted the shift-era turn laws; L9g deleted segment_redrive, served_process_start, bound_trigger_duplicate, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence and the turn_config laws that drive a turn in process, and the effect_controller_replay, effect_controller_replay_mismatch, effect_controller_response_derivation, effect_host_await_event_witness and effect_host_cold_await_event macros, whose laws earlier lanes had already deleted), or not ported yet: the laws that drive a turn in process from a crate above lash-conformance (tool_batch_parallelism, batch_sugar, tool_call_limit, declared_start, tool_call_identity, turn_runner, migrated_tools_redrive) answer SessionRunPending on the durable backend and are owed, see the protocol and subagent rows."
 
 [[row]]
 path = "crates/lash-restate/src/tests/vm_broker_on_the_double.rs"
@@ -7351,8 +7365,9 @@ lane = "L9g"
 laws = [
   "lash_conformance::vm_broker_tests!",
 ]
-disposition = "covered-by:crates/lash-conformance"
+disposition = "covered-by:crates/lash-vm-broker/src/broker/tests.rs"
 status = "deleted"
+note = "L7 (FIG-5177) deleted lash-conformance vm_broker; each law has its own L7 row"
 
 [[row]]
 path = "crates/lash-restate/src/tests/wait_generation_endpoint.rs"
@@ -7722,7 +7737,8 @@ laws = [
   "lash_conformance::attachment_store_tests!",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "L9g (FIG-5185): its store laws run in place on SQLite file and SQLite memory; the turn witness has its own row"
 
 [[row]]
 path = "crates/lash-sqlite-store/tests/conformance/suite.rs"
@@ -7783,7 +7799,8 @@ laws = [
   "lash_conformance::worker_recovery_tests!",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "L9g (FIG-5185): every surviving law of this row runs on the durable backend on SQLite file and SQLite memory: the store laws in place, and runtime_persistence_reopenable_tests!, session_store_factory_tests!, process_prune_session_store_tests!, turn_config_tests! in crates/lash-sqlite-store/tests/conformance/durable_laws.rs, each effect context an ActorContext over the backend. The laws that are not ported have their own rows: deleted ones with a disposition, the blocked one as todo."
 
 [[row]]
 path = "crates/lash-sqlite-store/tests/conformance/suite.rs"
@@ -7796,7 +7813,8 @@ laws = [
   "sqlite_store_schema_excludes_embedded_turn_replay_tables",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "L9g (FIG-5185): a schema law over the store set; it runs in place on SQLite file and SQLite memory"
 
 [[row]]
 path = "crates/lash-subagents/src/tests.rs"
@@ -7836,6 +7854,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "L9g (FIG-5185): not ported. Every law here drives its turn in process through the runtime (LashRuntime::execute_turn and its kin) over the tier's runner. Since L3s (FIG-5196) a turn input is session mail the session actor admits and runs, so on the durable backend that call answers SessionRunPending, as it does for the turn laws L9g ran on the SQLite tiers (turn_config, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence). Each law must be rewritten to send() its input and let a served node run the turn, or be deleted with a disposition; owed."
 
 [[row]]
 path = "crates/lash-upgrade-harness/src/e2e/control/transport.rs"
@@ -22291,3 +22310,667 @@ disposition = "replaced-by:planned:L3S-TURN"
 status = "deleted"
 owed = "a run's turn commit settles each admitted row once: a row two admitted sets name settles once, and a completed row is never also handed back"
 note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/turn_config.rs"
+test = "one_config_resolution_per_run"
+area = "turn-config"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "one_config_resolution_per_run",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a run resolves its run spec against its session config once, and a frame switch inside it keeps that resolution"
+note = "deleted by L9g (FIG-5185): on the durable backend it fails with SessionRunPending: since L3s (FIG-5196) a turn input is session mail that the session actor admits and runs, and this law drives its turn in process through the runtime (execute_turn and its kin), which answers SessionRunPending on the durable backend; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/turn_config.rs"
+test = "an_unbindable_llm_profile_retries_and_never_fails_the_turn"
+area = "turn-config"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "an_unbindable_llm_profile_retries_and_never_fails_the_turn",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a turn whose model profile cannot bind aborts retryably and names the profile, and never fails the turn"
+note = "deleted by L9g (FIG-5185): on the durable backend it fails with SessionRunPending: since L3s (FIG-5196) a turn input is session mail that the session actor admits and runs, and this law drives its turn in process through the runtime (execute_turn and its kin), which answers SessionRunPending on the durable backend; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/turn_config.rs"
+test = "a_redrive_runs_under_the_execution_controls_its_run_recorded"
+area = "turn-config"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_redrive_runs_under_the_execution_controls_its_run_recorded",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a recovered turn runs under the execution controls its run recorded, not the recovering worker defaults"
+note = "deleted by L9g (FIG-5185): on the durable backend it fails with SessionRunPending: since L3s (FIG-5196) a turn input is session mail that the session actor admits and runs, and this law drives its turn in process through the runtime (execute_turn and its kin), which answers SessionRunPending on the durable backend; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/turn_config.rs"
+test = "a_redrive_assembles_the_terminal_its_run_recorded_termination_decides"
+area = "turn-config"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_redrive_assembles_the_terminal_its_run_recorded_termination_decides",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a recovered turn assembles the terminal its run recorded termination policy decides"
+note = "deleted by L9g (FIG-5185): on the durable backend it fails with SessionRunPending: since L3s (FIG-5196) a turn input is session mail that the session actor admits and runs, and this law drives its turn in process through the runtime (execute_turn and its kin), which answers SessionRunPending on the durable backend; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/turn_config/recorded_request_defaults.rs"
+test = "*"
+area = "turn-config"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_redrive_calls_the_model_with_the_request_defaults_its_run_recorded",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a recovered turn calls the model with the request defaults its run recorded"
+note = "deleted by L9g (FIG-5185): on the durable backend it fails with SessionRunPending: since L3s (FIG-5196) a turn input is session mail that the session actor admits and runs, and this law drives its turn in process through the runtime (execute_turn and its kin), which answers SessionRunPending on the durable backend"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/admitted_head_redrive.rs"
+test = "*"
+area = "turns"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_turn_redriven_after_its_commit_replays_at_its_admitted_head",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a turn recovered after its commit answers from its committed run at the head it was admitted on, and runs nothing again"
+note = "deleted by L9g (FIG-5185): on the durable backend it fails with SessionRunPending: since L3s (FIG-5196) a turn input is session mail that the session actor admits and runs, and this law drives its turn in process through the runtime (execute_turn and its kin), which answers SessionRunPending on the durable backend; a cold restart restores a committed turn from its run row (L3)"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/direct_turn_acceptance.rs"
+test = "direct_turn_accepts_before_executing"
+area = "turn-ingress"
+needs = ["turn"]
+class = "replace"
+lane = "L3"
+laws = [
+  "direct_turn_accepts_before_executing",
+]
+disposition = "replaced-by:planned:ACCEPT1"
+status = "deleted"
+owed = "a direct turn's acceptance commits once before it executes"
+note = "deleted by L9g (FIG-5185): on the durable backend it fails with SessionRunPending: since L3s (FIG-5196) a turn input is session mail that the session actor admits and runs, and this law drives its turn in process through the runtime (execute_turn and its kin), which answers SessionRunPending on the durable backend"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/direct_turn_acceptance.rs"
+test = "direct_turn_acceptance_mints_no_idempotency_key"
+area = "turn-ingress"
+needs = ["turn"]
+class = "replace"
+lane = "L3"
+laws = [
+  "direct_turn_acceptance_mints_no_idempotency_key",
+]
+disposition = "replaced-by:planned:ACCEPT1"
+status = "deleted"
+owed = "a direct turn's acceptance commits once before it executes"
+note = "deleted by L9g (FIG-5185): on the durable backend it fails with SessionRunPending: since L3s (FIG-5196) a turn input is session mail that the session actor admits and runs, and this law drives its turn in process through the runtime (execute_turn and its kin), which answers SessionRunPending on the durable backend"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/session_store_factory_failure_evidence.rs"
+test = "*"
+area = "sessions"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "session_store_factory_mid_stream_failure_evidence",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a turn whose provider stream fails mid-answer settles, and the session read shows the provider-visible prefix as failure evidence"
+note = "deleted by L9g (FIG-5185) with its registration macro: on the durable backend it fails with SessionRunPending: since L3s (FIG-5196) a turn input is session mail that the session actor admits and runs, and this law drives its turn in process through the runtime (execute_turn and its kin), which answers SessionRunPending on the durable backend"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/checkpoint_admissions.rs"
+test = "a_checkpoint_admitted_input_is_listed_admitted_to_its_run"
+area = "turn-inputs"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_checkpoint_admitted_input_is_listed_admitted_to_its_run",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a checkpoint admitted input is listed admitted to its run"
+note = "deleted by L9g (FIG-5185): on the durable backend it fails with IngressTurnAddressUnknown: its setup addresses input to a turn the deleted store run admission opened; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/checkpoint_admissions.rs"
+test = "checkpoint_admission_is_idempotent_by_run_and_step"
+area = "turn-inputs"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "checkpoint_admission_is_idempotent_by_run_and_step",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "checkpoint admission is idempotent by run and step"
+note = "deleted by L9g (FIG-5185): on the durable backend it fails with IngressTurnAddressUnknown: its setup addresses input to a turn the deleted store run admission opened; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/checkpoint_admissions.rs"
+test = "checkpoint_admission_takes_both_families_once"
+area = "turn-inputs"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "checkpoint_admission_takes_both_families_once",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "checkpoint admission takes both families once"
+note = "deleted by L9g (FIG-5185): on the durable backend it fails with IngressTurnAddressUnknown: its setup addresses input to a turn the deleted store run admission opened; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/checkpoint_admissions.rs"
+test = "checkpoint_admissions_honor_min_boundary_at_every_checkpoint"
+area = "turn-inputs"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "checkpoint_admissions_honor_min_boundary_at_every_checkpoint",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "checkpoint admissions honor min boundary at every checkpoint"
+note = "deleted by L9g (FIG-5185): on the durable backend it fails with IngressTurnAddressUnknown: its setup addresses input to a turn the deleted store run admission opened; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/checkpoint_admissions.rs"
+test = "checkpoint_budget_refusal_preserves_active_turn_input"
+area = "turn-inputs"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "checkpoint_budget_refusal_preserves_active_turn_input",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "checkpoint budget refusal preserves active turn input"
+note = "deleted by L9g (FIG-5185): on the durable backend it fails with IngressTurnAddressUnknown: its setup addresses input to a turn the deleted store run admission opened; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/turn_inputs_and_reopen.rs"
+test = "pending_turn_input_bulk_and_suffix_cancellation"
+area = "turn-inputs"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "pending_turn_input_bulk_and_suffix_cancellation",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "pending turn input bulk and suffix cancellation"
+note = "deleted by L9g (FIG-5185): on the durable backend it fails with IngressTurnAddressUnknown: its setup addresses input to a turn the deleted store run admission opened; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/session_store_factory_config_commands.rs"
+test = "session_store_factory_runs_every_config_command_alone"
+area = "turn-config"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "session_store_factory_runs_every_config_command_alone",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "every config command runs as a run of its own, each settled by one commit"
+note = "deleted by L9g (FIG-5185): on the durable backend it fails with SessionHeadOwned: it settles a command run through the store's legacy final commit, which L3s superseded with the session actor's command drain; it was a part of the session_store_factory law, whose other parts run; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/segment_budget.rs"
+test = "*"
+area = "processes"
+needs = ["process"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "segment_budget_and_continuation_preserve_results_across_waits",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L9g (FIG-5185), registered nowhere: segment budget cuts and engine handover are gone (L7b); a process resumes from its committed snapshot"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/segment_redrive.rs"
+test = "*"
+area = "processes"
+needs = ["process"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "segment_redrive_never_reexecutes_a_recorded_effect",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L9g (FIG-5185) with its macro and the turn runner's segment methods (serve_segments, run_segment_until_crash, recover_segment, SegmentRecovery): segments and a segment engine's record are gone (L7b)"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/served_process_start.rs"
+test = "*"
+area = "processes"
+needs = ["process", "cell"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "a_drifted_spawn_whose_start_was_issued_is_served",
+  "a_drifted_spawn_cut_before_its_send_is_served",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L9g (FIG-5185) with its macro: its laws serve a recorded start to a redrive under a drifted binding, which is replay of a recorded history; a process start is a store-local effect committed once (planned F3, L4)"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/bound_trigger_duplicate.rs"
+test = "*"
+area = "triggers"
+needs = ["turn", "process"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "bound_trigger_duplicate_after_child_prune_returns_original_process",
+  "trigger_emission_held_across_a_bind_and_prune_returns_the_bound_process",
+]
+disposition = "covered-by:planned:INTENT1"
+status = "deleted"
+note = "deleted by L9g (FIG-5185): its subject is an emission admission decision journaled by a fresh invocation and served to its replay; a trigger delivery is a store-local effect of its tool outcome, realized once in the settle transaction"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/conformance/suite.rs"
+test = "driver_turn_ownership_tests"
+area = "store-conformance"
+needs = ["turn"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "lash_conformance::driver_turn_ownership_tests!",
+]
+disposition = "covered-by:row:crates/lash-conformance/src/conformance/run_control/ownership.rs"
+status = "deleted"
+note = "L3s (FIG-5196) deleted these laws with the shift, run admission and turn parks; their dispositions are on the rows of crates/lash-conformance/src/conformance/run_control/ownership.rs"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/conformance/suite.rs"
+test = "frame_open_redrive_tests"
+area = "store-conformance"
+needs = ["turn"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "lash_conformance::frame_open_redrive_tests!",
+]
+disposition = "covered-by:row:crates/lash-conformance/src/conformance/frame_open_redrive.rs"
+status = "deleted"
+note = "L3s (FIG-5196) deleted these laws with the shift, run admission and turn parks; their dispositions are on the rows of crates/lash-conformance/src/conformance/frame_open_redrive.rs"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/conformance/suite.rs"
+test = "queued_input_runs_tests"
+area = "store-conformance"
+needs = ["turn"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "lash_conformance::queued_input_runs_tests!",
+]
+disposition = "covered-by:row:crates/lash-conformance/src/conformance/queued_input_runs.rs"
+status = "deleted"
+note = "L3s (FIG-5196) deleted these laws with the shift, run admission and turn parks; their dispositions are on the rows of crates/lash-conformance/src/conformance/queued_input_runs.rs"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/conformance/suite.rs"
+test = "session_command_replay_tests"
+area = "store-conformance"
+needs = ["turn"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "lash_conformance::session_command_replay_tests!",
+]
+disposition = "covered-by:row:crates/lash-conformance/src/conformance/turn_config/command_settlement.rs"
+status = "deleted"
+note = "L3s (FIG-5196) deleted these laws with the shift, run admission and turn parks; their dispositions are on the rows of crates/lash-conformance/src/conformance/turn_config/command_settlement.rs"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/conformance/suite.rs"
+test = "a_joined_inputs_turn_scope_closes_with_its_admitting_run"
+area = "store-conformance"
+needs = ["turn"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "a_joined_inputs_turn_scope_closes_with_its_admitting_run",
+]
+disposition = "covered-by:row:crates/lash-conformance/src/conformance/run_terminal.rs"
+status = "deleted"
+note = "L3s (FIG-5196) deleted these laws with the shift, run admission and turn parks; their dispositions are on the rows of crates/lash-conformance/src/conformance/run_terminal.rs"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/conformance/suite.rs"
+test = "bound_trigger_duplicate_tests"
+area = "triggers"
+needs = ["turn", "process"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "lash_conformance::bound_trigger_duplicate_tests!",
+]
+disposition = "covered-by:row:crates/lash-conformance/src/conformance/bound_trigger_duplicate.rs"
+status = "deleted"
+note = "deleted by L9g (FIG-5185); see its row"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/conformance/suite.rs"
+test = "process_continuation_store_tests"
+area = "processes"
+needs = ["process"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "lash_conformance::process_continuation_store_tests!",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7b (FIG-5198) deleted segment handover and its continuation store with this suite"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/conformance/suite.rs"
+test = "worker_recovery_tests"
+area = "cells"
+needs = ["cell"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "lash_conformance::worker_recovery_tests!",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7b (FIG-5198) deleted durable worker-recovery accounting (lash_worker_recovery) with this suite"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/conformance/suite.rs"
+test = "vm_broker_tests"
+area = "cells"
+needs = ["cell"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "lash_conformance::vm_broker_tests!",
+]
+disposition = "covered-by:crates/lash-vm-broker/src/broker/tests.rs"
+status = "deleted"
+note = "L7 (FIG-5177) deleted the journal-era worker-broker suite; each law has its own L7 row under crates/lash-conformance/src/conformance/vm_broker/"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/conformance/suite.rs"
+test = "fork_inherits_history_without_execution_queues_waits_or_journals"
+area = "store-conformance"
+needs = ["turn"]
+class = "semantic"
+lane = "L9g"
+laws = [
+  "fork_inherits_history_without_execution_queues_waits_or_journals",
+]
+disposition = "port"
+status = "todo"
+note = "blocked:L4 (FIG-5174): instantiated (ignored) in crates/lash-sqlite-store/tests/conformance/durable_laws.rs; the source session's turn mints a tool completion key, which reaches await_event_legacy::port_pending, todo!() until fig-5174-pending ports it. Repro: kiln test //crates/lash-sqlite-store:conformance_memory__test --test_arg=suite::durable_laws::fork_inherits --test_arg=--ignored (panics at crates/lash-core-execution/src/runtime/actor/await_event_legacy.rs:24)"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/conformance/attachment_store.rs"
+test = "sqlite_attachment_materialization_turn_witnesses"
+area = "attachments"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "lash_conformance::attachment_materialization_turn_witnesses",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a turn whose attachments fail to read settles without calling the provider, and a repeated attachment's bytes are charged once"
+note = "deleted by L9g (FIG-5185), with the law in crates/lash-conformance/src/conformance/attachment_read_budgets.rs: on the durable backend it fails with SessionRunPending: since L3s (FIG-5196) a turn input is session mail that the session actor admits and runs, and this law drives its turn in process through the runtime (execute_turn and its kin), which answers SessionRunPending on the durable backend; the store half, attachment_materialization_read_budgets, still runs"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance.rs"
+test = "driver_turn_ownership_tests"
+area = "store-conformance"
+needs = ["turn"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "lash_conformance::driver_turn_ownership_tests!",
+]
+disposition = "covered-by:row:crates/lash-conformance/src/conformance/run_control/ownership.rs"
+status = "deleted"
+note = "L3s (FIG-5196) deleted these laws with the shift, run admission and turn parks; their dispositions are on the rows of crates/lash-conformance/src/conformance/run_control/ownership.rs"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance.rs"
+test = "frame_open_redrive_tests"
+area = "store-conformance"
+needs = ["turn"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "lash_conformance::frame_open_redrive_tests!",
+]
+disposition = "covered-by:row:crates/lash-conformance/src/conformance/frame_open_redrive.rs"
+status = "deleted"
+note = "L3s (FIG-5196) deleted these laws with the shift, run admission and turn parks; their dispositions are on the rows of crates/lash-conformance/src/conformance/frame_open_redrive.rs"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance.rs"
+test = "queued_input_runs_tests"
+area = "store-conformance"
+needs = ["turn"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "lash_conformance::queued_input_runs_tests!",
+]
+disposition = "covered-by:row:crates/lash-conformance/src/conformance/queued_input_runs.rs"
+status = "deleted"
+note = "L3s (FIG-5196) deleted these laws with the shift, run admission and turn parks; their dispositions are on the rows of crates/lash-conformance/src/conformance/queued_input_runs.rs"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance.rs"
+test = "session_command_replay_tests"
+area = "store-conformance"
+needs = ["turn"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "lash_conformance::session_command_replay_tests!",
+]
+disposition = "covered-by:row:crates/lash-conformance/src/conformance/turn_config/command_settlement.rs"
+status = "deleted"
+note = "L3s (FIG-5196) deleted these laws with the shift, run admission and turn parks; their dispositions are on the rows of crates/lash-conformance/src/conformance/turn_config/command_settlement.rs"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance.rs"
+test = "run_answers_its_rows_tests"
+area = "store-conformance"
+needs = ["turn"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "lash_conformance::run_answers_its_rows_tests!",
+]
+disposition = "covered-by:row:crates/lash-conformance/src/conformance/run_answers_its_rows.rs"
+status = "deleted"
+note = "L3s (FIG-5196) deleted these laws with the shift, run admission and turn parks; their dispositions are on the rows of crates/lash-conformance/src/conformance/run_answers_its_rows.rs"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance.rs"
+test = "shift_admission_tests"
+area = "store-conformance"
+needs = ["turn"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "lash_conformance::shift_admission_tests!",
+]
+disposition = "covered-by:row:crates/lash-conformance/src/conformance/shift_admission.rs"
+status = "deleted"
+note = "L3s (FIG-5196) deleted these laws with the shift, run admission and turn parks; their dispositions are on the rows of crates/lash-conformance/src/conformance/shift_admission.rs"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance.rs"
+test = "bound_trigger_duplicate_tests"
+area = "triggers"
+needs = ["turn", "process"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "lash_conformance::bound_trigger_duplicate_tests!",
+]
+disposition = "covered-by:row:crates/lash-conformance/src/conformance/bound_trigger_duplicate.rs"
+status = "deleted"
+note = "deleted by L9g (FIG-5185); see its row"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance.rs"
+test = "process_continuation_store_tests"
+area = "processes"
+needs = ["process"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "lash_conformance::process_continuation_store_tests!",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7b (FIG-5198) deleted segment handover and its continuation store with this suite"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance.rs"
+test = "worker_recovery_tests"
+area = "cells"
+needs = ["cell"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "lash_conformance::worker_recovery_tests!",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7b (FIG-5198) deleted durable worker-recovery accounting (lash_worker_recovery) with this suite"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance.rs"
+test = "vm_broker_tests"
+area = "cells"
+needs = ["cell"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "lash_conformance::vm_broker_tests!",
+]
+disposition = "covered-by:crates/lash-vm-broker/src/broker/tests.rs"
+status = "deleted"
+note = "L7 (FIG-5177) deleted the journal-era worker-broker suite; each law has its own L7 row under crates/lash-conformance/src/conformance/vm_broker/"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance.rs"
+test = "fork_inherits_history_without_execution_queues_waits_or_journals"
+area = "store-conformance"
+needs = ["turn"]
+class = "semantic"
+lane = "L9g"
+laws = [
+  "fork_inherits_history_without_execution_queues_waits_or_journals",
+]
+disposition = "port"
+status = "todo"
+note = "blocked:L4 (FIG-5174): instantiated (ignored) in crates/lash-postgres-store/tests/conformance/durable_laws.rs; the source session's turn mints a tool completion key, which reaches await_event_legacy::port_pending, todo!() until fig-5174-pending ports it. Repro: kiln test //crates/lash-sqlite-store:conformance_memory__test --test_arg=suite::durable_laws::fork_inherits --test_arg=--ignored (panics at crates/lash-core-execution/src/runtime/actor/await_event_legacy.rs:24)"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance.rs"
+test = "postgres_attachment_materialization_turn_witnesses"
+area = "attachments"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "lash_conformance::attachment_materialization_turn_witnesses",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a turn whose attachments fail to read settles without calling the provider, and a repeated attachment's bytes are charged once"
+note = "deleted by L9g (FIG-5185), with the law in crates/lash-conformance/src/conformance/attachment_read_budgets.rs: on the durable backend it fails with SessionRunPending: since L3s (FIG-5196) a turn input is session mail that the session actor admits and runs, and this law drives its turn in process through the runtime (execute_turn and its kin), which answers SessionRunPending on the durable backend; the store half, attachment_materialization_read_budgets, still runs"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance.rs"
+test = "process_shutdown_preserves_typed_failures"
+area = "processes"
+needs = ["process"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "process_shutdown_preserves_typed_failures",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7b (FIG-5198) deleted it with the lashlang process run path (argument_admission_testing)"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance.rs"
+test = "process_event_host_failure_stops_execution"
+area = "processes"
+needs = ["process"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "process_event_host_failure_stops_execution",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7b (FIG-5198) deleted it with the lashlang process run path (argument_admission_testing)"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance.rs"
+test = "postgres_wake_enqueue_serializes_with_consumption_when_configured"
+area = "processes"
+needs = ["process"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "postgres_wake_enqueue_serializes_with_consumption_when_configured",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L6 (FIG-5175) deleted the process wake outbox (lash_process_wake_deliveries) and the PG wake-source lock this law raced"

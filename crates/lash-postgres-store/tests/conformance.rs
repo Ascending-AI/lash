@@ -55,6 +55,8 @@ mod artifact_races;
 mod attachment_catalog;
 #[path = "conformance/attachment_recovery.rs"]
 mod attachment_recovery;
+#[path = "conformance/durable_laws.rs"]
+mod durable_laws;
 #[path = "conformance/obligation_relay.rs"]
 mod obligation_relay;
 #[path = "conformance/occurrence_listing.rs"]
@@ -890,16 +892,6 @@ lash_conformance::retention_tests!({
     (database_fixture, Arc::new(storage.session_store_factory()))
 });
 
-mod driver_turn_ownership {}
-
-// The ownership law where every await suspends and every resumption replays
-// the handler's journal from its start (FIG-4514): a run replayed after its
-// terminal-checkpoint follow-on committed names that follow-on's effects as
-// its first execution did, so the shift ends.
-mod driver_turn_ownership_under_replay {}
-
-mod run_control {}
-
 mod session_history {
     use super::*;
     use lash_core_execution::store::ConformanceDeployment;
@@ -986,12 +978,6 @@ mod session_history {
         .await;
     }
 }
-
-mod vm_broker {}
-
-mod frame_open {}
-
-mod bound_trigger_duplicate {}
 
 #[tokio::test]
 async fn fenced_process_and_trigger_registration_stays_typed() {
@@ -1096,5 +1082,3 @@ lash_conformance::process_prune_start_staging_tests!({
     let env_store = Arc::new(storage.process_env_store()) as Arc<dyn ProcessExecutionEnvStore>;
     (database_fixture, registry, env_store)
 });
-
-mod session_commands {}
