@@ -63,6 +63,7 @@ Scope `lash`, version `1.0`. GenAI snapshot `b31e9e8ea26ac1c086d3313d474e31d7c3f
 | `lash.session_execution_lane.wait.outcome` | String |
 | `lash.session_execution_lane.give_up` | String |
 | `lash.store.pool.acquire.outcome` | String |
+| `lash.durable.commit.label` | String |
 | `lash.runtime_commit.budget.outcome` | String |
 | `lash.parked_work.kind` | String |
 | `lash.parked_work.reason` | String |
@@ -78,6 +79,12 @@ Scope `lash`, version `1.0`. GenAI snapshot `b31e9e8ea26ac1c086d3313d474e31d7c3f
 | `lash.session_execution_lane.give_ups` | Counter | `` | Live |
 | `lash.queued_work.wake_retries` | Counter | `` | Live |
 | `lash.store.pool.acquire_wait.duration` | Histogram | `ms` | Physical |
+| `lash.durable.commit.acquire_wait.duration` | Histogram | `us` | Physical |
+| `lash.durable.commit.transaction.duration` | Histogram | `us` | Physical |
+| `lash.durable.commit.sql_statements` | Histogram | `` | Physical |
+| `lash.durable.commit.returned_bytes` | Histogram | `By` | Physical |
+| `lash.durable.commit.lock_statement_elapsed` | Histogram | `us` | Physical |
+| `lash.durable.commit.group_commit.members` | Histogram | `` | Physical |
 | `lash.runtime_commit.budgeted_size` | Histogram | `By` | Live |
 | `lash.parked_work.parks` | Counter | `` | Transition |
 | `lash.parked_work.count` | Gauge | `` | Gauge |

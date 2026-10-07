@@ -64,7 +64,7 @@ pub(super) async fn apply(
                 )
                 .bind(purpose.deadline().map(|deadline| deadline.0))
                 .bind(commit.epoch.0)
-                .execute(&mut *tx)
+                .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
             Ok(())
@@ -75,7 +75,7 @@ pub(super) async fn apply(
                 .bind(commit.actor.as_str())
                 .bind(TIMER_DIGEST)
                 .bind(commit.now.0)
-                .execute(&mut *tx)
+                .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
             Ok(())
@@ -84,7 +84,7 @@ pub(super) async fn apply(
             let owners: Vec<String> = sqlx::query_scalar(SQL.waits.revoke_scope.sql())
                 .bind(scope.stored())
                 .bind(commit.now.0)
-                .fetch_all(&mut *tx)
+                .fetch_all(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
             wake_owners(tx, commit.actor, owners, commit.now).await
@@ -99,7 +99,7 @@ pub(super) async fn apply(
                 .bind(digest)
                 .bind(resolution_ref)
                 .bind(commit.now.0)
-                .fetch_all(&mut *tx)
+                .fetch_all(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
             wake_owners(tx, commit.actor, owners, commit.now).await
@@ -114,7 +114,7 @@ pub(super) async fn apply(
                 .bind(digest)
                 .bind(resolution_ref)
                 .bind(commit.now.0)
-                .fetch_all(&mut *tx)
+                .fetch_all(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
             wake_owners(tx, commit.actor, owners, commit.now).await
@@ -155,7 +155,7 @@ pub(super) async fn resolve(
 ) -> Result<(ResolveAnswer, Option<Woken>), DurableError> {
     let row = sqlx::query(SQL.postgres.lock.sql())
         .bind(resolution.id.to_hex())
-        .fetch_optional(&mut *tx)
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
     let Some(row) = row.as_ref().map(decode).transpose()? else {
@@ -169,7 +169,7 @@ pub(super) async fn resolve(
         .bind(&resolution.digest)
         .bind(&resolution.resolution_ref)
         .bind(now.0)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
     if owner.is_none() {
@@ -213,7 +213,7 @@ pub(super) async fn pending(
 ) -> Result<Vec<WaitRow>, DurableError> {
     let rows = sqlx::query(SQL.waits.pending.sql())
         .bind(owner.as_str())
-        .fetch_all(tx)
+        .fetch_all(crate::observed_sql::executor(tx))
         .await
         .map_err(sqlx_failure)?;
     rows.iter().map(decode).collect()
@@ -225,7 +225,7 @@ pub(super) async fn wait(
 ) -> Result<Option<WaitRow>, DurableError> {
     let row = sqlx::query(SQL.waits.one.sql())
         .bind(id.to_hex())
-        .fetch_optional(tx)
+        .fetch_optional(crate::observed_sql::executor(tx))
         .await
         .map_err(sqlx_failure)?;
     row.as_ref().map(decode).transpose()

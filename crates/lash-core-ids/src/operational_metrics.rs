@@ -3,6 +3,7 @@
 //! transition permit, gauges report current state, and physical resource
 //! observations use a construction-time store observer without a permit.
 
+pub use lash_trace::telemetry::metrics::DurableCommitCost;
 use lash_trace::telemetry::metrics::TelemetryMetrics;
 use lash_trace::{EmissionPermit, EmissionSource};
 use std::time::Duration;
@@ -36,6 +37,26 @@ impl StoreObserver {
     pub fn pool_acquire_wait(&self, wait: Duration, outcome: &'static str) {
         if let Some(metrics) = &self.metrics {
             record_pool_acquire_wait(metrics, wait, outcome);
+        }
+    }
+
+    /// Record the physical cost of a durable transaction, independent of execution permits.
+    pub fn durable_commit(&self, label: &str, outcome: &'static str, cost: DurableCommitCost) {
+        if let Some(metrics) = &self.metrics {
+            #[cfg(any(test, feature = "testing"))]
+            for name in [
+                "lash.durable.commit.acquire_wait.duration",
+                "lash.durable.commit.transaction.duration",
+                "lash.durable.commit.sql_statements",
+                "lash.durable.commit.returned_bytes",
+                "lash.durable.commit.lock_statement_elapsed",
+                "lash.durable.commit.group_commit.members",
+            ] {
+                observe_test_metric(name);
+            }
+            metrics
+                .runtime_tuning
+                .record_durable_commit(label, outcome, cost);
         }
     }
 

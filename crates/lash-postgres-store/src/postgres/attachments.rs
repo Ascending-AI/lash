@@ -81,7 +81,7 @@ async fn check_fence_tx(
     )
     .bind(referrer.kind().as_str())
     .bind(referrer.canonical_id())
-    .fetch_one(&mut *tx)
+    .fetch_one(crate::observed_sql::executor(&mut *tx))
     .await
     .map_err(store_sqlx_error)?;
     if fenced {
@@ -107,12 +107,12 @@ pub(crate) async fn acquire_attachment_refs_tx(
     for id in &ids {
         let deleting: bool = sqlx::query_scalar(attachment_sql().postgres.select_deleting.sql())
             .bind(id.as_str())
-            .fetch_one(&mut *tx)
+            .fetch_one(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(store_sqlx_error)?;
         let evidenced = sqlx::query(attachment_sql().uploads.select_evidence.sql())
             .bind(id.as_str())
-            .fetch_optional(&mut *tx)
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(store_sqlx_error)?
             .is_some();
@@ -130,7 +130,7 @@ pub(crate) async fn acquire_attachment_refs_tx(
                 .sql(),
         )
         .bind(id.as_str())
-        .execute(&mut *tx)
+        .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
         insert_edge_tx(tx, &claim.referrer(), id).await?;
@@ -149,7 +149,7 @@ async fn insert_edge_tx(
         .bind(id.as_str())
         .bind(referrer.kind().as_str())
         .bind(referrer.canonical_id())
-        .execute(&mut *tx)
+        .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
     Ok(())
@@ -164,7 +164,7 @@ async fn has_permit_tx(
         .bind(write.attachment_id.as_str())
         .bind(write.claim.referrer().kind().as_str())
         .bind(write.claim.referrer().canonical_id())
-        .fetch_optional(&mut **tx)
+        .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?
         .is_some())
@@ -180,7 +180,7 @@ async fn abort_write_tx(
         .bind(token)
         .bind(referrer.kind().as_str())
         .bind(referrer.canonical_id())
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     sqlx::query(attachment_sql().pending.delete_permit.sql())
@@ -188,14 +188,14 @@ async fn abort_write_tx(
         .bind(id.as_str())
         .bind(referrer.kind().as_str())
         .bind(referrer.canonical_id())
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     sqlx::query(attachment_sql().edges.delete_unproven_ref.sql())
         .bind(id.as_str())
         .bind(referrer.kind().as_str())
         .bind(referrer.canonical_id())
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     Ok(())
@@ -233,7 +233,7 @@ pub(crate) async fn lock_attachment_fence_tx(
     )
     .bind(ATTACHMENT_FENCE_LOCK_NAMESPACE)
     .bind(attachment_id)
-    .execute(&mut *tx)
+    .execute(crate::observed_sql::executor(&mut *tx))
     .await
     .map_err(store_sqlx_error)?;
     Ok(())

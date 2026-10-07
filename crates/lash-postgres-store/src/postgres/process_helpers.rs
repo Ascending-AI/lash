@@ -35,7 +35,7 @@ pub(crate) async fn process_change_horizon_tx(
             .select_compaction_horizon_for_share
             .sql(),
     )
-    .fetch_one(&mut *tx)
+    .fetch_one(crate::observed_sql::executor(&mut *tx))
     .await
     .map_err(plugin_sqlx_error)?;
     plugin_u64_from_sql(
@@ -56,7 +56,7 @@ pub(crate) async fn load_process_tx(
             .sql(),
     )
     .bind(process_id.as_str())
-    .fetch_optional(&mut *tx)
+    .fetch_optional(crate::observed_sql::executor(&mut *tx))
     .await
     .map_err(plugin_sqlx_error)?;
     json.map(|json| decode_process_record(&json)).transpose()
@@ -71,7 +71,7 @@ pub(crate) async fn load_process_by_start_key_tx(
     let json: Option<String> =
         sqlx::query_scalar(process_sql().process.select_record_json_by_start_key.sql())
             .bind(start_key.as_str())
-            .fetch_optional(&mut *tx)
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(plugin_sqlx_error)?;
     json.map(|json| decode_process_record(&json)).transpose()
@@ -99,7 +99,7 @@ pub(crate) async fn require_process_tx(
     }
     let row = sqlx::query(process_sql().tombstone.select_terminal.sql())
         .bind(process_id.as_str())
-        .fetch_optional(&mut *tx)
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(plugin_sqlx_error)?;
     let tombstone = row
@@ -133,7 +133,7 @@ pub(crate) async fn wake_session_id_tx(
 ) -> Result<Option<SessionId>, PluginError> {
     sqlx::query_scalar::<_, Option<String>>(process_sql().process.select_wake_session_id.sql())
         .bind(process_id.as_str())
-        .fetch_one(&mut *tx)
+        .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(plugin_sqlx_error)?
         .map(SessionId::parse)
@@ -154,7 +154,7 @@ pub(crate) async fn save_process_tx(
         .bind(record.last_event_sequence as i64)
         .bind(cancel_requested_at_ms(record))
         .bind(serde_json::to_string(record).map_err(process_decode_error)?)
-        .execute(&mut *tx)
+        .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(plugin_sqlx_error)?;
     Ok(())
@@ -164,7 +164,7 @@ pub(crate) async fn next_process_change_seq_tx(
     tx: &mut sqlx::PgConnection,
 ) -> Result<u64, PluginError> {
     let seq: i64 = sqlx::query_scalar(process_sql().clock_postgres.bump_returning.sql())
-        .fetch_one(&mut *tx)
+        .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(plugin_sqlx_error)?;
     plugin_u64_from_sql("ProcessChangeClock", "current_seq", seq)
@@ -182,7 +182,7 @@ pub(crate) async fn load_event_by_key_tx(
     let Some(row) = sqlx::query(process_sql().event.select_by_replay_key.sql())
         .bind(process_id.as_str())
         .bind(replay_key)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(plugin_sqlx_error)?
     else {
@@ -206,7 +206,7 @@ pub(crate) async fn next_process_event_sequence_tx(
     let last_sequence: Option<i64> =
         sqlx::query_scalar(process_sql().event.select_max_sequence.sql())
             .bind(process_id.as_str())
-            .fetch_one(&mut *tx)
+            .fetch_one(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(plugin_sqlx_error)?;
     let last_sequence = last_sequence
@@ -368,7 +368,7 @@ async fn stage_process_event_append_tx(
                 .bind(process_id.as_str())
                 .bind(request.event_type.as_str())
                 .bind(clamp_sequence_bound(u64::MAX))
-                .fetch_one(&mut *tx)
+                .fetch_one(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(plugin_sqlx_error)?;
         Some(count as u64)
@@ -422,7 +422,7 @@ async fn stage_process_event_append_tx(
                 .bind(event.event_type.as_str())
                 .bind(event.invocation.effect_replay_key())
                 .bind(serde_json::to_string(&event).map_err(process_decode_error)?)
-                .execute(&mut *tx)
+                .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(plugin_sqlx_error)?;
             // A new signal reaches the engine as mail, in the append's own
@@ -494,13 +494,13 @@ pub(crate) async fn deliver_process_wake_tx(
     let sql = crate::session_sql::session_sql();
     let deleted: bool = sqlx::query_scalar(sql.deleted_postgres.exists.sql())
         .bind(wake.target_session_id.as_str())
-        .fetch_one(&mut *tx)
+        .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(plugin_sqlx_error)?;
     let live = !deleted
         && sqlx::query(sql.meta_postgres.select_relation_for_share.sql())
             .bind(wake.target_session_id.as_str())
-            .fetch_optional(&mut *tx)
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(plugin_sqlx_error)?
             .is_some();

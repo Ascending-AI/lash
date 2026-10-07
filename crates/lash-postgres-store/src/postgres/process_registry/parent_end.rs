@@ -71,7 +71,7 @@ pub(crate) async fn lock_parent_scope_tx(
             .sql(),
     )
     .bind(format!("lash-parent-end:{kind}:{id}"))
-    .execute(&mut *tx)
+    .execute(crate::observed_sql::executor(&mut *tx))
     .await
     .map(drop)
     .map_err(plugin_sqlx_error)
@@ -94,7 +94,7 @@ pub(crate) async fn record_tx(
         .bind(id.clone())
         .bind(ledger_payload(parent, fleet_format)?)
         .bind(ended_at_ms as i64)
-        .execute(&mut *tx)
+        .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map(drop)
         .map_err(plugin_sqlx_error)?;
@@ -104,7 +104,7 @@ pub(crate) async fn record_tx(
     sqlx::query(process_sql().process.release_consumer_holds_owned_by.sql())
         .bind(kind)
         .bind(&id)
-        .execute(&mut *tx)
+        .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map(drop)
         .map_err(plugin_sqlx_error)?;
@@ -113,7 +113,7 @@ pub(crate) async fn record_tx(
     sqlx::query(process_sql().abandoned_hold.forget_owned_by.sql())
         .bind(kind)
         .bind(id)
-        .execute(&mut *tx)
+        .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map(drop)
         .map_err(plugin_sqlx_error)?;
@@ -136,7 +136,7 @@ pub(crate) async fn lock_consumer_hold_tx(
             .sql(),
     )
     .bind(format!("lash-consumer-hold:{key}"))
-    .execute(&mut *tx)
+    .execute(crate::observed_sql::executor(&mut *tx))
     .await
     .map(drop)
     .map_err(plugin_sqlx_error)
@@ -151,7 +151,7 @@ pub(crate) async fn plan_exists_tx(
     let row = sqlx::query(process_sql().plan.exists.sql())
         .bind(kind)
         .bind(id)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(plugin_sqlx_error)?;
     Ok(row.is_some())

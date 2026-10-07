@@ -293,6 +293,20 @@ fn emitted_domain_shape_matches_registry() {
         .metrics
         .runtime_tuning
         .record_runtime_commit_budgeted_size(3, "admitted");
+    for (label, members) in [("round.outcome", 3), ("turn.commit", 0)] {
+        adapter.metrics.runtime_tuning.record_durable_commit(
+            label,
+            "success",
+            crate::telemetry::metrics::DurableCommitCost {
+                acquire_wait: Duration::from_micros(123),
+                transaction_duration: Duration::from_micros(456),
+                sql_statements: 7,
+                returned_bytes: 89,
+                lock_statement_elapsed: Duration::from_micros(34),
+                group_commit_members: members,
+            },
+        );
+    }
     adapter.metrics.parked_work.record_park("turn", "budget");
     adapter
         .metrics
@@ -377,6 +391,38 @@ fn emitted_domain_shape_matches_registry() {
             assert_eq!(scope.scope().version(), Some("1.0"));
             for metric in scope.metrics() {
                 definitions.push((metric.name(), metric.unit()));
+                if metric.name().starts_with("lash.durable.commit.") {
+                    let opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(
+                        opentelemetry_sdk::metrics::data::MetricData::Histogram(histogram),
+                    ) = metric.data()
+                    else {
+                        panic!("durable cost is a u64 histogram");
+                    };
+                    let points: Vec<_> = histogram.data_points().collect();
+                    assert_eq!(points.len(), 2, "both durable labels have values");
+                    for point in points {
+                        assert_eq!(point.count(), 1);
+                        let label = point
+                            .attributes()
+                            .find(|attribute| attribute.key.as_str() == "lash.durable.commit.label")
+                            .expect("commit label")
+                            .value
+                            .to_string();
+                        assert!(["round.outcome", "turn.commit"].contains(&label.as_str()));
+                        let expected = match metric.name() {
+                            "lash.durable.commit.acquire_wait.duration" => 123,
+                            "lash.durable.commit.transaction.duration" => 456,
+                            "lash.durable.commit.sql_statements" => 7,
+                            "lash.durable.commit.returned_bytes" => 89,
+                            "lash.durable.commit.lock_statement_elapsed" => 34,
+                            "lash.durable.commit.group_commit.members" => {
+                                if label == "round.outcome" { 3 } else { 0 }
+                            }
+                            _ => panic!("unrecognized durable cost"),
+                        };
+                        assert_eq!(point.sum(), expected);
+                    }
+                }
             }
         }
     }

@@ -7,7 +7,8 @@ pub use lash_sansio::{AttachmentMaterializationReason, AttachmentMaterialization
 /// The scope, cause, permit and identity vocabulary the trace runtime's
 /// signatures name.
 pub use lash_trace::telemetry::metrics::{
-    ObligationMetrics, ParkedWorkMetrics, RuntimeTuningMetrics, TelemetryMetrics, ToolIntentMetrics,
+    DurableCommitCost, ObligationMetrics, ParkedWorkMetrics, RuntimeTuningMetrics,
+    TelemetryMetrics, ToolIntentMetrics,
 };
 pub use lash_trace::{
     AttemptObservation, DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier,

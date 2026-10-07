@@ -487,6 +487,7 @@ PACKAGE_DEPS = {
         },
         "normal": {
             "async_trait": "//third-party/rust:p0015",
+            "futures_util": "//third-party/rust:p0127",
             "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
             "lash_durable": "//crates/lash-durable:lash-durable",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",

@@ -1,5 +1,25 @@
 //! Runtime metrics with injected instruments and feature-independent no-op handles.
 
+/// Physical cost of one durable PostgreSQL transaction attempt.
+/// No payloads or bind values are retained by this observation.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DurableCommitCost {
+    /// Time awaiting a pool checkout, including checkout validation.
+    pub acquire_wait: std::time::Duration,
+    /// Elapsed time from BEGIN through COMMIT or ROLLBACK, excluding acquire.
+    pub transaction_duration: std::time::Duration,
+    /// Attempted SQL executions, including BEGIN and COMMIT or ROLLBACK.
+    /// Preparation, checkout validation and protocol messages are excluded.
+    pub sql_statements: u64,
+    /// Returned column-value bytes before decoding, excluding NULLs and wire framing.
+    pub returned_bytes: u64,
+    /// Elapsed time of lock-bearing statements, an upper bound on lock wait.
+    /// Includes execution and network time; it is not pure server lock time.
+    pub lock_statement_elapsed: std::time::Duration,
+    /// Outcome records submitted in this group commit attempt; zero for non-group work.
+    pub group_commit_members: u64,
+}
+
 #[path = "registry.rs"]
 pub mod registry;
 
@@ -35,6 +55,12 @@ mod enabled {
         queued_work_wake_retries: Counter<u64>,
         pool_acquire_wait_duration: Histogram<u64>,
         runtime_commit_budgeted_size: Histogram<u64>,
+        durable_acquire_wait: Histogram<u64>,
+        durable_transaction_duration: Histogram<u64>,
+        durable_sql_statements: Histogram<u64>,
+        durable_returned_bytes: Histogram<u64>,
+        durable_lock_statement_elapsed: Histogram<u64>,
+        durable_group_commit_members: Histogram<u64>,
     }
 
     impl RuntimeTuningMetrics {
@@ -50,6 +76,15 @@ mod enabled {
                 queued_work_wake_retries: counter(&meter, Metric::WakeRetries),
                 pool_acquire_wait_duration: histogram(&meter, Metric::PoolAcquireWait),
                 runtime_commit_budgeted_size: histogram(&meter, Metric::CommitBudgetedSize),
+                durable_acquire_wait: histogram(&meter, Metric::DurableAcquireWait),
+                durable_transaction_duration: histogram(&meter, Metric::DurableTransactionDuration),
+                durable_sql_statements: histogram(&meter, Metric::DurableSqlStatements),
+                durable_returned_bytes: histogram(&meter, Metric::DurableReturnedBytes),
+                durable_lock_statement_elapsed: histogram(
+                    &meter,
+                    Metric::DurableLockStatementElapsed,
+                ),
+                durable_group_commit_members: histogram(&meter, Metric::DurableGroupCommitMembers),
             }
         }
 
@@ -97,6 +132,31 @@ mod enabled {
             );
         }
 
+        /// Record one physical transaction attempt with its durable label and outcome.
+        pub fn record_durable_commit(
+            &self,
+            label: &str,
+            outcome: &'static str,
+            cost: super::DurableCommitCost,
+        ) {
+            let attributes = [
+                AttributeKey::CommitLabel.value(label.to_owned()),
+                AttributeKey::Outcome.value(outcome),
+            ];
+            self.durable_acquire_wait
+                .record(duration_micros(cost.acquire_wait), &attributes);
+            self.durable_transaction_duration
+                .record(duration_micros(cost.transaction_duration), &attributes);
+            self.durable_sql_statements
+                .record(cost.sql_statements, &attributes);
+            self.durable_returned_bytes
+                .record(cost.returned_bytes, &attributes);
+            self.durable_lock_statement_elapsed
+                .record(duration_micros(cost.lock_statement_elapsed), &attributes);
+            self.durable_group_commit_members
+                .record(cost.group_commit_members, &attributes);
+        }
+
         pub fn record_runtime_commit_budgeted_size(&self, bytes: usize, outcome: &'static str) {
             self.runtime_commit_budgeted_size.record(
                 u64::try_from(bytes).unwrap_or(u64::MAX),
@@ -106,6 +166,10 @@ mod enabled {
                 )],
             );
         }
+    }
+
+    fn duration_micros(duration: std::time::Duration) -> u64 {
+        u64::try_from(duration.as_micros()).unwrap_or(u64::MAX)
     }
 
     fn duration_millis(duration: std::time::Duration) -> u64 {
@@ -279,6 +343,14 @@ mod disabled {
         pub fn record_queued_work_wake_retry(&self) {}
         pub fn record_pool_acquire_wait(&self, wait: std::time::Duration, outcome: &'static str) {
             let _ = (wait, outcome);
+        }
+        pub fn record_durable_commit(
+            &self,
+            label: &str,
+            outcome: &'static str,
+            cost: super::DurableCommitCost,
+        ) {
+            let _ = (label, outcome, cost);
         }
         pub fn record_runtime_commit_budgeted_size(&self, bytes: usize, outcome: &'static str) {
             let _ = (bytes, outcome);

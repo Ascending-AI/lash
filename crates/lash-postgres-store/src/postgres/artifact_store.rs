@@ -129,7 +129,7 @@ pub(crate) async fn lock_referrer_tx(
             .sql(),
     )
     .bind(key)
-    .execute(conn)
+    .execute(crate::observed_sql::executor(conn))
     .await
     .map(|_| ())
 }

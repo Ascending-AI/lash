@@ -50,7 +50,7 @@ impl PostgresStore {
         let row = sqlx::query(sql.queued_batches_postgres.select_cancelable.sql())
             .bind(session_id.as_str())
             .bind(batch_id)
-            .fetch_optional(&mut **tx)
+            .fetch_optional(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         let Some(row) = row else {
@@ -64,7 +64,7 @@ impl PostgresStore {
             .bind(session_id.as_str())
             .bind(batch_id)
             .bind(crate::support::clamp_epoch_ms(self.clock.timestamp_ms()))
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         tx.commit().await.map_err(store_sqlx_error)?;
@@ -85,7 +85,7 @@ impl PostgresStore {
         )
         .bind(session_id.as_str())
         .bind(batch_id)
-        .fetch_optional(&mut *connection)
+        .fetch_optional(crate::observed_sql::executor(&mut *connection))
         .await
         .map_err(store_sqlx_error)?;
         row.map(|row| {
@@ -112,7 +112,7 @@ impl PostgresStore {
                 .begin_repeatable_read_read_only
                 .sql(),
         )
-        .execute(&mut *tx)
+        .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]
@@ -125,7 +125,7 @@ impl PostgresStore {
                 .sql(),
         )
         .bind(session_id.as_str())
-        .fetch_all(&mut *tx)
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
         let mut batches = Vec::new();
@@ -158,7 +158,7 @@ impl PostgresStore {
         )
         .bind(session_id.as_str())
         .bind(QueuedWorkKind::Control.as_str())
-        .fetch_one(&mut *tx)
+        .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
         tx.commit().await.map_err(store_sqlx_error)?;
@@ -191,7 +191,7 @@ impl PostgresStore {
                 .begin_repeatable_read_read_only
                 .sql(),
         )
-        .execute(&mut *tx)
+        .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]
@@ -204,7 +204,7 @@ impl PostgresStore {
                 .sql(),
         )
         .bind(session_id.as_str())
-        .fetch_all(&mut *tx)
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
         let mut batches = Vec::new();

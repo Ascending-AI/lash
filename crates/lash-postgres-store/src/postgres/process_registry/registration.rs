@@ -106,7 +106,7 @@ pub(crate) async fn apply_registration_tx(
         parent_end::lock_consumer_hold_tx(tx, &hold.key).await?;
         let abandoned: bool = sqlx::query_scalar(process_sql().abandoned_hold.exists.sql())
             .bind(hold.key.as_str())
-            .fetch_one(&mut *tx)
+            .fetch_one(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(plugin_sqlx_error)?;
         if abandoned {
@@ -157,7 +157,7 @@ pub(crate) async fn apply_registration_tx(
         .bind(consumer_hold.as_ref().map(|hold| hold.owner.storage_kind()))
         .bind(consumer_hold.as_ref().map(|hold| hold.owner.storage_id()))
         .bind(consumer_hold.as_ref().map(|hold| hold.cancels))
-        .execute(&mut *tx)
+        .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(plugin_sqlx_error)?;
     // On this tier alone the read that found no retained process for the
@@ -198,7 +198,7 @@ pub(crate) async fn apply_registration_tx(
         sqlx::query(process_sql().observer.insert.sql())
             .bind(session_id.as_str())
             .bind(process_id.as_str())
-            .execute(&mut *tx)
+            .execute(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(plugin_sqlx_error)?;
         append_process_event_tx(

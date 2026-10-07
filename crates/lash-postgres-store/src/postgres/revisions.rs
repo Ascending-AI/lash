@@ -30,7 +30,7 @@ pub(crate) async fn record_revision_tx(
         .bind(leaf_node_id)
         .bind(checkpoint_ref)
         .bind(head_json)
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     Ok(())
@@ -52,7 +52,7 @@ pub(crate) async fn release_unretained_tx(
     let released = sqlx::query(session_sql().revisions.prune_unretained.sql())
         .bind(i64::from(collecting))
         .bind(session_id.map(SessionId::as_str))
-        .fetch_all(&mut **tx)
+        .fetch_all(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     // Retirement takes node locks in id order across the whole release, the
@@ -77,7 +77,7 @@ pub(crate) async fn retention_tx(
 ) -> Result<Retention, StoreError> {
     sqlx::query_as::<_, (String, Option<i64>)>(session_sql().meta.select_retention.sql())
         .bind(session_id.as_str())
-        .fetch_optional(&mut **tx)
+        .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?
         .map_or(Ok(Retention::default()), |(kind, last_turns)| {
@@ -96,7 +96,7 @@ async fn require_session_tx(tx: &mut Tx<'_>, session_id: &SessionId) -> Result<(
             .sql(),
     )
     .bind(session_id.as_str())
-    .fetch_one(&mut **tx)
+    .fetch_one(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)?;
     if deleted {
@@ -116,7 +116,7 @@ async fn require_session_tx(tx: &mut Tx<'_>, session_id: &SessionId) -> Result<(
 async fn head_revision_tx(tx: &mut Tx<'_>, session_id: &SessionId) -> Result<u64, StoreError> {
     let head: Option<i64> = sqlx::query_scalar(session_sql().revisions.select_head_revision.sql())
         .bind(session_id.as_str())
-        .fetch_optional(&mut **tx)
+        .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     u64_from_sql("SessionRevision", "head_revision", head.unwrap_or(0))
@@ -148,7 +148,7 @@ async fn resolve_tx(
                     )
                     .bind(session_id.as_str())
                     .bind(input.as_str())
-                    .fetch_optional(&mut **tx)
+                    .fetch_optional(crate::observed_sql::executor(&mut **tx))
                     .await
                     .map_err(store_sqlx_error)?;
                     return TargetResolution::of_unbound_input(state.as_deref());
@@ -198,7 +198,7 @@ async fn resolved_pins_tx(
 ) -> Result<Vec<(Target, Option<u64>)>, StoreError> {
     let pins = sqlx::query_as::<_, (String, String)>(session_sql().pins.select_by_session.sql())
         .bind(session_id.as_str())
-        .fetch_all(&mut **tx)
+        .fetch_all(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     let mut resolved = Vec::with_capacity(pins.len());
@@ -243,7 +243,7 @@ async fn begin_snapshot(pool: &PgPool) -> Result<Tx<'_>, StoreError> {
             .begin_repeatable_read
             .sql(),
     )
-    .execute(&mut *tx)
+    .execute(crate::observed_sql::executor(&mut *tx))
     .await
     .map_err(store_sqlx_error)?;
     Ok(tx)
@@ -267,7 +267,7 @@ impl PostgresStore {
             )
             .bind(session_id.as_str())
             .bind(sql_revision)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(store_sqlx_error)?,
             Err(_) => None,
@@ -306,7 +306,7 @@ impl PostgresStore {
             session_sql().revisions.select_by_session.sql(),
         )
         .bind(session_id.as_str())
-        .fetch_all(&mut *tx)
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
         let mut stored = Vec::with_capacity(rows.len());
@@ -359,7 +359,7 @@ impl PostgresStore {
             .bind(session_id.as_str())
             .bind(target.kind())
             .bind(target.id())
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         // A policy that releases as the session commits releases what this
@@ -396,7 +396,7 @@ impl PostgresStore {
             .bind(session_id.as_str())
             .bind(retention.kind())
             .bind(retention.last_turns().map(i64::from))
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         tx.commit().await.map_err(store_sqlx_error)
@@ -413,7 +413,7 @@ pub(crate) async fn pin_tx(
         .bind(session_id.as_str())
         .bind(target.kind())
         .bind(target.id())
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     Ok(())

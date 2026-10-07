@@ -53,7 +53,7 @@ pub(super) async fn apply(
         } => {
             let open: Option<String> = sqlx::query_scalar(SQL.open_run.sql())
                 .bind(session.as_str())
-                .fetch_optional(&mut *tx)
+                .fetch_optional(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
             if open.is_some() {
@@ -65,7 +65,7 @@ pub(super) async fn apply(
                 .bind(session.as_str())
                 .bind(run.as_str())
                 .bind(admission.to_stored().map_err(|error| encoding(&error))?)
-                .execute(&mut *tx)
+                .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
             let (phase, argument) = UnfinishedPhase::Admitted.stored();
@@ -80,7 +80,7 @@ pub(super) async fn apply(
                 .bind(Option::<i64>::None)
                 .bind(turn_deadline.map(|deadline| deadline.0))
                 .bind(commit.epoch.0)
-                .execute(&mut *tx)
+                .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
             Ok(())
@@ -103,7 +103,7 @@ pub(super) async fn apply(
                 .bind(pin.map(|pin| pin.request_ref.as_str()))
                 .bind(pin.map(|pin| pin.deadline.0))
                 .bind(commit.epoch.0)
-                .fetch_optional(&mut *tx)
+                .fetch_optional(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
             if advanced.is_none() {
@@ -127,7 +127,7 @@ pub(super) async fn apply(
                 .bind(cause.to_stored().map_err(|error| encoding(&error))?)
                 .bind(head_revision.map(integer::<i64>).transpose()?)
                 .bind(commit.now.0)
-                .fetch_optional(&mut *tx)
+                .fetch_optional(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
             if ended.is_none() {
@@ -139,7 +139,7 @@ pub(super) async fn apply(
             sqlx::query(SQL.delete_phase.sql())
                 .bind(session.as_str())
                 .bind(run.as_str())
-                .execute(&mut *tx)
+                .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
             super::session_mail::settle_held(&mut *tx, session, run, commit.now.0).await
@@ -212,7 +212,7 @@ pub(super) async fn request_cancel(
     let open: Option<String> = sqlx::query_scalar(SQL.open_named_run.sql())
         .bind(session)
         .bind(run)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
     if open.is_none() {
@@ -228,7 +228,7 @@ pub(super) async fn request_cancel(
                 .bind(&request.reason)
                 .bind(turn_cancel_undelivered_wire(request.undelivered))
                 .bind(turn_cancel_mode_wire(request.mode))
-                .execute(&mut *tx)
+                .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
             TurnCancelAnswer::Requested
@@ -238,7 +238,7 @@ pub(super) async fn request_cancel(
                 .bind(session)
                 .bind(run)
                 .bind(turn_cancel_mode_wire(request.mode))
-                .execute(&mut *tx)
+                .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
             accepted.mode = request.mode;
@@ -266,7 +266,7 @@ async fn cancel_of(
     let stored: Option<StoredCancel> = sqlx::query_as(SQL.cancel_of.sql())
         .bind(session.as_str())
         .bind(run.as_str())
-        .fetch_optional(&mut *tx)
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
     let Some((request_id, origin, reason, disposition, mode)) = stored else {
@@ -300,7 +300,7 @@ pub(super) async fn turn_end(
     let Some(row) = sqlx::query(SQL.ended.sql())
         .bind(session.as_str())
         .bind(run.as_str())
-        .fetch_optional(&mut *tx)
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?
     else {
@@ -322,7 +322,7 @@ pub(super) async fn turn(
 ) -> Result<Option<TurnRow>, DurableError> {
     let Some(row) = sqlx::query(SQL.unfinished.sql())
         .bind(session.as_str())
-        .fetch_optional(&mut *tx)
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?
     else {
@@ -415,7 +415,7 @@ mod ddl_tests {
         .bind(checkpoint)
         .bind(pin.map(|(request, _)| request))
         .bind(pin.map(|(_, deadline)| deadline))
-        .execute(connection)
+        .execute(crate::observed_sql::executor(connection))
         .await
     }
 
@@ -494,7 +494,7 @@ mod ddl_tests {
             .bind(run)
             .bind(kind)
             .bind(cause)
-            .execute(&mut conn)
+            .execute(crate::observed_sql::executor(&mut conn))
             .await
         };
         let cancelled = r#"{"cause":"operator_cancelled","intent":1}"#;

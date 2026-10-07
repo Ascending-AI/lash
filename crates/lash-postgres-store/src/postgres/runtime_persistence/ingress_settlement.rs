@@ -161,7 +161,7 @@ async fn admitted_input_tx(
     )
     .bind(session_id.as_str())
     .bind(input_id.as_str())
-    .fetch_optional(&mut **tx)
+    .fetch_optional(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)?
     .map(pending_turn_input_row)
@@ -190,7 +190,7 @@ async fn admitted_batch_tx(
         sqlx::query_scalar(sql.queued_batches_postgres.settlement_facts.sql())
             .bind(session_id.as_str())
             .bind(batch_id.as_str())
-            .fetch_optional(&mut **tx)
+            .fetch_optional(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
     lash_core_execution::store_backend_support::require_admitted_to_run(
@@ -225,7 +225,7 @@ async fn settle_admitted_input_tx(
     .bind(state.as_str())
     .bind(run.as_str())
     .bind(crate::support::clamp_epoch_ms(now))
-    .execute(&mut **tx)
+    .execute(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)?
     .rows_affected();
@@ -248,7 +248,7 @@ async fn release_admitted_input_tx(
     .bind(session_id.as_str())
     .bind(input_id.as_str())
     .bind(run.as_str())
-    .execute(&mut **tx)
+    .execute(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)?
     .rows_affected();
@@ -271,7 +271,7 @@ async fn release_admitted_batch_tx(
     .bind(session_id.as_str())
     .bind(batch_id.as_str())
     .bind(run.as_str())
-    .execute(&mut **tx)
+    .execute(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)?
     .rows_affected();

@@ -50,7 +50,7 @@ use sqlx::postgres::{PgPoolOptions, PgRow};
 use sqlx::{PgConnection, PgPool, Row};
 
 use crate::StoreError;
-use crate::guarded_tx::{GuardedTx, WriterFence, begin_guarded};
+use crate::guarded_tx::{GuardedTx, WriterFence, begin_durable};
 use crate::support::store_sqlx_error;
 
 mod park_events;
@@ -224,6 +224,7 @@ pub struct PostgresDurableStore {
     pool: PgPool,
     reserve: Reserve,
     fence: WriterFence,
+    observer: lash_core_execution::facade_support::StoreObserver,
     /// The clock a test stands in for the database's.
     #[cfg(any(test, feature = "testing"))]
     clock: Option<std::sync::Arc<dyn lash_core_execution::Clock>>,
@@ -313,11 +314,17 @@ async fn finish<T>(tx: Tx, outcome: Result<T, DurableError>) -> Result<T, Durabl
 }
 
 impl PostgresDurableStore {
-    pub(crate) fn new(pool: PgPool, fence: WriterFence, reserve: Reserve) -> Self {
+    pub(crate) fn new(
+        pool: PgPool,
+        fence: WriterFence,
+        reserve: Reserve,
+        observer: lash_core_execution::facade_support::StoreObserver,
+    ) -> Self {
         Self {
             pool,
             reserve,
             fence,
+            observer,
             #[cfg(any(test, feature = "testing"))]
             clock: None,
         }
@@ -354,7 +361,7 @@ impl PostgresDurableStore {
                 .select_statement_epoch_ms
                 .sql(),
         )
-        .fetch_one(connection)
+        .fetch_one(crate::observed_sql::executor(connection))
         .await
         .map_err(sqlx_failure)?;
         Ok(DurableInstant(now))
@@ -369,14 +376,14 @@ impl PostgresDurableStore {
         } else {
             &self.pool
         };
-        let mut tx: Tx = begin_guarded(pool, &self.fence)
+        let mut tx: Tx = begin_durable(pool, &self.fence)
             .await
             .map_err(store_failure)?;
         let row = sqlx::query(SQL.postgres.begin_bounded.sql())
             .bind(LOCK_TIMEOUT_MS)
             .bind(STATEMENT_TIMEOUT_MS)
             .bind(IDLE_IN_TRANSACTION_TIMEOUT_MS)
-            .fetch_one(&mut **tx)
+            .fetch_one(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(sqlx_failure)?;
         let now = match self.injected_instant().transpose()? {
@@ -413,44 +420,47 @@ impl PostgresDurableStore {
         reaper: &NodeLease,
         boot: &Owner,
     ) -> Result<Vec<Reaped>, DurableError> {
-        let (mut tx, now) = self.open(CommitLabel::REAP).await?;
-        let outcome = async {
-            if !node_live(&mut tx, &reaper.owner).await? {
-                return Err(DurableError::NodeLeaseLost {
-                    node: reaper.owner.node.clone(),
-                });
-            }
-            for (owner, free) in [(&reaper.owner, false), (boot, true)] {
-                let taken: bool = sqlx::query_scalar(SQL.postgres.take_liveness.sql())
-                    .bind(owner.boot.as_str())
-                    .fetch_one(&mut **tx)
+        crate::observed_sql::measure(&self.observer, CommitLabel::REAP, 0, async {
+            let (mut tx, now) = self.open(CommitLabel::REAP).await?;
+            let outcome = async {
+                if !node_live(&mut tx, &reaper.owner).await? {
+                    return Err(DurableError::NodeLeaseLost {
+                        node: reaper.owner.node.clone(),
+                    });
+                }
+                for (owner, free) in [(&reaper.owner, false), (boot, true)] {
+                    let taken: bool = sqlx::query_scalar(SQL.postgres.take_liveness.sql())
+                        .bind(owner.boot.as_str())
+                        .fetch_one(crate::observed_sql::executor(&mut **tx))
+                        .await
+                        .map_err(sqlx_failure)?;
+                    if taken != free {
+                        return Ok(Vec::new());
+                    }
+                }
+                let deleted = sqlx::query(SQL.node.delete_boot.sql())
+                    .bind(boot.node.as_str())
+                    .bind(boot.boot.as_str())
+                    .fetch_optional(crate::observed_sql::executor(&mut **tx))
                     .await
                     .map_err(sqlx_failure)?;
-                if taken != free {
+                if deleted.is_none() {
                     return Ok(Vec::new());
                 }
+                Ok(release_owned_by(&mut tx, boot, now)
+                    .await?
+                    .into_iter()
+                    .map(|(actor, epoch)| Reaped {
+                        actor,
+                        from: boot.clone(),
+                        epoch,
+                    })
+                    .collect())
             }
-            let deleted = sqlx::query(SQL.node.delete_boot.sql())
-                .bind(boot.node.as_str())
-                .bind(boot.boot.as_str())
-                .fetch_optional(&mut **tx)
-                .await
-                .map_err(sqlx_failure)?;
-            if deleted.is_none() {
-                return Ok(Vec::new());
-            }
-            Ok(release_owned_by(&mut tx, boot, now)
-                .await?
-                .into_iter()
-                .map(|(actor, epoch)| Reaped {
-                    actor,
-                    from: boot.clone(),
-                    epoch,
-                })
-                .collect())
-        }
-        .await;
-        finish(tx, outcome).await
+            .await;
+            finish(tx, outcome).await
+        })
+        .await
     }
 }
 
@@ -463,7 +473,7 @@ async fn node_draining(tx: &mut PgConnection, node: &Owner) -> Result<Option<boo
     sqlx::query_scalar(SQL.postgres.node_live.sql())
         .bind(node.node.as_str())
         .bind(node.boot.as_str())
-        .fetch_optional(tx)
+        .fetch_optional(crate::observed_sql::executor(tx))
         .await
         .map_err(sqlx_failure)
 }
@@ -484,7 +494,7 @@ async fn release_owned_by(
         .bind(owner.node.as_str())
         .bind(owner.boot.as_str())
         .bind(now.0)
-        .fetch_all(tx)
+        .fetch_all(crate::observed_sql::executor(tx))
         .await
         .map_err(sqlx_failure)?;
     rows.iter()
@@ -499,7 +509,7 @@ async fn fenced(
 ) -> Result<DurableError, DurableError> {
     let current: Option<i64> = sqlx::query_scalar(SQL.actor.epoch_of.sql())
         .bind(actor.as_str())
-        .fetch_optional(tx)
+        .fetch_optional(crate::observed_sql::executor(tx))
         .await
         .map_err(sqlx_failure)?;
     Ok(DurableError::OwnershipLost(Fenced {
@@ -507,6 +517,21 @@ async fn fenced(
         held,
         current: current.map(Epoch),
     }))
+}
+
+fn group_members(tx: &ActorTx) -> u64 {
+    tx.domain()
+        .iter()
+        .filter(|write| {
+            matches!(
+                write,
+                DomainWrite::RunRecord(lash_durable::domain::RunRecordWrite::Append {
+                    kind: lash_durable::domain::RunRecordKind::XOutcome,
+                    ..
+                })
+            )
+        })
+        .count() as u64
 }
 
 async fn apply_owner(
@@ -519,7 +544,7 @@ async fn apply_owner(
     let fence: Option<i64> = sqlx::query_scalar(SQL.actor.fence.sql())
         .bind(actor)
         .bind(write.epoch().0)
-        .fetch_optional(&mut ***tx)
+        .fetch_optional(crate::observed_sql::executor(&mut ***tx))
         .await
         .map_err(sqlx_failure)?;
     let Some(revision) = fence else {
@@ -538,7 +563,7 @@ async fn apply_owner(
         sqlx::query(SQL.actor.stamp_formats.sql())
             .bind(actor)
             .bind(formats.as_str())
-            .execute(&mut ***tx)
+            .execute(crate::observed_sql::executor(&mut ***tx))
             .await
             .map_err(sqlx_failure)?;
     }
@@ -547,7 +572,7 @@ async fn apply_owner(
             sqlx::query(statement.sql())
                 .bind(actor)
                 .bind(through.0)
-                .execute(&mut ***tx)
+                .execute(crate::observed_sql::executor(&mut ***tx))
                 .await
                 .map_err(sqlx_failure)?;
         }
@@ -561,7 +586,7 @@ async fn apply_owner(
             let cancel_pending = sqlx::query(SQL.park.pending_mail_of_kind.sql())
                 .bind(actor)
                 .bind(lash_durable::domain::CANCEL_MAIL)
-                .fetch_optional(&mut ***tx)
+                .fetch_optional(crate::observed_sql::executor(&mut ***tx))
                 .await
                 .map_err(sqlx_failure)?
                 .is_some();
@@ -571,13 +596,13 @@ async fn apply_owner(
                     .bind("idle")
                     .bind(Option::<i64>::None)
                     .bind(now.0)
-                    .fetch_one(&mut ***tx)
+                    .fetch_one(crate::observed_sql::executor(&mut ***tx))
                     .await
                     .map_err(sqlx_failure)?
             } else {
                 sqlx::query_scalar(SQL.park.park.sql())
                     .bind(actor)
-                    .fetch_one(&mut ***tx)
+                    .fetch_one(crate::observed_sql::executor(&mut ***tx))
                     .await
                     .map_err(sqlx_failure)?
             };
@@ -586,12 +611,12 @@ async fn apply_owner(
         Some(Release::Terminal) => {
             sqlx::query(SQL.mail.delete_all.sql())
                 .bind(actor)
-                .execute(&mut ***tx)
+                .execute(crate::observed_sql::executor(&mut ***tx))
                 .await
                 .map_err(sqlx_failure)?;
             let stored: String = sqlx::query_scalar(SQL.actor.end.sql())
                 .bind(actor)
-                .fetch_one(&mut ***tx)
+                .fetch_one(crate::observed_sql::executor(&mut ***tx))
                 .await
                 .map_err(sqlx_failure)?;
             actor_state(&stored)?
@@ -607,7 +632,7 @@ async fn apply_owner(
                 .bind(state)
                 .bind(due)
                 .bind(now.0)
-                .fetch_one(&mut ***tx)
+                .fetch_one(crate::observed_sql::executor(&mut ***tx))
                 .await
                 .map_err(sqlx_failure)?;
             actor_state(&stored)?
@@ -642,13 +667,13 @@ pub(crate) async fn wake_within(
     let woke = sqlx::query(statement)
         .bind(actor.as_str())
         .bind(now.0)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
     let Some(row) = woke else {
         let state: Option<(i64, String)> = sqlx::query_as(SQL.actor.epoch_of.sql())
             .bind(actor.as_str())
-            .fetch_optional(&mut *tx)
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(sqlx_failure)?;
         return Err(DurableError::MailRefused(match state {
@@ -682,7 +707,7 @@ pub(crate) async fn wake_session_within(
         .bind(actor.kind().as_str())
         .bind(lash_durable::domain::SESSION_ACTOR_FORMATS)
         .bind(now.0)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
     Ok(wake_within(tx, &actor, control, now).await?.0)
@@ -812,7 +837,7 @@ async fn lock_mail_targets(tx: &mut PgConnection, writes: &MailTx) -> Result<(),
     if targets.len() > 1 {
         sqlx::query(SQL.postgres.lock_actors.sql())
             .bind(&targets)
-            .execute(&mut *tx)
+            .execute(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(sqlx_failure)?;
     }
@@ -835,7 +860,7 @@ async fn apply_mail(
                     .bind(actor.kind().as_str())
                     .bind(formats.as_str())
                     .bind(now.0)
-                    .fetch_optional(&mut *tx)
+                    .fetch_optional(crate::observed_sql::executor(&mut *tx))
                     .await
                     .map_err(sqlx_failure)?;
                 if created.is_none() {
@@ -861,7 +886,7 @@ async fn apply_mail(
                         .bind(kind.as_str())
                         .bind(body)
                         .bind(now.0)
-                        .execute(&mut *tx)
+                        .execute(crate::observed_sql::executor(&mut *tx))
                         .await
                         .map_err(sqlx_failure)?;
                     receipt.appended.push((actor.clone(), seq));
@@ -888,170 +913,185 @@ impl DurableStore for PostgresDurableStore {
     }
 
     async fn register_node(&self, spec: &NodeSpec) -> Result<NodeLease, DurableError> {
-        let lease_owner = Owner {
-            node: spec.node.clone(),
-            boot: BootId::new(uuid::Uuid::new_v4().to_string()),
-        };
-        let formats: Vec<&str> = spec.decodes.iter().map(FormatSet::as_str).collect();
-        let formats = serde_json::Value::from(formats).to_string();
-        let (mut tx, now) = self.open(CommitLabel::NODE_REGISTER).await?;
-        let outcome = async {
-            let boots: Vec<String> = sqlx::query_scalar(SQL.node.delete_boots.sql())
-                .bind(spec.node.as_str())
-                .fetch_all(&mut **tx)
-                .await
-                .map_err(sqlx_failure)?;
-            for boot in boots {
-                let earlier = Owner {
-                    node: spec.node.clone(),
-                    boot: BootId::new(boot),
-                };
-                release_owned_by(&mut tx, &earlier, now).await?;
+        crate::observed_sql::measure(&self.observer, CommitLabel::NODE_REGISTER, 0, async {
+            let lease_owner = Owner {
+                node: spec.node.clone(),
+                boot: BootId::new(uuid::Uuid::new_v4().to_string()),
+            };
+            let formats: Vec<&str> = spec.decodes.iter().map(FormatSet::as_str).collect();
+            let formats = serde_json::Value::from(formats).to_string();
+            let (mut tx, now) = self.open(CommitLabel::NODE_REGISTER).await?;
+            let outcome = async {
+                let boots: Vec<String> = sqlx::query_scalar(SQL.node.delete_boots.sql())
+                    .bind(spec.node.as_str())
+                    .fetch_all(crate::observed_sql::executor(&mut **tx))
+                    .await
+                    .map_err(sqlx_failure)?;
+                for boot in boots {
+                    let earlier = Owner {
+                        node: spec.node.clone(),
+                        boot: BootId::new(boot),
+                    };
+                    release_owned_by(&mut tx, &earlier, now).await?;
+                }
+                let expires_at = now.after_millis(spec.ttl_millis);
+                sqlx::query(SQL.node.insert.sql())
+                    .bind(lease_owner.node.as_str())
+                    .bind(lease_owner.boot.as_str())
+                    .bind(&formats)
+                    .bind(now.0)
+                    .bind(expires_at.0)
+                    .execute(crate::observed_sql::executor(&mut **tx))
+                    .await
+                    .map_err(sqlx_failure)?;
+                Ok(NodeLease {
+                    owner: lease_owner,
+                    decodes: spec.decodes.clone(),
+                    ttl_millis: spec.ttl_millis,
+                    expires_at,
+                })
             }
-            let expires_at = now.after_millis(spec.ttl_millis);
-            sqlx::query(SQL.node.insert.sql())
-                .bind(lease_owner.node.as_str())
-                .bind(lease_owner.boot.as_str())
-                .bind(&formats)
-                .bind(now.0)
-                .bind(expires_at.0)
-                .execute(&mut **tx)
-                .await
-                .map_err(sqlx_failure)?;
-            Ok(NodeLease {
-                owner: lease_owner,
-                decodes: spec.decodes.clone(),
-                ttl_millis: spec.ttl_millis,
-                expires_at,
-            })
-        }
-        .await;
-        finish(tx, outcome).await
+            .await;
+            finish(tx, outcome).await
+        })
+        .await
     }
 
     async fn heartbeat(&self, node: &NodeLease) -> Result<HeartbeatOutcome, DurableError> {
-        let (mut tx, now) = self.open(CommitLabel::HEARTBEAT).await?;
-        let outcome = sqlx::query_scalar::<_, i64>(SQL.node.renew.sql())
-            .bind(node.owner.node.as_str())
-            .bind(node.owner.boot.as_str())
-            .bind(now.after_millis(node.ttl_millis).0)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(sqlx_failure)
-            .map(|renewed| match renewed {
-                Some(expires_at) => HeartbeatOutcome::Renewed {
-                    expires_at: DurableInstant(expires_at),
-                },
-                None => HeartbeatOutcome::Reaped,
-            });
-        finish(tx, outcome).await
+        crate::observed_sql::measure(&self.observer, CommitLabel::HEARTBEAT, 0, async {
+            let (mut tx, now) = self.open(CommitLabel::HEARTBEAT).await?;
+            let outcome = sqlx::query_scalar::<_, i64>(SQL.node.renew.sql())
+                .bind(node.owner.node.as_str())
+                .bind(node.owner.boot.as_str())
+                .bind(now.after_millis(node.ttl_millis).0)
+                .fetch_optional(crate::observed_sql::executor(&mut **tx))
+                .await
+                .map_err(sqlx_failure)
+                .map(|renewed| match renewed {
+                    Some(expires_at) => HeartbeatOutcome::Renewed {
+                        expires_at: DurableInstant(expires_at),
+                    },
+                    None => HeartbeatOutcome::Reaped,
+                });
+            finish(tx, outcome).await
+        })
+        .await
     }
 
     async fn reap(&self, reaper: &NodeLease) -> Result<Vec<Reaped>, DurableError> {
-        let (mut tx, now) = self.open(CommitLabel::REAP).await?;
-        let outcome = async {
-            if !node_live(&mut tx, &reaper.owner).await? {
-                return Err(DurableError::NodeLeaseLost {
-                    node: reaper.owner.node.clone(),
-                });
-            }
-            let dead: Vec<(String, String)> = sqlx::query_as(SQL.node.delete_expired.sql())
-                .bind(now.0)
-                .fetch_all(&mut **tx)
-                .await
-                .map_err(sqlx_failure)?;
-            let mut reaped = Vec::new();
-            for (node, boot) in dead {
-                let from = Owner {
-                    node: NodeId::new(node),
-                    boot: BootId::new(boot),
-                };
-                for (actor, epoch) in release_owned_by(&mut tx, &from, now).await? {
-                    reaped.push(Reaped {
-                        actor,
-                        from: from.clone(),
-                        epoch,
+        crate::observed_sql::measure(&self.observer, CommitLabel::REAP, 0, async {
+            let (mut tx, now) = self.open(CommitLabel::REAP).await?;
+            let outcome = async {
+                if !node_live(&mut tx, &reaper.owner).await? {
+                    return Err(DurableError::NodeLeaseLost {
+                        node: reaper.owner.node.clone(),
                     });
                 }
+                let dead: Vec<(String, String)> = sqlx::query_as(SQL.node.delete_expired.sql())
+                    .bind(now.0)
+                    .fetch_all(crate::observed_sql::executor(&mut **tx))
+                    .await
+                    .map_err(sqlx_failure)?;
+                let mut reaped = Vec::new();
+                for (node, boot) in dead {
+                    let from = Owner {
+                        node: NodeId::new(node),
+                        boot: BootId::new(boot),
+                    };
+                    for (actor, epoch) in release_owned_by(&mut tx, &from, now).await? {
+                        reaped.push(Reaped {
+                            actor,
+                            from: from.clone(),
+                            epoch,
+                        });
+                    }
+                }
+                Ok(reaped)
             }
-            Ok(reaped)
-        }
-        .await;
-        finish(tx, outcome).await
+            .await;
+            finish(tx, outcome).await
+        })
+        .await
     }
 
     async fn release_node(&self, node: &NodeLease) -> Result<Vec<ActorKey>, DurableError> {
-        let (mut tx, now) = self.open(CommitLabel::NODE_RELEASE).await?;
-        let outcome = async {
-            let deleted = sqlx::query(SQL.node.delete_boot.sql())
-                .bind(node.owner.node.as_str())
-                .bind(node.owner.boot.as_str())
-                .fetch_optional(&mut **tx)
-                .await
-                .map_err(sqlx_failure)?;
-            if deleted.is_none() {
-                return Err(DurableError::NodeLeaseLost {
-                    node: node.owner.node.clone(),
-                });
-            }
-            Ok(release_owned_by(&mut tx, &node.owner, now)
-                .await?
-                .into_iter()
-                .map(|(actor, _)| actor)
-                .collect())
-        }
-        .await;
-        finish(tx, outcome).await
-    }
-
-    async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {
-        let formats: Vec<String> = node
-            .decodes
-            .iter()
-            .map(|formats| formats.as_str().to_owned())
-            .collect();
-        let limit = integer::<i64>(limit)?;
-        let (mut tx, now) = self.open(CommitLabel::CLAIM).await?;
-        let outcome = async {
-            match node_draining(&mut tx, &node.owner).await? {
-                None => {
+        crate::observed_sql::measure(&self.observer, CommitLabel::NODE_RELEASE, 0, async {
+            let (mut tx, now) = self.open(CommitLabel::NODE_RELEASE).await?;
+            let outcome = async {
+                let deleted = sqlx::query(SQL.node.delete_boot.sql())
+                    .bind(node.owner.node.as_str())
+                    .bind(node.owner.boot.as_str())
+                    .fetch_optional(crate::observed_sql::executor(&mut **tx))
+                    .await
+                    .map_err(sqlx_failure)?;
+                if deleted.is_none() {
                     return Err(DurableError::NodeLeaseLost {
                         node: node.owner.node.clone(),
                     });
                 }
-                Some(true) => return Ok(Vec::new()),
-                Some(false) => {}
+                Ok(release_owned_by(&mut tx, &node.owner, now)
+                    .await?
+                    .into_iter()
+                    .map(|(actor, _)| actor)
+                    .collect())
             }
-            let rows = sqlx::query(SQL.postgres.claim.sql())
-                .bind(now.0)
-                .bind(node.owner.node.as_str())
-                .bind(node.owner.boot.as_str())
-                .bind(&formats)
-                .bind(limit)
-                .bind(lash_durable::domain::CANCEL_MAIL)
-                .fetch_all(&mut **tx)
-                .await
-                .map_err(sqlx_failure)?;
-            let mut claimed = rows
+            .await;
+            finish(tx, outcome).await
+        })
+        .await
+    }
+
+    async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {
+        crate::observed_sql::measure(&self.observer, CommitLabel::CLAIM, 0, async {
+            let formats: Vec<String> = node
+                .decodes
                 .iter()
-                .map(|row| {
-                    Ok(Claimed {
-                        actor: actor_key(&get::<String>(row, 0)?)?,
-                        epoch: Epoch(get(row, 1)?),
-                        cause: if get::<String>(row, 2)? == ActorState::Waiting.as_str() {
-                            ClaimCause::Due
-                        } else {
-                            ClaimCause::Ready
-                        },
-                        purpose: ClaimPurpose::of(&node.decodes, &get::<String>(row, 3)?),
+                .map(|formats| formats.as_str().to_owned())
+                .collect();
+            let limit = integer::<i64>(limit)?;
+            let (mut tx, now) = self.open(CommitLabel::CLAIM).await?;
+            let outcome = async {
+                match node_draining(&mut tx, &node.owner).await? {
+                    None => {
+                        return Err(DurableError::NodeLeaseLost {
+                            node: node.owner.node.clone(),
+                        });
+                    }
+                    Some(true) => return Ok(Vec::new()),
+                    Some(false) => {}
+                }
+                let rows = sqlx::query(SQL.postgres.claim.sql())
+                    .bind(now.0)
+                    .bind(node.owner.node.as_str())
+                    .bind(node.owner.boot.as_str())
+                    .bind(&formats)
+                    .bind(limit)
+                    .bind(lash_durable::domain::CANCEL_MAIL)
+                    .fetch_all(crate::observed_sql::executor(&mut **tx))
+                    .await
+                    .map_err(sqlx_failure)?;
+                let mut claimed = rows
+                    .iter()
+                    .map(|row| {
+                        Ok(Claimed {
+                            actor: actor_key(&get::<String>(row, 0)?)?,
+                            epoch: Epoch(get(row, 1)?),
+                            cause: if get::<String>(row, 2)? == ActorState::Waiting.as_str() {
+                                ClaimCause::Due
+                            } else {
+                                ClaimCause::Ready
+                            },
+                            purpose: ClaimPurpose::of(&node.decodes, &get::<String>(row, 3)?),
+                        })
                     })
-                })
-                .collect::<Result<Vec<_>, DurableError>>()?;
-            claimed.sort_by(|left, right| left.actor.cmp(&right.actor));
-            Ok(claimed)
-        }
-        .await;
-        finish(tx, outcome).await
+                    .collect::<Result<Vec<_>, DurableError>>()?;
+                claimed.sort_by(|left, right| left.actor.cmp(&right.actor));
+                Ok(claimed)
+            }
+            .await;
+            finish(tx, outcome).await
+        })
+        .await
     }
 
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
@@ -1074,21 +1114,24 @@ impl DurableStore for PostgresDurableStore {
     }
 
     async fn mark_draining(&self, node: &NodeLease) -> Result<(), DurableError> {
-        let (mut tx, _now) = self.open(CommitLabel::NODE_DRAIN).await?;
-        let outcome = async {
-            sqlx::query(SQL.node.mark_draining.sql())
-                .bind(node.owner.node.as_str())
-                .bind(node.owner.boot.as_str())
-                .fetch_optional(&mut **tx)
-                .await
-                .map_err(sqlx_failure)?
-                .map(|_| ())
-                .ok_or_else(|| DurableError::NodeLeaseLost {
-                    node: node.owner.node.clone(),
-                })
-        }
-        .await;
-        finish(tx, outcome).await
+        crate::observed_sql::measure(&self.observer, CommitLabel::NODE_DRAIN, 0, async {
+            let (mut tx, _now) = self.open(CommitLabel::NODE_DRAIN).await?;
+            let outcome = async {
+                sqlx::query(SQL.node.mark_draining.sql())
+                    .bind(node.owner.node.as_str())
+                    .bind(node.owner.boot.as_str())
+                    .fetch_optional(crate::observed_sql::executor(&mut **tx))
+                    .await
+                    .map_err(sqlx_failure)?
+                    .map(|_| ())
+                    .ok_or_else(|| DurableError::NodeLeaseLost {
+                        node: node.owner.node.clone(),
+                    })
+            }
+            .await;
+            finish(tx, outcome).await
+        })
+        .await
     }
 
     async fn live_decodes(&self) -> Result<Vec<Vec<FormatSet>>, DurableError> {
@@ -1144,14 +1187,17 @@ impl DurableStore for PostgresDurableStore {
     }
 
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
-        if tx.ack().is_some_and(|through| through > tx.seen()) {
-            return Err(DurableError::AckBeyondRead {
-                actor: tx.actor().clone(),
-            });
-        }
-        let (mut guarded, now) = self.open(label).await?;
-        let outcome = apply_owner(&mut guarded, &tx, now, self.fence.fleet()).await;
-        finish(guarded, outcome).await
+        crate::observed_sql::measure(&self.observer, label, group_members(&tx), async {
+            if tx.ack().is_some_and(|through| through > tx.seen()) {
+                return Err(DurableError::AckBeyondRead {
+                    actor: tx.actor().clone(),
+                });
+            }
+            let (mut guarded, now) = self.open(label).await?;
+            let outcome = Box::pin(apply_owner(&mut guarded, &tx, now, self.fence.fleet())).await;
+            finish(guarded, outcome).await
+        })
+        .await
     }
 
     async fn commit_mail(
@@ -1159,9 +1205,12 @@ impl DurableStore for PostgresDurableStore {
         tx: MailTx,
         label: CommitLabel,
     ) -> Result<MailCommit, DurableError> {
-        let (mut guarded, now) = self.open(label).await?;
-        let outcome = Box::pin(apply_mail(&mut guarded, &tx, now, self.fence.fleet())).await;
-        finish(guarded, outcome).await
+        crate::observed_sql::measure(&self.observer, label, 0, async {
+            let (mut guarded, now) = self.open(label).await?;
+            let outcome = Box::pin(apply_mail(&mut guarded, &tx, now, self.fence.fleet())).await;
+            finish(guarded, outcome).await
+        })
+        .await
     }
 
     async fn actor(&self, actor: &ActorKey) -> Result<Option<ActorSnapshot>, DurableError> {
@@ -1314,10 +1363,10 @@ mod constraint_tests {
             .await
             .expect("open constraint fixture");
         sqlx::raw_sql(crate::PostgresStorage::schema_ddl())
-            .execute(&mut conn)
+            .execute(crate::observed_sql::executor(&mut conn))
             .await
             .expect("create constraint fixture");
-        sqlx::query("INSERT INTO lash_waits (wait_id, owner_actor, owner_scope, kind, host_resolvable, state, created_epoch) VALUES ('wait', 's/session', 's/session', 'signal', false, 'pending', 1)").execute(&mut conn).await.expect("pending signal");
+        sqlx::query("INSERT INTO lash_waits (wait_id, owner_actor, owner_scope, kind, host_resolvable, state, created_epoch) VALUES ('wait', 's/session', 's/session', 'signal', false, 'pending', 1)").execute(crate::observed_sql::executor(&mut conn)).await.expect("pending signal");
         for (assignment, constraint) in [
             ("kind = 'timer'", "ck_waits_timer_deadline"),
             ("resolved_at_ms = 1", "ck_waits_settled_at"),
@@ -1329,7 +1378,7 @@ mod constraint_tests {
             ("resolution_ref = 'payload'", "ck_waits_resolution_ref"),
         ] {
             let error = sqlx::query(&format!("UPDATE lash_waits SET {assignment}"))
-                .execute(&mut conn)
+                .execute(crate::observed_sql::executor(&mut conn))
                 .await
                 .expect_err("impossible wait must be refused");
             assert_eq!(
@@ -1339,9 +1388,9 @@ mod constraint_tests {
                 Some(constraint)
             );
         }
-        sqlx::query("UPDATE lash_waits SET kind = 'timer', deadline_ms = 1, state = 'resolved', resolution_digest = 'timer', resolved_at_ms = 1").execute(&mut conn).await.expect("resolved timer without value");
+        sqlx::query("UPDATE lash_waits SET kind = 'timer', deadline_ms = 1, state = 'resolved', resolution_digest = 'timer', resolved_at_ms = 1").execute(crate::observed_sql::executor(&mut conn)).await.expect("resolved timer without value");
         let error = sqlx::query("UPDATE lash_waits SET resolution_ref = 'payload'")
-            .execute(&mut conn)
+            .execute(crate::observed_sql::executor(&mut conn))
             .await
             .expect_err("timer has no payload");
         assert_eq!(
@@ -1355,7 +1404,7 @@ mod constraint_tests {
             ("p/process", "session"),
             ("x/unknown", "session"),
         ] {
-            let error = sqlx::query(&format!("INSERT INTO lash_actors (actor_key, kind, state, epoch, formats, state_revision, mail_seq, acked_seq, created_at_ms) VALUES ('{key}', '{kind}', 'idle', 0, '[]', 0, 0, 0, 0)")).execute(&mut conn).await.expect_err("key must agree with kind");
+            let error = sqlx::query(&format!("INSERT INTO lash_actors (actor_key, kind, state, epoch, formats, state_revision, mail_seq, acked_seq, created_at_ms) VALUES ('{key}', '{kind}', 'idle', 0, '[]', 0, 0, 0, 0)")).execute(crate::observed_sql::executor(&mut conn)).await.expect_err("key must agree with kind");
             assert_eq!(
                 error
                     .as_database_error()
@@ -1364,7 +1413,7 @@ mod constraint_tests {
             );
         }
         for version in [-1_i64, i64::from(u32::MAX) + 1] {
-            let error = sqlx::query("INSERT INTO lash_exec_snapshots VALUES ('p/process', 1, 'snapshot', 'identity', $1, 1)").bind(version).execute(&mut conn).await.expect_err("format versions are u32");
+            let error = sqlx::query("INSERT INTO lash_exec_snapshots VALUES ('p/process', 1, 'snapshot', 'identity', $1, 1)").bind(version).execute(crate::observed_sql::executor(&mut conn)).await.expect_err("format versions are u32");
             assert_eq!(
                 error
                     .as_database_error()

@@ -34,6 +34,7 @@ testing = ["lash-core-execution/testing"]
 synthetic-next = ["lash-core-execution/synthetic-next"]
 
 [dependencies]
+futures-util.workspace = true
 lash-store-sql = { workspace = true }
 lash-durable = { workspace = true }
 lash-sansio = { workspace = true }

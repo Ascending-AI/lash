@@ -38,7 +38,7 @@ pub(super) async fn apply(
             let key = exec.stored();
             let found: Option<i64> = sqlx::query_scalar(SQL.rev.sql())
                 .bind(&key)
-                .fetch_optional(&mut *tx)
+                .fetch_optional(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
             let found = found.map(revision).transpose()?;
@@ -58,7 +58,7 @@ pub(super) async fn apply(
                         .bind(executable_identity)
                         .bind(format_version)
                         .bind(commit.epoch.0)
-                        .execute(&mut *tx)
+                        .execute(crate::observed_sql::executor(&mut *tx))
                         .await
                         .map_err(sqlx_failure)?;
                 }
@@ -70,7 +70,7 @@ pub(super) async fn apply(
                         .bind(executable_identity)
                         .bind(format_version)
                         .bind(commit.epoch.0)
-                        .fetch_one(&mut *tx)
+                        .fetch_one(crate::observed_sql::executor(&mut *tx))
                         .await
                         .map_err(sqlx_failure)?;
                 }
@@ -80,7 +80,7 @@ pub(super) async fn apply(
         SnapshotWrite::Delete { exec } => {
             sqlx::query(SQL.delete.sql())
                 .bind(exec.stored())
-                .execute(&mut *tx)
+                .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
             Ok(())
@@ -94,7 +94,7 @@ pub(super) async fn read(
 ) -> Result<Option<SnapshotRow>, DurableError> {
     let Some(row) = sqlx::query(SQL.read.sql())
         .bind(exec.stored())
-        .fetch_optional(&mut *tx)
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?
     else {

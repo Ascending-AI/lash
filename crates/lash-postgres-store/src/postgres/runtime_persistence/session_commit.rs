@@ -62,7 +62,7 @@ async fn end_frames_left_tx(
             .bind(ended.kind().as_str())
             .bind(ended.canonical_id())
             .bind(crate::support::clamp_epoch_ms(now_ms))
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         crate::obligation_ledger::arm_cleanup_tx(
@@ -88,7 +88,7 @@ async fn carry_into_successor_tx(
     let successor_fenced: bool = sqlx::query_scalar(sql.fences.select_is_fenced.sql())
         .bind(successor.kind().as_str())
         .bind(successor.canonical_id())
-        .fetch_one(&mut **tx)
+        .fetch_one(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     if successor_fenced {
@@ -106,7 +106,7 @@ async fn carry_into_successor_tx(
         let bytes: Vec<u8> = sqlx::query_scalar(sql.lashlang_artifacts.select_bytes.sql())
             .bind("process_definition")
             .bind(&carry.artifact_ref)
-            .fetch_one(&mut **tx)
+            .fetch_one(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         let draft = lash_core_execution::ProcessDefinitionDraft::from_store_bytes(&id, &bytes)
@@ -139,7 +139,7 @@ async fn carry_into_successor_tx(
                 .sql(),
         )
         .bind(key)
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     }
@@ -149,7 +149,7 @@ async fn carry_into_successor_tx(
             .bind(artifact_ref)
             .bind(ended.kind().as_str())
             .bind(ended.canonical_id())
-            .fetch_one(&mut **tx)
+            .fetch_one(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         if !source_edge {
@@ -163,7 +163,7 @@ async fn carry_into_successor_tx(
             .bind(artifact_ref)
             .bind(successor.kind().as_str())
             .bind(successor.canonical_id())
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
     }
@@ -227,7 +227,7 @@ impl SessionCommitStore for PostgresStore {
         sqlx::query(session_sql().meta.retain_admission_base.sql())
             .bind(session_id.as_str())
             .bind(base.checkpoint.as_ref().map(|blob_ref| blob_ref.as_str()))
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         tx.commit().await.map_err(store_sqlx_error)?;
@@ -288,7 +288,7 @@ impl SessionCommitStore for PostgresStore {
                 .sql(),
         )
         .bind(session_id.as_str())
-        .fetch_optional(&mut **tx)
+        .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
         if present.is_none() {
@@ -374,7 +374,7 @@ pub(crate) async fn apply_runtime_commit_tx(
     let admitted =
         sqlx::query_scalar::<_, bool>(session_sql().meta_postgres.exists_materialized.sql())
             .bind(commit.session_id.as_str())
-            .fetch_one(&mut ***tx)
+            .fetch_one(crate::observed_sql::executor(&mut ***tx))
             .await
             .map_err(store_sqlx_error)?;
     if !admitted {
@@ -391,7 +391,7 @@ pub(crate) async fn apply_runtime_commit_tx(
         let prior = sqlx::query(session_sql().turn_commits.select_receipt.sql())
             .bind(commit.session_id.as_str())
             .bind(planner.operation_key())
-            .fetch_optional(&mut ***tx)
+            .fetch_optional(crate::observed_sql::executor(&mut ***tx))
             .await
             .map_err(store_sqlx_error)?;
         if let Some(row) = prior {
@@ -454,7 +454,7 @@ pub(crate) async fn apply_runtime_commit_tx(
     let locked_revision =
         sqlx::query_scalar::<_, i64>(session_sql().head_postgres.select_revision_for_update.sql())
             .bind(commit.session_id.as_str())
-            .fetch_optional(&mut ***tx)
+            .fetch_optional(crate::observed_sql::executor(&mut ***tx))
             .await
             .map_err(store_sqlx_error)?
             .map(|revision| u64_from_sql("SessionHeadMeta", "head_revision", revision))
@@ -469,7 +469,7 @@ pub(crate) async fn apply_runtime_commit_tx(
                 .sql(),
         )
         .bind(leaf_node_id)
-        .fetch_optional(&mut ***tx)
+        .fetch_optional(crate::observed_sql::executor(&mut ***tx))
         .await
         .map_err(store_sqlx_error)?
         .map(|(generation, frame_node_id, owner)| {
@@ -507,7 +507,7 @@ pub(crate) async fn apply_runtime_commit_tx(
         .bind(i64::try_from(parent.generation).map_err(|_| {
             StoreError::Backend("parent generation does not fit PostgreSQL BIGINT".to_string())
         })?)
-        .fetch_optional(&mut ***tx)
+        .fetch_optional(crate::observed_sql::executor(&mut ***tx))
         .await
         .map_err(store_sqlx_error)?
         {
@@ -559,7 +559,7 @@ pub(crate) async fn apply_runtime_commit_tx(
     let occupied_node_ids =
         sqlx::query_scalar::<_, String>(session_sql().graph_postgres.select_occupied.sql())
             .bind(&node_ids)
-            .fetch_all(&mut ***tx)
+            .fetch_all(crate::observed_sql::executor(&mut ***tx))
             .await
             .map_err(store_sqlx_error)?
             .into_iter()
@@ -602,7 +602,7 @@ pub(crate) async fn apply_runtime_commit_tx(
                 StoreError::Backend("graph node body exceeds PostgreSQL BIGINT".to_string())
             })?)
             .bind(node_json)
-            .execute(&mut ***tx)
+            .execute(crate::observed_sql::executor(&mut ***tx))
             .await
             .map_err(|error| {
                 graph_node_insert_error(error, &commit.session_id, facts.generation, &node.node_id)
@@ -646,7 +646,7 @@ pub(crate) async fn apply_runtime_commit_tx(
         .bind(commit.session_id.as_str())
         .bind(sql_head_revision)
         .bind(plan.actual_head_revision() as i64)
-        .execute(&mut ***tx)
+        .execute(crate::observed_sql::executor(&mut ***tx))
         .await;
     let head_write = match head_write {
         Ok(result) => result,
@@ -674,7 +674,7 @@ pub(crate) async fn apply_runtime_commit_tx(
     ) {
         let actual_now = sqlx::query_scalar::<_, i64>(session_sql().head.select_revision.sql())
             .bind(commit.session_id.as_str())
-            .fetch_optional(&mut ***tx)
+            .fetch_optional(crate::observed_sql::executor(&mut ***tx))
             .await
             .map_err(store_sqlx_error)?
             .map(|revision| u64_from_sql("SessionHeadMeta", "head_revision", revision))
@@ -697,7 +697,7 @@ pub(crate) async fn apply_runtime_commit_tx(
         sqlx::query_as::<_, (String, Option<i64>)>(session_sql().meta.touch_last_commit.sql())
             .bind(commit.session_id.as_str())
             .bind(i64::try_from(now).unwrap_or(i64::MAX))
-            .fetch_optional(&mut ***tx)
+            .fetch_optional(crate::observed_sql::executor(&mut ***tx))
             .await
             .map_err(store_sqlx_error)?
             .map_or(
@@ -746,7 +746,7 @@ pub(crate) async fn apply_runtime_commit_tx(
             .sql(),
     )
     .bind(commit.session_id.as_str())
-    .fetch_one(&mut ***tx)
+    .fetch_one(crate::observed_sql::executor(&mut ***tx))
     .await
     .map_err(store_sqlx_error)?;
     let mut result = plan.result(checkpoint_ref, manifest, now, work_remaining);
@@ -773,7 +773,7 @@ pub(crate) async fn apply_runtime_commit_tx(
             .bind(columns.2)
             .bind(!receipt.result.failure_evidence.is_empty())
             .bind(crate::session_factory::next_turn_change_sequence(&mut *tx).await?)
-            .execute(&mut ***tx)
+            .execute(crate::observed_sql::executor(&mut ***tx))
             .await
             .map_err(store_sqlx_error)?;
     }

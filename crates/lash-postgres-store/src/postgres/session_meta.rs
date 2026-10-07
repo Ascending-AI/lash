@@ -83,7 +83,7 @@ pub(crate) async fn load_recorded_lineage_tx(
 ) -> Result<Option<lash_core_execution::SessionLineage>, StoreError> {
     let row = sqlx::query(session_sql().meta.select_lineage.sql())
         .bind(session_id.as_str())
-        .fetch_optional(&mut **tx)
+        .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     let Some(row) = row else {
@@ -136,7 +136,7 @@ pub(crate) async fn write_session_meta_tx(
             )) as i32,
         )
         .bind(meta.owning_process_id.as_ref().map(ProcessId::as_str))
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     if result.rows_affected() == 0 {
@@ -154,7 +154,7 @@ pub(crate) async fn settle_observer_intents_tx(
 ) -> Result<(), StoreError> {
     sqlx::query(session_sql().observer_intents.delete_by_session.sql())
         .bind(session_id.as_str())
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     for (process_index, intent) in remaining.iter().enumerate() {
@@ -166,7 +166,7 @@ pub(crate) async fn settle_observer_intents_tx(
                 "observer-intent process",
             )?)
             .bind(intent.process_id.as_str())
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
     }
@@ -183,7 +183,7 @@ pub(crate) async fn load_session_meta(
     let row = if let Some(session_id) = selected_session_id {
         sqlx::query(session_sql().meta_postgres.select_relation_for_share.sql())
             .bind(session_id.as_str())
-            .fetch_optional(&mut *tx)
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(store_sqlx_error)?
     } else {
@@ -193,7 +193,7 @@ pub(crate) async fn load_session_meta(
                 .select_sole_relation_for_share
                 .sql(),
         )
-        .fetch_all(&mut *tx)
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
         if rows.len() != 1 {
@@ -210,7 +210,7 @@ pub(crate) async fn load_session_meta(
     let observer_rows =
         sqlx::query_as::<_, (i64, String)>(session_sql().observer_intents.select_for_session.sql())
             .bind(stored.session_id.as_str())
-            .fetch_all(&mut *tx)
+            .fetch_all(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(store_sqlx_error)?;
     for (process_index, process_id) in observer_rows {
@@ -241,7 +241,7 @@ pub(crate) async fn load_session_meta(
     meta.owning_process_id =
         sqlx::query_scalar::<_, Option<String>>(session_sql().meta.select_owning_process.sql())
             .bind(session_id.as_str())
-            .fetch_one(&mut *tx)
+            .fetch_one(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(store_sqlx_error)?
             .map(|process_id| {

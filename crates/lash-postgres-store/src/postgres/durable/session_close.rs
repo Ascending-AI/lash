@@ -30,7 +30,7 @@ async fn stored(
 ) -> Result<Option<Stored>, DurableError> {
     let Some(row) = sqlx::query(SQL.row.sql())
         .bind(session.as_str())
-        .fetch_optional(tx)
+        .fetch_optional(crate::observed_sql::executor(tx))
         .await
         .map_err(sqlx_failure)?
     else {
@@ -55,7 +55,7 @@ pub(super) async fn apply(
                 .bind(session.as_str())
                 .bind(commit.now.0)
                 .bind(commit.epoch.0)
-                .execute(tx)
+                .execute(crate::observed_sql::executor(tx))
                 .await
                 .map_err(sqlx_failure)?;
             Ok(())
@@ -80,7 +80,7 @@ pub(super) async fn apply(
                 .bind(session.as_str())
                 .bind(step.as_str())
                 .bind(commit.epoch.0)
-                .execute(tx)
+                .execute(crate::observed_sql::executor(tx))
                 .await
                 .map_err(sqlx_failure)?;
             Ok(())
@@ -89,7 +89,7 @@ pub(super) async fn apply(
             sqlx::query(SQL.scope_ended.sql())
                 .bind(session.as_str())
                 .bind(scope.stored())
-                .execute(tx)
+                .execute(crate::observed_sql::executor(tx))
                 .await
                 .map_err(sqlx_failure)?;
             Ok(())
@@ -110,7 +110,7 @@ pub(super) async fn record_ending(
         .bind(scope.stored())
         .bind(commit.now.0)
         .bind(commit.epoch.0)
-        .execute(tx)
+        .execute(crate::observed_sql::executor(tx))
         .await
         .map_err(sqlx_failure)?;
     Ok(())
@@ -122,7 +122,7 @@ pub(super) async fn ending_scopes(
 ) -> Result<Vec<ScopeKey>, DurableError> {
     let stored: Vec<String> = sqlx::query_scalar(SQL.ending_scopes.sql())
         .bind(session.as_str())
-        .fetch_all(tx)
+        .fetch_all(crate::observed_sql::executor(tx))
         .await
         .map_err(sqlx_failure)?;
     stored

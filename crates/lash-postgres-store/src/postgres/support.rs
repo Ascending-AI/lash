@@ -18,7 +18,7 @@ pub(crate) async fn postgres_transaction_epoch_ms(
                 .select_injected_lease_epoch_ms
                 .sql(),
         )
-        .fetch_one(&mut **tx)
+        .fetch_one(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
         if let Some(injected) = injected {
@@ -32,7 +32,7 @@ pub(crate) async fn postgres_transaction_epoch_ms(
             .select_transaction_epoch_ms
             .sql(),
     )
-    .fetch_one(&mut **tx)
+    .fetch_one(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)?;
     u64::try_from(now)
@@ -278,7 +278,7 @@ async fn put_checkpoint_blobs_tx(
         sqlx::query(crate::blobs::blob_sql().postgres.insert_chunk.sql())
             .bind(hashes)
             .bind(contents)
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
     }
@@ -291,7 +291,7 @@ async fn get_blob_tx(
 ) -> Result<Option<Vec<u8>>, StoreError> {
     sqlx::query_scalar(crate::blobs::blob_sql().shared.select_content.sql())
         .bind(blob_ref.as_str())
-        .fetch_optional(&mut **tx)
+        .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)
 }
@@ -308,7 +308,7 @@ pub(crate) async fn lock_checkpoint_blob_tx(
 ) -> Result<(), StoreError> {
     let exists = sqlx::query_scalar::<_, bool>(crate::blobs::blob_sql().postgres.lock_one.sql())
         .bind(blob_ref)
-        .fetch_optional(&mut **tx)
+        .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     if exists.is_some() {
@@ -341,7 +341,7 @@ async fn lock_checkpoint_blobs_tx(
                 crate::blobs::blob_sql().postgres.lock_existing_hashes.sql(),
             )
             .bind(chunk)
-            .fetch_all(&mut **tx)
+            .fetch_all(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?,
         );
@@ -381,7 +381,7 @@ async fn checkpoint_component_bodies_tx(
                 .sql(),
         )
         .bind(chunk)
-        .fetch_all(&mut **tx)
+        .fetch_all(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
         for row in rows {
@@ -463,7 +463,7 @@ pub(crate) async fn put_checkpoint_tx(
     sqlx::query(session_sql().checkpoint_edges.insert_batch.sql())
         .bind(checkpoint_ref.as_str())
         .bind(component_refs)
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     Ok((checkpoint_ref, manifest))
@@ -528,7 +528,7 @@ pub(crate) async fn load_session_head_meta_tx(
     };
     let row = sqlx::query(sql)
         .bind(session_id.as_str())
-        .fetch_optional(&mut **tx)
+        .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     decode_session_head_meta_row(session_id, row, fleet)

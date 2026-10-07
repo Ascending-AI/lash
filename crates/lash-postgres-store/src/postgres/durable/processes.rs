@@ -70,7 +70,7 @@ pub(crate) async fn create_actor_within(
         .bind(actor.kind().as_str())
         .bind(formats)
         .bind(now.0)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
     match created {
@@ -99,7 +99,7 @@ pub(crate) async fn cancel_mail_within(
             .bind(CANCEL_MAIL)
             .bind(body)
             .bind(now.0)
-            .execute(&mut *tx)
+            .execute(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(sqlx_failure)?;
     }
@@ -126,7 +126,7 @@ pub(crate) async fn signal_mail_within(
         .bind(SIGNAL_MAIL)
         .bind(body)
         .bind(now.0)
-        .execute(&mut *tx)
+        .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(|error| failure(error.to_string()))?;
     Ok(())
@@ -276,7 +276,7 @@ pub(super) async fn apply(
                 .bind(integer::<i64>(*expected_rev)?)
                 .bind(driver_json)
                 .bind(commit.epoch.0)
-                .fetch_optional(&mut *tx)
+                .fetch_optional(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
             if moved.is_some() {
@@ -391,7 +391,7 @@ async fn set_cursor(
         .bind(process.as_str())
         .bind(cursor)
         .bind(epoch.0)
-        .execute(&mut *tx)
+        .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
     Ok(())
@@ -420,7 +420,7 @@ pub(super) async fn process(
 ) -> Result<Option<ProcessActorRow>, DurableError> {
     let Some(row) = sqlx::query(SQL.process.row.sql())
         .bind(process.as_str())
-        .fetch_optional(&mut *tx)
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?
     else {
@@ -452,7 +452,7 @@ pub(super) async fn until_children(
         .bind(id)
         .bind(after.map_or("", ProcessId::as_str))
         .bind(integer::<i64>(limit)?)
-        .fetch_all(&mut *tx)
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
     process_ids(ids)
@@ -476,7 +476,7 @@ pub(super) async fn live_until_descendants(
         .bind(roots.turns)
         .bind(roots.operations)
         .bind(integer::<i64>(limit)?)
-        .fetch_all(&mut *tx)
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
     process_ids(ids)

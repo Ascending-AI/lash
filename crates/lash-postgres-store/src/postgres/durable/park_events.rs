@@ -25,7 +25,7 @@ async fn append(
         .bind(kind.as_str())
         .bind(reason_json)
         .bind(at.0)
-        .execute(&mut *tx)
+        .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
     Ok(())
@@ -42,7 +42,7 @@ pub(super) async fn apply(
             sqlx::query(SQL.park.set_park.sql())
                 .bind(actor)
                 .bind(reason_json)
-                .execute(&mut *tx)
+                .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
             append(tx, actor, ParkEventKind::Parked, reason_json, commit.now).await
@@ -50,7 +50,7 @@ pub(super) async fn apply(
         ParkEventWrite::Ended { reason_json } => {
             let cleared = sqlx::query(SQL.park.clear_park.sql())
                 .bind(actor)
-                .fetch_optional(&mut *tx)
+                .fetch_optional(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
             if cleared.is_some() {
@@ -72,7 +72,7 @@ pub(super) async fn redrive(
     let actor = request.actor.as_str();
     let park: Option<(Option<String>, i64)> = sqlx::query_as(SQL.park.park_of.sql())
         .bind(actor)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
     if park.and_then(|(park, _)| park).is_none() {
@@ -81,7 +81,7 @@ pub(super) async fn redrive(
     let (woken, _) = wake_within(tx, &request.actor, true, now).await?;
     sqlx::query(SQL.park.clear_park.sql())
         .bind(actor)
-        .fetch_one(&mut *tx)
+        .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
     let reason = serde_json::json!({ "requester": request.requester }).to_string();
@@ -97,7 +97,7 @@ pub(super) async fn read(
     let rows = sqlx::query(SQL.park_events.page.sql())
         .bind(after.map_or(0, |seq| seq.0))
         .bind(integer::<i64>(limit)?)
-        .fetch_all(&mut *tx)
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
     rows.iter()

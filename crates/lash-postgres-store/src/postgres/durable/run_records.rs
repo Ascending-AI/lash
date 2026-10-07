@@ -40,7 +40,7 @@ pub(super) async fn apply(
                 .bind(&owner_key)
                 .bind(integer::<i64>(run.0)?)
                 .bind(integer::<i64>(ordinal.0)?)
-                .fetch_optional(&mut *tx)
+                .fetch_optional(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
             if taken.is_some() {
@@ -55,7 +55,7 @@ pub(super) async fn apply(
                     .bind(&owner_key)
                     .bind(integer::<i64>(run.0)?)
                     .bind(integer::<i64>(previous)?)
-                    .fetch_optional(&mut *tx)
+                    .fetch_optional(crate::observed_sql::executor(&mut *tx))
                     .await
                     .map_err(sqlx_failure)?;
                 if follows.is_none() {
@@ -73,7 +73,7 @@ pub(super) async fn apply(
                     .bind(&owner_key)
                     .bind(integer::<i64>(run.0)?)
                     .bind(call.as_str())
-                    .fetch_optional(&mut *tx)
+                    .fetch_optional(crate::observed_sql::executor(&mut *tx))
                     .await
                     .map_err(sqlx_failure)?;
                 if exists.is_some() {
@@ -92,7 +92,7 @@ pub(super) async fn apply(
                 .bind(call.as_ref().map(ToolCallId::as_str))
                 .bind(record_json)
                 .bind(commit.epoch.0)
-                .execute(&mut *tx)
+                .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
             Ok(())
@@ -101,7 +101,7 @@ pub(super) async fn apply(
             sqlx::query(SQL.prune.sql())
                 .bind(owner.stored())
                 .bind(integer::<i64>(before.0)?)
-                .execute(&mut *tx)
+                .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
             Ok(())
@@ -115,7 +115,7 @@ pub(super) async fn read(
 ) -> Result<Vec<RunRecordRow>, DurableError> {
     let rows = sqlx::query(SQL.read.sql())
         .bind(owner.stored())
-        .fetch_all(&mut *tx)
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
     rows.iter()

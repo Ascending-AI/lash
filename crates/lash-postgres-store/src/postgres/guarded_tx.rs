@@ -161,7 +161,7 @@ impl WriterFence {
     /// when the row is absent.
     async fn read(&self, tx: &mut Transaction<'_, Postgres>) -> Result<Option<u32>, StoreError> {
         let read = sqlx::query_scalar::<_, i32>(session_sql().fleet_format.select_for_fence.sql())
-            .fetch_optional(&mut **tx)
+            .fetch_optional(crate::observed_sql::executor(&mut **tx))
             .await;
         match read {
             Ok(Some(recorded)) => u32::try_from(recorded).map(Some).map_err(|_| {
@@ -256,7 +256,7 @@ pub(crate) async fn read_plugin_writers(
 ) -> Result<PluginWriterRanges, StoreError> {
     let rows: Vec<(String, i32, i32)> =
         sqlx::query_as(session_sql().fleet_plugin_writers.select_all.sql())
-            .fetch_all(connection)
+            .fetch_all(crate::observed_sql::executor(connection))
             .await
             .map_err(store_sqlx_error)?;
     plugin_writer_ranges(rows)
@@ -317,7 +317,7 @@ impl GuardedTx<'_> {
             let rows: Vec<(String, i32, i32)> =
                 sqlx::query_as(session_sql().fleet_plugin_writers.select_named.sql())
                     .bind(&plugins)
-                    .fetch_all(&mut *self.tx)
+                    .fetch_all(crate::observed_sql::executor(&mut *self.tx))
                     .await
                     .map_err(store_sqlx_error)?;
             let seeded = plugin_writer_ranges(rows)?
@@ -334,7 +334,7 @@ impl GuardedTx<'_> {
                         .bind(plugin)
                         .bind(min)
                         .bind(max)
-                        .execute(&mut *self.tx)
+                        .execute(crate::observed_sql::executor(&mut *self.tx))
                         .await
                         .map_err(store_sqlx_error)?
                         .rows_affected();
@@ -361,7 +361,7 @@ impl GuardedTx<'_> {
                 .bind(&plugin)
                 .bind(min)
                 .bind(max)
-                .execute(&mut *self.tx)
+                .execute(crate::observed_sql::executor(&mut *self.tx))
                 .await
                 .map_err(store_sqlx_error)?;
         }
@@ -371,11 +371,11 @@ impl GuardedTx<'_> {
     }
 
     pub(crate) async fn commit(self) -> Result<(), sqlx::Error> {
-        self.tx.commit().await
+        crate::observed_sql::control("COMMIT", self.tx.commit()).await
     }
 
     pub(crate) async fn rollback(self) -> Result<(), sqlx::Error> {
-        self.tx.rollback().await
+        crate::observed_sql::control("ROLLBACK", self.tx.rollback()).await
     }
 }
 
@@ -412,6 +412,27 @@ where
     })
 }
 
+/// Durable entry with checkout observed separately from the transaction.
+pub(crate) async fn begin_durable(
+    pool: &PgPool,
+    fence: &WriterFence,
+) -> Result<GuardedTx<'static>, StoreError> {
+    let started = std::time::Instant::now();
+    let connection = pool.acquire().await;
+    crate::observed_sql::acquired(started.elapsed());
+    let connection = connection.map_err(store_sqlx_error)?;
+    crate::observed_sql::transaction_started();
+    let mut tx = crate::observed_sql::control("BEGIN", Transaction::begin(connection, None))
+        .await
+        .map_err(store_sqlx_error)?;
+    let fleet = fence.admit(&mut tx).await?;
+    Ok(GuardedTx {
+        tx,
+        fleet,
+        finalized: fleet.version() == fence.state.writable.max(),
+    })
+}
+
 /// A schema migration's transaction entry: `BEGIN`, then the fence, on the
 /// connection that holds the schema advisory lock.
 ///
@@ -427,7 +448,7 @@ pub(crate) async fn begin_migration<'c>(
 ) -> Result<GuardedTx<'c>, StoreError> {
     let mut tx = Acquire::begin(connection).await.map_err(store_sqlx_error)?;
     let recordable: bool = sqlx::query_scalar(session_sql().fleet_format.select_is_present.sql())
-        .fetch_one(&mut *tx)
+        .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
     let recorded = if recordable {
@@ -468,7 +489,9 @@ impl FleetRowTx {
     }
 
     pub(crate) async fn commit(self) -> Result<(), StoreError> {
-        self.tx.commit().await.map_err(store_sqlx_error)
+        crate::observed_sql::control("COMMIT", self.tx.commit())
+            .await
+            .map_err(store_sqlx_error)
     }
 }
 
@@ -480,7 +503,7 @@ pub(crate) async fn begin_fleet_row(
 ) -> Result<FleetRowTx, StoreError> {
     let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
     let row: Option<i32> = sqlx::query_scalar(session_sql().fleet_format.select_for_update.sql())
-        .fetch_optional(&mut *tx)
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
     let Some(recorded) = row else {

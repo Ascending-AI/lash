@@ -27,7 +27,7 @@ pub(super) async fn standing(
 ) -> Result<(bool, bool), DurableError> {
     let row = sqlx::query(SQL.session_mail.standing.sql())
         .bind(session.as_str())
-        .fetch_one(&mut *tx)
+        .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
     let meta: i64 = get(&row, 0)?;
@@ -52,7 +52,7 @@ pub(super) async fn read(
     }
     let bound: Option<String> = sqlx::query_scalar(SQL.session_mail.bound_run.sql())
         .bind(session.as_str())
-        .fetch_optional(&mut *tx)
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
     mailbox.bound_run = bound
@@ -61,7 +61,7 @@ pub(super) async fn read(
         .map_err(|error| undecodable("bound run", error))?;
     let inputs = sqlx::query(SQL.session_mail.open_inputs.sql())
         .bind(session.as_str())
-        .fetch_all(&mut *tx)
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
     for row in &inputs {
@@ -76,7 +76,7 @@ pub(super) async fn read(
     }
     let batches = sqlx::query(SQL.session_mail.open_batches.sql())
         .bind(session.as_str())
-        .fetch_all(&mut *tx)
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
     for row in &batches {
@@ -161,14 +161,14 @@ pub(super) async fn settle_held(
         .bind(run.as_str())
         .bind(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str())
         .bind(now_ms)
-        .execute(&mut *tx)
+        .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
     sqlx::query(SQL.session_mail.settle_held_batches.sql())
         .bind(session.as_str())
         .bind(run.as_str())
         .bind(now_ms)
-        .execute(&mut *tx)
+        .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
     Ok(())
@@ -245,7 +245,7 @@ async fn admit(
             .bind(session.as_str())
             .bind(input.as_str())
             .bind(run.as_str())
-            .fetch_optional(&mut *tx)
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(sqlx_failure)?;
         if bound.is_none() {
@@ -255,7 +255,7 @@ async fn admit(
             .bind(session.as_str())
             .bind(input.as_str())
             .bind(run.as_str())
-            .execute(&mut *tx)
+            .execute(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(sqlx_failure)?;
     }
@@ -264,7 +264,7 @@ async fn admit(
             .bind(session.as_str())
             .bind(batch.as_str())
             .bind(run.as_str())
-            .fetch_optional(&mut *tx)
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(sqlx_failure)?;
         if bound.is_none() {

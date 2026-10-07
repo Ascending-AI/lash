@@ -1299,3 +1299,107 @@ async fn postgres_commit_meta_preflight_answers_on_a_pool_of_one_when_configured
             .expect("the preflight answers on a pool of one");
     assert!(meta.is_some(), "the admitted session has its metadata");
 }
+
+/// Per-label costs include the transaction envelope and delegated domain SQL,
+/// returned column bytes, and the actual number of outcome records batched.
+#[tokio::test(flavor = "current_thread")]
+async fn durable_labels_observe_physical_cost_and_group_members() {
+    use lash_durable::domain::{
+        DomainWrite, Ordinal, OwnerKey, RunRecordKind, RunRecordWrite, RunSeq,
+    };
+    use lash_durable::{
+        ActorKey, CommitLabel, DurableStore, FormatSet, MailTx, NodeId, NodeSpec, Release,
+    };
+    let url =
+        crate::postgres_test_support::database_url().expect("this cost law requires PostgreSQL");
+    let database = crate::testing::IsolatedDatabase::create(&url).await;
+    let runtime =
+        lash_core::trace::TraceRuntime::new(Arc::new(lash_core::facade_support::SystemClock));
+    let storage = PostgresStorage::connect_with(
+        database.url(),
+        PostgresStoreConfig {
+            observer: StoreObserver::new(runtime.metrics().clone()),
+            ..PostgresStoreConfig::default()
+        },
+    )
+    .await
+    .expect("open observed store");
+    let store = storage.durable_store();
+    let formats = FormatSet::new("cost-law");
+    let node = store
+        .register_node(&NodeSpec {
+            node: NodeId::new("cost-law"),
+            decodes: vec![formats.clone()],
+            ttl_millis: 15_000,
+        })
+        .await
+        .expect("register");
+    let actor = ActorKey::session("cost-law").expect("actor key");
+    let mut create = MailTx::new();
+    create.create_actor(actor.clone(), formats);
+    store
+        .commit_mail(create, CommitLabel::new("law.create"))
+        .await
+        .expect("create");
+    let claimed = store.claim(&node, 1).await.expect("claim");
+    let mut tx = store
+        .begin(&actor, claimed[0].epoch)
+        .await
+        .expect("open actor");
+    for ordinal in 0..2 {
+        tx.write(DomainWrite::RunRecord(RunRecordWrite::Append {
+            owner: OwnerKey::Turn(
+                SessionId::from("cost-law"),
+                lash_core_execution::TurnId::from("run"),
+            ),
+            run: RunSeq(0),
+            ordinal: Ordinal(ordinal),
+            kind: RunRecordKind::XOutcome,
+            call: None,
+            record_json: "{}".into(),
+        }));
+    }
+    let observed = lash_core::operational_metrics::TestMetrics::install();
+    crate::observed_sql::RECEIPTS
+        .scope(std::cell::RefCell::new(Vec::new()), async {
+            store
+                .commit(tx, CommitLabel::ROUND_OUTCOME)
+                .await
+                .expect("commit grouped outcomes");
+            let mut tx = store
+                .begin(&actor, claimed[0].epoch)
+                .await
+                .expect("open turn commit");
+            tx.give_up(Release::Idle);
+            store
+                .commit(tx, CommitLabel::TURN_COMMIT)
+                .await
+                .expect("commit turn");
+            crate::observed_sql::RECEIPTS.with(|receipts| {
+                let receipts = receipts.borrow();
+                assert_eq!(receipts.len(), 2);
+                for (index, (label, outcome, cost)) in receipts.iter().enumerate() {
+                    assert_eq!(label, ["round.outcome", "turn.commit"][index]);
+                    assert_eq!(*outcome, "success");
+                    assert!(cost.acquire_wait > Duration::ZERO);
+                    assert!(cost.transaction_duration > cost.lock_statement_elapsed);
+                    assert!(cost.lock_statement_elapsed > Duration::ZERO);
+                    assert!(cost.returned_bytes > 0);
+                    assert_eq!(cost.group_commit_members, [2, 0][index]);
+                    assert_eq!(cost.sql_statements, [10, 6][index]);
+                    eprintln!("{label}: {cost:?}");
+                }
+            });
+        })
+        .await;
+    for name in [
+        "lash.durable.commit.acquire_wait.duration",
+        "lash.durable.commit.transaction.duration",
+        "lash.durable.commit.sql_statements",
+        "lash.durable.commit.returned_bytes",
+        "lash.durable.commit.lock_statement_elapsed",
+        "lash.durable.commit.group_commit.members",
+    ] {
+        assert_eq!(observed.histogram_count(name), 2, "{name}");
+    }
+}

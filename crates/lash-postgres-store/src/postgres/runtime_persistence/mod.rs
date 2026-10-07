@@ -14,7 +14,7 @@ pub(crate) async fn allocate_ingress_sequence_tx(
             .sql(),
     )
     .bind(session_id.as_str())
-    .fetch_one(&mut *tx)
+    .fetch_one(crate::observed_sql::executor(&mut *tx))
     .await
     .map_err(store_sqlx_error)
 }
@@ -29,7 +29,7 @@ pub(crate) async fn lock_session_history_mutation_tx(
             .sql(),
     )
     .bind(session_id.as_str())
-    .execute(&mut *tx)
+    .execute(crate::observed_sql::executor(&mut *tx))
     .await
     .map_err(store_sqlx_error)?;
     Ok(())
@@ -53,7 +53,7 @@ pub(crate) async fn lock_session_history_mutations_tx(
             .map(SessionId::as_str)
             .collect::<Vec<_>>(),
     )
-    .execute(&mut **tx)
+    .execute(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)?;
     Ok(())
@@ -70,7 +70,7 @@ pub(crate) async fn ensure_session_not_closing_tx(
     let closing: Option<Option<i64>> =
         sqlx::query_scalar(session_sql().meta.select_closing_intent.sql())
             .bind(session_id.as_str())
-            .fetch_optional(&mut **tx)
+            .fetch_optional(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
     match closing.flatten() {
@@ -91,7 +91,7 @@ pub(crate) async fn ensure_session_not_deleted_tx(
     lock_session_history_mutation_tx(tx, session_id).await?;
     let deleted = sqlx::query_scalar::<_, bool>(session_sql().deleted_postgres.exists.sql())
         .bind(session_id.as_str())
-        .fetch_one(&mut **tx)
+        .fetch_one(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     if deleted {
@@ -121,7 +121,7 @@ async fn retirable_ancestry_node_tx(
         session_sql().graph_postgres.select_parent_for_update.sql(),
     )
     .bind(node_id)
-    .fetch_optional(&mut **tx)
+    .fetch_optional(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)?;
     let Some(parent_node_id) = parent else {
@@ -130,7 +130,7 @@ async fn retirable_ancestry_node_tx(
     let reachable =
         sqlx::query_scalar::<_, bool>(session_sql().graph_postgres.exists_reachable.sql())
             .bind(node_id)
-            .fetch_one(&mut **tx)
+            .fetch_one(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
     if reachable {
@@ -148,7 +148,7 @@ async fn retire_ancestry_node_tx(
 ) -> Result<Option<String>, StoreError> {
     sqlx::query(session_sql().graph_postgres.retire.sql())
         .bind(&witness.node_id)
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     Ok(witness.parent_node_id)
@@ -176,7 +176,7 @@ pub(crate) async fn nearest_frame_node_id_tx(
 ) -> Result<Option<String>, StoreError> {
     sqlx::query_scalar(session_sql().graph_postgres.select_frame_node_id.sql())
         .bind(leaf_node_id)
-        .fetch_optional(&mut **tx)
+        .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)
 }
@@ -217,7 +217,7 @@ pub(crate) async fn enqueue_queued_work_with_outcome_tx(
             sqlx::query_as(sql.queued_batches.select_id_by_source_key.sql())
                 .bind(batch.session_id.as_str())
                 .bind(source_key)
-                .fetch_optional(&mut *tx)
+                .fetch_optional(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(store_sqlx_error)?;
         let admission =
@@ -252,7 +252,7 @@ pub(crate) async fn enqueue_queued_work_with_outcome_tx(
         .bind(submission_digest.as_str())
         .bind(encode_json(&batch.payload)?)
         .bind(lash_core_execution::store_backend_support::encode_trace_cause(&batch.trace_cause)?)
-        .execute(&mut *tx)
+        .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
     // The batch and the session's wake commit together (ADR 0132 §12).
@@ -282,7 +282,7 @@ async fn read_session_state_version_tx(
     };
     let marker: Option<Option<i32>> = sqlx::query_scalar(statement)
         .bind(session_id.as_str())
-        .fetch_optional(&mut **tx)
+        .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     let Some(marker) = marker else {

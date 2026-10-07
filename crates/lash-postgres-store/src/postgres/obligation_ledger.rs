@@ -79,7 +79,7 @@ pub(crate) async fn arm_cleanup_tx(
     let existing = sqlx::query(CLEANUP.select_by_referrer.sql())
         .bind(kind)
         .bind(&referrer_id)
-        .fetch_optional(&mut *conn)
+        .fetch_optional(crate::observed_sql::executor(&mut *conn))
         .await
         .map_err(store_sqlx_error)?;
     let decoded = existing.as_ref().map(cleanup_row).transpose()?;
@@ -99,7 +99,7 @@ pub(crate) async fn arm_cleanup_tx(
                 .bind(json)
                 .bind(id.as_str())
                 .bind(sql_i64("cleanup due instant", now_ms)?)
-                .execute(&mut *conn)
+                .execute(crate::observed_sql::executor(&mut *conn))
                 .await
                 .map_err(store_sqlx_error)?;
         }
@@ -109,7 +109,7 @@ pub(crate) async fn arm_cleanup_tx(
                 .bind(&referrer_id)
                 .bind(json)
                 .bind(sql_i64("cleanup due instant", now_ms)?)
-                .execute(&mut *conn)
+                .execute(crate::observed_sql::executor(&mut *conn))
                 .await
                 .map_err(store_sqlx_error)?;
         }
@@ -125,7 +125,7 @@ pub(crate) async fn arm_cleanup_tx(
         .bind(kind)
         .bind(&referrer_id)
         .bind(sql_i64("referrer end instant", now_ms)?)
-        .execute(&mut *conn)
+        .execute(crate::observed_sql::executor(&mut *conn))
         .await
         .map_err(store_sqlx_error)?;
     }
@@ -228,7 +228,7 @@ impl ObligationLedger for PostgresObligationLedger {
         let ids: Vec<String> = sqlx::query_scalar(locking)
             .bind(now)
             .bind(limit)
-            .fetch_all(&mut **tx)
+            .fetch_all(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         let mut claimed = Vec::with_capacity(ids.len());
@@ -238,7 +238,7 @@ impl ObligationLedger for PostgresObligationLedger {
                 .bind(token.as_str())
                 .bind(until)
                 .bind(now)
-                .fetch_optional(&mut **tx)
+                .fetch_optional(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(store_sqlx_error)?;
             if let Some(row) = row {
@@ -266,7 +266,7 @@ impl ObligationLedger for PostgresObligationLedger {
             .bind(id.as_str())
             .bind(token.as_str())
             .bind(until)
-            .fetch_optional(&mut **tx)
+            .fetch_optional(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         tx.commit().await.map_err(store_sqlx_error)?;
@@ -315,7 +315,7 @@ impl ObligationLedger for PostgresObligationLedger {
         };
         let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
         let changed = query
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?
             .rows_affected();
@@ -334,7 +334,7 @@ impl ObligationLedger for PostgresObligationLedger {
         let changed = sqlx::query(sql.rearm.sql())
             .bind(id.as_str())
             .bind(due_at)
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?
             .rows_affected();
@@ -430,7 +430,7 @@ impl ArtifactCleanupLedger for PostgresObligationLedger {
             .bind(referrer.kind().as_str())
             .bind(referrer.canonical_id())
             .bind(due_at)
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?
             .rows_affected();

@@ -31,6 +31,7 @@
 
 use lash_sansio::SessionId;
 mod namespace;
+mod observed_sql;
 
 use lash_core_execution::facade_support::StoreObserver;
 use std::sync::Arc;
@@ -742,6 +743,7 @@ impl PostgresStorage {
             self.pool.clone(),
             self.fence.clone(),
             self.durable_reserve.clone(),
+            self.observer.clone(),
         )
     }
 

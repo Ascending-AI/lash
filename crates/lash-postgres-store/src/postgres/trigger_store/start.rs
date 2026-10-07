@@ -64,7 +64,7 @@ async fn apply(
             .sql(),
     )
     .bind(&occurrence.idempotency_key)
-    .execute(&mut *tx)
+    .execute(crate::observed_sql::executor(&mut *tx))
     .await
     .map_err(plugin_sqlx_error)?;
     let held: Option<String> = sqlx::query_scalar(
@@ -73,7 +73,7 @@ async fn apply(
             .sql(),
     )
     .bind(&occurrence.idempotency_key)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(crate::observed_sql::executor(&mut *tx))
     .await
     .map_err(plugin_sqlx_error)?;
     if held.is_some() {
@@ -103,7 +103,7 @@ async fn apply(
         .bind(lash_core_execution::facade_support::encode_trigger_row(
             occurrence,
         )?)
-        .execute(&mut *tx)
+        .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(plugin_sqlx_error)?;
     let fired = occurrence.outcome == lash_core_execution::TriggerOccurrenceOutcome::Fired;
@@ -118,7 +118,7 @@ async fn apply(
         sqlx::query(sql.occurrence.arm_reclaimable.sql())
             .bind(&occurrence.occurrence_id)
             .bind(i64::try_from(occurrence.occurred_at_ms).unwrap_or(i64::MAX))
-            .execute(&mut *tx)
+            .execute(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(plugin_sqlx_error)?;
     }
@@ -202,7 +202,7 @@ async fn apply(
             )
             .bind(status)
             .bind(refusal_json)
-            .execute(&mut *tx)
+            .execute(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(plugin_sqlx_error)?;
         if let Some(process_id) = process_id {

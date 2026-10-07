@@ -344,11 +344,7 @@ async fn resolve_row(
     loop {
         let mut tx = MailTx::new();
         tx.write(MailDomainWrite::ResolveWait(resolution.clone()));
-        match backend
-            .durable()
-            .commit_mail(tx, CommitLabel::WAIT_RESOLVE)
-            .await
-        {
+        match backend.commit_mail(tx, CommitLabel::WAIT_RESOLVE).await {
             Ok(commit) => {
                 return match commit.answers.first() {
                     Some(MailAnswer::ResolveWait(answer)) => Ok(*answer),
