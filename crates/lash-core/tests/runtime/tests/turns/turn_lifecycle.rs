@@ -3,6 +3,8 @@ use lash_core::plugin::PluginSessionRequest;
 use lash_core::testing::TestTurnExecution as _;
 
 const SEED: u64 = 0x5_f410;
+/// A clock jump past the 30s session-lease TTL these probes expire.
+const EXPIRED_LEASE_MS: u64 = 30_001;
 
 #[derive(Debug)]
 pub(super) struct ManualClock {
@@ -169,8 +171,7 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for ExpireLeaseAtPreparedTurn {
         if phase == lash_core::runtime::RuntimeTurnPhase::PreparedTurn
             && !self.expired.swap(true, Ordering::SeqCst)
         {
-            self.clock
-                .advance(lash_core::facade_support::LeaseTimings::default().ttl_ms() + 1);
+            self.clock.advance(EXPIRED_LEASE_MS);
         }
     }
 
@@ -198,8 +199,7 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for ExpireLeaseAfterPromptBuild {
         if phase == lash_core::runtime::RuntimeTurnPhase::PromptBuild
             && !self.expired.swap(true, Ordering::SeqCst)
         {
-            self.clock
-                .advance(lash_core::facade_support::LeaseTimings::default().ttl_ms() + 1);
+            self.clock.advance(EXPIRED_LEASE_MS);
         }
     }
 }
@@ -227,8 +227,7 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for ExpireLeaseAtSecondTurnFinali
         if phase.starts_with("plugin_hook.turn_finalized.")
             && self.finalized_hooks.fetch_add(1, Ordering::SeqCst) == 1
         {
-            self.clock
-                .advance(lash_core::facade_support::LeaseTimings::default().ttl_ms() + 1);
+            self.clock.advance(EXPIRED_LEASE_MS);
         }
     }
 }

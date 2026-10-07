@@ -1308,14 +1308,6 @@ pub(crate) async fn delete_session_tx(
     crate::session_runs::delete_session_runs_conn(tx, session_id).await?;
     for statement in [
         turn_ingress.queued_batches.delete_by_session.sql(),
-        crate::process_sql::process_sql()
-            .fence
-            .delete_by_session
-            .sql(),
-        crate::process_sql::process_sql()
-            .floor
-            .delete_by_session
-            .sql(),
         turn_ingress.pending_inputs.delete_by_session.sql(),
         turn_ingress.run_specs.delete_session.sql(),
         crate::session_ingress::session_ingress_sql()

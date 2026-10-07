@@ -1,5 +1,4 @@
 use crate::support::prelude::*;
-use std::sync::Arc;
 
 use crate::runtime::process::{
     ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEventAppendRequest,
@@ -7,13 +6,9 @@ use crate::runtime::process::{
     ProcessInput, ProcessProvenance, ProcessRegistration, ProcessValueSelector, ProcessWakeSpec,
     ProjectionWatermark,
 };
-use crate::{Lifetime, ProcessRegistry, SessionId, StoreSet as _};
+use crate::{Lifetime, SessionId, StoreSet as _};
 
 use crate::support::sqlite_memory_store_set;
-
-async fn memory_registry() -> Arc<dyn ProcessRegistry> {
-    sqlite_memory_store_set().await.process_registry()
-}
 
 fn registration(_id: &str) -> ProcessRegistration {
     crate::testing::held_engine_registration(
@@ -26,12 +21,32 @@ fn registration(_id: &str) -> ProcessRegistration {
 /// FIG-3123. The three halves of "an announcement is not a wake", written
 /// together because each is only meaningful against the other two: the same
 /// process, the same event type, the same declared wake and the same target
-/// session — and only the delivery differs.
+/// session — and only the delivery differs. A delivered wake is queued work
+/// at the target session, written in the append's own transaction.
 #[tokio::test]
 async fn a_suppressed_append_is_journaled_in_full_and_wakes_nobody() {
-    let registry = memory_registry().await;
+    let stores = sqlite_memory_store_set().await;
+    let registry = stores.process_registry();
+    let sessions = stores.session_store_factory();
     let process_id = crate::ProcessId::fixture("announcement-suppression");
     let target_session_id = SessionId::from("announcing-session");
+    crate::SessionCatalogStore::admit_session(
+        sessions.as_ref(),
+        &crate::SessionStoreCreateRequest {
+            owning_process_id: None,
+            pending_observer_intents: Vec::new(),
+            session_id: target_session_id.clone(),
+            relation: crate::SessionRelation::Root,
+            config: crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            )
+            .into(),
+            head: crate::SessionCreationHead::Config,
+        },
+    )
+    .await
+    .expect("admit the target session");
     let announcement_suppression_record = registry
         .register_process(wake_registration(process_id.as_str(), &target_session_id))
         .await
@@ -58,10 +73,9 @@ async fn a_suppressed_append_is_journaled_in_full_and_wakes_nobody() {
         announced.wake_delivery
     );
     assert!(
-        registry
-            .claim_pending_wake_deliveries(8)
+        crate::QueuedWorkStore::list_queued_work(sessions.as_ref(), &target_session_id)
             .await
-            .expect("claim wake deliveries after the announcement")
+            .expect("read queued work after the announcement")
             .is_empty(),
         "the announcing session must observe no queued work from its own park"
     );
@@ -102,14 +116,13 @@ async fn a_suppressed_append_is_journaled_in_full_and_wakes_nobody() {
         emitted.wake_delivery.is_some(),
         "an unsuppressed append of the same event type still delivers its wake"
     );
-    let claimed = registry
-        .claim_pending_wake_deliveries(8)
+    let queued = crate::QueuedWorkStore::list_queued_work(sessions.as_ref(), &target_session_id)
         .await
-        .expect("claim wake deliveries after the emission");
+        .expect("read queued work after the emission");
     assert_eq!(
-        claimed.len(),
+        queued.len(),
         1,
-        "exactly the emission reaches the declaring session: {claimed:?}"
+        "exactly the emission reaches the declaring session: {queued:?}"
     );
 }
 

@@ -78,30 +78,6 @@ macro_rules! delegate_process_query {
             async fn count_non_terminal_processes(&self) -> Result<usize, $crate::PluginError> {
                 self.$inner.count_non_terminal_processes().await
             }
-
-            async fn list_parked_processes(
-                &self,
-                query: &$crate::store::ProcessParkQuery,
-            ) -> Result<Vec<$crate::ProcessRecord>, $crate::PluginError> {
-                self.$inner.list_parked_processes(query).await
-            }
-
-            async fn process_park_feed(
-                &self,
-                after: $crate::store::ParkFeedCursor,
-                limit: std::num::NonZeroUsize,
-            ) -> Result<
-                $crate::store::ParkFeedPage<$crate::store::ProcessParkKey>,
-                $crate::PluginError,
-            > {
-                self.$inner.process_park_feed(after, limit).await
-            }
-
-            async fn summarize_parked_processes(
-                &self,
-            ) -> Result<$crate::store::ParkReport, $crate::PluginError> {
-                self.$inner.summarize_parked_processes().await
-            }
         }
     };
 }
@@ -478,34 +454,6 @@ macro_rules! delegate_process_lifecycle {
                     .clear_process_wait_with_authority(process_id, prelude, authority);
                 $event_hook
             }
-
-            async fn park_process_with_authority(
-                &self,
-                process_id: &$crate::ProcessId,
-                park: $crate::store::ProcessParkWrite,
-                authority: &$crate::ProcessExecutionWriteAuthority,
-            ) -> Result<$crate::store::StoreTransition<$crate::ProcessRecord>, $crate::PluginError>
-            {
-                let $event_process_id = process_id;
-                let $event_self = self;
-                let $event_call = self
-                    .$inner
-                    .park_process_with_authority(process_id, park, authority);
-                $event_hook
-            }
-
-            async fn begin_parked_rerun_with_authority(
-                &self,
-                process_id: &$crate::ProcessId,
-                authority: &$crate::ProcessExecutionWriteAuthority,
-            ) -> Result<$crate::ProcessRecord, $crate::PluginError> {
-                let $event_process_id = process_id;
-                let $event_self = self;
-                let $event_call = self
-                    .$inner
-                    .begin_parked_rerun_with_authority(process_id, authority);
-                $event_hook
-            }
         }
     };
 }
@@ -630,77 +578,6 @@ macro_rules! delegate_process_tool_intents {
 }
 pub(crate) use delegate_process_tool_intents;
 
-macro_rules! delegate_process_wake_outbox {
-    ($wrapper:ty, $inner:ident) => {
-        #[async_trait::async_trait]
-        impl $crate::runtime::process::registry_concerns::ProcessWakeOutbox for $wrapper {
-            fn wake_delivery_config(&self) -> $crate::WakeDeliveryConfig {
-                self.$inner.wake_delivery_config()
-            }
-
-            async fn claim_pending_wake_deliveries(
-                &self,
-                limit: usize,
-            ) -> Result<Vec<$crate::WakeDelivery>, $crate::PluginError> {
-                self.$inner.claim_pending_wake_deliveries(limit).await
-            }
-
-            async fn list_wake_deliveries(
-                &self,
-                state: Option<$crate::WakeDeliveryState>,
-            ) -> Result<Vec<$crate::WakeDelivery>, $crate::PluginError> {
-                self.$inner.list_wake_deliveries(state).await
-            }
-
-            async fn wake_delivery_report(
-                &self,
-            ) -> Result<$crate::WakeDeliveryReport, $crate::PluginError> {
-                self.$inner.wake_delivery_report().await
-            }
-
-            async fn mark_wake_enqueued(
-                &self,
-                delivery_id: &str,
-                claim_token: &str,
-            ) -> Result<$crate::WakeDeliveryClaimOutcome, $crate::PluginError> {
-                self.$inner
-                    .mark_wake_enqueued(delivery_id, claim_token)
-                    .await
-            }
-
-            async fn discard_wake_delivery(
-                &self,
-                delivery_id: &str,
-                claim_token: &str,
-                reason: $crate::WakeDiscardReason,
-            ) -> Result<$crate::WakeDeliveryClaimOutcome, $crate::PluginError> {
-                self.$inner
-                    .discard_wake_delivery(delivery_id, claim_token, reason)
-                    .await
-            }
-
-            async fn redrive_wake_delivery(
-                &self,
-                delivery_id: &str,
-            ) -> Result<(), $crate::PluginError> {
-                self.$inner.redrive_wake_delivery(delivery_id).await
-            }
-
-            async fn defer_wake_delivery(
-                &self,
-                delivery_id: &str,
-                claim_token: &str,
-                next_attempt_at_ms: u64,
-            ) -> Result<$crate::WakeDeliveryClaimOutcome, $crate::PluginError> {
-                self.$inner
-                    .defer_wake_delivery(delivery_id, claim_token, next_attempt_at_ms)
-                    .await
-            }
-        }
-    };
-}
-pub(crate) use delegate_process_wake_outbox;
-
 macro_rules! delegate_process_retention {
     ($wrapper:ty, $inner:ident) => {
         #[async_trait::async_trait]
@@ -714,13 +591,6 @@ macro_rules! delegate_process_retention {
                 self.$inner
                     .compact_process_tombstones(cutoff_epoch_ms, watermark, trigger_store)
                     .await
-            }
-
-            async fn compact_process_park_feed(
-                &self,
-                through: $crate::store::ParkFeedCursor,
-            ) -> Result<(), $crate::PluginError> {
-                self.$inner.compact_process_park_feed(through).await
             }
 
             async fn release_process_events(

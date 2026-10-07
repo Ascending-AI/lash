@@ -127,8 +127,9 @@ crate::statements! {
              RETURNING state";
 
         /// Wake actor `?1` at `?2`: take the next mailbox position, and make
-        /// it ready when it was idle or waiting. No row when it is unknown
-        /// or terminal.
+        /// it ready when it was idle or waiting. A parked actor stays parked:
+        /// only a control wake readies it. No row when it is unknown or
+        /// terminal.
         wake = "UPDATE actors
              SET mail_seq = mail_seq + 1,
                  state = CASE WHEN state IN ('idle', 'waiting') THEN 'ready' ELSE state END,
@@ -153,7 +154,8 @@ crate::statements! {
         snapshot = "SELECT a.kind, a.state, a.epoch, a.owner_node, a.owner_boot,
                     a.mail_seq, a.acked_seq, a.next_due_ms, a.state_revision, a.formats,
                     (SELECT COUNT(*) FROM actor_mail m WHERE m.actor_key = a.actor_key)
-                        AS pending_mail
+                        AS pending_mail,
+                    a.park_json, a.failed_activations
              FROM actors a
              WHERE a.actor_key = ?1";
     }

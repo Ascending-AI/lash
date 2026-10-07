@@ -210,34 +210,18 @@ pub struct ProcessEngineProcessContext {
     process_id: ProcessId,
     process_work: crate::ProcessWorkWiring,
     execution_write_authority: super::model::ProcessExecutionWriteAuthority,
-    store: Option<Arc<dyn crate::RuntimeStore>>,
-    session_store_factory: Option<Arc<dyn crate::DeploymentStore>>,
-    queued_work: Arc<dyn crate::SessionWorkEngine>,
-    process_wake_delivery_policy: crate::DeliveryPolicy,
-    clock: Arc<dyn crate::Clock>,
 }
 
 impl ProcessEngineProcessContext {
-    #[allow(clippy::too_many_arguments)]
     fn new(
         process_id: ProcessId,
         process_work: crate::ProcessWorkWiring,
         execution_write_authority: super::model::ProcessExecutionWriteAuthority,
-        store: Option<Arc<dyn crate::RuntimeStore>>,
-        session_store_factory: Option<Arc<dyn crate::DeploymentStore>>,
-        queued_work: Arc<dyn crate::SessionWorkEngine>,
-        process_wake_delivery_policy: crate::DeliveryPolicy,
-        clock: Arc<dyn crate::Clock>,
     ) -> Self {
         Self {
             process_id,
             process_work,
             execution_write_authority,
-            store,
-            session_store_factory,
-            queued_work,
-            process_wake_delivery_policy,
-            clock,
         }
     }
 
@@ -274,17 +258,6 @@ impl ProcessEngineProcessContext {
             .registry()
             .append_event_with_authority(&self.process_id, request, &self.execution_write_authority)
             .await?;
-        crate::tool_provider::process_events::enqueue_wake_delivery(
-            Arc::clone(self.process_work.registry()),
-            self.store.clone(),
-            self.session_store_factory.as_ref(),
-            result.wake_delivery,
-            None,
-            Arc::clone(&self.queued_work),
-            self.process_wake_delivery_policy,
-            Arc::clone(&self.clock),
-        )
-        .await?;
         Ok(result.event)
     }
 
@@ -361,7 +334,6 @@ impl<'run> ProcessEngineRunContext<'run> {
         store: Option<Arc<dyn crate::RuntimeStore>>,
         session_store_factory: Option<Arc<dyn crate::DeploymentStore>>,
         queued_work: Arc<dyn crate::SessionWorkEngine>,
-        process_wake_delivery_policy: crate::DeliveryPolicy,
         clock: Arc<dyn crate::Clock>,
         process_registry_available: bool,
         cancellation: CancellationToken,
@@ -378,11 +350,6 @@ impl<'run> ProcessEngineRunContext<'run> {
             process_id.clone(),
             process_work,
             execution_write_authority,
-            store.clone(),
-            session_store_factory.clone(),
-            Arc::clone(&queued_work),
-            process_wake_delivery_policy,
-            Arc::clone(&clock),
         );
         Self {
             tracing: crate::trace::TraceRuntime::new(clock),

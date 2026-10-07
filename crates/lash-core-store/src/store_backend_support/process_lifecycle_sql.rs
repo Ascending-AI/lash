@@ -12,7 +12,7 @@
 //! [`ProcessStatus::is_retired`](crate::ProcessStatus::is_retired)) cannot
 //! drift.
 
-use crate::{ProcessStatus, WakeDeliveryState};
+use crate::ProcessStatus;
 
 /// Quote one process status for interpolation into backend SQL.
 pub(crate) fn process_status_sql_literal(status: ProcessStatus) -> String {
@@ -104,39 +104,4 @@ pub fn nonterminal_process_status_predicate_sql(column: &str) -> String {
         return EVERY_ROW_PREDICATE.to_string();
     }
     format!("{column} NOT IN ({terminal})")
-}
-
-/// Quote one wake-delivery state for interpolation into backend SQL.
-pub fn wake_delivery_state_sql_literal(state: WakeDeliveryState) -> String {
-    format!("'{}'", state.as_str())
-}
-
-/// Quote a wake-delivery state list as the body of a SQL `IN (...)` list.
-pub(crate) fn wake_delivery_state_sql_literal_list(states: &[WakeDeliveryState]) -> String {
-    states
-        .iter()
-        .copied()
-        .map(wake_delivery_state_sql_literal)
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-/// The undelivered wake-delivery states spelled as the body of a SQL `IN (...)`
-/// list: the deliveries a prune must still account for.
-pub(crate) fn undelivered_wake_delivery_states_sql() -> String {
-    let undelivered = WakeDeliveryState::ALL
-        .iter()
-        .copied()
-        .filter(|state| state.is_undelivered())
-        .collect::<Vec<_>>();
-    wake_delivery_state_sql_literal_list(&undelivered)
-}
-
-/// `<column> IN (<undelivered states>)`.
-pub fn undelivered_wake_delivery_state_predicate_sql(column: &str) -> String {
-    let undelivered = undelivered_wake_delivery_states_sql();
-    if undelivered.is_empty() {
-        return NO_ROW_PREDICATE.to_string();
-    }
-    format!("{column} IN ({undelivered})")
 }

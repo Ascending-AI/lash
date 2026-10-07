@@ -9,9 +9,7 @@ use crate::ProcessEventLogTestSupport as _;
 use crate::{
     LeaseOwnerIdentity, ProcessCompletionOutcome, ProcessExecutionWriteAuthority,
     ProcessExternalRef, ProcessObserverBy, ProcessRecord, ProcessStartOutcome, ProjectionWatermark,
-    WakeDelivery, WakeDeliveryClaimOutcome, WakeDeliveryLifecycle, WakeDeliveryState,
-    WakeDiscardReason, apply_process_event_projection, fold_process_record,
-    process_wake_batch_draft,
+    apply_process_event_projection, fold_process_record, process_wake_batch_draft,
 };
 use generated_prefix::generated_prefix;
 use lash_core::testing::RuntimeStoreTestShiftExt as _;
@@ -98,16 +96,6 @@ pub enum StoreContractOp {
     Retarget {
         process: u8,
         session: Option<u8>,
-    },
-    ClaimWake,
-    MarkWake {
-        stale: bool,
-    },
-    DiscardWake {
-        stale: bool,
-    },
-    DeferWake {
-        stale: bool,
     },
     EnqueueWake {
         process: u8,
@@ -205,10 +193,8 @@ struct ReferenceModel {
     /// run. A slot re-registered after its run was pruned names a new run.
     slot_ids: BTreeMap<u8, ProcessId>,
     processes: BTreeMap<ProcessId, ModelProcess>,
-    wake_deliveries: BTreeMap<String, WakeDelivery>,
     live_wakes: BTreeMap<(SessionId, ProcessId), BTreeMap<u64, ExpectedQueuedWake>>,
     next_wake_sequence: BTreeMap<(SessionId, ProcessId), u64>,
-    event_sequence_floors: BTreeMap<(SessionId, ProcessId), u64>,
     projection_cursor: ProcessChangeCursor,
     process_counts: ProcessCountConservation,
 }
@@ -468,10 +454,6 @@ where
         |handles| async move { assert_stale_authority_non_mutation(&handles.registry).await },
     )
     .await?;
-    assert_on_fresh_handles(make, seed, &SessionId::from("prop-runtime-session"), |handles| async move {
-        assert_wake_group_order_and_claim_ownership(&handles.registry).await
-    })
-    .await?;
     assert_on_fresh_handles(
         make,
         seed,
@@ -483,7 +465,7 @@ where
         make,
         seed,
         &SessionId::from("law-prune-wake"),
-        |handles| async move { assert_prune_reregister_wake_fence(&handles).await },
+        |handles| async move { assert_prune_reregister_wake_names_the_new_run(&handles).await },
     )
     .await?;
     assert_on_fresh_handles(
@@ -690,7 +672,6 @@ async fn apply_operation(
                 }
                 expected.lifecycle = crate::ProcessLifecycleState::Waiting {
                     wait: wait_state(&id),
-                    park: None,
                 };
             }
         }
@@ -784,20 +765,12 @@ async fn apply_operation(
                 "Replay-key idempotency / stale append",
             )
             .await?;
-            if let Ok(appended) = result {
-                if let Some(expected) = model.process_mut(&id).expected_mut() {
-                    apply_process_event_projection(expected, &appended.event)
-                        .map_err(|error| error.to_string())?;
-                    expected.last_event_sequence = appended.last_event_sequence;
-                }
-                if let Some(wake) = appended.wake_delivery {
-                    let delivery =
-                        WakeDelivery::pending(wake, handles.registry.wake_delivery_config());
-                    model
-                        .wake_deliveries
-                        .entry(delivery.delivery_id().into_inner())
-                        .or_insert(delivery);
-                }
+            if let Ok(appended) = result
+                && let Some(expected) = model.process_mut(&id).expected_mut()
+            {
+                apply_process_event_projection(expected, &appended.event)
+                    .map_err(|error| error.to_string())?;
+                expected.last_event_sequence = appended.last_event_sequence;
             }
         }
         StoreContractOp::CancelRequest { process, requester } => {
@@ -914,38 +887,7 @@ async fn apply_operation(
                         ProcessEventAppendRequest::subscription_retargeted(&id, target.as_deref()),
                     );
                 }
-                for delivery in model.wake_deliveries.values_mut() {
-                    if delivery.state() == WakeDeliveryState::Pending
-                        && delivery.wake.process_id == id
-                        && Some(delivery.wake.target_session_id.as_str()) != target.as_deref()
-                    {
-                        delivery.disposition = WakeDeliveryLifecycle::Discarded {
-                            reason: WakeDiscardReason::Retargeted,
-                        };
-                    }
-                }
             }
-        }
-        StoreContractOp::ClaimWake => {
-            let claims = handles
-                .registry
-                .claim_pending_wake_deliveries(3)
-                .await
-                .map_err(|error| error.to_string())?;
-            for claim in claims {
-                model
-                    .wake_deliveries
-                    .insert(claim.delivery_id().into_inner(), claim);
-            }
-        }
-        StoreContractOp::MarkWake { stale } => {
-            settle_wake(handles, model, *stale, WakeSettle::Mark).await?
-        }
-        StoreContractOp::DiscardWake { stale } => {
-            settle_wake(handles, model, *stale, WakeSettle::Discard).await?
-        }
-        StoreContractOp::DeferWake { stale } => {
-            settle_wake(handles, model, *stale, WakeSettle::Defer).await?
         }
         StoreContractOp::EnqueueWake { process } => {
             let process = model.slot_id(*process);
@@ -1033,11 +975,6 @@ async fn apply_operation(
                     Err(crate::PluginError::ProcessNoLongerRetained { .. })
                 );
                 if pruned {
-                    // Process-owned delivery rows cascade with the registry row;
-                    // the independently retained sender floor does not.
-                    model
-                        .wake_deliveries
-                        .retain(|_, delivery| delivery.wake.process_id != *id);
                     if !process.is_tombstoned()
                         && !process.expected().is_some_and(ProcessRecord::is_terminal)
                     {
@@ -1070,7 +1007,6 @@ async fn apply_operation(
                 .map_err(|error| error.to_string())?;
         }
     }
-    event_sequences.finish(model);
     Ok(())
 }
 
@@ -1163,116 +1099,6 @@ fn terminal_output(index: u8) -> ProcessAwaitOutput {
             control: None,
         },
     }
-}
-
-#[derive(Clone, Copy)]
-enum WakeSettle {
-    Mark,
-    Discard,
-    Defer,
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn settle_wake(
-    handles: &StoreContractHandles,
-    model: &mut ReferenceModel,
-    stale: bool,
-    settle: WakeSettle,
-) -> Result<(), String> {
-    let Some(delivery) = model
-        .wake_deliveries
-        .values()
-        .rev()
-        .find(|delivery| delivery.state() == WakeDeliveryState::Enqueuing)
-        .cloned()
-    else {
-        return Ok(());
-    };
-    let token = delivery.claim_token().map_err(|error| error.to_string())?;
-    let token = if stale {
-        format!("stale-{token}")
-    } else {
-        token.to_string()
-    };
-    let before = wake_delivery_snapshot(&handles.registry, &delivery.delivery_id()).await?;
-    let outcome = match settle {
-        WakeSettle::Mark => {
-            handles
-                .registry
-                .mark_wake_enqueued(&delivery.delivery_id(), &token)
-                .await
-        }
-        WakeSettle::Discard => {
-            handles
-                .registry
-                .discard_wake_delivery(
-                    &delivery.delivery_id(),
-                    &token,
-                    WakeDiscardReason::TargetGone,
-                )
-                .await
-        }
-        WakeSettle::Defer => {
-            handles
-                .registry
-                .defer_wake_delivery(
-                    &delivery.delivery_id(),
-                    &token,
-                    delivery.next_attempt_at_ms.saturating_add(1),
-                )
-                .await
-        }
-    }
-    .map_err(|error| error.to_string())?;
-    if stale {
-        if matches!(outcome, WakeDeliveryClaimOutcome::Applied) {
-            return Err("Stale-authority non-mutation: stale wake claim was applied".to_string());
-        }
-        let after = wake_delivery_snapshot(&handles.registry, &delivery.delivery_id()).await?;
-        if before != after {
-            return Err(
-                "Stale-authority non-mutation: stale wake claim mutated its delivery".to_string(),
-            );
-        }
-    } else if matches!(outcome, WakeDeliveryClaimOutcome::Applied) {
-        let expected = model
-            .wake_deliveries
-            .get_mut(delivery.delivery_id().as_str())
-            .expect("claimed delivery is modeled");
-        match settle {
-            WakeSettle::Mark => {
-                expected.disposition = WakeDeliveryLifecycle::Enqueued;
-            }
-            WakeSettle::Discard => {
-                expected.disposition = WakeDeliveryLifecycle::Discarded {
-                    reason: WakeDiscardReason::TargetGone,
-                };
-            }
-            WakeSettle::Defer => {
-                expected.disposition = WakeDeliveryLifecycle::Pending;
-                expected.next_attempt_at_ms = delivery.next_attempt_at_ms.saturating_add(1);
-            }
-        }
-    }
-    Ok(())
-}
-
-async fn wake_delivery_snapshot(
-    registry: &Arc<dyn ProcessRegistry>,
-    delivery_id: &str,
-) -> Result<Option<serde_json::Value>, String> {
-    registry
-        .list_wake_deliveries(None)
-        .await
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .find(|delivery| delivery.delivery_id() == *delivery_id)
-        .map(serde_json::to_value)
-        .transpose()
-        .map_err(|error| error.to_string())
 }
 
 async fn assert_rejected_write_is_noop(
@@ -1496,101 +1322,14 @@ async fn assert_stale_authority_non_mutation(
     Ok(())
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn assert_wake_group_order_and_claim_ownership(
-    registry: &Arc<dyn ProcessRegistry>,
-) -> Result<(), TestCaseError> {
-    let id = registry
-        .register_process(registration(
-            "law-wake-order",
-            Some(SessionId::from("law-wake-session")),
-        ))
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .id;
-    let mut sequences = Vec::new();
-    for wake_input in 1..=2 {
-        let result = registry
-            .append_event(
-                &id,
-                ProcessEventAppendRequest::new(
-                    "property.wake",
-                    serde_json::json!({"wake_input": wake_input}),
-                )
-                .with_replay_key(format!("law:wake:{wake_input}")),
-            )
-            .await
-            .map_err(|error| TestCaseError::fail(error.to_string()))?;
-        sequences.push(
-            result
-                .wake_delivery
-                .ok_or_else(|| TestCaseError::fail("wake append omitted delivery"))?
-                .sequence,
-        );
-    }
-    prop_assert_eq!(sequences[1], sequences[0] + 1);
-    let first = registry
-        .claim_pending_wake_deliveries(2)
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    prop_assert_eq!(
-        first.len(),
-        1,
-        "Wake group order + claim ownership: later group member claimed while head unsettled"
-    );
-    prop_assert_eq!(first[0].wake.sequence, sequences[0]);
-    let competing = registry
-        .claim_pending_wake_deliveries(2)
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    prop_assert!(
-        competing.is_empty(),
-        "Wake group order + claim ownership: concurrent claimant acquired an owned head"
-    );
-    let stale = registry
-        .mark_wake_enqueued(&first[0].delivery_id(), "not-the-claim-token")
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    prop_assert!(
-        !matches!(stale, WakeDeliveryClaimOutcome::Applied),
-        "Wake group order + claim ownership: stale token settled delivery"
-    );
-    let applied = registry
-        .mark_wake_enqueued(
-            &first[0].delivery_id(),
-            first[0].claim_token().expect("claim token"),
-        )
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    prop_assert!(matches!(applied, WakeDeliveryClaimOutcome::Applied));
-    let second = registry
-        .claim_pending_wake_deliveries(2)
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    prop_assert_eq!(second.len(), 1);
-    prop_assert_eq!(second[0].wake.sequence, sequences[1]);
-    Ok(())
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 async fn assert_enqueued_wake_high_water_safety(
     runtime: &Arc<dyn RuntimeStore>,
 ) -> Result<(), TestCaseError> {
     let session = SessionId::from("law-high-water");
     let process = crate::ProcessId::fixture("law-high-water-process");
     // Removal is intentionally not required to be contiguous: a host cancel withdraws any open
-    // row and raises the floor like a settlement. The production precondition is contiguous
-    // enqueue, and the law is that MAX floor advancement never removes an already-enqueued lower
-    // row; literal contiguous-removal assertions would reject that supported behavior. This
-    // Sender-floor allocation keeps normal process sequences dense and makes each value unique
-    // across prune/re-register lifetimes. The receiver fence remains defense in depth for a
-    // sender store restored behind surviving receiver state.
+    // row. The law is that withdrawing a later sequence never removes an already-enqueued lower
+    // row.
     let earlier = runtime
         .enqueue_queued_work(process_wake_batch_draft(runtime_wake_for(
             &session, &process, 1,
@@ -1623,8 +1362,7 @@ async fn assert_enqueued_wake_high_water_safety(
         "Enqueued-wake high-water safety: cancelling sequence 2 removed or disturbed live sequence 1"
     );
 
-    // Until vacuum the cancelled tombstone answers the redelivery; after it,
-    // the no-live-row wake at the receiver floor is a typed rewind.
+    // The cancelled tombstone answers the redelivery.
     let answered = runtime
         .enqueue_queued_work_with_outcome(process_wake_batch_draft(runtime_wake_for(
             &session, &process, 2,
@@ -1640,44 +1378,10 @@ async fn assert_enqueued_wake_high_water_safety(
         "Enqueued-wake high-water safety: the redelivery must answer the cancelled tombstone: \
          {answered:?}"
     );
-    runtime
-        .vacuum(&session)
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    let redelivery_error = runtime
-        .enqueue_queued_work(process_wake_batch_draft(runtime_wake_for(
-            &session, &process, 2,
-        )))
-        .await
-        .expect_err("a no-live-row wake at the receiver floor is a typed rewind");
-    prop_assert!(
-        matches!(
-            redelivery_error,
-            StoreError::ProcessWakeSequenceRewound {
-                sequence: 2,
-                allocation_floor: 2,
-                ..
-            }
-        ),
-        "Enqueued-wake allocation fence returned the wrong typed error: {redelivery_error}"
-    );
-    let after_redelivery = runtime
-        .list_queued_work(&session)
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    prop_assert_eq!(
-        after_redelivery
-            .iter()
-            .map(|batch| batch.batch_id.as_str())
-            .collect::<Vec<_>>(),
-        vec![earlier.batch_id.as_str()],
-        "Enqueued-wake allocation fence disturbed live sequence 1"
-    );
 
-    // A retry whose receiver row is still live remains idempotent even when its sequence is below
-    // the receiver floor. The live row is the durable evidence that this exact semantic source was
-    // accepted; only the no-live-row case above is a restored-sender rewind. The retry's delivery
-    // metadata may differ; its process fact may not (ADR 0101 §8).
+    // A retry whose receiver row is still live is idempotent: the live row is the durable
+    // evidence that this exact semantic source was accepted. The retry's delivery metadata may
+    // differ; its process fact may not (ADR 0101 §8).
     let mut changed = runtime_wake_for(&session, &process, 1);
     changed.input = "a different process fact under the same sequence".to_string();
     let conflict = runtime
@@ -1689,7 +1393,7 @@ async fn assert_enqueued_wake_high_water_safety(
             Err(StoreError::QueuedWorkSourceKeyConflict { existing_batch_id, .. })
                 if *existing_batch_id == earlier.batch_id
         ),
-        "Enqueued-wake allocation fence: a changed process fact must be a typed conflict: \
+        "Enqueued-wake source key: a changed process fact must be a typed conflict: \
          {conflict:?}"
     );
     let mut rewound = runtime_wake_for(&session, &process, 1);
@@ -1700,13 +1404,13 @@ async fn assert_enqueued_wake_high_water_safety(
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let crate::QueuedWorkEnqueueOutcome::Existing(retried_batch) = retry else {
         return Err(TestCaseError::fail(
-            "Enqueued-wake allocation fence: live-row retry was not idempotent",
+            "Enqueued-wake source key: live-row retry was not idempotent",
         ));
     };
     prop_assert_eq!(
         retried_batch.batch_id,
         earlier.batch_id.clone(),
-        "Enqueued-wake allocation fence: floor-only suppression won before the live receiver row"
+        "Enqueued-wake source key: the live-row retry answered another batch"
     );
     let after_live_retry = runtime
         .list_queued_work(&session)
@@ -1718,7 +1422,7 @@ async fn assert_enqueued_wake_high_water_safety(
             .map(|batch| batch.batch_id.as_str())
             .collect::<Vec<_>>(),
         vec![earlier.batch_id.as_str()],
-        "Enqueued-wake allocation fence: live-row absorption changed pending receiver work"
+        "Enqueued-wake source key: live-row absorption changed pending receiver work"
     );
 
     let owner = LeaseOwnerIdentity::opaque(
@@ -1762,7 +1466,7 @@ async fn assert_enqueued_wake_high_water_safety(
     Ok(())
 }
 
-async fn assert_prune_reregister_wake_fence(
+async fn assert_prune_reregister_wake_names_the_new_run(
     handles: &StoreContractHandles,
 ) -> Result<(), TestCaseError> {
     let session = SessionId::from("law-prune-wake");
@@ -1795,25 +1499,6 @@ async fn assert_prune_reregister_wake_fence(
         .enqueue_queued_work(process_wake_batch_draft(original))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    let claimed_delivery = handles
-        .registry
-        .claim_pending_wake_deliveries(1)
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .into_iter()
-        .next()
-        .ok_or_else(|| TestCaseError::fail("old-incarnation delivery was not claimable"))?;
-    let marked = handles
-        .registry
-        .mark_wake_enqueued(
-            &claimed_delivery.delivery_id(),
-            claimed_delivery
-                .claim_token()
-                .map_err(|error| TestCaseError::fail(error.to_string()))?,
-        )
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    prop_assert!(matches!(marked, WakeDeliveryClaimOutcome::Applied));
     let owner = LeaseOwnerIdentity::opaque(
         "law-prune-reregister-wake-owner",
         "law-prune-reregister-wake-incarnation",
@@ -2205,8 +1890,8 @@ async fn consume_wake(
     )) else { return Ok(false); };
     // The turn lane is claimed in enqueue order, so only the head wake is
     // consumed by a settled claim. A wake behind it leaves through the other
-    // terminal transition, a host cancel, which raises the same floor
-    // (FIG-3545); a stale settlement needs a claim, so it executes the head.
+    // terminal transition, a host cancel; a stale settlement needs a claim, so
+    // it executes the head.
     let head = queued.iter().min_by_key(|batch| batch.enqueue_seq);
     if head.is_none_or(|head| head.batch_id != batch.batch_id) {
         if stale {

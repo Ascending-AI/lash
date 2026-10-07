@@ -99,18 +99,5 @@ lash_store_sql::statements! {
                     LIMIT 1
                 )
              )";
-
-        /// The source key of batch `?2` of session `?1`, if run `?3` still
-        /// holds it.
-        ///
-        /// The settlement observation needs the source key to decide whether a
-        /// settled batch consumed a process wake (and so which fence to raise
-        /// before the row goes away). The head payload is the shared
-        /// [`QueuedBatchStatements::select_admitted_batch_payload`].
-        select_admitted_batch_source_key = "SELECT source_key
-             FROM queued_work_batches
-             WHERE session_id = ?1
-               AND batch_id = ?2
-               AND admitted_run = ?3";
     }
 }

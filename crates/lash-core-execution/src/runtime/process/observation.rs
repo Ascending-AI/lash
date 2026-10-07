@@ -84,10 +84,6 @@ pub struct ObservedProcess {
     pub external_ref: Option<ProcessExternalRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait: Option<WaitState>,
-    /// The park the process is in, while its body refuses to replay its
-    /// journal (FIG-3659 NOW-B).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub park: Option<crate::store::ProcessPark>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub child_session_id: Option<SessionId>,
 }
@@ -396,7 +392,6 @@ impl ObservedProcess {
         let lifecycle = record.status();
         let outcome = record.outcome();
         let wait = record.wait().cloned();
-        let park = record.park().cloned();
         let input = record.input.as_ref().clone();
         let identity = record.identity;
         let process_id = record.id;
@@ -419,7 +414,6 @@ impl ObservedProcess {
             caused_by: record.provenance.caused_by,
             external_ref: record.external_ref,
             wait,
-            park,
             child_session_id: child_session_id(&input),
             input,
         }

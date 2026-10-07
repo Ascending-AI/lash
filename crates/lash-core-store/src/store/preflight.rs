@@ -500,8 +500,6 @@ pub enum DurableSurface {
     /// One parked segment-handover envelope per non-terminal process that has
     /// one: the durable continuation a process resumes from.
     ParkedSegment,
-    /// One undelivered wake payload per pending delivery.
-    PendingWake,
     /// One start record per non-terminal process that has started: the
     /// executable generation its incarnation runs under (FIG-3571), which a
     /// first-segment process carries with no parked handover to read it from.
@@ -519,7 +517,6 @@ impl DurableSurface {
         match self {
             DurableSurface::ModuleArtifact => "module artifacts",
             DurableSurface::ParkedSegment => "parked segments",
-            DurableSurface::PendingWake => "pending wakes",
             DurableSurface::StartedProcess => "started processes",
             DurableSurface::SessionCheckpoint => "session checkpoints",
             DurableSurface::SessionExecutionState => "session execution state",

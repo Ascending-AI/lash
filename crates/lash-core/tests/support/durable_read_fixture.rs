@@ -22,8 +22,8 @@
 //! | Session graph and checkpoints | `graph_nodes`, `session_head`/`sessions`, `session_meta`, `blobs`, `runtime_turn_commits` | Ordered graph nodes and every payload field; checkpoint turn, usage, tool, plugin, and execution state; current and legacy receipt replay |
 //! | Session retention | `session_revisions`, `pins`, `deleted_sessions` | `revisions`, deletion probe, and typed `SessionDeleted` refusal to reopen a retired id |
 //! | Attachments | `attachment_referrer_edges`, `attachment_pending_writes`, `attachment_uploads`, SQLite `artifact_refs`, PostgreSQL's artifact table | The committed session's referrer edge plus process-execution-environment reference recovery |
-//! | Receiver queue | `queued_work_batches`, `pending_turn_inputs`, `wake_redelivery_fences` | Queue/input payloads, deterministic ids, and typed wake-rewind refusal |
-//! | Processes | `processes`, `process_events`, `process_change_clock`, `process_observers`, `process_segment_handovers`, `process_tombstones`, `process_wake_deliveries`, `wake_allocation_floors` | Process state; every event payload; observers; continuation; wake delivery/floor; paginated change feed; typed `ProcessNoLongerRetained` tombstone |
+//! | Receiver queue | `queued_work_batches`, `pending_turn_inputs` | Queue/input payloads, deterministic ids, and a settled wake's tombstone answering its redelivery |
+//! | Processes | `processes`, `process_events`, `process_change_clock`, `process_observers`, `process_segment_handovers`, `process_tombstones` | Process state; every event payload; observers; continuation; paginated change feed; typed `ProcessNoLongerRetained` tombstone |
 //! | Triggers | `trigger_subscriptions`, `trigger_occurrences`, `trigger_deliveries`, `trigger_mutation_receipts` | List/filter, delivery reservation, deterministic receipt replay, and `Unchanged` re-registration |
 //!
 //! The table names above omit PostgreSQL's `lash_` prefix where the logical name is
@@ -599,8 +599,8 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         other => panic!("fixture queue shift did not seal: {other:?}"),
     }
     // The receiver wake sits behind the fixture's queued work, which stays
-    // pending, so the turn lane never reaches it: its host cancel is the
-    // terminal transition that persists the redelivery fence (FIG-3545).
+    // pending, so the turn lane never reaches it: its host cancel is its
+    // terminal transition.
     session
         .cancel_queued_work_batch(&wake_batch.batch_id)
         .await
@@ -1055,25 +1055,6 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         wake_events[0].payload,
         serde_json::json!({"wake_input": "durable read wake"}),
         "durable fixture semantic drift: wake-process event payload changed"
-    );
-    assert!(
-        handles
-            .processes
-            .list_wake_deliveries(None)
-            .await
-            .expect("durable fixture drift: wake-delivery read failed")
-            .iter()
-            .any(|delivery| delivery.wake.process_id == wake_process_id()),
-        "durable fixture semantic drift: process wake delivery disappeared"
-    );
-    assert_eq!(
-        handles
-            .processes
-            .wake_allocation_floor_for_testing(&SessionId::from(SESSION_ID), &wake_process_id())
-            .await
-            .expect("durable fixture drift: wake-allocation-floor read failed"),
-        Some(1),
-        "durable fixture semantic drift: sender wake allocation floor changed"
     );
     // The settled wake's tombstone answers its redelivery, and nothing
     // reopens (ADR 0101 §8).

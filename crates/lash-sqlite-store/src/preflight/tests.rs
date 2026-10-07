@@ -262,10 +262,9 @@ mod walk {
     use super::super::SqliteStorePreflight;
     use crate::{SqliteProcessRegistry, SqliteStore};
 
-    const EVERY_SURFACE: [DurableSurface; 6] = [
+    const EVERY_SURFACE: [DurableSurface; 5] = [
         DurableSurface::ModuleArtifact,
         DurableSurface::ParkedSegment,
-        DurableSurface::PendingWake,
         DurableSurface::StartedProcess,
         DurableSurface::SessionCheckpoint,
         DurableSurface::SessionExecutionState,

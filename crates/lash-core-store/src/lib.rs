@@ -165,7 +165,7 @@ pub(crate) use chronological::ChronologicalProjection;
 pub(crate) use effect_identity::RuntimeEffectKind;
 pub(crate) use lash_sansio::ToolIntentIdentity;
 pub(crate) use message_projection::plugin_message_to_message;
-pub(crate) use process_identity::{ProcessWakeDelivery, WakeDeliveryState};
+pub(crate) use process_identity::ProcessWakeDelivery;
 pub(crate) use store::queued_work::QueuedWorkClass;
 pub(crate) use turn_input_vocabulary::TurnInputCheckpointBoundary;
 pub(crate) use turn_input_vocabulary::{InputItem, TurnContext, TurnInput};

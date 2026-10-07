@@ -28,8 +28,8 @@ use lash_core::{
 
 use super::*;
 use crate::formats::{
-    LASHLANG_SEGMENT_STATE_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, RLM_SNAPSHOT_VERSION,
-    SESSION_CHECKPOINT_SCHEMA_VERSION, VM_CONTINUATION_FORMAT_VERSION,
+    LASHLANG_SEGMENT_STATE_VERSION, RLM_SNAPSHOT_VERSION, SESSION_CHECKPOINT_SCHEMA_VERSION,
+    VM_CONTINUATION_FORMAT_VERSION,
 };
 
 /// A handle whose surfaces are exactly what a test declares.
@@ -210,20 +210,6 @@ fn segment_item(process: &str, session: &str, segment: u32, continuation: u32) -
     }
 }
 
-fn wake_item(delivery: &str, process: &str, version: u32) -> DurableItem {
-    DurableItem {
-        surface: DurableSurface::PendingWake,
-        cursor: delivery.to_string(),
-        process_id: Some(ProcessId::fixture(process)),
-        session_id: Some(SessionId::from("s-1")),
-        status: None,
-        owner_record: None,
-        payload: DurablePayload::Json(
-            serde_json::json!({"wake_id": delivery, "version": version}).to_string(),
-        ),
-    }
-}
-
 fn checkpoint_item(session: &str, schema_version: u32, encoding: u32) -> DurableItem {
     let bytes = rmp_serde::to_vec_named(&serde_json::json!({
         "schema_version": schema_version,
@@ -299,14 +285,6 @@ fn healthy_store() -> FakeStore {
                 "s-1",
                 LASHLANG_SEGMENT_STATE_VERSION,
                 VM_CONTINUATION_FORMAT_VERSION,
-            )],
-        )
-        .with_items(
-            DurableSurface::PendingWake,
-            vec![wake_item(
-                "w-1",
-                "p-1",
-                PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
             )],
         )
         .with_items(
@@ -508,16 +486,21 @@ async fn an_unreadable_database_is_undecided_rather_than_ready() {
 
 #[tokio::test]
 async fn a_payload_nobody_can_decode_is_undecided_and_never_panics() {
-    let mut item = wake_item("w-1", "p-1", PROCESS_WAKE_DELIVERY_FORMAT_VERSION);
+    let mut item = segment_item(
+        "p-1",
+        "s-1",
+        LASHLANG_SEGMENT_STATE_VERSION,
+        VM_CONTINUATION_FORMAT_VERSION,
+    );
     item.payload = DurablePayload::Json("not json at all".to_string());
-    let store = FakeStore::default().with_items(DurableSurface::PendingWake, vec![item]);
+    let store = FakeStore::default().with_items(DurableSurface::ParkedSegment, vec![item]);
     let report = probe_store(&store, PreflightOptions::summary())
         .await
         .expect("the probe reads the store");
-    let wake = component(&report, DurableFormat::ProcessWakeDelivery);
-    assert_eq!(wake.verdict, ComponentVerdict::Undecodable);
-    assert_eq!(wake.undecodable, 1);
-    assert_eq!(wake.undecodable_reasons.len(), 1);
+    let segment = component(&report, DurableFormat::LashlangSegmentHandover);
+    assert_eq!(segment.verdict, ComponentVerdict::Undecodable);
+    assert_eq!(segment.undecodable, 1);
+    assert_eq!(segment.undecodable_reasons.len(), 1);
     assert_eq!(report.outcome, PreflightOutcome::Undecided);
     assert!(report.drain.is_empty(), "nobody read a version to refuse");
 }

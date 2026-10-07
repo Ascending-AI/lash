@@ -308,7 +308,6 @@ impl TryFrom<lash_core::facade_support::ObservedProcess> for RemoteObservedProce
             caused_by,
             external_ref,
             wait,
-            park,
             child_session_id,
         } = value;
         Ok(Self {
@@ -332,7 +331,6 @@ impl TryFrom<lash_core::facade_support::ObservedProcess> for RemoteObservedProce
             caused_by: caused_by.map(Into::into),
             external_ref: external_ref.map(Into::into),
             wait: wait.map(Into::into),
-            park: park.map(TryInto::try_into).transpose()?,
             child_session_id,
         })
     }
@@ -362,7 +360,6 @@ impl TryFrom<RemoteObservedProcess> for lash_core::facade_support::ObservedProce
             caused_by,
             external_ref,
             wait,
-            park,
             child_session_id,
         } = value;
         Ok(Self {
@@ -386,7 +383,6 @@ impl TryFrom<RemoteObservedProcess> for lash_core::facade_support::ObservedProce
             caused_by: caused_by.map(Into::into),
             external_ref: external_ref.map(Into::into),
             wait: wait.map(Into::into),
-            park: park.map(TryInto::try_into).transpose()?,
             child_session_id,
         })
     }

@@ -1299,13 +1299,18 @@ impl lash_core::ProcessEngine for IngressAdmissionEngine {
 
     fn advance(
         &self,
-        _state: lash_core::EngineState,
+        state: lash_core::EngineState,
         _event: lash_core::EngineEvent,
     ) -> std::result::Result<
         (lash_core::EngineState, lash_core::EngineAction),
         lash_core::ProcessInfraError,
     > {
-        todo!("L6 (FIG-5175): port IngressAdmissionEngine to advance")
+        Ok((
+            state,
+            lash_core::EngineAction::Terminal(lash_core::ProcessAwaitOutput::from_tool_output(
+                lash_core::ToolCallOutput::success(serde_json::json!({"ingress_engine": "ran"})),
+            )),
+        ))
     }
 
     async fn resolve(

@@ -4,8 +4,8 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 /// Everything a transfer could touch, read through the registry's own
-/// surface: both processes' records, event logs, observer edges,
-/// every wake delivery, the sender floors, and the change feed.
+/// surface: both processes' records, event logs, observer edges and the
+/// change feed.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each read is established by the setup above"
@@ -26,15 +26,6 @@ async fn transfer_footprint(
                     .expect("read an observer edge"),
             );
         }
-        let mut floors = Vec::new();
-        for session_id in sessions {
-            floors.push(
-                registry
-                    .wake_allocation_floor_for_testing(session_id, process_id)
-                    .await
-                    .expect("read a sender floor"),
-            );
-        }
         per_process.push(serde_json::json!({
             "record": registry.get_process(process_id).await.expect("read a record"),
             "events": registry
@@ -46,7 +37,6 @@ async fn transfer_footprint(
                 .await
                 .expect("read observers"),
             "observed_by": observed_by,
-            "floors": floors,
         }));
     }
     let (changes, _) = registry
@@ -55,17 +45,13 @@ async fn transfer_footprint(
         .expect("read the change feed");
     serde_json::json!({
         "processes": per_process,
-        "wake_deliveries": registry
-            .list_wake_deliveries(None)
-            .await
-            .expect("list wake deliveries"),
         "changes": changes.len(),
     })
 }
 
 /// A transfer of several processes that fails part-way commits nothing: the
-/// first process's observer move, its audit events, the wake deliveries and
-/// the sender floor all roll back with the refusal the second process causes.
+/// first process's observer move and its audit events roll back with the
+/// refusal the second process causes.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"

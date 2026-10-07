@@ -39,7 +39,6 @@ pub mod ingress_obligation;
 mod ingress_terminal;
 pub mod plugin_writers;
 pub use ingress_terminal::{IngressTerminal, IngressTerminalCause};
-mod lease_timings;
 mod maintenance;
 pub use enumeration::*;
 pub mod obligation;
@@ -95,9 +94,9 @@ pub use record_schema_version::{
 pub use crate::session_graph::RealizedNodeTimestamp;
 pub use crate::session_store_factory_types::{RetainedRevision, Retention, SessionLookup, Target};
 pub use admission_plan::{
-    IngressRowId, IngressSettlement, RUN_ADMISSION_STEP, TerminalProcessWake, TurnLaneStop,
-    deferred_wake_records, plan_checkpoint_input_admission, plan_next_turn_input_admission,
-    require_admitted_to_run, require_open_command, turn_input_state_after_admission,
+    IngressRowId, IngressSettlement, RUN_ADMISSION_STEP, TurnLaneStop, deferred_wake_records,
+    plan_checkpoint_input_admission, plan_next_turn_input_admission, require_admitted_to_run,
+    require_open_command, turn_input_state_after_admission,
 };
 pub use artifact_cleanup::{ArtifactCleanupLedger, CleanupUpsert};
 pub use attachment_referrers::{
@@ -148,7 +147,6 @@ pub use history::{
     WindowSelector,
 };
 pub use lease_owner::LeaseOwnerIdentity;
-pub use lease_timings::{LeaseTimings, LeaseTimingsError};
 pub use maintenance::{
     GcReport, MaintenanceFailure, MaintenanceRefusal, MaintenanceReport, MaintenanceResult,
     MaintenanceStop, MaintenanceSweep, SessionBlobReclaimReport, VacuumReport,
@@ -156,10 +154,9 @@ pub use maintenance::{
 pub use obligation::*;
 pub use park::{
     EnginePark, ParkCancelCause, ParkEventColumns, ParkEventKind, ParkFeedCursor, ParkFeedEvent,
-    ParkFeedPage, ParkId, ParkReason, ParkReasonCode, ParkReport, ProcessPark, ProcessParkKey,
-    ProcessParkQuery, ProcessParkWrite, StoreTransition, StoredParkRedrive, StoredTurnParkHead,
-    TurnPark, TurnParkOrigin, TurnParkQuery, TurnParkTarget, TurnParkWrite, TurnParkWriteDecision,
-    UnparkCause, UnsettledTurnCounts, decide_turn_park_write,
+    ParkFeedPage, ParkId, ParkReason, ParkReasonCode, ParkReport, StoreTransition,
+    StoredParkRedrive, StoredTurnParkHead, TurnPark, TurnParkOrigin, TurnParkQuery, TurnParkTarget,
+    TurnParkWrite, TurnParkWriteDecision, UnparkCause, UnsettledTurnCounts, decide_turn_park_write,
 };
 pub use pending_follow_on::{
     DEFAULT_MAX_FOLLOW_ON_RECOVERIES, FollowOnAdmission, FollowOnBlocked, FollowOnRecovery,
@@ -1272,12 +1269,6 @@ pub trait QueuedWorkStore: Send + Sync {
     /// [`Existing`](crate::QueuedWorkEnqueueOutcome::Existing) when the
     /// digests are equal, and nothing reopens; a changed digest is
     /// [`StoreError::QueuedWorkSourceKeyConflict`] and nothing is stored.
-    ///
-    /// A changed process wake is that wake's terminal (FIG-4487): the
-    /// refusing transaction raises the session's redelivery floor to
-    /// `max(floor, sequence)` and commits before the conflict is returned,
-    /// leaving the stored wake untouched. After vacuum, a retry at or below
-    /// the floor is refused with [`StoreError::ProcessWakeSequenceRewound`].
     async fn enqueue_queued_work_with_outcome(
         &self,
         batch: crate::QueuedWorkBatchDraft,
@@ -1311,12 +1302,6 @@ pub trait QueuedWorkStore: Send + Sync {
     /// A command whose fenced read delivered its obligation is being applied
     /// and cannot be withdrawn.
     ///
-    /// Cancelling a process-wake batch is a terminal transition of that wake:
-    /// the session's redelivery fence rises to `max(floor, sequence)` in the
-    /// same transaction as the tombstone. A redelivery of the same
-    /// `(process, sequence)` answers the tombstone and reopens nothing; after
-    /// host vacuum it is refused with
-    /// [`StoreError::ProcessWakeSequenceRewound`].
     async fn cancel_queued_work_batch(
         &self,
         session_id: &SessionId,

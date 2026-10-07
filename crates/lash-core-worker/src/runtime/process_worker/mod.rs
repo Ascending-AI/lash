@@ -3,8 +3,6 @@ use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 
-mod park;
-
 use crate::RuntimeHostConfig;
 use crate::{
     DeploymentStore, PluginError, PluginFactory, PluginHost, PluginStack, ProcessExecutionContext,
@@ -303,26 +301,6 @@ impl DurableProcessWorker {
                 ),
             )));
         }
-        // A parked process (FIG-3586) is re-run to find out whether this build
-        // can replay its journal. The park stays on the record — listed, with
-        // its `since_ms` and `park_id` — while the rerun no longer exempts the
-        // process from its attempt budget: a run that refuses again re-parks
-        // it, and a run that goes on to fail for any other reason spends its
-        // budget as usual (FIG-3659 NOW-B).
-        // An exhausted engine child can park a still-running process.
-        // Admission replay cannot redrive that child; control clears its
-        // refusing flag when it resumes the engine work explicitly.
-        if current.park().is_some_and(|park| {
-            park.refusing
-                && (park.engine.is_some()
-                    || park.reason.code() != crate::store::ParkReasonCode::EngineRetryExhausted)
-        }) {
-            self.config
-                .process_registry()
-                .begin_parked_rerun_with_authority(&process_id, &execution_write_authority)
-                .await?;
-        }
-        let park_authority = execution_write_authority.clone();
         // The generation fence (FIG-3571), before the runtime, the artifact
         // load and the compile: an incarnation started under another
         // executable generation, or before the stamp existed, parks typed with
@@ -334,11 +312,9 @@ impl DurableProcessWorker {
         if let Err(refusal) =
             crate::ExecutableGenerationRefusal::check(started_under, current_generation)
         {
-            let error =
-                PluginError::Runtime(crate::RuntimeError::retired_process_generation(refusal));
-            self.park_refused_process(&process_id, &error, &park_authority)
-                .await?;
-            return Err(error);
+            return Err(PluginError::Runtime(
+                crate::RuntimeError::retired_process_generation(refusal),
+            ));
         }
         let execution_context = execution_context
             .with_execution_write_authority(execution_write_authority)
@@ -368,8 +344,6 @@ impl DurableProcessWorker {
         if let Some(plugins) = plugin_admission.as_ref()
             && let Err(error) = self.config.plugin_host.validate_plugin_admission(plugins)
         {
-            self.park_refused_process(&process_id, &error, &park_authority)
-                .await?;
             return Err(error);
         }
         let runtime = Box::pin(ProcessRuntimeContext::for_admitted(
@@ -392,7 +366,7 @@ impl DurableProcessWorker {
         if let Some(plugins) = plugin_admission {
             runtime.adopt_plugin_admission(plugins);
         }
-        let result = runtime
+        runtime
             .run_process(
                 admitted,
                 execution_context,
@@ -402,12 +376,7 @@ impl DurableProcessWorker {
                 handover,
             )
             .await
-            .map_err(crate::ProcessInfraError::into_plugin_error);
-        if let Err(error) = &result {
-            self.park_refused_process(&process_id, error, &park_authority)
-                .await?;
-        }
-        result
+            .map_err(crate::ProcessInfraError::into_plugin_error)
     }
 
     /// Wall-clock epoch ms from the worker's configured clock.

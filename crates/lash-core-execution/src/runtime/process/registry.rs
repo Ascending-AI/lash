@@ -1,14 +1,12 @@
 use crate::ProcessId;
 use crate::SessionId;
 use crate::plugin::PluginError;
-pub use lash_core_store::process_identity::*;
 
 use super::engine::PersistedSegmentHandover;
 use super::model::{ProcessChangeCursor, ProcessRecord};
 pub use super::registry_concerns::{
     ProcessClockRebind, ProcessEventLog, ProcessLifecycle, ProcessObserverRegistry, ProcessQuery,
     ProcessRegistrar, ProcessRetention, ProcessTerminalPublication, ProcessToolIntents,
-    ProcessWakeOutbox,
 };
 
 /// Outcome of process retention: how many terminal processes, events, and
@@ -99,331 +97,6 @@ pub struct ParentEndPlan {
     pub obligation_id: crate::store::ObligationId,
     /// Where that obligation stands.
     pub obligation_state: crate::store::ObligationState,
-}
-
-pub const DEFAULT_WAKE_DELIVERY_EXPIRY_MS: u64 = 7 * 24 * 60 * 60 * 1_000;
-pub const WAKE_ENQUEUING_STALE_AFTER_MS: u64 = 30_000;
-
-/// Host-owned bound for process-wake redelivery.
-///
-/// Exactly-once delivery does not depend on comparing clocks across the
-/// process registry and target session store. Receiver completion advances one
-/// monotone receiver allocation floor per `(session_id, process_id)`. Because
-/// selected-batch settlement may be out of order, this is a redelivery fence,
-/// not a consumption watermark. The process registry separately retains one
-/// sender allocation floor per wake target and process, so sequences stay
-/// strictly monotone across pruned incarnations without consulting a clock.
-/// A live receiver row is idempotent; a no-live-row wake at or below the
-/// receiver floor returns the typed store-rewind error.
-/// `delivery_expiry_ms` is only a pending-delivery liveness bound, evaluated
-/// with the runtime's injected clock.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct WakeDeliveryConfig {
-    pub delivery_expiry_ms: u64,
-    pub enqueuing_stale_after_ms: u64,
-}
-
-impl Default for WakeDeliveryConfig {
-    fn default() -> Self {
-        Self {
-            delivery_expiry_ms: DEFAULT_WAKE_DELIVERY_EXPIRY_MS,
-            enqueuing_stale_after_ms: WAKE_ENQUEUING_STALE_AFTER_MS,
-        }
-    }
-}
-
-impl WakeDeliveryConfig {
-    /// Constructs wake-retention policy for process-store implementors and rejects a zero expiry so
-    /// pending delivery cannot expire at creation.
-    pub fn new(delivery_expiry_ms: u64) -> Result<Self, PluginError> {
-        if delivery_expiry_ms == 0 {
-            return Err(PluginError::Session(
-                "process wake delivery expiry must be greater than zero".to_string(),
-            ));
-        }
-        Ok(Self {
-            delivery_expiry_ms,
-            enqueuing_stale_after_ms: WAKE_ENQUEUING_STALE_AFTER_MS,
-        })
-    }
-
-    /// Sets the reclaim age for process-store implementors and rejects zero so an active enqueuing
-    /// claim is not immediately stale.
-    pub fn with_enqueuing_stale_after_ms(
-        mut self,
-        enqueuing_stale_after_ms: u64,
-    ) -> Result<Self, PluginError> {
-        if enqueuing_stale_after_ms == 0 {
-            return Err(PluginError::Session(
-                "process wake enqueuing stale age must be greater than zero".to_string(),
-            ));
-        }
-        self.enqueuing_stale_after_ms = enqueuing_stale_after_ms;
-        Ok(self)
-    }
-}
-
-/// Durable terminal outcome for an undeliverable wake.
-///
-/// Non-exhaustive so future delivery-terminal reasons remain additive.
-#[non_exhaustive]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WakeDiscardReason {
-    Expired,
-    TargetGone,
-    Retargeted,
-    SequenceRewound,
-    /// The source cannot be read without repairing durable state or configuration.
-    SourceUnreadable,
-    /// The receiver already holds a different wake under this delivery's process and
-    /// sequence. The receiver kept its own wake and raised its redelivery floor to this
-    /// sequence before the discard was recorded, so the delivery can never be admitted.
-    ContentConflict,
-}
-
-/// State-specific evidence travels with the state that requires it, so an enqueuing delivery
-/// cannot exist without its ownership fence and a typed discard cannot exist without its reason.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WakeDeliveryLifecycle {
-    /// Awaiting its next claim attempt.
-    Pending,
-    /// Claimed while the receiver enqueue is in flight.
-    Enqueuing {
-        /// Ownership fence that every transition out of `enqueuing` must present.
-        claim_token: String,
-    },
-    /// Successfully enqueued at the target session.
-    Enqueued,
-    /// Terminally discarded with a typed classification.
-    Discarded {
-        /// The classification that made this delivery terminal.
-        reason: WakeDiscardReason,
-    },
-}
-
-impl WakeDeliveryLifecycle {
-    pub fn state(&self) -> WakeDeliveryState {
-        match self {
-            Self::Pending => WakeDeliveryState::Pending,
-            Self::Enqueuing { .. } => WakeDeliveryState::Enqueuing,
-            Self::Enqueued => WakeDeliveryState::Enqueued,
-            Self::Discarded { .. } => WakeDeliveryState::Discarded,
-        }
-    }
-
-    /// Returns the typed reason carried by a classified discard.
-    pub fn discard_reason(&self) -> Option<WakeDiscardReason> {
-        match self {
-            Self::Discarded { reason } => Some(*reason),
-            _ => None,
-        }
-    }
-}
-
-macro_rules! define_wake_discard_ordering_group_rule {
-    (
-        blocking: [$($blocking:ident),+ $(,)?],
-        non_blocking: [$($non_blocking:ident),+ $(,)?],
-    ) => {
-        /// Stable labels for discarded wakes that do not block later deliveries in their ordering
-        /// group. SQL-backed registries bind this list into their claim predicates.
-        pub const NON_BLOCKING_ORDERING_GROUP_LABELS: &'static [&'static str] =
-            &[$(Self::$non_blocking.as_str()),+];
-
-        /// Whether this discard reason blocks later deliveries in the same ordering group.
-        pub const fn blocks_ordering_group(self) -> bool {
-            match self {
-                $(Self::$blocking => true,)+
-                $(Self::$non_blocking => false,)+
-            }
-        }
-    };
-}
-
-impl WakeDiscardReason {
-    /// Exposes the stable snake-case discard reason for process-store implementors and durable
-    /// diagnostics.
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Expired => "expired",
-            Self::TargetGone => "target_gone",
-            Self::Retargeted => "retargeted",
-            Self::SequenceRewound => "sequence_rewound",
-            Self::SourceUnreadable => "source_unreadable",
-            Self::ContentConflict => "content_conflict",
-        }
-    }
-
-    define_wake_discard_ordering_group_rule! {
-        blocking: [Expired, TargetGone, Retargeted, SourceUnreadable],
-        non_blocking: [SequenceRewound, ContentConflict],
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct WakeDelivery {
-    pub wake: ProcessWakeDelivery,
-    pub disposition: WakeDeliveryLifecycle,
-    pub attempts: u64,
-    pub first_attempt_ms: Option<u64>,
-    pub next_attempt_at_ms: u64,
-    pub expires_at_ms: u64,
-}
-
-impl WakeDelivery {
-    pub fn pending(wake: ProcessWakeDelivery, config: WakeDeliveryConfig) -> Self {
-        let next_attempt_at_ms = wake.created_at_ms;
-        Self {
-            expires_at_ms: wake.created_at_ms.saturating_add(config.delivery_expiry_ms),
-            wake,
-            disposition: WakeDeliveryLifecycle::Pending,
-            attempts: 0,
-            first_attempt_ms: None,
-            next_attempt_at_ms,
-        }
-    }
-
-    /// The delivery's key: the identity of the wake it delivers.
-    pub fn delivery_id(&self) -> WakeId {
-        self.wake.wake_id()
-    }
-
-    pub fn state(&self) -> WakeDeliveryState {
-        self.disposition.state()
-    }
-
-    /// Returns the exact enqueuing ownership fence process-store implementors must present for
-    /// settlement, or an error when the delivery is not enqueuing.
-    pub fn claim_token(&self) -> Result<&str, PluginError> {
-        match &self.disposition {
-            WakeDeliveryLifecycle::Enqueuing { claim_token } => Ok(claim_token),
-            _ => Err(PluginError::Session(format!(
-                "wake delivery `{}` is not enqueuing",
-                self.delivery_id()
-            ))),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WakeDeliveryClaimOutcome {
-    Applied,
-    ClaimLost { state: WakeDeliveryState },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct WakeDeliveryBlockedGroup {
-    pub target_session_id: SessionId,
-    pub process_id: ProcessId,
-    pub blocking_delivery_id: String,
-    pub blocking_sequence: u64,
-    pub reason: WakeDiscardReason,
-    /// Pass this id to `redrive_wake_delivery` to unblock the group.
-    pub redrive_delivery_id: String,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct WakeDeliveryReport {
-    pub pending: usize,
-    pub enqueuing: usize,
-    pub enqueued: usize,
-    pub discarded: usize,
-    pub expired: usize,
-    pub target_gone: usize,
-    pub retargeted: usize,
-    pub sequence_rewound: usize,
-    pub source_unreadable: usize,
-    pub content_conflict: usize,
-    /// Ordering groups stopped by a discarded head while later work remains.
-    pub blocked_groups: Vec<WakeDeliveryBlockedGroup>,
-}
-
-impl WakeDeliveryReport {
-    /// Counts delivery states and discard reasons for process-store embedders, then identifies each
-    /// target/process ordering group blocked behind a discarded head with later work.
-    #[expect(
-        clippy::expect_used,
-        reason = "the filter above matched a typed discard reason"
-    )]
-    pub fn from_deliveries<'a>(deliveries: impl IntoIterator<Item = &'a WakeDelivery>) -> Self {
-        let deliveries = deliveries.into_iter().collect::<Vec<_>>();
-        let mut report = Self::default();
-        for delivery in &deliveries {
-            match &delivery.disposition {
-                WakeDeliveryLifecycle::Pending => report.pending += 1,
-                WakeDeliveryLifecycle::Enqueuing { .. } => report.enqueuing += 1,
-                WakeDeliveryLifecycle::Enqueued => report.enqueued += 1,
-                WakeDeliveryLifecycle::Discarded { reason } => {
-                    report.discarded += 1;
-                    match reason {
-                        WakeDiscardReason::Expired => report.expired += 1,
-                        WakeDiscardReason::TargetGone => report.target_gone += 1,
-                        WakeDiscardReason::Retargeted => report.retargeted += 1,
-                        WakeDiscardReason::SequenceRewound => report.sequence_rewound += 1,
-                        WakeDiscardReason::SourceUnreadable => report.source_unreadable += 1,
-                        WakeDiscardReason::ContentConflict => report.content_conflict += 1,
-                    }
-                }
-            }
-        }
-
-        let mut groups = std::collections::BTreeMap::<(&str, &str), Vec<&WakeDelivery>>::new();
-        for delivery in &deliveries {
-            groups
-                .entry((
-                    delivery.wake.target_session_id.as_str(),
-                    delivery.wake.process_id.as_str(),
-                ))
-                .or_default()
-                .push(delivery);
-        }
-        for group in groups.values_mut() {
-            group.sort_by_key(|delivery| delivery.wake.sequence);
-            let Some(last_active_index) = group.iter().rposition(|delivery| {
-                matches!(
-                    delivery.state(),
-                    WakeDeliveryState::Pending | WakeDeliveryState::Enqueuing
-                )
-            }) else {
-                continue;
-            };
-            if let Some(delivery) = group[..last_active_index].iter().find(|delivery| {
-                delivery.state() == WakeDeliveryState::Discarded
-                    && delivery
-                        .disposition
-                        .discard_reason()
-                        .is_some_and(WakeDiscardReason::blocks_ordering_group)
-            }) {
-                let reason = delivery
-                    .disposition
-                    .discard_reason()
-                    .expect("discarded delivery filtered to a typed reason");
-                report.blocked_groups.push(WakeDeliveryBlockedGroup {
-                    target_session_id: delivery.wake.target_session_id.clone(),
-                    process_id: delivery.wake.process_id.clone(),
-                    blocking_delivery_id: delivery.delivery_id().into_inner(),
-                    blocking_sequence: delivery.wake.sequence,
-                    reason,
-                    redrive_delivery_id: delivery.delivery_id().into_inner(),
-                });
-            }
-        }
-        report.blocked_groups.sort_by(|left, right| {
-            (
-                &left.target_session_id,
-                &left.process_id,
-                left.blocking_sequence,
-            )
-                .cmp(&(
-                    &right.target_session_id,
-                    &right.process_id,
-                    right.blocking_sequence,
-                ))
-        });
-        report
-    }
 }
 
 /// One segment of one process: the key every segment-scoped durable fact is
@@ -544,18 +217,7 @@ pub trait ProcessContinuationStore: Send + Sync {
 /// requires a testing method, and a build with `lash-core/testing` on but a
 /// backend's `testing` off still compiles.
 #[cfg(any(test, feature = "testing"))]
-#[async_trait::async_trait]
-pub trait ProcessRegistryTestSupport: Send + Sync {
-    /// Raw sender-floor probe for cross-backend conformance tests.
-    async fn wake_allocation_floor_for_testing(
-        &self,
-        target_session_id: &SessionId,
-        process_id: &ProcessId,
-    ) -> Result<Option<u64>, PluginError> {
-        let _ = (target_session_id, process_id);
-        Ok(None)
-    }
-}
+pub trait ProcessRegistryTestSupport: Send + Sync {}
 
 /// Small-fixture event-log convenience, excluded from production builds.
 ///
@@ -655,7 +317,6 @@ pub trait ProcessRegistry:
     + ProcessEventLog
     + ProcessLifecycle
     + ProcessToolIntents
-    + ProcessWakeOutbox
     + ProcessRetention
     + ProcessClockRebind
 {
@@ -669,7 +330,6 @@ impl<T> ProcessRegistry for T where
         + ProcessEventLog
         + ProcessLifecycle
         + ProcessToolIntents
-        + ProcessWakeOutbox
         + ProcessRetention
         + ProcessClockRebind
         + ?Sized

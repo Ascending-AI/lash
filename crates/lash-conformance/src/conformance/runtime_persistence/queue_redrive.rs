@@ -368,8 +368,7 @@ pub async fn process_wakes_batch_by_default(store: Arc<dyn RuntimeStore>) {
             .is_empty(),
         "merged settlement must settle every admitted receiver row"
     );
-    // Until vacuum each delivered tombstone answers its wake's redelivery;
-    // after it, the receiver floor refuses it.
+    // Each delivered tombstone answers its wake's redelivery.
     for wake in &merged_wakes {
         let answered = store
             .enqueue_queued_work_with_outcome(crate::process_wake_batch_draft(wake.clone()))
@@ -382,20 +381,6 @@ pub async fn process_wakes_batch_by_default(store: Arc<dyn RuntimeStore>) {
             ),
             "the redelivery is the delivered wake: {answered:?}"
         );
-    }
-    store
-        .vacuum(&session)
-        .await
-        .expect("vacuum the delivered tombstones");
-    for wake in merged_wakes {
-        let error = store
-            .enqueue_queued_work(crate::process_wake_batch_draft(wake))
-            .await
-            .expect_err("a vacuumed settled wake must trip the receiver floor");
-        assert!(matches!(
-            error,
-            StoreError::ProcessWakeSequenceRewound { .. }
-        ));
     }
 }
 

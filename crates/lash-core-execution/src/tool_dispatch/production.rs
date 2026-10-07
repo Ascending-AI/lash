@@ -603,11 +603,6 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 process_id.clone(),
                 events.execution_write_authority.clone(),
                 events.process_work.clone(),
-                events.store.clone(),
-                events.session_store_factory.clone(),
-                Arc::clone(&events.queued_work),
-                events.process_wake_delivery_policy,
-                Arc::clone(&events.clock),
             ));
         }
         let mut context = builder

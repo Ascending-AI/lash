@@ -3790,12 +3790,6 @@
       "minimum": 0,
       "type": "integer"
     },
-    "ParkFeedCursor": {
-      "description": "Opaque position in one store's park feed.\n\nThe wrapped sequence is meaningful only to the feed that issued it: a\nturn park feed position and a process park feed position are not\ncomparable, and neither is comparable across stores. Backends expose\nconstructors/accessors so store implementations can persist and bind the\nposition; consumers treat values as cursors, never as timestamps.",
-      "format": "uint64",
-      "minimum": 0,
-      "type": "integer"
-    },
     "PayloadKind": {
       "description": "A typed payload inside a frame that did not encode or decode.",
       "enum": [
@@ -5941,148 +5935,6 @@
         }
       ]
     },
-    "RemoteParkReason": {
-      "description": "Why a process parked: the serde form of the core park reason, arm for\narm (FIG-3659 NOW-B).",
-      "oneOf": [
-        {
-          "description": "A code cell's re-execution issued a command its journal does not hold.",
-          "properties": {
-            "message": {
-              "type": "string"
-            },
-            "type": {
-              "const": "replay_divergence",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "message"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "A code cell's journal was written under a replay-key grammar this\nbuild does not mint.",
-          "properties": {
-            "message": {
-              "type": "string"
-            },
-            "type": {
-              "const": "key_format_cutover",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "message"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "A host tool binding the journal names is missing or changed.",
-          "properties": {
-            "message": {
-              "type": "string"
-            },
-            "type": {
-              "const": "binding_drift",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "message"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "A recorded effect's envelope no longer matches the one the redrive\nreconstructs.",
-          "properties": {
-            "effect_kind": {
-              "type": "string"
-            },
-            "message": {
-              "type": "string"
-            },
-            "type": {
-              "const": "effect_replay_divergence",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "effect_kind",
-            "message"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "The session-state generation gate refused the redrive.",
-          "properties": {
-            "current": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "found": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "message": {
-              "type": "string"
-            },
-            "type": {
-              "const": "session_state_generation_refused",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "found",
-            "current",
-            "message"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "The engine stopped retrying work that kept failing live.",
-          "properties": {
-            "attempts": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "last_failure_code": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message": {
-              "type": "string"
-            },
-            "profile_key": {
-              "description": "The recorded model key the failing attempts could not bind.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "type": {
-              "const": "engine_retry_exhausted",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "attempts",
-            "message"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "RemoteParkedTurn": {
       "additionalProperties": false,
       "properties": {
@@ -6589,22 +6441,11 @@
       ]
     },
     "RemoteProcessLifecycleState": {
-      "description": "Mirrors [`lash_core::ProcessLifecycleState`]: each state owns the facts\nthat exist only in it, so a record cannot carry a wait or a park beside an\noutcome, or a terminal status without one.",
+      "description": "Mirrors [`lash_core::ProcessLifecycleState`]: each state owns the facts\nthat exist only in it, so a record cannot carry a wait beside an outcome,\nor a terminal status without one.",
       "oneOf": [
         {
           "additionalProperties": false,
           "properties": {
-            "park": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/RemoteProcessPark"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "The park the process is in, while its body refuses to replay its\njournal (FIG-3659 NOW-B)."
-            },
             "state": {
               "const": "running",
               "type": "string"
@@ -6618,16 +6459,6 @@
         {
           "additionalProperties": false,
           "properties": {
-            "park": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/RemoteProcessPark"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
             "state": {
               "const": "waiting",
               "type": "string"
@@ -6705,59 +6536,6 @@
           "type": "object"
         }
       ]
-    },
-    "RemoteProcessPark": {
-      "description": "The park a process is in while its body refuses to replay its journal\n(FIG-3659 NOW-B).",
-      "properties": {
-        "attempts": {
-          "description": "Refusals since the park opened.",
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "engine": {
-          "description": "The engine's opaque handle on the stopped execution, when the engine\nparked the process itself.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "last_refused_ms": {
-          "description": "Epoch milliseconds of its latest refusal.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "park_id": {
-          "description": "The process event sequence of the fact that opened the park.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "reason": {
-          "$ref": "#/$defs/RemoteParkReason",
-          "description": "Why it parked, as its latest refusal said."
-        },
-        "refusing": {
-          "description": "Whether the latest run refused (a rerun under way clears it).",
-          "type": "boolean"
-        },
-        "since_ms": {
-          "description": "Epoch milliseconds of the park's first refusal.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "reason",
-        "park_id",
-        "since_ms",
-        "last_refused_ms",
-        "attempts",
-        "refusing"
-      ],
-      "type": "object"
     },
     "RemoteProcessProvenance": {
       "properties": {
@@ -7249,6 +7027,10 @@
     },
     "RemoteProcessToolCancellation": {
       "properties": {
+        "forced": {
+          "description": "Whether lash forced the end: a cancelled process whose engine did not\nend it within its cancel grace (ADR 0132 \u00a710).",
+          "type": "boolean"
+        },
         "message": {
           "type": "string"
         },
@@ -8333,6 +8115,10 @@
     "RemoteToolCancellation": {
       "additionalProperties": false,
       "properties": {
+        "forced": {
+          "description": "Whether lash forced the end: a cancelled process whose engine did not\nend it within its cancel grace (ADR 0132 \u00a710).",
+          "type": "boolean"
+        },
         "message": {
           "type": "string"
         },
@@ -14943,34 +14729,6 @@
             },
             "type": {
               "const": "trigger_subscription_change_cursor_pruned",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "message"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "A process park feed cursor predates history\n`compact_process_park_feed` removed. The consumer must relist parked\nprocesses before resuming from the reported horizon.",
-          "properties": {
-            "message": {
-              "additionalProperties": false,
-              "properties": {
-                "horizon": {
-                  "$ref": "#/$defs/ParkFeedCursor",
-                  "description": "The lowest feed position the store still serves."
-                }
-              },
-              "required": [
-                "horizon"
-              ],
-              "type": "object"
-            },
-            "type": {
-              "const": "process_park_feed_cursor_compacted",
               "type": "string"
             }
           },

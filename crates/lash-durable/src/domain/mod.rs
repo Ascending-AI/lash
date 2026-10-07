@@ -36,8 +36,11 @@ pub mod turns;
 pub mod waits;
 
 pub use keys::{CellId, ExecKey, Ordinal, OwnerKey, RunSeq, ScopeKey, StoredKeyError};
-pub use park_events::{ParkEventRow, ParkEventSeq, ParkEventWrite};
-pub use processes::{CancelAnswer, CancelRequest, ProcessActorRow, ProcessStartRows, ProcessWrite};
+pub use park_events::{ParkEventKind, ParkEventRow, ParkEventSeq, ParkEventWrite};
+pub use processes::{
+    CancelAnswer, CancelRequest, PROCESS_FORMATS, ProcessActorRow, ProcessStartRows, ProcessWrite,
+    RedriveAnswer, RedriveRequest, SIGNAL_MAIL,
+};
 pub use run_records::{AdmittedId, RunRecordKind, RunRecordRow, RunRecordWrite};
 pub use session_close::{SessionCloseStep, SessionCloseWrite};
 pub use snapshots::{SnapshotRev, SnapshotRow, SnapshotWrite};
@@ -99,6 +102,10 @@ pub enum MailDomainWrite {
     /// L3: request a turn's cancel: its cancel-request row (first policy
     /// wins, a stronger mode escalates) plus a control wake.
     RequestTurnCancel(TurnCancelRequest),
+    /// L6: redrive a parked actor: clear its park and its failed
+    /// activations, record the redrive on the park feed, and control-wake
+    /// it.
+    Redrive(RedriveRequest),
 }
 
 /// The answer to one [`MailDomainWrite`], in the order they were recorded.
@@ -110,6 +117,8 @@ pub enum MailAnswer {
     RequestProcessCancel(CancelAnswer),
     /// The answer to [`MailDomainWrite::RequestTurnCancel`].
     RequestTurnCancel(TurnCancelAnswer),
+    /// The answer to [`MailDomainWrite::Redrive`].
+    Redrive(RedriveAnswer),
 }
 
 /// A conditional domain write that found the rows otherwise than it
@@ -174,6 +183,17 @@ pub enum DomainRefusal {
         /// The session.
         session: SessionId,
     },
+    /// A process transition's expected state revision was not the stored
+    /// one, or the process is gone or terminal.
+    #[error("process {process} is at state revision {found:?}, not the expected {expected}")]
+    ProcessRevConflict {
+        /// The process.
+        process: ProcessId,
+        /// The revision the transition expected to replace.
+        expected: u64,
+        /// The revision stored; `None` when the process is gone or terminal.
+        found: Option<u64>,
+    },
     /// The session head moved past the revision the commit expected.
     #[error("session {session} head is at {found:?}, not the expected {expected}")]
     HeadMoved {
@@ -217,6 +237,16 @@ pub trait DurableReads: Send + Sync {
     async fn live_until_descendants(
         &self,
         scope: &ScopeKey,
+        limit: usize,
+    ) -> Result<Vec<ProcessId>, DurableError>;
+
+    /// L6: up to `limit` live `Until(scope)` children whose cancel was not
+    /// yet requested, ordered by process id, after `after`: the next batch
+    /// of a scope's cascade.
+    async fn until_children(
+        &self,
+        scope: &ScopeKey,
+        after: Option<&ProcessId>,
         limit: usize,
     ) -> Result<Vec<ProcessId>, DurableError>;
 

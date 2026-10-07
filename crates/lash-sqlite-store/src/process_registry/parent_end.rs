@@ -59,6 +59,7 @@ pub(super) fn record_conn(
     parent: &ScopeId,
     ended_at_ms: u64,
     fleet_format: lash_core_execution::FleetFormat,
+    cascaded_by_actor: bool,
 ) -> Result<(), PluginError> {
     let (kind, id) = ledger_key(parent);
     crate::conn::cached_execute(
@@ -81,6 +82,17 @@ pub(super) fn record_conn(
         ended_at_ms,
     )
     .map_err(PluginError::from)?;
+    if cascaded_by_actor {
+        // The ended process's actor runs its cascade (ADR 0132 §11): the
+        // row stays as the late-start fence and settles at once, so no
+        // relay runs it.
+        crate::conn::cached_execute(
+            conn,
+            process_sql().plan.settle.sql(),
+            params![kind, id, ended_at_ms as i64],
+        )
+        .map_err(process_sqlite_error)?;
+    }
     // The close ends every wait the scope's calls still hold (ADR 0116
     // §3.6): an abandoned call leaks no hold, and a late start under the
     // closed scope is refused above, so no redrive needs the row pinned.
@@ -130,6 +142,7 @@ pub(super) async fn record(
                 &parent,
                 ended_at_ms,
                 fleet_format,
+                false,
             )))
         })
         .await

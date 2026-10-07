@@ -2159,7 +2159,6 @@ async fn runners_for_case_with_clock(
             Arc::new(lash::persistence::FileAttachmentStore::new(
                 sqlite_case_root.join("postgres-attachments"),
             )),
-            lash_core::WakeDeliveryConfig::default(),
             Arc::clone(&clock),
         ),
     ));

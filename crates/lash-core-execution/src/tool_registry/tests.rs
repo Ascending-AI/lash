@@ -80,7 +80,6 @@ fn test_tool_context() -> crate::ToolContext<'static> {
         SessionId::from("registry-test"),
         Arc::new(crate::testing::MockSessionManager::default()),
         Arc::new(crate::testing::MockSessionManager::default()),
-        Arc::new(crate::testing::MockSessionManager::default()),
         Arc::new(crate::UnavailableProcessService),
         crate::ActorContext::unavailable()
             .scoped(crate::AdmittedScope::runtime_operation(

@@ -1,4 +1,3 @@
-use crate::ProcessId;
 use crate::SessionId;
 use crate::{BatchId, InputId, NodeId};
 
@@ -945,15 +944,6 @@ pub enum StoreError {
     /// A run named run spec `hash`, which its session does not hold.
     #[error("run spec `{hash}` of session `{session_id}` is not interned")]
     RunSpecMissing { session_id: SessionId, hash: String },
-    #[error(
-        "process wake `{process_id}` sequence {sequence} for session `{session_id}` has no live receiver row and is at or below the receiver allocation floor {allocation_floor}; the sender store may have been restored or rewound"
-    )]
-    ProcessWakeSequenceRewound {
-        session_id: SessionId,
-        process_id: ProcessId,
-        sequence: u64,
-        allocation_floor: u64,
-    },
     #[error("session execution lease for session `{session_id}` is missing or expired")]
     SessionExecutionLeaseExpired { session_id: SessionId },
     #[error(
@@ -1240,7 +1230,6 @@ impl StoreError {
             | Self::RunSpecHashCollision { .. }
             | Self::PendingTurnInputRunSpecMismatch { .. }
             | Self::RunSpecMissing { .. }
-            | Self::ProcessWakeSequenceRewound { .. }
             | Self::SessionExecutionLeaseExpired { .. }
             | Self::UnfencedHeadPublication { .. }
             | Self::UnsupportedRecordSchemaVersion { .. }
@@ -1388,7 +1377,6 @@ impl StoreError {
             | Self::ShiftFenceSessionMismatch { .. }
             | Self::PendingTurnInputBatchForeignSession { .. }
             | Self::RunSpecMissing { .. }
-            | Self::ProcessWakeSequenceRewound { .. }
             | Self::UnfencedHeadPublication { .. }
             | Self::UnsupportedRecordSchemaVersion { .. }
             | Self::MissingRecordSchemaVersion { .. }
@@ -1581,7 +1569,6 @@ impl StoreError {
             Self::RunSpecHashCollision { .. } => "RunSpecHashCollision",
             Self::PendingTurnInputRunSpecMismatch { .. } => "PendingTurnInputRunSpecMismatch",
             Self::RunSpecMissing { .. } => "RunSpecMissing",
-            Self::ProcessWakeSequenceRewound { .. } => "ProcessWakeSequenceRewound",
             Self::SessionExecutionLeaseExpired { .. } => "SessionExecutionLeaseExpired",
             Self::UnfencedHeadPublication { .. } => "UnfencedHeadPublication",
             Self::UnsupportedRecordSchemaVersion { .. } => "UnsupportedRecordSchemaVersion",

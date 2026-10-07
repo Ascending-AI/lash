@@ -58,6 +58,15 @@ impl DurableReads for DummyDomainApply {
         self.inner.live_until_descendants(scope, limit).await
     }
 
+    async fn until_children(
+        &self,
+        scope: &ScopeKey,
+        after: Option<&ProcessId>,
+        limit: usize,
+    ) -> Result<Vec<ProcessId>, DurableError> {
+        self.inner.until_children(scope, after, limit).await
+    }
+
     async fn park_events(
         &self,
         after: Option<ParkEventSeq>,
@@ -125,10 +134,9 @@ impl DurableStore for DummyDomainApply {
     }
 }
 
-fn park(kind: &str) -> DomainWrite {
-    DomainWrite::ParkEvent(ParkEventWrite::Append {
-        kind: kind.to_owned(),
-        reason_json: "{}".to_owned(),
+fn park(reason: &str) -> DomainWrite {
+    DomainWrite::ParkEvent(ParkEventWrite::Park {
+        reason_json: reason.to_owned(),
     })
 }
 

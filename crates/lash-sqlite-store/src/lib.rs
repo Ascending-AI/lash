@@ -227,7 +227,6 @@ impl SqliteStore {
 pub struct SqliteProcessRegistry {
     conn: SqliteConnection,
     clock: Arc<dyn lash_core_execution::Clock>,
-    wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
     /// This registry's database.
     location: DatabaseLocation,
     /// Where registration mints process ids (ADR 0107).

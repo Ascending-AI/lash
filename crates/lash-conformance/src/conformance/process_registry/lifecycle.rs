@@ -57,24 +57,6 @@ pub async fn lifecycle_event_timestamps_follow_the_registry_clock(
         .clear_process_wait_with_authority(&process_id, Vec::new(), &authority)
         .await
         .expect("clear wait");
-    clock.advance(10);
-    registry
-        .park_process_with_authority(
-            &process_id,
-            crate::store::ParkReason::ReplayDivergence {
-                message: "clock provenance fixture".to_string(),
-            }
-            .into(),
-            &authority,
-        )
-        .await
-        .map(lash_core::store::StoreTransition::into_record)
-        .expect("park process");
-    clock.advance(10);
-    registry
-        .begin_parked_rerun_with_authority(&process_id, &authority)
-        .await
-        .expect("begin parked rerun");
     let page = registry
         .event_page(
             &process_id,
@@ -99,8 +81,6 @@ pub async fn lifecycle_event_timestamps_follow_the_registry_clock(
             ("process.first_started", 10_010),
             ("process.waiting", 10_020),
             ("process.resumed", 10_030),
-            ("process.parked", 10_040),
-            ("process.park_rerun_began", 10_050),
         ],
         "every lifecycle event must retain its injected clock instant"
     );

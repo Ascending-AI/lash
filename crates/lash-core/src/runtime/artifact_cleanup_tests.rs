@@ -479,7 +479,7 @@ impl crate::ProcessEngine for Engine {
         _state: crate::EngineState,
         _event: crate::EngineEvent,
     ) -> Result<(crate::EngineState, crate::EngineAction), crate::ProcessInfraError> {
-        todo!("L6 (FIG-5175): port Engine to advance")
+        unreachable!("cleanup never advances a process")
     }
 
     async fn resolve(

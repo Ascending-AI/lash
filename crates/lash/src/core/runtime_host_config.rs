@@ -46,9 +46,6 @@ impl LashCoreBuilder {
         if let Some(policy) = self.output_retention.take() {
             core = core.with_output_retention(policy);
         }
-        if let Some(policy) = self.process_wake_delivery_policy.take() {
-            core.control.process_wake_delivery_policy = policy;
-        }
         if let Some(runtime) = self.trace_runtime.take() {
             core.tracing = runtime;
         }

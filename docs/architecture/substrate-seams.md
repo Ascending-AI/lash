@@ -41,7 +41,7 @@ L13 = FIG-5193.
 - **S4:** `ExecutionDraft.limit` is L3a's (FIG-5171) `lash_sansio::ExecutionLimit`; I0 defines no copy.
 - **S9, facade:** `DurableBackendBuilder::new` keeps the `Arc<dyn StoreSet>` that L10a's skeleton landed with, because every host already hands it one. `config` takes `DurableSettings` (the unvalidated parameters) rather than a `DurableConfig`, so `build` is where they are validated and `InvalidConfig` is reachable. `projection_provider` exists with the `rlm` feature, which brings `lashlang`; `build` registers the providers into a `lashlang::ProjectionCatalog` (whose `register` is L7p's) and maps a refused registration, or a host provider of the lash-provided `history` type, to `DuplicateProvider`. The facade re-exports the build vocabulary from `lash::durable` (`CompletionKeySecrets`, `DurableBuildError`, `DurableConfig`, `DurableSettings`, `DurableStore`, `KeyVersion`, `SecretBytes`, `SecretsRefusal`) and the engine state machine from `lash::plugins` (`EngineAction`, `EngineEvent`, `EngineState`, `EngineStateFormat`, `HostWaitKind`, `KeyName`, `StepName`, `StepRequest`), so an external engine and store set can be written against the facade alone.
 - **S9, signals (L8, FIG-5178):** `StoreSet` gained `durable_signals() -> Option<Arc<dyn lash_durable::Signals>>`, agreed with the orchestrator. PostgreSQL answers `PostgresSignals` (after-commit `pg_notify` wake hints, a listener per node that holds the boot's session advisory lock, liveness probes and the reap of a boot whose lock is released); SQLite and the test store sets answer `None`, because one node per database keeps its wakes in process. `serve` passes it to `Runner::with_signals` when `DurableConfig`'s notifier is `AfterCommit`, and every mailbox commit through `Backend::commit_mail` hands what it woke to the shared `Hints`, which hint in process or publish.
-- **S1, work ports:** `EffectEngine::{session_work, process_work}` became `DurableSessionWork` and `DurableProcessWork` (`runtime/work/durable.rs`), the facade core's session-work engine and process port over the backend. A shift ask is `Backend::wake_session` (L3s) and a process start is `Backend::wake_process` (L6); `schedule_shift` and `await_shift` are L3s stubs, the terminal wait and its publication are L5's, and cancel delivery is L6's mail. `install_session_shifts` is real (get-or-init).
+- **S1, work ports:** `EffectEngine::{session_work, process_work}` became `DurableSessionWork` and `DurableProcessWork` (`runtime/work/durable.rs`), the facade core's session-work engine and process port over the backend. A shift ask is `Backend::wake_session` (L3s) and a process start needs no delivery: registration creates its actor ready, so the durable `deliver_process_start` is a no-op (L6); `schedule_shift` and `await_shift` are L3s stubs, the terminal wait and its publication are L5's, and cancel delivery is L6's mail. `install_session_shifts` is real (get-or-init).
 - **S1, perf:** the runtime-perf scenario `ScopedEffectController` is `ScopedEffects`; its report name `scoped_effect_controller` and its budget are unchanged.
 
 ## `execute_effect` variant classification
@@ -99,7 +99,6 @@ Code the fold made unreachable, or nearly, that an owning lane is about to rewri
 - **L6 and L7b:** the `with_turn_hand_over(false)` plumbing (4 sites) and segment handover as process state; the process run-context builder (`process_runners/mod.rs`) and the capability items only it read (`session_runtime_store`, `execution_owner`, `turn_phase_probe`), kept under `#[expect(dead_code)]` for the advance-driven engine drive; `ProcessEngineRunContext` without effect accessors, and the lashlang run path (`run_lashlang_process`, which takes the context it will run under).
 - **L3, L4 and L6:** the await-event methods addressed by the retired `AwaitEventKey` (`await_event_key`, `resolve_await_event`, `publish_await_event`, `peek_await_event`, `await_await_event`, `prepare_completion_key`, `wait_effect`'s `AwaitEvent` and `PeekAwaitEvent`, and `completion_host_key`), kept by L5 in `runtime/actor/await_event_legacy.rs`. Each reaches `port_pending`, whose arm names the lane by wait identity: turn control and session-command cancel L3, tool completion and custom L4, process signals L6. They are deleted with their callers' ports; no wait row serves a recomputable key.
 - **V0:** `RunRecordObserver::bind`, kept for `record_run_record`.
-- **L6:** host and test process engines whose `advance` is a stub (`IngressAdmissionEngine`, `PayloadGatedEngine`, the artifact-cleanup engine, the h2 receiver): their tests compile and reach the stub until L6 ports the engine drive.
 - At the L10a rebase I0 ported every file that still named the deleted seam, deleted `replay_read_gate.rs` (its subject was replay paths) and the pending list, and dropped Rule 7's Restate exclusion; L10a itself removed `RecordedJournal` and `read_recorded_journal`.
 
 ## Table ownership
@@ -124,7 +123,7 @@ Created in DDL by the lane named; written by the lanes in the last column. On SQ
 
 Generated from the tree with `scripts/check-substrate-todos.py`'s scanner; each lane removes its rows as it fills them.
 
-Counts: L3 7, L3s 5, L4 14, L6 33, L6b 2 (61 in all).
+Counts: L3 7, L3s 5, L4 14, L6 1, L6b 2 (29 in all).
 
 ### V0 (FIG-5170)
 
@@ -180,40 +179,9 @@ None: V0 filled its stubs. It re-tagged the journal-era ones its path never reac
 
 | Where | Function | Stub |
 |---|---|---|
-| `crates/lash-conformance/src/conformance/bound_trigger_duplicate.rs` | `advance` | port IncrementEngine to advance |
-| `crates/lash-conformance/src/conformance/definitions.rs` | `advance` | port ModuleDefinitionEngine to advance |
-| `crates/lash-conformance/src/conformance/obligation_relay.rs` | `advance` | port MissingCarryEngine to advance |
-| `crates/lash-conformance/src/conformance/process_prune_start_staging.rs` | `advance` | port ModuleNamingEngine to advance |
-| `crates/lash-conformance/src/conformance/process_trigger_retention.rs` | `advance` | port TriggerTargetEngine to advance |
-| `crates/lash-core-execution/src/backend.rs` | `wake_process` | wake a process actor in a mailbox transaction |
-| `crates/lash-core-execution/src/runtime/actor/process.rs` | `end_scope` | mark a batch of a scope's Until children for cancel |
-| `crates/lash-core-execution/src/runtime/actor/process.rs` | `observe_process_cancel` | read the process's cancel_requested_at, or delete where advance replaces it |
-| `crates/lash-core-execution/src/runtime/actor/process.rs` | `process_effect` | run a process effect as a store-local effect, wait or mail |
-| `crates/lash-core-execution/src/runtime/actor/process.rs` | `record_process_drive_step` | delete where advance replaces it, else a write under the process epoch |
-| `crates/lash-core-execution/src/runtime/process/definition_tests.rs` | `advance` | port SignedEngine to advance |
-| `crates/lash-core-execution/src/runtime/process/engine_resolve_tests.rs` | `advance` | port SignedEngine to advance |
-| `crates/lash-core-execution/src/runtime/work/durable.rs` | `deliver_cancel` | request the process's cancel as mail; the first request wins |
-| `crates/lash-core-execution/src/testing/mod.rs` | `advance` | port FixtureProcessEngine to advance |
-| `crates/lash-core-execution/src/testing/mod.rs` | `advance` | port HeldProcessEngine to advance |
-| `crates/lash-core/src/runtime/artifact_cleanup_tests.rs` | `advance` | port Engine to advance |
-| `crates/lash-core/src/runtime/session_manager/process_runners/runner.rs` | `run_admitted_process` | drive the engine's process by advance from the process activation |
-| `crates/lash-core/tests/runtime_support/payload_gated_engine.rs` | `advance` | port PayloadGatedEngine to advance |
-| `crates/lash-lashlang-runtime/src/lib.rs` | `advance` | port LashlangProcessEngine to advance |
-| `crates/lash-postgres-store/src/postgres/durable/park_events.rs` | `apply` | append to the park feed on PostgreSQL |
-| `crates/lash-postgres-store/src/postgres/durable/park_events.rs` | `read` | read the park feed on PostgreSQL |
-| `crates/lash-postgres-store/src/postgres/durable/processes.rs` | `apply` | register, advance, end or cascade a process on PostgreSQL |
-| `crates/lash-postgres-store/src/postgres/durable/processes.rs` | `live_until_descendants` | list a scope's live Until descendants on PostgreSQL |
-| `crates/lash-postgres-store/src/postgres/durable/processes.rs` | `process` | read a process actor's row on PostgreSQL |
-| `crates/lash-postgres-store/src/postgres/durable/processes.rs` | `request_cancel` | record a process's first cancel request and control-wake it on PostgreSQL |
-| `crates/lash-sqlite-store/src/durable/park_events.rs` | `apply` | append to the park feed on SQLite |
-| `crates/lash-sqlite-store/src/durable/park_events.rs` | `read` | read the park feed on SQLite |
-| `crates/lash-sqlite-store/src/durable/processes.rs` | `apply` | register, advance, end or cascade a process on SQLite |
-| `crates/lash-sqlite-store/src/durable/processes.rs` | `live_until_descendants` | list a scope's live Until descendants on SQLite |
-| `crates/lash-sqlite-store/src/durable/processes.rs` | `process` | read a process actor's row on SQLite |
-| `crates/lash-sqlite-store/src/durable/processes.rs` | `request_cancel` | record a process's first cancel request and control-wake it on SQLite |
-| `crates/lash/src/tests/tool_intent_ingress.rs` | `advance` | port IngressAdmissionEngine to advance |
-| `examples/shared/h2_receiver.rs` | `advance` | port ReceiverEngine to advance: run until cancelled |
 | `crates/lash-core-execution/src/runtime/actor/await_event_legacy.rs` | `port_pending` | delete with the process signals' port to process mail and L5's pin and race |
+
+L6 filled the rest. The one row left is reached only by the lashlang run path's `await_process_signal_event` (`lash-lashlang-runtime/src/process.rs`), which L7b ports to `advance`; an engine receives a signal as `EngineEvent::Signal` from its mail.
 
 ### L6b (FIG-5176)
 

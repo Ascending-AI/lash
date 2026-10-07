@@ -1,25 +1,18 @@
-//! The process family: the process registry and the two wake-floor tables.
+//! The process family: the process registry's tables.
 //!
-//! Fifteen tables, the largest family in either store. They are one family
-//! because they are one transactional unit: an event append writes the event,
-//! the process projection, the parent-end ledger, the wake delivery and the
-//! allocation floor in the same transaction, and a prune moves a process row,
-//! its events, its tombstone and its artifact cleanup together.
-//!
-//! Two of them — [`wake_allocation_floors`] and [`wake_redelivery_fences`] —
-//! live in the session databases rather than the registry's own, because they
-//! record what a *session* has been promised and has consumed. They are the
-//! process family's tables all the same: nothing but a process wake writes
-//! them, and the sequence they carry is a process event sequence.
+//! One family because they are one transactional unit: an event append writes
+//! the event, the process projection and the parent-end ledger in the same
+//! transaction (and, for a wake, the target session's queued work), and a
+//! prune moves a process row, its events, its tombstone and its artifact
+//! cleanup together.
 //!
 //! # Vocabulary
 //!
-//! `processes.status` and `process_wake_deliveries.state` carry domain
-//! vocabulary generated from `lash_core::ProcessStatus` and
-//! `lash_core::WakeDeliveryState` (FIG-2815, FIG-2844). No statement in this
-//! family spells either: each names the predicate it wants as a
-//! `{{term(column)}}` token and the backend's [`crate::Vocabulary`] expands it
-//! at startup from the one source those labels have.
+//! `processes.status` carries domain vocabulary generated from
+//! `lash_core::ProcessStatus` (FIG-2815). No statement in this family spells
+//! it: each names the predicate it wants as a `{{term(column)}}` token and the
+//! backend's [`crate::Vocabulary`] expands it at startup from the one source
+//! those labels have.
 
 pub mod abandoned_consumer_holds;
 pub mod change_clock;
@@ -27,14 +20,9 @@ pub mod event_horizons;
 pub mod events;
 pub mod observers;
 pub mod parent_end_plans;
-pub mod park_clock;
-pub mod park_events;
 pub mod processes;
 pub mod segment_handovers;
 pub mod tombstones;
-pub mod wake_allocation_floors;
-pub mod wake_deliveries;
-pub mod wake_redelivery_fences;
 
 // No family-wide shared statement: every read that spans two of these tables —
 // the change feed, the retention classification, the prune, the listings —

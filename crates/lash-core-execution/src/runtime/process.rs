@@ -26,6 +26,7 @@ pub mod registry_transitions;
 mod scope_close;
 mod service;
 mod start_staging;
+pub mod steps;
 #[cfg(any(test, feature = "testing"))]
 mod testing;
 #[cfg(test)]
@@ -66,8 +67,8 @@ pub use engine::{
     ProcessRunOutcome, SegmentHandover, WeakProcessEngineRegistry,
 };
 pub use engine_state::{
-    EngineAction, EngineEvent, EngineState, EngineStateFormat, HostWaitKind, KeyName, StepName,
-    StepRequest,
+    EngineAction, EngineEvent, EngineState, EngineStateFormat, HostWaitKind, KeyName,
+    SettledOutcome, SettledOutcomeRefusal, StepName, StepRequest,
 };
 pub use events::{
     AbandonEvidence, AbandonWriter, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessAwaitOutput,
@@ -127,15 +128,12 @@ pub use registry::{
     ConformanceProcessRegistry, ProcessEventLogTestSupport, ProcessRegistryTestSupport,
 };
 pub use registry::{
-    DEFAULT_WAKE_DELIVERY_EXPIRY_MS, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NonTerminalProcessPage,
-    ParentEndPlan, ProcessClockRebind, ProcessContinuationStore, ProcessEventLog, ProcessLifecycle,
-    ProcessObserverRegistry, ProcessPruneReport, ProcessQuery, ProcessRegistrar, ProcessRegistry,
-    ProcessRegistryCursor, ProcessRetention, ProcessSegmentKey, ProcessTerminalPublication,
-    ProcessToolIntents, ProcessWakeOutbox, ProjectionWatermark, SegmentHandoverCommit,
-    SegmentStartMarker, WAKE_ENQUEUING_STALE_AFTER_MS, WakeDelivery, WakeDeliveryBlockedGroup,
-    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryLifecycle, WakeDeliveryReport,
-    WakeDeliveryState, WakeDiscardReason, reconcile_pruned_trigger_deliveries,
-    release_bound_trigger_delivery_pins,
+    MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NonTerminalProcessPage, ParentEndPlan, ProcessClockRebind,
+    ProcessContinuationStore, ProcessEventLog, ProcessLifecycle, ProcessObserverRegistry,
+    ProcessPruneReport, ProcessQuery, ProcessRegistrar, ProcessRegistry, ProcessRegistryCursor,
+    ProcessRetention, ProcessSegmentKey, ProcessTerminalPublication, ProcessToolIntents,
+    ProjectionWatermark, SegmentHandoverCommit, SegmentStartMarker,
+    reconcile_pruned_trigger_deliveries, release_bound_trigger_delivery_pins,
 };
 pub use scope_close::RegistryScopeClose;
 pub use service::{ProcessService, ProcessToolVisibilityFilter, UnavailableProcessService};
@@ -143,6 +141,7 @@ pub use start_staging::{
     ArtifactReferrerPorts, HostStartAdmission, ProcessStartStores, ReferrerAcquisition,
     RegisteredProcessStart, SessionTurnAdmission, register_process_start,
 };
+pub use steps::{ProcessSteps, StepAdmission, StepRefusal};
 #[cfg(any(test, feature = "testing"))]
 pub use testing::*;
 pub use validation::{
@@ -151,7 +150,7 @@ pub use validation::{
     allocate_process_event_sequence, apply_process_event_projection, check_retained_start,
     check_trigger_delivery_start, fold_process_record, prepare_process_event_append,
     prepare_process_registration, prepare_process_start, prepare_process_transition,
-    process_park_transitions, require_event_replay, validate_generic_process_event_append,
+    require_event_replay, validate_generic_process_event_append,
 };
 
 pub fn current_epoch_ms() -> u64 {

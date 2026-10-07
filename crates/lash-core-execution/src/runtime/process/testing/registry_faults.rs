@@ -1,5 +1,5 @@
 //! A registry decorator that injects read, terminal-write and page-read
-//! faults and stale wake deliveries, holds a non-terminal page at a known point,
+//! faults, holds a non-terminal page at a known point,
 //! and counts point reads, over any backend.
 
 use lash_sansio::sync::MutexExt;
@@ -14,9 +14,8 @@ use super::super::registry_delegate::{
 
 /// Wraps a registry so a test can make its point reads of one process fail,
 /// miss, or answer a stale record, can fail terminal,
-/// external-reference and cancellation writes, can hand its wake-delivery
-/// driver a claimed delivery the registry no longer holds, and can count how
-/// its callers read processes.
+/// external-reference and cancellation writes, and can count how its callers
+/// read processes.
 ///
 /// Reads are faulted at the point reads —
 /// [`get_process`](super::super::registry_concerns::ProcessQuery::get_process)
@@ -27,7 +26,6 @@ use super::super::registry_delegate::{
 pub struct ProcessRegistryFaults {
     inner: Arc<dyn ProcessRegistry>,
     faults: Arc<std::sync::Mutex<ReadFaultPlan>>,
-    injected_wakes: Arc<std::sync::Mutex<Vec<crate::WakeDelivery>>>,
     process_point_reads: Arc<AtomicUsize>,
 }
 
@@ -39,8 +37,6 @@ type ExternalRefWriteHold =
 struct ReadFaultPlan {
     delete_error: Option<crate::PluginError>,
     error: Option<crate::PluginError>,
-    wake_defer_error: Option<crate::PluginError>,
-    wake_discard_error: Option<crate::PluginError>,
     error_after: Option<(usize, crate::PluginError)>,
     absent: bool,
     record_override: Option<crate::ProcessRecord>,
@@ -126,7 +122,6 @@ impl ProcessRegistryFaults {
         Self {
             inner,
             faults: Arc::default(),
-            injected_wakes: Arc::default(),
             process_point_reads: Arc::default(),
         }
     }
@@ -314,40 +309,6 @@ impl ProcessRegistryFaults {
         pause
     }
 
-    /// The next claim of pending wake deliveries hands out `wake` first,
-    /// already claimed, whether or not the wrapped registry holds it: the
-    /// stale row a driver meets when a delivery outlives the incarnation that
-    /// minted it.
-    pub fn inject_claimed_wake_delivery(
-        &self,
-        wake: crate::ProcessWakeDelivery,
-    ) -> Result<(), crate::PluginError> {
-        let mut delivery = crate::WakeDelivery::pending(wake, self.inner.wake_delivery_config());
-        delivery.disposition = crate::WakeDeliveryLifecycle::Enqueuing {
-            claim_token: format!("injected:{}", delivery.delivery_id()),
-        };
-        delivery.attempts = 1;
-        self.injected_wakes.lock_recover().push(delivery);
-        Ok(())
-    }
-
-    /// Return a retained claim from a superseded owner in the next page.
-    pub fn inject_claimed_wake(&self, delivery: crate::WakeDelivery) {
-        self.injected_wakes.lock_recover().push(delivery);
-    }
-
-    /// Fail the next wake defer write, without touching its durable claim.
-    pub fn set_wake_defer_error(&self, error: Option<crate::PluginError>) {
-        self.faults.lock_recover().wake_defer_error = error;
-    }
-
-    /// Fail the next wake discard write before it reaches the wrapped
-    /// registry, so the delivery keeps its claim as if the sender's
-    /// acknowledgement were lost.
-    pub fn fail_next_wake_discard(&self, error: crate::PluginError) {
-        self.faults.lock_recover().wake_discard_error = Some(error);
-    }
-
     fn faulted_read(&self) -> Option<Result<Option<crate::ProcessRecord>, crate::PluginError>> {
         let mut plan = self.faults.lock_recover();
         if let Some(error) = plan.error.clone() {
@@ -482,27 +443,6 @@ impl super::super::registry_concerns::ProcessQuery for ProcessRegistryFaults {
 
     async fn count_non_terminal_processes(&self) -> Result<usize, crate::PluginError> {
         self.inner.count_non_terminal_processes().await
-    }
-
-    async fn list_parked_processes(
-        &self,
-        query: &crate::store::ProcessParkQuery,
-    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
-        self.inner.list_parked_processes(query).await
-    }
-
-    async fn process_park_feed(
-        &self,
-        after: crate::store::ParkFeedCursor,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<crate::store::ParkFeedPage<crate::store::ProcessParkKey>, crate::PluginError> {
-        self.inner.process_park_feed(after, limit).await
-    }
-
-    async fn summarize_parked_processes(
-        &self,
-    ) -> Result<crate::store::ParkReport, crate::PluginError> {
-        self.inner.summarize_parked_processes().await
     }
 }
 
@@ -789,108 +729,9 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
             .clear_process_wait_with_authority(process_id, prelude, authority)
             .await
     }
-
-    async fn park_process_with_authority(
-        &self,
-        process_id: &ProcessId,
-        park: crate::store::ProcessParkWrite,
-        authority: &crate::ProcessExecutionWriteAuthority,
-    ) -> Result<crate::store::StoreTransition<crate::ProcessRecord>, crate::PluginError> {
-        self.inner
-            .park_process_with_authority(process_id, park, authority)
-            .await
-    }
-
-    async fn begin_parked_rerun_with_authority(
-        &self,
-        process_id: &ProcessId,
-        authority: &crate::ProcessExecutionWriteAuthority,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        self.inner
-            .begin_parked_rerun_with_authority(process_id, authority)
-            .await
-    }
 }
 
 delegate_process_tool_intents!(ProcessRegistryFaults, inner);
-
-#[async_trait::async_trait]
-impl super::super::registry_concerns::ProcessWakeOutbox for ProcessRegistryFaults {
-    fn wake_delivery_config(&self) -> crate::WakeDeliveryConfig {
-        self.inner.wake_delivery_config()
-    }
-
-    async fn claim_pending_wake_deliveries(
-        &self,
-        limit: usize,
-    ) -> Result<Vec<crate::WakeDelivery>, crate::PluginError> {
-        let mut claimed = {
-            let mut injected = self.injected_wakes.lock_recover();
-            let take = injected.len().min(limit);
-            injected.drain(..take).collect::<Vec<_>>()
-        };
-        let remaining = limit - claimed.len();
-        if remaining > 0 {
-            claimed.extend(self.inner.claim_pending_wake_deliveries(remaining).await?);
-        }
-        Ok(claimed)
-    }
-
-    async fn list_wake_deliveries(
-        &self,
-        state: Option<crate::WakeDeliveryState>,
-    ) -> Result<Vec<crate::WakeDelivery>, crate::PluginError> {
-        self.inner.list_wake_deliveries(state).await
-    }
-
-    async fn wake_delivery_report(&self) -> Result<crate::WakeDeliveryReport, crate::PluginError> {
-        self.inner.wake_delivery_report().await
-    }
-
-    async fn mark_wake_enqueued(
-        &self,
-        delivery_id: &str,
-        claim_token: &str,
-    ) -> Result<crate::WakeDeliveryClaimOutcome, crate::PluginError> {
-        self.inner
-            .mark_wake_enqueued(delivery_id, claim_token)
-            .await
-    }
-
-    async fn discard_wake_delivery(
-        &self,
-        delivery_id: &str,
-        claim_token: &str,
-        reason: crate::WakeDiscardReason,
-    ) -> Result<crate::WakeDeliveryClaimOutcome, crate::PluginError> {
-        let injected = self.faults.lock_recover().wake_discard_error.take();
-        if let Some(error) = injected {
-            return Err(error);
-        }
-        self.inner
-            .discard_wake_delivery(delivery_id, claim_token, reason)
-            .await
-    }
-
-    async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<(), crate::PluginError> {
-        self.inner.redrive_wake_delivery(delivery_id).await
-    }
-
-    async fn defer_wake_delivery(
-        &self,
-        delivery_id: &str,
-        claim_token: &str,
-        next_attempt_at_ms: u64,
-    ) -> Result<crate::WakeDeliveryClaimOutcome, crate::PluginError> {
-        let injected = self.faults.lock_recover().wake_defer_error.take();
-        if let Some(error) = injected {
-            return Err(error);
-        }
-        self.inner
-            .defer_wake_delivery(delivery_id, claim_token, next_attempt_at_ms)
-            .await
-    }
-}
 
 #[async_trait::async_trait]
 impl super::super::registry_concerns::ProcessRetention for ProcessRegistryFaults {
@@ -903,13 +744,6 @@ impl super::super::registry_concerns::ProcessRetention for ProcessRegistryFaults
         self.inner
             .compact_process_tombstones(cutoff_epoch_ms, watermark, trigger_store)
             .await
-    }
-
-    async fn compact_process_park_feed(
-        &self,
-        through: crate::store::ParkFeedCursor,
-    ) -> Result<(), crate::PluginError> {
-        self.inner.compact_process_park_feed(through).await
     }
 
     async fn release_process_events(
@@ -1004,7 +838,6 @@ impl super::super::registry_concerns::ProcessClockRebind for ProcessRegistryFaul
             Arc::new(Self {
                 inner,
                 faults: Arc::clone(&self.faults),
-                injected_wakes: Arc::clone(&self.injected_wakes),
                 process_point_reads: Arc::clone(&self.process_point_reads),
             }) as Arc<dyn ProcessRegistry>
         })

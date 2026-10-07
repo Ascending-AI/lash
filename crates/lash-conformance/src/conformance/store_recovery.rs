@@ -48,15 +48,6 @@ where
     assert_fresh_instances(&first, &second, "store_recovery");
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-fn recovery_timings() -> crate::LeaseTimings {
-    crate::LeaseTimings::new(RECOVERY_TTL, RECOVERY_RENEW)
-        .expect("300ms TTL / 100ms renew satisfies ttl >= 3x renew")
-}
-
 fn owner(id: impl Into<String>) -> crate::LeaseOwnerIdentity {
     let id = id.into();
     crate::LeaseOwnerIdentity::opaque(id.clone(), format!("{id}:incarnation"))
@@ -242,8 +233,13 @@ pub async fn checkpoint_survives_before_admission_settlement<F>(
     let session_id = SessionId::fixture(format!("{prefix}:checkpoint-before-settlement"));
     let source = "checkpoint-before-settlement";
     let writer = make(&session_id);
-    let (_expired_lease, admission) =
-        seed_and_admit(&writer, &session_id, source, recovery_timings().ttl_ms()).await;
+    let (_expired_lease, admission) = seed_and_admit(
+        &writer,
+        &session_id,
+        source,
+        RECOVERY_TTL.as_millis() as u64,
+    )
+    .await;
     writer
         .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
             &committed_state(&session_id, "checkpoint-committed"),

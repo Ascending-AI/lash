@@ -8,7 +8,7 @@ use super::registry::ProcessRegistry;
 use super::registry_delegate::{
     delegate_process_event_log, delegate_process_lifecycle, delegate_process_observer_registry,
     delegate_process_query, delegate_process_registrar, delegate_process_retention,
-    delegate_process_tool_intents, delegate_process_wake_outbox,
+    delegate_process_tool_intents,
 };
 
 mod change_hub;
@@ -191,8 +191,6 @@ delegate_process_lifecycle!(
 );
 
 delegate_process_tool_intents!(WatchedProcessRegistry, inner);
-
-delegate_process_wake_outbox!(WatchedProcessRegistry, inner);
 
 // No hub bump on retention: pruned rows are terminal, so any waiter on
 // them resolved long ago (terminal state is durable and observed via the

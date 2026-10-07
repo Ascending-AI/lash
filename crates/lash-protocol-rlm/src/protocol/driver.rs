@@ -1434,6 +1434,7 @@ mod tests {
                 ToolValue::String(oversized.clone()),
                 ToolValue::Attachment(cancellation_attachment.clone()),
             ])),
+            forced: false,
         };
 
         let (bounded, omitted) = bounded_exec_tool_call_records(&[

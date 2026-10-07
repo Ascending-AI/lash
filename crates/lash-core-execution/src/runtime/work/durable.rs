@@ -86,14 +86,14 @@ impl std::fmt::Debug for DurableProcessWork {
 
 #[async_trait::async_trait]
 impl ProcessWorkSubstrate for DurableProcessWork {
+    /// Nothing to deliver: registration created the process's actor ready
+    /// in its own transaction (ADR 0132 §3), so its start obligation
+    /// settles as a no-op.
     async fn deliver_process_start(
         &self,
-        record: &crate::ProcessRecord,
+        _record: &crate::ProcessRecord,
     ) -> Result<(), PluginError> {
-        self.backend
-            .wake_process(&record.id)
-            .await
-            .map_err(|error| PluginError::Invoke(error.to_string()))
+        Ok(())
     }
 
     /// A caller outside an actor has no wait row to own: it reads the
@@ -112,11 +112,27 @@ impl ProcessWorkSubstrate for DurableProcessWork {
 
     async fn deliver_cancel(
         &self,
-        _process_id: &crate::ProcessId,
-        _request: &crate::CancelRequest,
+        process_id: &crate::ProcessId,
+        request: &crate::CancelRequest,
         _key: &str,
     ) -> Result<(), PluginError> {
-        todo!("L6 (FIG-5175): request the process's cancel as mail; the first request wins")
+        // The registry recorded the first request and its mail; this is the
+        // same request again, which answers `AlreadyRequested` (or
+        // `AlreadyEnded`) and wakes the actor.
+        let mut tx = lash_durable::MailTx::new();
+        tx.write(lash_durable::domain::MailDomainWrite::RequestProcessCancel(
+            lash_durable::domain::CancelRequest {
+                process: process_id.clone(),
+                origin: request.origin,
+                requester: request.requester.clone(),
+            },
+        ));
+        self.backend
+            .durable()
+            .commit_mail(tx, lash_durable::CommitLabel::PROCESS_CANCEL)
+            .await
+            .map(drop)
+            .map_err(|error| PluginError::Invoke(error.to_string()))
     }
 
     /// Nothing to publish: the process's terminal transaction resolves its

@@ -961,10 +961,6 @@ async fn a_raised_reader_floor_is_rejected_without_adding_check_constraints() {
                  DROP CONSTRAINT ck_session_meta_caused_by_kind;
              ALTER TABLE lash_processes
                  DROP CONSTRAINT ck_processes_status;
-             ALTER TABLE lash_process_wake_deliveries
-                 DROP CONSTRAINT ck_process_wake_deliveries_state,
-                 DROP CONSTRAINT ck_process_wake_deliveries_discard_reason,
-                 DROP CONSTRAINT ck_process_wake_deliveries_lifecycle;
              ALTER TABLE lash_trigger_subscriptions
                  DROP CONSTRAINT ck_trigger_subscriptions_lifecycle,
                  DROP CONSTRAINT ck_trigger_subscriptions_lifecycle_deleted_at;
@@ -1024,9 +1020,6 @@ async fn a_raised_reader_floor_is_rejected_without_adding_check_constraints() {
         "ck_session_meta_relation_kind",
         "ck_session_meta_caused_by_kind",
         "ck_processes_status",
-        "ck_process_wake_deliveries_state",
-        "ck_process_wake_deliveries_discard_reason",
-        "ck_process_wake_deliveries_lifecycle",
         "ck_trigger_subscriptions_lifecycle",
         "ck_trigger_subscriptions_lifecycle_deleted_at",
     ])

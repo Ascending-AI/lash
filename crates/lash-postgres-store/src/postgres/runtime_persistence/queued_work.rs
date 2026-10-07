@@ -3,7 +3,6 @@
 //! withdrawal, the command receipt, and the open-work reads.
 
 use super::*;
-use lash_core_execution::store_backend_support as support;
 
 impl PostgresStore {
     pub(super) async fn enqueue_queued_work_pg(
@@ -16,15 +15,7 @@ impl PostgresStore {
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
         ensure_session_not_deleted_tx(&mut tx, &batch.session_id).await?;
-        let queued = match enqueue_queued_work_tx(&mut tx, &batch, self.clock.timestamp_ms()).await
-        {
-            // A changed wake's refusal commits the floor it raised (FIG-4487).
-            Err(error) if support::conflicting_process_wake(&batch, &error).is_some() => {
-                tx.commit().await.map_err(store_sqlx_error)?;
-                return Err(error);
-            }
-            queued => queued?,
-        };
+        let queued = enqueue_queued_work_tx(&mut tx, &batch, self.clock.timestamp_ms()).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(queued)
     }
@@ -40,16 +31,7 @@ impl PostgresStore {
             .await?;
         ensure_session_not_deleted_tx(&mut tx, &batch.session_id).await?;
         let queued =
-            match enqueue_queued_work_with_outcome_tx(&mut tx, &batch, self.clock.timestamp_ms())
-                .await
-            {
-                // A changed wake's refusal commits the floor it raised (FIG-4487).
-                Err(error) if support::conflicting_process_wake(&batch, &error).is_some() => {
-                    tx.commit().await.map_err(store_sqlx_error)?;
-                    return Err(error);
-                }
-                queued => queued?,
-            };
+            enqueue_queued_work_with_outcome_tx(&mut tx, &batch, self.clock.timestamp_ms()).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(queued)
     }
@@ -77,12 +59,6 @@ impl PostgresStore {
         };
         let row = queued_batch_row(row)?;
         let batch = queued_work_batch_from_row(row)?;
-        // A host cancel is a wake's terminal transition too: the fence lands
-        // with the tombstone, so a redelivery after vacuum is not admitted
-        // again (FIG-3545).
-        if let Some(wake) = lash_core_execution::store::TerminalProcessWake::of_batch(&batch) {
-            raise_wake_redelivery_fence_tx(&mut tx, session_id, &wake).await?;
-        }
         // The row lock `select_cancelable` took holds the openness decision.
         sqlx::query(sql.queued_batches.withdraw_open.sql())
             .bind(session_id.as_str())

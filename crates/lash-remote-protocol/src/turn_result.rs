@@ -839,6 +839,10 @@ pub struct RemoteToolCancellation {
     pub origin: Option<lash_sansio::CancelOrigin>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<serde_json::Value>,
+    /// Whether lash forced the end: a cancelled process whose engine did not
+    /// end it within its cancel grace (ADR 0132 §10).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub forced: bool,
 }
 
 /// Namespaced failure code, as carried to a host.

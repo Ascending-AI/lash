@@ -492,7 +492,6 @@ fn a_signal_append_selects_its_declared_wait_or_its_position() {
                 ordinal: 7,
             },
         },
-        park: None,
     };
     assert_eq!(selected(&record, Some(2)).expect("parked"), binding(7));
     assert_eq!(selected(&record, None).expect("parked"), binding(7));
@@ -507,7 +506,6 @@ fn a_signal_append_selects_its_declared_wait_or_its_position() {
                 ordinal: 7,
             },
         },
-        park: None,
     };
     assert_eq!(
         selected(&record, Some(2)).expect("parked elsewhere"),

@@ -164,11 +164,6 @@ pub(crate) fn enqueue_queued_work_conn(
 /// source key, open or a tombstone, answers an identical submission and
 /// refuses a changed one; otherwise the draft is inserted at the next
 /// position of the session's ingress sequence with its submission digest.
-///
-/// A changed process wake's refusal is that wake's terminal: the
-/// redelivery fence rises to its sequence here, and the caller commits the
-/// transaction with the refusal
-/// ([`conflicting_process_wake`](lash_core_execution::store_backend_support::conflicting_process_wake)).
 pub(crate) fn enqueue_queued_work_conn_with_outcome(
     conn: &Connection,
     batch: &QueuedWorkBatchDraft,
@@ -188,57 +183,14 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
             )
             .optional()
             .map_err(sqlite_error)?;
-        let admission = match support::decide_queued_work_draft_admission(
-            batch,
-            &submission_digest,
-            by_source_key,
-        ) {
-            Ok(admission) => admission,
-            Err(refusal) => {
-                if let Some(wake) = support::conflicting_process_wake(batch, &refusal) {
-                    raise_wake_redelivery_fence_conn(conn, &batch.session_id, &wake)?;
-                }
-                return Err(refusal);
-            }
-        };
+        let admission =
+            support::decide_queued_work_draft_admission(batch, &submission_digest, by_source_key)?;
         if let support::QueuedWorkDraftAdmission::Existing { batch_id } = admission {
             let existing =
                 load_queued_batch_by_id_conn(conn, batch_id.as_str())?.ok_or_else(|| {
                     StoreError::Backend("queued work source row disappeared".to_string())
                 })?;
             return Ok(QueuedWorkEnqueueOutcome::Existing(existing));
-        }
-    }
-    if let Some(wake_source) = batch.process_wake_source.as_ref() {
-        let allocation_floor = conn
-            .query_row(
-                crate::process_registry::sql::process_sql()
-                    .fence
-                    .select_floor
-                    .sql(),
-                params![batch.session_id.as_str(), wake_source.process_id.as_str()],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()
-            .map_err(sqlite_error)?
-            .map(|value| {
-                u64::try_from(value).map_err(|_| {
-                    stored_data_corrupt(
-                        "WakeAllocationFloor",
-                        format!("allocation_floor must be non-negative, got {value}"),
-                    )
-                })
-            })
-            .transpose()?;
-        if let Some(allocation_floor) = allocation_floor
-            && wake_source.sequence <= allocation_floor
-        {
-            return Err(StoreError::ProcessWakeSequenceRewound {
-                session_id: batch.session_id.clone(),
-                process_id: wake_source.process_id.clone(),
-                sequence: wake_source.sequence,
-                allocation_floor,
-            });
         }
     }
     let batch_id = derive_batch_id(
@@ -303,26 +255,6 @@ pub(crate) fn complete_admitted_batch_conn(
         &row,
         observed.as_ref().map(Option::as_deref),
     )?;
-    // The sole payload contributes the batch's complete redelivery fence.
-    let terminal_wake = conn
-        .query_row(
-            turn_ingress
-                .queued_batches
-                .select_admitted_batch_payload
-                .sql(),
-            params![session_id.as_str(), batch_id.as_str(), run.as_str()],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()
-        .map_err(sqlite_error)?
-        .map(decode_queued_payload)
-        .transpose()?
-        .and_then(|payload| {
-            lash_core_execution::store::TerminalProcessWake::of_payload(None, &payload)
-        });
-    if let Some(wake) = terminal_wake.as_ref() {
-        raise_wake_redelivery_fence_conn(conn, session_id, wake)?;
-    }
     let settled = conn
         .execute(
             turn_ingress.queued_batches.settle_admitted.sql(),
@@ -403,41 +335,4 @@ pub(crate) fn settle_open_command_conn(
             batch_id: batch_id.clone(),
         },
     )
-}
-
-/// Raise session `session_id`'s redelivery fence to `max(floor, sequence)`
-/// for a wake whose row is leaving the queue in this transaction.
-///
-/// The one home of the invariant that every terminal transition of a wake —
-/// settlement by its run, host cancel and a content conflict's refusal —
-/// raises the floor with the row's removal or the refusal (FIG-1065,
-/// FIG-3545, FIG-4487). Callers write the fence before the delete.
-pub(crate) fn raise_wake_redelivery_fence_conn(
-    conn: &Connection,
-    session_id: &SessionId,
-    wake: &lash_core_execution::store::TerminalProcessWake,
-) -> Result<(), StoreError> {
-    let allocation_floor = i64::try_from(wake.sequence).map_err(|_| {
-        stored_data_corrupt(
-            "WakeRedeliveryFence",
-            format!(
-                "allocation_floor does not fit SQLite INTEGER: {}",
-                wake.sequence
-            ),
-        )
-    })?;
-    crate::conn::cached_execute(
-        conn,
-        crate::process_registry::sql::process_sql()
-            .fence_sqlite
-            .upsert_max
-            .sql(),
-        params![
-            session_id.as_str(),
-            wake.process_id.as_str(),
-            allocation_floor
-        ],
-    )
-    .map_err(sqlite_error)?;
-    Ok(())
 }

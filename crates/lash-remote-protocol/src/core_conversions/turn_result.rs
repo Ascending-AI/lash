@@ -421,12 +421,14 @@ impl From<lash_core::ToolCancellation> for RemoteToolCancellation {
             source,
             origin,
             raw,
+            forced,
         } = value;
         Self {
             message,
             source,
             origin,
             raw: raw.map(|value| value.to_json_value()),
+            forced,
         }
     }
 }

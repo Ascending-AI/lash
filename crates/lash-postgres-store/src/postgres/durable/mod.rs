@@ -42,6 +42,8 @@ use lash_durable::{
     Owner, Reaped, Release, StateRevision, StoreFailure, StoreFailureKind, Woken,
 };
 use lash_store_sql::Dialect;
+use lash_store_sql::durable::park_events::ParkEventStatements;
+use lash_store_sql::durable::processes::{ActorParkStatements, ProcessActorStatements};
 use lash_store_sql::durable::{ActorStatements, MailStatements, NodeStatements};
 use sqlx::postgres::{PgPoolOptions, PgRow};
 use sqlx::{PgConnection, PgPool, Row};
@@ -51,7 +53,7 @@ use crate::guarded_tx::{GuardedTx, WriterFence, begin_guarded};
 use crate::support::store_sqlx_error;
 
 mod park_events;
-mod processes;
+pub(crate) mod processes;
 mod run_records;
 mod session_close;
 mod snapshots;
@@ -105,6 +107,9 @@ pub(crate) struct Committing<'a> {
     pub(crate) epoch: Epoch,
     /// The transaction's one clock reading.
     pub(crate) now: DurableInstant,
+    /// The fleet format the transaction's fence read: registry rows a
+    /// domain write touches are encoded under it.
+    pub(crate) fleet: lash_core_execution::FleetFormat,
 }
 
 lash_store_sql::statements! {
@@ -116,7 +121,9 @@ lash_store_sql::statements! {
 
         /// Give up to `?5` actors claimable at `?1` in a format set of `?4`
         /// to boot `?3` of node `?2`, oldest first, bumping each epoch;
-        /// returns each with the state that made it claimable.
+        /// returns each with the state that made it claimable. A claim that
+        /// finds no commit since the previous claim counts one more failed
+        /// activation; any commit since resets the count.
         claim = "WITH c AS (
                  SELECT actor_key, state FROM actors
                  WHERE ((state = 'ready' AND ready_at_ms <= ?1)
@@ -128,7 +135,10 @@ lash_store_sql::statements! {
              )
              UPDATE actors AS a
              SET state = 'owned', epoch = a.epoch + 1, owner_node = ?2, owner_boot = ?3,
-                 ready_at_ms = NULL, next_due_ms = NULL
+                 ready_at_ms = NULL, next_due_ms = NULL,
+                 failed_activations = CASE WHEN a.claimed_revision = a.state_revision
+                                           THEN a.failed_activations + 1 ELSE 0 END,
+                 claimed_revision = a.state_revision
              FROM c
              WHERE a.actor_key = c.actor_key
              RETURNING a.actor_key, a.epoch, c.state";
@@ -177,6 +187,9 @@ struct Sql {
     node: NodeStatements,
     actor: ActorStatements,
     mail: MailStatements,
+    park: ActorParkStatements,
+    process: ProcessActorStatements,
+    park_events: ParkEventStatements,
     postgres: PostgresDurableStatements,
 }
 
@@ -186,6 +199,9 @@ static SQL: LazyLock<Sql> = LazyLock::new(|| {
         node: NodeStatements::render(dialect),
         actor: ActorStatements::render(dialect),
         mail: MailStatements::render(dialect),
+        park: ActorParkStatements::render(dialect),
+        process: ProcessActorStatements::render(dialect),
+        park_events: ParkEventStatements::render(dialect),
         postgres: PostgresDurableStatements::render(dialect),
     }
 });
@@ -469,6 +485,7 @@ async fn apply_owner(
     tx: &mut PgConnection,
     write: &ActorTx,
     now: DurableInstant,
+    fleet: lash_core_execution::FleetFormat,
 ) -> Result<ActorCommit, DurableError> {
     let actor = write.actor().as_str();
     let fence: Option<i64> = sqlx::query_scalar(SQL.actor.fence.sql())
@@ -484,6 +501,7 @@ async fn apply_owner(
         actor: write.actor(),
         epoch: write.epoch(),
         now,
+        fleet,
     };
     for domain in write.domain() {
         apply_domain(tx, &committing, domain).await?;
@@ -500,6 +518,35 @@ async fn apply_owner(
     }
     let state = match write.release() {
         None => ActorState::Owned,
+        Some(Release::Parked) => {
+            // A cancel that arrived since the owner's read is not lost to the
+            // park: the actor goes ready instead, its park kept, and its
+            // claimer ends it engine-free.
+            let cancel_pending = sqlx::query(SQL.park.pending_mail_of_kind.sql())
+                .bind(actor)
+                .bind(lash_durable::domain::CANCEL_MAIL)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(sqlx_failure)?
+                .is_some();
+            let stored: String = if cancel_pending {
+                sqlx::query_scalar(SQL.actor.release.sql())
+                    .bind(actor)
+                    .bind("idle")
+                    .bind(Option::<i64>::None)
+                    .bind(now.0)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(sqlx_failure)?
+            } else {
+                sqlx::query_scalar(SQL.park.park.sql())
+                    .bind(actor)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(sqlx_failure)?
+            };
+            actor_state(&stored)?
+        }
         Some(Release::Terminal) => {
             sqlx::query(SQL.mail.delete_all.sql())
                 .bind(actor)
@@ -543,17 +590,19 @@ async fn apply_owner(
 /// inputs, queued work, control intents, turn cancel requests, process
 /// registration, trigger occurrences) calls this in its own transaction, so
 /// the work and the wake commit together. `control` marks a cancel or a
-/// redrive: L6 (FIG-5175) adds the `parked` state, which only a control wake
-/// readies; until then every wake readies the same states.
+/// redrive: only a control wake readies a parked actor.
 pub(crate) async fn wake_within(
     tx: &mut PgConnection,
     actor: &ActorKey,
     control: bool,
     now: DurableInstant,
 ) -> Result<(Woken, MailSeq), DurableError> {
-    // L6 (FIG-5175) adds `parked`, which only a control wake readies.
-    let _ = control;
-    let woke = sqlx::query(SQL.actor.wake.sql())
+    let statement = if control {
+        SQL.park.control_wake.sql()
+    } else {
+        SQL.actor.wake.sql()
+    };
+    let woke = sqlx::query(statement)
         .bind(actor.as_str())
         .bind(now.0)
         .fetch_optional(&mut *tx)
@@ -607,6 +656,7 @@ async fn apply_mail_domain(
     tx: &mut PgConnection,
     write: &MailDomainWrite,
     now: DurableInstant,
+    fleet: lash_core_execution::FleetFormat,
 ) -> Result<(MailAnswer, Option<Woken>), DurableError> {
     Ok(match write {
         MailDomainWrite::ResolveWait(resolution) => {
@@ -614,12 +664,16 @@ async fn apply_mail_domain(
             (MailAnswer::ResolveWait(answer), woken)
         }
         MailDomainWrite::RequestProcessCancel(request) => {
-            let (answer, woken) = processes::request_cancel(tx, request, now).await?;
+            let (answer, woken) = processes::request_cancel(tx, request, now, fleet).await?;
             (MailAnswer::RequestProcessCancel(answer), woken)
         }
         MailDomainWrite::RequestTurnCancel(request) => {
             let (answer, woken) = turns::request_cancel(tx, request, now).await?;
             (MailAnswer::RequestTurnCancel(answer), woken)
+        }
+        MailDomainWrite::Redrive(request) => {
+            let (answer, woken) = park_events::redrive(tx, request, now).await?;
+            (MailAnswer::Redrive(answer), woken)
         }
     })
 }
@@ -660,6 +714,7 @@ async fn apply_mail(
     tx: &mut PgConnection,
     writes: &MailTx,
     now: DurableInstant,
+    fleet: lash_core_execution::FleetFormat,
 ) -> Result<MailCommit, DurableError> {
     lock_mail_targets(tx, writes).await?;
     let mut receipt = MailCommit::default();
@@ -705,7 +760,7 @@ async fn apply_mail(
                 note_woken(&mut receipt.woken, woken);
             }
             MailWrite::Domain(domain) => {
-                let (answer, woken) = apply_mail_domain(tx, domain, now).await?;
+                let (answer, woken) = apply_mail_domain(tx, domain, now, fleet).await?;
                 receipt.answers.push(answer);
                 if let Some(woken) = woken {
                     note_woken(&mut receipt.woken, woken);
@@ -951,7 +1006,7 @@ impl DurableStore for PostgresDurableStore {
             });
         }
         let (mut guarded, now) = self.open(label).await?;
-        let outcome = apply_owner(&mut guarded, &tx, now).await;
+        let outcome = apply_owner(&mut guarded, &tx, now, self.fence.fleet()).await;
         finish(guarded, outcome).await
     }
 
@@ -961,7 +1016,7 @@ impl DurableStore for PostgresDurableStore {
         label: CommitLabel,
     ) -> Result<MailCommit, DurableError> {
         let (mut guarded, now) = self.open(label).await?;
-        let outcome = apply_mail(&mut guarded, &tx, now).await;
+        let outcome = apply_mail(&mut guarded, &tx, now, self.fence.fleet()).await;
         finish(guarded, outcome).await
     }
 
@@ -988,6 +1043,8 @@ impl DurableStore for PostgresDurableStore {
             revision: StateRevision(get(&row, 8)?),
             formats: FormatSet::new(get::<String>(&row, 9)?),
             pending_mail: u64::try_from(get::<i64>(&row, 10)?).unwrap_or_default(),
+            park: get(&row, 11)?,
+            failed_activations: u32::try_from(get::<i64>(&row, 12)?).unwrap_or(u32::MAX),
         }))
     }
 }
@@ -1039,6 +1096,15 @@ impl DurableReads for PostgresDurableStore {
         processes::live_until_descendants(&mut *self.reader().await?, scope, limit).await
     }
 
+    async fn until_children(
+        &self,
+        scope: &ScopeKey,
+        after: Option<&lash_sansio::ProcessId>,
+        limit: usize,
+    ) -> Result<Vec<lash_sansio::ProcessId>, DurableError> {
+        processes::until_children(&mut *self.reader().await?, scope, after, limit).await
+    }
+
     async fn park_events(
         &self,
         after: Option<ParkEventSeq>,
@@ -1055,6 +1121,10 @@ mod tests;
 #[cfg(test)]
 #[path = "../wait_law_tests.rs"]
 mod wait_law_tests;
+
+#[cfg(test)]
+#[path = "../process_law_tests.rs"]
+mod process_law_tests;
 
 #[cfg(test)]
 #[path = "../durable_concurrency_tests.rs"]

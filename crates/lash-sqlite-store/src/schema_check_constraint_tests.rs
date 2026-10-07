@@ -184,48 +184,6 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
          VALUES ('wake-parent', 0)",
         "ck_process_event_horizons_positive",
     );
-    assert_check_rejects(
-        &process,
-        "INSERT INTO process_wake_deliveries (
-             delivery_id, process_id, target_session_id, sequence, state,
-             next_attempt_at_ms, expires_at_ms, delivery_json
-         ) VALUES ('bad-state', 'wake-parent', 'target', 1, 'claimed', 0, 1, '{}')",
-        "ck_process_wake_deliveries_state",
-    );
-    assert_check_rejects(
-        &process,
-        "INSERT INTO process_wake_deliveries (
-             delivery_id, process_id, target_session_id, sequence, state,
-             next_attempt_at_ms, expires_at_ms, discard_reason, delivery_json
-         ) VALUES (
-             'bad-discard', 'wake-parent', 'target', 2, 'discarded', 0, 1,
-             'unroutable', '{}'
-         )",
-        "ck_process_wake_deliveries_discard_reason",
-    );
-    // A claim token exactly while enqueuing, a discard reason exactly once
-    // discarded: the four pairs outside that.
-    for (delivery_id, state, claim_token, discard_reason) in [
-        ("enqueuing-unclaimed", "enqueuing", "NULL", "NULL"),
-        ("pending-claimed", "pending", "'claim'", "NULL"),
-        ("discarded-reasonless", "discarded", "NULL", "NULL"),
-        ("enqueued-with-reason", "enqueued", "NULL", "'expired'"),
-    ] {
-        assert_check_rejects(
-            &process,
-            &format!(
-                "INSERT INTO process_wake_deliveries (
-                     delivery_id, process_id, target_session_id, sequence, state,
-                     claim_token, next_attempt_at_ms, expires_at_ms, discard_reason,
-                     delivery_json
-                 ) VALUES (
-                     '{delivery_id}', 'wake-parent', 'target', 3, '{state}',
-                     {claim_token}, 0, 1, {discard_reason}, '{{}}'
-                 )"
-            ),
-            "ck_process_wake_deliveries_lifecycle",
-        );
-    }
     // A tombstone names the retired status its process was pruned in.
     for label in ["running", "waiting", "finished"] {
         assert_check_rejects(

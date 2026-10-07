@@ -16,7 +16,7 @@ use crate::runtime::process::registry::ProcessRegistry;
 use crate::runtime::process::registry_concerns::{ProcessEventLog, ProcessLifecycle};
 use crate::runtime::process::registry_delegate::{
     delegate_process_observer_registry, delegate_process_query, delegate_process_registrar,
-    delegate_process_retention, delegate_process_tool_intents, delegate_process_wake_outbox,
+    delegate_process_retention, delegate_process_tool_intents,
 };
 use crate::{
     CancelOrigin, ParentEndPlan, PluginError, ProcessAwaitOutput, ProcessCompletionAuthority,
@@ -363,32 +363,9 @@ impl ProcessLifecycle for EffectSummaryAppendFaults {
             .clear_process_wait_with_authority(process_id, prelude, authority)
             .await
     }
-
-    async fn park_process_with_authority(
-        &self,
-        process_id: &ProcessId,
-        park: crate::store::ProcessParkWrite,
-        authority: &crate::ProcessExecutionWriteAuthority,
-    ) -> Result<crate::store::StoreTransition<crate::ProcessRecord>, crate::PluginError> {
-        self.inner
-            .park_process_with_authority(process_id, park, authority)
-            .await
-    }
-
-    async fn begin_parked_rerun_with_authority(
-        &self,
-        process_id: &ProcessId,
-        authority: &crate::ProcessExecutionWriteAuthority,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        self.inner
-            .begin_parked_rerun_with_authority(process_id, authority)
-            .await
-    }
 }
 
 delegate_process_tool_intents!(EffectSummaryAppendFaults, inner);
-
-delegate_process_wake_outbox!(EffectSummaryAppendFaults, inner);
 
 delegate_process_retention!(EffectSummaryAppendFaults, inner);
 

@@ -519,11 +519,9 @@ pub struct QueuedWorkBatchDraft {
     pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_key: Option<String>,
-    /// Structural producer identity for a process wake.
-    ///
-    /// Stores use this tuple for the receiver allocation-floor fence. It
-    /// deliberately duplicates the human-readable source key so
-    /// correctness never depends on parsing that string.
+    /// Structural producer identity for a process wake: the
+    /// `(process, sequence)` its source key spells, validated against it at
+    /// enqueue so correctness never depends on parsing that string.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub process_wake_source: Option<ProcessWakeSource>,
     pub delivery_policy: DeliveryPolicy,

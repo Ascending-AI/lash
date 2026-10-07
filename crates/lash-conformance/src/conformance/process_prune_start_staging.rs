@@ -629,10 +629,15 @@ impl crate::ProcessEngine for ModuleNamingEngine {
 
     fn advance(
         &self,
-        _state: crate::EngineState,
+        state: crate::EngineState,
         _event: crate::EngineEvent,
     ) -> Result<(crate::EngineState, crate::EngineAction), crate::ProcessInfraError> {
-        todo!("L6 (FIG-5175): port ModuleNamingEngine to advance")
+        Ok((
+            state,
+            crate::EngineAction::Terminal(crate::ProcessAwaitOutput::from_tool_output(
+                crate::ToolCallOutput::success(serde_json::Value::Null),
+            )),
+        ))
     }
 
     async fn resolve(

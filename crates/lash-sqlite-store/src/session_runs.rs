@@ -649,21 +649,13 @@ pub(crate) fn run_admission_conn(
 /// The queued-work batches `run`'s recorded admission took, read on `conn`:
 /// none for a run with no admission or an input-headed one.
 /// Cancel batch `batch_id` of session `session_id`, held by a run a verb
-/// ends, into its `cancelled` tombstone at `at_ms` (ADR 0101 §8). A wake's
-/// cancellation is its terminal transition, so its receiver floor rises in
-/// the same write (ADR 0101 §9).
+/// ends, into its `cancelled` tombstone at `at_ms` (ADR 0101 §8).
 pub(crate) fn cancel_run_batch_conn(
     tx: &Connection,
     session_id: &SessionId,
     batch_id: &str,
     at_ms: u64,
 ) -> Result<(), StoreError> {
-    if let Some(batch) = crate::queued_work::load_queued_batch_by_id_conn(tx, batch_id)?
-        && batch.terminal.is_none()
-        && let Some(wake) = lash_core_execution::store::TerminalProcessWake::of_batch(&batch)
-    {
-        crate::queued_work::raise_wake_redelivery_fence_conn(tx, session_id, &wake)?;
-    }
     crate::conn::cached_execute(
         tx,
         session_runs_sql().verbs.cancel_batch.sql(),

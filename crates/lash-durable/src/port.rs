@@ -19,6 +19,9 @@ pub enum ActorState {
     Owned,
     /// Unowned, blocked until mail arrives or its due time passes.
     Waiting,
+    /// Unowned and set aside for an operator: only a control wake (a
+    /// cancel request or a redrive) readies it.
+    Parked,
     /// Finished; never claimed again.
     Terminal,
 }
@@ -32,6 +35,7 @@ impl ActorState {
             Self::Ready => "ready",
             Self::Owned => "owned",
             Self::Waiting => "waiting",
+            Self::Parked => "parked",
             Self::Terminal => "terminal",
         }
     }
@@ -44,6 +48,7 @@ impl ActorState {
             "ready" => Some(Self::Ready),
             "owned" => Some(Self::Owned),
             "waiting" => Some(Self::Waiting),
+            "parked" => Some(Self::Parked),
             "terminal" => Some(Self::Terminal),
             _ => None,
         }
@@ -189,6 +194,12 @@ pub struct ActorSnapshot {
     pub formats: FormatSet,
     /// How many mail rows are pending.
     pub pending_mail: u64,
+    /// Why it is parked, encoded by its owner, while it is parked; kept
+    /// through a control wake so its claimer knows it was parked.
+    pub park: Option<String>,
+    /// How many claims in a row found no commit since the previous claim:
+    /// the actor's failed activations (ADR 0132 §3).
+    pub failed_activations: u32,
 }
 
 /// The fenced transaction port: one implementation per dialect, its SQL in

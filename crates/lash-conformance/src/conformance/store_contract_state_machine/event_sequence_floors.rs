@@ -1,43 +1,12 @@
 use super::*;
 
-/// Capture the sender before an operation: retarget appends against its old
-/// target, while pruning must preserve floors independently of process rows.
-pub(super) struct EventSequenceStep {
-    prior: Vec<(ProcessId, Option<SessionId>, u64)>,
-    floors: BTreeMap<ProcessId, u64>,
-}
+/// The next event sequence of a process is one past its last; a replayed
+/// lifecycle intent allocates none.
+pub(super) struct EventSequenceStep;
 
 impl EventSequenceStep {
-    pub(super) fn capture(model: &ReferenceModel) -> Self {
-        let prior = model
-            .processes
-            .iter()
-            .filter_map(|(id, process)| {
-                process.expected().map(|record| {
-                    (
-                        id.clone(),
-                        process.wake_target.clone(),
-                        record.last_event_sequence,
-                    )
-                })
-            })
-            .collect::<Vec<_>>();
-        let floors = prior
-            .iter()
-            .map(|(id, target, _)| {
-                let floor = target
-                    .as_ref()
-                    .and_then(|target| {
-                        model
-                            .event_sequence_floors
-                            .get(&(target.clone(), id.clone()))
-                    })
-                    .copied()
-                    .unwrap_or(0);
-                (id.clone(), floor)
-            })
-            .collect();
-        Self { prior, floors }
+    pub(super) fn capture(_model: &ReferenceModel) -> Self {
+        Self
     }
 
     #[expect(
@@ -47,7 +16,6 @@ impl EventSequenceStep {
     pub(super) fn advance(&self, record: &mut ProcessRecord) {
         record.last_event_sequence = record
             .last_event_sequence
-            .max(self.floors.get(&record.id).copied().unwrap_or(0))
             .checked_add(1)
             .expect("generated process sequence remains in range");
     }
@@ -66,21 +34,6 @@ impl EventSequenceStep {
         }
         if let Some(record) = process.expected_mut() {
             self.advance(record);
-        }
-    }
-
-    pub(super) fn finish(self, model: &mut ReferenceModel) {
-        for (id, target, previous_sequence) in self.prior {
-            if let Some(target) = target
-                && let Some(record) = model
-                    .processes
-                    .get(&id)
-                    .and_then(|process| process.expected())
-                && record.last_event_sequence > previous_sequence
-            {
-                let floor = model.event_sequence_floors.entry((target, id)).or_default();
-                *floor = (*floor).max(record.last_event_sequence);
-            }
         }
     }
 }
@@ -105,8 +58,7 @@ mod floor_tests {
     }
 
     /// A slot re-registered after its run was pruned starts a new process:
-    /// a new id whose first event is its own first, with no sender floor
-    /// carried over from the pruned run (ADR 0107).
+    /// a new id whose first event is its own first (ADR 0107).
     #[tokio::test]
     async fn a_restart_after_prune_starts_a_new_process_at_its_own_first_event() {
         let (_backend, handles) = memory_handles().await;
@@ -185,43 +137,6 @@ mod floor_tests {
             registry.get_process(&pruned).await,
             Err(crate::PluginError::ProcessNoLongerRetained { .. })
         ));
-    }
-    #[tokio::test]
-    async fn prune_removes_settled_process_wakes_but_preserves_floor() {
-        let (_backend, handles) = memory_handles().await;
-        replay_case(
-            handles,
-            &[
-                StoreContractOp::Register {
-                    process: 1,
-                    wake_target: Some(0),
-                },
-                StoreContractOp::Terminal {
-                    process: 1,
-                    disposition: 0,
-                },
-                StoreContractOp::Signal {
-                    process: 1,
-                    replay: 0,
-                    value: 0,
-                    wake: true,
-                    stale: false,
-                },
-                StoreContractOp::ClaimWake,
-                StoreContractOp::MarkWake { stale: false },
-                StoreContractOp::Prune { watermark: false },
-                StoreContractOp::Register {
-                    process: 1,
-                    wake_target: Some(0),
-                },
-                StoreContractOp::SetExternalRef {
-                    process: 1,
-                    value: 0,
-                },
-            ],
-        )
-        .await
-        .expect("prune cascades deliveries while reuse retains its floor");
     }
     #[tokio::test]
     async fn repeated_observer_and_retarget_operations_replay_their_audit_events() {

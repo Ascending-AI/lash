@@ -447,13 +447,6 @@ CREATE INDEX IF NOT EXISTS idx_lash_queued_work_session_command_order
     ON lash_queued_work_batches(session_id, work_kind, enqueued_at_ms, enqueue_seq)
     WHERE terminal_cause IS NULL;
 
-CREATE TABLE IF NOT EXISTS lash_wake_redelivery_fences (
-    session_id TEXT NOT NULL,
-    process_id TEXT NOT NULL,
-    allocation_floor BIGINT NOT NULL,
-    PRIMARY KEY (session_id, process_id)
-);
-
 CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs (
     enqueue_seq BIGINT NOT NULL,
     input_id TEXT NOT NULL UNIQUE,
@@ -697,9 +690,10 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     lifetime_scope_kind TEXT,
     lifetime_scope_id TEXT COLLATE "C",
     cancel_requested_at_ms BIGINT,
-    parked_since_ms BIGINT,
-    parked_reason_code TEXT,
-    park_executable_generation TEXT,
+    state_rev BIGINT NOT NULL DEFAULT 0,
+    driver_json TEXT,
+    cascade_cursor TEXT,
+    written_epoch BIGINT,
     record_json TEXT NOT NULL,
     start_obligation_id TEXT,
     start_obligation_state TEXT,
@@ -729,7 +723,6 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     CONSTRAINT ck_processes_trigger_delivery_pin CHECK ((trigger_delivery_pin_occurrence_id IS NULL) = (trigger_delivery_pin_subscription_id IS NULL)),
     CONSTRAINT ck_processes_start_obligation CHECK (((start_obligation_state IS NULL AND start_obligation_id IS NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'due' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'claimed' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NOT NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'delivered' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NOT NULL) OR (start_obligation_state = 'stalled' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND start_obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_processes_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
-    CONSTRAINT ck_processes_parked CHECK ((parked_since_ms IS NULL) = (parked_reason_code IS NULL)),
     CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned')),
     CONSTRAINT ck_processes_lifetime CHECK (lifetime IN ('until', 'detached')),
     CONSTRAINT ck_processes_lifetime_scope CHECK ((lifetime = 'detached' AND lifetime_scope_kind IS NULL AND lifetime_scope_id IS NULL) OR (lifetime = 'until' AND lifetime_scope_kind IN ('turn', 'session_operation', 'process', 'session') AND lifetime_scope_id IS NOT NULL))
@@ -814,35 +807,6 @@ CREATE INDEX IF NOT EXISTS idx_lash_processes_lifetime_pending
       AND cancel_requested_at_ms IS NULL
       AND status IN ('running', 'waiting');
 
--- The parked projection (FIG-3659 NOW-B): the parked-process list and the
--- park summary read only parked rows, in `(since, process)` keyset order.
-CREATE INDEX IF NOT EXISTS idx_lash_processes_parked
-    ON lash_processes(parked_since_ms, process_id)
-    WHERE parked_since_ms IS NOT NULL;
--- The retired generation a `retired_generation` park names (FIG-3571): the
--- drain counts retired process parks per executable generation off it.
-CREATE INDEX IF NOT EXISTS idx_lash_processes_park_executable_generation
-    ON lash_processes(park_executable_generation) WHERE park_executable_generation IS NOT NULL;
-
-CREATE TABLE IF NOT EXISTS lash_process_park_clock (
-    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
-    current_seq BIGINT NOT NULL DEFAULT 0,
-    compaction_horizon BIGINT NOT NULL DEFAULT 0,
-    CONSTRAINT ck_process_park_clock_singleton CHECK (singleton)
-);
-
-CREATE TABLE IF NOT EXISTS lash_process_park_events (
-    seq BIGINT PRIMARY KEY,
-    process_id TEXT COLLATE "C" NOT NULL,
-    park_id BIGINT NOT NULL,
-    kind TEXT NOT NULL CONSTRAINT ck_process_park_events_kind CHECK (kind IN ('parked', 'unparked', 'cancelled', 'redrive_requested')),
-    cause_json TEXT,
-    reason_json TEXT,
-    at_ms BIGINT NOT NULL,
-    redrive_intent BIGINT,
-    CONSTRAINT ck_process_park_events_parked_reason CHECK (((kind = 'parked' AND reason_json IS NOT NULL AND cause_json IS NULL AND redrive_intent IS NULL) OR (kind IN ('unparked', 'cancelled') AND reason_json IS NULL AND cause_json IS NOT NULL AND redrive_intent IS NULL) OR (kind = 'redrive_requested' AND reason_json IS NULL AND cause_json IS NULL AND redrive_intent IS NOT NULL AND redrive_intent >= 0)) IS TRUE)
-);
-
 CREATE TABLE IF NOT EXISTS lash_process_events (
     process_id TEXT COLLATE "C" NOT NULL,
     sequence BIGINT NOT NULL,
@@ -865,40 +829,6 @@ CREATE TABLE IF NOT EXISTS lash_process_event_horizons (
     released_through BIGINT NOT NULL CONSTRAINT ck_process_event_horizons_positive CHECK (released_through > 0),
     FOREIGN KEY (process_id) REFERENCES lash_processes(process_id) ON DELETE CASCADE
 );
-
-CREATE TABLE IF NOT EXISTS lash_wake_allocation_floors (
-    target_session_id TEXT NOT NULL,
-    process_id TEXT COLLATE "C" NOT NULL,
-    allocation_floor BIGINT NOT NULL,
-    PRIMARY KEY (target_session_id, process_id)
-);
-
-CREATE TABLE IF NOT EXISTS lash_process_wake_deliveries (
-    delivery_id TEXT PRIMARY KEY,
-    process_id TEXT COLLATE "C" NOT NULL,
-    target_session_id TEXT NOT NULL,
-    sequence BIGINT NOT NULL,
-    state TEXT NOT NULL,
-    claim_token TEXT,
-    attempts BIGINT NOT NULL DEFAULT 0,
-    first_attempt_ms BIGINT,
-    next_attempt_at_ms BIGINT NOT NULL,
-    expires_at_ms BIGINT NOT NULL,
-    discard_reason TEXT,
-    delivery_json TEXT NOT NULL,
-    CONSTRAINT ck_process_wake_deliveries_state CHECK (state IN ('pending', 'enqueuing', 'enqueued', 'discarded')),
-    CONSTRAINT ck_process_wake_deliveries_discard_reason CHECK (discard_reason IN ('expired', 'target_gone', 'retargeted', 'sequence_rewound', 'source_unreadable', 'content_conflict')),
-    CONSTRAINT ck_process_wake_deliveries_lifecycle CHECK ((state = 'enqueuing') = (claim_token IS NOT NULL) AND (state = 'discarded') = (discard_reason IS NOT NULL)),
-    FOREIGN KEY (process_id) REFERENCES lash_processes(process_id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_lash_wake_deliveries_pending
-    ON lash_process_wake_deliveries(
-        next_attempt_at_ms, target_session_id, process_id, sequence
-    )
-    WHERE state IN ('pending', 'enqueuing');
-CREATE INDEX IF NOT EXISTS idx_lash_wake_deliveries_group_sequence
-    ON lash_process_wake_deliveries(target_session_id, process_id, sequence)
-    WHERE state <> 'enqueued';
 
 CREATE TABLE IF NOT EXISTS lash_process_observers (
     session_id TEXT NOT NULL,
@@ -1208,11 +1138,6 @@ INSERT INTO lash_process_change_clock (
 ) VALUES (TRUE, 0, 0)
 ON CONFLICT (singleton) DO NOTHING;
 
-INSERT INTO lash_process_park_clock (
-    singleton, current_seq, compaction_horizon
-) VALUES (TRUE, 0, 0)
-ON CONFLICT (singleton) DO NOTHING;
-
 INSERT INTO lash_turn_park_clock (
     singleton, current_seq, compaction_horizon
 ) VALUES (TRUE, 0, 0)
@@ -1254,7 +1179,7 @@ CREATE TABLE IF NOT EXISTS lash_actors (
     actor_key TEXT COLLATE "C" PRIMARY KEY,
     kind TEXT NOT NULL CONSTRAINT ck_lash_actors_kind CHECK (kind IN ('session', 'process')),
     state TEXT NOT NULL CONSTRAINT ck_lash_actors_state
-        CHECK (state IN ('idle', 'ready', 'owned', 'waiting', 'terminal')),
+        CHECK (state IN ('idle', 'ready', 'owned', 'waiting', 'parked', 'terminal')),
     epoch BIGINT NOT NULL,
     owner_node TEXT,
     owner_boot TEXT,
@@ -1265,6 +1190,10 @@ CREATE TABLE IF NOT EXISTS lash_actors (
     mail_seq BIGINT NOT NULL,
     acked_seq BIGINT NOT NULL,
     created_at_ms BIGINT NOT NULL,
+    park_json TEXT,
+    failed_activations BIGINT NOT NULL DEFAULT 0,
+    claimed_revision BIGINT,
+    CONSTRAINT ck_lash_actors_parked CHECK (state <> 'parked' OR park_json IS NOT NULL),
     CONSTRAINT ck_lash_actors_owned CHECK ((state = 'owned') = (owner_node IS NOT NULL)),
     CONSTRAINT ck_lash_actors_owner_boot CHECK ((owner_node IS NULL) = (owner_boot IS NULL)),
     CONSTRAINT ck_lash_actors_ready CHECK ((state = 'ready') = (ready_at_ms IS NOT NULL)),
@@ -1310,6 +1239,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_lash_run_records_outcome
 -- VM snapshots (I0, FIG-5194; statements: V0, then L7): the latest snapshot
 -- of each code cell ('c/...') and lashlang process ('p/...'),
 -- compare-and-set on rev.
+-- The operator's park feed (L6, FIG-5175): one entry per park of an actor,
+-- per redrive and per end of a parked actor.
+CREATE TABLE IF NOT EXISTS lash_park_events (
+    seq BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    actor_key TEXT COLLATE "C" NOT NULL,
+    kind TEXT NOT NULL CONSTRAINT ck_lash_park_events_kind
+        CHECK (kind IN ('parked', 'redriven', 'ended')),
+    reason_json TEXT NOT NULL,
+    at_ms BIGINT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS lash_exec_snapshots (
     exec_key TEXT COLLATE "C" PRIMARY KEY,
     rev BIGINT NOT NULL CONSTRAINT ck_exec_snapshots_rev CHECK (rev >= 1),

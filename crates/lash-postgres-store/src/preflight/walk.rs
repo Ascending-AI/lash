@@ -83,7 +83,6 @@ pub(crate) async fn scan_durable(
     match scan.surface {
         DurableSurface::ModuleArtifact => scan_module_artifacts(pool, scan).await,
         DurableSurface::ParkedSegment => scan_parked_segments(pool, scan).await,
-        DurableSurface::PendingWake => scan_pending_wakes(pool, scan).await,
         DurableSurface::StartedProcess => scan_started_processes(pool, scan).await,
         DurableSurface::SessionCheckpoint => scan_session_checkpoints(pool, scan).await,
         DurableSurface::SessionExecutionState => scan_session_execution_state(pool, scan).await,
@@ -233,51 +232,6 @@ async fn scan_parked_segments(
                     owner_record: Some(record_json),
                     payload: DurablePayload::Json(handover_json),
                 }
-            },
-        )
-        .collect();
-    let next = page_cursor(scan, items.last().map(|item| item.cursor.clone()), returned);
-    Ok(scanned(items, next))
-}
-
-/// One undelivered wake payload per pending delivery.
-async fn scan_pending_wakes(
-    pool: &PgPool,
-    scan: &DurableScan,
-) -> Result<DurableScanPage, StoreError> {
-    let rows = sqlx::query_as::<_, PendingWakeRow>(
-        crate::process_sql::process_sql()
-            .wake_postgres
-            .list_undelivered_for_walk
-            .sql(),
-    )
-    .bind(scan.after.clone())
-    .bind(row_limit(scan))
-    .fetch_all(pool)
-    .await;
-    let rows = match rows {
-        Ok(rows) => rows,
-        Err(error) => return read_failure(scan.surface, error),
-    };
-
-    let returned = rows.len();
-    let items: Vec<DurableItem> = rows
-        .into_iter()
-        .map(
-            |(delivery_id, process_id, target_session_id, state, delivery_json)| DurableItem {
-                surface: DurableSurface::PendingWake,
-                cursor: delivery_id,
-                process_id: ProcessId::parse(&process_id).ok(),
-                session_id: SessionId::parse(target_session_id).ok(),
-                // The delivery's own state word, verbatim: an operator reading
-                // `enqueuing` learns the claim lapsed mid-flight, which a
-                // translation to "pending" would have hidden.
-                status: Some(state),
-                // A delivery owns no separate record; the payload is the whole
-                // of it, and inventing an owner record here would put the same
-                // bytes on the report twice.
-                owner_record: None,
-                payload: DurablePayload::Json(delivery_json),
             },
         )
         .collect();
@@ -677,10 +631,6 @@ fn invalid_cursor(cursor: &str) -> StoreError {
 /// crate does not enable sqlx's `derive` feature, and the alias keeps the column
 /// order the query fixes visible next to the query itself.
 type ParkedSegmentRow = (String, i64, String, String, Option<String>, String);
-
-/// `(delivery_id, process_id, target_session_id, state, delivery_json)`, in the
-/// order `process_wake_delivery.list_undelivered_for_walk` selects them.
-type PendingWakeRow = (String, String, String, String, String);
 
 /// A session that has published a checkpoint root, named rather than positional
 /// because both deep surfaces pass it around well away from its query.

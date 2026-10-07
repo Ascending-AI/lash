@@ -367,6 +367,7 @@ fn output_from_process_turn(
                     raw: serde_json::to_value(evidence)
                         .ok()
                         .map(crate::ToolValue::untrusted_json),
+                    forced: false,
                 }
             }
             _ => crate::ToolCancellation::runtime("background session turn was cancelled"),

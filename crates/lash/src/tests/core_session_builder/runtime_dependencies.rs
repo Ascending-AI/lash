@@ -69,8 +69,9 @@ async fn a_core_refuses_an_rlm_factory_built_over_another_backend() -> Result<()
     Ok(())
 }
 
-/// The backend's process registry stamps wake deliveries from the
-/// backend's clock: the one clock the core and every store share.
+/// The backend's process registry stamps a wake's event, and the wake it
+/// carries, from the backend's clock: the one clock the core and every store
+/// share.
 #[tokio::test]
 async fn the_backend_process_registry_stamps_from_the_backend_clock() {
     const NOW_MS: u64 = 4_200_000;
@@ -81,7 +82,6 @@ async fn the_backend_process_registry_stamps_from_the_backend_clock() {
         .build(crate::testing::runtime_lease_owner())
         .expect("build core over a clocked memory backend");
     let registry = core.process_registry();
-    let delivery_expiry_ms = registry.wake_delivery_config().delivery_expiry_ms;
     let builder_clock_process_id = registry
         .register_process(
             lash_core::testing::held_engine_registration(
@@ -105,7 +105,7 @@ async fn the_backend_process_registry_stamps_from_the_backend_clock() {
         .await
         .expect("register clock-wiring process")
         .id;
-    registry
+    let appended = registry
         .append_event(
             &builder_clock_process_id,
             lash_core::ProcessEventAppendRequest::new(
@@ -115,16 +115,10 @@ async fn the_backend_process_registry_stamps_from_the_backend_clock() {
         )
         .await
         .expect("append clock-wiring wake");
-    let delivery = registry
-        .claim_pending_wake_deliveries(1)
-        .await
-        .expect("scan clock-wiring wake")
-        .into_iter()
-        .next()
-        .expect("clock-wiring delivery");
+    let wake = appended.wake_delivery.expect("clock-wiring wake");
 
-    assert_eq!(delivery.wake.created_at_ms, NOW_MS);
-    assert_eq!(delivery.expires_at_ms, NOW_MS + delivery_expiry_ms);
+    assert_eq!(appended.event.occurred_at, NOW_MS);
+    assert_eq!(wake.created_at_ms, NOW_MS);
 }
 
 #[tokio::test]

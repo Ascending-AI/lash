@@ -410,13 +410,6 @@ CREATE INDEX IF NOT EXISTS idx_queued_work_batches_obligation_stalled
     ON queued_work_batches(obligation_id)
     WHERE obligation_state = 'stalled';
 
-CREATE TABLE IF NOT EXISTS wake_redelivery_fences (
-    session_id       TEXT NOT NULL,
-    process_id       TEXT NOT NULL,
-    allocation_floor INTEGER NOT NULL,
-    PRIMARY KEY (session_id, process_id)
-);
-
 -- Both scans range over live batches only: a tombstone never lengthens an
 -- open-work scan (ADR 0101 §8).
 CREATE INDEX IF NOT EXISTS idx_queued_work_session_command_order
@@ -690,9 +683,10 @@ CREATE TABLE IF NOT EXISTS processes (
     lifetime_scope_kind   TEXT,
     lifetime_scope_id     TEXT,
     cancel_requested_at_ms INTEGER,
-    parked_since_ms       INTEGER,
-    parked_reason_code    TEXT,
-    park_executable_generation TEXT,
+    state_rev             INTEGER NOT NULL DEFAULT 0,
+    driver_json           TEXT,
+    cascade_cursor        TEXT,
+    written_epoch         INTEGER,
     record_json           TEXT NOT NULL,
     start_obligation_id         TEXT,
     start_obligation_state      TEXT,
@@ -722,7 +716,6 @@ CREATE TABLE IF NOT EXISTS processes (
     CONSTRAINT ck_processes_trigger_delivery_pin CHECK ((trigger_delivery_pin_occurrence_id IS NULL) = (trigger_delivery_pin_subscription_id IS NULL)),
     CONSTRAINT ck_processes_start_obligation CHECK (((start_obligation_state IS NULL AND start_obligation_id IS NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'due' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'claimed' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NOT NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'delivered' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NOT NULL) OR (start_obligation_state = 'stalled' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND start_obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_processes_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
-    CONSTRAINT ck_processes_parked CHECK ((parked_since_ms IS NULL) = (parked_reason_code IS NULL)),
     CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned')),
     CONSTRAINT ck_processes_lifetime CHECK (lifetime IN ('until', 'detached')),
     CONSTRAINT ck_processes_lifetime_scope CHECK ((lifetime = 'detached' AND lifetime_scope_kind IS NULL AND lifetime_scope_id IS NULL) OR (lifetime = 'until' AND lifetime_scope_kind IN ('turn', 'session_operation', 'process', 'session') AND lifetime_scope_id IS NOT NULL))
@@ -797,38 +790,6 @@ CREATE INDEX IF NOT EXISTS idx_processes_lifetime_pending
       AND cancel_requested_at_ms IS NULL
       AND status IN ('running', 'waiting');
 
--- The parked projection (FIG-3659 NOW-B): the parked-process list and the
--- park summary read only parked rows, in `(since, process)` keyset order.
-CREATE INDEX IF NOT EXISTS idx_processes_parked
-    ON processes(parked_since_ms, process_id)
-    WHERE parked_since_ms IS NOT NULL;
--- The retired generation a `retired_generation` park names (FIG-3571): the
--- drain counts retired process parks per executable generation off it.
-CREATE INDEX IF NOT EXISTS idx_processes_park_executable_generation
-    ON processes(park_executable_generation) WHERE park_executable_generation IS NOT NULL;
-
-CREATE TABLE IF NOT EXISTS process_park_clock (
-    singleton           INTEGER PRIMARY KEY CONSTRAINT ck_process_park_clock_singleton CHECK (singleton = 1),
-    current_seq         INTEGER NOT NULL DEFAULT 0,
-    compaction_horizon  INTEGER NOT NULL DEFAULT 0
-);
-
-INSERT OR IGNORE INTO process_park_clock (
-    singleton, current_seq, compaction_horizon
-) VALUES (1, 0, 0);
-
-CREATE TABLE IF NOT EXISTS process_park_events (
-    seq         INTEGER PRIMARY KEY,
-    process_id  TEXT NOT NULL,
-    park_id     INTEGER NOT NULL,
-    kind        TEXT NOT NULL CONSTRAINT ck_process_park_events_kind CHECK (kind IN ('parked', 'unparked', 'cancelled', 'redrive_requested')),
-    cause_json       TEXT,
-    reason_json TEXT,
-    at_ms       INTEGER NOT NULL,
-    redrive_intent INTEGER,
-    CONSTRAINT ck_process_park_events_parked_reason CHECK (((kind = 'parked' AND reason_json IS NOT NULL AND cause_json IS NULL AND redrive_intent IS NULL) OR (kind IN ('unparked', 'cancelled') AND reason_json IS NULL AND cause_json IS NOT NULL AND redrive_intent IS NULL) OR (kind = 'redrive_requested' AND reason_json IS NULL AND cause_json IS NULL AND redrive_intent IS NOT NULL AND redrive_intent >= 0)) IS TRUE)
-);
-
 CREATE TABLE IF NOT EXISTS process_change_clock (
     singleton    INTEGER PRIMARY KEY CONSTRAINT ck_process_change_clock_singleton CHECK (singleton = 1),
     current_seq  INTEGER NOT NULL DEFAULT 0,
@@ -862,39 +823,6 @@ CREATE TABLE IF NOT EXISTS process_event_horizons (
     released_through  INTEGER NOT NULL CONSTRAINT ck_process_event_horizons_positive CHECK (released_through > 0),
     FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
 );
-
-CREATE TABLE IF NOT EXISTS wake_allocation_floors (
-    target_session_id TEXT NOT NULL,
-    process_id        TEXT NOT NULL,
-    allocation_floor INTEGER NOT NULL,
-    PRIMARY KEY (target_session_id, process_id)
-);
-
-CREATE TABLE IF NOT EXISTS process_wake_deliveries (
-    delivery_id       TEXT PRIMARY KEY,
-    process_id        TEXT NOT NULL,
-    target_session_id TEXT NOT NULL,
-    sequence          INTEGER NOT NULL,
-    state             TEXT NOT NULL,
-    claim_token       TEXT,
-    attempts          INTEGER NOT NULL DEFAULT 0,
-    first_attempt_ms  INTEGER,
-    next_attempt_at_ms INTEGER NOT NULL,
-    expires_at_ms     INTEGER NOT NULL,
-    discard_reason    TEXT,
-    delivery_json     TEXT NOT NULL,
-    CONSTRAINT ck_process_wake_deliveries_state CHECK (state IN ('pending', 'enqueuing', 'enqueued', 'discarded')),
-    CONSTRAINT ck_process_wake_deliveries_discard_reason CHECK (discard_reason IN ('expired', 'target_gone', 'retargeted', 'sequence_rewound', 'source_unreadable', 'content_conflict')),
-    CONSTRAINT ck_process_wake_deliveries_lifecycle CHECK ((state = 'enqueuing') = (claim_token IS NOT NULL) AND (state = 'discarded') = (discard_reason IS NOT NULL)),
-    FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_wake_deliveries_pending
-    ON process_wake_deliveries(next_attempt_at_ms, target_session_id, process_id, sequence)
-    WHERE state IN ('pending', 'enqueuing');
-CREATE INDEX IF NOT EXISTS idx_wake_deliveries_group_sequence
-    ON process_wake_deliveries(target_session_id, process_id, sequence)
-    WHERE state <> 'enqueued';
 
 CREATE TABLE IF NOT EXISTS process_observers (
     session_id       TEXT NOT NULL,
@@ -1012,7 +940,7 @@ pub(crate) fn expected_version() -> i64 {
 
 /// The shared table sets provisioning applies after the schema bodies, in
 /// order; see [`crate::schema_fragments`].
-pub(crate) const FRAGMENTS: [&str; 7] = [
+pub(crate) const FRAGMENTS: [&str; 8] = [
     crate::schema_fragments::SESSION_INGRESS_TABLE,
     crate::schema_fragments::SESSION_RUNS_TABLES,
     crate::durable::DURABLE_TABLES,
@@ -1020,6 +948,7 @@ pub(crate) const FRAGMENTS: [&str; 7] = [
     crate::durable::EXEC_SNAPSHOTS_TABLES,
     crate::durable::TURN_PHASES_TABLES,
     crate::durable::WAITS_TABLES,
+    crate::durable::PARK_EVENTS_TABLES,
 ];
 
 /// Everything provisioning applies, in order: the durable core's, process

@@ -105,7 +105,6 @@ pub(super) async fn extract(
     };
     match item.surface {
         DurableSurface::ParkedSegment => parked_segment(payload, item.owner_record.as_deref()),
-        DurableSurface::PendingWake => pending_wake(payload),
         DurableSurface::StartedProcess => started_process(payload),
         DurableSurface::SessionCheckpoint => session_checkpoint(payload),
         DurableSurface::SessionExecutionState => session_execution_state(payload),
@@ -418,21 +417,6 @@ fn start_generation(record: &serde_json::Value, stamp: Option<&str>) -> Option<E
 #[cfg(not(feature = "rlm"))]
 fn start_generation(_record: &serde_json::Value, _stamp: Option<&str>) -> Option<Extraction> {
     None
-}
-
-fn pending_wake(payload: Payload<'_>) -> Vec<Extraction> {
-    let format = DurableFormat::ProcessWakeDelivery;
-    let root = match payload.json(format) {
-        Ok(root) => root,
-        Err(extraction) => return vec![extraction],
-    };
-    match as_u32(root.get("version")) {
-        Some(version) => vec![Extraction::Found { format, version }],
-        None => vec![Extraction::Undecodable {
-            format,
-            reason: "wake delivery carries no readable `version`".to_string(),
-        }],
-    }
 }
 
 /// A checkpoint manifest answers for itself and for every component descriptor
@@ -801,34 +785,6 @@ mod tests {
         assert!(
             reasons[0].contains("requires the `rlm` feature"),
             "{reasons:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn an_unstamped_wake_is_undecodable_not_this_builds_version() {
-        // The wake payload's own decoder requires the stamp, so the probe
-        // reports what a read of the row would: it does not open.
-        let extractions = extract(&item(
-            DurableSurface::PendingWake,
-            DurablePayload::Json(serde_json::json!({"wake_id": "w-1"}).to_string()),
-        ))
-        .await;
-        assert!(versions(&extractions, DurableFormat::ProcessWakeDelivery).is_empty());
-        let reasons = undecodable(&extractions, DurableFormat::ProcessWakeDelivery);
-        assert_eq!(reasons.len(), 1);
-        assert!(
-            reasons[0].contains("carries no readable `version`"),
-            "{reasons:?}"
-        );
-
-        let stamped = extract(&item(
-            DurableSurface::PendingWake,
-            DurablePayload::Json(serde_json::json!({"version": 9}).to_string()),
-        ))
-        .await;
-        assert_eq!(
-            versions(&stamped, DurableFormat::ProcessWakeDelivery),
-            vec![9]
         );
     }
 

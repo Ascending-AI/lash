@@ -52,8 +52,6 @@ fn processes_area_witnesses() {
     let _ = lash::runtime::RuntimeEffectLocalExecutor::with_process_turn_cancellation;
     // W0008: lash::runtime::RuntimeEffectLocalExecutor::with_turn_cancel_observation [function]
     let _ = lash::runtime::RuntimeEffectLocalExecutor::with_turn_cancel_observation;
-    // W0010: lash::LashCoreBuilder::process_wake_delivery_policy [function]
-    let _ = lash::LashCoreBuilder::process_wake_delivery_policy;
     // W0011: lash::SessionCreateRequest::observed_processes [field]
     field_witness(|value: &lash::SessionCreateRequest| {
         let _ = &value.observed_processes;
@@ -109,8 +107,6 @@ fn processes_area_witnesses() {
     let _ = lash::durability::RuntimeHostConfig::with_process_env_store;
     // W0082: lash::durability::RuntimeHostConfig::with_process_tool_visibility_filter [function]
     let _ = lash::durability::RuntimeHostConfig::with_process_tool_visibility_filter;
-    // W0083: lash::durability::RuntimeHostConfig::with_process_wake_delivery_policy [function]
-    let _ = lash::durability::RuntimeHostConfig::with_process_wake_delivery_policy;
     // W0084: lash::messages::MessageOrigin::Process [variant]
     variant_witness(|value: &lash::messages::MessageOrigin| {
         matches!(value, lash::messages::MessageOrigin::Process { .. })
@@ -196,42 +192,6 @@ fn processes_area_witnesses() {
     });
     // W0102: lash::persistence::QueuedWorkPayload::process_wake [function]
     let _ = lash::persistence::QueuedWorkPayload::process_wake;
-    // W0103: lash::persistence::StoreError::ProcessWakeSequenceRewound [variant]
-    variant_witness(|value: &lash::persistence::StoreError| {
-        matches!(
-            value,
-            lash::persistence::StoreError::ProcessWakeSequenceRewound { .. }
-        )
-    });
-    // W0104: lash::persistence::StoreError::ProcessWakeSequenceRewound::allocation_floor [field]
-    field_witness(|value: &lash::persistence::StoreError| {
-        if let lash::persistence::StoreError::ProcessWakeSequenceRewound {
-            allocation_floor, ..
-        } = value
-        {
-            let _ = allocation_floor;
-        }
-    });
-    // W0105: lash::persistence::StoreError::ProcessWakeSequenceRewound::process_id [field]
-    field_witness(|value: &lash::persistence::StoreError| {
-        if let lash::persistence::StoreError::ProcessWakeSequenceRewound { process_id, .. } = value
-        {
-            let _ = process_id;
-        }
-    });
-    // W0106: lash::persistence::StoreError::ProcessWakeSequenceRewound::sequence [field]
-    field_witness(|value: &lash::persistence::StoreError| {
-        if let lash::persistence::StoreError::ProcessWakeSequenceRewound { sequence, .. } = value {
-            let _ = sequence;
-        }
-    });
-    // W0107: lash::persistence::StoreError::ProcessWakeSequenceRewound::session_id [field]
-    field_witness(|value: &lash::persistence::StoreError| {
-        if let lash::persistence::StoreError::ProcessWakeSequenceRewound { session_id, .. } = value
-        {
-            let _ = session_id;
-        }
-    });
     // W0111: lash::plugins::PluginError::ProcessAlreadyTerminal [variant]
     variant_witness(|value: &lash::plugins::PluginError| {
         matches!(
@@ -681,25 +641,13 @@ fn processes_area_witnesses() {
     fn meth_0237<T: lash::process::ProcessRegistry>(_: &T) {
         let _ = T::append_event_with_authority;
     }
-    // W0238: lash::process::ProcessRegistry::claim_pending_wake_deliveries [function]
-    fn meth_0238<T: lash::process::ProcessRegistry>(_: &T) {
-        let _ = T::claim_pending_wake_deliveries;
-    }
     // W0239: lash::process::ProcessRegistry::clear_process_wait_with_authority [function]
     fn meth_0239<T: lash::process::ProcessRegistry>(_: &T) {
         let _ = T::clear_process_wait_with_authority;
     }
-    // W0241: lash::process::ProcessRegistry::defer_wake_delivery [function]
-    fn meth_0241<T: lash::process::ProcessRegistry>(_: &T) {
-        let _ = T::defer_wake_delivery;
-    }
     // W0242: lash::process::ProcessRegistry::delete_session_process_state [function]
     fn meth_0242<T: lash::process::ProcessRegistry>(_: &T) {
         let _ = T::delete_session_process_state;
-    }
-    // W0243: lash::process::ProcessRegistry::discard_wake_delivery [function]
-    fn meth_0243<T: lash::process::ProcessRegistry>(_: &T) {
-        let _ = T::discard_wake_delivery;
     }
     // W0245: lash::process::ProcessRegistry::get_process [function]
     fn meth_0245<T: lash::process::ProcessRegistry>(_: &T) {
@@ -713,14 +661,6 @@ fn processes_area_witnesses() {
     fn meth_0247<T: lash::process::ProcessRegistry>(_: &T) {
         let _ = T::list_observed_by;
     }
-    // W0248: lash::process::ProcessRegistry::list_wake_deliveries [function]
-    fn meth_0248<T: lash::process::ProcessRegistry>(_: &T) {
-        let _ = T::list_wake_deliveries;
-    }
-    // W0249: lash::process::ProcessRegistry::mark_wake_enqueued [function]
-    fn meth_0249<T: lash::process::ProcessRegistry>(_: &T) {
-        let _ = T::mark_wake_enqueued;
-    }
     // W0250: lash::process::ProcessRegistry::processes_changed_since [function]
     fn meth_0250<T: lash::process::ProcessRegistry>(_: &T) {
         let _ = T::processes_changed_since;
@@ -729,21 +669,9 @@ fn processes_area_witnesses() {
     fn meth_0252<T: lash::process::ProcessRegistry>(_: &T) {
         let _ = T::record_first_started_with_authority;
     }
-    // W0253: lash::process::ProcessRegistry::redrive_wake_delivery [function]
-    fn meth_0253<T: lash::process::ProcessRegistry>(_: &T) {
-        let _ = T::redrive_wake_delivery;
-    }
     // W0255: lash::process::ProcessRegistry::set_process_wait_with_authority [function]
     fn meth_0255<T: lash::process::ProcessRegistry>(_: &T) {
         let _ = T::set_process_wait_with_authority;
-    }
-    // W0256: lash::process::ProcessRegistry::wake_delivery_config [function]
-    fn meth_0256<T: lash::process::ProcessRegistry>(_: &T) {
-        let _ = T::wake_delivery_config;
-    }
-    // W0257: lash::process::ProcessRegistry::wake_delivery_report [function]
-    fn meth_0257<T: lash::process::ProcessRegistry>(_: &T) {
-        let _ = T::wake_delivery_report;
     }
     // W0258: lash::process::ProcessRegistry::with_runtime_clock [function]
     fn meth_0258<T: lash::process::ProcessRegistry>(_: &T) {
@@ -805,10 +733,6 @@ fn processes_area_witnesses() {
     }
     // W0274: lash::process::ProcessSessionDeleteReport [struct]
     type_witness::<lash::process::ProcessSessionDeleteReport>();
-    // W0275: lash::process::ProcessSessionDeleteReport::discarded_wake_delivery_count [field]
-    field_witness(|value: &lash::process::ProcessSessionDeleteReport| {
-        let _ = &value.discarded_wake_delivery_count;
-    });
     // W0276: lash::process::ProcessSessionDeleteReport::removed_observer_count [field]
     field_witness(|value: &lash::process::ProcessSessionDeleteReport| {
         let _ = &value.removed_observer_count;

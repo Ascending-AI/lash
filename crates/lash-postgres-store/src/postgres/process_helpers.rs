@@ -27,7 +27,7 @@ pub(crate) fn cancel_requested_at_ms(record: &ProcessRecord) -> Option<i64> {
 }
 
 pub(crate) async fn process_change_horizon_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
 ) -> Result<u64, PluginError> {
     let horizon: i64 = sqlx::query_scalar(
         process_sql()
@@ -35,7 +35,7 @@ pub(crate) async fn process_change_horizon_tx(
             .select_compaction_horizon_for_share
             .sql(),
     )
-    .fetch_one(&mut **tx)
+    .fetch_one(&mut *tx)
     .await
     .map_err(plugin_sqlx_error)?;
     plugin_u64_from_sql(
@@ -46,7 +46,7 @@ pub(crate) async fn process_change_horizon_tx(
 }
 
 pub(crate) async fn load_process_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     process_id: &ProcessId,
 ) -> Result<Option<ProcessRecord>, PluginError> {
     let json: Option<String> = sqlx::query_scalar(
@@ -56,7 +56,7 @@ pub(crate) async fn load_process_tx(
             .sql(),
     )
     .bind(process_id.as_str())
-    .fetch_optional(&mut **tx)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(plugin_sqlx_error)?;
     json.map(|json| decode_process_record(&json)).transpose()
@@ -65,13 +65,13 @@ pub(crate) async fn load_process_tx(
 /// The retained process registered under `start_key`, if any, locked for the
 /// registration transaction that read it.
 pub(crate) async fn load_process_by_start_key_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     start_key: &lash_core_execution::StartKey,
 ) -> Result<Option<ProcessRecord>, PluginError> {
     let json: Option<String> =
         sqlx::query_scalar(process_sql().process.select_record_json_by_start_key.sql())
             .bind(start_key.as_str())
-            .fetch_optional(&mut **tx)
+            .fetch_optional(&mut *tx)
             .await
             .map_err(plugin_sqlx_error)?;
     json.map(|json| decode_process_record(&json)).transpose()
@@ -91,7 +91,7 @@ pub(crate) async fn load_process(
 }
 
 pub(crate) async fn require_process_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     process_id: &ProcessId,
 ) -> Result<ProcessRecord, PluginError> {
     if let Some(record) = load_process_tx(tx, process_id).await? {
@@ -99,7 +99,7 @@ pub(crate) async fn require_process_tx(
     }
     let row = sqlx::query(process_sql().tombstone.select_terminal.sql())
         .bind(process_id.as_str())
-        .fetch_optional(&mut **tx)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(plugin_sqlx_error)?;
     let tombstone = row
@@ -128,12 +128,12 @@ pub(crate) fn decode_matching_process(
 }
 
 pub(crate) async fn wake_session_id_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     process_id: &ProcessId,
 ) -> Result<Option<SessionId>, PluginError> {
     sqlx::query_scalar::<_, Option<String>>(process_sql().process.select_wake_session_id.sql())
         .bind(process_id.as_str())
-        .fetch_one(&mut **tx)
+        .fetch_one(&mut *tx)
         .await
         .map_err(plugin_sqlx_error)?
         .map(SessionId::parse)
@@ -142,8 +142,9 @@ pub(crate) async fn wake_session_id_tx(
 }
 
 pub(crate) async fn save_process_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     record: &ProcessRecord,
+    arms_obligations: bool,
 ) -> Result<(), PluginError> {
     let change_seq = next_process_change_seq_tx(tx).await?;
     sqlx::query(process_sql().process.update_mutable_columns.sql())
@@ -154,26 +155,23 @@ pub(crate) async fn save_process_tx(
         .bind(record.last_event_sequence as i64)
         .bind(cancel_requested_at_ms(record))
         .bind(serde_json::to_string(record).map_err(process_decode_error)?)
-        .bind(record.park().map(|park| clamp_epoch_ms(park.since_ms)))
-        .bind(record.park().map(|park| park.reason.code().as_str()))
-        .bind(
-            record
-                .park()
-                .and_then(|park| park.reason.retired_executable_generation_key()),
-        )
-        .execute(&mut **tx)
+        .execute(&mut *tx)
         .await
         .map_err(plugin_sqlx_error)?;
     // The transaction that makes a process terminal arms its terminal
-    // publication (ADR 0109 §3): the row is the obligation.
+    // publication (ADR 0109 §3): the row is the obligation. An actor's own
+    // terminal resolves its waiters instead.
+    if !arms_obligations {
+        return Ok(());
+    }
     crate::process_registry::terminal_publication::arm_tx(tx, record).await
 }
 
 pub(crate) async fn next_process_change_seq_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
 ) -> Result<u64, PluginError> {
     let seq: i64 = sqlx::query_scalar(process_sql().clock_postgres.bump_returning.sql())
-        .fetch_one(&mut **tx)
+        .fetch_one(&mut *tx)
         .await
         .map_err(plugin_sqlx_error)?;
     plugin_u64_from_sql("ProcessChangeClock", "current_seq", seq)
@@ -183,7 +181,7 @@ pub(crate) async fn next_process_change_seq_tx(
 /// event comes back with `request`'s payload when it carries the released
 /// digest, and refuses as a conflict when it does not.
 pub(crate) async fn load_event_by_key_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     process_id: &ProcessId,
     replay_key: &str,
     request: &ProcessEventAppendRequest,
@@ -191,7 +189,7 @@ pub(crate) async fn load_event_by_key_tx(
     let Some(row) = sqlx::query(process_sql().event.select_by_replay_key.sql())
         .bind(process_id.as_str())
         .bind(replay_key)
-        .fetch_optional(&mut **tx)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(plugin_sqlx_error)?
     else {
@@ -209,33 +207,20 @@ pub(crate) async fn load_event_by_key_tx(
 }
 
 pub(crate) async fn next_process_event_sequence_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     process_id: &ProcessId,
-    target_session_id: Option<&SessionId>,
 ) -> Result<(Option<u64>, u64), PluginError> {
     let last_sequence: Option<i64> =
         sqlx::query_scalar(process_sql().event.select_max_sequence.sql())
             .bind(process_id.as_str())
-            .fetch_one(&mut **tx)
+            .fetch_one(&mut *tx)
             .await
             .map_err(plugin_sqlx_error)?;
     let last_sequence = last_sequence
         .map(|sequence| plugin_u64_from_sql("ProcessEvent", "sequence", sequence))
         .transpose()?;
-    let sender_floor = if let Some(target_session_id) = target_session_id {
-        sqlx::query_scalar::<_, i64>(process_sql().floor.select_floor.sql())
-            .bind(target_session_id.as_str())
-            .bind(process_id.as_str())
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(plugin_sqlx_error)?
-            .map(|floor| plugin_u64_from_sql("WakeAllocationFloor", "allocation_floor", floor))
-            .transpose()?
-    } else {
-        None
-    };
     let sequence =
-        lash_core_execution::runtime::allocate_process_event_sequence(last_sequence, sender_floor)?;
+        lash_core_execution::runtime::allocate_process_event_sequence(last_sequence, None)?;
     Ok((last_sequence, sequence))
 }
 
@@ -258,6 +243,7 @@ pub(crate) enum ProcessEventAppendArm {
 pub(crate) struct ProcessEventBatch {
     fleet_format: lash_core_execution::FleetFormat,
     record_changed: bool,
+    arms_obligations: bool,
 }
 
 impl ProcessEventBatch {
@@ -266,19 +252,31 @@ impl ProcessEventBatch {
         Self {
             fleet_format,
             record_changed: false,
+            arms_obligations: true,
+        }
+    }
+
+    /// Start an empty batch for a process actor's own terminal
+    /// transaction: it arms no terminal publication, since that transaction
+    /// resolves the process's waiters itself, and its parent-end plan is
+    /// only the late-start fence, settled at once, since its actor runs the
+    /// cascade (ADR 0132 §11; L6, FIG-5175).
+    pub(crate) fn for_actor(fleet_format: lash_core_execution::FleetFormat) -> Self {
+        Self {
+            arms_obligations: false,
+            ..Self::for_fleet(fleet_format)
         }
     }
 
     /// Stage one preauthorized append of the batch.
     pub(crate) async fn stage(
         &mut self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut sqlx::PgConnection,
         record: &mut ProcessRecord,
         request: ProcessEventAppendRequest,
         occurred_at_ms: u64,
-        wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
     ) -> Result<ProcessEventAppendReceipt, PluginError> {
-        self.stage_arm(tx, record, request, occurred_at_ms, wake_delivery_config)
+        self.stage_arm(tx, record, request, occurred_at_ms)
             .await
             .map(|(receipt, _)| receipt)
     }
@@ -287,19 +285,18 @@ impl ProcessEventBatch {
     /// arm.
     pub(crate) async fn stage_arm(
         &mut self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut sqlx::PgConnection,
         record: &mut ProcessRecord,
         request: ProcessEventAppendRequest,
         occurred_at_ms: u64,
-        wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
     ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), PluginError> {
         let (receipt, arm, record_changed) = stage_process_event_append_tx(
             tx,
             record,
             request,
             occurred_at_ms,
-            wake_delivery_config,
             self.fleet_format,
+            self.arms_obligations,
         )
         .await?;
         self.record_changed |= record_changed;
@@ -309,11 +306,11 @@ impl ProcessEventBatch {
     /// Save the process once if any staged append moved its projection.
     pub(crate) async fn commit(
         self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut sqlx::PgConnection,
         record: &ProcessRecord,
     ) -> Result<(), PluginError> {
         if self.record_changed {
-            save_process_tx(tx, record).await?;
+            save_process_tx(tx, record, self.arms_obligations).await?;
         }
         Ok(())
     }
@@ -324,21 +321,16 @@ impl ProcessEventBatch {
 /// once, advancing the change clock once, when any of them moved it. The
 /// caller owns the transaction, so a refusal of any request commits none.
 pub(crate) async fn append_process_event_batch_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     record: &mut ProcessRecord,
     requests: Vec<ProcessEventAppendRequest>,
     occurred_at_ms: u64,
-    wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
     fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<Vec<ProcessEventAppendReceipt>, PluginError> {
     let mut batch = ProcessEventBatch::for_fleet(fleet_format);
     let mut receipts = Vec::with_capacity(requests.len());
     for request in requests {
-        receipts.push(
-            batch
-                .stage(tx, record, request, occurred_at_ms, wake_delivery_config)
-                .await?,
-        );
+        receipts.push(batch.stage(tx, record, request, occurred_at_ms).await?);
     }
     batch.commit(tx, record).await?;
     Ok(receipts)
@@ -348,24 +340,17 @@ pub(crate) async fn append_process_event_batch_tx(
 /// ([`stage_process_event_append_tx`]) followed by the process save when the
 /// append moved the projection.
 pub(crate) async fn apply_process_event_append_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     record: &mut ProcessRecord,
     request: ProcessEventAppendRequest,
     occurred_at_ms: u64,
-    wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
     fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), PluginError> {
-    let (receipt, arm, record_changed) = stage_process_event_append_tx(
-        tx,
-        record,
-        request,
-        occurred_at_ms,
-        wake_delivery_config,
-        fleet_format,
-    )
-    .await?;
+    let (receipt, arm, record_changed) =
+        stage_process_event_append_tx(tx, record, request, occurred_at_ms, fleet_format, true)
+            .await?;
     if record_changed {
-        save_process_tx(tx, record).await?;
+        save_process_tx(tx, record, true).await?;
     }
     Ok((receipt, arm))
 }
@@ -384,14 +369,16 @@ pub(crate) async fn apply_process_event_append_tx(
 ///
 /// `occurred_at_ms` is the caller's clock and the only clock this function
 /// sees: each entry point keeps its own source (the injected store clock), and
-/// this function never reads one.
+/// this function never reads one. Without `arms_obligations` (an actor's own
+/// terminal) a terminal append's parent-end plan is settled at once: the
+/// actor runs the cascade.
 async fn stage_process_event_append_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     record: &mut ProcessRecord,
     request: ProcessEventAppendRequest,
     occurred_at_ms: u64,
-    wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
     fleet_format: lash_core_execution::FleetFormat,
+    arms_obligations: bool,
 ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm, bool), PluginError> {
     let process_id = record.id.clone();
     let replay_lookup =
@@ -412,16 +399,16 @@ async fn stage_process_event_append_tx(
                 .bind(process_id.as_str())
                 .bind(request.event_type.as_str())
                 .bind(clamp_sequence_bound(u64::MAX))
-                .fetch_one(&mut **tx)
+                .fetch_one(&mut *tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
         Some(count as u64)
     } else {
         None
     };
+    let signal = request.signal();
     let wake_session_id = wake_session_id_tx(tx, &process_id).await?;
-    let (last_sequence, sequence) =
-        next_process_event_sequence_tx(tx, &process_id, wake_session_id.as_ref()).await?;
+    let (last_sequence, sequence) = next_process_event_sequence_tx(tx, &process_id).await?;
     let prepared = lash_core_execution::runtime::prepare_process_event_append(
         record,
         request,
@@ -440,7 +427,6 @@ async fn stage_process_event_append_tx(
             wake_delivery,
             ..
         } => {
-            insert_wake_delivery_tx(tx, wake_delivery.as_ref(), wake_delivery_config).await?;
             let repaired = repair_record.is_some();
             if let Some(repaired) = repair_record {
                 *record = repaired;
@@ -467,24 +453,21 @@ async fn stage_process_event_append_tx(
                 .bind(event.event_type.as_str())
                 .bind(event.invocation.effect_replay_key())
                 .bind(serde_json::to_string(&event).map_err(process_decode_error)?)
-                .execute(&mut **tx)
+                .execute(&mut *tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
-            let park_transitions = lash_core_execution::runtime::process_park_transitions(
-                record.park(),
-                &projected_record,
-            );
+            // A new signal reaches the engine as mail, in the append's own
+            // transaction (ADR 0132 §10).
+            if let Some(signal) = &signal {
+                crate::durable::processes::signal_mail_within(
+                    tx,
+                    &process_id,
+                    signal,
+                    lash_durable::DurableInstant(i64::try_from(occurred_at_ms).unwrap_or(i64::MAX)),
+                )
+                .await?;
+            }
             *record = projected_record;
-            // The park feed rides the event's own transaction (FIG-3659
-            // NOW-B): a park that opened or closed here is durable in the feed
-            // exactly when the fact that moved it is.
-            crate::process_registry::park_feed::log_process_park_transitions_tx(
-                tx,
-                &record.park_key(),
-                &park_transitions,
-                occurred_at_ms,
-            )
-            .await?;
             // A process that just reached a terminal status is an ended parent
             // scope: its ledger row rides the same transaction as the terminal
             // append, so no child can be stranded by a crash between the two.
@@ -494,12 +477,11 @@ async fn stage_process_event_append_tx(
                     &lash_core_execution::ScopeId::process(process_id.clone()),
                     occurred_at_ms,
                     fleet_format,
+                    !arms_obligations,
                 )
                 .await?;
             }
-            insert_wake_delivery_tx(tx, wake_delivery.as_ref(), wake_delivery_config).await?;
-            advance_wake_allocation_floor_tx(tx, wake_session_id.as_ref(), &process_id, sequence)
-                .await?;
+            deliver_process_wake_tx(tx, wake_delivery.as_ref(), occurred_at_ms).await?;
             Ok((
                 ProcessEventAppendReceipt {
                     last_event_sequence: event.sequence,
@@ -515,64 +497,65 @@ async fn stage_process_event_append_tx(
 }
 
 pub(crate) async fn append_process_event_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     record: &mut ProcessRecord,
     request: ProcessEventAppendRequest,
     occurred_at_ms: u64,
-    wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
     fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<ProcessEventAppendReceipt, PluginError> {
-    apply_process_event_append_tx(
-        tx,
-        record,
-        request,
-        occurred_at_ms,
-        wake_delivery_config,
-        fleet_format,
-    )
-    .await
-    .map(|(receipt, _)| receipt)
-}
-
-pub(crate) async fn advance_wake_allocation_floor_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    target_session_id: Option<&SessionId>,
-    process_id: &ProcessId,
-    sequence: u64,
-) -> Result<(), PluginError> {
-    let Some(target_session_id) = target_session_id else {
-        return Ok(());
-    };
-    sqlx::query(process_sql().floor_postgres.upsert_max.sql())
-        .bind(target_session_id.as_str())
-        .bind(process_id.as_str())
-        .bind(sequence as i64)
-        .execute(&mut **tx)
+    apply_process_event_append_tx(tx, record, request, occurred_at_ms, fleet_format)
         .await
-        .map_err(plugin_sqlx_error)?;
-    Ok(())
+        .map(|(receipt, _)| receipt)
 }
 
-pub(crate) async fn insert_wake_delivery_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+/// Hand a process event's wake to its target session as queued work, inside
+/// the append's own transaction: the producer admits the batch under its
+/// source key (so a repeat is the same batch) and wakes the session actor
+/// (ADR 0132 §12). A target session that is deleted, or that never existed,
+/// receives nothing. The producer runs in a savepoint of the append.
+pub(crate) async fn deliver_process_wake_tx(
+    tx: &mut sqlx::PgConnection,
     wake: Option<&lash_core_execution::ProcessWakeDelivery>,
-    config: lash_core_execution::WakeDeliveryConfig,
+    occurred_at_ms: u64,
 ) -> Result<(), PluginError> {
     let Some(wake) = wake else {
         return Ok(());
     };
-    let delivery = lash_core_execution::WakeDelivery::pending(wake.clone(), config);
-    sqlx::query(process_sql().wake_postgres.insert_pending.sql())
-        .bind(delivery.delivery_id().as_str())
-        .bind(delivery.wake.process_id.as_str())
-        .bind(delivery.wake.target_session_id.as_str())
-        .bind(delivery.wake.sequence as i64)
-        .bind(delivery.next_attempt_at_ms as i64)
-        .bind(delivery.expires_at_ms as i64)
-        .bind(serde_json::to_string(&delivery.wake).map_err(process_decode_error)?)
-        .execute(&mut **tx)
+    let to_plugin =
+        |error: lash_core_execution::StoreError| PluginError::Session(error.to_string());
+    let sql = crate::session_sql::session_sql();
+    let deleted: bool = sqlx::query_scalar(sql.deleted_postgres.exists.sql())
+        .bind(wake.target_session_id.as_str())
+        .fetch_one(&mut *tx)
         .await
         .map_err(plugin_sqlx_error)?;
+    let live = !deleted
+        && sqlx::query(sql.meta_postgres.select_relation_for_share.sql())
+            .bind(wake.target_session_id.as_str())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?
+            .is_some();
+    if !live {
+        tracing::debug!(
+            process_id = %wake.process_id,
+            target_session_id = %wake.target_session_id,
+            sequence = wake.sequence,
+            "process wake target is not a live session; nothing is queued"
+        );
+        return Ok(());
+    }
+    let mut savepoint = sqlx::Connection::begin(&mut *tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
+    crate::runtime_persistence::enqueue_queued_work_with_outcome_tx(
+        &mut savepoint,
+        &lash_core_execution::facade_support::process_wake_batch_draft(wake.clone()),
+        occurred_at_ms,
+    )
+    .await
+    .map_err(to_plugin)?;
+    savepoint.commit().await.map_err(plugin_sqlx_error)?;
     Ok(())
 }
 
@@ -591,4 +574,97 @@ pub(crate) fn validate_process_execution_authority(
     } else {
         authority.validate_invocation_for_write(process_id, record)
     }
+}
+
+/// What recording a cancel request found (L6, FIG-5175).
+pub(crate) enum CancelRecorded {
+    /// This request is the first: recorded at `at_ms`.
+    Requested { at_ms: u64 },
+    /// An earlier request stands, recorded at `at_ms`.
+    AlreadyRequested { at_ms: u64 },
+    /// The process is terminal.
+    Ended,
+}
+
+/// Record `origin`'s cancel of `process_id` at `now_ms` unless one is
+/// recorded, on a durable commit's connection: the first request wins and
+/// keeps its timestamp (L6, FIG-5175).
+pub(crate) async fn record_cancel_tx(
+    tx: &mut sqlx::PgConnection,
+    process_id: &ProcessId,
+    origin: lash_core_execution::CancelOrigin,
+    requester: &str,
+    now_ms: u64,
+    fleet_format: lash_core_execution::FleetFormat,
+) -> Result<CancelRecorded, PluginError> {
+    let mut record = require_process_tx(tx, process_id).await?;
+    if record.is_terminal() {
+        return Ok(CancelRecorded::Ended);
+    }
+    if let Some(existing) = record.cancel_request.as_deref() {
+        return Ok(CancelRecorded::AlreadyRequested {
+            at_ms: existing.requested_at_ms,
+        });
+    }
+    let request = lash_core_execution::CancelRequest::new(origin, requester, now_ms);
+    if let lash_core_execution::runtime::ProcessTransitionPlan::Append(append) =
+        lash_core_execution::runtime::prepare_process_transition(
+            &record,
+            lash_core_execution::runtime::ProcessTransition::RequestCancel(request),
+        )?
+    {
+        append_process_event_tx(tx, &mut record, *append, now_ms, fleet_format).await?;
+    }
+    Ok(CancelRecorded::Requested { at_ms: now_ms })
+}
+
+/// End `process_id` with `output` under its actor's `epoch`, on a durable
+/// commit's connection. A process already terminal keeps its first
+/// terminal; answers whether this call ended it (L6, FIG-5175).
+pub(crate) async fn record_terminal_tx(
+    tx: &mut sqlx::PgConnection,
+    process_id: &ProcessId,
+    output: &ProcessAwaitOutput,
+    epoch: u64,
+    now_ms: u64,
+    fleet_format: lash_core_execution::FleetFormat,
+) -> Result<bool, PluginError> {
+    let mut record = require_process_tx(tx, process_id).await?;
+    if record.is_terminal() {
+        return Ok(false);
+    }
+    let output = output.clone().with_cancel_origin(
+        record
+            .cancel_request
+            .as_deref()
+            .map(|request| request.origin),
+    );
+    let authority = lash_core_execution::ProcessCompletionAuthority::ActorEpoch { epoch };
+    let mut batch = ProcessEventBatch::for_actor(fleet_format);
+    let request = lash_core_execution::facade_support::terminal_append_request(
+        process_id,
+        &output,
+        Some(&authority),
+    );
+    batch.stage(tx, &mut record, request, now_ms).await?;
+    batch.commit(tx, &record).await?;
+    Ok(true)
+}
+
+/// Append `event_type` with `payload` to `process_id` under `replay_key`, on
+/// a durable commit's connection: a repeat under the same key is a no-op
+/// (L6, FIG-5175).
+pub(crate) async fn record_event_tx(
+    tx: &mut sqlx::PgConnection,
+    process_id: &ProcessId,
+    event_type: &str,
+    payload: serde_json::Value,
+    replay_key: &str,
+    now_ms: u64,
+    fleet_format: lash_core_execution::FleetFormat,
+) -> Result<(), PluginError> {
+    let mut record = require_process_tx(tx, process_id).await?;
+    let request = ProcessEventAppendRequest::new(event_type, payload).with_replay_key(replay_key);
+    append_process_event_tx(tx, &mut record, request, now_ms, fleet_format).await?;
+    Ok(())
 }

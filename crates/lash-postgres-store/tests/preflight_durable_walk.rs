@@ -61,7 +61,6 @@ async fn an_unprovisioned_database_reports_not_scanned_rather_than_erroring() {
 
     for surface in [
         DurableSurface::ParkedSegment,
-        DurableSurface::PendingWake,
         DurableSurface::StartedProcess,
         DurableSurface::SessionCheckpoint,
         DurableSurface::SessionExecutionState,
@@ -259,60 +258,6 @@ async fn a_live_process_is_walked_with_its_record_and_terminal_ones_are_not() {
     scratch.cleanup().await;
 }
 
-/// Undelivered wakes only. `enqueued` has already left the queue, and reporting
-/// it would put finished work on a drain list.
-#[tokio::test]
-async fn only_undelivered_wakes_are_enumerated() {
-    let Some(database_url) = database_url() else {
-        eprintln!("skipping preflight durable walk: database URL is not set");
-        return;
-    };
-    let scratch = ScratchSchema::provision(&database_url).await;
-    seed_process(
-        &scratch,
-        &ProcessId::fixture("proc-1"),
-        "running",
-        Some("session-1"),
-    )
-    .await;
-    seed_wake(
-        &scratch,
-        "delivery-a",
-        &ProcessId::fixture("proc-1"),
-        "pending",
-    )
-    .await;
-    seed_wake(
-        &scratch,
-        "delivery-b",
-        &ProcessId::fixture("proc-1"),
-        "enqueuing",
-    )
-    .await;
-    seed_wake(
-        &scratch,
-        "delivery-c",
-        &ProcessId::fixture("proc-1"),
-        "enqueued",
-    )
-    .await;
-
-    let page = PostgresStorePreflight::from_pool(scratch.pool.clone())
-        .scan_durable(&DurableScan::first(DurableSurface::PendingWake, 10))
-        .await
-        .expect("a provisioned deployment walks");
-
-    let delivered: Vec<&str> = page.items.iter().map(|item| item.cursor.as_str()).collect();
-    assert_eq!(delivered, vec!["delivery-a", "delivery-b"]);
-    assert_eq!(page.items[0].session_id.as_deref(), Some("session-target"));
-    assert_eq!(page.items[1].status.as_deref(), Some("enqueuing"));
-
-    scratch.cleanup().await;
-}
-
-/// Paging with the smallest possible page is the harshest test of a keyset
-/// walk: every boundary is exercised, and a cursor that disagreed with the
-/// ordering by even one row would show up as a duplicate or a hole.
 #[tokio::test]
 async fn paging_a_surface_one_item_at_a_time_is_exact() {
     let Some(database_url) = database_url() else {
@@ -578,37 +523,6 @@ async fn seed_segment(
             "INSERT INTO lash_process_segment_handovers
                  (process_id, segment_ordinal, committed_at_ms, handover_json)
              VALUES ('{process_id}', {ordinal}, 0, '{handover}')"
-        ))
-        .await;
-}
-
-async fn seed_wake(
-    scratch: &ScratchSchema,
-    delivery_id: &str,
-    process_id: &ProcessId,
-    state: &str,
-) {
-    // A row carries its claim token while it is enqueuing and its discard
-    // reason once it is discarded, and neither otherwise.
-    let claim_token = if state == "enqueuing" {
-        "'claim'"
-    } else {
-        "NULL"
-    };
-    let discard_reason = if state == "discarded" {
-        "'retargeted'"
-    } else {
-        "NULL"
-    };
-    scratch
-        .apply(&format!(
-            "INSERT INTO lash_process_wake_deliveries (
-                 delivery_id, process_id, target_session_id, sequence, state,
-                 claim_token, discard_reason, next_attempt_at_ms, expires_at_ms, delivery_json
-             ) VALUES (
-                 '{delivery_id}', '{process_id}', 'session-target', 1, '{state}',
-                 {claim_token}, {discard_reason}, 0, 0, '{{\"delivery\":\"{delivery_id}\"}}'
-             )"
         ))
         .await;
 }

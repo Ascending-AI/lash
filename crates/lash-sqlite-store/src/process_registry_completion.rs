@@ -24,7 +24,6 @@ pub(super) async fn complete_process(
 ) -> Result<lash_core_execution::ProcessCompletionOutcome, lash_core_execution::PluginError> {
     let process_id = process_id.clone();
     let now = registry.clock.timestamp_ms();
-    let wake_delivery_config = registry.wake_delivery_config;
     registry
         .conn
         .write_flow(move |tx| {
@@ -50,15 +49,14 @@ pub(super) async fn complete_process(
                 }
                 let mut batch = ProcessEventBatch::for_fleet(fleet_format);
                 for request in prelude {
-                    batch.stage(tx, &mut record, request, now, wake_delivery_config)?;
+                    batch.stage(tx, &mut record, request, now)?;
                 }
                 let request = lash_core_execution::facade_support::terminal_append_request(
                     &process_id,
                     &await_output,
                     Some(&authority),
                 );
-                let (_, arm) =
-                    batch.stage_arm(tx, &mut record, request, now, wake_delivery_config)?;
+                let (_, arm) = batch.stage_arm(tx, &mut record, request, now)?;
                 batch.commit(tx, &record)?;
                 Ok(match arm {
                     ProcessEventAppendArm::Replayed { .. } => {

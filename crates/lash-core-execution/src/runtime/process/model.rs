@@ -1538,7 +1538,6 @@ impl ProcessListMode {
 pub struct ProcessSessionDeleteReport {
     pub session_id: SessionId,
     pub removed_observer_count: usize,
-    pub discarded_wake_delivery_count: usize,
     pub cleared_subscription_count: usize,
 }
 
@@ -1637,41 +1636,28 @@ pub struct ProcessRecord {
     /// The first accepted cancellation request, retained across retries.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cancel_request: Option<Box<CancelRequest>>,
-    /// The one lifecycle state the process is in. Its status, wait, park and
+    /// The one lifecycle state the process is in. Its status, wait and
     /// outcome are read from it ([`Self::status`], [`Self::wait`],
-    /// [`Self::park`], [`Self::terminal`]) and stored nowhere beside it.
+    /// [`Self::terminal`]) and stored nowhere beside it.
     pub lifecycle: ProcessLifecycleState,
 }
 
 /// The lifecycle state of a process record: each state owns the facts that
-/// exist only in it, so a record cannot hold a wait or a park beside an
-/// outcome, or a terminal status without one.
-///
-/// A park is folded from `process.parked` facts while the process's body
-/// refuses to replay its journal (FIG-3586, FIG-3659 NOW-B) and cleared by
-/// the first lifecycle fact past the refusal. It is boxed so the
-/// usually-absent fact does not enlarge the pervasive [`ProcessRecord`].
+/// exist only in it, so a record cannot hold a wait beside an outcome, or a
+/// terminal status without one. A parked process is its actor's state
+/// (ADR 0132 §11), not a record fact.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ProcessLifecycleState {
-    Running {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        park: Option<Box<crate::store::ProcessPark>>,
-    },
-    Waiting {
-        wait: WaitState,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        park: Option<Box<crate::store::ProcessPark>>,
-    },
-    Terminal {
-        outcome: ProcessTerminal,
-    },
+    Running {},
+    Waiting { wait: WaitState },
+    Terminal { outcome: ProcessTerminal },
 }
 
 impl ProcessLifecycleState {
     /// The state of a newly registered process.
     pub fn running() -> Self {
-        Self::Running { park: None }
+        Self::Running {}
     }
 
     /// A representative state of `status`, for fixtures that need a record
@@ -1693,7 +1679,6 @@ impl ProcessLifecycleState {
                     },
                     since_ms: 0,
                 },
-                park: None,
             },
             ProcessStatus::Completed => {
                 settled(crate::ToolCallOutput::success(serde_json::Value::Null))
@@ -1736,22 +1721,6 @@ impl ProcessLifecycleState {
         match self {
             Self::Waiting { wait, .. } => Some(wait),
             Self::Running { .. } | Self::Terminal { .. } => None,
-        }
-    }
-
-    /// The park the process is in.
-    pub fn park(&self) -> Option<&crate::store::ProcessPark> {
-        match self {
-            Self::Running { park } | Self::Waiting { park, .. } => park.as_deref(),
-            Self::Terminal { .. } => None,
-        }
-    }
-
-    /// The park slot of a state that can hold one.
-    pub(super) fn park_mut(&mut self) -> Option<&mut Option<Box<crate::store::ProcessPark>>> {
-        match self {
-            Self::Running { park } | Self::Waiting { park, .. } => Some(park),
-            Self::Terminal { .. } => None,
         }
     }
 
@@ -1869,11 +1838,6 @@ impl ProcessRecord {
         self.lifecycle.wait()
     }
 
-    /// The park the process is in.
-    pub fn park(&self) -> Option<&crate::store::ProcessPark> {
-        self.lifecycle.park()
-    }
-
     /// The outcome the process ended in.
     pub fn terminal(&self) -> Option<&ProcessTerminal> {
         self.lifecycle.terminal()
@@ -1888,19 +1852,6 @@ impl ProcessRecord {
     /// presence of an incidental event.
     pub fn is_terminal(&self) -> bool {
         self.terminal().is_some()
-    }
-
-    /// The key this process's park projection and park feed name it by. The
-    /// one place a process record is mapped onto
-    /// [`ProcessParkKey`](crate::store::ProcessParkKey).
-    pub fn park_key(&self) -> crate::store::ProcessParkKey {
-        self.id.clone()
-    }
-
-    /// Whether the process is parked and its latest run refused: the only
-    /// state in which a recovery rerun is exempt from the attempt budget.
-    pub fn is_refusing_park(&self) -> bool {
-        self.park().is_some_and(|park| park.refusing)
     }
 
     /// Exposes originator id to store and durable-substrate implementors while persisting and

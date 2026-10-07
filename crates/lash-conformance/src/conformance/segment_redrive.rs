@@ -536,12 +536,11 @@ async fn child_settled(scenario: &Scenario) {
         Some(child_id) => match scenario.registry.get_process(&child_id).await {
             Ok(Some(record)) => format!(
                 "`{child_id}`: status {:?}, started {:?}, external reference {:?}, cancel \
-                 request {:?}, park {:?}, outcome {:?}",
+                 request {:?}, outcome {:?}",
                 record.status(),
                 record.first_started,
                 record.external_ref,
                 record.cancel_request,
-                record.park(),
                 record.outcome()
             ),
             Ok(None) => format!("`{child_id}` has no row"),

@@ -1549,6 +1549,10 @@
     },
     "RemoteProcessToolCancellation": {
       "properties": {
+        "forced": {
+          "description": "Whether lash forced the end: a cancelled process whose engine did not\nend it within its cancel grace (ADR 0132 \u00a710).",
+          "type": "boolean"
+        },
         "message": {
           "type": "string"
         },

@@ -704,28 +704,6 @@ impl fmt::Display for RetiredProcessStatus {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WakeDeliveryState {
-    Pending,
-    Enqueuing,
-    Enqueued,
-    Discarded,
-}
-impl WakeDeliveryState {
-    /// Whether the delivery still owes the target a wake.
-    ///
-    /// The Rust twin of the `state IN (...)` predicate prune and preflight
-    /// queries carry. Exhaustive on purpose: a new state must declare whether
-    /// it is still owed before any query can compile.
-    pub fn is_undelivered(self) -> bool {
-        match self {
-            Self::Pending | Self::Enqueuing => true,
-            Self::Enqueued | Self::Discarded => false,
-        }
-    }
-}
-
 /// Version 3 carries full admitted effect addresses and complete trigger causes
 /// in the invocation delivered with a process wake. Version 4 drops the
 /// process incarnation: a minted process id names one process (ADR 0107).
@@ -981,13 +959,6 @@ lifecycle_vocabulary!(ProcessStatus, label, by_ref {
     Failed => "failed",
     Cancelled => "cancelled",
     Abandoned => "abandoned",
-});
-
-lifecycle_vocabulary!(WakeDeliveryState, as_str, by_value {
-    Pending => "pending",
-    Enqueuing => "enqueuing",
-    Enqueued => "enqueued",
-    Discarded => "discarded",
 });
 
 impl crate::store::DurableRecord for StartKey {

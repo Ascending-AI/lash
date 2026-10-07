@@ -150,7 +150,7 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-core-execution", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-execution", "--lib", "--no-default-features", "--features", "perf-witness", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-execution", "--lib", "--no-default-features", "--features", "testing", "--locked"],
-  ["cargo", "test", "-p", "lash-internal-core-execution", "--test", "process_model", "--test", "effect_model", "--no-default-features", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-core-execution", "--test", "effect_model", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-worker", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-worker", "--lib", "--no-default-features", "--features", "perf-witness", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-worker", "--lib", "--no-default-features", "--features", "testing", "--locked"],

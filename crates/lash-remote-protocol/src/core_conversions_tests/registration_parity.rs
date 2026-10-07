@@ -81,7 +81,7 @@ fn peer_record(
         external_ref: None,
         first_started: None,
         cancel_request: None,
-        lifecycle: RemoteProcessLifecycleState::Running { park: None },
+        lifecycle: RemoteProcessLifecycleState::Running {},
         trace: None,
     })
 }

@@ -65,8 +65,6 @@ fn processes_area_witnesses_b() {
     let _ = lash::process::SessionScopeId::as_str;
     // W0347: lash::process::SessionScopeId::new [function]
     let _ = lash::process::SessionScopeId::new(String::new());
-    // W0348: lash::process::WakeDeliveryDriver::drive_pending_once_with_delivery_policy [function]
-    let _ = lash::process::WakeDeliveryDriver::drive_pending_once_with_delivery_policy;
     // W0358: lash::runtime::ExecutionScope::Process [variant]
     variant_witness(|value: &lash::runtime::ExecutionScope| {
         matches!(value, lash::runtime::ExecutionScope::Process { .. })
@@ -565,217 +563,12 @@ fn processes_area_witnesses_b() {
     fn meth_0543<T: lash_core::TestProcessRegistryWriteExt>(_: &T) {
         let _ = T::set_process_wait;
     }
-    // W0544: lash::process::WakeDelivery [struct]
-    type_witness::<lash::process::WakeDelivery>();
-    // W0545: lash::process::WakeDelivery::attempts [field]
-    field_witness(|value: &lash::process::WakeDelivery| {
-        let _ = &value.attempts;
-    });
-    // W0546: lash::process::WakeDelivery::delivery_id [function]
-    let _ = lash::process::WakeDelivery::delivery_id;
-    // W0547: lash::process::WakeDelivery::disposition [field]
-    field_witness(|value: &lash::process::WakeDelivery| {
-        let _ = &value.disposition;
-    });
-    // W0548: lash::process::WakeDelivery::expires_at_ms [field]
-    field_witness(|value: &lash::process::WakeDelivery| {
-        let _ = &value.expires_at_ms;
-    });
-    // W0549: lash::process::WakeDelivery::first_attempt_ms [field]
-    field_witness(|value: &lash::process::WakeDelivery| {
-        let _ = &value.first_attempt_ms;
-    });
-    // W0550: lash::process::WakeDelivery::next_attempt_at_ms [field]
-    field_witness(|value: &lash::process::WakeDelivery| {
-        let _ = &value.next_attempt_at_ms;
-    });
-    // W0551: lash::process::WakeDelivery::pending [function]
-    let _ = lash::process::WakeDelivery::pending;
-    // W0552: lash::process::WakeDelivery::state [function]
-    let _ = lash::process::WakeDelivery::state;
-    // W0553: lash::process::WakeDelivery::wake [field]
-    field_witness(|value: &lash::process::WakeDelivery| {
-        let _ = &value.wake;
-    });
-    // W0554: lash::process::WakeDeliveryBlockedGroup [struct]
-    type_witness::<lash::process::WakeDeliveryBlockedGroup>();
-    // W0555: lash::process::WakeDeliveryBlockedGroup::blocking_delivery_id [field]
-    field_witness(|value: &lash::process::WakeDeliveryBlockedGroup| {
-        let _ = &value.blocking_delivery_id;
-    });
-    // W0556: lash::process::WakeDeliveryBlockedGroup::blocking_sequence [field]
-    field_witness(|value: &lash::process::WakeDeliveryBlockedGroup| {
-        let _ = &value.blocking_sequence;
-    });
-    // W0557: lash::process::WakeDeliveryBlockedGroup::process_id [field]
-    field_witness(|value: &lash::process::WakeDeliveryBlockedGroup| {
-        let _ = &value.process_id;
-    });
-    // W0558: lash::process::WakeDeliveryBlockedGroup::reason [field]
-    field_witness(|value: &lash::process::WakeDeliveryBlockedGroup| {
-        let _ = &value.reason;
-    });
-    // W0559: lash::process::WakeDeliveryBlockedGroup::redrive_delivery_id [field]
-    field_witness(|value: &lash::process::WakeDeliveryBlockedGroup| {
-        let _ = &value.redrive_delivery_id;
-    });
-    // W0560: lash::process::WakeDeliveryBlockedGroup::target_session_id [field]
-    field_witness(|value: &lash::process::WakeDeliveryBlockedGroup| {
-        let _ = &value.target_session_id;
-    });
-    // W0561: lash::process::WakeDeliveryClaimOutcome [enum]
-    type_witness::<lash::process::WakeDeliveryClaimOutcome>();
-    // W0562: lash::process::WakeDeliveryClaimOutcome::Applied [variant]
-    variant_witness(|value: &lash::process::WakeDeliveryClaimOutcome| {
-        matches!(value, lash::process::WakeDeliveryClaimOutcome::Applied)
-    });
-    // W0563: lash::process::WakeDeliveryClaimOutcome::ClaimLost [variant]
-    variant_witness(|value: &lash::process::WakeDeliveryClaimOutcome| {
-        matches!(
-            value,
-            lash::process::WakeDeliveryClaimOutcome::ClaimLost { .. }
-        )
-    });
-    // W0564: lash::process::WakeDeliveryClaimOutcome::ClaimLost::state [field]
-    field_witness(|value: &lash::process::WakeDeliveryClaimOutcome| {
-        if let lash::process::WakeDeliveryClaimOutcome::ClaimLost { state, .. } = value {
-            let _ = state;
-        }
-    });
-    // W0565: lash::process::WakeDeliveryLifecycle [enum]
-    type_witness::<lash::process::WakeDeliveryLifecycle>();
-    // W0566: lash::process::WakeDeliveryLifecycle::Discarded [variant]
-    variant_witness(|value: &lash::process::WakeDeliveryLifecycle| {
-        matches!(
-            value,
-            lash::process::WakeDeliveryLifecycle::Discarded { .. }
-        )
-    });
-    // W0567: lash::process::WakeDeliveryLifecycle::Discarded::reason [field]
-    field_witness(|value: &lash::process::WakeDeliveryLifecycle| {
-        if let lash::process::WakeDeliveryLifecycle::Discarded { reason, .. } = value {
-            let _ = reason;
-        }
-    });
-    // W0569: lash::process::WakeDeliveryLifecycle::Enqueued [variant]
-    variant_witness(|value: &lash::process::WakeDeliveryLifecycle| {
-        matches!(value, lash::process::WakeDeliveryLifecycle::Enqueued)
-    });
-    // W0570: lash::process::WakeDeliveryLifecycle::Enqueuing [variant]
-    variant_witness(|value: &lash::process::WakeDeliveryLifecycle| {
-        matches!(
-            value,
-            lash::process::WakeDeliveryLifecycle::Enqueuing { .. }
-        )
-    });
-    // W0571: lash::process::WakeDeliveryLifecycle::Enqueuing::claim_token [field]
-    field_witness(|value: &lash::process::WakeDeliveryLifecycle| {
-        if let lash::process::WakeDeliveryLifecycle::Enqueuing { claim_token, .. } = value {
-            let _ = claim_token;
-        }
-    });
-    // W0572: lash::process::WakeDeliveryLifecycle::Pending [variant]
-    variant_witness(|value: &lash::process::WakeDeliveryLifecycle| {
-        matches!(value, lash::process::WakeDeliveryLifecycle::Pending)
-    });
-    // W0573: lash::process::WakeDeliveryLifecycle::discard_reason [function]
-    let _ = lash::process::WakeDeliveryLifecycle::discard_reason;
-    // W0574: lash::process::WakeDeliveryLifecycle::state [function]
-    let _ = lash::process::WakeDeliveryLifecycle::state;
-    // W0575: lash::process::WakeDeliveryReport [struct]
-    type_witness::<lash::process::WakeDeliveryReport>();
-    // W0576: lash::process::WakeDeliveryReport::blocked_groups [field]
-    field_witness(|value: &lash::process::WakeDeliveryReport| {
-        let _ = &value.blocked_groups;
-    });
-    // W0577: lash::process::WakeDeliveryReport::discarded [field]
-    field_witness(|value: &lash::process::WakeDeliveryReport| {
-        let _ = &value.discarded;
-    });
-    // W0578: lash::process::WakeDeliveryReport::enqueued [field]
-    field_witness(|value: &lash::process::WakeDeliveryReport| {
-        let _ = &value.enqueued;
-    });
-    // W0579: lash::process::WakeDeliveryReport::enqueuing [field]
-    field_witness(|value: &lash::process::WakeDeliveryReport| {
-        let _ = &value.enqueuing;
-    });
-    // W0580: lash::process::WakeDeliveryReport::expired [field]
-    field_witness(|value: &lash::process::WakeDeliveryReport| {
-        let _ = &value.expired;
-    });
-    // W0581: lash::process::WakeDeliveryReport::from_deliveries [function]
-    let _ = lash::process::WakeDeliveryReport::from_deliveries(std::iter::empty::<
-        &'static lash::process::WakeDelivery,
-    >());
-    // W0582: lash::process::WakeDeliveryReport::pending [field]
-    field_witness(|value: &lash::process::WakeDeliveryReport| {
-        let _ = &value.pending;
-    });
-    // W0583: lash::process::WakeDeliveryReport::retargeted [field]
-    field_witness(|value: &lash::process::WakeDeliveryReport| {
-        let _ = &value.retargeted;
-    });
-    // W0584: lash::process::WakeDeliveryReport::sequence_rewound [field]
-    field_witness(|value: &lash::process::WakeDeliveryReport| {
-        let _ = &value.sequence_rewound;
-    });
-    // W0585: lash::process::WakeDeliveryReport::target_gone [field]
-    field_witness(|value: &lash::process::WakeDeliveryReport| {
-        let _ = &value.target_gone;
-    });
-    // W0586: lash::process::WakeDeliveryState [enum]
-    type_witness::<lash::process::WakeDeliveryState>();
-    // W0587: lash::process::WakeDeliveryState::Discarded [variant]
-    variant_witness(|value: &lash::process::WakeDeliveryState| {
-        matches!(value, lash::process::WakeDeliveryState::Discarded)
-    });
-    // W0588: lash::process::WakeDeliveryState::Enqueued [variant]
-    variant_witness(|value: &lash::process::WakeDeliveryState| {
-        matches!(value, lash::process::WakeDeliveryState::Enqueued)
-    });
-    // W0589: lash::process::WakeDeliveryState::Enqueuing [variant]
-    variant_witness(|value: &lash::process::WakeDeliveryState| {
-        matches!(value, lash::process::WakeDeliveryState::Enqueuing)
-    });
-    // W0590: lash::process::WakeDeliveryState::Pending [variant]
-    variant_witness(|value: &lash::process::WakeDeliveryState| {
-        matches!(value, lash::process::WakeDeliveryState::Pending)
-    });
-    // W0591: lash::process::WakeDeliveryState::as_str [function]
-    let _ = lash::process::WakeDeliveryState::as_str;
-    // W0592: lash::process::WakeDiscardReason [enum]
-    type_witness::<lash::process::WakeDiscardReason>();
-    // W0593: lash::process::WakeDiscardReason::Expired [variant]
-    variant_witness(|value: &lash::process::WakeDiscardReason| {
-        matches!(value, lash::process::WakeDiscardReason::Expired)
-    });
-    // W0594: lash::process::WakeDiscardReason::Retargeted [variant]
-    variant_witness(|value: &lash::process::WakeDiscardReason| {
-        matches!(value, lash::process::WakeDiscardReason::Retargeted)
-    });
-    // W0595: lash::process::WakeDiscardReason::SequenceRewound [variant]
-    variant_witness(|value: &lash::process::WakeDiscardReason| {
-        matches!(value, lash::process::WakeDiscardReason::SequenceRewound)
-    });
-    // W0596: lash::process::WakeDiscardReason::TargetGone [variant]
-    variant_witness(|value: &lash::process::WakeDiscardReason| {
-        matches!(value, lash::process::WakeDiscardReason::TargetGone)
-    });
-    // W0597: lash::process::WakeDiscardReason::NON_BLOCKING_ORDERING_GROUP_LABELS [assoc_const]
-    let _ = lash::process::WakeDiscardReason::NON_BLOCKING_ORDERING_GROUP_LABELS;
-    // W0598: lash::process::WakeDiscardReason::as_str [function]
-    let _ = lash::process::WakeDiscardReason::as_str;
-    // W0599: lash::process::WakeDiscardReason::blocks_ordering_group [function]
-    let _ = lash::process::WakeDiscardReason::blocks_ordering_group;
     // W0600: lash_core::facade_support::AgentFrameRun::into_final_turn [function]
     let _ = lash_core::facade_support::AgentFrameRun::into_final_turn;
     // W0605: lash_core::facade_support::TurnOptions::with_local_stop [function]
     let _ = lash_core::facade_support::TurnOptions::with_local_stop;
     // W0606: lash_core::facade_support::registry_transitions::RETIRED_PROCESS_STATUS_LABELS [constant]
     let _ = lash_core::facade_support::registry_transitions::RETIRED_PROCESS_STATUS_LABELS;
-    // W0608: lash_core::facade_support::registry_transitions::WakeDeliveryRow::project [function]
-    let _ = lash_core::facade_support::registry_transitions::WakeDeliveryRow::project;
     // W0609: lash::testing::RuntimeNamedPhase [struct]
     type_witness::<lash::testing::RuntimeNamedPhase>();
     // W0610: lash::testing::RuntimeNamedPhase::begin [function]
@@ -792,10 +585,6 @@ fn processes_area_witnesses_b() {
         lash::SessionId::from("x"),
         todo!(),
     );
-    // W0615: lash::runtime::RuntimeControlConfig::process_wake_delivery_policy [field]
-    field_witness(|value: &lash::runtime::RuntimeControlConfig| {
-        let _ = &value.process_wake_delivery_policy;
-    });
     // W0616: lash::plugins::ProcessEngineProcessContext [struct]
     type_witness::<lash::plugins::ProcessEngineProcessContext>();
     // W0618: lash::plugins::ProcessEngineProcessContext::clear_wait [function]
@@ -870,8 +659,6 @@ fn processes_area_witnesses_b() {
     field_witness(|value: &lash::persistence::QueuedCheckpointWork| {
         let _ = &value.turn_causes;
     });
-    // W0654: lash::process::WakeDelivery::claim_token [function]
-    let _ = lash::process::WakeDelivery::claim_token;
     // W0655: lash::plugins::PluginError::ProcessRegistryCursorBackendMismatch [variant]
     variant_witness(|value: &lash::plugins::PluginError| {
         matches!(

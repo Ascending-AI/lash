@@ -40,25 +40,13 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         let mut batch = ProcessEventBatch::for_fleet(self.fence.fleet());
         for request in prelude {
             batch
-                .stage(
-                    &mut tx,
-                    &mut record,
-                    request,
-                    occurred_at_ms,
-                    self.wake_delivery_config,
-                )
+                .stage(&mut tx, &mut record, request, occurred_at_ms)
                 .await?;
         }
         let request =
             facade_support::terminal_append_request(process_id, &await_output, Some(&authority));
         let (_, arm) = batch
-            .stage_arm(
-                &mut tx,
-                &mut record,
-                request,
-                occurred_at_ms,
-                self.wake_delivery_config,
-            )
+            .stage_arm(&mut tx, &mut record, request, occurred_at_ms)
             .await?;
         batch.commit(&mut tx, &record).await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
@@ -158,15 +146,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
             ProcessStartPlan::Append => {}
         }
         let request = ProcessEventAppendRequest::first_started(process_id, &started);
-        append_process_event_tx(
-            &mut tx,
-            &mut record,
-            request,
-            now,
-            self.wake_delivery_config,
-            self.fence.fleet(),
-        )
-        .await?;
+        append_process_event_tx(&mut tx, &mut record, request, now, self.fence.fleet()).await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(ProcessStartOutcome::Started(record))
     }
@@ -213,16 +193,26 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
                 if let Some(replay) = append.replay.as_mut() {
                     replay.attribution = attribution;
                 }
-                append_process_event_tx(
-                    &mut tx,
-                    &mut record,
-                    *append,
-                    now,
-                    self.wake_delivery_config,
-                    self.fence.fleet(),
-                )
-                .await?;
+                append_process_event_tx(&mut tx, &mut record, *append, now, self.fence.fleet())
+                    .await?;
             }
+        }
+        // The recorded cancel reaches the process's actor in the same
+        // transaction: its cancel mail and a control wake, which readies even
+        // a parked actor (ADR 0132 §11).
+        if !record.is_terminal()
+            && let Some(request) = record.cancel_request.as_deref()
+        {
+            crate::durable::processes::cancel_mail_within(
+                &mut tx,
+                process_id,
+                request.origin,
+                &request.requester,
+                true,
+                lash_durable::DurableInstant(i64::try_from(now).unwrap_or(i64::MAX)),
+            )
+            .await
+            .map_err(|error| PluginError::Session(error.to_string()))?;
         }
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok((record, lash_core_execution::StoreRealization::Realized))
@@ -246,13 +236,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         let mut batch = ProcessEventBatch::for_fleet(self.fence.fleet());
         for request in prelude {
             batch
-                .stage(
-                    &mut tx,
-                    &mut record,
-                    request,
-                    occurred_at_ms,
-                    self.wake_delivery_config,
-                )
+                .stage(&mut tx, &mut record, request, occurred_at_ms)
                 .await?;
         }
         if let ProcessTransitionPlan::Append(request) =
@@ -262,13 +246,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
             )?
         {
             batch
-                .stage(
-                    &mut tx,
-                    &mut record,
-                    *request,
-                    occurred_at_ms,
-                    self.wake_delivery_config,
-                )
+                .stage(&mut tx, &mut record, *request, occurred_at_ms)
                 .await?;
         }
         batch.commit(&mut tx, &record).await?;
@@ -292,15 +270,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         // transaction (FIG-3571).
         let mut batch = ProcessEventBatch::for_fleet(self.fence.fleet());
         for request in prelude {
-            batch
-                .stage(
-                    &mut tx,
-                    &mut record,
-                    request,
-                    now,
-                    self.wake_delivery_config,
-                )
-                .await?;
+            batch.stage(&mut tx, &mut record, request, now).await?;
         }
         if let ProcessTransitionPlan::Append(request) =
             lash_core_execution::runtime::prepare_process_transition(
@@ -308,88 +278,9 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
                 ProcessTransition::ClearWait,
             )?
         {
-            batch
-                .stage(
-                    &mut tx,
-                    &mut record,
-                    *request,
-                    now,
-                    self.wake_delivery_config,
-                )
-                .await?;
+            batch.stage(&mut tx, &mut record, *request, now).await?;
         }
         batch.commit(&mut tx, &record).await?;
-        tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(record)
-    }
-
-    async fn park_process_with_authority(
-        &self,
-        process_id: &ProcessId,
-        park: lash_core_execution::store::ProcessParkWrite,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<lash_core_execution::store::StoreTransition<ProcessRecord>, PluginError> {
-        let mut tx = begin_guarded(&self.pool, &self.fence)
-            .await
-            .map_err(plugin_store_error)?;
-        let mut record = require_process_tx(&mut tx, process_id).await?;
-        let now = self.clock.timestamp_ms();
-        validate_process_execution_authority(process_id, &record, authority, None)?;
-        let request = match lash_core_execution::runtime::prepare_process_transition(
-            &record,
-            ProcessTransition::Park(park),
-        )? {
-            ProcessTransitionPlan::Unchanged => {
-                tx.commit().await.map_err(plugin_sqlx_error)?;
-                return Ok(lash_core_execution::store::StoreTransition::unchanged(
-                    record,
-                ));
-            }
-            ProcessTransitionPlan::Append(request) => *request,
-        };
-        append_process_event_tx(
-            &mut tx,
-            &mut record,
-            request,
-            now,
-            self.wake_delivery_config,
-            self.fence.fleet(),
-        )
-        .await?;
-        tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(lash_core_execution::store::StoreTransition::changed(record))
-    }
-
-    async fn begin_parked_rerun_with_authority(
-        &self,
-        process_id: &ProcessId,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessRecord, PluginError> {
-        let mut tx = begin_guarded(&self.pool, &self.fence)
-            .await
-            .map_err(plugin_store_error)?;
-        let mut record = require_process_tx(&mut tx, process_id).await?;
-        let now = self.clock.timestamp_ms();
-        validate_process_execution_authority(process_id, &record, authority, None)?;
-        let request = match lash_core_execution::runtime::prepare_process_transition(
-            &record,
-            ProcessTransition::BeginParkedRerun,
-        )? {
-            ProcessTransitionPlan::Unchanged => {
-                tx.commit().await.map_err(plugin_sqlx_error)?;
-                return Ok(record);
-            }
-            ProcessTransitionPlan::Append(request) => *request,
-        };
-        append_process_event_tx(
-            &mut tx,
-            &mut record,
-            request,
-            now,
-            self.wake_delivery_config,
-            self.fence.fleet(),
-        )
-        .await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(record)
     }

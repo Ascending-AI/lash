@@ -1,10 +1,26 @@
 //! Process actor rows (L6): the process actor and registry row, its state
 //! revision, cancel, terminal and cascade cursor (ADR 0132 §10, §11).
+//!
+//! The registry row is the process's one row: its outcome, its lifetime
+//! scope and its first cancel request are the registry's, and the actor
+//! columns beside them (state revision, the driver's pending action, the
+//! cascade cursor) are the process actor's. The engine's state is the
+//! process's snapshot, `p/<pid>` in the snapshots domain, and moves in the
+//! same commit as the state revision.
 
 use crate::ids::{DurableInstant, Epoch};
-use lash_sansio::ProcessId;
+use lash_sansio::{CancelOrigin, ProcessId};
 
 use super::keys::ScopeKey;
+
+/// The format set a process actor is created in. One set for every
+/// process until L11 (FIG-5187) stamps each actor with its engine's format
+/// digest; a node that serves processes decodes it.
+pub const PROCESS_FORMATS: &str = "lash-process/1";
+
+/// The mail kind of a signal sent to a process: its body is the signal,
+/// encoded by its owner, and it reaches `advance` as one event.
+pub const SIGNAL_MAIL: &str = "signal";
 
 /// One process actor's row.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -12,56 +28,89 @@ pub struct ProcessActorRow {
     /// The process.
     pub process: ProcessId,
     /// Its engine state's revision; advances with every committed
-    /// transition.
+    /// transition. Zero before the first.
     pub state_rev: u64,
+    /// The process driver's state, encoded by its owner: what the last
+    /// committed transition left in flight. `None` before the first.
+    pub driver_json: Option<String>,
     /// When its cancel was first requested.
     pub cancel_requested_at: Option<DurableInstant>,
     /// Whether it is terminal.
     pub terminal: bool,
     /// The terminal's cascade cursor while `Until` children remain to be
-    /// marked.
+    /// marked: the last child marked, or empty before the first batch.
     pub cascade_cursor: Option<String>,
     /// The epoch of the commit that last wrote it.
-    pub written_epoch: Epoch,
+    pub written_epoch: Option<Epoch>,
 }
 
-/// The rows a process start writes: the registry row and the process actor
-/// as ready, in the transaction that admits the start.
+/// The rows a process start writes: the process actor, ready, in the
+/// transaction that admits the start. The registry row is the registry's
+/// own write in that transaction.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProcessStartRows {
     /// The process.
     pub process: ProcessId,
     /// Its lifetime scope, when it is `Until` one.
     pub until: Option<ScopeKey>,
-    /// The registration (definition, engine kind, engine config with its
-    /// cancel grace), encoded by its owner.
+    /// The registration (definition, engine kind, engine config), encoded
+    /// by its owner.
     pub registration_json: String,
 }
 
 /// A process write inside an owner commit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProcessWrite {
-    /// Register a process and create its actor ready.
+    /// Create a process's actor ready.
     Register(ProcessStartRows),
-    /// Commit one engine transition: the state revision moves on.
+    /// Commit one engine transition: the state revision moves from
+    /// `expected_rev` to `expected_rev + 1` and the driver state is
+    /// replaced. Refused with
+    /// [`DomainRefusal::ProcessRevConflict`](super::DomainRefusal::ProcessRevConflict)
+    /// when the stored revision is not `expected_rev`.
     Advance {
         /// The process.
         process: ProcessId,
         /// The revision replaced.
         expected_rev: u64,
+        /// The driver state after the transition.
+        driver_json: String,
     },
-    /// End the process with its terminal, encoded by its owner.
+    /// Append one process event, encoded by its owner, exactly once: the
+    /// replay key makes a repeat of the same commit a no-op.
+    Emit {
+        /// The process.
+        process: ProcessId,
+        /// The event's type.
+        event_type: String,
+        /// Its payload.
+        payload_json: String,
+        /// Its replay key.
+        replay_key: String,
+    },
+    /// End the process with its terminal, encoded by its owner. A process
+    /// already terminal keeps its first terminal. The cascade over its
+    /// `Until` children starts: its cursor is set, empty.
     Terminal {
         /// The process.
         process: ProcessId,
         /// The terminal outcome.
         outcome_json: String,
     },
-    /// Mark the next batch of `scope`'s `Until` children for cancel and
-    /// record where the cascade got to; `None` once it is done.
+    /// Mark `children` (live `Until(scope)` children whose cancel was not
+    /// yet requested) for cancel with `origin`: each records its first
+    /// cancel request, gets a cancel mail and a control wake. When `scope`
+    /// is the committing process, its cursor moves to `cursor`; `None`
+    /// once the cascade is done.
     CascadeBatch {
         /// The ending scope.
         scope: ScopeKey,
+        /// The children this batch marks.
+        children: Vec<ProcessId>,
+        /// Why they are cancelled.
+        origin: CancelOrigin,
+        /// Who asked, for the children's cancel requests.
+        requester: String,
         /// The cursor after this batch.
         cursor: Option<String>,
     },
@@ -72,23 +121,46 @@ pub enum ProcessWrite {
 pub struct CancelRequest {
     /// The process.
     pub process: ProcessId,
-    /// Who asked and why, encoded by its owner.
-    pub origin_json: String,
+    /// Why.
+    pub origin: CancelOrigin,
+    /// Who asked.
+    pub requester: String,
 }
 
 /// The answer to a [`CancelRequest`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CancelAnswer {
-    /// The first request: recorded at `at`, and the process woken.
+    /// The first request: recorded at `at`, a cancel mail appended and the
+    /// process control-woken.
     Requested {
         /// When.
         at: DurableInstant,
     },
-    /// An earlier request stands, with its own timestamp.
+    /// An earlier request stands, with its own timestamp; the process was
+    /// control-woken again.
     AlreadyRequested {
         /// The earlier request's time.
         at: DurableInstant,
     },
     /// The process is already terminal.
     AlreadyEnded,
+}
+
+/// A request to redrive a parked actor, from an operator.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RedriveRequest {
+    /// The actor.
+    pub actor: crate::ids::ActorKey,
+    /// Who asked.
+    pub requester: String,
+}
+
+/// The answer to a [`RedriveRequest`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RedriveAnswer {
+    /// It was parked: its park and its failed activations are cleared, the
+    /// feed records the redrive, and it is ready.
+    Redriven,
+    /// It was not parked; nothing was written.
+    NotParked,
 }

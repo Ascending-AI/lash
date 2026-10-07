@@ -9,8 +9,6 @@ pub(super) struct ProcessRows {
     pub(super) records: Vec<serde_json::Value>,
     pub(super) events: Vec<serde_json::Value>,
     pub(super) observers: Vec<(SessionId, ProcessId)>,
-    pub(super) wake_deliveries: Vec<serde_json::Value>,
-    pub(super) wake_allocation_floors: Vec<(SessionId, ProcessId, u64)>,
     pub(super) tombstones: Vec<serde_json::Value>,
 }
 
@@ -25,7 +23,6 @@ pub(super) struct TriggerRows {
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub(super) struct SurfaceState {
     pub(super) processes: ProcessRows,
-    pub(super) wake_redelivery_fences: Vec<(String, String, u64)>,
     pub(super) triggers: TriggerRows,
     /// `turn_parks`, normalized: the session's parked-turn record (FIG-3586).
     pub(super) turn_parks: Vec<serde_json::Value>,
@@ -209,69 +206,6 @@ pub(super) fn read_sqlite_surface(
         .collect::<Result<Vec<_>, _>>()
         .unwrap()
     };
-    let wake_deliveries = sqlite_simple_json_rows(
-        &process,
-        "SELECT delivery_id, delivery_json, state, claim_token, attempts, first_attempt_ms,
-                next_attempt_at_ms, expires_at_ms, discard_reason
-         FROM process_wake_deliveries ORDER BY delivery_id",
-        |row| {
-            let json: String = row.get(1)?;
-            let wake: serde_json::Value = serde_json::from_str(&json).unwrap();
-            let mut value = serde_json::json!({
-                "delivery_id": row.get::<_, String>(0)?,
-                "wake": wake,
-            });
-            let fields = value.as_object_mut().unwrap();
-            fields.insert(
-                "state".to_string(),
-                serde_json::json!(row.get::<_, String>(2)?),
-            );
-            if let Some(token) = row.get::<_, Option<String>>(3)? {
-                fields.insert("claim_token".to_string(), serde_json::json!(token));
-            } else {
-                fields.remove("claim_token");
-            }
-            fields.insert(
-                "attempts".to_string(),
-                serde_json::json!(row.get::<_, i64>(4)?),
-            );
-            fields.insert(
-                "first_attempt_ms".to_string(),
-                serde_json::json!(row.get::<_, Option<i64>>(5)?),
-            );
-            fields.insert(
-                "next_attempt_at_ms".to_string(),
-                serde_json::json!(row.get::<_, i64>(6)?),
-            );
-            fields.insert(
-                "expires_at_ms".to_string(),
-                serde_json::json!(row.get::<_, i64>(7)?),
-            );
-            fields.insert(
-                "discard_reason".to_string(),
-                serde_json::json!(row.get::<_, Option<String>>(8)?),
-            );
-            Ok(normalized_json(value))
-        },
-    );
-    let wake_allocation_floors = {
-        let mut stmt = process
-            .prepare(
-                "SELECT target_session_id, process_id, allocation_floor
-                 FROM wake_allocation_floors ORDER BY target_session_id, process_id",
-            )
-            .unwrap();
-        stmt.query_map([], |row| {
-            Ok((
-                SessionId::fixture(row.get::<_, String>(0)?),
-                stored_process_id(row.get::<_, String>(1)?),
-                row.get::<_, i64>(2)? as u64,
-            ))
-        })
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap()
-    };
     let tombstones = sqlite_simple_json_rows(
         &process,
         "SELECT process_id, terminal_label, pruned_at_ms, pruned_change_seq
@@ -285,30 +219,13 @@ pub(super) fn read_sqlite_surface(
             })))
         },
     );
-    let wake_redelivery_fences = {
-        let mut stmt = runtime
-            .prepare(
-                "SELECT session_id, process_id, allocation_floor
-             FROM wake_redelivery_fences ORDER BY session_id, process_id",
-            )
-            .unwrap();
-        stmt.query_map([], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get::<_, i64>(2)? as u64))
-        })
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap()
-    };
     SurfaceState {
         processes: ProcessRows {
             records,
             events,
             observers,
-            wake_deliveries,
-            wake_allocation_floors,
             tombstones,
         },
-        wake_redelivery_fences,
         triggers: read_sqlite_triggers(&trigger),
         turn_parks: sqlite_simple_json_rows(
             &runtime,
@@ -422,93 +339,15 @@ pub(super) async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
         )
     })
     .collect();
-    type PgWakeRow = (
-        String,
-        String,
-        String,
-        Option<String>,
-        i64,
-        Option<i64>,
-        i64,
-        i64,
-        Option<String>,
-    );
-    let wake_rows: Vec<PgWakeRow> = sqlx::query_as("SELECT delivery_id, delivery_json, state, claim_token, attempts, first_attempt_ms, next_attempt_at_ms, expires_at_ms, discard_reason FROM lash_process_wake_deliveries ORDER BY delivery_id").fetch_all(pool).await.unwrap();
-    let wake_deliveries = wake_rows
-        .into_iter()
-        .map(
-            |(
-                delivery_id,
-                json,
-                state,
-                token,
-                attempts,
-                first_attempt,
-                next_attempt,
-                expires,
-                discard,
-            )| {
-                let wake: serde_json::Value = serde_json::from_str(&json).unwrap();
-                let mut value = serde_json::json!({
-                    "delivery_id": delivery_id,
-                    "wake": wake,
-                });
-                let fields = value.as_object_mut().unwrap();
-                fields.insert("state".to_string(), serde_json::json!(state));
-                if let Some(token) = token {
-                    fields.insert("claim_token".to_string(), serde_json::json!(token));
-                } else {
-                    fields.remove("claim_token");
-                }
-                fields.insert("attempts".to_string(), serde_json::json!(attempts));
-                fields.insert(
-                    "first_attempt_ms".to_string(),
-                    serde_json::json!(first_attempt),
-                );
-                fields.insert(
-                    "next_attempt_at_ms".to_string(),
-                    serde_json::json!(next_attempt),
-                );
-                fields.insert("expires_at_ms".to_string(), serde_json::json!(expires));
-                fields.insert("discard_reason".to_string(), serde_json::json!(discard));
-                normalized_json(value)
-            },
-        )
-        .collect();
-    let allocation_rows: Vec<(String, String, i64)> = sqlx::query_as(
-        "SELECT target_session_id, process_id, allocation_floor
-         FROM lash_wake_allocation_floors ORDER BY target_session_id, process_id",
-    )
-    .fetch_all(pool)
-    .await
-    .unwrap();
-    let wake_allocation_floors = allocation_rows
-        .into_iter()
-        .map(|(session, process, sequence)| {
-            (
-                SessionId::fixture(session),
-                stored_process_id(process),
-                sequence as u64,
-            )
-        })
-        .collect();
     let tombstone_rows: Vec<(String, String, i64, i64)> = sqlx::query_as("SELECT process_id, terminal_label, pruned_at_ms, pruned_change_seq FROM lash_process_tombstones ORDER BY process_id").fetch_all(pool).await.unwrap();
     let tombstones = tombstone_rows.into_iter().map(|(process_id, terminal_label, pruned_at_ms, pruned_change_seq)| normalized_json(serde_json::json!({"process_id": process_id, "terminal_label": terminal_label, "pruned_at_ms": pruned_at_ms, "pruned_change_seq": pruned_change_seq}))).collect();
-    let fence_rows: Vec<(String, String, i64)> = sqlx::query_as("SELECT session_id, process_id, allocation_floor FROM lash_wake_redelivery_fences ORDER BY session_id, process_id").fetch_all(pool).await.unwrap();
-    let wake_redelivery_fences = fence_rows
-        .into_iter()
-        .map(|(session, process, sequence)| (session, process, sequence as u64))
-        .collect();
     SurfaceState {
         processes: ProcessRows {
             records,
             events,
             observers,
-            wake_deliveries,
-            wake_allocation_floors,
             tombstones,
         },
-        wake_redelivery_fences,
         triggers: read_postgres_triggers(pool).await,
         turn_parks: read_postgres_turn_parks(pool).await,
         turn_park_loads: Vec::new(),
@@ -595,7 +434,6 @@ pub(super) async fn read_postgres_triggers(pool: &PgPool) -> TriggerRows {
 pub(super) fn states_agree(observations: &[(&str, SurfaceState)]) -> bool {
     observations.windows(2).all(|pair| {
         pair[0].1.processes == pair[1].1.processes
-            && pair[0].1.wake_redelivery_fences == pair[1].1.wake_redelivery_fences
             && pair[0].1.triggers == pair[1].1.triggers
             && pair[0].1.turn_parks == pair[1].1.turn_parks
             && pair[0].1.turn_park_loads == pair[1].1.turn_park_loads

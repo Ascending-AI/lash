@@ -273,22 +273,6 @@ pub async fn every_execution_write_refuses_a_superseded_invocation_without_mutat
                 .clear_process_wait_with_authority(&id, Vec::new(), &old)
                 .await
                 .map(|_| ()),
-            registry
-                .park_process_with_authority(
-                    &id,
-                    crate::store::ParkReason::ReplayDivergence {
-                        message: "stale".into(),
-                    }
-                    .into(),
-                    &old,
-                )
-                .await
-                .map(lash_core::store::StoreTransition::into_record)
-                .map(|_| ()),
-            registry
-                .begin_parked_rerun_with_authority(&id, &old)
-                .await
-                .map(|_| ()),
         ];
         for (write, result) in results.into_iter().enumerate() {
             if write == 0 {
@@ -326,16 +310,8 @@ pub async fn every_execution_write_refuses_a_superseded_invocation_without_mutat
                 .is_none()
         );
         registry
-            .park_process_with_authority(
-                &id,
-                crate::store::ParkReason::ReplayDivergence {
-                    message: "current".into(),
-                }
-                .into(),
-                &current,
-            )
+            .clear_process_wait_with_authority(&id, Vec::new(), &current)
             .await
-            .map(lash_core::store::StoreTransition::into_record)
             .expect("current invocation can write");
     }
 }

@@ -36,14 +36,17 @@ table lash_actor_mail
 table lash_actors
   column acked_seq bigint not-null
   column actor_key text not-null
+  column claimed_revision bigint nullable
   column created_at_ms bigint not-null
   column epoch bigint not-null
+  column failed_activations bigint not-null default
   column formats text not-null
   column kind text not-null
   column mail_seq bigint not-null
   column next_due_ms bigint nullable
   column owner_boot text nullable
   column owner_node text nullable
+  column park_json text nullable
   column ready_at_ms bigint nullable
   column state text not-null
   column state_revision bigint not-null
@@ -219,6 +222,13 @@ table lash_parent_end_plans
   column parent_payload text not-null
   unique (obligation_id)
   primary-key (parent_kind, parent_id)
+table lash_park_events
+  column actor_key text not-null
+  column at_ms bigint not-null
+  column kind text not-null
+  column reason_json text not-null
+  column seq bigint not-null identity-always
+  primary-key (seq)
 table lash_pending_turn_inputs
   column admitted_by text nullable
   column admitted_run text nullable
@@ -277,21 +287,6 @@ table lash_process_observers
   column session_id text not-null
   primary-key (session_id, process_id)
   foreign-key (process_id) references lash_processes (process_id) on delete cascade
-table lash_process_park_clock
-  column compaction_horizon bigint not-null default
-  column current_seq bigint not-null default
-  column singleton boolean not-null default
-  primary-key (singleton)
-table lash_process_park_events
-  column at_ms bigint not-null
-  column cause_json text nullable
-  column kind text not-null
-  column park_id bigint not-null
-  column process_id text not-null
-  column reason_json text nullable
-  column redrive_intent bigint nullable
-  column seq bigint not-null
-  primary-key (seq)
 table lash_process_segment_handovers
   column committed_at_ms bigint not-null
   column handover_json text not-null
@@ -306,29 +301,16 @@ table lash_process_tombstones
   column pruned_change_seq bigint not-null
   column terminal_label text not-null
   primary-key (process_id)
-table lash_process_wake_deliveries
-  column attempts bigint not-null default
-  column claim_token text nullable
-  column delivery_id text not-null
-  column delivery_json text not-null
-  column discard_reason text nullable
-  column expires_at_ms bigint not-null
-  column first_attempt_ms bigint nullable
-  column next_attempt_at_ms bigint not-null
-  column process_id text not-null
-  column sequence bigint not-null
-  column state text not-null
-  column target_session_id text not-null
-  primary-key (delivery_id)
-  foreign-key (process_id) references lash_processes (process_id) on delete cascade
 table lash_processes
   column cancel_requested_at_ms bigint nullable
+  column cascade_cursor text nullable
   column change_seq bigint not-null
   column consumer_hold_cancels boolean nullable
   column consumer_hold_key text nullable
   column consumer_hold_scope_id text nullable
   column consumer_hold_scope_kind text nullable
   column created_at_ms bigint not-null
+  column driver_json text nullable
   column identity_kind text not-null
   column identity_label text nullable
   column last_event_sequence bigint not-null
@@ -345,9 +327,6 @@ table lash_processes
   column obligation_stall_reason text nullable
   column obligation_state text nullable
   column originator_id text not-null
-  column park_executable_generation text nullable
-  column parked_reason_code text nullable
-  column parked_since_ms bigint nullable
   column process_id text not-null
   column record_json text not-null
   column start_key text nullable
@@ -360,11 +339,13 @@ table lash_processes
   column start_obligation_settled_at_ms bigint nullable
   column start_obligation_stall_reason text nullable
   column start_obligation_state text nullable
+  column state_rev bigint not-null default
   column status text not-null
   column trigger_delivery_pin_occurrence_id text nullable
   column trigger_delivery_pin_subscription_id text nullable
   column updated_at_ms bigint not-null
   column wake_session_id text nullable
+  column written_epoch bigint nullable
   unique (obligation_id)
   unique (start_key) where start_key is not null
   unique (start_obligation_id)
@@ -750,16 +731,6 @@ table lash_waits
   column target_process text nullable
   column wait_id text not-null
   primary-key (wait_id)
-table lash_wake_allocation_floors
-  column allocation_floor bigint not-null
-  column process_id text not-null
-  column target_session_id text not-null
-  primary-key (target_session_id, process_id)
-table lash_wake_redelivery_fences
-  column allocation_floor bigint not-null
-  column process_id text not-null
-  column session_id text not-null
-  primary-key (session_id, process_id)
 table lash_worker_recovery
   column attempts integer not-null
   column cpu_nanos bigint not-null

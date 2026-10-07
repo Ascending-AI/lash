@@ -174,6 +174,10 @@ pub enum ProcessCompletionAuthority {
         workflow_key: String,
         segment_ordinal: u64,
     },
+    /// The process's own actor ends it in its terminal transaction (ADR
+    /// 0132 §11). Its single-writer discipline is the actor's epoch fence,
+    /// checked by the same commit; `epoch` records the epoch it held.
+    ActorEpoch { epoch: u64 },
 }
 
 impl ProcessCompletionAuthority {
@@ -188,6 +192,7 @@ impl ProcessCompletionAuthority {
         match self {
             Self::WorkflowKey { .. } => "workflow-key",
             Self::WorkflowKeyRecovery { .. } => "workflow-key-recovery",
+            Self::ActorEpoch { .. } => "actor-epoch",
         }
     }
 
@@ -1016,6 +1021,18 @@ impl ProcessEventAppendRequest {
     ///
     /// See [`wake_suppressed`](Self::wake_suppressed) for when an append is
     /// entitled to do this.
+    /// The signal this append admits, if it is a signal's: what the store
+    /// mails to the process actor in the append's own transaction when the
+    /// append is new (ADR 0132 §10).
+    #[must_use]
+    pub fn signal(&self) -> Option<ProcessSignal> {
+        self.signal_identity.as_ref().map(|identity| ProcessSignal {
+            identity: identity.clone(),
+            payload: self.payload.clone(),
+            trace_cause: self.trace_cause.clone(),
+        })
+    }
+
     pub fn without_wake(mut self) -> Self {
         self.wake_suppressed = true;
         self
@@ -1075,51 +1092,6 @@ impl ProcessEventAppendRequest {
             "process:{process_id}:wait:{}:since:{}:cleared",
             wait.key(),
             wait.since_ms
-        ))
-    }
-
-    /// Builds the park fact of a process whose body refused to replay its
-    /// journal (NOW-B). Keyed by the record's newest event sequence: each
-    /// refusal of a rerun appends its own fact, and a retried write of the
-    /// same refusal coalesces onto it.
-    #[expect(
-        clippy::expect_used,
-        reason = "a json! object literal is an object and crate-owned payloads serialize"
-    )]
-    pub fn parked(
-        process_id: &ProcessId,
-        park: &crate::store::ProcessParkWrite,
-        after_event_sequence: u64,
-    ) -> Self {
-        let mut payload = serde_json::json!({ "reason": park.reason });
-        let object = payload
-            .as_object_mut()
-            .expect("the parked payload is an object");
-        if let Some(engine) = &park.engine {
-            object.insert(
-                "engine".to_string(),
-                serde_json::to_value(engine).expect("an engine park serializes"),
-            );
-        }
-        Self::new("process.parked", payload).with_replay_key(format!(
-            "process:{process_id}:parked:after:{after_event_sequence}"
-        ))
-    }
-
-    /// Builds the fact that a rerun of a parked process began (NOW-B): the
-    /// park stays, but no longer exempts the next start from the attempt
-    /// budget until the rerun refuses again.
-    pub fn park_rerun_began(
-        process_id: &ProcessId,
-        park_id: crate::store::ParkId,
-        after_event_sequence: u64,
-    ) -> Self {
-        Self::new(
-            "process.park_rerun_began",
-            serde_json::json!({ "park_id": park_id }),
-        )
-        .with_replay_key(format!(
-            "process:{process_id}:park-rerun:after:{after_event_sequence}"
         ))
     }
 
@@ -1235,8 +1207,6 @@ pub(super) enum ProcessEventKind {
     Resumed,
     ExternalRefSet,
     CancelRequested,
-    Parked,
-    ParkRerunBegan,
     ObserverAdded,
     ObserverRemoved,
     SubscriptionRetargeted,
@@ -1254,8 +1224,6 @@ impl ProcessEventKind {
             "process.resumed" => Self::Resumed,
             "process.external_ref_set" => Self::ExternalRefSet,
             "process.cancel_requested" => Self::CancelRequested,
-            "process.parked" => Self::Parked,
-            "process.park_rerun_began" => Self::ParkRerunBegan,
             "process.observer_added" => Self::ObserverAdded,
             "process.observer_removed" => Self::ObserverRemoved,
             "process.subscription_retargeted" => Self::SubscriptionRetargeted,
@@ -1285,8 +1253,6 @@ pub fn runtime_lifecycle_event_type(name: &str) -> Option<ProcessEventType> {
         | ProcessEventKind::Resumed
         | ProcessEventKind::ExternalRefSet
         | ProcessEventKind::CancelRequested
-        | ProcessEventKind::Parked
-        | ProcessEventKind::ParkRerunBegan
         | ProcessEventKind::ObserverAdded
         | ProcessEventKind::ObserverRemoved
         | ProcessEventKind::SubscriptionRetargeted => Some(ProcessEventType {

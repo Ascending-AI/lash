@@ -767,6 +767,10 @@ pub struct ToolCancellation {
     pub origin: Option<CancelOrigin>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<ToolValue>,
+    /// Whether lash forced the end: a cancelled process whose engine did not
+    /// end it within its cancel grace (ADR 0132 §10).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub forced: bool,
 }
 
 impl ToolCancellation {
@@ -782,7 +786,15 @@ impl ToolCancellation {
             source: ToolFailureSource::Cancellation,
             origin: None,
             raw: None,
+            forced: false,
         }
+    }
+
+    /// Mark the cancellation forced: lash ended the process at its grace.
+    #[must_use]
+    pub fn forced(mut self) -> Self {
+        self.forced = true;
+        self
     }
 
     pub fn to_json_value(&self) -> Value {
@@ -1406,6 +1418,7 @@ mod tests {
             message: "stopped".to_string(),
             source: ToolFailureSource::Cancellation,
             raw: Some(ToolValue::untrusted_json(foreign.clone())),
+            forced: false,
         };
 
         assert_eq!(

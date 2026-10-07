@@ -589,14 +589,6 @@ pub async fn every_terminal_ingress_item_leaves_a_tombstone(store: Arc<dyn Runti
         .await
         .expect("vacuum the session's tombstones");
     assert_eq!(vacuum.removed_queued_work_tombstone_count, 3);
-    let error = store
-        .enqueue_queued_work(wake(&session, "withdrawn-process", 1, "withdrawn"))
-        .await
-        .expect_err("a vacuumed wake's redelivery meets its receiver floor");
-    assert!(
-        matches!(error, StoreError::ProcessWakeSequenceRewound { .. }),
-        "{error:?}"
-    );
 }
 
 /// ADR 0101 §8, as FIG-4202 found missing: a session command resubmitted

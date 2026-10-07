@@ -40,6 +40,7 @@ const POSITION_CODE_OPENER: u8 = 6;
 const POSITION_CODE_CELL: u8 = 7;
 const POSITION_CODE_COMMAND: u8 = 8;
 const POSITION_CODE_AGGREGATE: u8 = 9;
+const POSITION_PROCESS_STEP: u8 = 10;
 
 /// The durable admission a tool call's identity is rooted in.
 ///
@@ -211,6 +212,14 @@ pub enum ToolCallPosition<'a> {
     CodeCommand(u64),
     /// A leaf's first-appearance index in the aggregate as written.
     CodeAggregate(u64),
+    /// A host process engine's step: its name, unique within the process,
+    /// and the run that admitted it (ADR 0132 §10).
+    ProcessStep {
+        /// The step's name.
+        step: &'a str,
+        /// The run that admitted it.
+        run: u64,
+    },
 }
 
 impl ToolCallPosition<'_> {
@@ -230,6 +239,11 @@ impl ToolCallPosition<'_> {
             }
             Self::CodeCommand(value) => encode_number(digest, POSITION_CODE_COMMAND, value),
             Self::CodeAggregate(value) => encode_number(digest, POSITION_CODE_AGGREGATE, value),
+            Self::ProcessStep { step, run } => {
+                digest.update([POSITION_PROCESS_STEP]);
+                encode_bytes(digest, step);
+                digest.update(run.to_be_bytes());
+            }
         }
     }
 }

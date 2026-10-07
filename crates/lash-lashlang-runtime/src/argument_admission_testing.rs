@@ -106,7 +106,6 @@ pub async fn process_shutdown_preserves_typed_failures(
             None,
             None,
             Arc::new(lash_core::NoSessionWork::new()),
-            lash_core::DeliveryPolicy::EarliestSafeBoundary,
             backend.clock(),
             true,
             lash_core::CancellationToken::new(),

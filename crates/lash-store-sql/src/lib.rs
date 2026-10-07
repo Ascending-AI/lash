@@ -110,6 +110,7 @@ pub const TABLES: &[&str] = &[
     durable::ACTORS_TABLE,
     durable::MAIL_TABLE,
     durable::NODES_TABLE,
+    durable::park_events::TABLE,
     durable::run_records::TABLE,
     durable::turns::TABLE,
     durable::snapshots::TABLE,
@@ -120,14 +121,9 @@ pub const TABLES: &[&str] = &[
     process::events::TABLE,
     process::observers::TABLE,
     process::parent_end_plans::TABLE,
-    process::park_clock::TABLE,
-    process::park_events::TABLE,
     process::processes::TABLE,
     process::segment_handovers::TABLE,
     process::tombstones::TABLE,
-    process::wake_allocation_floors::TABLE,
-    process::wake_deliveries::TABLE,
-    process::wake_redelivery_fences::TABLE,
     recovery_leader::TABLE,
     worker_recovery::TABLE,
     trigger::deliveries::TABLE,
@@ -208,7 +204,6 @@ pub fn all_statements() -> Vec<Statement> {
     );
     statements.extend_from_slice(process::events::EventStatements::NEUTRAL);
     statements.extend_from_slice(process::event_horizons::EventHorizonStatements::NEUTRAL);
-    statements.extend_from_slice(process::park_events::ProcessParkEventStatements::NEUTRAL);
     statements.extend_from_slice(process::observers::ObserverStatements::NEUTRAL);
     statements.extend_from_slice(process::parent_end_plans::ParentEndPlanStatements::NEUTRAL);
     statements.extend_from_slice(process::processes::ProcessStatements::NEUTRAL);
@@ -256,6 +251,9 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(durable::run_records::RunRecordStatements::NEUTRAL);
     statements.extend_from_slice(durable::snapshots::SnapshotStatements::NEUTRAL);
     statements.extend_from_slice(durable::waits::WaitStatements::NEUTRAL);
+    statements.extend_from_slice(durable::processes::ProcessActorStatements::NEUTRAL);
+    statements.extend_from_slice(durable::processes::ActorParkStatements::NEUTRAL);
+    statements.extend_from_slice(durable::park_events::ParkEventStatements::NEUTRAL);
     statements.extend_from_slice(
         turn_ingress::pending_inputs::PendingTurnInputObligationStatements::NEUTRAL,
     );

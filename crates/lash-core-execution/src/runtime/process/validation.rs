@@ -34,11 +34,7 @@ pub fn validate_generic_process_event_append(
     }
     if matches!(
         request.event_type.as_str(),
-        "process.observer_added"
-            | "process.observer_removed"
-            | "process.subscription_retargeted"
-            | "process.parked"
-            | "process.park_rerun_began"
+        "process.observer_added" | "process.observer_removed" | "process.subscription_retargeted"
     ) {
         return Err(PluginError::ReservedProcessEvent {
             event_type: request.event_type.clone(),
@@ -98,16 +94,6 @@ pub enum ProcessTransition {
     /// Enter a durable wait state.
     EnterWait(WaitState),
     ClearWait,
-    /// Park the process: its body refused to replay its journal (NOW-B). A
-    /// first refusal opens the park; a rerun's refusal re-parks it, keeping
-    /// `since_ms` and `park_id` and counting the attempt. A park whose latest
-    /// run already refused is unchanged, so a retried write never counts one
-    /// refusal twice.
-    Park(crate::store::ProcessParkWrite),
-    /// A rerun of a parked process began: the park stays, no longer
-    /// refusing, until the rerun refuses again. Unchanged on a process with
-    /// no refusing park.
-    BeginParkedRerun,
 }
 
 /// The store action selected for a registry-owned lifecycle transition.
@@ -275,27 +261,6 @@ pub fn prepare_process_transition(
             };
             ProcessEventAppendRequest::wait_cleared(&record.id, wait)
         }
-        ProcessTransition::Park(park) => {
-            if record.is_refusing_park() {
-                return Ok(ProcessTransitionPlan::Unchanged);
-            }
-            let mut append =
-                ProcessEventAppendRequest::parked(&record.id, &park, record.last_event_sequence);
-            if record.is_terminal() {
-                route_transition_refusal_to_fold(&mut append)?;
-            }
-            append
-        }
-        ProcessTransition::BeginParkedRerun => {
-            let Some(park) = record.park().filter(|park| park.refusing) else {
-                return Ok(ProcessTransitionPlan::Unchanged);
-            };
-            ProcessEventAppendRequest::park_rerun_began(
-                &record.id,
-                park.park_id,
-                record.last_event_sequence,
-            )
-        }
     };
     Ok(ProcessTransitionPlan::Append(Box::new(append)))
 }
@@ -347,8 +312,6 @@ pub fn apply_process_event_projection(
                 }
             }
         }
-        // A wait is a fact of the process's own execution past a refusal, so
-        // entering or leaving one ends its park (NOW-B).
         ProcessEventKind::Waiting => match &record.lifecycle {
             ProcessLifecycleState::Terminal { .. } => {
                 return Err(PluginError::Session(format!(
@@ -359,7 +322,6 @@ pub fn apply_process_event_projection(
             ProcessLifecycleState::Running { .. } | ProcessLifecycleState::Waiting { .. } => {
                 record.lifecycle = ProcessLifecycleState::Waiting {
                     wait: lifecycle_payload(event, "wait")?,
-                    park: None,
                 };
             }
         },
@@ -434,59 +396,6 @@ pub fn apply_process_event_projection(
                 }
             }
         }
-        ProcessEventKind::Parked => {
-            let status = record.status();
-            let process_id = record.id.clone();
-            let Some(slot) = record.lifecycle.park_mut() else {
-                return Err(PluginError::Session(format!(
-                    "process `{process_id}` cannot park from `{}`",
-                    status.label()
-                )));
-            };
-            let reason: crate::store::ParkReason = lifecycle_payload(event, "reason")?;
-            let engine: Option<crate::store::EnginePark> = event
-                .payload
-                .get("engine")
-                .map(|engine| serde_json::from_value(engine.clone()))
-                .transpose()
-                .map_err(|error| {
-                    PluginError::Session(format!(
-                        "process event `{}` has an invalid engine park handle: {error}",
-                        event.event_type
-                    ))
-                })?;
-            match slot.as_deref_mut() {
-                Some(park) => {
-                    park.reason = reason;
-                    if engine.is_some() {
-                        park.engine = engine;
-                    }
-                    park.last_refused_ms = event.occurred_at;
-                    park.attempts = park.attempts.saturating_add(1);
-                    park.refusing = true;
-                }
-                None => {
-                    *slot = Some(Box::new(crate::store::ProcessPark {
-                        reason,
-                        park_id: crate::store::ParkId::from_feed_sequence(event.sequence),
-                        since_ms: event.occurred_at,
-                        last_refused_ms: event.occurred_at,
-                        attempts: 1,
-                        refusing: true,
-                        engine,
-                    }));
-                }
-            }
-        }
-        ProcessEventKind::ParkRerunBegan => {
-            if let Some(park) = record
-                .lifecycle
-                .park_mut()
-                .and_then(|slot| slot.as_deref_mut())
-            {
-                park.refusing = false;
-            }
-        }
         ProcessEventKind::ObserverAdded
         | ProcessEventKind::ObserverRemoved
         | ProcessEventKind::SubscriptionRetargeted
@@ -500,27 +409,11 @@ pub fn apply_process_event_projection(
         }
     }
 
-    // The first fact of the process's own execution past a refusal ends its
-    // park (NOW-B): the run got past replay. Registry-side facts — a start
-    // marker, a cancel or abandon request, observer edges — say nothing about
-    // whether the body can replay, so the park outlives them.
-    if matches!(
-        kind,
-        ProcessEventKind::EffectOutcome
-            | ProcessEventKind::EffectOmissions
-            | ProcessEventKind::Waiting
-            | ProcessEventKind::Resumed
-            | ProcessEventKind::Custom
-    ) && let Some(slot) = record.lifecycle.park_mut()
-    {
-        *slot = None;
-    }
-
     if let Some(terminal) = event.semantics.terminal.as_ref() {
         if record.is_terminal() {
             return Ok(());
         }
-        // The outcome is the state: it takes the wait and the park with it.
+        // The outcome is the state: it takes the wait with it.
         record.lifecycle = ProcessLifecycleState::Terminal {
             outcome: terminal.outcome.clone(),
         };
@@ -528,57 +421,6 @@ pub fn apply_process_event_projection(
     record.updated_at_ms = event.occurred_at;
     record.last_event_sequence = event.sequence;
     Ok(())
-}
-
-/// The park feed transitions one appended event made to a process record
-/// (NOW-B), given the record's park before the append and the projected
-/// record after it. Every process store appends exactly these, in order, to
-/// its process park feed inside the event's own transaction: a first park is
-/// `Parked`, a re-park and a rerun's start are no transition at all, and the
-/// fact that ends a park closes it as `Unparked` or `Cancelled`.
-pub fn process_park_transitions(
-    before: Option<&crate::store::ProcessPark>,
-    after: &ProcessRecord,
-) -> Vec<(crate::store::ParkId, crate::store::ParkEventKind)> {
-    use crate::store::{ParkCancelCause, ParkEventKind, UnparkCause};
-    let closing = |park: &crate::store::ProcessPark| {
-        let kind = if after.status() == ProcessStatus::Cancelled {
-            ParkEventKind::Cancelled {
-                cause: ParkCancelCause::ProcessCancelled {
-                    origin: after
-                        .cancel_request
-                        .as_deref()
-                        .map(|request| request.origin),
-                },
-            }
-        } else if after.is_terminal() {
-            ParkEventKind::Unparked {
-                cause: UnparkCause::ProcessTerminal {
-                    status: after.status(),
-                },
-            }
-        } else {
-            ParkEventKind::Unparked {
-                cause: UnparkCause::ProcessProgressed,
-            }
-        };
-        (park.park_id, kind)
-    };
-    let opening = |park: &crate::store::ProcessPark| {
-        (
-            park.park_id,
-            ParkEventKind::Parked {
-                reason: park.reason.clone(),
-            },
-        )
-    };
-    match (before, after.park()) {
-        (None, None) => Vec::new(),
-        (None, Some(opened)) => vec![opening(opened)],
-        (Some(closed), None) => vec![closing(closed)],
-        (Some(previous), Some(current)) if previous.park_id == current.park_id => Vec::new(),
-        (Some(previous), Some(current)) => vec![closing(previous), opening(current)],
-    }
 }
 
 /// Rebuild a process record by folding its persisted events in sequence order.
@@ -1111,8 +953,6 @@ pub fn require_event_replay(
                 | "process.waiting"
                 | "process.resumed"
                 | "process.external_ref_set"
-                | "process.parked"
-                | "process.park_rerun_began"
                 | "process.observer_added"
                 | "process.observer_removed"
                 | "process.subscription_retargeted"

@@ -204,9 +204,8 @@ pub use crate::core::{
 pub use crate::durable_session::DurableSession;
 pub use crate::error::{EmbedError, Result, SendError};
 pub use crate::parked_work::{
-    ParkedKinds, ParkedWork, ParkedWorkCursor, ParkedWorkEvent, ParkedWorkEventPage,
-    ParkedWorkEventsCursor, ParkedWorkPage, ParkedWorkQuery, ParkedWorkRecord, ParkedWorkRef,
-    ParkedWorkReport,
+    ParkedWork, ParkedWorkCursor, ParkedWorkEvent, ParkedWorkEventPage, ParkedWorkEventsCursor,
+    ParkedWorkPage, ParkedWorkQuery, ParkedWorkRecord, ParkedWorkRef, ParkedWorkReport,
 };
 pub use crate::send::{
     BatchInput, CancelBuilder, CancelReceipt, CancelTarget, ParkedTurn, RunHandle,
@@ -627,8 +626,6 @@ pub mod persistence {
     pub use lash_core::store::ArtifactCleanupLedger;
     /// The current state of an obligation a custom ledger exposes.
     pub use lash_core::store::ObligationStanding;
-    /// A process park write accepted by a custom registry.
-    pub use lash_core::store::ProcessParkWrite;
     /// Head and usage values returned by custom session stores.
     pub use lash_core::store::SessionHeadRef;
     pub use lash_core::store::worker_recovery::{
@@ -709,14 +706,13 @@ pub mod persistence {
         HydratedCheckpointComponent, HydratedSessionCheckpoint, InterruptedTurnClosure,
         OperationId, ParkCancelCause, ParkEventColumns, ParkEventKind, ParkFeedCursor,
         ParkFeedEvent, ParkFeedPage, ParkId, ParkReason, ParkReasonCode, ParkReport,
-        PendingFollowOn, PhysicalTurn, ProcessPark, ProcessParkKey, ProcessParkQuery,
-        RunContinuation, RunOpenerState, RuntimeCommit, RuntimeCommitReceipt,
-        RuntimeStoreDecorator, RuntimeTurnCommitStamp, SemanticBoundaryOperation,
-        SessionCheckpoint, SessionHeadMeta, SessionHeadPayload, SuspendedCell, TurnChange,
-        TurnChangeCursor, TurnChangeKind, TurnChangePage, TurnCommitFailureCause,
-        TurnCommitOutcome, TurnPark, TurnParkOrigin, TurnParkQuery, TurnParkTarget, TurnParkWrite,
-        TurnProjectionWatermark, UnparkCause, UnsettledTurnCounts, commit_runtime_state_verified,
-        validate_turn_commit_outcome_code,
+        PendingFollowOn, PhysicalTurn, RunContinuation, RunOpenerState, RuntimeCommit,
+        RuntimeCommitReceipt, RuntimeStoreDecorator, RuntimeTurnCommitStamp,
+        SemanticBoundaryOperation, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
+        SuspendedCell, TurnChange, TurnChangeCursor, TurnChangeKind, TurnChangePage,
+        TurnCommitFailureCause, TurnCommitOutcome, TurnPark, TurnParkOrigin, TurnParkQuery,
+        TurnParkTarget, TurnParkWrite, TurnProjectionWatermark, UnparkCause, UnsettledTurnCounts,
+        commit_runtime_state_verified, validate_turn_commit_outcome_code,
     };
     /// A logical run's durable terminal evidence and the store segment that
     /// answers and binds runs (FIG-3600 S7, FIG-3607 item 8), and the
@@ -1007,7 +1003,7 @@ pub mod plugins {
     /// answers with.
     pub use lash_core::{
         EngineAction, EngineEvent, EngineState, EngineStateFormat, HostWaitKind, KeyName,
-        PinnedKey, StepName, StepRequest,
+        PinnedKey, SettledOutcome, SettledOutcomeRefusal, StepName, StepRequest,
     };
     /// Executable identity and terminal rendering returned by protocol integrators.
     pub use lash_core::{ExecutableGeneration, RecordedRender};
@@ -1126,15 +1122,17 @@ pub mod process {
     /// The origin of a lifecycle cancellation submitted to a registry.
     pub use lash_core::CancelOrigin;
     pub use lash_core::SessionTurnOutcome;
+    /// [`process_wake_source_key`] is the queued-work source key a process
+    /// wake lands under at its target session, so a host can correlate the
+    /// two.
+    pub use lash_core::facade_support::process_wake_source_key;
     /// Materialized event semantics returned to custom process registries.
     pub use lash_core::runtime::ProcessEventSemantics;
     /// Process-registry and event types that complete the store and engine signature closure.
     pub use lash_core::runtime::{
         ParentEndPlan, ProcessChange, ProcessCompletionOutcome, ProcessExecutionWriteAuthority,
         ProcessOutcome, ProcessStartOutcome, ProcessTerminalSemantics, ProcessTerminalSpec,
-        ProcessTombstone, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
-        WakeDeliveryClaimOutcome, WakeDeliveryLifecycle, WakeDeliveryReport, WakeDeliveryState,
-        WakeDiscardReason,
+        ProcessTombstone, WaitKind, WaitState,
     };
     /// The one lifecycle state a process record holds, and the outcome a
     /// terminal one ends in.
@@ -1170,10 +1168,10 @@ pub mod process {
         ProcessSignalWaitBinding, ProcessSignature, ProcessStartOptions, ProcessStartReceipt,
         ProcessStartRegistration, ProcessStartRequest, ProcessStartTarget, ProcessStarted,
         ProcessStatus, ProcessStatusFilter, ProcessTerminalPublication, ProcessTerminalWait,
-        ProcessToolIntents, ProcessWakeDelivery, ProcessWakeOutbox, ProcessWakeSpec,
-        ProcessWorkSubstrate, ProcessWorkWiring, ProjectionWatermark, RetiredProcessStatus,
-        ScopeGrant, ScopeId, ScopeRef, ScopeStorageError, SessionScope, StartCx, StartCxError,
-        StartKey, TerminalProcessStatus, TriggerDeliveryPin, WakeId, WatchedRegistry,
+        ProcessToolIntents, ProcessWakeDelivery, ProcessWakeSpec, ProcessWorkSubstrate,
+        ProcessWorkWiring, ProjectionWatermark, RetiredProcessStatus, ScopeGrant, ScopeId,
+        ScopeRef, ScopeStorageError, SessionScope, StartCx, StartCxError, StartKey,
+        TerminalProcessStatus, TriggerDeliveryPin, WakeId, WatchedRegistry,
         facade_support::ObservedProcess, facade_support::ObservedProcessEvent,
         facade_support::ObservedProcessEventLite, facade_support::ObservedProcessEventPage,
         facade_support::ObservedProcessEventReadOutcome, facade_support::ObservedWorkItem,
@@ -1195,15 +1193,6 @@ pub mod process {
     /// occurrences wake the process ([`ProcessWakeSpec`]) and how a payload is
     /// projected into the wake input ([`ProcessValueSelector`]).
     pub use lash_core::{ProcessEventSemanticsSpec, ProcessValueSelector};
-    /// Wake redelivery. A host that owns its own [`ProcessRegistry`] also owns
-    /// the redelivery loop that turns pending wakes into queued work; an
-    /// embedded core executes one for you.
-    /// [`process_wake_source_key`] is the queued-work source key a delivered
-    /// wake lands under, so a host can correlate the two.
-    pub use lash_core::{
-        WakeDeliveryConfig, facade_support::WakeDeliveryDriveReport,
-        facade_support::WakeDeliveryDriver, facade_support::process_wake_source_key,
-    };
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{
         LASHLANG_ENGINE_KIND, LashlangProcessInput, TraceLanguageExecutionMapError,
@@ -1243,9 +1232,8 @@ pub mod durability {
         RunStepHandle, SelectKey,
     };
     pub use lash_core::{
-        TurnCancellationAuthority, facade_support::LeaseTimings, facade_support::LeaseTimingsError,
-        facade_support::RuntimeEnvironment, facade_support::RuntimeHostConfig,
-        facade_support::TerminationPolicy,
+        TurnCancellationAuthority, facade_support::RuntimeEnvironment,
+        facade_support::RuntimeHostConfig, facade_support::TerminationPolicy,
     };
     pub use lash_core_worker::{DurableProcessWorker, DurableProcessWorkerConfig};
 }

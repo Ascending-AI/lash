@@ -391,12 +391,6 @@ store_error_samples! {
         session_id: session(),
         hash: "sampled-hash".to_string(),
     },
-    ProcessWakeSequenceRewound { .. } => StoreError::ProcessWakeSequenceRewound {
-        session_id: session(),
-        process_id: crate::process_id_for_test("sampled-process"),
-        sequence: 1,
-        allocation_floor: 2,
-    },
     SessionExecutionLeaseExpired { .. } => StoreError::SessionExecutionLeaseExpired {
         session_id: session(),
     },

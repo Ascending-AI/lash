@@ -723,18 +723,6 @@ fn remote_process_record() -> RemoteProcessRecord {
             },
             since_ms: 2,
         },
-        park: Some(RemoteProcessPark {
-            reason: RemoteParkReason::EffectReplayDivergence {
-                effect_kind: "llm_call".to_string(),
-                message: "the recorded envelope diverged".to_string(),
-            },
-            park_id: 3,
-            since_ms: 1,
-            last_refused_ms: 2,
-            attempts: 2,
-            refusing: true,
-            engine: None,
-        }),
         },
     lifetime: crate::RemoteLifetimeDecision::Detached,
     ancestry: Vec::new(),

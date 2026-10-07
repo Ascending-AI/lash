@@ -40,7 +40,6 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
         let wake_session_id = registration.wake_session_id.clone();
         let consumer_hold = registration.consumer_hold.clone();
         let trigger_delivery_pin = registration.trigger_delivery_pin.clone();
-        let wake_delivery_config = self.wake_delivery_config;
         self.conn
             .write_flow(move |tx| {
                 let fleet_format = tx.fleet();
@@ -161,14 +160,19 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                         ],
                     )
                     .map_err(process_sqlite_error)?;
-                    crate::obligation_ledger::arm_obligation_tx(
+                    // The process's actor commits with its row, ready: the
+                    // start is a wake of the actor, never a relayed
+                    // obligation (ADR 0132 §12).
+                    crate::durable::processes::create_actor_within(
                         tx,
-                        &lash_core_execution::store::ObligationKey::ProcessStart {
-                            process_id: record.id.clone(),
-                        },
-                        crate::obligation_ledger::DUE_AT_ONCE_MS,
+                        &record.id,
+                        lash_durable::domain::PROCESS_FORMATS,
+                        lash_durable::DurableInstant(i64::try_from(now).unwrap_or(i64::MAX)),
                     )
-                    .map_err(lash_core_execution::PluginError::from)?;
+                    .map_err(process_sqlite_error)?
+                    .map_err(|error| {
+                        lash_core_execution::PluginError::Session(error.to_string())
+                    })?;
                     let mut record = record;
                     let process_id = record.id.clone();
                     for session_id in &observers {
@@ -187,7 +191,6 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                                 &ProcessObserverBy::host("registration"),
                             ),
                             now,
-                            wake_delivery_config,
                             fleet_format,
                         )?;
                     }
@@ -207,7 +210,6 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
     ) -> Result<ProcessRecord, lash_core_execution::PluginError> {
         let process_id = process_id.clone();
         let now = self.clock.timestamp_ms();
-        let wake_delivery_config = self.wake_delivery_config;
         let record = self
             .conn
             .write_flow(move |tx| {
@@ -220,14 +222,7 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                     )? {
                         ProcessTransitionPlan::Unchanged => return Ok(record),
                         ProcessTransitionPlan::Append(request) => {
-                            Self::append_event_conn(
-                                tx,
-                                &mut record,
-                                *request,
-                                now,
-                                wake_delivery_config,
-                                fleet_format,
-                            )?;
+                            Self::append_event_conn(tx, &mut record, *request, now, fleet_format)?;
                         }
                     }
                     Ok(record)

@@ -533,21 +533,13 @@ async fn write_unanswered_run_end_tx(
 }
 
 /// Cancel batch `batch_id` of session `session_id`, held by a run a verb
-/// ends, into its `cancelled` tombstone at `at_ms` (ADR 0101 §8). A wake's
-/// cancellation is its terminal transition, so its receiver floor rises in
-/// the same transaction (ADR 0101 §9).
+/// ends, into its `cancelled` tombstone at `at_ms` (ADR 0101 §8).
 pub(crate) async fn cancel_run_batch_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     batch_id: &str,
     at_ms: u64,
 ) -> Result<(), StoreError> {
-    if let Some(batch) = crate::queued_work::load_queued_batch(tx, batch_id).await?
-        && batch.terminal.is_none()
-        && let Some(wake) = lash_core_execution::store::TerminalProcessWake::of_batch(&batch)
-    {
-        crate::runtime_persistence::raise_wake_redelivery_fence_tx(tx, session_id, &wake).await?;
-    }
     sqlx::query(session_runs_sql().verbs.cancel_batch.sql())
         .bind(session_id.as_str())
         .bind(batch_id)

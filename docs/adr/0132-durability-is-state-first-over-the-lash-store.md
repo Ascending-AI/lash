@@ -252,42 +252,63 @@ all mutable execution state and resumes from it.
 A host `ProcessEngine` is an explicit state machine:
 
 ```rust
-fn advance(&self, state: EngineState, event: EngineEvent) -> (EngineState, EngineAction);
+fn advance(&self, state: EngineState, event: EngineEvent)
+    -> Result<(EngineState, EngineAction), ProcessInfraError>;
 
 enum EngineAction {
-    Step(StepRequest),                         // one bounded admitted execution, with its ExecutionPolicy
-    AwaitExternal { key: PinnedKey, deadline: WaitDeadline },
-    AwaitProcess { process: ProcessId, deadline: WaitDeadline },
+    Steps(Vec<StepRequest>),                         // admitted executions of catalog tools
+    PinKey { name: KeyName, kind: HostWaitKind, deadline: Option<Duration> },
+    AwaitExternal { name: KeyName },                 // a key pinned earlier
+    AwaitProcess { process: ProcessId, deadline: Option<Duration> },
     Sleep { until: DurableInstant },
+    Idle,                                            // until the next mailbox event
+    Emit { event_type: ProcessEventType, payload: serde_json::Value },
     Terminal(ProcessOutcome),
 }
 ```
 
-- The new state and the action's admission (its started row or wait row)
-  commit in one transaction before the action runs.
+- A step names a catalog tool: its declaration's `ExecutionPolicy` and a limit
+  within the tool ceiling are pinned at admission, and its body runs through
+  the admitted-execution primitive (§5). There is no `perform`.
+- The new state and the action's admission (its started rows, its wait row or
+  its event) commit in one `process.advance` transaction before the action
+  runs. The engine state lives in the snapshot store under `p/<pid>`.
 - `advance` performs no effects; effects happen only as actions. When the
-  commit did not happen, the next owner calls `advance` with the same state and
+  commit did not happen, the next pass calls `advance` with the same state and
   event, which is recomputation from committed state.
-- Events come from rows: a step's `AttemptOutcome` under the §5 recovery rules,
-  a resolved or timed-out wait, a process terminal, a cancellation.
-- There is no opaque `run` and no re-invocation of host code from the top.
-- Cancellation is cooperative first: a running step sees its token. After the
-  engine's cancel grace, lash commits a forced `Cancelled` terminal and drops
-  the step. Lash ends the process; it never claims a physical stop.
+- Events come from rows, at most one per transaction: `Cancelled` (once),
+  `Started`, the immediate answer to `PinKey` (`KeyPinned`) or `Emit`
+  (`Emitted`), a step's `AttemptOutcome` under the §5 recovery rules, a signal
+  from the mailbox, a resolved or timed-out wait, a process terminal, a sleep's
+  end.
+- There is no opaque `run`, no `await_terminal` and no re-invocation of host
+  code from the top. No trait method has a default body.
+- Cancellation is cooperative first. A running or waiting process receives
+  `Cancelled { origin, grace_until }` once; `grace_until` runs from the
+  committed request, and the steps admitted before it see their token. At
+  `grace_until` lash commits a forced `Cancelled` terminal and drops the
+  steps. Lash ends the process; it never claims a physical stop.
 
 ### 11. Cancellation cascades through the scope tree
 
 - A cancel request is a mailbox row that wakes its actor, including a parked
   one.
-- A waiting or parked process ends without running its engine: the claimer
-  commits its terminal from registry state.
+- A parked process, one whose state this node cannot decode and one that never
+  started end without running their engine: the claimer commits the terminal
+  from registry state. A running or waiting process is cancelled through
+  `advance` within its grace (§10).
+- A process whose claims commit nothing parks with `ActivationLoop` at the
+  activation-loop budget, recorded in the park feed; a cancel or an operator's
+  redrive readies it.
 - A process's terminal transaction resolves every `process_terminal` wait on
-  it, revokes its own pending waits and marks its `Until(process)` children
-  for cancellation. A turn commit and a session close do the same for their
-  scopes.
-- The cascade is batched: each transaction cancels a bounded set of children
-  and keeps a durable cursor for the rest. No single statement walks a large
-  tree.
+  it, revokes its own pending waits and begins the cascade over its
+  `Until(process)` children. A turn commit and a session close do the same for
+  their scopes through `end_scope`.
+- The cascade is batched: each `cascade.batch` transaction cancels a bounded
+  set of children and keeps a durable cursor for the rest; the ending actor
+  stays runnable until the cursor is drained. No single statement walks a
+  large tree. A parent's terminal does not mean its subtree is quiescent:
+  `live_until_descendants` reads what is still live.
 - A process-to-process wait is a bounded `process_terminal` wait raced against
   the awaiter's own cancel mail, so a cycle of waits is cancellable.
 

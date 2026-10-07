@@ -210,17 +210,8 @@ pub struct RuntimeControlConfig {
     /// [`DeltaCoalescing::default`]: 50 ms frames of at most 8 KiB, the first
     /// delta of a block published at once.
     pub delta_coalescing: DeltaCoalescing,
-    /// Host-selected boundary for process wakes entering the target session.
-    pub process_wake_delivery_policy: crate::DeliveryPolicy,
     /// Optional narrow-only policy for the model-facing session process tools.
     pub process_tool_visibility_filter: Option<Arc<dyn crate::ProcessToolVisibilityFilter>>,
-    /// Lease timing capability for every durable single-writer *lease* lane this
-    /// runtime renews on a cadence: session execution leases,
-    /// and durable effect-replay leases. Queued work and turn inputs are not
-    /// leased and carry no TTL: a run admits them under its shift fence and
-    /// holds them until its own commit settles them (FIG-3927). Defaults to
-    /// [`crate::LeaseTimings::default`] (30s TTL / 10s renew).
-    pub lease_timings: crate::LeaseTimings,
     /// What a turn run does when a persisted tool id no registered source
     /// resolves. Defaults to
     /// [`ToolSourcePolicy::Tolerate`](crate::ToolSourcePolicy): the run goes
@@ -308,8 +299,6 @@ impl RuntimeHostConfig {
                 delta_coalescing: DeltaCoalescing::default(),
                 effect_host,
                 trigger_route_restorer: None,
-                process_wake_delivery_policy: crate::DeliveryPolicy::EarliestSafeBoundary,
-                lease_timings: crate::LeaseTimings::default(),
                 process_tool_visibility_filter: None,
                 tool_source_policy: crate::ToolSourcePolicy::default(),
                 scope_close: Arc::new(crate::engine::NoScopeClose),
@@ -478,25 +467,12 @@ impl RuntimeHostConfig {
         self.tracing = self.tracing.with_product_observer(sink);
         self
     }
-    /// Replace the lease timing capability governing every durable lease and
-    /// claim this runtime takes.
-    pub fn with_lease_timings(mut self, lease_timings: crate::LeaseTimings) -> Self {
-        self.control.lease_timings = lease_timings;
-        self
-    }
 
     pub fn with_process_tool_visibility_filter(
         mut self,
         filter: Arc<dyn crate::ProcessToolVisibilityFilter>,
     ) -> Self {
         self.control.process_tool_visibility_filter = Some(filter);
-        self
-    }
-
-    /// This remains
-    /// independent from the wake merge key and all batching safety gates.
-    pub fn with_process_wake_delivery_policy(mut self, policy: crate::DeliveryPolicy) -> Self {
-        self.control.process_wake_delivery_policy = policy;
         self
     }
 }

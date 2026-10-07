@@ -42,7 +42,6 @@ pub(crate) async fn process_event_host_failure_stops_execution(
             store: None,
             session_store_factory: None,
             queued_work: Arc::new(lash_core::NoSessionWork::new()),
-            process_wake_delivery_policy: lash_core::DeliveryPolicy::EarliestSafeBoundary,
             clock: backend.clock(),
         },
     );

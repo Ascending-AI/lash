@@ -208,22 +208,6 @@ impl ProcessQuery for ReceiverHoldRegistry {
     async fn count_non_terminal_processes(&self) -> Result<usize, PluginError> {
         self.inner.count_non_terminal_processes().await
     }
-    async fn list_parked_processes(
-        &self,
-        query: &ProcessParkQuery,
-    ) -> Result<Vec<ProcessRecord>, PluginError> {
-        self.inner.list_parked_processes(query).await
-    }
-    async fn process_park_feed(
-        &self,
-        after: ParkFeedCursor,
-        limit: NonZeroUsize,
-    ) -> Result<ParkFeedPage<ProcessParkKey>, PluginError> {
-        self.inner.process_park_feed(after, limit).await
-    }
-    async fn summarize_parked_processes(&self) -> Result<ParkReport, PluginError> {
-        self.inner.summarize_parked_processes().await
-    }
 }
 
 #[async_trait::async_trait]
@@ -554,25 +538,6 @@ impl ProcessLifecycle for ReceiverHoldRegistry {
             .clear_process_wait_with_authority(process_id, prelude, authority)
             .await
     }
-    async fn park_process_with_authority(
-        &self,
-        process_id: &ProcessId,
-        park: ProcessParkWrite,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<StoreTransition<ProcessRecord>, PluginError> {
-        self.inner
-            .park_process_with_authority(process_id, park, authority)
-            .await
-    }
-    async fn begin_parked_rerun_with_authority(
-        &self,
-        process_id: &ProcessId,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessRecord, PluginError> {
-        self.inner
-            .begin_parked_rerun_with_authority(process_id, authority)
-            .await
-    }
 }
 
 #[async_trait::async_trait]
@@ -590,60 +555,6 @@ impl ProcessToolIntents for ReceiverHoldRegistry {
     ) -> Result<StoreTransition<ToolIntentSubmissionRecord>, PluginError> {
         self.inner
             .complete_tool_intent_submission(replay_key, outcome)
-            .await
-    }
-}
-
-#[async_trait::async_trait]
-impl ProcessWakeOutbox for ReceiverHoldRegistry {
-    fn wake_delivery_config(&self) -> WakeDeliveryConfig {
-        self.inner.wake_delivery_config()
-    }
-    async fn claim_pending_wake_deliveries(
-        &self,
-        limit: usize,
-    ) -> Result<Vec<WakeDelivery>, PluginError> {
-        self.inner.claim_pending_wake_deliveries(limit).await
-    }
-    async fn list_wake_deliveries(
-        &self,
-        state: Option<WakeDeliveryState>,
-    ) -> Result<Vec<WakeDelivery>, PluginError> {
-        self.inner.list_wake_deliveries(state).await
-    }
-    async fn wake_delivery_report(&self) -> Result<WakeDeliveryReport, PluginError> {
-        self.inner.wake_delivery_report().await
-    }
-    async fn mark_wake_enqueued(
-        &self,
-        delivery_id: &str,
-        claim_token: &str,
-    ) -> Result<WakeDeliveryClaimOutcome, PluginError> {
-        self.inner
-            .mark_wake_enqueued(delivery_id, claim_token)
-            .await
-    }
-    async fn discard_wake_delivery(
-        &self,
-        delivery_id: &str,
-        claim_token: &str,
-        reason: WakeDiscardReason,
-    ) -> Result<WakeDeliveryClaimOutcome, PluginError> {
-        self.inner
-            .discard_wake_delivery(delivery_id, claim_token, reason)
-            .await
-    }
-    async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<(), PluginError> {
-        self.inner.redrive_wake_delivery(delivery_id).await
-    }
-    async fn defer_wake_delivery(
-        &self,
-        delivery_id: &str,
-        claim_token: &str,
-        next_attempt_at_ms: u64,
-    ) -> Result<WakeDeliveryClaimOutcome, PluginError> {
-        self.inner
-            .defer_wake_delivery(delivery_id, claim_token, next_attempt_at_ms)
             .await
     }
 }
@@ -675,9 +586,6 @@ impl ProcessRetention for ReceiverHoldRegistry {
         self.inner
             .compact_process_tombstones(cutoff_epoch_ms, watermark, trigger_store)
             .await
-    }
-    async fn compact_process_park_feed(&self, through: ParkFeedCursor) -> Result<(), PluginError> {
-        self.inner.compact_process_park_feed(through).await
     }
     async fn prune_terminal_processes(
         &self,

@@ -107,7 +107,6 @@ async fn postgres_generated_trigger_delivery_is_bound_and_settled() {
         Arc::new(lash::persistence::FileAttachmentStore::new(
             attachments.path().join("attachments"),
         )),
-        lash_core::WakeDeliveryConfig::default(),
         Arc::new(lash_core::testing::TestClock::new(4_000_000_000_000)),
     );
     generated_trigger_delivery_is_bound_and_settled(Arc::new(stores)).await;

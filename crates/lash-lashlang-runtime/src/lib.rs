@@ -1447,7 +1447,14 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
         _event: lash_core::EngineEvent,
     ) -> Result<(lash_core::EngineState, lash_core::EngineAction), lash_core::ProcessInfraError>
     {
-        todo!("L6 (FIG-5175): port LashlangProcessEngine to advance")
+        // A lashlang process is refused typed until its VM runs as a
+        // `Repeatable` step (L7b, FIG-5198); the activation parks it with
+        // this refusal, and a cancel ends it engine-free.
+        Err(lash_core::ProcessInfraError::new(
+            lash_core::PluginError::Invoke(
+                "a lashlang process cannot advance yet: its VM step is L7b's (FIG-5198)".to_owned(),
+            ),
+        ))
     }
 }
 

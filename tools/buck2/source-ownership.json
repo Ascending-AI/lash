@@ -104,10 +104,6 @@
       "src/**/*.rs"
     ],
     "tests": {
-      "process_model": [
-        "tests/process_model.rs",
-        "tests/runtime/process/registry_transitions.rs"
-      ],
       "effect_model": [
         "tests/effect_model.rs",
         "tests/runtime/effect/envelope.rs"

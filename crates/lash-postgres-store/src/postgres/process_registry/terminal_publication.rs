@@ -27,7 +27,7 @@ static STATEMENTS: LazyLock<ProcessObligationStatements> =
 /// than at that instant: a relay whose host clock is behind the database
 /// takes it in its first pass.
 pub(crate) async fn arm_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     record: &ProcessRecord,
 ) -> Result<(), PluginError> {
     if !record.is_terminal() {

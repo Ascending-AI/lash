@@ -9,7 +9,7 @@ use std::num::NonZeroUsize;
 
 use lash_core_execution::{EffectOpener, ParentEndPlan, PluginError, ProcessRecord, ScopeId};
 use lash_sansio::ProcessId;
-use sqlx::{PgPool, Postgres, Row, Transaction};
+use sqlx::{PgPool, Row};
 
 use crate::process_sql::process_sql;
 use crate::{plugin_sqlx_error, process_decode_error};
@@ -84,7 +84,7 @@ fn decode_plan(
 /// in the ledger write and in settle orders those two writes: the child either
 /// commits before the row and is swept, or sees the row and is refused.
 pub(crate) async fn lock_parent_scope_tx(
-    tx: &mut Transaction<'_, Postgres>,
+    tx: &mut sqlx::PgConnection,
     parent: &ScopeId,
 ) -> Result<(), PluginError> {
     let (kind, id) = ledger_key(parent);
@@ -94,7 +94,7 @@ pub(crate) async fn lock_parent_scope_tx(
             .sql(),
     )
     .bind(format!("lash-parent-end:{kind}:{id}"))
-    .execute(&mut **tx)
+    .execute(&mut *tx)
     .await
     .map(drop)
     .map_err(plugin_sqlx_error)
@@ -108,10 +108,11 @@ pub(crate) async fn lock_parent_scope_tx(
 /// obligation is due at once rather than at it: a relay whose host clock is
 /// behind the database takes it in its first pass.
 pub(crate) async fn record_tx(
-    tx: &mut Transaction<'_, Postgres>,
+    tx: &mut sqlx::PgConnection,
     parent: &ScopeId,
     ended_at_ms: u64,
     fleet_format: lash_core_execution::FleetFormat,
+    cascaded_by_actor: bool,
 ) -> Result<(), PluginError> {
     lock_parent_scope_tx(tx, parent).await?;
     let (kind, id) = ledger_key(parent);
@@ -120,7 +121,7 @@ pub(crate) async fn record_tx(
         .bind(id.clone())
         .bind(ledger_payload(parent, fleet_format)?)
         .bind(ended_at_ms as i64)
-        .execute(&mut **tx)
+        .execute(&mut *tx)
         .await
         .map(drop)
         .map_err(plugin_sqlx_error)?;
@@ -134,13 +135,25 @@ pub(crate) async fn record_tx(
     )
     .await
     .map_err(PluginError::from)?;
+    if cascaded_by_actor {
+        // The ended process's actor runs its cascade (ADR 0132 §11): the
+        // row stays as the late-start fence and settles at once, so no
+        // relay runs it.
+        sqlx::query(process_sql().plan.settle.sql())
+            .bind(kind)
+            .bind(id.clone())
+            .bind(ended_at_ms as i64)
+            .execute(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
+    }
     // The close ends every wait the scope's calls still hold (ADR 0116
     // §3.6): an abandoned call leaks no hold, and a late start under the
     // closed scope is refused, so no redrive needs the row pinned.
     sqlx::query(process_sql().process.release_consumer_holds_owned_by.sql())
         .bind(kind)
         .bind(&id)
-        .execute(&mut **tx)
+        .execute(&mut *tx)
         .await
         .map(drop)
         .map_err(plugin_sqlx_error)?;
@@ -149,7 +162,7 @@ pub(crate) async fn record_tx(
     sqlx::query(process_sql().abandoned_hold.forget_owned_by.sql())
         .bind(kind)
         .bind(id)
-        .execute(&mut **tx)
+        .execute(&mut *tx)
         .await
         .map(drop)
         .map_err(plugin_sqlx_error)?;
@@ -163,7 +176,7 @@ pub(crate) async fn record_tx(
 /// check-then-act under READ COMMITTED, and a start that read "no mark"
 /// could commit after the abandonment's read missed it.
 pub(crate) async fn lock_consumer_hold_tx(
-    tx: &mut Transaction<'_, Postgres>,
+    tx: &mut sqlx::PgConnection,
     key: &str,
 ) -> Result<(), PluginError> {
     sqlx::query(
@@ -172,7 +185,7 @@ pub(crate) async fn lock_consumer_hold_tx(
             .sql(),
     )
     .bind(format!("lash-consumer-hold:{key}"))
-    .execute(&mut **tx)
+    .execute(&mut *tx)
     .await
     .map(drop)
     .map_err(plugin_sqlx_error)
@@ -180,14 +193,14 @@ pub(crate) async fn lock_consumer_hold_tx(
 
 /// Whether a ledger row exists for this scope, settled or not.
 pub(crate) async fn plan_exists_tx(
-    tx: &mut Transaction<'_, Postgres>,
+    tx: &mut sqlx::PgConnection,
     parent: &ScopeId,
 ) -> Result<bool, PluginError> {
     let (kind, id) = ledger_key(parent);
     let row = sqlx::query(process_sql().plan.exists.sql())
         .bind(kind)
         .bind(id)
-        .fetch_optional(&mut **tx)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(plugin_sqlx_error)?;
     Ok(row.is_some())
@@ -208,7 +221,7 @@ pub(super) async fn record(
         .await
         .map_err(crate::plugin_store_error)?;
     let fleet_format = tx.fleet();
-    record_tx(&mut tx, parent, ended_at_ms, fleet_format).await?;
+    record_tx(&mut tx, parent, ended_at_ms, fleet_format, false).await?;
     tx.commit().await.map_err(plugin_sqlx_error)
 }
 

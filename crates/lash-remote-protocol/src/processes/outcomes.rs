@@ -171,6 +171,10 @@ pub struct RemoteProcessToolCancellation {
     pub source: RemoteProcessToolFailureSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<serde_json::Value>,
+    /// Whether lash forced the end: a cancelled process whose engine did not
+    /// end it within its cancel grace (ADR 0132 §10).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub forced: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

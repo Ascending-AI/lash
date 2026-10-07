@@ -66,8 +66,6 @@ DROP TABLE IF EXISTS lash_turn_park_events CASCADE;
 
 DROP TABLE IF EXISTS lash_queued_work_batches CASCADE;
 
-DROP TABLE IF EXISTS lash_wake_redelivery_fences CASCADE;
-
 DROP TABLE IF EXISTS lash_pending_turn_inputs CASCADE;
 
 DROP TABLE IF EXISTS lash_session_run_specs CASCADE;
@@ -98,17 +96,9 @@ DROP TABLE IF EXISTS lash_processes CASCADE;
 
 DROP TABLE IF EXISTS lash_abandoned_consumer_holds CASCADE;
 
-DROP TABLE IF EXISTS lash_process_park_clock CASCADE;
-
-DROP TABLE IF EXISTS lash_process_park_events CASCADE;
-
 DROP TABLE IF EXISTS lash_process_events CASCADE;
 
 DROP TABLE IF EXISTS lash_process_event_horizons CASCADE;
-
-DROP TABLE IF EXISTS lash_wake_allocation_floors CASCADE;
-
-DROP TABLE IF EXISTS lash_process_wake_deliveries CASCADE;
 
 DROP TABLE IF EXISTS lash_process_observers CASCADE;
 
@@ -159,6 +149,8 @@ DROP TABLE IF EXISTS lash_actors CASCADE;
 DROP TABLE IF EXISTS lash_actor_mail CASCADE;
 
 DROP TABLE IF EXISTS lash_run_records CASCADE;
+
+DROP TABLE IF EXISTS lash_park_events CASCADE;
 
 DROP TABLE IF EXISTS lash_exec_snapshots CASCADE;
 

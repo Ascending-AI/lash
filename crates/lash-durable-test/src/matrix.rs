@@ -133,6 +133,7 @@ impl MatrixReport {
 pub struct Matrix {
     faults: Vec<Fault>,
     horizon_ms: u64,
+    labels: Option<Vec<CommitLabel>>,
 }
 
 impl Default for Matrix {
@@ -156,12 +157,19 @@ impl Matrix {
                 Fault::LostWake,
             ],
             horizon_ms: 600_000,
+            labels: None,
         }
     }
 
     /// Cut with these faults only.
     pub fn faults(mut self, faults: &[Fault]) -> Self {
         self.faults = faults.to_vec();
+        self
+    }
+
+    /// Cut only writes under these labels.
+    pub fn labels(mut self, labels: &[CommitLabel]) -> Self {
+        self.labels = Some(labels.to_vec());
         self
     }
 
@@ -182,7 +190,11 @@ impl Matrix {
             baseline.trace
         );
         let mut cells = Vec::new();
-        for point in cut_points(&baseline.writes) {
+        for point in cut_points(&baseline.writes).into_iter().filter(|point| {
+            self.labels
+                .as_ref()
+                .is_none_or(|labels| labels.contains(&point.label))
+        }) {
             for fault in self
                 .faults
                 .iter()

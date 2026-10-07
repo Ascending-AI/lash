@@ -358,8 +358,6 @@ pub mod facade_support {
     pub use crate::runtime::TurnTerminal;
     pub use crate::runtime::TurnWorkDriver;
 
-    pub use crate::runtime::WakeDeliveryDriveReport;
-    pub use crate::runtime::WakeDeliveryDriver;
     pub use crate::runtime::WatchedRegistry;
     pub use crate::runtime::WeakRuntimeHandle;
     pub use crate::runtime::current_epoch_ms;
@@ -391,8 +389,6 @@ pub mod facade_support {
     pub use crate::session_model::SessionSpec;
     pub use crate::session_model::SpecResolveError;
     pub use crate::session_model::context::PreparedContext;
-    pub use crate::store::LeaseTimings;
-    pub use crate::store::LeaseTimingsError;
     pub use crate::store::{CommitBudget, CommitBudgetLimit};
     pub use crate::tool_provider::ToolChildExecutionTraceHook;
     pub use crate::tool_registry::PLUGIN_TOOL_SOURCE_ID;
@@ -483,24 +479,6 @@ pub mod facade_support {
     /// through (`#[schemars(crate = "lash_core::facade_support::schemars")]`).
     pub use schemars;
     pub use schemars::JsonSchema;
-
-    pub fn wake_delivery_driver_with_work_cadence(
-        registry: std::sync::Arc<dyn crate::runtime::ProcessRegistry>,
-        session_store_factory: std::sync::Arc<dyn crate::runtime::DeploymentStore>,
-        queued_work: std::sync::Arc<dyn crate::runtime::SessionWorkEngine>,
-        clock: std::sync::Arc<dyn crate::runtime::Clock>,
-        delivery_policy: crate::runtime::DeliveryPolicy,
-        work_cadence: crate::runtime::WorkCadencePolicy,
-    ) -> Result<crate::runtime::WakeDeliveryDriver, crate::runtime::WorkCadenceError> {
-        crate::runtime::WakeDeliveryDriver::with_work_cadence(
-            registry,
-            session_store_factory,
-            queued_work,
-            clock,
-            delivery_policy,
-            work_cadence,
-        )
-    }
 }
 
 pub(crate) use facade_support::*;
@@ -667,6 +645,7 @@ pub use plugin::{
 };
 pub use plugin::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
 
+pub use lash_core_execution::{SettledOutcome, SettledOutcomeRefusal};
 pub use provider::{
     AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,
     AttachmentCapabilitySnapshot, AttachmentMimeSource, CacheControlDialect, GoogleDialect,
@@ -756,12 +735,12 @@ pub use runtime::{
     ProcessSpawnProvenance, ProcessStartDeclaration, ProcessStartOptions, ProcessStartOutcome,
     ProcessStartReceipt, ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
     ProcessTerminalPublication, ProcessTerminalSpec, ProcessTerminalWait, ProcessTombstone,
-    ProcessToolIntents, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeOutbox,
-    ProcessWakeSpec, ProcessWorkSubstrate, ProcessWorkWiring, ProjectionWatermark,
-    ProtocolSessionExtension, QueuedDrainCandidate, QueuedDrainFamily, QueuedDrainPolicy,
-    QueuedDrainRequest, QueuedDrainSelection, QueuedWorkAuthority, QueuedWorkBatchingConfig,
-    QueuedWorkKind, RecordedKeyFence, RecordedKeyRange, RecordedKeys, RecordedRender,
-    RefusedWriteRange, RegistryScopeClose, RenderFault, RenderRefusal, Resolution, ResolveOutcome,
+    ProcessToolIntents, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec,
+    ProcessWorkSubstrate, ProcessWorkWiring, ProjectionWatermark, ProtocolSessionExtension,
+    QueuedDrainCandidate, QueuedDrainFamily, QueuedDrainPolicy, QueuedDrainRequest,
+    QueuedDrainSelection, QueuedWorkAuthority, QueuedWorkBatchingConfig, QueuedWorkKind,
+    RecordedKeyFence, RecordedKeyRange, RecordedKeys, RecordedRender, RefusedWriteRange,
+    RegistryScopeClose, RenderFault, RenderRefusal, Resolution, ResolveOutcome,
     ResolvedProcessDefinition, ResolvedRun, RetainedRevision, Retention, RunAggregateWakePolicy,
     RunDefinition, RunDefinitionRefusal, RunDefinitions, RunOptionsOwner, RunOverrides,
     RunRecordStep, RunResolveError, RunShapeRefusal, RunSpec, RunSpecHash, RuntimeAttribution,
@@ -789,9 +768,7 @@ pub use runtime::{
     TurnInputAdmissionMode, TurnInputApplication, TurnInputCheckpointBoundary, TurnInputCompletion,
     TurnInputCompletionData, TurnInputIngress, TurnInputState, TurnInputStateKind,
     TurnLaneAdmissionPolicy, TurnPrelude, TurnPreludeRef, TurnPreludeStore, WaitKind, WaitState,
-    WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
-    WakeDeliveryLifecycle, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason, WakeId,
-    WatchedRegistry, WeakProcessEngineRegistry, WorkCadenceError, WorkCadencePolicy,
+    WakeId, WatchedRegistry, WeakProcessEngineRegistry, WorkCadenceError, WorkCadencePolicy,
     admit_session_state_generation, artifact_store_plugin_error, lifetime, mint_process_id,
     park_turn_refused_by_generation, retry_cancel_watch, tool_failure_code,
 };

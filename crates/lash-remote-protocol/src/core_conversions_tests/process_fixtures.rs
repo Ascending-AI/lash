@@ -51,7 +51,6 @@ pub(super) fn process_record(process_id: &ProcessId) -> lash_core::ProcessRecord
             },
             since_ms: 10,
         },
-        park: None,
     };
     record
 }
@@ -76,7 +75,6 @@ pub(super) fn observed_process() -> lash_core::facade_support::ObservedProcess {
         caused_by: None,
         external_ref: None,
         wait: None,
-        park: None,
         child_session_id: None,
     }
 }

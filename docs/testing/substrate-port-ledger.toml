@@ -650,10 +650,12 @@ law = "the first resolution of a wait wins (resolve, cancel or timeout); every l
 [planned."C1"]
 owner = "L6"
 law = "a cancel ends a running, waiting or parked process and cascades to its Until children; a turn commit or session close ends its Until processes (L6b)"
+path = "crates/lash-core-execution/src/runtime/actor/process_laws.rs::c1_a_parked_child_ends_engine_free_and_its_child_receives_parent_ended"
 
 [planned."P1"]
 owner = "L6"
 law = "an actor whose claims make no progress parks with ActivationLoop at its activation budget; progress resets the count"
+path = "crates/lash-core-execution/src/runtime/actor/process_laws.rs::p1_a_crash_loop_parks_at_its_budget_and_progress_resets_the_count"
 
 [planned."D1"]
 owner = "L11"

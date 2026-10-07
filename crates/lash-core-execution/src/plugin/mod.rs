@@ -118,7 +118,7 @@ pub use runtime_host::{
 pub use runtime_impl::{
     PluginHost, PluginSessionMaterializationRequest, PluginSessionRequest, SessionAuthorityContext,
 };
-#[cfg(any(test, feature = "testing"))]
+#[cfg(test)]
 pub(crate) use services::NoopSessionManager;
 pub use services::{PersistentRuntimeServices, PluginOperationInvokeError, RuntimeServices};
 pub use session_obj::PluginSession;

@@ -55,10 +55,6 @@ static CLEANUPS: LazyLock<CleanupObligationStatements> =
 static CLEANUP_LEDGER: LazyLock<CleanupObligationLedgerStatements> =
     LazyLock::new(|| CleanupObligationLedgerStatements::render(crate::schema_layout::MAIN));
 
-/// The due instant a producer's own transaction arms at: `due` from the
-/// commit, so a claim never waits on a clock edge (ADR 0109 §1.5).
-pub(crate) const DUE_AT_ONCE_MS: u64 = 0;
-
 /// `kind`'s statements, rendered for the connection's own database. Ingress
 /// names its turn-input table here; its ledger composes that table with the
 /// queued-batch table (`crate::ingress_obligation`).

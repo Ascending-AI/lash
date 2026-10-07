@@ -191,7 +191,6 @@ impl Lane {
                 Arc::new(lash::persistence::FileAttachmentStore::new(
                     attachments.path(),
                 )),
-                lash_core::WakeDeliveryConfig::default(),
                 clock.clone(),
             );
             Self::over(

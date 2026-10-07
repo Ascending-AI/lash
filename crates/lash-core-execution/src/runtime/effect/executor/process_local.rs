@@ -452,34 +452,14 @@ impl ProcessLocalExecution {
                 ))
             }
             ProcessCommand::Signal { signal } => {
-                let effect_controller = effect_controller.ok_or_else(|| {
-                    RuntimeEffectControllerError::new(
-                        crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
-                        "local process signal execution requires its effect controller",
-                    )
-                })?;
                 let process_id = signal.identity.process_id();
-                // The append admits the signal and selects the wait it
-                // resolves in one store transaction; a redelivered signal is
-                // served its admitted event and that same wait (FIG-4298).
+                // The append admits the signal and mails it to the process
+                // actor in one store transaction; a redelivered signal is
+                // served its admitted event and mails nothing (ADR 0132 §10).
                 let result = registry
                     .append_event(process_id, signal.append_request())
                     .await?;
                 let realization = result.realization;
-                let wait = crate::runtime::process::admitted_signal_wait(&result.event)?;
-                let key = effect_controller
-                    .await_event_key(
-                        &crate::ExecutionScope::process(process_id),
-                        crate::AwaitEventWaitIdentity::process_signal(
-                            process_id,
-                            signal.identity.signal_name(),
-                            wait.ordinal,
-                        ),
-                    )
-                    .await?;
-                let _ = effect_controller
-                    .resolve_await_event(&key, crate::Resolution::Ok(result.event.payload.clone()))
-                    .await?;
                 Ok((
                     ProcessEffectOutcome::Signal {
                         event: Box::new(result.event),

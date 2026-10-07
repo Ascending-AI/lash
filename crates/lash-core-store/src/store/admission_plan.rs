@@ -13,8 +13,7 @@
 //! admission takes ([`plan_next_turn_input_admission`],
 //! [`plan_checkpoint_input_admission`]), which rows a settlement
 //! may touch ([`require_admitted_to_run`]), where one composition of the
-//! turn lane stops ([`TurnLaneStop`]), and what a wake leaves behind when it
-//! leaves the queue ([`TerminalProcessWake`]).
+//! turn lane stops ([`TurnLaneStop`]).
 
 use serde::{Deserialize, Serialize};
 
@@ -388,52 +387,6 @@ impl TurnLaneStop {
                     || self.admits(candidate.enqueue_seq)
             })
             .count()
-    }
-}
-
-/// The process wake a batch carried when it left the queue, which its
-/// session's redelivery fence must record (FIG-1065, FIG-3545).
-///
-/// Every terminal transition of a wake row — settlement and host cancel
-/// alike — raises the fence to `max(floor, sequence)` in the same
-/// transaction that removes the row. Otherwise a redelivery of the same
-/// `(process, sequence)` after a producer crash or a failed terminal mark
-/// finds neither a row nor a floor and re-admits the wake.
-///
-/// A process-wake batch is validated at enqueue to carry exactly one wake
-/// payload, so "the wake the batch carried" is one fact no matter how a
-/// backend reads it.
-#[derive(Clone, Debug)]
-pub struct TerminalProcessWake {
-    /// The batch's source key. PostgreSQL advisory-locks this identity before
-    /// writing the fence; backends without advisory locks may leave it `None`.
-    pub source_key: Option<String>,
-    /// Structural producer identity the fence indexes on.
-    pub process_id: crate::ProcessId,
-    /// The terminal sequence the allocation floor rises to.
-    pub sequence: u64,
-}
-
-impl TerminalProcessWake {
-    /// The wake `payload` carries, if it is a process wake, under the batch's
-    /// `source_key`.
-    pub fn of_payload(
-        source_key: Option<String>,
-        payload: &crate::QueuedWorkPayload,
-    ) -> Option<Self> {
-        match payload {
-            crate::QueuedWorkPayload::ProcessWake { wake } => Some(Self {
-                source_key,
-                process_id: wake.process_id.clone(),
-                sequence: wake.sequence,
-            }),
-            crate::QueuedWorkPayload::SessionCommand { .. } => None,
-        }
-    }
-
-    /// The wake a hydrated batch carries, if any.
-    pub fn of_batch(batch: &crate::QueuedWorkBatch) -> Option<Self> {
-        Self::of_payload(batch.source_key.clone(), &batch.payload)
     }
 }
 

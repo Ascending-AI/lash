@@ -545,7 +545,7 @@ pub async fn queued_wake_delivery_is_source_key_idempotent_and_admitted_once(
             .is_empty(),
         "completed wake delivery must be removed exactly once"
     );
-    // Until vacuum the delivered tombstone answers a late redelivery.
+    // The delivered tombstone answers a late redelivery.
     let answered = store
         .enqueue_queued_work_with_outcome(crate::process_wake_batch_draft(wake.clone()))
         .await
@@ -559,26 +559,6 @@ pub async fn queued_wake_delivery_is_source_key_idempotent_and_admitted_once(
                         == Some(lash_core::store::IngressTerminalCause::Delivered)
         ),
         "the late redelivery is the delivered wake: {answered:?}"
-    );
-    store
-        .vacuum(&SessionId::from("root"))
-        .await
-        .expect("vacuum the delivered tombstone");
-    let consumed_replay = store
-        .enqueue_queued_work(crate::process_wake_batch_draft(wake))
-        .await
-        .expect_err("a vacuumed wake's late redelivery must trip the receiver floor");
-    assert!(matches!(
-        consumed_replay,
-        StoreError::ProcessWakeSequenceRewound { .. }
-    ));
-    assert!(
-        store
-            .list_queued_work(&SessionId::from("root"))
-            .await
-            .expect("list after consumed wake redelivery")
-            .is_empty(),
-        "receiver evidence must prevent a late redelivery from recreating queued work"
     );
 }
 
@@ -600,13 +580,10 @@ fn run_process_wake(sequence: u64) -> ProcessWakeDelivery {
     }
 }
 
-/// A host cancel is a terminal transition of a wake, so it raises the
-/// session's redelivery floor in the same transaction that leaves the
-/// `cancelled` tombstone (FIG-3545, ADR 0101 §8). A redelivery of the
-/// withdrawn `(process, seq)` — after a producer crash, a failed terminal
-/// mark or a lost admission — answers the tombstone until host vacuum and is
-/// refused with the typed rewind outcome after it, never resurrecting the
-/// wake; a later sequence from the same process is still admitted.
+/// A host cancel of a wake leaves its `cancelled` tombstone (ADR 0101 §8):
+/// an enqueue of the withdrawn `(process, seq)` answers the tombstone and
+/// never resurrects the wake; a later sequence from the same process is
+/// still admitted.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -645,41 +622,11 @@ pub async fn host_cancelled_wake_is_not_redelivered(store: Arc<dyn RuntimeStore>
             .is_empty(),
         "an answered redelivery reopens nothing"
     );
-    store
-        .vacuum(&session_id)
-        .await
-        .expect("vacuum the cancelled tombstone");
-    let redelivery = store
-        .enqueue_queued_work(crate::process_wake_batch_draft(run_process_wake(7)))
-        .await
-        .expect_err("redelivery of a vacuumed host-cancelled wake must trip the receiver floor");
-    match redelivery {
-        StoreError::ProcessWakeSequenceRewound {
-            session_id: refused_session,
-            process_id,
-            sequence,
-            allocation_floor,
-        } => {
-            assert_eq!(refused_session, session_id);
-            assert_eq!(process_id, crate::ProcessId::fixture("process-1"));
-            assert_eq!(sequence, 7);
-            assert_eq!(allocation_floor, 7);
-        }
-        other => panic!("expected ProcessWakeSequenceRewound, got {other:?}"),
-    }
-    assert!(
-        store
-            .list_queued_work(&session_id)
-            .await
-            .expect("list after refused redelivery")
-            .is_empty(),
-        "a host-cancelled wake must not come back"
-    );
 
     let later = store
         .enqueue_queued_work(crate::process_wake_batch_draft(run_process_wake(8)))
         .await
-        .expect("a later sequence stays above the floor");
+        .expect("a later sequence of the same process is admitted");
     assert_eq!(
         store
             .list_queued_work(&session_id)

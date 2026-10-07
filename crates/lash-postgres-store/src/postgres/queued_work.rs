@@ -150,36 +150,6 @@ pub(crate) async fn complete_admitted_batch_tx(
         &row,
         observed.as_ref().map(Option::as_deref),
     )?;
-    // The wake identity a settled batch contributes to its redelivery fence:
-    // the source key (advisory-lock identity) and the sole payload, both
-    // run-keyed reads over the locked row.
-    let source_key: Option<String> =
-        sqlx::query_scalar(sql.family_postgres.select_admitted_batch_source_key.sql())
-            .bind(session_id.as_str())
-            .bind(batch_id.as_str())
-            .bind(run.as_str())
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?
-            .flatten();
-    let payload_json: Option<String> =
-        sqlx::query_scalar(sql.queued_batches.select_admitted_batch_payload.sql())
-            .bind(session_id.as_str())
-            .bind(batch_id.as_str())
-            .bind(run.as_str())
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-    let terminal_wake = payload_json
-        .as_deref()
-        .map(|json| store_decode_json::<QueuedWorkPayload>(json, "queued work payload"))
-        .transpose()?
-        .and_then(|payload| {
-            lash_core_execution::store::TerminalProcessWake::of_payload(source_key, &payload)
-        });
-    if let Some(wake) = terminal_wake.as_ref() {
-        crate::runtime_persistence::raise_wake_redelivery_fence_tx(tx, session_id, wake).await?;
-    }
     let settled = sqlx::query(sql.queued_batches.settle_admitted.sql())
         .bind(session_id.as_str())
         .bind(batch_id.as_str())

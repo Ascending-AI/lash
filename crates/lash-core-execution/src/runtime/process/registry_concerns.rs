@@ -25,8 +25,7 @@ use super::model::{
 use super::references::ProcessLiveReferenceView;
 use super::registry::{
     NonTerminalProcessPage, ParentEndPlan, ProcessPruneReport, ProcessRegistry,
-    ProcessRegistryCursor, ProjectionWatermark, WakeDelivery, WakeDeliveryClaimOutcome,
-    WakeDeliveryConfig, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
+    ProcessRegistryCursor, ProjectionWatermark,
 };
 
 /// Point reads and scans over registered processes.
@@ -160,30 +159,6 @@ pub trait ProcessQuery: Send + Sync {
     /// drain read. Durable backends should override it with an indexed count
     /// over their authoritative status rows rather than hydrating records.
     async fn count_non_terminal_processes(&self) -> Result<usize, PluginError>;
-
-    /// The deployment's parked processes (FIG-3659 NOW-B) as one keyset page
-    /// in `(park since_ms, process key)` order, filtered by reason code and
-    /// age. Answered from the store's parked projection, never by decoding
-    /// every record.
-    async fn list_parked_processes(
-        &self,
-        query: &crate::store::ProcessParkQuery,
-    ) -> Result<Vec<ProcessRecord>, PluginError>;
-
-    /// The process park feed strictly after `after`, at most `limit` events
-    /// in commit order (FIG-3659 NOW-B): the durable transition ledger every
-    /// park, and every fact that ends one, appends to in the event's own
-    /// transaction. A cursor below the compaction horizon is refused
-    /// [`PluginError::ProcessParkFeedCursorCompacted`].
-    async fn process_park_feed(
-        &self,
-        after: crate::store::ParkFeedCursor,
-        limit: NonZeroUsize,
-    ) -> Result<crate::store::ParkFeedPage<crate::store::ProcessParkKey>, PluginError>;
-
-    /// Live process parks per reason code and the oldest one's `since_ms`,
-    /// for drain and the parked-work gauges.
-    async fn summarize_parked_processes(&self) -> Result<crate::store::ParkReport, PluginError>;
 }
 
 /// Process admission: registration and the durable external backend reference.
@@ -717,31 +692,6 @@ pub trait ProcessLifecycle: Send + Sync {
         prelude: Vec<ProcessEventAppendRequest>,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError>;
-
-    /// Park the process whose body refused to replay its journal (FIG-3659
-    /// NOW-B, [`ProcessTransition::Park`](super::ProcessTransition::Park)):
-    /// non-terminal, no terminal evidence, holding what it holds. A first
-    /// refusal opens the park and appends `Parked` to the process park feed
-    /// in the same transaction; a rerun's refusal re-parks it (`attempts +=
-    /// 1`, `since_ms` and `park_id` kept) with no feed event; a park whose
-    /// latest run already refused is returned unchanged.
-    async fn park_process_with_authority(
-        &self,
-        process_id: &ProcessId,
-        park: crate::store::ProcessParkWrite,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<crate::store::StoreTransition<ProcessRecord>, PluginError>;
-
-    /// Record that a rerun of the parked process began
-    /// ([`ProcessTransition::BeginParkedRerun`](super::ProcessTransition::BeginParkedRerun)):
-    /// the park stays listed and writes no feed event, but no longer exempts
-    /// the process's next start from its attempt budget. Unchanged when the
-    /// process has no refusing park.
-    async fn begin_parked_rerun_with_authority(
-        &self,
-        process_id: &ProcessId,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessRecord, PluginError>;
 }
 
 /// Durable tool-intent submission admission and settlement.
@@ -783,53 +733,6 @@ pub trait ProcessToolIntents: Send + Sync {
     ) -> Result<crate::store::StoreTransition<crate::ToolIntentSubmissionRecord>, PluginError>;
 }
 
-/// The wake-delivery outbox.
-///
-/// Retention policy plus the claim/settle/redrive protocol that turns pending
-/// process wakes into exactly-once queued work at their target sessions.
-#[async_trait::async_trait]
-pub trait ProcessWakeOutbox: Send + Sync {
-    fn wake_delivery_config(&self) -> WakeDeliveryConfig;
-
-    /// Implementations must preserve sequence order inside a
-    /// `(target_session_id, process_id)` group while selecting fairly across
-    /// distinct groups by `next_attempt_at_ms`.
-    async fn claim_pending_wake_deliveries(
-        &self,
-        limit: usize,
-    ) -> Result<Vec<WakeDelivery>, PluginError>;
-
-    async fn list_wake_deliveries(
-        &self,
-        state: Option<WakeDeliveryState>,
-    ) -> Result<Vec<WakeDelivery>, PluginError>;
-
-    async fn wake_delivery_report(&self) -> Result<WakeDeliveryReport, PluginError>;
-
-    async fn mark_wake_enqueued(
-        &self,
-        delivery_id: &str,
-        claim_token: &str,
-    ) -> Result<WakeDeliveryClaimOutcome, PluginError>;
-
-    async fn discard_wake_delivery(
-        &self,
-        delivery_id: &str,
-        claim_token: &str,
-        reason: WakeDiscardReason,
-    ) -> Result<WakeDeliveryClaimOutcome, PluginError>;
-
-    async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<(), PluginError>;
-
-    /// Defer a retryable non-delivery until the supplied runtime-clock time.
-    async fn defer_wake_delivery(
-        &self,
-        delivery_id: &str,
-        claim_token: &str,
-        next_attempt_at_ms: u64,
-    ) -> Result<WakeDeliveryClaimOutcome, PluginError>;
-}
-
 /// Physical reclamation of terminal processes and their tombstones.
 #[async_trait::async_trait]
 pub trait ProcessRetention: Send + Sync {
@@ -846,15 +749,6 @@ pub trait ProcessRetention: Send + Sync {
         watermark: ProjectionWatermark,
         trigger_store: Option<&dyn crate::TriggerStore>,
     ) -> Result<usize, PluginError>;
-
-    /// Drop process park feed events at or below `through` and raise the
-    /// feed's compaction horizon to it, so a later read from a cursor below
-    /// it is refused typed rather than silently partial. Host-gated, like
-    /// tombstone compaction.
-    async fn compact_process_park_feed(
-        &self,
-        through: crate::store::ParkFeedCursor,
-    ) -> Result<(), PluginError>;
 
     /// Release the payloads of `process_id`'s events at or below `through`,
     /// while the process stays retained, running or not (FIG-3482).
@@ -1067,24 +961,6 @@ pub trait ProcessClockRebind: Send + Sync {
 ///         unimplemented!()
 ///     }
 ///     async fn count_non_terminal_processes(&self) -> Result<usize, PluginError> {
-///         unimplemented!()
-///     }
-///     async fn list_parked_processes(
-///         &self,
-///         _: &lash_core::store::ProcessParkQuery,
-///     ) -> Result<Vec<ProcessRecord>, PluginError> {
-///         unimplemented!()
-///     }
-///     async fn process_park_feed(
-///         &self,
-///         _: lash_core::store::ParkFeedCursor,
-///         _: NonZeroUsize,
-///     ) -> Result<lash_core::store::ParkFeedPage<lash_core::store::ProcessParkKey>, PluginError> {
-///         unimplemented!()
-///     }
-///     async fn summarize_parked_processes(
-///         &self,
-///     ) -> Result<lash_core::store::ParkReport, PluginError> {
 ///         unimplemented!()
 ///     }
 /// }

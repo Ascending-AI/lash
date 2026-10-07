@@ -9,18 +9,15 @@ use pretty_assertions::assert_eq;
 /// The two arms of a process-event append leave different durable footprints,
 /// and every entry point into the append sequence must produce the same one.
 ///
-/// The insert arm writes exactly one event row and advances the wake allocation
-/// floor to that event's sequence. The replay arm writes no event row and must
-/// leave the floor alone: re-advancing it there would push a later incarnation's
-/// sequences past a wake that was already allocated and delivered, for a call
-/// that persisted nothing.
+/// The insert arm writes exactly one event row. The replay arm writes none:
+/// it persists nothing, so nothing a later read sees may move.
 ///
 /// Each backend spells the sequence once and reaches it from two entry points
 /// — the unfenced host append and workflow-key completion. Both are exercised
 /// here. The completion path settles its repeat call on the already-terminal
 /// row rather than the replay arm proper; the observable contract is the same
-/// either way, and asserting it per entry point is what catches a floor advance
-/// or an event row escaping onto a path that persisted nothing.
+/// either way, and asserting it per entry point is what catches an event row
+/// escaping onto a path that persisted nothing.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -48,12 +45,8 @@ pub async fn process_event_append_arms_are_ordered(
         )
         .with_replay_key("append-arm-host:wake:1")
     };
-    let baseline = append_arm_footprint(&registry, &host_id, &target_session_id).await;
-    assert_eq!(
-        baseline,
-        (0, None),
-        "a registered process has no events and no sender floor yet"
-    );
+    let baseline = append_arm_footprint(&registry, &host_id).await;
+    assert_eq!(baseline, 0, "a registered process has no events yet");
     let inserted = registry
         .append_event(&host_id, host_request())
         .await
@@ -70,9 +63,9 @@ pub async fn process_event_append_arms_are_ordered(
         "the record fold and append receipt must carry the inserted event sequence"
     );
     assert_eq!(
-        append_arm_footprint(&registry, &host_id, &target_session_id).await,
-        (1, Some(inserted.event.sequence)),
-        "the insert arm writes one event row and advances the floor to it"
+        append_arm_footprint(&registry, &host_id).await,
+        1,
+        "the insert arm writes one event row"
     );
     let later = registry
         .append_event(
@@ -95,9 +88,9 @@ pub async fn process_event_append_arms_are_ordered(
         "a replay receipt reports the process fold position, not the older replayed event"
     );
     assert_eq!(
-        append_arm_footprint(&registry, &host_id, &target_session_id).await,
-        (2, Some(later.event.sequence)),
-        "the replay arm writes no event row and leaves the floor where the latest insert put it"
+        append_arm_footprint(&registry, &host_id).await,
+        2,
+        "the replay arm writes no event row"
     );
 
     // Entry point 2: workflow-key completion.
@@ -123,16 +116,10 @@ pub async fn process_event_append_arms_are_ordered(
             .expect("workflow-key completion takes the insert arm"),
         crate::ProcessCompletionOutcome::Committed(_)
     ));
-    let workflow_footprint =
-        append_arm_footprint(&registry, &workflow_id, &target_session_id).await;
+    let workflow_footprint = append_arm_footprint(&registry, &workflow_id).await;
     assert_eq!(
-        workflow_footprint.0, 1,
+        workflow_footprint, 1,
         "workflow-key completion writes exactly one terminal event row"
-    );
-    assert_eq!(
-        workflow_footprint.1,
-        Some(terminal_sequence(&registry, &workflow_id).await),
-        "workflow-key completion advances the floor to its terminal event"
     );
     assert!(matches!(
         registry
@@ -146,16 +133,15 @@ pub async fn process_event_append_arms_are_ordered(
         crate::ProcessCompletionOutcome::AlreadyApplied { .. }
     ));
     assert_eq!(
-        append_arm_footprint(&registry, &workflow_id, &target_session_id).await,
+        append_arm_footprint(&registry, &workflow_id).await,
         workflow_footprint,
-        "a repeated workflow-key completion writes no event row and does not move the floor"
+        "a repeated workflow-key completion writes no event row"
     );
 
     durable_effect_outcome_event_crash_windows(registry).await;
 }
 
-/// The durable footprint of a process's appends: how many event rows exist, and
-/// where the sender floor for `target_session_id` stands.
+/// The durable footprint of a process's appends: how many event rows exist.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -163,35 +149,12 @@ pub async fn process_event_append_arms_are_ordered(
 async fn append_arm_footprint(
     registry: &Arc<dyn crate::ConformanceProcessRegistry>,
     process_id: &ProcessId,
-    target_session_id: &SessionId,
-) -> (usize, Option<u64>) {
-    let events = registry
-        .full_event_window(process_id, 0)
-        .await
-        .expect("read append-arm event rows")
-        .len();
-    let floor = registry
-        .wake_allocation_floor_for_testing(target_session_id, process_id)
-        .await
-        .expect("read append-arm sender floor");
-    (events, floor)
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn terminal_sequence(
-    registry: &Arc<dyn crate::ConformanceProcessRegistry>,
-    process_id: &ProcessId,
-) -> u64 {
+) -> usize {
     registry
         .full_event_window(process_id, 0)
         .await
         .expect("read append-arm event rows")
-        .last()
-        .expect("a completed process has a terminal event")
-        .sequence
+        .len()
 }
 
 /// The runtime's effect-summary appends go through execution authority only.

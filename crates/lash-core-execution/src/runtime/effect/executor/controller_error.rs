@@ -180,7 +180,6 @@ impl From<PluginError> for RuntimeEffectControllerError {
             | PluginError::ProcessUnknown { .. }
             | PluginError::ProcessChangeCursorPruned { .. }
             | PluginError::TriggerSubscriptionChangeCursorPruned { .. }
-            | PluginError::ProcessParkFeedCursorCompacted { .. }
             | PluginError::ProcessEventsReleased { .. }
             | PluginError::ProcessHandedOver { .. }
             | PluginError::ProcessTerminalOutcomeMismatch { .. }

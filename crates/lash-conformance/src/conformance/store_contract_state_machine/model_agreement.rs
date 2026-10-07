@@ -1,4 +1,4 @@
-//! Record, wake-delivery and queued-work agreement between a backend under
+//! Record and queued-work agreement between a backend under
 //! test and the independently-derived reference model.
 use super::*;
 
@@ -116,28 +116,6 @@ pub(super) async fn assert_model_agreement(
                 "observer set for `{id}` differs from reference model"
             ));
         }
-    }
-    let mut actual_deliveries = handles
-        .registry
-        .list_wake_deliveries(None)
-        .await
-        .map_err(|error| error.to_string())?;
-    actual_deliveries.sort_by_key(|delivery| delivery.delivery_id());
-    // The model records each wake as its append wrote it, at the version the
-    // store's `F` pinned; a read lifts every admitted version to the newest.
-    let expected_deliveries = model
-        .wake_deliveries
-        .values()
-        .cloned()
-        .map(|mut delivery| {
-            delivery.wake.version = PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
-            delivery
-        })
-        .collect::<Vec<_>>();
-    if actual_deliveries != expected_deliveries {
-        return Err(format!(
-            "wake delivery states differ from reference model: actual={actual_deliveries:?}, expected={expected_deliveries:?}"
-        ));
     }
     let queued = handles
         .runtime

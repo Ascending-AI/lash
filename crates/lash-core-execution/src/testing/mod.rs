@@ -214,10 +214,18 @@ impl crate::ProcessEngine for HeldProcessEngine {
 
     fn advance(
         &self,
-        _state: crate::EngineState,
-        _event: crate::EngineEvent,
+        state: crate::EngineState,
+        event: crate::EngineEvent,
     ) -> Result<(crate::EngineState, crate::EngineAction), crate::ProcessInfraError> {
-        todo!("L6 (FIG-5175): port HeldProcessEngine to advance")
+        let action = match event {
+            crate::EngineEvent::Cancelled { .. } => crate::EngineAction::Terminal(
+                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(
+                    crate::ToolCancellation::runtime("the held process was cancelled"),
+                )),
+            ),
+            _ => crate::EngineAction::Idle,
+        };
+        Ok((state, action))
     }
 
     async fn resolve(
@@ -294,10 +302,15 @@ impl crate::ProcessEngine for FixtureProcessEngine {
 
     fn advance(
         &self,
-        _state: crate::EngineState,
+        state: crate::EngineState,
         _event: crate::EngineEvent,
     ) -> Result<(crate::EngineState, crate::EngineAction), crate::ProcessInfraError> {
-        todo!("L6 (FIG-5175): port FixtureProcessEngine to advance")
+        Ok((
+            state,
+            crate::EngineAction::Terminal(crate::ProcessAwaitOutput::from_tool_output(
+                crate::ToolCallOutput::success(serde_json::json!({ "fixture": "complete" })),
+            )),
+        ))
     }
 
     async fn resolve(
@@ -771,14 +784,12 @@ impl ToolCallFixture<'static> {
             + 'static,
     {
         let sessions: Arc<dyn crate::plugin::SessionStateService> = host.clone();
-        let session_lifecycle: Arc<dyn crate::plugin::SessionLifecycleService> = host.clone();
-        let session_graph: Arc<dyn crate::plugin::SessionGraphService> = host;
+        let session_lifecycle: Arc<dyn crate::plugin::SessionLifecycleService> = host;
         Self {
             context: crate::tool_provider::ToolContext::builder(
                 SessionId::from("test-session"),
                 sessions,
                 session_lifecycle,
-                session_graph,
                 Arc::new(crate::UnavailableProcessService),
                 crate::ActorContext::unavailable()
                     .scoped(crate::AdmittedScope::runtime_operation(
@@ -1558,7 +1569,6 @@ pub fn process_engine_run_context_for_validation(
         None,
         None,
         Arc::new(crate::NoSessionWork::new()),
-        crate::DeliveryPolicy::EarliestSafeBoundary,
         backend.clock(),
         process_registry_available,
         tokio_util::sync::CancellationToken::new(),

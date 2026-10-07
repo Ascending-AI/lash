@@ -1332,10 +1332,6 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::runtime::RuntimeControlConfig| {
         let _ = &value.effect_host;
     });
-    // W0434: lash::runtime::RuntimeControlConfig::lease_timings [field]
-    field_witness(|value: &lash::runtime::RuntimeControlConfig| {
-        let _ = &value.lease_timings;
-    });
     // W0436: lash::runtime::RuntimeControlConfig::process_tool_visibility_filter [field]
     field_witness(|value: &lash::runtime::RuntimeControlConfig| {
         let _ = &value.process_tool_visibility_filter;

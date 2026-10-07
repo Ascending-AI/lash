@@ -167,7 +167,6 @@ pub struct PostgresStore {
 #[derive(Clone)]
 pub struct PostgresProcessRegistry {
     pool: PgPool,
-    wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
     clock: Arc<dyn lash_core_execution::Clock>,
     /// Effect hosts whose scope fence registration lifts (ADR 0049). The
     /// PostgreSQL journal's own fence rows share the pool and are cleared in
@@ -701,20 +700,6 @@ impl PostgresStorage {
     pub fn process_registry(&self) -> PostgresProcessRegistry {
         PostgresProcessRegistry {
             pool: self.pool.clone(),
-            wake_delivery_config: lash_core_execution::WakeDeliveryConfig::default(),
-            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
-            process_id_mint: lash_core_execution::ProcessIdMint::default(),
-            fence: self.fence.clone(),
-        }
-    }
-
-    pub fn process_registry_with_wake_delivery_config(
-        &self,
-        wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
-    ) -> PostgresProcessRegistry {
-        PostgresProcessRegistry {
-            pool: self.pool.clone(),
-            wake_delivery_config,
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             process_id_mint: lash_core_execution::ProcessIdMint::default(),
             fence: self.fence.clone(),

@@ -9,12 +9,10 @@ use std::sync::Arc;
 mod awaiter;
 mod cadence;
 mod durable;
-mod wake_delivery;
 
 pub use awaiter::ProcessRegistryAwaiter;
 pub use cadence::{WorkCadenceError, WorkCadencePolicy};
 pub use durable::{DurableProcessWork, DurableSessionWork};
-pub use wake_delivery::{WakeDeliveryDriveReport, WakeDeliveryDriver};
 
 use super::process::{ProcessRegistry, WatchedRegistry};
 use crate::{PluginError, ProcessAwaitOutput, SessionId};

@@ -248,19 +248,6 @@ pub(super) async fn delete_session_from_catalog(
                 params![session_id.as_str()],
             )
             .map_err(sqlite_error)?;
-            for statement in [
-                crate::process_registry::sql::process_sql()
-                    .fence
-                    .delete_by_session
-                    .sql(),
-                crate::process_registry::sql::process_sql()
-                    .floor
-                    .delete_by_session
-                    .sql(),
-            ] {
-                crate::conn::cached_execute(tx, statement, params![session_id.as_str()])
-                    .map_err(sqlite_error)?;
-            }
             // A deleted session's parked turn is cancelled, and its feed event
             // outlives the session row: the ledger is the only place the park
             // transition stays durable (FIG-3659).

@@ -73,7 +73,6 @@ pub struct CompatDescriptor {
 ///             "CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs",
 ///             "CREATE TABLE IF NOT EXISTS lash_processes",
 ///             "CREATE TABLE IF NOT EXISTS lash_process_events",
-///             "CREATE TABLE IF NOT EXISTS lash_process_wake_deliveries",
 ///             "CREATE TABLE IF NOT EXISTS lash_trigger_subscriptions",
 ///             "CREATE TABLE IF NOT EXISTS lash_trigger_occurrences",
 ///             "CREATE TABLE IF NOT EXISTS lash_trigger_deliveries",

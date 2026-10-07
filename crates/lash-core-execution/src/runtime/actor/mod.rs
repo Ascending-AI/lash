@@ -26,6 +26,8 @@ pub use await_event_legacy::completion_host_key;
 mod core;
 pub mod journal;
 pub mod process;
+#[cfg(feature = "testing")]
+pub mod process_laws;
 pub mod projection;
 pub mod round;
 pub mod shift;

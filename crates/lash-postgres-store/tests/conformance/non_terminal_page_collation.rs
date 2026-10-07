@@ -68,8 +68,6 @@ async fn process_family_columns_and_registry_scan_index_pin_c_collation() {
     for table in [
         "lash_processes",
         "lash_process_events",
-        "lash_wake_allocation_floors",
-        "lash_process_wake_deliveries",
         "lash_process_observers",
         "lash_process_tombstones",
         "lash_process_segment_handovers",

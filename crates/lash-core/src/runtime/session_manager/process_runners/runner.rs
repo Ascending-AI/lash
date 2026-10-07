@@ -64,11 +64,13 @@ impl RuntimeSessionServices {
                 .await?;
                 Ok(crate::ProcessRunOutcome::from(output))
             }
-            crate::ProcessInput::Engine { .. } => {
-                todo!(
-                    "L6 (FIG-5175): drive the engine's process by advance from the process activation"
-                )
-            }
+            // An engine row is driven by `advance` from its process actor's
+            // activation (ADR 0132 §10); it is never run here.
+            crate::ProcessInput::Engine { kind, .. } => Err(crate::ProcessInfraError::new(
+                crate::PluginError::Invoke(format!(
+                    "process `{process_id}` runs engine `{kind}`, which its process actor drives by advance"
+                )),
+            )),
         }
     }
 }

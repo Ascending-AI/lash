@@ -7,9 +7,7 @@ use lash_sansio::llm::types::ProviderReplayMeta;
 use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 
-use crate::plugin::{
-    PluginError, SessionGraphService, SessionLifecycleService, SessionSnapshot, SessionStateService,
-};
+use crate::plugin::{PluginError, SessionLifecycleService, SessionSnapshot, SessionStateService};
 use crate::{ToolContract, ToolDefinition, ToolId, ToolManifest, ToolOutcome};
 
 mod attachments;
@@ -556,54 +554,29 @@ pub(crate) struct ToolProcessEventContext {
     process_id: ProcessId,
     execution_write_authority: crate::ProcessExecutionWriteAuthority,
     process_work: crate::ProcessWorkWiring,
-    store: Option<Arc<dyn crate::RuntimeStore>>,
-    session_store_factory: Option<Arc<dyn crate::DeploymentStore>>,
-    session_graph: Arc<dyn SessionGraphService>,
-    queued_work: Arc<dyn crate::SessionWorkEngine>,
-    process_wake_delivery_policy: crate::DeliveryPolicy,
-    clock: Arc<dyn crate::Clock>,
 }
 
 /// The durable process a tool call runs inside, and the wiring the runtime
-/// appends that call's declared park announcement and nudges its wake
-/// delivery through. Engine process calls carry this wiring in their tool
-/// context; the tool body never sees it.
+/// appends that call's declared park announcement through. Engine process
+/// calls carry this wiring in their tool context; the tool body never sees
+/// it.
 #[derive(Clone)]
 pub struct ProcessToolCallWiring {
     process_id: ProcessId,
     execution_write_authority: crate::ProcessExecutionWriteAuthority,
     process_work: crate::ProcessWorkWiring,
-    store: Option<Arc<dyn crate::RuntimeStore>>,
-    session_store_factory: Option<Arc<dyn crate::DeploymentStore>>,
-    queued_work: Arc<dyn crate::SessionWorkEngine>,
-    process_wake_delivery_policy: crate::DeliveryPolicy,
-    clock: Arc<dyn crate::Clock>,
 }
 
 impl ProcessToolCallWiring {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "each argument is one port of the process host the call's appends go through"
-    )]
     pub fn new(
         process_id: impl Into<ProcessId>,
         execution_write_authority: crate::ProcessExecutionWriteAuthority,
         process_work: crate::ProcessWorkWiring,
-        store: Option<Arc<dyn crate::RuntimeStore>>,
-        session_store_factory: Option<Arc<dyn crate::DeploymentStore>>,
-        queued_work: Arc<dyn crate::SessionWorkEngine>,
-        process_wake_delivery_policy: crate::DeliveryPolicy,
-        clock: Arc<dyn crate::Clock>,
     ) -> Self {
         Self {
             process_id: process_id.into(),
             execution_write_authority,
             process_work,
-            store,
-            session_store_factory,
-            queued_work,
-            process_wake_delivery_policy,
-            clock,
         }
     }
 }
@@ -612,7 +585,6 @@ pub(crate) struct ToolContextBuilder<'run> {
     owner: crate::ExecutionOwner,
     sessions: Arc<dyn SessionStateService>,
     session_lifecycle: Arc<dyn SessionLifecycleService>,
-    session_graph: Arc<dyn SessionGraphService>,
     processes: Arc<dyn crate::ProcessService>,
     effect_controller: crate::ActorContext,
     runtime_dispatch: Option<Arc<crate::tool_dispatch::ToolDispatchContext<'run>>>,
@@ -642,7 +614,6 @@ impl<'run> ToolContextBuilder<'run> {
             owner: dispatch.owner.clone(),
             sessions: Arc::clone(&dispatch.sessions),
             session_lifecycle: Arc::clone(&dispatch.session_lifecycle),
-            session_graph: Arc::clone(&dispatch.session_graph),
             processes: Arc::clone(&dispatch.processes),
             effect_controller: dispatch.effect_controller.clone(),
             runtime_dispatch: Some(Arc::clone(&dispatch)),
@@ -695,11 +666,6 @@ impl<'run> ToolContextBuilder<'run> {
             process_id,
             execution_write_authority,
             process_work,
-            store,
-            session_store_factory,
-            queued_work,
-            process_wake_delivery_policy,
-            clock,
         } = wiring;
         match &self.enclosing_process {
             Some(enclosing) => assert_eq!(
@@ -712,12 +678,6 @@ impl<'run> ToolContextBuilder<'run> {
             process_id,
             execution_write_authority,
             process_work,
-            store,
-            session_store_factory,
-            session_graph: Arc::clone(&self.session_graph),
-            queued_work,
-            process_wake_delivery_policy,
-            clock,
         });
         self
     }
@@ -823,10 +783,6 @@ impl<'run> ToolContext<'run> {
 
     #[cfg(any(test, feature = "testing"))]
     #[expect(
-        clippy::too_many_arguments,
-        reason = "testing constructor mirrors the sealed runtime tool context dependencies"
-    )]
-    #[expect(
         clippy::expect_used,
         reason = "test-only builder: `FrameNodeId::new` rejects only the empty string, and the literal here is not"
     )]
@@ -834,7 +790,6 @@ impl<'run> ToolContext<'run> {
         session_id: SessionId,
         sessions: Arc<dyn SessionStateService>,
         session_lifecycle: Arc<dyn SessionLifecycleService>,
-        session_graph: Arc<dyn SessionGraphService>,
         processes: Arc<dyn crate::ProcessService>,
         effect_controller: crate::ActorContext,
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
@@ -848,7 +803,6 @@ impl<'run> ToolContext<'run> {
             },
             sessions,
             session_lifecycle,
-            session_graph,
             processes,
             effect_controller,
             runtime_dispatch: None,
@@ -959,12 +913,6 @@ impl<'run> ToolContext<'run> {
             execution_write_authority,
             process_id,
             process_work,
-            store: None,
-            session_store_factory: None,
-            session_graph: Arc::new(crate::plugin::NoopSessionManager),
-            queued_work: Arc::new(crate::NoSessionWork::new()),
-            process_wake_delivery_policy: crate::DeliveryPolicy::EarliestSafeBoundary,
-            clock: Arc::new(crate::SystemClock),
         });
         self
     }
@@ -1499,7 +1447,6 @@ mod tests {
             .expect("the test scope validates");
         ToolContext::builder(
             SessionId::from("session-1"),
-            Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::UnavailableProcessService),

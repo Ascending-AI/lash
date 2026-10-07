@@ -865,6 +865,19 @@ impl Processes {
         Ok(lash_core::ProcessCancelReceipt::from_record(*record)?)
     }
 
+    /// Redrives a parked process (ADR 0132 §11): clears its park and its
+    /// activation-loop count and makes it runnable, so its engine runs again
+    /// from its committed state. Answers whether the process was parked; a
+    /// process that is not parked is left as it is. Cancelling a parked
+    /// process instead ends it without running its engine.
+    pub async fn redrive(&self, process_id: &ProcessId, requester: &str) -> Result<bool> {
+        self.core
+            .backend
+            .redrive_process(process_id, requester)
+            .await
+            .map_err(|error| EmbedError::Plugin(lash_core::PluginError::Invoke(error.to_string())))
+    }
+
     /// Delivers one signal to the process its identity names.
     ///
     /// The signal's identity is its append key (FIG-4299): delivering the
@@ -1221,40 +1234,6 @@ impl Processes {
                 Err(err.into())
             }
         }
-    }
-
-    /// List durable process-wake delivery rows, optionally filtered by state.
-    pub async fn wake_deliveries(
-        &self,
-        state: Option<lash_core::WakeDeliveryState>,
-    ) -> Result<Vec<lash_core::WakeDelivery>> {
-        self.registry()
-            .list_wake_deliveries(state)
-            .await
-            .map_err(Into::into)
-    }
-
-    /// Summarize delivery states and name blocked groups with their redrive ids.
-    pub async fn wake_delivery_report(&self) -> Result<lash_core::WakeDeliveryReport> {
-        self.registry()
-            .wake_delivery_report()
-            .await
-            .map_err(Into::into)
-    }
-
-    /// Explicitly return a discarded delivery to the pending lane.
-    pub async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<()> {
-        self.registry()
-            .redrive_wake_delivery(delivery_id)
-            .await
-            .map_err(Into::into)
-    }
-
-    pub async fn drive_wake_deliveries(
-        &self,
-    ) -> Result<lash_core::facade_support::WakeDeliveryDriveReport> {
-        let ports = self.core.substrate_slot.ports().await;
-        ports.queued.shift_wake().await.map_err(Into::into)
     }
 }
 /// A conflicting host start names only its key (ADR 0107). Every other

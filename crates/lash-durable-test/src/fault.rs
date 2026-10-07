@@ -398,6 +398,16 @@ impl DurableReads for FaultStore {
             .await
     }
 
+    async fn until_children(
+        &self,
+        scope: &ScopeKey,
+        after: Option<&ProcessId>,
+        limit: usize,
+    ) -> Result<Vec<ProcessId>, DurableError> {
+        self.read(self.inner.until_children(scope, after, limit))
+            .await
+    }
+
     async fn park_events(
         &self,
         after: Option<ParkEventSeq>,

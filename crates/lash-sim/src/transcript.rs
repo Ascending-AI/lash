@@ -398,7 +398,7 @@ mod attribution_tests {
 mod tests {
     use lash_core::{
         ProcessEventLog as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
-        ProcessRegistrar as _, ProcessRetention as _, ProcessWakeOutbox as _,
+        ProcessRegistrar as _, ProcessRetention as _,
     };
     use std::sync::Arc;
 
@@ -541,25 +541,6 @@ mod tests {
             .retarget_subscription(&process_id, Some("branch-session"))
             .await
             .expect("retarget subscription");
-        let retargeted = registry
-            .list_wake_deliveries(None)
-            .await
-            .expect("read wake delivery")
-            .into_iter()
-            .find(|delivery| {
-                delivery.disposition.discard_reason()
-                    == Some(lash_core::WakeDiscardReason::Retargeted)
-            })
-            .expect("retargeted delivery");
-        assert_eq!(
-            retargeted
-                .disposition
-                .discard_reason()
-                .expect("retargeted delivery reason")
-                .as_str(),
-            "retargeted",
-            "a retarget must settle its stale wake delivery as retargeted"
-        );
         let retarget_event = collect_process_events(registry.as_ref(), &process_id)
             .await
             .expect("read process audit events")

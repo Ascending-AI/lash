@@ -62,11 +62,6 @@ impl<'run> RuntimeExecutionContext<'run> {
                 process_id.clone(),
                 process_events.execution_write_authority.clone(),
                 process_events.process_work.clone(),
-                process_events.store.clone(),
-                process_events.session_store_factory.clone(),
-                std::sync::Arc::clone(&process_events.queued_work),
-                process_events.process_wake_delivery_policy,
-                std::sync::Arc::clone(&process_events.clock),
             ));
         }
         Box::pin(

@@ -20,16 +20,12 @@ pub struct DeploymentDrainStatus {
     /// its claims until a redrive under the build that wrote its journal, a
     /// cancel, or a fork resolves it.
     pub parked_turns: usize,
-    /// Processes that are parked: their body refused to replay its journal,
-    /// and they hold what they hold until an operator acts. Parked processes
-    /// are non-terminal, so they are included in
-    /// [`remaining_invocations`](Self::remaining_invocations).
-    pub parked_processes: usize,
     /// Host-clock epoch milliseconds of the oldest live park's first refusal:
-    /// the minimum `since_ms` over parked turns and parked processes. `None`
-    /// when nothing is parked.
+    /// the minimum `since_ms` over parked turns. `None` when nothing is
+    /// parked. A parked process is non-terminal, so it counts in
+    /// [`remaining_invocations`](Self::remaining_invocations).
     pub oldest_parked_since_ms: Option<u64>,
-    /// Parked turns admitted, and parked processes started, under an
+    /// Parked turns admitted under an
     /// executable generation this build retired, per that generation
     /// (FIG-3571): what an old-build drain of each generation still has to
     /// redrive.
@@ -67,7 +63,6 @@ impl serde::Serialize for DeploymentDrainStatus {
             remaining_invocations: usize,
             in_flight_turns: usize,
             parked_turns: usize,
-            parked_processes: usize,
             oldest_parked_since_ms: Option<u64>,
             retired_by_executable_generation:
                 &'a std::collections::BTreeMap<lash_core::ExecutableGeneration, usize>,
@@ -81,7 +76,6 @@ impl serde::Serialize for DeploymentDrainStatus {
             remaining_invocations: self.remaining_invocations,
             in_flight_turns: self.in_flight_turns,
             parked_turns: self.parked_turns,
-            parked_processes: self.parked_processes,
             oldest_parked_since_ms: self.oldest_parked_since_ms,
             retired_by_executable_generation: &self.retired_by_executable_generation,
             stalled_obligations: &self.stalled_obligations,
@@ -111,7 +105,6 @@ mod tests {
             remaining_invocations: 0,
             in_flight_turns: 0,
             parked_turns: 0,
-            parked_processes: 0,
             oldest_parked_since_ms: None,
             retired_by_executable_generation: BTreeMap::new(),
             stalled_obligations: ObligationKind::ALL.iter().map(|kind| (*kind, 0)).collect(),

@@ -20,7 +20,7 @@ pub(super) fn generated_case() -> impl Strategy<Value = GeneratedCase> {
 /// Deterministically sample the shared store-contract operation alphabet.
 ///
 /// The required prefix prevents small differential budgets from starving the
-/// process, wake-delivery, queue, and prune surfaces. Remaining steps
+/// process, queue, and prune surfaces. Remaining steps
 /// come from the exact strategy used by the property-law harness.
 #[expect(
     clippy::expect_used,
@@ -76,10 +76,6 @@ fn operation() -> impl Strategy<Value = StoreContractOp> {
             .prop_map(|(process, session)| StoreContractOp::RemoveObserver { process, session }),
         2 => (0..PROCESS_COUNT, prop::option::of(0..SESSION_COUNT))
             .prop_map(|(process, session)| StoreContractOp::Retarget { process, session }),
-        2 => Just(StoreContractOp::ClaimWake),
-        2 => any::<bool>().prop_map(|stale| StoreContractOp::MarkWake { stale }),
-        2 => any::<bool>().prop_map(|stale| StoreContractOp::DiscardWake { stale }),
-        2 => any::<bool>().prop_map(|stale| StoreContractOp::DeferWake { stale }),
         3 => (0..PROCESS_COUNT)
             .prop_map(|process| StoreContractOp::EnqueueWake { process }),
         3 => (any::<u8>(), any::<bool>(), any::<bool>())

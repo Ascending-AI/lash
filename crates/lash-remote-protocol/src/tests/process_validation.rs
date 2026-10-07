@@ -122,6 +122,7 @@ fn settled_cancelled() -> RemoteProcessAwaitOutput {
                 message: "cancelled".to_string(),
                 source: RemoteProcessToolFailureSource::Cancellation,
                 raw: None,
+                forced: false,
             }),
             control: None,
             view: None,

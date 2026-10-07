@@ -15,37 +15,41 @@
 use crate::ProcessId;
 use crate::plugin::PluginError;
 
-use super::events::{PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessWakeDelivery};
-use super::registry::{WakeDelivery, WakeDeliveryLifecycle, WakeDeliveryState, WakeDiscardReason};
-
 /// Failure text for a persisted registry payload that will not decode.
 ///
 /// One vocabulary for both backends: every process-registry row body that fails
 /// `serde_json` reports this, so a corrupt payload reads the same whichever
 /// substrate stored it.
+#[cfg(test)]
 fn registry_row_decode_error(err: serde_json::Error) -> PluginError {
     PluginError::Session(format!("failed to decode process registry row: {err}"))
 }
 
+#[cfg(test)]
 #[derive(serde::Deserialize)]
 struct ProcessWakeDeliveryFormatVersionProbe {
     version: u32,
 }
 
+/// The reader of [`super::events::PROCESS_WAKE_DELIVERY_FORMAT_VERSION`] the guarded-surface
+/// laws execute. Its production caller was the wake outbox, which ADR 0132
+/// §12 removed: a wake now lives only in its target session's queued work.
+///
 /// `fleet_format` is the `F` the bound registry store recorded: the read
 /// admits the pair `{fleet's writer version, this build's newest}` — ADR 0106
 /// §2's `[N-1, N]` window (FIG-3796). An admitted older payload climbs to the
 /// newest through the surface's `RecordUpcaster` hooks; anything else is
 /// refused as unsupported.
+#[cfg(test)]
 pub(super) fn decode_process_wake_delivery(
     delivery_json: &str,
     fleet_format: crate::FleetFormat,
-) -> Result<ProcessWakeDelivery, PluginError> {
+) -> Result<super::events::ProcessWakeDelivery, PluginError> {
     let probe: ProcessWakeDeliveryFormatVersionProbe =
         serde_json::from_str(delivery_json).map_err(registry_row_decode_error)?;
     let found = probe.version;
     let window = fleet_format.read_window(lash_core_store::surface_format!(
-        PROCESS_WAKE_DELIVERY_FORMAT_VERSION
+        super::events::PROCESS_WAKE_DELIVERY_FORMAT_VERSION
     ));
     if !window.admits(found) {
         return Err(PluginError::ProcessWakeDeliveryFormatVersionMismatch {
@@ -60,7 +64,7 @@ pub(super) fn decode_process_wake_delivery(
         serde_json::from_str(delivery_json).map_err(registry_row_decode_error)?;
     lash_core_store::store::upcast_json_record(
         "process wake delivery",
-        lash_core_store::surface_format!(PROCESS_WAKE_DELIVERY_FORMAT_VERSION),
+        lash_core_store::surface_format!(super::events::PROCESS_WAKE_DELIVERY_FORMAT_VERSION),
         found,
         window.newest(),
         &mut value,
@@ -166,151 +170,3 @@ pub const RETIRED_PROCESS_STATUS_LABELS: [&str; 4] =
 // ---------------------------------------------------------------------------
 // Wake reconciliation vocabulary
 // ---------------------------------------------------------------------------
-
-/// Refusal for a wake-delivery id with no row.
-pub fn unknown_wake_delivery(delivery_id: &str) -> PluginError {
-    PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
-}
-
-/// The labels are durable values, so this is the only reader: an unrecognised
-/// one is a refusal, never a default.
-pub fn wake_delivery_state_from_label(
-    delivery_id: &str,
-    label: &str,
-) -> Result<WakeDeliveryState, PluginError> {
-    match label {
-        "pending" => Ok(WakeDeliveryState::Pending),
-        "enqueuing" => Ok(WakeDeliveryState::Enqueuing),
-        "enqueued" => Ok(WakeDeliveryState::Enqueued),
-        "discarded" => Ok(WakeDeliveryState::Discarded),
-        state => Err(PluginError::Session(format!(
-            "wake delivery `{delivery_id}` has unknown state `{state}`"
-        ))),
-    }
-}
-
-/// `None` stays `None`: a delivery that was never discarded carries no reason.
-/// [`WakeDiscardReason`] is `#[non_exhaustive]`, so this single reader is also
-/// the single place a new reason has to be taught.
-pub fn wake_discard_reason_from_label(
-    delivery_id: &str,
-    label: Option<&str>,
-) -> Result<Option<WakeDiscardReason>, PluginError> {
-    match label {
-        None => Ok(None),
-        Some("expired") => Ok(Some(WakeDiscardReason::Expired)),
-        Some("target_gone") => Ok(Some(WakeDiscardReason::TargetGone)),
-        Some("retargeted") => Ok(Some(WakeDiscardReason::Retargeted)),
-        Some("sequence_rewound") => Ok(Some(WakeDiscardReason::SequenceRewound)),
-        Some("source_unreadable") => Ok(Some(WakeDiscardReason::SourceUnreadable)),
-        Some("content_conflict") => Ok(Some(WakeDiscardReason::ContentConflict)),
-        Some(reason) => Err(PluginError::Session(format!(
-            "wake delivery `{delivery_id}` has unknown discard reason `{reason}`"
-        ))),
-    }
-}
-
-/// Columns of a persisted wake-delivery row, before projection.
-#[derive(Clone, Debug)]
-pub struct WakeDeliveryRow {
-    /// `delivery_id`, which must be the identity the decoded wake computes.
-    pub delivery_id: String,
-    pub state_label: String,
-    /// `claim_token`, the ownership fence of the current `enqueuing` claim.
-    pub claim_token: Option<String>,
-    pub attempts: i64,
-    /// `first_attempt_ms`.
-    pub first_attempt_ms: Option<i64>,
-    /// `next_attempt_at_ms`.
-    pub next_attempt_at_ms: i64,
-    pub expires_at_ms: i64,
-    /// `discard_reason`.
-    pub discard_reason_label: Option<String>,
-    /// `delivery_json`, the encoded [`ProcessWakeDelivery`](crate::ProcessWakeDelivery).
-    pub delivery_json: String,
-}
-
-impl WakeDeliveryRow {
-    /// Project the row into a [`WakeDelivery`].
-    ///
-    /// The two label columns are parsed before the payload is decoded, so a row
-    /// with an unrecognised state reports the state refusal rather than a decode
-    /// failure. `fleet_format` is the `F` the bound store recorded: the
-    /// delivery payload's read window comes from it (FIG-3796).
-    pub fn project(self, fleet_format: crate::FleetFormat) -> Result<WakeDelivery, PluginError> {
-        let state = wake_delivery_state_from_label(&self.delivery_id, &self.state_label)?;
-        let discard_reason = wake_discard_reason_from_label(
-            &self.delivery_id,
-            self.discard_reason_label.as_deref(),
-        )?;
-        // The row is total (`ck_process_wake_deliveries_lifecycle`): a claim
-        // token exactly while enqueuing, a discard reason exactly once
-        // discarded. A row outside that is refused, never repaired.
-        let disposition = match (state, self.claim_token, discard_reason) {
-            (WakeDeliveryState::Pending, None, None) => WakeDeliveryLifecycle::Pending,
-            (WakeDeliveryState::Enqueuing, Some(claim_token), None) => {
-                WakeDeliveryLifecycle::Enqueuing { claim_token }
-            }
-            (WakeDeliveryState::Enqueued, None, None) => WakeDeliveryLifecycle::Enqueued,
-            (WakeDeliveryState::Discarded, None, Some(reason)) => {
-                WakeDeliveryLifecycle::Discarded { reason }
-            }
-            (WakeDeliveryState::Enqueuing, None, _) => {
-                return Err(PluginError::Session(format!(
-                    "wake delivery `{}` is enqueuing without a claim token",
-                    self.delivery_id
-                )));
-            }
-            (WakeDeliveryState::Discarded, _, None) => {
-                return Err(PluginError::Session(format!(
-                    "wake delivery `{}` is discarded without a discard reason",
-                    self.delivery_id
-                )));
-            }
-            (
-                WakeDeliveryState::Pending
-                | WakeDeliveryState::Enqueued
-                | WakeDeliveryState::Discarded,
-                Some(_),
-                _,
-            ) => {
-                return Err(PluginError::Session(format!(
-                    "wake delivery `{}` is {} with a claim token",
-                    self.delivery_id,
-                    state.as_str()
-                )));
-            }
-            (
-                WakeDeliveryState::Pending
-                | WakeDeliveryState::Enqueuing
-                | WakeDeliveryState::Enqueued,
-                _,
-                Some(_),
-            ) => {
-                return Err(PluginError::Session(format!(
-                    "wake delivery `{}` is {} with a discard reason",
-                    self.delivery_id,
-                    state.as_str()
-                )));
-            }
-        };
-        let wake = decode_process_wake_delivery(&self.delivery_json, fleet_format)?;
-        // The row is keyed by the identity its wake computes. A key that
-        // names any other wake is refused, never read as that delivery.
-        let wake_id = wake.wake_id();
-        if wake_id != self.delivery_id {
-            return Err(PluginError::WakeDeliveryIdentityMismatch {
-                delivery_id: self.delivery_id,
-                wake_id: wake_id.into_inner(),
-            });
-        }
-        Ok(WakeDelivery {
-            wake,
-            disposition,
-            attempts: self.attempts as u64,
-            first_attempt_ms: self.first_attempt_ms.map(|value| value as u64),
-            next_attempt_at_ms: self.next_attempt_at_ms as u64,
-            expires_at_ms: self.expires_at_ms as u64,
-        })
-    }
-}

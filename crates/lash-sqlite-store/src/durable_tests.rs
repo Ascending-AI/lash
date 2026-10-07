@@ -78,8 +78,8 @@ law!(
 );
 
 /// A process-registry row and a trigger row keyed by `?1`.
-const REGISTRY_ROW: &str = "INSERT INTO wake_allocation_floors \
-     (target_session_id, process_id, allocation_floor) VALUES (?1, 'process', 1)";
+const REGISTRY_ROW: &str = "INSERT INTO process_tombstones \
+     (process_id, terminal_label, pruned_at_ms, pruned_change_seq) VALUES (?1, 'completed', 1, 1)";
 const TRIGGER_ROW: &str = "INSERT INTO trigger_mutation_receipts \
      (operation_id, owner_kind, owner_id, request_fingerprint, result_json, created_at_ms) \
      VALUES (?1, 'host', 'host', 'fingerprint', '{}', 1)";
@@ -89,7 +89,7 @@ const TRIGGER_ROW: &str = "INSERT INTO trigger_mutation_receipts \
 fn registry_and_trigger_rows(path: &std::path::Path, key: &str) -> [i64; 2] {
     let connection = rusqlite::Connection::open(path).expect("open a raw connection");
     [
-        "SELECT count(*) FROM wake_allocation_floors WHERE target_session_id = ?1",
+        "SELECT count(*) FROM process_tombstones WHERE process_id = ?1",
         "SELECT count(*) FROM trigger_mutation_receipts WHERE operation_id = ?1",
     ]
     .map(|sql| {

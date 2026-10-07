@@ -105,7 +105,7 @@ impl crate::ProcessEngine for MissingCarryEngine {
         _state: crate::EngineState,
         _event: crate::EngineEvent,
     ) -> Result<(crate::EngineState, crate::EngineAction), crate::ProcessInfraError> {
-        todo!("L6 (FIG-5175): port MissingCarryEngine to advance")
+        unreachable!("the law delivers cleanup without advancing a process")
     }
 
     async fn resolve(

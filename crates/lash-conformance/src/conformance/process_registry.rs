@@ -1092,24 +1092,6 @@ async fn refolded_process_record_matches_stored_projection(
         .await
         .expect("record refold first start");
     assert_refold_matches_stored_projection(&reader, &base, process_id, "first start").await;
-    writer
-        .park_process_with_authority(
-            process_id,
-            crate::store::ParkReason::ReplayDivergence {
-                message: "refold park".to_string(),
-            }
-            .into(),
-            &authority,
-        )
-        .await
-        .map(lash_core::store::StoreTransition::into_record)
-        .expect("park refold process");
-    assert_refold_matches_stored_projection(&reader, &base, process_id, "park entered").await;
-    writer
-        .begin_parked_rerun_with_authority(process_id, &authority)
-        .await
-        .expect("begin parked rerun");
-    assert_refold_matches_stored_projection(&reader, &base, process_id, "parked rerun").await;
     let wait = WaitState {
         since_ms: base.created_at_ms,
         kind: WaitKind::Signal {
@@ -1658,14 +1640,6 @@ pub async fn wake_subscription_is_indexed_and_retargetable(registry: Arc<dyn Pro
         .await
         .expect("retarget wake subscription");
 
-    let deliveries = registry
-        .list_wake_deliveries(None)
-        .await
-        .expect("list wake deliveries");
-    assert!(deliveries.iter().any(|delivery| {
-        delivery.wake.process_id == process_id
-            && delivery.disposition.discard_reason() == Some(crate::WakeDiscardReason::Retargeted)
-    }));
     assert!(
         registry
             .full_event_window(&process_id, 0)

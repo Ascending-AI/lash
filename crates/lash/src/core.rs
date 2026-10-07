@@ -23,7 +23,7 @@ mod work_drivers;
 
 pub use drain::DeploymentDrainStatus;
 use session_shifts::{CoreSessionShifts, CoreSessionShiftsConfig};
-use work_drivers::{CoreWorkSetup, WakeDeliveryDriverSetup};
+use work_drivers::CoreWorkSetup;
 pub(crate) use work_drivers::{CoreWorkSlot, ResolvedQueuedWork};
 #[derive(Clone)]
 /// Owns the configured runtime services used to create and resume Lash sessions.
@@ -203,7 +203,6 @@ impl LashCore {
     pub async fn drain_status(&self, accepting_new_work: bool) -> Result<DeploymentDrainStatus> {
         let remaining_invocations = self.process_registry.count_non_terminal_processes().await?;
         let turns = self.store_factory.count_unsettled_turns().await?;
-        let processes = self.process_registry.summarize_parked_processes().await?;
         let checked_at = self.env.core.clock.timestamp_ms();
         let parked = crate::parked_work::ParkedWorkReport {
             turns: lash_core::store::ParkReport {
@@ -211,7 +210,6 @@ impl LashCore {
                 oldest_since_ms: turns.oldest_parked_since_ms,
                 retired_by_executable_generation: turns.retired_by_executable_generation.clone(),
             },
-            processes,
         };
         crate::parked_work::record_park_gauges(
             self.env.core.tracing.metrics(),
@@ -233,7 +231,6 @@ impl LashCore {
             remaining_invocations,
             in_flight_turns: turns.in_flight_turns,
             parked_turns: turns.parked_turns,
-            parked_processes: parked.processes.total(),
             oldest_parked_since_ms: parked.oldest_since_ms(),
             retired_by_executable_generation: parked.retired_by_executable_generation(),
             stalled_obligations,
@@ -343,7 +340,6 @@ impl LashCore {
                 .backend
                 .obligation_ledger(lash_core::store::ObligationKind::ControlIntent),
             store_factory: Arc::clone(&self.store_factory),
-            process_registry: Arc::clone(&self.process_registry),
             clock: Arc::clone(&self.env.core.clock),
             metrics: self.env.core.tracing.metrics().clone(),
             relay_policy: self.env.core.control.relay_policy(),
@@ -752,7 +748,6 @@ pub struct LashCoreBuilder {
     attachment_read_policy: Option<lash_core::AttachmentReadPolicy>,
     attachment_upload_expiry: Option<std::time::Duration>,
     output_retention: Option<lash_core::OutputRetentionPolicy>,
-    process_wake_delivery_policy: Option<lash_core::DeliveryPolicy>,
     // Core fields applied over the config the backend's ports assemble.
     trace_runtime: Option<lash_core::runtime::TraceRuntime>,
     trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
@@ -787,7 +782,6 @@ impl LashCoreBuilder {
             attachment_read_policy: None,
             attachment_upload_expiry: None,
             output_retention: None,
-            process_wake_delivery_policy: None,
             trace_runtime: None,
             trace_sink: None,
             #[cfg(feature = "otel-trace")]
@@ -913,11 +907,6 @@ impl LashCoreBuilder {
         policy: facade_support::QueuedWorkBatchingConfig,
     ) -> Self {
         self.queued_work_batching = Some(policy);
-        self
-    }
-
-    pub fn process_wake_delivery_policy(mut self, policy: lash_core::DeliveryPolicy) -> Self {
-        self.process_wake_delivery_policy = Some(policy);
         self
     }
 
@@ -1190,12 +1179,6 @@ impl LashCoreBuilder {
             process: process_work,
             session_work,
             store_binding: backend.binding_identity(),
-            wake: WakeDeliveryDriverSetup {
-                registry: Arc::clone(&process_registry),
-                factory: Arc::clone(&store_factory),
-                clock: Arc::clone(&env.core.clock),
-                delivery_policy: env.core.control.process_wake_delivery_policy,
-            },
         };
 
         let substrate_slot = Arc::new(CoreWorkSlot::new(substrate));

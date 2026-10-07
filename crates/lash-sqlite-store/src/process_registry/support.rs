@@ -32,6 +32,7 @@ impl ProcessEventAppendArm {
 pub(crate) struct ProcessEventBatch {
     fleet_format: lash_core_execution::FleetFormat,
     record_changed: bool,
+    arms_obligations: bool,
 }
 
 impl ProcessEventBatch {
@@ -40,6 +41,19 @@ impl ProcessEventBatch {
         Self {
             fleet_format,
             record_changed: false,
+            arms_obligations: true,
+        }
+    }
+
+    /// Start an empty batch for a process actor's own terminal
+    /// transaction: it arms no terminal publication, since that transaction
+    /// resolves the process's waiters itself, and its parent-end plan is
+    /// only the late-start fence, settled at once, since its actor runs the
+    /// cascade (ADR 0132 §11; L6, FIG-5175).
+    pub(crate) fn for_actor(fleet_format: lash_core_execution::FleetFormat) -> Self {
+        Self {
+            arms_obligations: false,
+            ..Self::for_fleet(fleet_format)
         }
     }
 
@@ -50,9 +64,8 @@ impl ProcessEventBatch {
         record: &mut ProcessRecord,
         request: ProcessEventAppendRequest,
         occurred_at_ms: u64,
-        wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
     ) -> Result<ProcessEventAppendReceipt, lash_core_execution::PluginError> {
-        self.stage_arm(conn, record, request, occurred_at_ms, wake_delivery_config)
+        self.stage_arm(conn, record, request, occurred_at_ms)
             .map(|(receipt, _)| receipt)
     }
 
@@ -64,7 +77,6 @@ impl ProcessEventBatch {
         record: &mut ProcessRecord,
         request: ProcessEventAppendRequest,
         occurred_at_ms: u64,
-        wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
     ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), lash_core_execution::PluginError>
     {
         let (receipt, arm) = SqliteProcessRegistry::stage_process_event_append_conn(
@@ -72,8 +84,8 @@ impl ProcessEventBatch {
             record,
             request,
             occurred_at_ms,
-            wake_delivery_config,
             self.fleet_format,
+            self.arms_obligations,
         )?;
         self.record_changed |= arm.record_changed();
         Ok((receipt, arm))
@@ -86,7 +98,7 @@ impl ProcessEventBatch {
         record: &ProcessRecord,
     ) -> Result<(), lash_core_execution::PluginError> {
         if self.record_changed {
-            SqliteProcessRegistry::save_process_conn(conn, record)?;
+            SqliteProcessRegistry::save_process_conn(conn, record, self.arms_obligations)?;
         }
         Ok(())
     }
@@ -140,36 +152,6 @@ pub(super) fn cancel_requested_at_ms(record: &ProcessRecord) -> Option<i64> {
         .map(|request| request.requested_at_ms as i64)
 }
 
-#[cfg(any(test, feature = "testing"))]
-pub(super) async fn wake_allocation_floor_for_testing(
-    registry: &SqliteProcessRegistry,
-    target_session_id: &SessionId,
-    process_id: &ProcessId,
-) -> Result<Option<u64>, lash_core_execution::PluginError> {
-    let target_session_id = SessionId::fixture(target_session_id.to_string());
-    let process_id = process_id.clone();
-    registry
-        .conn
-        .call(move |conn| {
-            Ok(conn
-                .query_row(
-                    process_sql().floor.select_floor.sql(),
-                    params![target_session_id.as_str(), process_id.as_str()],
-                    |row| row.get::<_, i64>(0),
-                )
-                .optional()
-                .map(|value| {
-                    value
-                        .map(|value| u64_from_sql("WakeAllocationFloor", "allocation_floor", value))
-                        .transpose()
-                })
-                .and_then(|value| value)
-                .map_err(process_sqlite_error))
-        })
-        .await
-        .map_err(process_sqlite_error)?
-}
-
 impl SqliteProcessRegistry {
     pub(crate) fn require_process_conn(
         conn: &rusqlite::Connection,
@@ -210,7 +192,6 @@ impl SqliteProcessRegistry {
         let session_id = SessionId::parse(session_id.to_string())?;
         let process_id = process_id.clone();
         let now = self.clock.timestamp_ms();
-        let config = self.wake_delivery_config;
         self.conn
             .write_flow(move |tx| {
                 let fleet_format = tx.fleet();
@@ -240,14 +221,7 @@ impl SqliteProcessRegistry {
                                 &by,
                             )
                         };
-                        Self::append_event_conn(
-                            tx,
-                            &mut record,
-                            request,
-                            now,
-                            config,
-                            fleet_format,
-                        )?;
+                        Self::append_event_conn(tx, &mut record, request, now, fleet_format)?;
                     }
                     Ok(())
                 })()))
@@ -264,7 +238,6 @@ impl SqliteProcessRegistry {
         let process_id = process_id.clone();
         let target = target.map(ToOwned::to_owned);
         let now = self.clock.timestamp_ms();
-        let config = self.wake_delivery_config;
         self.conn
             .write_flow(move |tx| {
                 let fleet_format = tx.fleet();
@@ -288,7 +261,6 @@ impl SqliteProcessRegistry {
                             target.as_deref(),
                         ),
                         now,
-                        config,
                         fleet_format,
                     )?;
                     crate::conn::cached_execute(
@@ -297,14 +269,6 @@ impl SqliteProcessRegistry {
                         params![process_id.as_str(), target],
                     )
                     .map_err(process_sqlite_error)?;
-                    if let Some(previous) = previous {
-                        crate::conn::cached_execute(
-                            tx,
-                            process_sql().wake.discard_retargeted.sql(),
-                            params![process_id.as_str(), previous],
-                        )
-                        .map_err(process_sqlite_error)?;
-                    }
                     Ok(())
                 })()))
             })
@@ -353,7 +317,6 @@ impl SqliteProcessRegistry {
         Self {
             conn,
             clock,
-            wake_delivery_config: lash_core_execution::WakeDeliveryConfig::default(),
             location,
             process_id_mint: lash_core_execution::ProcessIdMint::default(),
         }
@@ -367,14 +330,6 @@ impl SqliteProcessRegistry {
         mint: lash_core_execution::ProcessIdMint,
     ) -> Self {
         self.process_id_mint = mint;
-        self
-    }
-
-    pub fn with_wake_delivery_config(
-        mut self,
-        config: lash_core_execution::WakeDeliveryConfig,
-    ) -> Self {
-        self.wake_delivery_config = config;
         self
     }
 
@@ -425,6 +380,7 @@ impl SqliteProcessRegistry {
     pub(crate) fn save_process_conn(
         conn: &Connection,
         record: &ProcessRecord,
+        arms_obligations: bool,
     ) -> Result<(), lash_core_execution::PluginError> {
         let change_seq = Self::next_change_seq_conn(conn)?;
         crate::conn::cached_execute(
@@ -438,19 +394,17 @@ impl SqliteProcessRegistry {
                 record.last_event_sequence as i64,
                 cancel_requested_at_ms(record),
                 process_encode_json(record)?,
-                record
-                    .park()
-                    .map(|park| crate::clamp_epoch_ms(park.since_ms)),
-                record.park().map(|park| park.reason.code().as_str()),
-                record
-                    .park()
-                    .and_then(|park| park.reason.retired_executable_generation_key()),
             ],
         )
         .map_err(process_sqlite_error)?;
         // The transaction that makes a process terminal arms its terminal
-        // publication (ADR 0109 §3): the row is the obligation.
-        super::terminal_publication::arm_conn(conn, record)
+        // publication (ADR 0109 §3): the row is the obligation. An actor's
+        // own terminal resolves its waiters instead.
+        if arms_obligations {
+            super::terminal_publication::arm_conn(conn, record)
+        } else {
+            Ok(())
+        }
     }
 
     pub(crate) fn next_change_seq_conn(
@@ -517,7 +471,6 @@ impl SqliteProcessRegistry {
         record: &mut ProcessRecord,
         request: ProcessEventAppendRequest,
         occurred_at_ms: u64,
-        wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
         fleet_format: lash_core_execution::FleetFormat,
     ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), lash_core_execution::PluginError>
     {
@@ -526,11 +479,11 @@ impl SqliteProcessRegistry {
             record,
             request,
             occurred_at_ms,
-            wake_delivery_config,
             fleet_format,
+            true,
         )?;
         if arm.record_changed() {
-            Self::save_process_conn(conn, record)?;
+            Self::save_process_conn(conn, record, true)?;
         }
         Ok((receipt, arm))
     }
@@ -564,13 +517,12 @@ impl SqliteProcessRegistry {
         record: &mut ProcessRecord,
         requests: Vec<ProcessEventAppendRequest>,
         occurred_at_ms: u64,
-        wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
         fleet_format: lash_core_execution::FleetFormat,
     ) -> Result<Vec<ProcessEventAppendReceipt>, lash_core_execution::PluginError> {
         let mut batch = ProcessEventBatch::for_fleet(fleet_format);
         let receipts = requests
             .into_iter()
-            .map(|request| batch.stage(conn, record, request, occurred_at_ms, wake_delivery_config))
+            .map(|request| batch.stage(conn, record, request, occurred_at_ms))
             .collect::<Result<Vec<_>, _>>()?;
         batch.commit(conn, record)?;
         Ok(receipts)
@@ -589,14 +541,16 @@ impl SqliteProcessRegistry {
     /// prologue, transaction lifetime and outcome mapping.
     ///
     /// `occurred_at_ms` is the caller's clock and the only clock this function
-    /// sees; it never reads one itself.
+    /// sees; it never reads one itself. Without `arms_obligations` (an
+    /// actor's own terminal) a terminal append's parent-end plan is settled
+    /// at once: the actor runs the cascade.
     pub(crate) fn stage_process_event_append_conn(
         conn: &Connection,
         record: &mut ProcessRecord,
         request: ProcessEventAppendRequest,
         occurred_at_ms: u64,
-        wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
         fleet_format: lash_core_execution::FleetFormat,
+        arms_obligations: bool,
     ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), lash_core_execution::PluginError>
     {
         let process_id = record.id.clone();
@@ -623,9 +577,9 @@ impl SqliteProcessRegistry {
         } else {
             None
         };
+        let signal = request.signal();
         let wake_session_id = Self::wake_session_id_conn(conn, &process_id)?;
-        let (last_sequence, sequence) =
-            Self::next_event_sequence_conn(conn, &process_id, wake_session_id.as_ref())?;
+        let (last_sequence, sequence) = Self::next_event_sequence_conn(conn, &process_id)?;
         let prepared = prepare_process_event_append(
             record,
             request,
@@ -644,11 +598,6 @@ impl SqliteProcessRegistry {
                 wake_delivery,
                 ..
             } => {
-                Self::insert_wake_delivery_conn(
-                    conn,
-                    wake_delivery.as_ref(),
-                    wake_delivery_config,
-                )?;
                 let repaired = if let Some(repaired) = repair_record {
                     *record = repaired;
                     true
@@ -682,20 +631,19 @@ impl SqliteProcessRegistry {
                     ],
                 )
                 .map_err(process_sqlite_error)?;
-                let park_transitions = lash_core_execution::runtime::process_park_transitions(
-                    record.park(),
-                    &projected_record,
-                );
+                // A new signal reaches the engine as mail, in the append's
+                // own transaction (ADR 0132 §10).
+                if let Some(signal) = &signal {
+                    crate::durable::processes::signal_mail_within(
+                        conn,
+                        &process_id,
+                        signal,
+                        lash_durable::DurableInstant(
+                            i64::try_from(occurred_at_ms).unwrap_or(i64::MAX),
+                        ),
+                    )?;
+                }
                 *record = projected_record;
-                // The park feed rides the event's own transaction (FIG-3659
-                // NOW-B): a park that opened or closed here is durable in the
-                // feed exactly when the fact that moved it is.
-                super::park_feed::log_process_park_transitions_conn(
-                    conn,
-                    &record.park_key(),
-                    &park_transitions,
-                    occurred_at_ms,
-                )?;
                 // A process that just reached a terminal status is an ended
                 // parent scope: its ledger row rides the same transaction as
                 // the terminal append, so no child can be stranded by a crash
@@ -706,19 +654,10 @@ impl SqliteProcessRegistry {
                         &lash_core_execution::ScopeId::process(process_id.clone()),
                         occurred_at_ms,
                         fleet_format,
+                        !arms_obligations,
                     )?;
                 }
-                Self::insert_wake_delivery_conn(
-                    conn,
-                    wake_delivery.as_ref(),
-                    wake_delivery_config,
-                )?;
-                Self::advance_wake_allocation_floor_conn(
-                    conn,
-                    wake_session_id.as_ref(),
-                    &process_id,
-                    sequence,
-                )?;
+                Self::deliver_process_wake_conn(conn, wake_delivery.as_ref(), occurred_at_ms)?;
                 Ok((
                     ProcessEventAppendReceipt {
                         last_event_sequence: event.sequence,
@@ -737,7 +676,6 @@ impl SqliteProcessRegistry {
         record: &mut ProcessRecord,
         request: ProcessEventAppendRequest,
         occurred_at_ms: u64,
-        wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
         fleet_format: lash_core_execution::FleetFormat,
     ) -> Result<(ProcessEventAppendReceipt, bool), lash_core_execution::PluginError> {
         let (receipt, arm) = Self::apply_process_event_append_conn(
@@ -745,42 +683,54 @@ impl SqliteProcessRegistry {
             record,
             request,
             occurred_at_ms,
-            wake_delivery_config,
             fleet_format,
         )?;
         Ok((receipt, arm.record_changed()))
     }
 
-    pub(crate) fn insert_wake_delivery_conn(
+    /// Hand a process event's wake to its target session as queued work,
+    /// inside the append's own transaction: the producer admits the batch
+    /// under its source key (so a repeat is the same batch) and wakes the
+    /// session actor (ADR 0132 §12). A target session that is deleted, or
+    /// that never existed, receives nothing.
+    pub(crate) fn deliver_process_wake_conn(
         conn: &Connection,
         wake: Option<&lash_core_execution::ProcessWakeDelivery>,
-        config: lash_core_execution::WakeDeliveryConfig,
+        occurred_at_ms: u64,
     ) -> Result<(), lash_core_execution::PluginError> {
         let Some(wake) = wake else {
             return Ok(());
         };
-        let delivery = lash_core_execution::WakeDelivery::pending(wake.clone(), config);
-        crate::conn::cached_execute(
+        let to_plugin = |error: lash_core_execution::StoreError| {
+            lash_core_execution::PluginError::Session(error.to_string())
+        };
+        if crate::persistence::ensure_session_not_deleted_conn(conn, &wake.target_session_id)
+            .is_err()
+            || crate::session_meta::load_session_meta_in_tx(conn, Some(&wake.target_session_id))
+                .map_err(to_plugin)?
+                .is_none()
+        {
+            tracing::debug!(
+                process_id = %wake.process_id,
+                target_session_id = %wake.target_session_id,
+                sequence = wake.sequence,
+                "process wake target is not a live session; nothing is queued"
+            );
+            return Ok(());
+        }
+        crate::queued_work::enqueue_queued_work_conn_with_outcome(
             conn,
-            process_sql().wake_sqlite.insert_pending.sql(),
-            params![
-                delivery.delivery_id().as_str(),
-                delivery.wake.process_id.as_str(),
-                delivery.wake.target_session_id.as_str(),
-                delivery.wake.sequence as i64,
-                delivery.next_attempt_at_ms as i64,
-                delivery.expires_at_ms as i64,
-                process_encode_json(&delivery.wake)?,
-            ],
+            &lash_core_execution::facade_support::process_wake_batch_draft(wake.clone()),
+            occurred_at_ms,
+            wake.sequence,
         )
-        .map_err(process_sqlite_error)?;
+        .map_err(to_plugin)?;
         Ok(())
     }
 
     pub(crate) fn next_event_sequence_conn(
         conn: &Connection,
         process_id: &ProcessId,
-        target_session_id: Option<&SessionId>,
     ) -> Result<(Option<u64>, u64), lash_core_execution::PluginError> {
         let last_sequence = conn
             .query_row(
@@ -792,47 +742,9 @@ impl SqliteProcessRegistry {
         let last_sequence = last_sequence
             .map(|sequence| plugin_u64_from_sql("ProcessEvent", "sequence", sequence))
             .transpose()?;
-        let sender_floor = target_session_id
-            .map(|target_session_id| {
-                conn.query_row(
-                    process_sql().floor.select_floor.sql(),
-                    params![target_session_id.as_str(), process_id.as_str()],
-                    |row| row.get::<_, i64>(0),
-                )
-                .optional()
-                .map_err(process_sqlite_error)
-            })
-            .transpose()?
-            .flatten()
-            .map(|floor| plugin_u64_from_sql("WakeAllocationFloor", "allocation_floor", floor))
-            .transpose()?;
-        let sequence = lash_core_execution::runtime::allocate_process_event_sequence(
-            last_sequence,
-            sender_floor,
-        )?;
+        let sequence =
+            lash_core_execution::runtime::allocate_process_event_sequence(last_sequence, None)?;
         Ok((last_sequence, sequence))
-    }
-
-    pub(crate) fn advance_wake_allocation_floor_conn(
-        conn: &Connection,
-        target_session_id: Option<&SessionId>,
-        process_id: &ProcessId,
-        sequence: u64,
-    ) -> Result<(), lash_core_execution::PluginError> {
-        let Some(target_session_id) = target_session_id else {
-            return Ok(());
-        };
-        crate::conn::cached_execute(
-            conn,
-            process_sql().floor_sqlite.upsert_max.sql(),
-            params![
-                target_session_id.as_str(),
-                process_id.as_str(),
-                sequence as i64
-            ],
-        )
-        .map_err(process_sqlite_error)?;
-        Ok(())
     }
 }
 

@@ -1,14 +1,10 @@
-//! Parked work: the one host surface that lists parked turns and parked
-//! processes together, summarizes them, and follows their transitions
-//! (FIG-3659).
+//! Parked work: the host surface that lists parked turns, summarizes them,
+//! and follows their transitions (FIG-3659), ordered by `since_ms`, the first
+//! refusal of the park.
 //!
-//! A turn parks in its session store and a process parks on its registry
-//! record; the two live in different stores (on SQLite, different database
-//! files), so each is read through its own seam and merged here. Both are
-//! ordered by `since_ms` — the first refusal of the park — so the merged list
-//! is too: the page cursor keeps each source's own keyset position, which is
-//! what makes the merge exact without comparing a session id with a process
-//! id. The feed merge works the same way over each store's transition ledger.
+//! A parked process is its actor's state (ADR 0132 §11): it is recorded in
+//! the substrate's park feed, not here, and an operator redrives it by
+//! [`ParkedWork::redrive`] or `ProcessAdmin::redrive`.
 //!
 //! Parking is not failing: parked work holds what it holds until an operator
 //! acts (FIG-3586). This surface is how an operator finds it.
@@ -19,22 +15,20 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash_core::store::{
-    ParkEventKind, ParkFeedCursor, ParkId, ParkReason, ParkReasonCode, ParkReport,
-    ProcessParkQuery, TurnParkQuery,
+    ParkEventKind, ParkFeedCursor, ParkId, ParkReason, ParkReasonCode, ParkReport, TurnParkQuery,
 };
-use lash_core::{Clock, DeploymentStore, ProcessId, ProcessRegistry};
+use lash_core::{Clock, DeploymentStore, ProcessId};
 use lash_sansio::{SessionId, TurnId};
 use serde::{Deserialize, Serialize};
 
 use crate::Result;
 
-/// The deployment's parked work, turns and processes alike.
+/// The deployment's parked work.
 ///
 /// Obtained from [`LashCore::parked_work`](crate::LashCore::parked_work).
 #[derive(Clone)]
 pub struct ParkedWork {
     pub(crate) store_factory: Arc<dyn DeploymentStore>,
-    pub(crate) process_registry: Arc<dyn ProcessRegistry>,
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
     pub(crate) work: Arc<crate::core::CoreWorkSlot>,
@@ -91,33 +85,9 @@ pub struct ParkedWorkRecord {
     pub attempts: u32,
 }
 
-/// Which kinds of parked work a [`ParkedWorkQuery`] reads.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ParkedKinds {
-    /// Parked turns only.
-    Turns,
-    /// Parked processes only.
-    Processes,
-    /// Both, merged.
-    #[default]
-    Both,
-}
-
-impl ParkedKinds {
-    fn turns(self) -> bool {
-        matches!(self, Self::Turns | Self::Both)
-    }
-
-    fn processes(self) -> bool {
-        matches!(self, Self::Processes | Self::Both)
-    }
-}
-
 /// The filter and page a [`ParkedWork::list`] read applies.
 #[derive(Clone, Debug)]
 pub struct ParkedWorkQuery {
-    /// Which kinds of work to list.
-    pub kinds: ParkedKinds,
     /// Restrict to these reason codes; `None` (or an empty set) means all.
     pub reasons: Option<BTreeSet<ParkReasonCode>>,
     /// Only parks at least this old (by their first refusal).
@@ -129,11 +99,10 @@ pub struct ParkedWorkQuery {
 }
 
 impl ParkedWorkQuery {
-    /// Every parked turn and process, `limit` at a time.
+    /// Every parked turn, `limit` at a time.
     #[must_use]
     pub fn all(limit: NonZeroUsize) -> Self {
         Self {
-            kinds: ParkedKinds::Both,
             reasons: None,
             min_age: None,
             after: None,
@@ -142,16 +111,14 @@ impl ParkedWorkQuery {
     }
 }
 
-/// Where a [`ParkedWork::list`] page resumes: each source's own keyset
+/// Where a [`ParkedWork::list`] page resumes: the turn parks' keyset
 /// position. Opaque; hosts persist it through serde.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParkedWorkCursor {
     turn: Option<(u64, SessionId)>,
-    process: Option<(u64, ProcessId)>,
 }
 
-/// One page of parked work in `(since_ms, kind)` order, turns before
-/// processes on a tie.
+/// One page of parked work in `since_ms` order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParkedWorkPage {
     /// The parks on this page.
@@ -160,40 +127,31 @@ pub struct ParkedWorkPage {
     pub next: Option<ParkedWorkCursor>,
 }
 
-/// Live parks per kind.
+/// Live parks.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ParkedWorkReport {
     /// Parked turns.
     pub turns: ParkReport,
-    /// Parked processes.
-    pub processes: ParkReport,
 }
 
 impl ParkedWorkReport {
-    /// The oldest live park's first refusal over both kinds.
+    /// The oldest live park's first refusal.
     #[must_use]
     pub fn oldest_since_ms(&self) -> Option<u64> {
-        match (self.turns.oldest_since_ms, self.processes.oldest_since_ms) {
-            (Some(turns), Some(processes)) => Some(turns.min(processes)),
-            (turns, processes) => turns.or(processes),
-        }
+        self.turns.oldest_since_ms
     }
 
-    /// Live retired-generation parks over both kinds, per the executable
-    /// generation their admission recorded (FIG-3571).
+    /// Live retired-generation parks, per the executable generation their
+    /// admission recorded (FIG-3571).
     #[must_use]
     pub fn retired_by_executable_generation(
         &self,
     ) -> std::collections::BTreeMap<lash_core::ExecutableGeneration, usize> {
-        let mut counts = self.turns.retired_by_executable_generation.clone();
-        for (generation, parks) in &self.processes.retired_by_executable_generation {
-            *counts.entry(generation.clone()).or_default() += parks;
-        }
-        counts
+        self.turns.retired_by_executable_generation.clone()
     }
 }
 
-/// One transition of a park, from either feed.
+/// One transition of a park.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParkedWorkEvent {
     /// Host-clock epoch milliseconds the transition happened.
@@ -206,24 +164,22 @@ pub struct ParkedWorkEvent {
     pub kind: ParkEventKind,
 }
 
-/// Where a [`ParkedWork::events`] read resumes: each feed's own position.
-/// Opaque; hosts persist it through serde.
+/// Where a [`ParkedWork::events`] read resumes: the turn park feed's
+/// position. Opaque; hosts persist it through serde.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParkedWorkEventsCursor {
     turn: ParkFeedCursor,
-    process: ParkFeedCursor,
 }
 
 impl ParkedWorkEventsCursor {
-    /// Both feeds from their start.
+    /// The feed from its start.
     #[must_use]
     pub fn initial() -> Self {
         Self::default()
     }
 }
 
-/// One page of park transitions from both feeds, each feed in its commit
-/// order, merged by `at_ms`.
+/// One page of park transitions in the feed's commit order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParkedWorkEventPage {
     /// The transitions on this page.
@@ -246,54 +202,24 @@ impl ParkedWork {
                 .saturating_sub(u64::try_from(age.as_millis()).unwrap_or(u64::MAX))
         });
         let cursor = query.after.clone().unwrap_or_default();
-        let turns = if query.kinds.turns() {
-            self.store_factory
-                .list_turn_parks(&TurnParkQuery {
-                    reasons: query.reasons.clone(),
-                    session: None,
-                    parked_at_or_before_ms: at_or_before,
-                    after: cursor.turn.clone(),
-                    limit: fetch,
-                })
-                .await?
-        } else {
-            Vec::new()
-        };
-        let processes = if query.kinds.processes() {
-            self.process_registry
-                .list_parked_processes(&ProcessParkQuery {
-                    reasons: query.reasons.clone(),
-                    parked_at_or_before_ms: at_or_before,
-                    after: cursor.process.clone(),
-                    limit: fetch,
-                })
-                .await?
-        } else {
-            Vec::new()
-        };
-        let exhausted_turns = turns.len() < fetch.get();
-        let exhausted_processes = processes.len() < fetch.get();
-        let mut turns = turns.into_iter().peekable();
-        let mut processes = processes
-            .into_iter()
-            .filter_map(|record| {
-                let park = record.park()?.clone();
-                Some((record.park_key(), park))
+        let turns = self
+            .store_factory
+            .list_turn_parks(&TurnParkQuery {
+                reasons: query.reasons.clone(),
+                session: None,
+                parked_at_or_before_ms: at_or_before,
+                after: cursor.turn.clone(),
+                limit: fetch,
             })
-            .peekable();
+            .await?;
+        let more = turns.len() > query.limit.get();
         let mut next = cursor;
-        let mut records = Vec::with_capacity(query.limit.get());
-        while records.len() < query.limit.get() {
-            let take_turn = match (turns.peek(), processes.peek()) {
-                (Some(turn), Some((_, process))) => turn.since_ms <= process.since_ms,
-                (Some(_), None) => true,
-                (None, Some(_)) => false,
-                (None, None) => break,
-            };
-            if take_turn {
-                let Some(turn) = turns.next() else { break };
+        let records = turns
+            .into_iter()
+            .take(query.limit.get())
+            .map(|turn| {
                 next.turn = Some((turn.since_ms, turn.session_id.clone()));
-                records.push(ParkedWorkRecord {
+                ParkedWorkRecord {
                     target: ParkedWorkRef::Turn {
                         session_id: turn.session_id,
                         turn_id: turn.turn_id,
@@ -303,33 +229,16 @@ impl ParkedWork {
                     since_ms: turn.since_ms,
                     last_refused_ms: turn.last_refused_ms,
                     attempts: turn.attempts,
-                });
-            } else {
-                let Some((process_id, park)) = processes.next() else {
-                    break;
-                };
-                next.process = Some((park.since_ms, process_id.clone()));
-                records.push(ParkedWorkRecord {
-                    target: ParkedWorkRef::Process { process_id },
-                    park_id: park.park_id,
-                    reason: park.reason,
-                    since_ms: park.since_ms,
-                    last_refused_ms: park.last_refused_ms,
-                    attempts: park.attempts,
-                });
-            }
-        }
-        let more = turns.peek().is_some()
-            || processes.peek().is_some()
-            || !exhausted_turns
-            || !exhausted_processes;
+                }
+            })
+            .collect();
         Ok(ParkedWorkPage {
             records,
             next: more.then_some(next),
         })
     }
 
-    /// Live parks per kind and reason, and the oldest of each. Records the
+    /// Live parks per reason, and the oldest. Records the
     /// `lash.parked_work.count` and `lash.parked_work.oldest_age` gauges for
     /// every reason, zero included, so a host alerting on parked work calls
     /// this on its scrape interval.
@@ -339,27 +248,23 @@ impl ParkedWork {
     #[tracing::instrument(name = "lash.parked_work.summary", skip_all)]
     pub async fn summary(&self) -> Result<ParkedWorkReport> {
         let turns = self.store_factory.count_unsettled_turns().await?;
-        let processes = self.process_registry.summarize_parked_processes().await?;
         let report = ParkedWorkReport {
             turns: ParkReport {
                 by_reason: turns.parked_by_reason,
                 oldest_since_ms: turns.oldest_parked_since_ms,
                 retired_by_executable_generation: turns.retired_by_executable_generation,
             },
-            processes,
         };
         record_park_gauges(&self.metrics, &report, self.clock.timestamp_ms());
         Ok(report)
     }
 
-    /// Park transitions from both feeds strictly after `from`, at most
-    /// `limit` from each.
+    /// Park transitions strictly after `from`, at most `limit`.
     ///
     /// # Errors
-    /// When either feed refuses the read, including a position below a
-    /// feed's compaction horizon (`StoreError::ParkFeedCursorCompacted`,
-    /// `PluginError::ProcessParkFeedCursorCompacted`): relist, then resume
-    /// from the horizon.
+    /// When the feed refuses the read, including a position below its
+    /// compaction horizon (`StoreError::ParkFeedCursorCompacted`): relist,
+    /// then resume from the horizon.
     #[tracing::instrument(name = "lash.parked_work.events", skip_all)]
     pub async fn events(
         &self,
@@ -367,79 +272,45 @@ impl ParkedWork {
         limit: NonZeroUsize,
     ) -> Result<ParkedWorkEventPage> {
         let turns = self.store_factory.turn_park_feed(from.turn, limit).await?;
-        let processes = self
-            .process_registry
-            .process_park_feed(from.process, limit)
-            .await?;
-        let next = ParkedWorkEventsCursor {
-            turn: turns.next,
-            process: processes.next,
-        };
-        let mut events = turns
-            .events
-            .into_iter()
-            .map(|event| {
-                (
-                    (event.at_ms, 0u8, event.seq),
-                    ParkedWorkEvent {
-                        at_ms: event.at_ms,
-                        target: ParkedWorkRef::Turn {
-                            session_id: event.target.session_id,
-                            turn_id: event.target.turn_id,
-                        },
-                        park_id: event.park_id,
-                        kind: event.kind,
-                    },
-                )
-            })
-            .chain(processes.events.into_iter().map(|event| {
-                (
-                    (event.at_ms, 1u8, event.seq),
-                    ParkedWorkEvent {
-                        at_ms: event.at_ms,
-                        target: ParkedWorkRef::Process {
-                            process_id: event.target,
-                        },
-                        park_id: event.park_id,
-                        kind: event.kind,
-                    },
-                )
-            }))
-            .collect::<Vec<_>>();
-        // A stable sort on `(at_ms, feed, seq)` keeps each feed in its own
-        // commit order.
-        events.sort_by_key(|(key, _)| *key);
         Ok(ParkedWorkEventPage {
-            events: events.into_iter().map(|(_, event)| event).collect(),
-            next,
+            events: turns
+                .events
+                .into_iter()
+                .map(|event| ParkedWorkEvent {
+                    at_ms: event.at_ms,
+                    target: ParkedWorkRef::Turn {
+                        session_id: event.target.session_id,
+                        turn_id: event.target.turn_id,
+                    },
+                    park_id: event.park_id,
+                    kind: event.kind,
+                })
+                .collect(),
+            next: ParkedWorkEventsCursor { turn: turns.next },
         })
     }
 
-    /// Compact both feeds through `through`: events at or behind it are
-    /// removed and each feed's horizon advances to it. Host-gated, never
-    /// automatic.
+    /// Compact the feed through `through`: events at or behind it are
+    /// removed and its horizon advances to it. Host-gated, never automatic.
     ///
     /// # Errors
-    /// When either store refuses the compaction.
+    /// When the store refuses the compaction.
     pub async fn compact_events(&self, through: &ParkedWorkEventsCursor) -> Result<()> {
         self.store_factory
             .compact_turn_park_feed(through.turn)
-            .await?;
-        self.process_registry
-            .compact_process_park_feed(through.process)
             .await?;
         Ok(())
     }
 }
 
-/// Record the parked-work gauges for both kinds: every reason's count, zero
-/// included, and the oldest park's age.
+/// Record the parked-work gauges: every reason's count, zero included, and
+/// the oldest park's age.
 pub(crate) fn record_park_gauges(
     metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
     report: &ParkedWorkReport,
     now_ms: u64,
 ) {
-    for (kind, parks) in [("turn", &report.turns), ("process", &report.processes)] {
+    for (kind, parks) in [("turn", &report.turns)] {
         for reason in ParkReasonCode::ALL {
             let count = parks.by_reason.get(reason).copied().unwrap_or_default();
             lash_core::operational_metrics::record_parked_work_count(

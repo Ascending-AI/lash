@@ -183,7 +183,6 @@ pub struct RuntimeExecutionProcessEventContext {
     pub store: Option<Arc<dyn crate::RuntimeStore>>,
     pub session_store_factory: Option<Arc<dyn crate::DeploymentStore>>,
     pub queued_work: Arc<dyn crate::SessionWorkEngine>,
-    pub process_wake_delivery_policy: crate::DeliveryPolicy,
     pub clock: Arc<dyn crate::Clock>,
 }
 
@@ -452,10 +451,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         self.started_process_ids
             .lock_recover()
             .insert(process_id.clone());
-    }
-
-    pub(crate) fn session_graph_service(&self) -> &dyn crate::plugin::SessionGraphService {
-        self.dispatch.session_graph.as_ref()
     }
 
     pub(crate) fn to_static(&self) -> Option<RuntimeExecutionContext<'static>> {
@@ -1144,22 +1139,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                 &context.execution_write_authority,
             )
             .await?;
-        let mut events = Vec::with_capacity(receipts.len());
-        for receipt in receipts {
-            crate::tool_provider::process_events::enqueue_wake_delivery(
-                std::sync::Arc::clone(context.process_work.registry()),
-                context.store.clone(),
-                context.session_store_factory.as_ref(),
-                receipt.wake_delivery,
-                Some(self.session_graph_service()),
-                Arc::clone(&context.queued_work),
-                context.process_wake_delivery_policy,
-                Arc::clone(&context.clock),
-            )
-            .await?;
-            events.push(receipt.event);
-        }
-        Ok(events)
+        Ok(receipts.into_iter().map(|receipt| receipt.event).collect())
     }
 
     /// Waits for one named process signal for code-executor implementors through the durable

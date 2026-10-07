@@ -624,22 +624,6 @@ impl ProcessQuery for Integrator {
     async fn count_non_terminal_processes(&self) -> Result<usize, PluginError> {
         unreachable!("external signature witness")
     }
-    async fn list_parked_processes(
-        &self,
-        query: &ProcessParkQuery,
-    ) -> Result<Vec<ProcessRecord>, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn process_park_feed(
-        &self,
-        after: ParkFeedCursor,
-        limit: NonZeroUsize,
-    ) -> Result<ParkFeedPage<ProcessParkKey>, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn summarize_parked_processes(&self) -> Result<ParkReport, PluginError> {
-        unreachable!("external signature witness")
-    }
 }
 
 #[lash::async_trait]
@@ -923,21 +907,6 @@ impl ProcessLifecycle for Integrator {
     ) -> Result<ProcessRecord, PluginError> {
         unreachable!("external signature witness")
     }
-    async fn park_process_with_authority(
-        &self,
-        process_id: &ProcessId,
-        park: ProcessParkWrite,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<StoreTransition<ProcessRecord>, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn begin_parked_rerun_with_authority(
-        &self,
-        process_id: &ProcessId,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessRecord, PluginError> {
-        unreachable!("external signature witness")
-    }
 }
 
 #[lash::async_trait]
@@ -953,54 +922,6 @@ impl ProcessToolIntents for Integrator {
         replay_key: &str,
         outcome: ToolIntentExecutionOutcome,
     ) -> Result<StoreTransition<ToolIntentSubmissionRecord>, PluginError> {
-        unreachable!("external signature witness")
-    }
-}
-
-#[lash::async_trait]
-impl ProcessWakeOutbox for Integrator {
-    fn wake_delivery_config(&self) -> WakeDeliveryConfig {
-        unreachable!("external signature witness")
-    }
-    async fn claim_pending_wake_deliveries(
-        &self,
-        limit: usize,
-    ) -> Result<Vec<WakeDelivery>, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn list_wake_deliveries(
-        &self,
-        state: Option<WakeDeliveryState>,
-    ) -> Result<Vec<WakeDelivery>, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn wake_delivery_report(&self) -> Result<WakeDeliveryReport, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn mark_wake_enqueued(
-        &self,
-        delivery_id: &str,
-        claim_token: &str,
-    ) -> Result<WakeDeliveryClaimOutcome, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn discard_wake_delivery(
-        &self,
-        delivery_id: &str,
-        claim_token: &str,
-        reason: WakeDiscardReason,
-    ) -> Result<WakeDeliveryClaimOutcome, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<(), PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn defer_wake_delivery(
-        &self,
-        delivery_id: &str,
-        claim_token: &str,
-        next_attempt_at_ms: u64,
-    ) -> Result<WakeDeliveryClaimOutcome, PluginError> {
         unreachable!("external signature witness")
     }
 }
@@ -1031,9 +952,6 @@ impl ProcessRetention for Integrator {
         watermark: ProjectionWatermark,
         trigger_store: Option<&dyn TriggerStore>,
     ) -> Result<usize, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn compact_process_park_feed(&self, through: ParkFeedCursor) -> Result<(), PluginError> {
         unreachable!("external signature witness")
     }
     async fn prune_terminal_processes(

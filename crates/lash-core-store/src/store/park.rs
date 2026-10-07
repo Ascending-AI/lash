@@ -692,14 +692,6 @@ pub enum UnparkCause {
     /// was empty and ended: a command run commits no turn, so its end is
     /// what settles its park (FIG-4780).
     CommandsApplied,
-    /// The parked process appended a lifecycle fact past its refusal: a rerun
-    /// got past replay and made progress (NOW-B).
-    ProcessProgressed,
-    /// The parked process reached a terminal status other than `Cancelled`.
-    ProcessTerminal {
-        /// The terminal status it reached.
-        status: crate::ProcessStatus,
-    },
 }
 
 /// What ended a park by cancelling the work it held.
@@ -711,11 +703,6 @@ pub enum ParkCancelCause {
     InputWithdrawn,
     /// The session was deleted, single or batch.
     SessionDeleted,
-    /// The parked process reached its terminal `Cancelled` status.
-    ProcessCancelled {
-        /// The origin of the cancel request it recorded, when it recorded one.
-        origin: Option<lash_sansio::CancelOrigin>,
-    },
     /// An operator cancelled the parked run (its `Cancel` intent).
     Operator {
         /// The intent that cancelled it.
@@ -914,13 +901,6 @@ pub struct TurnParkTarget {
     pub turn_id: TurnId,
 }
 
-/// The one key a parked process is named by, in its park projection and its
-/// park feed.
-///
-/// It is the process's minted, never-reused id, so a park never outlives or
-/// aliases the run it names; every park surface follows this one type.
-pub type ProcessParkKey = crate::ProcessId;
-
 /// One park feed row, shared by the turn and the process feeds. `seq` is the
 /// feed's own clock sequence; `park_id` is the park the transition applies to
 /// (for `Unparked`/`Cancelled` it names the park that closed, which is
@@ -1013,71 +993,6 @@ impl EnginePark {
     pub fn as_str(&self) -> &str {
         &self.0
     }
-}
-
-/// The parked state a process record carries (NOW-B).
-///
-/// A process parks when its body refuses to replay its journal: nothing is
-/// settled and nothing was dispatched, so the process stays non-terminal and
-/// holds what it holds until an operator acts. The park lives on the record
-/// for as long as the process makes no progress: a rerun that refuses again
-/// re-parks it (`attempts += 1`, `since_ms` and `park_id` kept), and the
-/// first lifecycle fact past the refusal — progress or a terminal — clears it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ProcessPark {
-    /// Why the process parked, as its latest refusal said.
-    pub reason: ParkReason,
-    /// The process event sequence of the `process.parked` fact that opened
-    /// this park: the CAS token the operator verbs take.
-    pub park_id: ParkId,
-    /// Host-clock epoch milliseconds of the first refusal of this park.
-    pub since_ms: u64,
-    /// Host-clock epoch milliseconds of the most recent refusal.
-    pub last_refused_ms: u64,
-    /// Refusals since the park opened (1 on the first).
-    pub attempts: u32,
-    /// Whether the latest run refused: a rerun under way clears it, and the
-    /// run's own refusal sets it again. Only a refusing park exempts the
-    /// process's next start from its attempt budget, so a rerun that gets
-    /// past replay and then fails live spends its budget as usual.
-    pub refusing: bool,
-    /// The engine's handle on the stopped execution, when the engine parked
-    /// the process itself (an exhausted retry loop, FIG-3675).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub engine: Option<EnginePark>,
-}
-
-/// What a process park write records: the refusal, and the engine's handle
-/// on the stopped execution when the engine parked the work itself.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProcessParkWrite {
-    /// Why the process parked.
-    pub reason: ParkReason,
-    /// The engine's handle on the stopped execution, if any.
-    pub engine: Option<EnginePark>,
-}
-
-impl From<ParkReason> for ProcessParkWrite {
-    fn from(reason: ParkReason) -> Self {
-        Self {
-            reason,
-            engine: None,
-        }
-    }
-}
-
-/// The filter a `list_parked_processes` read applies.
-#[derive(Clone, Debug)]
-pub struct ProcessParkQuery {
-    /// Restrict to these reason codes; `None` (or an empty set) means all.
-    pub reasons: Option<BTreeSet<ParkReasonCode>>,
-    /// Age filter: only parks whose `since_ms` is at or before this instant.
-    pub parked_at_or_before_ms: Option<u64>,
-    /// Keyset: rows strictly after `(since_ms, process key)` in the
-    /// `(since_ms, process key)` ordering.
-    pub after: Option<(u64, ProcessParkKey)>,
-    /// Page size.
-    pub limit: NonZeroUsize,
 }
 
 /// The live parks of one kind of work, for drain and metrics.

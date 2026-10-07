@@ -334,7 +334,6 @@ fn test_attempt_context() -> crate::AttemptContext<'static> {
         crate::SessionId::from("registry-admission-test"),
         Arc::new(crate::testing::MockSessionManager::default()),
         Arc::new(crate::testing::MockSessionManager::default()),
-        Arc::new(crate::testing::MockSessionManager::default()),
         Arc::new(crate::UnavailableProcessService),
         crate::ActorContext::unavailable()
             .scoped(crate::AdmittedScope::runtime_operation(

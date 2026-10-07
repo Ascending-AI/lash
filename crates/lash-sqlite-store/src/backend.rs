@@ -28,9 +28,6 @@ pub struct SqliteStoreSetOptions {
     pub observer: lash_core_execution::facade_support::StoreObserver,
     /// Blob and connection policy for the database.
     pub store: StoreOptions,
-    /// Retention and staleness bounds of the process registry's wake
-    /// deliveries.
-    pub wake_delivery: lash_core_execution::WakeDeliveryConfig,
     /// Where the process registry mints process ids (ADR 0107): at random,
     /// unless a test that replays committed bytes needs them deterministic.
     #[doc(hidden)]
@@ -215,7 +212,6 @@ impl SqliteStoreSet {
                 database.clone(),
                 Arc::clone(&clock),
             )
-            .with_wake_delivery_config(options.wake_delivery)
             .with_process_id_mint_for_testing(options.process_id_mint.clone()),
         );
         let trigger_store = Arc::new(SqliteTriggerStore::on_connection(

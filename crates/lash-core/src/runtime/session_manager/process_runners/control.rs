@@ -223,26 +223,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
             })
             .await?
         {
-            crate::ProcessEffectOutcome::EmitEvent {
-                event,
-                wake_delivery,
-            } => {
-                crate::tool_provider::process_events::enqueue_wake_delivery(
-                    Arc::clone(&self.registry),
-                    self.current
-                        .session()
-                        .and_then(|session| session.store.as_ref())
-                        .map(|store| Arc::clone(store.store())),
-                    Some(&self.current.host.core.session_store_factory()),
-                    wake_delivery.map(|delivery| *delivery),
-                    None,
-                    Arc::clone(self.current.host.queued_work()),
-                    self.current.host.core.control.process_wake_delivery_policy,
-                    Arc::clone(&self.current.host.core.clock),
-                )
-                .await?;
-                Ok(*event)
-            }
+            crate::ProcessEffectOutcome::EmitEvent { event, .. } => Ok(*event),
             _ => Err(wrong_process_outcome("emit_event")),
         }
     }

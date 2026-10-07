@@ -85,30 +85,10 @@ crate::statements! {
              WHERE consumer_hold_scope_kind = ?1 AND consumer_hold_scope_id = ?2";
 
         /// The identity columns are absent because none of them is mutable.
-        /// `?8`/`?9` are the parked projection: the live park's `since_ms`
-        /// and reason code, both `NULL` while the process is not parked.
-        /// `?10` is the retired executable generation a `retired_generation`
-        /// park names, `NULL` for any other park (FIG-3571).
         update_mutable_columns = "UPDATE processes
              SET updated_at_ms = ?2, change_seq = ?3, status = ?4,
-                 last_event_sequence = ?5, cancel_requested_at_ms = ?6, record_json = ?7,
-                 parked_since_ms = ?8, parked_reason_code = ?9, park_executable_generation = ?10
+                 last_event_sequence = ?5, cancel_requested_at_ms = ?6, record_json = ?7
              WHERE process_id = ?1";
-
-        /// Live process parks per reason code, with each code's oldest
-        /// `since_ms`, over the parked projection's partial index.
-        summarize_parked = "SELECT parked_reason_code, COUNT(*), MIN(parked_since_ms)
-             FROM processes
-             WHERE parked_since_ms IS NOT NULL
-             GROUP BY parked_reason_code";
-
-        /// Live retired-generation process parks grouped by the generation
-        /// their start recorded (FIG-3571): read off the projected, indexed
-        /// `park_executable_generation` column, never the record.
-        count_retired_parks_by_executable_generation = "SELECT park_executable_generation, COUNT(*)
-             FROM processes
-             WHERE park_executable_generation IS NOT NULL
-             GROUP BY park_executable_generation";
 
         /// Every live process, whole. The unpaged read behind the in-memory
         /// registry rebuild; the paged non-terminal scans are backend-only because

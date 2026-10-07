@@ -95,7 +95,7 @@ impl ProcessEngine for SignedEngine {
         _state: crate::EngineState,
         _event: crate::EngineEvent,
     ) -> Result<(crate::EngineState, crate::EngineAction), crate::ProcessInfraError> {
-        todo!("L6 (FIG-5175): port SignedEngine to advance")
+        unreachable!("resolution never advances the process")
     }
 }
 

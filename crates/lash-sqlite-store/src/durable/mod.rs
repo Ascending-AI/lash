@@ -26,13 +26,15 @@ use lash_durable::{
     MailRefusal, MailSeq, MailTx, MailWrite, NodeId, NodeLease, NodeSpec, OpenedActor, Owner,
     Reaped, Release, StateRevision, StoreFailure, StoreFailureKind, Woken,
 };
+use lash_store_sql::durable::park_events::ParkEventStatements;
+use lash_store_sql::durable::processes::{ActorParkStatements, ProcessActorStatements};
 use lash_store_sql::durable::{ActorStatements, MailStatements, NodeStatements};
 use rusqlite::{Connection, OptionalExtension};
 
-use crate::conn::{SqliteConnection, TxOutcome, cached_execute};
+use crate::conn::{FencedTx, SqliteConnection, TxOutcome, cached_execute};
 
 mod park_events;
-mod processes;
+pub(crate) mod processes;
 mod run_records;
 mod session_close;
 mod snapshots;
@@ -41,6 +43,7 @@ mod waits;
 
 // The domain tables I0 creates in the durable core database (FIG-5194);
 // each domain's own lane adds its tables beside them.
+pub(crate) use park_events::TABLES as PARK_EVENTS_TABLES;
 pub(crate) use run_records::TABLES as RUN_RECORDS_TABLES;
 pub(crate) use snapshots::TABLES as EXEC_SNAPSHOTS_TABLES;
 pub(crate) use turns::TABLES as TURN_PHASES_TABLES;
@@ -60,7 +63,7 @@ CREATE TABLE IF NOT EXISTS actors (
     actor_key TEXT PRIMARY KEY,
     kind TEXT NOT NULL CONSTRAINT ck_actors_kind CHECK (kind IN ('session', 'process')),
     state TEXT NOT NULL CONSTRAINT ck_actors_state
-        CHECK (state IN ('idle', 'ready', 'owned', 'waiting', 'terminal')),
+        CHECK (state IN ('idle', 'ready', 'owned', 'waiting', 'parked', 'terminal')),
     epoch INTEGER NOT NULL,
     owner_node TEXT,
     owner_boot TEXT,
@@ -71,6 +74,10 @@ CREATE TABLE IF NOT EXISTS actors (
     mail_seq INTEGER NOT NULL,
     acked_seq INTEGER NOT NULL,
     created_at_ms INTEGER NOT NULL,
+    park_json TEXT,
+    failed_activations INTEGER NOT NULL DEFAULT 0,
+    claimed_revision INTEGER,
+    CONSTRAINT ck_actors_parked CHECK (state <> 'parked' OR park_json IS NOT NULL),
     CONSTRAINT ck_actors_owned CHECK ((state = 'owned') = (owner_node IS NOT NULL)),
     CONSTRAINT ck_actors_owner_boot CHECK ((owner_node IS NULL) = (owner_boot IS NULL)),
     CONSTRAINT ck_actors_ready CHECK ((state = 'ready') = (ready_at_ms IS NOT NULL)),
@@ -108,10 +115,15 @@ lash_store_sql::statements! {
              ORDER BY COALESCE(ready_at_ms, next_due_ms), actor_key
              LIMIT ?3";
 
-        /// Give actor `?1` to boot `?3` of node `?2`, bumping its epoch.
+        /// Give actor `?1` to boot `?3` of node `?2`, bumping its epoch. A
+        /// claim that finds no commit since the previous claim counts one
+        /// more failed activation; any commit since resets the count.
         claim = "UPDATE actors
              SET state = 'owned', epoch = epoch + 1, owner_node = ?2, owner_boot = ?3,
-                 ready_at_ms = NULL, next_due_ms = NULL
+                 ready_at_ms = NULL, next_due_ms = NULL,
+                 failed_activations = CASE WHEN claimed_revision = state_revision
+                                           THEN failed_activations + 1 ELSE 0 END,
+                 claimed_revision = state_revision
              WHERE actor_key = ?1
              RETURNING epoch";
     }
@@ -121,6 +133,9 @@ struct Sql {
     node: NodeStatements,
     actor: ActorStatements,
     mail: MailStatements,
+    park: ActorParkStatements,
+    process: ProcessActorStatements,
+    park_events: ParkEventStatements,
     sqlite: SqliteDurableStatements,
 }
 
@@ -130,6 +145,9 @@ static SQL: LazyLock<Sql> = LazyLock::new(|| {
         node: NodeStatements::render(dialect),
         actor: ActorStatements::render(dialect),
         mail: MailStatements::render(dialect),
+        park: ActorParkStatements::render(dialect),
+        process: ProcessActorStatements::render(dialect),
+        park_events: ParkEventStatements::render(dialect),
         sqlite: SqliteDurableStatements::render(dialect),
     }
 });
@@ -163,6 +181,9 @@ pub(crate) struct Committing<'a> {
     pub(crate) epoch: Epoch,
     /// The transaction's one clock reading.
     pub(crate) now: DurableInstant,
+    /// The fleet format the transaction's fence read: registry rows a
+    /// domain write touches are encoded under it.
+    pub(crate) fleet: lash_core_execution::FleetFormat,
 }
 
 fn refuse<T>(error: DurableError) -> Flow<T> {
@@ -185,7 +206,7 @@ impl SqliteDurableStore {
     async fn write<T, F>(&self, label: CommitLabel, body: F) -> Result<T, DurableError>
     where
         T: Send + 'static,
-        F: FnOnce(&Connection, DurableInstant) -> Flow<T> + Send + 'static,
+        F: FnOnce(&FencedTx<'_>, DurableInstant) -> Flow<T> + Send + 'static,
     {
         let now = self.instant();
         tracing::trace!(label = label.as_str(), "durable sqlite commit");
@@ -294,7 +315,9 @@ fn node_live(tx: &Connection, node: &Owner) -> rusqlite::Result<bool> {
         .map(|row| row.is_some())
 }
 
-fn apply_owner(tx: &Connection, write: ActorTx, now: DurableInstant) -> Flow<ActorCommit> {
+fn apply_owner(tx: &FencedTx<'_>, write: ActorTx, now: DurableInstant) -> Flow<ActorCommit> {
+    let fleet = tx.fleet();
+    let tx: &Connection = tx;
     let actor = write.actor().as_str().to_owned();
     let fence = tx
         .prepare_cached(SQL.actor.fence.sql())?
@@ -309,6 +332,7 @@ fn apply_owner(tx: &Connection, write: ActorTx, now: DurableInstant) -> Flow<Act
         actor: write.actor(),
         epoch: write.epoch(),
         now,
+        fleet,
     };
     for domain in write.domain() {
         if let Err(refusal) = apply_domain(tx, &committing, domain)? {
@@ -325,6 +349,32 @@ fn apply_owner(tx: &Connection, write: ActorTx, now: DurableInstant) -> Flow<Act
     }
     let state = match write.release() {
         None => ActorState::Owned,
+        Some(Release::Parked) => {
+            // A cancel that arrived since the owner's read is not lost to the
+            // park: the actor goes ready instead, its park kept, and its
+            // claimer ends it engine-free.
+            let cancel_pending = tx
+                .prepare_cached(SQL.park.pending_mail_of_kind.sql())?
+                .query_row(
+                    rusqlite::params![actor, lash_durable::domain::CANCEL_MAIL],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .is_some();
+            let stored: String = if cancel_pending {
+                tx.prepare_cached(SQL.actor.release.sql())?.query_row(
+                    rusqlite::params![actor, "idle", Option::<i64>::None, now.0],
+                    |row| row.get(0),
+                )?
+            } else {
+                tx.prepare_cached(SQL.park.park.sql())?
+                    .query_row([&actor], |row| row.get(0))?
+            };
+            match actor_state(&stored) {
+                Ok(state) => state,
+                Err(error) => return refuse(error),
+            }
+        }
         Some(Release::Terminal) => {
             cached_execute(tx, SQL.mail.delete_all.sql(), [&actor])?;
             let stored: String = tx
@@ -365,18 +415,20 @@ fn apply_owner(tx: &Connection, write: ActorTx, now: DurableInstant) -> Flow<Act
 /// inputs, queued work, control intents, turn cancel requests, process
 /// registration, trigger occurrences) calls this in its own transaction, so
 /// the work and the wake commit together. `control` marks a cancel or a
-/// redrive: L6 (FIG-5175) adds the `parked` state, which only a control wake
-/// readies; until then every wake readies the same states.
+/// redrive: only a control wake readies a parked actor.
 pub(crate) fn wake_within(
     tx: &Connection,
     actor: &ActorKey,
     control: bool,
     now: DurableInstant,
 ) -> Answer<(Woken, MailSeq)> {
-    // L6 (FIG-5175) adds `parked`, which only a control wake readies.
-    let _ = control;
+    let statement = if control {
+        SQL.park.control_wake.sql()
+    } else {
+        SQL.actor.wake.sql()
+    };
     let woke = tx
-        .prepare_cached(SQL.actor.wake.sql())?
+        .prepare_cached(statement)?
         .query_row(rusqlite::params![actor.as_str(), now.0], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
@@ -423,16 +475,19 @@ fn apply_mail_domain(
     tx: &Connection,
     write: &MailDomainWrite,
     now: DurableInstant,
+    fleet: lash_core_execution::FleetFormat,
 ) -> Answer<(MailAnswer, Option<Woken>)> {
     Ok(match write {
         MailDomainWrite::ResolveWait(resolution) => waits::resolve(tx, resolution, now)?
             .map(|(answer, woken)| (MailAnswer::ResolveWait(answer), woken)),
         MailDomainWrite::RequestProcessCancel(request) => {
-            processes::request_cancel(tx, request, now)?
+            processes::request_cancel(tx, request, now, fleet)?
                 .map(|(answer, woken)| (MailAnswer::RequestProcessCancel(answer), woken))
         }
         MailDomainWrite::RequestTurnCancel(request) => turns::request_cancel(tx, request, now)?
             .map(|(answer, woken)| (MailAnswer::RequestTurnCancel(answer), woken)),
+        MailDomainWrite::Redrive(request) => park_events::redrive(tx, request, now)?
+            .map(|(answer, woken)| (MailAnswer::Redrive(answer), woken)),
     })
 }
 
@@ -454,7 +509,9 @@ fn note_woken(woken: &mut Vec<Woken>, entry: Woken) {
     }
 }
 
-fn apply_mail(tx: &Connection, writes: MailTx, now: DurableInstant) -> Flow<MailCommit> {
+fn apply_mail(tx: &FencedTx<'_>, writes: MailTx, now: DurableInstant) -> Flow<MailCommit> {
+    let fleet = tx.fleet();
+    let tx: &Connection = tx;
     let mut receipt = MailCommit::default();
     for write in writes.writes() {
         match write {
@@ -502,7 +559,7 @@ fn apply_mail(tx: &Connection, writes: MailTx, now: DurableInstant) -> Flow<Mail
                 note_woken(&mut receipt.woken, woken.0);
             }
             MailWrite::Domain(domain) => {
-                let (answer, woken) = match apply_mail_domain(tx, domain, now)? {
+                let (answer, woken) = match apply_mail_domain(tx, domain, now, fleet)? {
                     Ok(applied) => applied,
                     Err(error) => return refuse(error),
                 };
@@ -802,11 +859,26 @@ impl DurableStore for SqliteDurableStore {
                         row.get::<_, i64>(8)?,
                         row.get::<_, String>(9)?,
                         row.get::<_, i64>(10)?,
+                        row.get::<_, Option<String>>(11)?,
+                        row.get::<_, i64>(12)?,
                     ))
                 })
                 .optional()?;
-            let Some((kind, state, epoch, node, boot, seq, acked, due, revision, formats, mail)) =
-                row
+            let Some((
+                kind,
+                state,
+                epoch,
+                node,
+                boot,
+                seq,
+                acked,
+                due,
+                revision,
+                formats,
+                mail,
+                park,
+                failed,
+            )) = row
             else {
                 return Ok(Ok(None));
             };
@@ -821,6 +893,8 @@ impl DurableStore for SqliteDurableStore {
                     revision: StateRevision(revision),
                     formats: lash_durable::FormatSet::new(formats),
                     pending_mail: u64::try_from(mail).unwrap_or_default(),
+                    park,
+                    failed_activations: u32::try_from(failed).unwrap_or(u32::MAX),
                     actor: actor.clone(),
                 })
             })();
@@ -878,6 +952,18 @@ impl DurableReads for SqliteDurableStore {
             .await
     }
 
+    async fn until_children(
+        &self,
+        scope: &ScopeKey,
+        after: Option<&lash_sansio::ProcessId>,
+        limit: usize,
+    ) -> Result<Vec<lash_sansio::ProcessId>, DurableError> {
+        let scope = scope.clone();
+        let after = after.cloned();
+        self.read(move |tx| processes::until_children(tx, &scope, after.as_ref(), limit))
+            .await
+    }
+
     async fn park_events(
         &self,
         after: Option<ParkEventSeq>,
@@ -895,3 +981,7 @@ mod tests;
 #[cfg(test)]
 #[path = "../wait_law_tests.rs"]
 mod wait_law_tests;
+
+#[cfg(test)]
+#[path = "../process_law_tests.rs"]
+mod process_law_tests;

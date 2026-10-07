@@ -67,13 +67,23 @@ impl ProcessEngine for ReceiverEngine {
 
     fn advance(
         &self,
-        _state: lash::plugins::EngineState,
-        _event: lash::plugins::EngineEvent,
+        state: lash::plugins::EngineState,
+        event: lash::plugins::EngineEvent,
     ) -> std::result::Result<
         (lash::plugins::EngineState, lash::plugins::EngineAction),
         ProcessInfraError,
     > {
-        todo!("L6 (FIG-5175): port ReceiverEngine to advance: run until cancelled")
+        // The receiver runs until it is cancelled, and then answers its
+        // cancellation.
+        let action = match event {
+            lash::plugins::EngineEvent::Cancelled { .. } => lash::plugins::EngineAction::Terminal(
+                ProcessAwaitOutput::from_tool_output(lash::tools::ToolCallOutput::cancelled(
+                    lash::tools::ToolCancellation::runtime("the receiver was cancelled"),
+                )),
+            ),
+            _ => lash::plugins::EngineAction::Idle,
+        };
+        Ok((state, action))
     }
 
     async fn resolve(

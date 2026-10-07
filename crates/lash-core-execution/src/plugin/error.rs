@@ -749,25 +749,6 @@ define_plugin_errors! {
         => Self::TriggerSubscriptionChangeCursorPruned { .. }
         => "trigger_subscription_change_cursor_pruned"
         => crate::ToolFailureClass::Internal;
-/// A process park feed cursor predates history
-    /// `compact_process_park_feed` removed. The consumer must relist parked
-    /// processes before resuming from the reported horizon.
-    #[error(
-        "process park feed cursor is below the compaction horizon {horizon:?}; a full relist is required"
-    )]
-    ProcessParkFeedCursorCompacted {
-        /// The lowest feed position the store still serves.
-        horizon: crate::store::ParkFeedCursor,
-    }
-        => PluginError::ProcessParkFeedCursorCompacted { horizon }
-        => {
-        /// The lowest feed position the store still serves.
-        horizon: crate::store::ParkFeedCursor,
-    }
-        => Self::ProcessParkFeedCursorCompacted { horizon: *horizon }
-        => Self::ProcessParkFeedCursorCompacted { .. }
-        => "process_park_feed_cursor_compacted"
-        => crate::ToolFailureClass::Internal;
 /// A read of one process's events starts below the prefix its host released
     /// (`release_process_events`). The events at or below the horizon keep
     /// their sequence and replay identity but no longer carry their payload;
@@ -1137,7 +1118,6 @@ impl PluginError {
             | Self::ProcessUnknown { .. }
             | Self::ProcessChangeCursorPruned { .. }
             | Self::TriggerSubscriptionChangeCursorPruned { .. }
-            | Self::ProcessParkFeedCursorCompacted { .. }
             | Self::ProcessEventsReleased { .. }
             | Self::MonotonicCounterOverflow { .. }
             | Self::ProcessNoLongerRetained { .. }

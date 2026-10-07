@@ -382,11 +382,6 @@ macro_rules! process_registry_tests {
                 (a_session_close_reaps_the_turn_scopes_that_never_became_runs, "never-run-turn-scopes"),
                 (process_prune_scoped_by_originator, "scoped-prune"),
                 (process_prune_batch_tombstones, "batch-prune"),
-                (parked_processes_list_by_since_with_filters_and_keyset_pages, "parked-process-list"),
-                (a_process_re_park_keeps_its_park_and_counts_attempts, "process-re-park"),
-                (progress_after_a_rerun_clears_the_park_once, "process-park-progress"),
-                (a_parked_process_that_ends_closes_its_park_by_how_it_ended, "process-park-terminal"),
-                (a_compacted_process_park_feed_cursor_is_refused_typed, "process-park-feed-compaction"),
             ]
         }
     };
@@ -1628,62 +1623,6 @@ macro_rules! turn_work_driver_tests {
     };
 }
 
-/// Register wake-delivery crash conformance.
-#[macro_export]
-macro_rules! wake_delivery_crash_tests {
-    ($fixture:block) => {
-        $crate::wake_delivery_crash_tests!(@catalogue $fixture; [
-            (wake_delivery_crash_matrix, "wake-delivery-crash-matrix"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_guard, factory, registry, clock, work, witness, before_terminal, verify) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(
-                    factory,
-                    registry,
-                    clock,
-                    work,
-                    witness,
-                    before_terminal,
-                )
-                .await;
-                verify().await;
-            }
-        )*
-    };
-}
-
-/// Register wake-delivery ordering-group conformance.
-#[macro_export]
-macro_rules! wake_delivery_ordering_tests {
-    ($fixture:block) => {
-        $crate::wake_delivery_ordering_tests!(@catalogue $fixture; [
-            (wake_delivery_ordering_group_conformance, "wake-delivery-ordering-group"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_guard, registry, work, witness, before_terminal, verify) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(
-                    registry,
-                    work,
-                    witness,
-                    before_terminal,
-                )
-                .await;
-                verify().await;
-            }
-        )*
-    };
-}
-
 /// Register cold abandoned-attachment recovery.
 #[macro_export]
 macro_rules! abandoned_attachment_recovery_tests {
@@ -1925,52 +1864,5 @@ macro_rules! checkpoint_profile_tests {
             let (_guard, stores) = $fixture;
             $crate::registration_macro_support::$law(stores).await;
         }
-    };
-}
-
-/// Register the claimed-page wake isolation laws on a backend.
-#[macro_export]
-macro_rules! wake_delivery_isolation_tests {
-    ($fixture:block) => {
-        $crate::wake_delivery_isolation_tests!(@laws $fixture; [
-            bad_wake_source_does_not_strand_claimed_siblings,
-            expired_wakes_settle_without_reading_bad_sources,
-            transient_wake_source_retries_release_claims_and_keep_expiry,
-            wake_defer_failure_does_not_strand_claimed_siblings,
-            bad_wake_source_page_recovers_after_restart,
-            lost_bad_source_claim_does_not_settle_the_new_owner,
-        ]);
-    };
-    (@laws $fixture:block; [$($law:ident),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_guard, factory, registry, clock, backend) = $fixture;
-                $crate::registration_macro_support::$law(factory, registry, clock, backend).await;
-            }
-        )*
-    };
-}
-
-/// Register the wake content-conflict law (FIG-4487) on a backend. The
-/// fixture returns its guard, the deployment and process registry on one
-/// test clock, the session-work engine the wake driver asks for shifts, and
-/// the backend's receiver-floor probe.
-#[macro_export]
-macro_rules! wake_delivery_conflict_tests {
-    ($fixture:block) => {
-        $crate::wake_delivery_conflict_tests!(@laws $fixture; [
-            conflicting_wake_delivery_is_terminal_and_later_delivery_progresses,
-        ]);
-    };
-    (@laws $fixture:block; [$($law:ident),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_guard, factory, registry, clock, work, floors) = $fixture;
-                $crate::registration_macro_support::$law(factory, registry, clock, work, floors)
-                    .await;
-            }
-        )*
     };
 }

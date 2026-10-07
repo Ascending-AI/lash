@@ -9,67 +9,20 @@
 
 use std::sync::LazyLock;
 
-use lash_core_execution::WakeDeliveryState;
 use lash_core_execution::store_backend_support as vocabulary;
 use lash_store_sql::process::{
     abandoned_consumer_holds::AbandonedConsumerHoldStatements,
     event_horizons::EventHorizonStatements, events::EventStatements, observers::ObserverStatements,
-    parent_end_plans::ParentEndPlanStatements, park_events::ProcessParkEventStatements,
-    processes::ProcessStatements, segment_handovers::SegmentHandoverStatements,
-    tombstones::TombstoneStatements, wake_allocation_floors::WakeAllocationFloorStatements,
-    wake_deliveries::WakeDeliveryStatements, wake_redelivery_fences::WakeRedeliveryFenceStatements,
+    parent_end_plans::ParentEndPlanStatements, processes::ProcessStatements,
+    segment_handovers::SegmentHandoverStatements, tombstones::TombstoneStatements,
 };
 use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
 
-/// `<column> = '<state>'`, for the one wake-delivery state named.
-///
-/// The label still comes from [`WakeDeliveryState`] through
-/// `wake_delivery_state_sql_literal`; these wrappers only put a column and an
-/// operator around it, so the vocabulary keeps exactly one source. A `SET`
-/// clause and a `WHERE` clause spell the same text, which is why one term
-/// serves both.
-fn pending_wake_delivery_state(column: &str) -> String {
-    wake_delivery_state_equals(column, WakeDeliveryState::Pending)
-}
-
-fn enqueuing_wake_delivery_state(column: &str) -> String {
-    wake_delivery_state_equals(column, WakeDeliveryState::Enqueuing)
-}
-
-fn discarded_wake_delivery_state(column: &str) -> String {
-    wake_delivery_state_equals(column, WakeDeliveryState::Discarded)
-}
-
-/// `<column> <> '<enqueued>'`: everything a delivery can be before it leaves
-/// the queue.
-fn not_enqueued_wake_delivery_state(column: &str) -> String {
-    format!(
-        "{column} <> {}",
-        vocabulary::wake_delivery_state_sql_literal(WakeDeliveryState::Enqueued)
-    )
-}
-
-/// `'<state>'`: the bare label, for the `VALUES` list that writes it.
-///
-/// The token still names the column the label belongs to, because that is
-/// what says which vocabulary it is drawn from; the expansion needs only the
-/// state.
-fn pending_wake_delivery_state_value(_column: &str) -> String {
-    vocabulary::wake_delivery_state_sql_literal(WakeDeliveryState::Pending)
-}
-
-fn wake_delivery_state_equals(column: &str, state: WakeDeliveryState) -> String {
-    format!(
-        "{column} = {}",
-        vocabulary::wake_delivery_state_sql_literal(state)
-    )
-}
-
 /// The process family's domain vocabulary, as this backend supplies it.
 ///
-/// Every expansion is generated from `lash_core_execution::ProcessStatus` or
-/// `lash_core_execution::WakeDeliveryState`, so adding a variant is still one edit in
-/// the enum rather than one per statement. The term names are the domain's and
+/// Every expansion is generated from `lash_core_execution::ProcessStatus`, so
+/// adding a variant is still one edit in the enum rather than one per
+/// statement. The term names are the domain's and
 /// are identical in the PostgreSQL store.
 const PROCESS_LIFECYCLE: Vocabulary = Vocabulary::new(&[
     VocabularyTerm::new(
@@ -83,27 +36,6 @@ const PROCESS_LIFECYCLE: Vocabulary = Vocabulary::new(&[
     VocabularyTerm::new(
         "nonterminal_process_status",
         vocabulary::nonterminal_process_status_predicate_sql,
-    ),
-    VocabularyTerm::new(
-        "undelivered_wake_delivery_state",
-        vocabulary::undelivered_wake_delivery_state_predicate_sql,
-    ),
-    VocabularyTerm::new("pending_wake_delivery_state", pending_wake_delivery_state),
-    VocabularyTerm::new(
-        "pending_wake_delivery_state_value",
-        pending_wake_delivery_state_value,
-    ),
-    VocabularyTerm::new(
-        "enqueuing_wake_delivery_state",
-        enqueuing_wake_delivery_state,
-    ),
-    VocabularyTerm::new(
-        "discarded_wake_delivery_state",
-        discarded_wake_delivery_state,
-    ),
-    VocabularyTerm::new(
-        "not_enqueued_wake_delivery_state",
-        not_enqueued_wake_delivery_state,
     ),
 ]);
 
@@ -119,19 +51,6 @@ lash_store_sql::statements! {
                AND (?1 IS NULL OR process_id > ?1)
              ORDER BY process_id
              LIMIT ?2";
-
-        /// The deployment's parked processes as a `?1`-row page in
-        /// `(parked_since_ms, process_id)` order over the parked projection's
-        /// partial index: only parks at or before `?2`, strictly after keyset
-        /// `?3`/`?4`, reason codes drawn from the JSON array `?5` (`NULL`
-        /// means all).
-        list_parked = "SELECT record_json FROM processes INDEXED BY idx_processes_parked
-             WHERE parked_since_ms IS NOT NULL
-               AND (?2 IS NULL OR parked_since_ms <= ?2)
-               AND (?3 IS NULL OR parked_since_ms > ?3 OR (parked_since_ms = ?3 AND process_id > ?4))
-               AND (?5 IS NULL OR parked_reason_code IN (SELECT value FROM json_each(?5)))
-             ORDER BY parked_since_ms, process_id
-             LIMIT ?1";
 
         /// No conflict clause: the row was read as absent under the same
         /// `BEGIN IMMEDIATE` lock, so a conflict is a defect and the
@@ -247,19 +166,13 @@ lash_store_sql::statements! {
                  LIMIT ?2";
 
         /// Prune candidates: retired rows older than `?1`, at or below change
-        /// sequence `?2`, with no wake still owed, no consumer hold and no
-        /// trigger delivery pin.
+        /// sequence `?2`, with no consumer hold and no trigger delivery pin.
         list_prunable_terminal = "SELECT process_id, record_json FROM processes
              WHERE {{retired_process_status(status)}}
                AND updated_at_ms < ?1
                AND (?2 IS NULL OR change_seq <= ?2)
                AND consumer_hold_key IS NULL
                AND trigger_delivery_pin_occurrence_id IS NULL
-               AND NOT EXISTS (
-                   SELECT 1 FROM process_wake_deliveries AS delivery
-                   WHERE delivery.process_id = processes.process_id
-                     AND {{undelivered_wake_delivery_state(delivery.state)}}
-               )
              ORDER BY process_id ASC";
 
         /// The change feed after `?1`, at most `?2` rows: live rows unioned
@@ -632,33 +545,6 @@ lash_store_sql::statements! {
 }
 
 lash_store_sql::statements! {
-    /// `process_park_clock` statements only SQLite issues (FIG-3659 NOW-B).
-    ///
-    /// The same fork as the change clock's: the singleton flag, and the
-    /// bump-then-read pair PostgreSQL folds into one `RETURNING`.
-    pub(crate) struct ProcessParkClockSqliteStatements @ "process_park_clock" {
-        /// Allocate one feed sequence. The write transaction's lock orders
-        /// writers, so the allocated order is commit order.
-        bump = "UPDATE process_park_clock SET current_seq = current_seq + 1
-             WHERE singleton = 1";
-
-        /// The sequence the last `bump` allocated.
-        select_current = "SELECT current_seq FROM process_park_clock
-             WHERE singleton = 1";
-
-        /// The cursor below which a feed read is refused
-        /// `ProcessParkFeedCursorCompacted`.
-        select_compaction_horizon = "SELECT compaction_horizon FROM process_park_clock
-             WHERE singleton = 1";
-
-        /// Raise the compaction horizon to `?1` when it is higher.
-        raise_compaction_horizon = "UPDATE process_park_clock
-             SET compaction_horizon = MAX(compaction_horizon, ?1)
-             WHERE singleton = 1";
-    }
-}
-
-lash_store_sql::statements! {
     /// `process_tombstones` statements only SQLite issues.
     pub(crate) struct TombstoneSqliteStatements @ "process_tombstone" {
         /// Tombstone every process named by the JSON id array `?1`, stamped
@@ -747,79 +633,6 @@ LIMIT ?2";
 }
 
 lash_store_sql::statements! {
-    /// `process_wake_deliveries` statements only SQLite issues.
-    pub(crate) struct WakeDeliverySqliteStatements @ "process_wake_delivery" {
-        /// `INSERT OR IGNORE` is SQLite's spelling of PostgreSQL's
-        /// `ON CONFLICT (delivery_id) DO NOTHING`.
-        insert_pending = "INSERT OR IGNORE INTO process_wake_deliveries (
-                delivery_id, process_id, target_session_id, sequence, state,
-                claim_token, attempts, first_attempt_ms, next_attempt_at_ms, expires_at_ms,
-                discard_reason, delivery_json
-             ) VALUES (?1, ?2, ?3, ?4, {{pending_wake_delivery_state_value(state)}}, NULL, 0, NULL, ?5, ?6, NULL, ?7)";
-
-        /// The next `?3` claimable wakes at `?1`, skipping any whose ordering
-        /// group still holds an earlier delivery that blocks it. `?2` is the
-        /// JSON array of discard reasons that do not block.
-        ///
-        /// No lock suffix and no `SKIP LOCKED`: `BEGIN IMMEDIATE` already
-        /// serialises claimants. PostgreSQL needs both, and spells the
-        /// non-blocking reason list as an array parameter.
-        select_claimable = "SELECT candidate.delivery_id
-                             FROM process_wake_deliveries AS candidate
-                             WHERE {{pending_wake_delivery_state(candidate.state)}}
-                               AND candidate.next_attempt_at_ms <= ?1
-                               AND NOT EXISTS (
-                                   SELECT 1
-                                   FROM process_wake_deliveries AS earlier
-                                   WHERE {{not_enqueued_wake_delivery_state(earlier.state)}}
-                                     AND NOT (
-                                         {{discarded_wake_delivery_state(earlier.state)}}
-                                         AND earlier.discard_reason IN (
-                                             SELECT value FROM json_each(?2)
-                                         )
-                                     )
-                                     AND earlier.target_session_id = candidate.target_session_id
-                                     AND earlier.process_id = candidate.process_id
-                                     AND earlier.sequence < candidate.sequence
-                               )
-                             ORDER BY candidate.next_attempt_at_ms ASC,
-                                      candidate.target_session_id ASC,
-                                      candidate.process_id ASC,
-                                      candidate.sequence ASC
-                             LIMIT ?3";
-
-        /// Delivery `?1`, whole.
-        ///
-        /// Keyed by the caller's own binding, so the key is not read back;
-        /// PostgreSQL reports it because the same projection also serves its
-        /// unkeyed listings.
-        select_report = "SELECT state, claim_token, attempts, first_attempt_ms, next_attempt_at_ms,
-                    expires_at_ms, discard_reason, delivery_json
-             FROM process_wake_deliveries WHERE delivery_id = ?1";
-
-        /// Every delivery id.
-        ///
-        /// SQLite lists the ids and reads each delivery back through
-        /// [`WakeDeliverySqliteStatements::select_report`]; PostgreSQL reports
-        /// the rows themselves.
-        list_delivery_ids = "SELECT delivery_id FROM process_wake_deliveries ORDER BY delivery_id ASC";
-
-        /// Every delivery id in state `?1`.
-        list_delivery_ids_by_state = "SELECT delivery_id FROM process_wake_deliveries WHERE state = ?1 ORDER BY delivery_id ASC";
-
-        /// The undelivered-wake page of the preflight walk: after `?1`, at
-        /// most `?2`. PostgreSQL casts its cursor parameter, which is the
-        /// fork.
-        list_undelivered_for_walk = "SELECT delivery_id, process_id, target_session_id, state, delivery_json
-FROM process_wake_deliveries
-WHERE {{undelivered_wake_delivery_state(state)}}
-  AND (?1 IS NULL OR delivery_id > ?1)
-ORDER BY delivery_id
-LIMIT ?2";
-    }
-}
-
-lash_store_sql::statements! {
     /// `parent_end_plans` statements only SQLite issues.
     pub(crate) struct ParentEndPlanSqliteStatements @ "parent_end_plan" {
         /// Reclaim settled plans older than `?1` that no live child still
@@ -833,40 +646,6 @@ lash_store_sql::statements! {
                  AND child.lifetime_scope_id = parent_end_plans.parent_id
                  AND {{live_process_status(child.status)}}
            )";
-    }
-}
-
-lash_store_sql::statements! {
-    /// `wake_allocation_floors` statements only SQLite issues.
-    pub(crate) struct WakeAllocationFloorSqliteStatements @ "wake_allocation_floor" {
-        /// Raise session `?1`'s floor for process `?2` to `?3`, never lowering
-        /// it. `MAX` over `excluded` is SQLite's spelling of PostgreSQL's
-        /// `GREATEST` over `EXCLUDED`.
-        upsert_max = "INSERT INTO wake_allocation_floors (
-                target_session_id, process_id, allocation_floor
-             ) VALUES (?1, ?2, ?3)
-             ON CONFLICT (target_session_id, process_id) DO UPDATE SET
-                allocation_floor = MAX(
-                    wake_allocation_floors.allocation_floor,
-                    excluded.allocation_floor
-                )";
-    }
-}
-
-lash_store_sql::statements! {
-    /// `wake_redelivery_fences` statements only SQLite issues.
-    pub(crate) struct WakeRedeliveryFenceSqliteStatements @ "wake_redelivery_fence" {
-        /// Raise session `?1`'s consumed floor for process `?2` to `?3`, never
-        /// lowering it. `MAX` over `excluded` is SQLite's spelling of
-        /// PostgreSQL's `GREATEST` over `EXCLUDED`.
-        upsert_max = "INSERT INTO wake_redelivery_fences (
-                session_id, process_id, allocation_floor
-             ) VALUES (?1, ?2, ?3)
-             ON CONFLICT (session_id, process_id) DO UPDATE SET
-                allocation_floor = MAX(
-                    wake_redelivery_fences.allocation_floor,
-                    excluded.allocation_floor
-                )";
     }
 }
 
@@ -897,30 +676,14 @@ pub(crate) struct ProcessSql {
     pub(crate) tombstone: TombstoneStatements,
     /// `process_tombstones` statements only SQLite issues.
     pub(crate) tombstone_sqlite: TombstoneSqliteStatements,
-    /// `process_wake_deliveries` statements both backends issue verbatim.
-    pub(crate) wake: WakeDeliveryStatements,
-    /// `process_wake_deliveries` statements only SQLite issues.
-    pub(crate) wake_sqlite: WakeDeliverySqliteStatements,
     /// `process_change_clock` statements, all of them SQLite's own.
     pub(crate) clock_sqlite: ChangeClockSqliteStatements,
-    /// `process_park_events` statements both backends issue verbatim.
-    pub(crate) park_event: ProcessParkEventStatements,
-    /// `process_park_clock` statements, all of them SQLite's own.
-    pub(crate) park_clock_sqlite: ProcessParkClockSqliteStatements,
     /// `parent_end_plans` statements both backends issue verbatim.
     pub(crate) plan: ParentEndPlanStatements,
     /// `abandoned_consumer_holds` statements, all of them shared.
     pub(crate) abandoned_hold: AbandonedConsumerHoldStatements,
     /// `parent_end_plans` statements only SQLite issues.
     pub(crate) plan_sqlite: ParentEndPlanSqliteStatements,
-    /// `wake_allocation_floors` statements both backends issue verbatim.
-    pub(crate) floor: WakeAllocationFloorStatements,
-    /// `wake_allocation_floors` statements only SQLite issues.
-    pub(crate) floor_sqlite: WakeAllocationFloorSqliteStatements,
-    /// `wake_redelivery_fences` statements both backends issue verbatim.
-    pub(crate) fence: WakeRedeliveryFenceStatements,
-    /// `wake_redelivery_fences` statements only SQLite issues.
-    pub(crate) fence_sqlite: WakeRedeliveryFenceSqliteStatements,
 }
 
 impl ProcessSql {
@@ -939,18 +702,10 @@ impl ProcessSql {
             handover_sqlite: SegmentHandoverSqliteStatements::render(dialect),
             tombstone: TombstoneStatements::render(dialect),
             tombstone_sqlite: TombstoneSqliteStatements::render(dialect),
-            wake: WakeDeliveryStatements::render(dialect),
-            wake_sqlite: WakeDeliverySqliteStatements::render(dialect),
             clock_sqlite: ChangeClockSqliteStatements::render(dialect),
-            park_event: ProcessParkEventStatements::render(dialect),
-            park_clock_sqlite: ProcessParkClockSqliteStatements::render(dialect),
             plan: ParentEndPlanStatements::render(dialect),
             abandoned_hold: AbandonedConsumerHoldStatements::render(dialect),
             plan_sqlite: ParentEndPlanSqliteStatements::render(dialect),
-            floor: WakeAllocationFloorStatements::render(dialect),
-            floor_sqlite: WakeAllocationFloorSqliteStatements::render(dialect),
-            fence: WakeRedeliveryFenceStatements::render(dialect),
-            fence_sqlite: WakeRedeliveryFenceSqliteStatements::render(dialect),
         }
     }
 }

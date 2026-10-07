@@ -44,17 +44,14 @@ impl PostgresStoreSet {
         Self::with_clock(
             storage,
             attachment_store,
-            lash_core_execution::WakeDeliveryConfig::default(),
             Arc::new(lash_core_execution::facade_support::SystemClock),
         )
     }
 
-    /// The store set over `storage` with explicit wake-delivery bounds and
-    /// clock.
+    /// The store set over `storage` on `clock`.
     pub fn with_clock(
         storage: &PostgresStorage,
         attachment_store: Arc<dyn AttachmentStore>,
-        wake_delivery: lash_core_execution::WakeDeliveryConfig,
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
@@ -66,9 +63,7 @@ impl PostgresStoreSet {
                 )),
                 session_store_factory: Arc::new(storage.store().with_clock(Arc::clone(&clock))),
                 process_registry: Arc::new(
-                    storage
-                        .process_registry_with_wake_delivery_config(wake_delivery)
-                        .with_clock(Arc::clone(&clock)),
+                    storage.process_registry().with_clock(Arc::clone(&clock)),
                 ),
                 trigger_store: Arc::new(storage.trigger_store().with_clock(Arc::clone(&clock))),
                 process_env_store: Arc::new(storage.process_env_store()),

@@ -257,8 +257,56 @@ impl Backend {
     /// # Errors
     ///
     /// The store's refusal.
-    pub async fn wake_process(&self, _process: &crate::ProcessId) -> Result<(), DurableError> {
-        todo!("L6 (FIG-5175): wake a process actor in a mailbox transaction")
+    pub async fn wake_process(&self, process: &crate::ProcessId) -> Result<(), DurableError> {
+        let actor = lash_durable::ActorKey::process(process.as_str()).map_err(|error| {
+            DurableError::Store(lash_durable::StoreFailure {
+                kind: lash_durable::StoreFailureKind::Corrupt,
+                message: error.to_string(),
+            })
+        })?;
+        let mut tx = lash_durable::MailTx::new();
+        tx.wake(actor);
+        self.durable()
+            .commit_mail(tx, lash_durable::CommitLabel::MAIL_PROCESS)
+            .await?;
+        Ok(())
+    }
+
+    /// Redrive `process`'s parked actor as an operator, `requester`: clear
+    /// its park, reset its activation-loop count and control-wake it, in
+    /// one mailbox transaction. Answers whether it was parked.
+    ///
+    /// # Errors
+    ///
+    /// The store's refusal.
+    pub async fn redrive_process(
+        &self,
+        process: &crate::ProcessId,
+        requester: &str,
+    ) -> Result<bool, DurableError> {
+        let actor = lash_durable::ActorKey::process(process.as_str()).map_err(|error| {
+            DurableError::Store(lash_durable::StoreFailure {
+                kind: lash_durable::StoreFailureKind::Corrupt,
+                message: error.to_string(),
+            })
+        })?;
+        let mut tx = lash_durable::MailTx::new();
+        tx.write(lash_durable::MailDomainWrite::Redrive(
+            lash_durable::domain::RedriveRequest {
+                actor,
+                requester: requester.to_owned(),
+            },
+        ));
+        let commit = self
+            .durable()
+            .commit_mail(tx, lash_durable::CommitLabel::MAIL_PROCESS)
+            .await?;
+        Ok(commit.answers.iter().any(|answer| {
+            matches!(
+                answer,
+                lash_durable::MailAnswer::Redrive(lash_durable::domain::RedriveAnswer::Redriven)
+            )
+        }))
     }
 
     /// The identity of the storage this backend's sessions, processes and

@@ -107,18 +107,18 @@ impl std::ops::Deref for PersistentRuntimeServices {
     }
 }
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(test)]
 pub(crate) struct NoopSessionManager;
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(test)]
 impl SessionReadService for NoopSessionManager {}
-#[cfg(any(test, feature = "testing"))]
+#[cfg(test)]
 impl ProcessReadService for NoopSessionManager {}
-#[cfg(any(test, feature = "testing"))]
+#[cfg(test)]
 impl SessionStateService for NoopSessionManager {}
-#[cfg(any(test, feature = "testing"))]
+#[cfg(test)]
 impl SessionLifecycleService for NoopSessionManager {}
-#[cfg(any(test, feature = "testing"))]
+#[cfg(test)]
 impl SessionGraphService for NoopSessionManager {}
 impl RuntimeServices {
     /// Services over the attachment facade and process-exec-env store the

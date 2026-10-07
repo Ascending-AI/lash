@@ -65,7 +65,6 @@ pub(super) async fn scan_durable(
 ) -> Result<DurableScanPage, StoreError> {
     let target: DatabaseTarget = match scan.surface {
         DurableSurface::ParkedSegment
-        | DurableSurface::PendingWake
         | DurableSurface::StartedProcess
         | DurableSurface::ModuleArtifact
         | DurableSurface::SessionCheckpoint
@@ -144,7 +143,6 @@ fn read_page(
     match surface {
         DurableSurface::ModuleArtifact => read_module_artifacts(conn, after, limit),
         DurableSurface::ParkedSegment => read_parked_segments(conn, after, limit),
-        DurableSurface::PendingWake => read_pending_wakes(conn, after, limit),
         DurableSurface::StartedProcess => read_started_processes(conn, after, limit),
         DurableSurface::SessionCheckpoint => read_session_checkpoints(conn, after, limit),
         DurableSurface::SessionExecutionState => read_session_execution_state(conn, after, limit),
@@ -307,43 +305,6 @@ fn read_started_processes(
                 .transpose()?,
             owner_record: Some(record.clone()),
             payload: DurablePayload::Json(record),
-        })
-    })?;
-    collect_page(rows, limit)
-}
-
-/// One undelivered wake per pending delivery.
-///
-/// `pending` and `enqueuing` are the registry's non-terminal delivery states —
-/// the same pair its `idx_wake_deliveries_pending` partial index is built on. An
-/// `enqueued` or `discarded` delivery has reached its outcome and is not
-/// something a drain has to move.
-fn read_pending_wakes(
-    conn: &Connection,
-    after: Option<&str>,
-    limit: usize,
-) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
-    let mut statement = conn.prepare_cached(
-        crate::process_registry::sql::process_sql()
-            .wake_sqlite
-            .list_undelivered_for_walk
-            .sql(),
-    )?;
-    let rows = statement.query_map(params![after, limit_binding(limit)], |row| {
-        Ok(DurableItem {
-            surface: DurableSurface::PendingWake,
-            // `delivery_id` is already the primary key and already text, so it
-            // is its own keyset cursor: nothing to pad, nothing to compose.
-            cursor: row.get(0)?,
-            process_id: Some(crate::row_process_id(row, 1)?),
-            session_id: Some(crate::codec::sql_identity(row.get::<_, String>(2)?)?),
-            // The delivery's own state word, reported verbatim so an operator
-            // reads the store's vocabulary rather than a translation of it.
-            status: Some(row.get(3)?),
-            // A wake delivery has no separate owner record: everything a drain
-            // needs about the delivery is in the delivery row itself.
-            owner_record: None,
-            payload: DurablePayload::Json(row.get(4)?),
         })
     })?;
     collect_page(rows, limit)

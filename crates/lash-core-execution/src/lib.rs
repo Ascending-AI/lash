@@ -331,14 +331,13 @@ pub mod facade_support {
     pub use crate::runtime::TurnTerminal;
     pub use crate::runtime::TurnWorkDriver;
 
-    pub use crate::runtime::WakeDeliveryDriveReport;
-    pub use crate::runtime::WakeDeliveryDriver;
     pub use crate::runtime::WatchedRegistry;
     pub use crate::runtime::current_epoch_ms;
 
     pub use crate::runtime::process_child_session_id;
     pub use crate::runtime::process_signal_event_type;
     pub use crate::runtime::process_signal_wait_key;
+    pub use crate::runtime::process_wake_batch_draft;
     pub use crate::runtime::process_wake_delivery;
     pub use crate::runtime::process_wake_source_key;
     pub use crate::runtime::reconcile_pruned_trigger_deliveries;
@@ -360,8 +359,6 @@ pub mod facade_support {
     pub use crate::session_model::SessionSpec;
     pub use crate::session_model::SpecResolveError;
     pub use crate::session_model::context::PreparedContext;
-    pub use crate::store::LeaseTimings;
-    pub use crate::store::LeaseTimingsError;
     pub use crate::store::{CommitBudget, CommitBudgetLimit};
     pub use crate::tool_provider::ToolChildExecutionTraceHook;
     pub use crate::tool_registry::PLUGIN_TOOL_SOURCE_ID;
@@ -816,12 +813,12 @@ pub use runtime::{
     ProcessStartDeclaration, ProcessStartOptions, ProcessStartOutcome, ProcessStartReceipt,
     ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
     ProcessTerminalPublication, ProcessTerminalSpec, ProcessTerminalWait, ProcessTombstone,
-    ProcessToolIntents, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeOutbox,
-    ProcessWakeSpec, ProcessWorkSubstrate, ProcessWorkWiring, ProjectionWatermark,
-    ProtocolSessionExtension, QueuedDrainCandidate, QueuedDrainFamily, QueuedDrainPolicy,
-    QueuedDrainRequest, QueuedDrainSelection, QueuedWorkAuthority, QueuedWorkBatchingConfig,
-    QueuedWorkKind, RecordedKeyFence, RecordedKeyRange, RecordedKeys, RecordedRender,
-    RefusedWriteRange, RegistryScopeClose, RenderFault, RenderRefusal, Resolution, ResolveOutcome,
+    ProcessToolIntents, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec,
+    ProcessWorkSubstrate, ProcessWorkWiring, ProjectionWatermark, ProtocolSessionExtension,
+    QueuedDrainCandidate, QueuedDrainFamily, QueuedDrainPolicy, QueuedDrainRequest,
+    QueuedDrainSelection, QueuedWorkAuthority, QueuedWorkBatchingConfig, QueuedWorkKind,
+    RecordedKeyFence, RecordedKeyRange, RecordedKeys, RecordedRender, RefusedWriteRange,
+    RegistryScopeClose, RenderFault, RenderRefusal, Resolution, ResolveOutcome,
     ResolvedProcessDefinition, ResolvedRun, RetainedRevision, Retention, RunAggregateWakePolicy,
     RunDefinition, RunDefinitionRefusal, RunDefinitions, RunOptionsOwner, RunOverrides,
     RunRecordStep, RunResolveError, RunShapeRefusal, RunSpec, RunSpecHash, RuntimeAttribution,
@@ -833,10 +830,10 @@ pub use runtime::{
     ScopeStorageError, SegmentHandover, SegmentHandoverCommit, SegmentProgress, SegmentStartMarker,
     ServedOnly, ServedOnlyRange, SessionCreationHead, SessionEntry, SessionId, SessionListFilter,
     SessionRelationKind, SessionScope, SessionStateVersionRefusal, SessionStoreCreateRequest,
-    SessionView, SessionWorkEngine, SleepSpec, SlotId, StartCx, StartCxError, StartKey, StepName,
-    StepRequest, StoreRealization, StoredDataCorruption, Target, ToolAttemptLaunch, TurnActivity,
-    TurnActivityId, TurnCancelAffectedInput, TurnCancelAffectedWake,
-    TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
+    SessionView, SessionWorkEngine, SettledOutcome, SettledOutcomeRefusal, SleepSpec, SlotId,
+    StartCx, StartCxError, StartKey, StepName, StepRequest, StoreRealization, StoredDataCorruption,
+    Target, ToolAttemptLaunch, TurnActivity, TurnActivityId, TurnCancelAffectedInput,
+    TurnCancelAffectedWake, TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
     TurnCancelClosureOwnerBinding, TurnCancelClosureProposal, TurnCancelClosureSettlement,
     TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelRequestRecord,
     TurnCancelUndeliveredInputPolicy, TurnCancellationAuthority, TurnContext,
@@ -845,9 +842,7 @@ pub use runtime::{
     TurnFailureSettlement, TurnInput, TurnInputAdmissionMode, TurnInputApplication,
     TurnInputCheckpointBoundary, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
     TurnInputState, TurnLaneAdmissionPolicy, TurnPrelude, TurnPreludeRef, TurnPreludeStore,
-    WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
-    WakeDeliveryConfig, WakeDeliveryLifecycle, WakeDeliveryReport, WakeDeliveryState,
-    WakeDiscardReason, WakeId, WatchedRegistry, WeakProcessEngineRegistry, WorkCadenceError,
+    WaitKind, WaitState, WakeId, WatchedRegistry, WeakProcessEngineRegistry, WorkCadenceError,
     WorkCadencePolicy, admit_session_state_generation, admit_session_view, apply_parent_end_plan,
     artifact_referrer_ended, end_parent_scope, end_session_runs, lifetime, live_session_view,
     mint_process_id, parent_end_delivery_key, parent_end_requester,
