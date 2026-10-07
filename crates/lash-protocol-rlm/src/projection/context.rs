@@ -519,6 +519,77 @@ mod tests {
         }
     }
 
+    // A step whose outputs were retained shows the model a bounded witness;
+    // indexing the real `history` projection hands back the reference to the
+    // FULL, untruncated value the prompt only previewed.
+    #[tokio::test]
+    async fn history_step_output_resolves_full_untruncated_value() {
+        let full = "Xé🙂".repeat(50_000);
+        let host = crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
+        let attachments = lash_core::facade_support::RuntimeAttachmentStore::ephemeral(
+            host.backend().attachment_store(),
+        );
+        let observations = vec![lash_core::Observation {
+            text: "bounded preview".to_string(),
+            value: serde_json::json!(full),
+            projection: Default::default(),
+        }];
+        let bytes = serde_json::to_vec(&observations).expect("encode archive");
+        let reference = attachments
+            .put(
+                bytes.clone(),
+                lash_core::AttachmentCreateMeta::new(
+                    "application/json".parse().expect("media type"),
+                    None,
+                    Some("step archive".to_string()),
+                ),
+            )
+            .await
+            .expect("store archive");
+        let entry = RlmTrajectoryEntry {
+            id: "archived-step".to_string(),
+            output_archive: Some(Box::new(lash_core::RetainedOutput {
+                reference: reference.clone(),
+                witness: "bounded preview".to_string(),
+            })),
+            ..Default::default()
+        };
+        let projection = lash_core::facade_support::ChronologicalProjection::from_turn_view(
+            &[lash_core::SessionHistoryRecord::Protocol(
+                rlm_protocol_event(
+                    RlmProtocolEvent::RlmTrajectoryEntry(entry),
+                    lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
+                        crate::RLM_PROTOCOL_EVENT_VERSION
+                    )),
+                ),
+            )],
+            &Default::default(),
+        );
+        let history = rlm_history_projection(&projection).expect("valid history fixture");
+        let FlowValue::Record(step) = read_index(&history, 0).await else {
+            panic!("history step");
+        };
+        let projected = step
+            .get("output_archive")
+            .expect("history exposes the archive");
+        let record = crate::projection::flow_to_json_value(projected);
+        let adopted: lash_core::ToolValue =
+            serde_json::from_value(record["attachment"].clone()).expect("typed attachment");
+        let lash_core::ToolValue::Attachment(AttachmentSource::Stored { attachment_ref }) = adopted
+        else {
+            panic!("stored reference");
+        };
+        assert_eq!(attachment_ref, reference);
+        let fetched = attachments
+            .get(&attachment_ref.id)
+            .await
+            .expect("explicit fetch")
+            .bytes;
+        assert_eq!(fetched, bytes);
+        let outputs = crate::control_tools::decode_output_archive(&fetched).expect("exact values");
+        assert_eq!(outputs, vec![serde_json::json!(full)]);
+    }
+
     /// A host whose only ability is finishing, so a cell's `finish(...)` is the
     /// observable result.
     struct FinishOnlyHost;

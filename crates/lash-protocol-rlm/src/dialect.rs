@@ -1014,6 +1014,92 @@ mod tests {
         shape Payload = record{body: str, empty: list[any], numbers: list[float | null], rows: list[RowItem]}
         "###);
     }
+
+    #[tokio::test]
+    async fn extension_session_parse_feedback_uses_its_cell_delimiter() {
+        for channel in [
+            crate::plugin::RlmChannel::Cell,
+            crate::plugin::RlmChannel::NativeTool,
+        ] {
+            let mut services = test_dialect_services();
+            services.channel = channel;
+            let mut session = DialectSession::new(
+                Arc::new(ExtensionFixture),
+                lash_lashlang_runtime::LashlangSurface::default(),
+                services,
+            );
+            let handler =
+                crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
+            let response = session
+                .execute(
+                    lash_core::testing::code_execution_context(handler.ports()),
+                    ExecRequest {
+                        code: "invalid fixture source".to_string(),
+                    },
+                    crate::projection::RlmProjectedBindings::default(),
+                )
+                .await
+                .expect("report the extension's parse failure");
+            let feedback = response
+                .error
+                .expect("the fixture refuses the source")
+                .message;
+            assert!(feedback.contains("fixture syntax error"), "{feedback}");
+            assert!(!feedback.contains("</typescript>"), "{feedback}");
+            match channel {
+                crate::plugin::RlmChannel::Cell => assert!(
+                    feedback.contains("standalone `</fixture>` line"),
+                    "{feedback}"
+                ),
+                crate::plugin::RlmChannel::NativeTool => assert!(
+                    !feedback.contains("standalone delimiter line"),
+                    "{feedback}"
+                ),
+            }
+        }
+    }
+
+    /// The channel reaches the parse diagnostic through the production session
+    /// seam, not just through the formatter's own argument: the session reads
+    /// it off the services the plugin factory fills from the session-pinned
+    /// config, so a native-channel session never sees cell-delimiter advice.
+    #[tokio::test]
+    async fn the_session_channel_decides_the_cell_delimiter_hint() {
+        async fn parse_failure_feedback(channel: crate::plugin::RlmChannel) -> String {
+            let mut services = test_dialect_services();
+            services.channel = channel;
+            let mut session = DialectSession::new(
+                Arc::new(TypescriptDialect),
+                lash_lashlang_runtime::LashlangSurface::default(),
+                services,
+            );
+            let handler =
+                crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
+            let response = session
+                .execute(
+                    lash_core::testing::code_execution_context(handler.ports()),
+                    ExecRequest {
+                        code: "const payload = `".to_string(),
+                    },
+                    crate::projection::RlmProjectedBindings::default(),
+                )
+                .await
+                .expect("the cell runs and reports its own failure");
+            response
+                .error
+                .expect("an unterminated template literal fails to parse")
+                .message
+        }
+
+        let native = Box::pin(parse_failure_feedback(
+            crate::plugin::RlmChannel::NativeTool,
+        ))
+        .await;
+        assert!(!native.contains("</typescript>"), "{native}");
+
+        let cell = Box::pin(parse_failure_feedback(crate::plugin::RlmChannel::Cell)).await;
+        assert!(cell.contains("standalone `</typescript>` line"), "{cell}");
+    }
 }
 
 #[cfg(test)]

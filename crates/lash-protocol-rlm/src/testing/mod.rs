@@ -1,5 +1,6 @@
 mod cell_conformance;
 mod durable_host;
+mod kernel_door_tests;
 
 pub(crate) use durable_host::DurableHost;
 

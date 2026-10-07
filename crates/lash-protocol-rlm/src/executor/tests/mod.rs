@@ -14,6 +14,7 @@ use lash_core::facade_support::TraceSink;
 use std::sync::Mutex;
 
 mod deferred_and_processes;
+mod frame_referrers;
 mod lifecycle_and_diagnostics;
 mod projections_and_snapshots;
 mod typescript_cells;
