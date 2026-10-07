@@ -49,7 +49,7 @@ use lash_core_store::tool_run::{
     MaterialLocation, MaterialOwner, MaterialRef, MaterialRole,
 };
 use lash_durable::domain::{AdmittedId, OwnerKey, RunRecordKind, RunSeq};
-use lash_durable::runner::{Activation, Owned};
+use lash_durable::runner::{Activation, Exit, Owned};
 use lash_durable::{
     ActorKey, ActorState, CommitLabel, DurableError, DurableStore, FormatSet, LeaseConfig, MailTx,
     Release,
@@ -428,7 +428,7 @@ impl RoundOwner {
 
 #[async_trait::async_trait]
 impl Activation for RoundOwner {
-    async fn activate(&self, owned: Owned) {
+    async fn activate(&self, owned: Owned) -> Exit {
         let cx = ActorContext::claimed(
             self.backend.clone(),
             &owned,
@@ -438,8 +438,8 @@ impl Activation for RoundOwner {
         );
         loop {
             match self.pass(&cx).await {
-                Ok(()) => return,
-                Err(Pass::Lost) => return,
+                Ok(()) => return Exit::Released,
+                Err(Pass::Lost) => return Exit::Released,
                 Err(Pass::Again) => owned.wait_for_mail().await,
             }
         }

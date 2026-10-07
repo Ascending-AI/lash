@@ -8,7 +8,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use lash_durable::runner::{Activation, Owned, Runner, RunnerConfig, Stopped};
+use lash_durable::runner::{Activation, Exit, Owned, Runner, RunnerConfig, Stopped};
 use lash_durable::{
     ActorState, CommitLabel, DurableError, DurableSettings, DurableStore, FormatSet,
     HeartbeatOutcome, LeaseSettings, MailKind, MailTx, NodeSpec, Release,
@@ -103,16 +103,16 @@ struct Hold {
 
 #[async_trait::async_trait]
 impl Activation for Hold {
-    async fn activate(&self, owned: Owned) {
+    async fn activate(&self, owned: Owned) -> Exit {
         loop {
             let Ok(mut tx) = owned.begin().await else {
-                return;
+                return Exit::Released;
             };
             if !tx.mail().is_empty() {
                 let arrived = Instant::now();
                 tx.ack_seen();
                 if owned.commit(tx, CommitLabel::new("law.ack")).await.is_err() {
-                    return;
+                    return Exit::Released;
                 }
                 let _ = self.arrived.send(arrived);
             }

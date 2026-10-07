@@ -8,6 +8,7 @@
 //! (counted from 1 across every node, or among one node's own writes) and the
 //! [`Fault`] it suffers. Every write is recorded, so a law asserts what was
 //! cut, and a rule that never fired fails the law when its script drops.
+//! A read rule fails one read of an actor's row the same way.
 
 use lash_durable::{ActorKey, CommitLabel, DurableError};
 use lash_sansio::sync::MutexExt as _;
@@ -194,11 +195,41 @@ impl std::fmt::Display for Rule {
     }
 }
 
+/// A read rule: the next read of `actor`'s row fails transiently.
+struct ReadRule {
+    actor: ActorKey,
+    fired: bool,
+}
+
+impl std::fmt::Display for ReadRule {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "read of {} fail-before", self.actor)
+    }
+}
+
 #[derive(Default)]
 struct State {
     rules: Vec<Rule>,
+    reads: Vec<ReadRule>,
     trace: Vec<Write>,
     cuts: Vec<Cut>,
+}
+
+impl State {
+    /// Every rule that has not fired, rendered.
+    fn unfired(&self) -> Vec<String> {
+        self.rules
+            .iter()
+            .filter(|rule| !rule.fired)
+            .map(|rule| format!("`{rule}`"))
+            .chain(
+                self.reads
+                    .iter()
+                    .filter(|rule| !rule.fired)
+                    .map(|rule| format!("`{rule}`")),
+            )
+            .collect()
+    }
 }
 
 #[derive(Default)]
@@ -289,6 +320,17 @@ impl Shared {
         }
     }
 
+    /// Whether an armed read rule fails this read of `actor`'s row; the
+    /// rule fires.
+    pub(crate) fn fails_read(&self, actor: &ActorKey) -> bool {
+        let mut state = self.state.lock_recover();
+        let rule = state
+            .reads
+            .iter_mut()
+            .find(|rule| !rule.fired && rule.actor == *actor);
+        rule.map(|rule| rule.fired = true).is_some()
+    }
+
     fn rendered_trace(&self) -> String {
         let state = self.state.lock_recover();
         if state.trace.is_empty() {
@@ -336,6 +378,16 @@ impl Script {
         self
     }
 
+    /// Answer the next read of `actor`'s row, by any node, a transient
+    /// store failure: nothing in the store changes, and the node lives.
+    pub fn fail_actor_read(&self, actor: ActorKey) -> &Self {
+        self.shared.state.lock_recover().reads.push(ReadRule {
+            actor,
+            fired: false,
+        });
+        self
+    }
+
     /// Every write so far, in the order the writes entered.
     pub fn trace(&self) -> Vec<Write> {
         self.shared.state.lock_recover().trace.clone()
@@ -350,13 +402,9 @@ impl Script {
     /// reports an unreached cut instead of panicking on drop.
     pub fn disarm_unfired(&self) -> Vec<String> {
         let mut state = self.shared.state.lock_recover();
-        let unfired = state
-            .rules
-            .iter()
-            .filter(|rule| !rule.fired)
-            .map(|rule| format!("`{rule}`"))
-            .collect();
+        let unfired = state.unfired();
         state.rules.retain(|rule| rule.fired);
+        state.reads.retain(|rule| rule.fired);
         unfired
     }
 
@@ -400,15 +448,7 @@ impl Script {
 impl Drop for Script {
     /// Fails the law when a rule it armed never fired.
     fn drop(&mut self) {
-        let unfired: Vec<String> = {
-            let state = self.shared.state.lock_recover();
-            state
-                .rules
-                .iter()
-                .filter(|rule| !rule.fired)
-                .map(|rule| format!("`{rule}`"))
-                .collect()
-        };
+        let unfired = self.shared.state.lock_recover().unfired();
         if !unfired.is_empty() && !std::thread::panicking() {
             panic!(
                 "rule {} never fired; {}",

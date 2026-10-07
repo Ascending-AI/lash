@@ -56,7 +56,8 @@ type AdvanceLog = Arc<Mutex<Vec<(String, String)>>>;
 /// - `hold`: idles; keeps each signal's payload, and ends with them once it
 ///   has `until` of them;
 /// - `sleep`: sleeps until `until_ms`, then ends;
-/// - `await`: awaits process `await`, and ends with what it saw;
+/// - `await`: awaits process `await` for `deadline_ms` (default [`LONG`]),
+///   and ends with what it saw;
 /// - `refused_step`: asks for one step whose admission is refused;
 /// - `emit`: emits one event of type `event`, then ends;
 /// - `flaky`: ends at once, but its `advance` fails opaquely while the
@@ -162,7 +163,11 @@ impl ProcessEngine for LawEngine {
             ("await", EngineEvent::Started { .. }) => EngineAction::AwaitProcess {
                 process: ProcessId::parse(script["await"].as_str().unwrap_or_default())
                     .map_err(infra)?,
-                deadline: Some(LONG),
+                deadline: Some(
+                    script["deadline_ms"]
+                        .as_u64()
+                        .map_or(LONG, Duration::from_millis),
+                ),
             },
             ("await", EngineEvent::ProcessEnded { outcome, .. }) => success(json!({
                 "ended": serde_json::to_value(&outcome).map_err(infra)?,
@@ -525,7 +530,6 @@ async fn a_refused_step_admission_ends_the_process_failed_and_its_awaiter_reads_
 /// awaiter has not run since; the host prunes the awaited process; then
 /// node B claims the awaiter.
 #[tokio::test]
-#[ignore = "blocked: L6 (FIG-5175): the awaiter's pass reads the pruned target with get_process, maps ProcessNoLongerRetained to a store failure and retries forever, and the Resolved wait arm ignores the outcome its row holds (runtime/actor/process/activation.rs next_event, Blocked::Process)"]
 async fn an_awaiter_reads_the_outcome_of_a_process_pruned_after_it_ended() {
     let script = Script::new();
     script.cut(CommitLabel::PROCESS_TERMINAL, 1, Fault::CommitThenAbort);
@@ -577,6 +581,147 @@ async fn an_awaiter_reads_the_outcome_of_a_process_pruned_after_it_ended() {
         Some(&produced),
         "the awaiter read the pruned producer's outcome: {seen}"
     );
+}
+
+/// A process awaiting another takes its event from its wait row's committed
+/// winner: a timeout that committed before the awaited process ended is
+/// answered as a timeout, though the awaited process has ended by the time
+/// the awaiter next reads (FIG-5227).
+///
+/// The awaiter's `wait.timeout` commits, and its answer reaches the awaiter
+/// only after the awaited process's terminal has committed.
+#[tokio::test]
+async fn a_timeout_that_wins_before_the_awaited_terminal_is_answered_as_a_timeout() {
+    let script = Script::new();
+    script.cut(
+        CommitLabel::WAIT_TIMEOUT,
+        1,
+        Fault::DelayedAck(Duration::from_secs(20)),
+    );
+    let world = World::new(script).await;
+    let producer = world
+        .register(registration(json!({
+            "tag": "producer",
+            "act": "sleep",
+            "until_ms": SimClock::timestamp_ms_at(8_000),
+        })))
+        .await;
+    let awaiter = world
+        .register(registration(json!({
+            "tag": "awaiter",
+            "act": "await",
+            "await": producer.as_str(),
+            "deadline_ms": 2_000,
+        })))
+        .await;
+    world.nodes.start("a");
+    world
+        .until("the awaiter ended", || async {
+            world.terminal(&awaiter).await.is_some()
+        })
+        .await;
+
+    let timed_out = world
+        .nodes
+        .script()
+        .trace()
+        .into_iter()
+        .find(|write| write.point.label == CommitLabel::WAIT_TIMEOUT)
+        .expect("the awaiter's wait timed out");
+    let ended = world
+        .nodes
+        .script()
+        .trace()
+        .into_iter()
+        .find(|write| write.point.label == CommitLabel::PROCESS_TERMINAL)
+        .expect("the producer ended");
+    assert!(
+        timed_out.at_ms < ended.at_ms && world.terminal(&producer).await.is_some(),
+        "the timeout committed before the producer's terminal: {}",
+        world.nodes.script().rendered_trace()
+    );
+    let seen = world.terminal(&awaiter).await.expect("the awaiter's end");
+    assert_eq!(
+        find(&seen, "timed_out"),
+        Some(&json!(true)),
+        "the awaiter was answered its committed timeout: {seen}"
+    );
+    assert_eq!(
+        world.advances("awaiter"),
+        ["started", "process_wait_timed_out"]
+    );
+}
+
+/// A process that awaits one already ended and pruned before its wait was
+/// pinned has no outcome left to read: its wait's deadline answers it, and
+/// the awaiter ends instead of failing every pass on the pruned row
+/// (FIG-5227).
+#[tokio::test]
+async fn an_await_pinned_after_its_target_was_pruned_is_answered_by_its_deadline() {
+    let world = World::new(Script::new()).await;
+    let gone = world
+        .register(registration(json!({ "tag": "gone", "act": "flaky" })))
+        .await;
+    world.nodes.start("a");
+    world
+        .until("the awaited process ended", || async {
+            world.terminal(&gone).await.is_some()
+        })
+        .await;
+    let now = world.backend.clock().timestamp_ms();
+    world
+        .backend
+        .process_registry()
+        .prune_terminal_processes(now + 1, None, ProjectionWatermark::NoProjector)
+        .await
+        .expect("prune the ended process");
+    assert!(world.record(&gone).await.is_none(), "it is pruned");
+
+    let awaiter = world
+        .register(registration(json!({
+            "tag": "awaiter",
+            "act": "await",
+            "await": gone.as_str(),
+            "deadline_ms": 2_000,
+        })))
+        .await;
+    world
+        .until("the awaiter ended", || async {
+            world.terminal(&awaiter).await.is_some()
+        })
+        .await;
+    let seen = world.terminal(&awaiter).await.expect("the awaiter's end");
+    assert_eq!(find(&seen, "timed_out"), Some(&json!(true)), "{seen}");
+}
+
+/// A transient store failure on the read a process activation makes right
+/// after its claim strands nothing: the process runs on and reaches its
+/// terminal on the node that claimed it, and its actor is never left owned
+/// with no activation (FIG-5227).
+#[tokio::test]
+async fn a_transient_read_failure_after_claim_never_strands_the_process() {
+    let world = World::new(Script::new()).await;
+    let process = world
+        .register(registration(json!({
+            "tag": "sleeper",
+            "act": "sleep",
+            "until_ms": SimClock::timestamp_ms_at(2_000),
+        })))
+        .await;
+    world.nodes.script().fail_actor_read(actor(&process));
+    world.nodes.start("a");
+    world
+        .until("the process ended", || async {
+            world.terminal(&process).await.is_some()
+        })
+        .await;
+
+    assert_eq!(world.advances("sleeper"), ["started", "woke"]);
+    world
+        .until("its actor is terminal", || async {
+            world.actor_state(&process).await == Some(ActorState::Terminal)
+        })
+        .await;
 }
 
 /// A signal is admitted by its first append: a repeat of it after the

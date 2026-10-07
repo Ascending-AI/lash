@@ -16,7 +16,7 @@ use crate::clock::SimClock;
 use crate::matrix::Scenario;
 use crate::nodes::{SimNodes, SimNodesConfig};
 use crate::script::{Cut, Fault, Stored, WriteKind};
-use lash_durable::runner::{Activation, Owned};
+use lash_durable::runner::{Activation, Exit, Owned};
 use lash_durable::{
     ActorKey, ActorState, CommitLabel, DurableError, DurableStore, Epoch, FormatSet, LeaseConfig,
     MailKind, MailSeq, MailTx, Release, StateRevision,
@@ -72,13 +72,13 @@ struct Drain {
 
 #[async_trait::async_trait]
 impl Activation for Drain {
-    async fn activate(&self, owned: Owned) {
+    async fn activate(&self, owned: Owned) -> Exit {
         let clock = Arc::clone(owned.clock());
         let mut hot_until = clock.now() + HOT_FOR;
         loop {
             let mut tx = match owned.begin().await {
                 Ok(tx) => tx,
-                Err(DurableError::OwnershipLost(_)) => return,
+                Err(DurableError::OwnershipLost(_)) => return Exit::Released,
                 Err(_) => {
                     owned.wait_for_mail().await;
                     continue;
@@ -91,7 +91,7 @@ impl Activation for Drain {
                 }
                 tx.ack_seen().give_up(Release::Idle);
                 match owned.commit(tx, RELEASE).await {
-                    Ok(_) | Err(DurableError::OwnershipLost(_)) => return,
+                    Ok(_) | Err(DurableError::OwnershipLost(_)) => return Exit::Released,
                     Err(_) => continue,
                 }
             }
@@ -113,7 +113,7 @@ impl Activation for Drain {
                         }));
                     hot_until = clock.now() + HOT_FOR;
                 }
-                Err(DurableError::OwnershipLost(_)) => return,
+                Err(DurableError::OwnershipLost(_)) => return Exit::Released,
                 Err(_) => {}
             }
         }

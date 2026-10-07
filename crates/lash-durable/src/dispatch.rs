@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use crate::ids::ActorKind;
-use crate::runner::{Activation, Owned};
+use crate::runner::{Activation, Exit, Owned};
 
 /// Routes a claimed actor by its [`ActorKind`]: sessions to the session
 /// activation (V0, then L3), processes to the process activation (L6).
@@ -18,7 +18,7 @@ pub struct ActorDispatch {
 
 #[async_trait::async_trait]
 impl Activation for ActorDispatch {
-    async fn activate(&self, owned: Owned) {
+    async fn activate(&self, owned: Owned) -> Exit {
         match owned.actor().kind() {
             ActorKind::Session => self.session.activate(owned).await,
             ActorKind::Process => self.process.activate(owned).await,

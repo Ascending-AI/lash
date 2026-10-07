@@ -10,7 +10,7 @@ use std::time::Duration;
 use lash_durable::domain::{
     CANCEL_MAIL, MailAnswer, MailDomainWrite, WaitResolution, WaitRow, WaitState,
 };
-use lash_durable::runner::{Activation, Owned, Runner, RunnerConfig};
+use lash_durable::runner::{Activation, Exit, Owned, Runner, RunnerConfig};
 use lash_durable::{
     ActorKey, ClaimCause, CommitLabel, DurableError, DurableInstant, Epoch, FormatSet, MailKind,
     MailTx, NodeId, NodeLease, NodeSpec, Release,
@@ -441,7 +441,7 @@ struct SettleOnClaim {
 
 #[async_trait::async_trait]
 impl Activation for SettleOnClaim {
-    async fn activate(&self, owned: Owned) {
+    async fn activate(&self, owned: Owned) -> Exit {
         let cx = context(
             &self.backend,
             owned.actor(),
@@ -464,6 +464,7 @@ impl Activation for SettleOnClaim {
             tx.ack_seen().give_up(Release::Idle);
             let _ = cx.commit(tx, CommitLabel::new("law.release")).await;
         }
+        Exit::Released
     }
 }
 

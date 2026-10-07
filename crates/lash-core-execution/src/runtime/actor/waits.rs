@@ -588,8 +588,9 @@ pub async fn pin_process_terminal(
 /// recorded outcome when the process had already ended: a process that ended
 /// before the wait was pinned resolved no wait in its terminal transaction.
 /// First winner beside that transaction, and the resolution wakes the wait's
-/// owner; a wait already settled, or one on a process still running, is left
-/// as it is.
+/// owner; a wait already settled, one on a process still running, and one on
+/// a process pruned since it ended (its outcome went with it; the wait's
+/// deadline answers) are left as they are.
 ///
 /// # Errors
 ///
@@ -604,16 +605,16 @@ pub async fn resolve_ended_terminal(backend: &Backend, wait: &WaitRef) -> Result
     else {
         return Ok(());
     };
-    let record = backend
-        .process_registry()
-        .get_process(&process)
-        .await
-        .map_err(|error| {
-            DurableError::Store(StoreFailure {
+    let record = match backend.process_registry().get_process(&process).await {
+        Ok(record) => record,
+        Err(crate::PluginError::ProcessNoLongerRetained { .. }) => return Ok(()),
+        Err(error) => {
+            return Err(DurableError::Store(StoreFailure {
                 kind: StoreFailureKind::Unavailable,
                 message: error.to_string(),
-            })
-        })?;
+            }));
+        }
+    };
     if let Some(outcome) = record.and_then(|record| record.outcome()) {
         let (digest, resolution_ref) = encode_process_outcome(&outcome)?;
         resolve_row(

@@ -97,7 +97,9 @@ impl CommitLabel {
     pub const MAIL_PROCESS: Self = Self::new("mail.process");
 
     // Drain (L11).
-    /// `drain.release`: An actor released by a draining node.
+    /// `drain.release`: An actor released `ready` with nothing of it left
+    /// running on its node: by a draining node at a committed phase, or by a
+    /// runner whose activation stopped without giving it up.
     pub const DRAIN_RELEASE: Self = Self::new("drain.release");
 
     /// The commits a store serves from reserved connection capacity (L8,

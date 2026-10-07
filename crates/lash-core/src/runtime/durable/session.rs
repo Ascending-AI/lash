@@ -35,7 +35,7 @@
 use std::sync::Arc;
 
 use lash_durable::domain::{MailAnswer, MailDomainWrite, TurnWrite};
-use lash_durable::runner::{Activation, Owned};
+use lash_durable::runner::{Activation, Exit, Owned};
 use lash_durable::{
     ActorTx, CommitLabel, DomainWrite, DurableError, DurableInstant, DurableProbe, MailTx, Release,
 };
@@ -494,9 +494,9 @@ enum Pass {
 
 #[async_trait::async_trait]
 impl Activation for SessionActivation {
-    async fn activate(&self, owned: Owned) {
+    async fn activate(&self, owned: Owned) -> Exit {
         let Ok(session) = SessionId::try_from(owned.actor().id().to_owned()) else {
-            return;
+            return Exit::Abandoned;
         };
         let cx = ActorContext::claimed(
             self.backend.clone(),
@@ -508,11 +508,16 @@ impl Activation for SessionActivation {
         // A claim never takes a session in a set its node does not decode;
         // one adopted in another set goes back unread.
         if owned.purpose() == lash_durable::ClaimPurpose::CancelOnly {
-            if let Ok(mut tx) = cx.begin().await {
-                tx.give_up(Release::Idle);
-                let _ = cx.commit(tx, CommitLabel::SESSION_RELEASE).await;
-            }
-            return;
+            let mut tx = match cx.begin().await {
+                Ok(tx) => tx,
+                Err(DurableError::OwnershipLost(_)) => return Exit::Released,
+                Err(_) => return Exit::Abandoned,
+            };
+            tx.give_up(Release::Idle);
+            return match cx.commit(tx, CommitLabel::SESSION_RELEASE).await {
+                Ok(_) | Err(DurableError::OwnershipLost(_)) => Exit::Released,
+                Err(_) => Exit::Abandoned,
+            };
         }
         // An owner with nothing to do keeps the actor hot for `idle_evict`,
         // reading its mailbox at every hint or poll, then releases it.
@@ -538,7 +543,7 @@ impl Activation for SessionActivation {
                     owned.wait_for_mail().await;
                 }
                 Ok(Pass::Released | Pass::Lost)
-                | Err(TurnError::Durable(DurableError::OwnershipLost(_))) => return,
+                | Err(TurnError::Durable(DurableError::OwnershipLost(_))) => return Exit::Released,
                 // Anything else did not commit, or committed with its answer
                 // lost: the next pass reloads the rows, the head among them,
                 // and carries on from them. A lost epoch shows at its fenced

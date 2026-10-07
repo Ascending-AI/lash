@@ -26,7 +26,8 @@ pub struct Mail {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Release {
     /// Claimable at once by any node that decodes it: a draining node's
-    /// release at a committed phase (`drain.release`).
+    /// release at a committed phase, or the runner's hand-back of an
+    /// abandoned activation's actor (`drain.release`).
     Ready,
     /// Nothing to do until mail arrives.
     Idle,

@@ -10,7 +10,9 @@
 //! Events, in order: a cancel not yet delivered (`Cancelled`, once, with its
 //! grace); `Started` before the first transition; the event the last
 //! transition asked for at once (`KeyPinned`, `Emitted`); a settled step;
-//! a signal from the mailbox; the end of what the process is blocked on.
+//! a signal from the mailbox; the end of what the process is blocked on,
+//! which for a wait is its row's committed winner (a resolution, a timeout
+//! or a revocation), never the live state of what it waited for.
 //! With none, step bodies run (the actor stays owned) or the actor releases
 //! as `waiting` until its earliest due time, holding nothing.
 //!
@@ -36,7 +38,7 @@ use lash_durable::domain::{
     AdmittedId, CANCEL_MAIL, ExecKey, OwnerKey, ParkEventWrite, ProcessActorRow, ProcessWrite,
     RunSeq, SIGNAL_MAIL, ScopeKey, SnapshotRev, SnapshotWrite, WaitState, WaitWrite,
 };
-use lash_durable::runner::{Activation, Owned};
+use lash_durable::runner::{Activation, Exit, Owned};
 use lash_durable::{
     ActorTx, CommitLabel, DomainWrite, DurableError, DurableInstant, DurableProbe, DurableReads,
     Release, StoreFailure, StoreFailureKind,
@@ -152,13 +154,23 @@ fn millis(at: DurableInstant) -> u64 {
 
 #[async_trait::async_trait]
 impl Activation for ProcessActivation {
-    async fn activate(&self, owned: Owned) {
+    async fn activate(&self, owned: Owned) -> Exit {
         let Ok(process) = ProcessId::parse(owned.actor().id()) else {
-            return;
+            return Exit::Abandoned;
         };
-        let (park, failed_activations) = match owned.store().actor(owned.actor()).await {
-            Ok(Some(snapshot)) => (snapshot.park, snapshot.failed_activations),
-            Ok(None) | Err(_) => return,
+        // A failed read leaves the claim as it was: read again at the
+        // activation's retry pace while this node holds the actor. A
+        // draining node hands it back instead.
+        let (park, failed_activations) = loop {
+            match owned.store().actor(owned.actor()).await {
+                Ok(Some(snapshot)) => break (snapshot.park, snapshot.failed_activations),
+                Ok(None) => return Exit::Released,
+                Err(_) if owned.draining() => return Exit::Abandoned,
+                Err(error) => {
+                    tracing::debug!(%error, %process, "process actor read failed; reading again");
+                    owned.wait_for_mail().await;
+                }
+            }
         };
         let steps_token = CancellationToken::new();
         let mut live = Live {
@@ -180,10 +192,10 @@ impl Activation for ProcessActivation {
                     if let Err(DurableError::OwnershipLost(_)) =
                         self.wait(&owned, &mut live, &fold, due).await
                     {
-                        return;
+                        return Exit::Released;
                     }
                 }
-                Ok(Pass::Released) | Err(DurableError::OwnershipLost(_)) => return,
+                Ok(Pass::Released) | Err(DurableError::OwnershipLost(_)) => return Exit::Released,
                 // A refusal as corrupt answers every retry the same: the
                 // process ends Failed on the first one, and the next pass
                 // runs its cascade.
@@ -194,7 +206,10 @@ impl Activation for ProcessActivation {
                     live.running.abort_all();
                     match self.end_refused(&owned, &process, &mut live, message).await {
                         Ok(Pass::Again) => {}
-                        Ok(_) | Err(_) => return,
+                        Ok(_) | Err(DurableError::OwnershipLost(_)) => return Exit::Released,
+                        // Neither its terminal nor its park committed: the
+                        // next claim meets the refusal again.
+                        Err(_) => return Exit::Abandoned,
                     }
                 }
                 // Anything else did not commit, or committed with its
@@ -869,36 +884,36 @@ impl ProcessActivation {
                 process: target,
                 wait,
             }) => {
-                let ended = self
-                    .backend
-                    .process_registry()
-                    .get_process(&target)
-                    .await
-                    .map_err(|error| registry_failure(&error))?
-                    .and_then(|target| {
-                        target
-                            .terminal()
-                            .map(|terminal| terminal.clone().into_await_output())
-                    });
-                if let Some(outcome) = ended {
-                    driver.blocked = None;
-                    return Ok(Next::Event(EngineEvent::ProcessEnded {
-                        process: target,
-                        outcome,
-                    }));
+                // The wait row's committed winner is the answer, never the
+                // target's live registry row: a timeout that committed first
+                // stays a timeout, and a resolution outlives the target's
+                // pruning.
+                let mut row = process_wait(reads, &wait).await?;
+                if row.state == WaitState::Pending {
+                    // A target that ended before the wait was pinned
+                    // resolved no wait: resolve it from the target's
+                    // recorded end, first winner, and read the winner.
+                    waits::resolve_ended_terminal(
+                        &self.backend,
+                        &waits::WaitRef::new(wait.0, WaitKind::ProcessTerminal),
+                    )
+                    .await?;
+                    row = process_wait(reads, &wait).await?;
                 }
-                let row = reads
-                    .wait(&wait.0)
-                    .await?
-                    .ok_or_else(|| corrupt("a process wait", "its row is gone"))?;
                 match row.state {
+                    WaitState::Resolved => {
+                        driver.blocked = None;
+                        return Ok(Next::Event(EngineEvent::ProcessEnded {
+                            process: target,
+                            outcome: waits::process_outcome(resolution(&row)?)?,
+                        }));
+                    }
                     WaitState::TimedOut | WaitState::Revoked => {
                         driver.blocked = None;
                         return Ok(Next::Event(EngineEvent::ProcessWaitTimedOut {
                             process: target,
                         }));
                     }
-                    WaitState::Resolved => {}
                     WaitState::Pending => match row.deadline {
                         Some(deadline) if now >= deadline => {
                             tx.write(DomainWrite::Wait(WaitWrite::Due { id: wait.0 }));
@@ -1146,6 +1161,17 @@ fn settled_step(
 }
 
 /// A resolved wait's resolution.
+/// The row of a process's wait on another process's terminal.
+async fn process_wait(
+    reads: &dyn DurableReads,
+    wait: &StoredWaitId,
+) -> Result<lash_durable::domain::WaitRow, DurableError> {
+    reads
+        .wait(&wait.0)
+        .await?
+        .ok_or_else(|| corrupt("a process wait", "its row is gone"))
+}
+
 fn resolution(row: &lash_durable::domain::WaitRow) -> Result<waits::Resolution, DurableError> {
     let stored = row
         .resolution_ref

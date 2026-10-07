@@ -12,7 +12,7 @@
 //! - **Tripwire:** draining mail re-runs nothing.
 
 use lash_core::durable_port::domain::SESSION_ACTOR_FORMATS;
-use lash_core::durable_port::runner::{Activation, Owned};
+use lash_core::durable_port::runner::{Activation, Exit, Owned};
 use lash_core::durable_port::{
     ActorKey, ActorState, CommitLabel, DurableError, DurableStore, Epoch, FormatSet, LeaseConfig,
     Release, StateRevision,
@@ -79,9 +79,9 @@ struct SessionDrain {
 
 #[async_trait::async_trait]
 impl Activation for SessionDrain {
-    async fn activate(&self, owned: Owned) {
+    async fn activate(&self, owned: Owned) -> Exit {
         let Some(shared) = self.shared.get() else {
-            return;
+            return Exit::Released;
         };
         let cx = ActorContext::new(
             shared.backend.clone(),
@@ -95,7 +95,7 @@ impl Activation for SessionDrain {
         loop {
             let mut tx = match owned.begin().await {
                 Ok(tx) => tx,
-                Err(DurableError::OwnershipLost(_)) => return,
+                Err(DurableError::OwnershipLost(_)) => return Exit::Released,
                 Err(_) => {
                     owned.wait_for_mail().await;
                     continue;
@@ -129,11 +129,11 @@ impl Activation for SessionDrain {
                         admitted,
                     });
                     if label == RELEASE {
-                        return;
+                        return Exit::Released;
                     }
                     hot_until = shared.clock.logical_ms() + HOT_FOR_MS;
                 }
-                Err(DurableError::OwnershipLost(_)) => return,
+                Err(DurableError::OwnershipLost(_)) => return Exit::Released,
                 Err(_) => {}
             }
         }

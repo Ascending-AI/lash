@@ -28,7 +28,7 @@ use std::time::Duration;
 
 use lash_core_execution::{ActorContext, AdmittedScope, Backend};
 use lash_durable::domain::{CellId, ExecKey};
-use lash_durable::runner::{Activation, Owned};
+use lash_durable::runner::{Activation, Exit, Owned};
 use lash_durable::{
     ActorKey, ActorState, CommitLabel, DurableError, DurableStore, FormatSet, LeaseConfig, MailTx,
     Release,
@@ -304,7 +304,7 @@ async fn lost(owned: &Owned) -> bool {
 
 #[async_trait::async_trait]
 impl Activation for CellActivation {
-    async fn activate(&self, owned: Owned) {
+    async fn activate(&self, owned: Owned) -> Exit {
         let cx = ActorContext::claimed(
             self.shared.backend(),
             &owned,
@@ -326,7 +326,7 @@ impl Activation for CellActivation {
                 Err(error) => {
                     self.stop(&error);
                     if lost(&owned).await {
-                        return;
+                        return Exit::Released;
                     }
                     continue;
                 }
@@ -363,12 +363,12 @@ impl Activation for CellActivation {
                         .unwrap_or_default();
                     self.shared.ends.lock().expect("ends").push(results);
                     let Ok(mut tx) = owned.begin().await else {
-                        return;
+                        return Exit::Released;
                     };
                     tx.give_up(Release::Terminal);
                     match owned.commit(tx, DONE).await {
-                        Ok(_) => return,
-                        Err(DurableError::OwnershipLost(_)) => return,
+                        Ok(_) => return Exit::Released,
+                        Err(DurableError::OwnershipLost(_)) => return Exit::Released,
                         Err(_) => continue,
                     }
                 }
@@ -376,11 +376,12 @@ impl Activation for CellActivation {
                 Err(failure) => {
                     self.stop(&failure);
                     if lost(&owned).await {
-                        return;
+                        return Exit::Released;
                     }
                 }
             }
         }
+        Exit::Released
     }
 }
 

@@ -4,7 +4,7 @@
 # 1550 rows over 847 files, 3902 laws.
 # By class: mechanical 163, semantic 110, delete 829, replace 448.
 # By lane: L1b 12, L3 18, L3s 57, L4 19, L5 2, L6b 9, L7 25, L7b 22, L7p 8, L9b 67, L9c 341, L9d 77, L9e 129, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 8, L9t 25, I0 49.
-# By status: todo 410, ported 85, deleted 1055.
+# By status: todo 409, ported 85, deleted 1056.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -225,8 +225,6 @@
 #   a process start-input acquisition fault retries the same registered process
 # - L9d: crates/lash-restate-test/tests/resource_capacity.rs
 #   process and session lifecycles release their native resources when they end
-# - L9d: crates/lash-restate/src/tests/durable_wait_source_seal.rs::l02_l12_process_terminal_source_keeps_material_after_producer_pruning
-#   a process-terminal wait source keeps its outcome after its producer is pruned
 # - L9d: crates/lash-restate/src/tests/process_session_turn_laws.rs
 #   a session-turn process (subagent) crashed at create, acceptance or final commit resumes once from its recorded creation config, keeps its durable rows when cancelled, and a child panic is typed while the parent lives
 # - L9d: crates/lash-restate/src/tests/run_control_witnesses/process_run.rs
@@ -5408,10 +5406,10 @@ lane = "L9d"
 laws = [
   "l02_l12_process_terminal_source_keeps_material_after_producer_pruning",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-durable-test/tests/process_actor_laws.rs::an_awaiter_reads_the_outcome_of_a_process_pruned_after_it_ended"
+status = "deleted"
 owed = "a process-terminal wait source keeps its outcome after its producer is pruned"
-note = "L9d (FIG-5182) wrote the law as crates/lash-durable-test/tests/process_actor_laws.rs::an_awaiter_reads_the_outcome_of_a_process_pruned_after_it_ended; it lands #[ignore]d, red: blocked: L6 (FIG-5175): the awaiter's pass reads its pruned target with get_process, maps ProcessNoLongerRetained to a store failure and retries forever, and the Resolved wait arm ignores the outcome the wait row holds (runtime/actor/process/activation.rs next_event, Blocked::Process)"
+note = "L9d (FIG-5182) wrote the law as crates/lash-durable-test/tests/process_actor_laws.rs::an_awaiter_reads_the_outcome_of_a_process_pruned_after_it_ended; FIG-5227 un-ignored it once an awaiting process took its event from its wait row's committed winner instead of the target's registry row"
 
 [[row]]
 path = "crates/lash-restate/src/tests/durable_wait_source_seal.rs"

@@ -6,7 +6,7 @@
 //! it. An owner commit's domain rows travel inside its transaction, so a cut
 //! at a label cuts them with it. Reads (`now`, `begin`, `actor`, `owned` and
 //! the domain [`DurableReads`]) pass through, but a paused or dead node makes
-//! none, as a stopped process could not.
+//! none, as a stopped process could not; a read rule fails one `actor` read.
 
 use crate::clock::SimClock;
 use crate::life::NodeLife;
@@ -426,6 +426,16 @@ impl DurableStore for FaultStore {
     }
 
     async fn actor(&self, actor: &ActorKey) -> Result<Option<ActorSnapshot>, DurableError> {
+        if self.script.fails_read(actor) {
+            return self
+                .read(async {
+                    Err(DurableError::Store(StoreFailure {
+                        kind: StoreFailureKind::Unavailable,
+                        message: format!("injected: the read of {actor} failed"),
+                    }))
+                })
+                .await;
+        }
         self.read(self.inner.actor(actor)).await
     }
 }

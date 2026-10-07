@@ -39,7 +39,7 @@ use lash_core_execution::{
     EngineState, EngineStateFormat, NoProjectionProviders, ProcessEngine, ProcessInfraError,
     ProcessRecord, StepRequest, StoreSet, ToolCallId, TriggerOccurrenceRequest,
 };
-use lash_durable::runner::{Activation, Owned};
+use lash_durable::runner::{Activation, Exit, Owned};
 use lash_durable::{
     ActorKey, ActorKind, ActorState, CommitLabel, DurableError, DurableStore, FormatSet,
     LeaseConfig, MailKind, MailTx, Release,
@@ -247,7 +247,7 @@ struct Activations {
 
 #[async_trait::async_trait]
 impl Activation for Activations {
-    async fn activate(&self, owned: Owned) {
+    async fn activate(&self, owned: Owned) -> Exit {
         if owned.actor().kind() == ActorKind::Process {
             return self.processes.activate(owned).await;
         }
@@ -278,7 +278,7 @@ impl Activation for Activations {
         loop {
             let mut tx = match owned.begin().await {
                 Ok(tx) => tx,
-                Err(DurableError::OwnershipLost(_)) => return,
+                Err(DurableError::OwnershipLost(_)) => return Exit::Released,
                 Err(_) => {
                     owned.wait_for_mail().await;
                     continue;
@@ -286,7 +286,7 @@ impl Activation for Activations {
             };
             tx.ack_seen().give_up(Release::Idle);
             match owned.commit(tx, EMITTER_DONE).await {
-                Ok(_) | Err(DurableError::OwnershipLost(_)) => return,
+                Ok(_) | Err(DurableError::OwnershipLost(_)) => return Exit::Released,
                 Err(_) => continue,
             }
         }

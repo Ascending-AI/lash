@@ -379,8 +379,8 @@ mod tests {
     use super::*;
     use crate::script::Fault;
     use crate::testing::{FORMATS, actor, sqlite};
-    use lash_durable::runner::Owned;
-    use lash_durable::{Epoch, MailKind, MailSeq};
+    use lash_durable::runner::{Exit, Owned};
+    use lash_durable::{ActorState, Epoch, MailKind, MailSeq, Release};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
@@ -403,12 +403,12 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Activation for Hold {
-        async fn activate(&self, owned: Owned) {
+        async fn activate(&self, owned: Owned) -> Exit {
             self.live.fetch_add(1, Ordering::SeqCst);
             let _live = Live(&self.live);
             loop {
                 let Ok(mut tx) = owned.begin().await else {
-                    return;
+                    return Exit::Released;
                 };
                 let seqs: Vec<MailSeq> = tx.mail().iter().map(|mail| mail.seq).collect();
                 if !seqs.is_empty() {
@@ -420,6 +420,33 @@ mod tests {
                 }
                 owned.wait_for_mail().await;
             }
+        }
+    }
+
+    /// Returns from its first activation without giving its actor up;
+    /// releases the actor idle at every later one. Records each claim's
+    /// epoch.
+    #[derive(Default)]
+    struct Abandon {
+        epochs: Mutex<Vec<Epoch>>,
+    }
+
+    #[async_trait::async_trait]
+    impl Activation for Abandon {
+        async fn activate(&self, owned: Owned) -> Exit {
+            let first = {
+                let mut epochs = self.epochs.lock_recover();
+                epochs.push(owned.epoch());
+                epochs.len() == 1
+            };
+            if first {
+                return Exit::Abandoned;
+            }
+            if let Ok(mut tx) = owned.begin().await {
+                tx.ack_seen().give_up(Release::Idle);
+                let _ = owned.commit(tx, ACK).await;
+            }
+            Exit::Released
         }
     }
 
@@ -459,6 +486,50 @@ mod tests {
             .unwrap();
         step_until(&nodes, || hold.acked.lock_recover().len() == 1).await;
         nodes
+    }
+
+    /// An activation that stops while its node still owns its actor never
+    /// strands it: the runner releases it `ready`, fenced by the claimed
+    /// epoch, and a claim runs it again (FIG-5227).
+    #[tokio::test]
+    async fn an_activation_that_stops_holding_its_actor_hands_it_back() {
+        let clock = SimClock::new();
+        let abandon = Arc::new(Abandon::default());
+        let nodes = SimNodes::new(
+            sqlite(Arc::clone(&clock)).await,
+            clock,
+            Script::new(),
+            SimNodesConfig {
+                lease: LeaseConfig::default(),
+                decodes: vec![FormatSet::new(FORMATS)],
+                max_active: 4,
+            },
+            Arc::clone(&abandon) as Arc<dyn Activation>,
+        );
+        nodes.start("a");
+        let mut create = MailTx::new();
+        create
+            .create_actor(actor("one"), FormatSet::new(FORMATS))
+            .append(actor("one"), MailKind::new("t"), "first");
+        nodes
+            .mail("a", create, CommitLabel::new("t.create"))
+            .await
+            .unwrap();
+        step_until(&nodes, || abandon.epochs.lock_recover().len() == 2).await;
+        let epochs = abandon.epochs.lock_recover().clone();
+        assert!(epochs[1] > epochs[0], "claimed again: {epochs:?}");
+        assert!(
+            nodes.script().trace().iter().any(|write| {
+                write.point.label == CommitLabel::DRAIN_RELEASE
+                    && write.actor == Some(actor("one"))
+                    && write.committed()
+            }),
+            "the runner released it: {}",
+            nodes.script().rendered_trace()
+        );
+        nodes.quiesce().await;
+        let row = nodes.database().actor(&actor("one")).await.unwrap();
+        assert_eq!(row.map(|row| row.state), Some(ActorState::Idle));
     }
 
     /// The first heartbeat answers a minute after it commits: a heartbeat

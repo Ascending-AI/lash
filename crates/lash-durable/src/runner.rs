@@ -21,6 +21,12 @@
 //! releases its node and returns [`Stopped::Drained`]. Nodes of the next
 //! build then claim the released actors they decode.
 //!
+//! An activation answers how it ended ([`Exit`]). One that stopped while
+//! this boot may still own its actor (a read it gave up on, a panic) is
+//! [`Exit::Abandoned`]: the runner releases the actor `ready` in one owner
+//! transaction fenced by the epoch it was claimed under, so a claim runs it
+//! again and no actor is left owned with no activation.
+//!
 //! With [`Signals`] (PostgreSQL), the runner also listens: it opens its
 //! listener before its first claim, so no hint sent after that scan is
 //! missed; it rescans after the listener resubscribes; it publishes what
@@ -219,15 +225,30 @@ impl std::fmt::Debug for Liveness {
     }
 }
 
+/// How an activation ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Exit {
+    /// The actor is not this node's any more: the activation released or
+    /// ended it, or lost it to another owner.
+    Released,
+    /// The activation stopped while this boot may still own the actor: the
+    /// runner releases it `ready`, fenced by the epoch it was claimed under,
+    /// for a claim to run it again.
+    Abandoned,
+}
+
 /// What a node does with one actor it claimed.
 #[async_trait::async_trait]
 pub trait Activation: Send + Sync + 'static {
     /// Run `owned` until the activation releases the actor, ends it, or
-    /// loses it. A commit refused with [`DurableError::OwnershipLost`] means
-    /// the actor is someone else's: return at once, keeping nothing.
+    /// loses it, and answer [`Exit::Released`]. A commit refused with
+    /// [`DurableError::OwnershipLost`] means the actor is someone else's:
+    /// return at once, keeping nothing. An activation that stops before
+    /// then answers [`Exit::Abandoned`], and the runner hands the actor
+    /// back.
     ///
     /// The runner drops this future, mid-await, when the node stops serving.
-    async fn activate(&self, owned: Owned);
+    async fn activate(&self, owned: Owned) -> Exit;
 }
 
 /// One claimed actor, as its activation holds it.
@@ -664,7 +685,12 @@ impl Runner {
         if let Some(signals) = &self.signals {
             publisher.spawn(publish(self.hints.clone(), Arc::clone(signals)));
         }
-        let mut active: JoinSet<()> = JoinSet::new();
+        let mut active: JoinSet<Exit> = JoinSet::new();
+        // The actor and epoch each running activation was claimed with, and
+        // the claims of activations that ended abandoning their actors,
+        // until the runner has handed them back.
+        let mut claims: HashMap<tokio::task::Id, (ActorKey, Epoch)> = HashMap::new();
+        let mut abandoned: Vec<(ActorKey, Epoch)> = Vec::new();
         let start = self.clock.now();
         let mut last_renewed = start;
         self.liveness.renew(start + settings.self_stop_after);
@@ -683,6 +709,22 @@ impl Runner {
         tokio::pin!(stop);
         let stopped = 'serve: loop {
             let unrenewed = last_renewed + settings.self_stop_after;
+            // A hand-back that failed is retried at the next turn of the
+            // loop; one the fence refused finds the actor already gone.
+            for (actor, epoch) in std::mem::take(&mut abandoned) {
+                match self
+                    .bounded(&mut stop, unrenewed, self.hand_back(&actor, epoch))
+                    .await
+                {
+                    Ok(Ok(())) => {
+                        next_claim = self.clock.now();
+                        claim_delay = settings.claim_backoff;
+                    }
+                    Ok(Err(DurableError::OwnershipLost(_))) => {}
+                    Ok(Err(_)) => abandoned.push((actor, epoch)),
+                    Err(stopped) => break 'serve stopped,
+                }
+            }
             if self.drain.started() {
                 if !marked_draining {
                     let mark = self.store.mark_draining(&lease);
@@ -698,7 +740,7 @@ impl Runner {
                         Err(stopped) => break stopped,
                     }
                 }
-                if marked_draining && active.is_empty() {
+                if marked_draining && active.is_empty() && abandoned.is_empty() {
                     break Stopped::Drained;
                 }
             }
@@ -709,7 +751,19 @@ impl Runner {
             tokio::select! {
                 biased;
                 () = &mut stop => break Stopped::Requested,
-                Some(_) = active.join_next(), if !active.is_empty() => continue,
+                Some(joined) = active.join_next_with_id(), if !active.is_empty() => {
+                    // A panicked activation stopped holding its actor too.
+                    let (task, exit) = match joined {
+                        Ok((task, exit)) => (task, exit),
+                        Err(error) => (error.id(), Exit::Abandoned),
+                    };
+                    if let Some(claim) = claims.remove(&task)
+                        && exit == Exit::Abandoned
+                    {
+                        abandoned.push(claim);
+                    }
+                    continue;
+                }
                 () = self.drain.wait(), if !self.drain.started() => continue,
                 signal = next_signal(&mut feed) => match signal {
                     Signal::Ready => {
@@ -842,7 +896,7 @@ impl Runner {
                         next_claim = now + claim_delay;
                         adopt = false;
                         for claimed in claimed {
-                            self.activate(&mut active, claimed);
+                            self.activate(&mut active, &mut claims, claimed);
                         }
                     }
                     Err(DurableError::NodeLeaseLost { .. }) => break Stopped::LeaseLost,
@@ -880,8 +934,30 @@ impl Runner {
         }
     }
 
-    fn activate(&self, active: &mut JoinSet<()>, claimed: Claimed) {
+    /// Release `actor` `ready` under `drain.release`, fenced by `epoch`, the
+    /// epoch its abandoned activation was claimed under: an actor that
+    /// activation released or ended, or another node claimed, is left as it
+    /// is ([`DurableError::OwnershipLost`]). A draining node records it among
+    /// the drain's releases.
+    async fn hand_back(&self, actor: &ActorKey, epoch: Epoch) -> Result<(), DurableError> {
+        let mut tx = self.store.begin(actor, epoch).await?;
+        if self.drain.started() {
+            self.drain.release(self.store.as_ref(), tx).await?;
+        } else {
+            tx.give_up(Release::Ready);
+            self.store.commit(tx, CommitLabel::DRAIN_RELEASE).await?;
+        }
+        Ok(())
+    }
+
+    fn activate(
+        &self,
+        active: &mut JoinSet<Exit>,
+        claims: &mut HashMap<tokio::task::Id, (ActorKey, Epoch)>,
+        claimed: Claimed,
+    ) {
         let actor = claimed.actor.clone();
+        let claim = (claimed.actor.clone(), claimed.epoch);
         let owned = Owned {
             store: Arc::clone(&self.store),
             clock: Arc::clone(&self.clock),
@@ -896,10 +972,11 @@ impl Runner {
             hints: self.hints.clone(),
             actor,
         };
-        active.spawn(async move {
+        let task = active.spawn(async move {
             let _running = running;
-            activation.activate(owned).await;
+            activation.activate(owned).await
         });
+        claims.insert(task.id(), claim);
     }
 }
 
