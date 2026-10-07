@@ -155,7 +155,6 @@ fn restoring_twice_without_running_a_cell_is_a_fixed_point() {
 /// restart as the reference it is: the capture encodes the object, and a
 /// later cell reads the projection through it.
 #[test]
-#[ignore = "blocked: L7p (FIG-5197): a projected value held by a heap object fails the snapshot capture; repro persistence::a_projected_value_held_by_an_object_survives_a_restart"]
 fn a_projected_value_held_by_an_object_survives_a_restart() {
     let host = std::collections::BTreeMap::from([(
         "report".to_string(),
@@ -164,8 +163,8 @@ fn a_projected_value_held_by_an_object_survives_a_restart() {
     let mut session = Session::open_with_host(HarnessMode::Resident, &host);
     session.run_ok("const holder = { doc: report, n: 1 };");
     session.restart();
-    let outcome = session.run_ok("finish(holder.doc.title);");
-    assert_eq!(outcome.finish, Some(serde_json::json!("q3")));
+    let outcome = session.run_ok("finish(holder.doc.title === \"q3\" && holder.n === 1);");
+    assert_eq!(outcome.finish, Some(serde_json::json!(true)));
 }
 
 /// A cell that binds a process literal publishes the literal's definition

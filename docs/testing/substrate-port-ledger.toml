@@ -11626,7 +11626,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "every session observes what node observes"
-note = "blocked: L7p (FIG-5197): a projected value held inside a heap object fails snapshot capture (`heap object members must be scalars or heap references, not inline compounds`); repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_projected_value_held_by_an_object_survives_a_restart; the law is written and #[ignore]d"
+note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; the law is written and #[ignore]d; its session `process-literal-binding` binds a process literal (its projected-value session, red on L7p, passes since e7510888f0)"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/testing/cell_conformance/node_oracle/generated.rs"
