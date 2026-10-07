@@ -389,7 +389,7 @@ mod blake3_domain_tests {
     #[test]
     fn domain_usage_follows_source_declared_constants() {
         let source = r#"
-const ACTIVE_DOMAIN: &str = "lash-build-generation/v1";
+const ACTIVE_DOMAIN: &str = "lash-tool-call-id/v1";
 const MULTILINE_DOMAIN: &str =
     "lash-standard-compaction/v1";
 fn encode() {
@@ -400,7 +400,7 @@ fn encode() {
         assert_eq!(
             domain_literals(source),
             BTreeSet::from([
-                "lash-build-generation/v1".to_string(),
+                "lash-tool-call-id/v1".to_string(),
                 "lash-standard-compaction/v1".to_string()
             ])
         );
