@@ -167,6 +167,50 @@ fn a_projected_value_held_by_an_object_survives_a_restart() {
     assert_eq!(outcome.finish, Some(serde_json::json!(true)));
 }
 
+/// The host's report binding the projected-scalar laws read through.
+fn report_host() -> std::collections::BTreeMap<String, serde_json::Value> {
+    std::collections::BTreeMap::from([("report".to_string(), serde_json::json!({ "title": "q3" }))])
+}
+
+/// A member read of a projected scalar is the plain value it yields, so a
+/// cell finishes with that value rather than a projection of it (FIG-5197).
+#[test]
+fn a_member_read_of_a_projected_scalar_finishes_as_its_plain_value() {
+    for &mode in HarnessMode::ALL {
+        let mut session = Session::open_with_host(mode, &report_host());
+        let outcome = session.run_ok("finish(report.title);");
+        assert_eq!(outcome.finish, Some(serde_json::json!("q3")), "{mode:?}");
+    }
+}
+
+/// The same read inside an array or an object finishes as the plain value in
+/// its place, read straight off the binding or through an object holding it.
+#[test]
+fn a_projected_scalar_read_inside_an_array_or_object_finishes_plain() {
+    for &mode in HarnessMode::ALL {
+        let mut session = Session::open_with_host(mode, &report_host());
+        session.run_ok("const holder = { doc: report };");
+        let outcome =
+            session.run_ok("finish([holder.doc.title, report.title, { title: report.title }]);");
+        assert_eq!(
+            outcome.finish,
+            Some(serde_json::json!(["q3", "q3", { "title": "q3" }])),
+            "{mode:?}"
+        );
+    }
+}
+
+/// A projected scalar's member read held across a restart, in an object and
+/// through one, finishes plain in the cell after it.
+#[test]
+fn a_projected_scalar_read_finishes_plain_after_a_restart() {
+    let mut session = Session::open_with_host(HarnessMode::Resident, &report_host());
+    session.run_ok("const holder = { doc: report, title: report.title };");
+    session.restart();
+    let outcome = session.run_ok("finish([holder.title, holder.doc.title]);");
+    assert_eq!(outcome.finish, Some(serde_json::json!(["q3", "q3"])));
+}
+
 /// A cell that binds a process literal publishes the literal's definition
 /// through its claimed context, and goes on.
 #[test]

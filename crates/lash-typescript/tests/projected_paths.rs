@@ -135,10 +135,10 @@ async fn execute(source: &str) -> Result<ExecutionOutcome, RuntimeError> {
     execute_with_view(source, None).await
 }
 
-/// The value the cell finished with, with a projected wrapper stripped. A path
-/// read over a projected source keeps the wrapper by design
+/// The value the cell finished with, with a projected wrapper stripped: a
+/// compound member read stays a projection of its path
 /// (`ProjectedValue::propagate_field`), so these tests assert on the value
-/// behind it; `projected_path_reads_stay_projected` pins the wrapper itself.
+/// behind it.
 async fn finished(source: &str) -> Value {
     let outcome = execute(source)
         .await
@@ -235,35 +235,14 @@ async fn projected_records_assign_as_sources() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn projected_path_reads_stay_projected() {
-    // Reading through a projection does not lose "this came from a projected
-    // source": the wrapper the field read propagates is what the host is handed.
-    let outcome = execute(r#"finish(row.kind);"#)
-        .await
-        .expect("a projected field read should execute");
-    let ExecutionOutcome::Finished(Value::Projected(projected)) = outcome else {
-        panic!("a projected field read should finish with a projected value: {outcome:?}")
-    };
-    assert_eq!(projected.name(), "row.kind");
-    assert_eq!(
-        projected.materialize().expect("projection materializes"),
-        Value::String("tool".into())
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn custom_projection_field_reads_stay_lazy() {
     // Only *scalar* projections resolve through the dialect helpers; a custom
     // projection is a lazy host view, so the descriptor answers the field and the
     // view is never materialized to serve one property.
     let view = recording_view();
-    let value = finished_projection(r#"finish(view.kind);"#, &view).await;
-    // Asserted before materializing the handle below, which is itself a read.
+    let value = finished_with_view(r#"finish(view.kind);"#, &view).await;
     assert_eq!(asked(&view), vec!["field:kind".to_string()]);
-    assert_eq!(
-        value.materialize().expect("projection materializes"),
-        Value::String("tool".into())
-    );
+    assert_eq!(value, Value::String("tool".into()));
 }
 
 #[tokio::test(flavor = "current_thread")]

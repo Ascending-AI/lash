@@ -1127,3 +1127,74 @@ pub(super) fn bound_variables_prompt_degrades_large_live_globals() {
         assert!(s.contains("hidden items"), "{s}");
     });
 }
+
+/// A member read of a projected scalar reaches a tool as its plain value, even
+/// in the field whose policy carries projections across as handles; only the
+/// unread binding crosses as one (FIG-5197).
+#[test]
+pub(super) fn a_projected_scalar_read_reaches_a_tool_as_its_plain_value() {
+    block_on(async {
+        let definition = crate::continue_as_tool_definition(&crate::dialect::TypescriptDialect);
+        let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![definition]);
+        let invocation = lash_core::testing::exec_code_invocation(
+            "test-session",
+            "turn-7",
+            7,
+            2,
+            "exec-code-3",
+            "exec-code:3",
+        );
+        let handler = crate::testing::DurableHost::open(lash_core::AdmittedScope::turn(
+            lash_core::SessionId::from("test-session"),
+            lash_core::TurnId::from("turn-7"),
+        ))
+        .await;
+        let context =
+            lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
+                handler.ports(),
+                Arc::new(crate::control_tools::RlmControlToolsProvider {
+                    vocabulary: crate::dialect::Dialect::prompt_vocabulary(
+                        &crate::dialect::TypescriptDialect,
+                    ),
+                }),
+                catalog,
+                invocation,
+            );
+        let bindings = RlmProjectedBindings::new()
+            .bind_json("report", serde_json::json!({ "title": "q3" }))
+            .expect("bind report");
+        let response = execute_code_with_test_render(
+            &mut RlmExecutionState::new(),
+            context,
+            ExecRequest {
+                code: "await control.continue_as({ task: report.title, seed: { title: report.title, doc: report } });"
+                    .to_string(),
+            },
+            handler.artifacts(),
+            LashlangSurface::default(),
+            None,
+            bindings,
+            None,
+            lashlang::ExecutionBounds::unbounded(),
+            crate::plugin::RlmChannel::Cell,
+        )
+        .await;
+        assert_eq!(response.error, None);
+        let record = response
+            .calls
+            .into_iter()
+            .next()
+            .and_then(|call| call.host_record)
+            .expect("one continue_as host record");
+        assert_eq!(record.args["task"], serde_json::json!("q3"));
+        assert_eq!(
+            record.args["seed"],
+            serde_json::json!({
+                "title": "q3",
+                "doc": {
+                    PROJECTED_JSON_TAG: { "kind": "materialized", "value": { "title": "q3" } }
+                }
+            })
+        );
+    });
+}

@@ -1011,12 +1011,8 @@ async fn type_ref_with_undefined_name_is_undefined_variable() {
 }
 
 // ----------------------------------------------------------------------------
-// Projection propagation: `Value::Projected` carries through path expressions
-// (Field / Index) but is stripped by computation. This is the lashlang side
-// of the unified `seed:` channel for spawn_agent / continue_as: the host wire
-// format (`{"__projected__": <tagged seed entry>}`) only needs a wrapper to survive the
-// JSON boundary, but path-rooted entry-values must already be projected at
-// runtime so they serialize that way.
+// Projection propagation: a member read of a projection yields its scalar
+// member as the plain value (FIG-5197), and computation strips a projection.
 // ----------------------------------------------------------------------------
 
 fn projected_record_bindings(name: &str, record: serde_json::Value) -> ProjectedBindings {
@@ -1026,45 +1022,6 @@ fn projected_record_bindings(name: &str, record: serde_json::Value) -> Projected
         ProjectedValue::scalar(name.to_string(), crate::runtime::from_json(record)),
     );
     projected
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn nested_field_access_keeps_projection() {
-    let projected =
-        projected_record_bindings("cfg", serde_json::json!({ "options": { "timeout": 30 } }));
-    let (value, _) = exec_with_projected(
-        // finish cfg.options.timeout
-        builders::program(vec![builders::finish(builders::field(
-            builders::field(builders::var("cfg"), "options"),
-            "timeout",
-        ))]),
-        &projected,
-    )
-    .await
-    .expect("nested projected field read");
-    assert!(
-        matches!(value, Value::Projected(_)),
-        "expected nested field to stay projected, got {value:?}"
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn index_on_projected_list_returns_projected() {
-    let projected =
-        projected_record_bindings("items", serde_json::json!(["alpha", "beta", "gamma"]));
-    let (value, _) = exec_with_projected(
-        builders::program(vec![builders::finish(builders::index(
-            builders::var("items"),
-            builders::num(1.0),
-        ))]),
-        &projected,
-    )
-    .await
-    .expect("projected index read");
-    assert!(
-        matches!(value, Value::Projected(_)),
-        "expected `items[1]` to stay projected, got {value:?}"
-    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1083,44 +1040,6 @@ async fn computation_strips_projection() {
     assert!(
         !matches!(value, Value::Projected(_)),
         "computation should strip projection, got {value:?}"
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn record_literal_preserves_per_entry_projection() {
-    let projected = projected_record_bindings("input", serde_json::json!({ "prompt": "hello" }));
-    let (value, _) = exec_with_projected(
-        // g = 42
-        // finish { proj: input.prompt, glob: g, lit: 99 }
-        builders::program(vec![
-            builders::assign("g", builders::num(42.0)),
-            builders::finish(builders::record(vec![
-                ("proj", builders::field(builders::var("input"), "prompt")),
-                ("glob", builders::var("g")),
-                ("lit", builders::num(99.0)),
-            ])),
-        ]),
-        &projected,
-    )
-    .await
-    .expect("record literal");
-    let Value::Record(record) = value else {
-        panic!("expected record");
-    };
-    assert!(
-        matches!(record.get("proj"), Some(Value::Projected(_))),
-        "expected `proj` entry to stay projected, got {:?}",
-        record.get("proj")
-    );
-    assert!(
-        !matches!(record.get("glob"), Some(Value::Projected(_))),
-        "global `glob` should not be projected, got {:?}",
-        record.get("glob")
-    );
-    assert!(
-        !matches!(record.get("lit"), Some(Value::Projected(_))),
-        "literal `lit` should not be projected, got {:?}",
-        record.get("lit")
     );
 }
 

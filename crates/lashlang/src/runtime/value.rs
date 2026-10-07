@@ -1033,37 +1033,35 @@ impl ProjectedValue {
         }
     }
 
-    /// `parent.field`).
-    /// Pass-through if the inner value is already a `Value::Projected` so we never
-    /// double-wrap.
-    /// Used by field/index access on projected sources to keep "this came from a projected
-    /// source" alive across path expressions; non-path operations (binary ops, builtins,
-    /// formatters) auto-strip via their existing materialise-and-evaluate code paths and so
-    /// naturally lose the wrapper.
+    /// The value a member read `parent.field` of a projection yields.
+    ///
+    /// A member read that yields a scalar is that plain value: the read is
+    /// done, so nothing is left to project, and every way out of the VM
+    /// (`finish`, a tool argument, a snapshot) carries the value itself
+    /// (FIG-5197). A compound member stays a projection named by its path, a
+    /// narrower view the next read goes through without importing it into the
+    /// heap. A member that is itself a projection passes through, so nothing
+    /// double-wraps.
     pub fn propagate_field(parent_name: &str, field: &str, inner: Value) -> Value {
-        match inner {
-            Value::Projected(_) => inner,
-            other => Value::Projected(ProjectedValue::scalar(
-                Arc::<str>::from(format!("{parent_name}.{field}")),
-                other,
-            )),
-        }
+        Self::member(inner, || format!("{parent_name}.{field}"))
     }
 
+    /// The value a member read `parent[index]` of a projection yields, by the
+    /// rule of [`Self::propagate_field`].
     pub fn propagate_index(parent_name: &str, index: &Value, inner: Value) -> Value {
+        Self::member(inner, || match index {
+            Value::String(s) => format!("{parent_name}[{s:?}]"),
+            Value::Number(n) => format!("{parent_name}[{n}]"),
+            other => format!("{parent_name}[{other}]"),
+        })
+    }
+
+    fn member(inner: Value, path: impl FnOnce() -> String) -> Value {
         match inner {
-            Value::Projected(_) => inner,
-            other => {
-                let suffix = match index {
-                    Value::String(s) => format!("[{s:?}]"),
-                    Value::Number(n) => format!("[{n}]"),
-                    other => format!("[{other}]"),
-                };
-                Value::Projected(ProjectedValue::scalar(
-                    Arc::<str>::from(format!("{parent_name}{suffix}")),
-                    other,
-                ))
+            compound @ (Value::Tuple(_) | Value::List(_) | Value::Record(_)) => {
+                Value::Projected(ProjectedValue::scalar(Arc::<str>::from(path()), compound))
             }
+            other => other,
         }
     }
 

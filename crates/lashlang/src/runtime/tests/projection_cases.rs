@@ -526,12 +526,9 @@ async fn projected_list_len_and_index_are_lazy() {
     assert_eq!(record["n"], Value::Number(2.0));
     assert_eq!(record["first"], Value::String("first".into()));
     // An index past the end reads `undefined`, the one ECMA answer now that
-    // TypeScript is the only RLM language (ADR 0096); the projected wrapper is
-    // kept so the path still says where the read came from.
-    assert_eq!(
-        record["missing"],
-        Value::Projected(ProjectedValue::scalar("history[9]", Value::Undefined))
-    );
+    // TypeScript is the only RLM language (ADR 0096), and a member read that
+    // yields a scalar is that plain value (FIG-5197).
+    assert_eq!(record["missing"], Value::Undefined);
     assert_eq!(list.get_count.load(Ordering::SeqCst), 1);
     assert_eq!(list.materialize_count.load(Ordering::SeqCst), 0);
 }

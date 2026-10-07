@@ -48,10 +48,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// one still asks its descriptor, so nothing is dragged across to serve one
     /// property.
     ///
-    /// The result keeps the projected wrapper either way, so a path expression
-    /// still carries "this came from a projected source" — except a built-in
-    /// method, which is the heap's own function object and no data of the
-    /// projection's.
+    /// Either way the result is what `ProjectedValue::propagate_field` makes of
+    /// it: a scalar member is its plain value, a compound member a projection
+    /// of its path. A built-in method is the heap's own function object and no
+    /// data of the projection's, so it is returned as it is.
     pub(super) fn read_projected_field(
         &mut self,
         projected: &ProjectedValue,
