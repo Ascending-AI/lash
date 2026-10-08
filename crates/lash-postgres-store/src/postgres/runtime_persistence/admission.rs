@@ -8,8 +8,7 @@
 //! row still being open.
 
 use super::*;
-use lash_core_execution::store::queued_work::TurnWorkPrefix;
-use lash_core_execution::store::{CheckpointAdmission, CheckpointAdmissionRequest, TurnLaneStop};
+use lash_core_execution::store::{CheckpointAdmission, CheckpointAdmissionRequest};
 
 type PgTx<'c> = sqlx::Transaction<'c, sqlx::Postgres>;
 
@@ -53,7 +52,6 @@ pub(crate) async fn admit_at_checkpoint_postgres(
         tx.commit().await.map_err(store_sqlx_error)?;
         return Ok(recorded);
     }
-    let now = postgres_transaction_epoch_ms(&mut tx).await?;
     let inputs = if request.max_inputs == 0 {
         None
     } else {
@@ -69,24 +67,8 @@ pub(crate) async fn admit_at_checkpoint_postgres(
     if let Some(inputs) = inputs.as_ref() {
         bind_turn_inputs_tx(&mut tx, &request.run, &request.step, inputs).await?;
     }
-    let batches = compose_turn_lane_batches_tx(
-        &mut tx,
-        now,
-        session_id,
-        AdmissionBoundary::ActiveTurnCheckpoint,
-        Some(&request.turn_id),
-        &request.policy,
-    )
-    .await?;
-    bind_batches_tx(&mut tx, session_id, &request.run, &request.step, &batches).await?;
     tx.commit().await.map_err(store_sqlx_error)?;
-    Ok(CheckpointAdmission {
-        inputs,
-        queued: (!batches.is_empty()).then(|| lash_core_execution::runtime::AdmittedQueuedWork {
-            session_id: session_id.clone(),
-            batches,
-        }),
-    })
+    Ok(CheckpointAdmission { inputs })
 }
 
 /// The leading open session-command run the session applies next (ADR 0101
@@ -137,7 +119,6 @@ async fn checkpoint_work_pending_postgres(
         .bind(request.session_id.as_str())
         .bind(request.turn_id.as_str())
         .bind(i64::try_from(request.max_inputs).unwrap_or(i64::MAX))
-        .bind(i64::try_from(request.policy.max_rows).unwrap_or(i64::MAX))
         .bind(request.run.as_str())
         .bind(request.step.as_str())
         .fetch_one(&mut *connection)
@@ -166,27 +147,12 @@ async fn read_step_admission_tx(
         .into_iter()
         .map(|row| pending_turn_input_from_row(pending_turn_input_row(row)?))
         .collect::<Result<Vec<_>, _>>()?;
-    let batch_rows = sqlx::query(sql.queued_batches.select_admitted_by_step.sql())
-        .bind(session_id.as_str())
-        .bind(run.as_str())
-        .bind(step)
-        .fetch_all(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-    let mut batches = Vec::with_capacity(batch_rows.len());
-    for row in batch_rows {
-        batches.push(queued_work_batch_from_row(queued_batch_row(row)?)?);
-    }
     Ok(CheckpointAdmission {
         inputs: (!inputs.is_empty()).then(|| lash_core_execution::AdmittedTurnInputs {
             session_id: session_id.clone(),
             mode,
             inputs,
             applications: Vec::new(),
-        }),
-        queued: (!batches.is_empty()).then(|| lash_core_execution::runtime::AdmittedQueuedWork {
-            session_id: session_id.clone(),
-            batches,
         }),
     })
 }
@@ -262,80 +228,6 @@ async fn bind_turn_inputs_tx(
     Ok(())
 }
 
-/// Bind every batch of `batches` to `run` under `step`.
-async fn bind_batches_tx(
-    tx: &mut PgTx<'_>,
-    session_id: &SessionId,
-    run: &TurnId,
-    step: &str,
-    batches: &[QueuedWorkBatch],
-) -> Result<(), StoreError> {
-    let statement = crate::turn_ingress::turn_ingress_sql()
-        .queued_batches
-        .admit
-        .sql();
-    for batch in batches {
-        let bound = sqlx::query(statement)
-            .bind(session_id.as_str())
-            .bind(batch.batch_id.as_str())
-            .bind(run.as_str())
-            .bind(step)
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?
-            .rows_affected();
-        lash_core_execution::store_backend_support::require_fenced_write_applied(
-            lash_core_execution::store_backend_support::FencedWrite::IngressAdmission,
-            crate::POSTGRES_BACKEND,
-            batch.batch_id.as_str(),
-            bound,
-            || StoreError::Contended,
-        )?;
-    }
-    Ok(())
-}
-
-/// The open queued turn work one composition at `boundary` takes, by the
-/// shared prefix rule: stopped before the earliest open next-turn input
-/// while `running_turn` runs (`None` at idle) (ADR 0101 §5) and bounded by
-/// `policy`.
-async fn compose_turn_lane_batches_tx(
-    tx: &mut PgTx<'_>,
-    now: u64,
-    session_id: &SessionId,
-    boundary: AdmissionBoundary,
-    running_turn: Option<&TurnId>,
-    policy: &TurnLaneAdmissionPolicy,
-) -> Result<Vec<QueuedWorkBatch>, StoreError> {
-    if policy.max_rows == 0 {
-        return Ok(Vec::new());
-    }
-    // The boundary is a closed two-variant choice, so it selects a named
-    // statement rather than splicing a predicate: an optional boundary filter
-    // cannot seek the `(session_id, enqueue_seq)` primary key cleanly. An
-    // idle run's execution is the turn lane's, which a command enqueued since the
-    // session chose it never holds back (ADR 0101 §4).
-    let sql = &crate::turn_ingress::turn_ingress_sql().queued_batches_postgres;
-    let statement = match boundary {
-        AdmissionBoundary::Idle => sql.admission_candidates_turn_lane.sql(),
-        AdmissionBoundary::ActiveTurnCheckpoint => sql.admission_candidates_boundary.sql(),
-    };
-    let (mut batches, candidates) =
-        scan_queued_work_candidates_tx(tx, session_id, statement, policy.max_rows).await?;
-    // Read after the scan: an input committed before a scanned row took its
-    // sequence first, so this read sees it.
-    let admitted = TurnLaneStop::before(
-        earliest_next_turn_candidate_seq_tx(tx, session_id, running_turn).await?,
-    )
-    .queued_prefix(&candidates);
-    let selected = match select_turn_work_prefix(&candidates[..admitted], boundary, policy, now)? {
-        TurnWorkPrefix::Selected { len } => len,
-        TurnWorkPrefix::Refused { .. } => 0,
-    };
-    batches.truncate(selected);
-    Ok(batches)
-}
-
 /// One locked candidate scan of the open queued work by `statement`, one of
 /// the named admission-candidate scans: the batches it hydrates to and the
 /// candidates the shared prefix rule decides over.
@@ -357,27 +249,4 @@ async fn scan_queued_work_candidates_tx(
     }
     let candidates = batches.iter().map(turn_lane_candidate).collect();
     Ok((batches, candidates))
-}
-
-/// The `enqueue_seq` of session `session_id`'s earliest open next-turn
-/// input while `running_turn` runs (`None` at idle): the turn-lane head of
-/// the input table.
-async fn earliest_next_turn_candidate_seq_tx(
-    tx: &mut PgTx<'_>,
-    session_id: &SessionId,
-    running_turn: Option<&TurnId>,
-) -> Result<Option<u64>, StoreError> {
-    let seq: Option<i64> = sqlx::query_scalar(
-        crate::turn_ingress::turn_ingress_sql()
-            .pending_inputs
-            .earliest_next_turn_candidate_seq
-            .sql(),
-    )
-    .bind(session_id.as_str())
-    .bind(running_turn.map(TurnId::as_str))
-    .fetch_one(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
-    seq.map(|seq| u64_from_sql("turn_lane", "enqueue_seq", seq))
-        .transpose()
 }

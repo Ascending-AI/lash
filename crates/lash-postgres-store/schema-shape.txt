@@ -289,7 +289,6 @@ table lash_processes
   column status text not-null
   column unsequenced_saves integer not-null default
   column updated_at_ms bigint not-null
-  column wake_session_id text nullable
   column written_epoch bigint nullable
   unique (start_key) where start_key is not null
   primary-key (process_id)
@@ -329,7 +328,6 @@ table lash_queued_work_batches
   column terminal_at_ms bigint nullable
   column terminal_cause text nullable
   column trace_cause_json text nullable
-  column work_kind text not-null
   unique (batch_id)
   unique (session_id, source_key)
   primary-key (session_id, enqueue_seq)
@@ -405,13 +403,9 @@ table lash_session_meta
   column caused_by_effect_id text nullable
   column caused_by_kind text nullable
   column caused_by_node_id text nullable
-  column caused_by_occurrence_id text nullable
   column caused_by_process_event_sequence text nullable
   column caused_by_process_id text nullable
   column caused_by_session_id text nullable
-  column caused_by_subscription_id text nullable
-  column caused_by_subscription_incarnation text nullable
-  column caused_by_subscription_revision text nullable
   column caused_by_turn_id text nullable
   column closing_intent bigint nullable
   column created_at_ms bigint not-null default
@@ -489,71 +483,6 @@ table lash_tool_intent_submissions
   column submission_json text not-null
   column tool_call_id text not-null
   primary-key (replay_key)
-table lash_trigger_deliveries
-  column created_at_ms bigint not-null
-  column occurrence_id text not-null
-  column occurrence_outcome_kind text not-null default
-  column process_id text nullable
-  column refusal_json text nullable
-  column status text not-null
-  column subscription_id text not-null
-  column subscription_incarnation text not-null
-  column subscription_revision bigint not-null
-  column subscription_snapshot_json text not-null
-  primary-key (occurrence_id, subscription_id)
-  foreign-key (occurrence_id, occurrence_outcome_kind) references lash_trigger_occurrences (occurrence_id, outcome_kind) on delete cascade
-table lash_trigger_mutation_receipts
-  column created_at_ms bigint not-null
-  column operation_id text not-null
-  column owner_id text not-null
-  column owner_kind text not-null
-  column request_fingerprint text not-null
-  column result_json text not-null
-  primary-key (operation_id)
-table lash_trigger_occurrence_tombstones
-  column occurrence_id text not-null
-  column reclaimed_at_ms bigint not-null
-  primary-key (occurrence_id)
-table lash_trigger_occurrences
-  column idempotency_key text not-null
-  column occurred_at_ms bigint not-null
-  column occurrence_id text not-null
-  column outcome_kind text not-null
-  column reclaimable_at_ms bigint nullable
-  column record_json text not-null
-  column source_key text not-null
-  column source_type text not-null
-  unique (idempotency_key)
-  unique (occurrence_id, outcome_kind)
-  primary-key (occurrence_id)
-table lash_trigger_subscription_change_clock
-  column current_seq bigint not-null
-  column pruned_through bigint not-null
-  column singleton boolean not-null
-  primary-key (singleton)
-table lash_trigger_subscription_changes
-  column change_seq bigint not-null
-  column deleted_at_ms bigint nullable
-  column record_json text not-null
-  column subscription_id text not-null
-  unique (change_seq)
-  primary-key (subscription_id)
-table lash_trigger_subscriptions
-  column created_at_ms bigint not-null
-  column definition_fingerprint text not-null
-  column deleted_at_ms bigint nullable
-  column incarnation text not-null
-  column lifecycle text not-null
-  column owner_scope text not-null
-  column record_json text not-null
-  column revision bigint not-null
-  column source_key text not-null
-  column source_type text not-null
-  column subscription_id text not-null
-  column subscription_key text not-null
-  column updated_at_ms bigint not-null
-  unique (owner_scope, subscription_key)
-  primary-key (subscription_id)
 table lash_turn_cancel_requests
   column disposition text not-null
   column intent_revision bigint not-null

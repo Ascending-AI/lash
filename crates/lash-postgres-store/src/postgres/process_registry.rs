@@ -96,8 +96,6 @@ impl lash_core_execution::ProcessQuery for PostgresProcessRegistry {
             .bind(filter.identity_kind.as_deref())
             .bind(filter.identity_label.as_deref())
             .bind(definition)
-            .bind(filter.caused_by_occurrence_id.as_deref())
-            .bind(filter.caused_by_subscription_id.as_deref())
             .bind(filter.created_at_start_ms.map(clamp_epoch_ms))
             .bind(filter.created_at_end_ms.map(clamp_epoch_ms))
             .bind(filter.retired_since_ms.map(clamp_epoch_ms));
@@ -259,13 +257,9 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
                     record,
                 ))
             }
-            AppliedRegistration::Retained { record, wake } => {
+            AppliedRegistration::Retained { record } => {
                 tx.commit().await.map_err(plugin_sqlx_error)?;
-                lash_core_execution::runtime::check_retained_start(
-                    &unprepared,
-                    &record,
-                    wake.as_ref(),
-                )?;
+                lash_core_execution::runtime::check_retained_start(&unprepared, &record)?;
                 Ok(lash_core_execution::ProcessRegistrationReceipt::existing(
                     record,
                 ))
@@ -274,13 +268,9 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
             // it, so the loser adds no event and no `change_seq` of its own
             // (ADR 0046), and the caller gets the sequential answer — the
             // winner's process.
-            AppliedRegistration::LostRace { winner, wake } => {
+            AppliedRegistration::LostRace { winner } => {
                 tx.rollback().await.map_err(plugin_sqlx_error)?;
-                lash_core_execution::runtime::check_retained_start(
-                    &unprepared,
-                    &winner,
-                    wake.as_ref(),
-                )?;
+                lash_core_execution::runtime::check_retained_start(&unprepared, &winner)?;
                 Ok(lash_core_execution::ProcessRegistrationReceipt::existing(
                     winner,
                 ))
@@ -500,56 +490,6 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
             .collect()
     }
 
-    async fn wake_target(&self, process_id: &ProcessId) -> Result<Option<SessionId>, PluginError> {
-        if self.get_process(process_id).await?.is_none() {
-            return Err(registry_transitions::unknown_process(process_id));
-        }
-        sqlx::query_scalar::<_, Option<String>>(process_sql().process.select_wake_session_id.sql())
-            .bind(process_id.as_str())
-            .fetch_one(&self.pool)
-            .await
-            .map_err(plugin_sqlx_error)?
-            .map(SessionId::parse)
-            .transpose()
-            .map_err(PluginError::from)
-    }
-
-    async fn retarget_subscription(
-        &self,
-        process_id: &ProcessId,
-        target: Option<&str>,
-    ) -> Result<(), PluginError> {
-        let mut tx = begin_guarded(&self.pool, &self.fence)
-            .await
-            .map_err(plugin_store_error)?;
-        let mut record = require_process_tx(&mut tx, process_id).await?;
-        let previous: Option<String> =
-            sqlx::query_scalar(process_sql().process.select_wake_session_id.sql())
-                .bind(process_id.as_str())
-                .fetch_one(&mut **tx)
-                .await
-                .map_err(plugin_sqlx_error)?;
-        if previous.as_deref() == target {
-            tx.commit().await.map_err(plugin_sqlx_error)?;
-            return Ok(());
-        }
-        append_process_event_tx(
-            &mut tx,
-            &mut record,
-            ProcessEventAppendRequest::subscription_retargeted(process_id, target),
-            self.clock.timestamp_ms(),
-            self.fence.fleet(),
-        )
-        .await?;
-        sqlx::query(process_sql().process.set_wake_session_id.sql())
-            .bind(process_id.as_str())
-            .bind(target)
-            .execute(&mut **tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
-        tx.commit().await.map_err(plugin_sqlx_error)
-    }
-
     async fn delete_session_process_state(
         &self,
         session_id: &SessionId,
@@ -565,18 +505,10 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
             .await
             .map_err(plugin_sqlx_error)?
             .rows_affected() as usize;
-        let cleared_subscription_count =
-            sqlx::query(process_sql().process.clear_wake_session_for_session.sql())
-                .bind(session_id.as_str())
-                .execute(&mut **tx)
-                .await
-                .map_err(plugin_sqlx_error)?
-                .rows_affected() as usize;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(lash_core_execution::ProcessSessionDeleteReport {
             session_id: session_id.clone(),
             removed_observer_count,
-            cleared_subscription_count,
         })
     }
 }
@@ -718,7 +650,12 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
                                 "sequence",
                                 row.get(0),
                             )?,
-                            event_type: row.get(1),
+                            kind: lash_core_execution::ProcessEventKind::parse(
+                                &row.get::<String, _>(1),
+                            )
+                            .ok_or_else(|| {
+                                PluginError::Session("unknown process lifecycle event kind".into())
+                            })?,
                         })
                     })
                     .collect::<Result<Vec<_>, PluginError>>()?;
@@ -727,26 +664,6 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
         };
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(lash_core_execution::ProcessEventReadOutcome::Retained(page))
-    }
-
-    async fn count_events_through(
-        &self,
-        process_id: &ProcessId,
-        event_type: &str,
-        up_to_sequence: u64,
-    ) -> Result<u64, PluginError> {
-        if self.get_process(process_id).await?.is_none() {
-            return Err(registry_transitions::unknown_process(process_id));
-        }
-        let row = sqlx::query(process_sql().event.count_by_type_through_sequence.sql())
-            .bind(process_id.as_str())
-            .bind(event_type)
-            .bind(clamp_sequence_bound(up_to_sequence))
-            .fetch_one(&self.pool)
-            .await
-            .map_err(plugin_sqlx_error)?;
-        let count: i64 = row.get(0);
-        Ok(count as u64)
     }
 
     async fn recent_events(
@@ -823,19 +740,14 @@ impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
         &self,
         cutoff_epoch_ms: u64,
         watermark: lash_core_execution::ProjectionWatermark,
-        trigger_store: Option<&dyn lash_core_execution::TriggerStore>,
     ) -> Result<usize, PluginError> {
+        let cutoff_epoch_ms = clamp_epoch_ms(cutoff_epoch_ms);
         let max_change_seq = match watermark {
             lash_core_execution::ProjectionWatermark::UpTo(cursor) => {
                 Some(cursor.store_sequence() as i64)
             }
             lash_core_execution::ProjectionWatermark::NoProjector => None,
         };
-        let outstanding_trigger_delivery_process_ids = match trigger_store {
-            Some(trigger_store) => trigger_store.list_delivery_process_ids().await?,
-            None => Vec::new(),
-        };
-        let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
         let mut tx = begin_guarded(&self.pool, &self.fence)
             .await
             .map_err(plugin_store_error)?;
@@ -853,24 +765,12 @@ impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
         )
         .bind(cutoff_epoch_ms)
         .bind(max_change_seq)
-        .bind(
-            outstanding_trigger_delivery_process_ids
-                .iter()
-                .map(ProcessId::as_str)
-                .collect::<Vec<_>>(),
-        )
         .fetch_one(&mut **tx)
         .await
         .map_err(plugin_sqlx_error)?;
         let deleted = sqlx::query(process_sql().tombstone_postgres.delete_compactable.sql())
             .bind(cutoff_epoch_ms)
             .bind(max_change_seq)
-            .bind(
-                outstanding_trigger_delivery_process_ids
-                    .iter()
-                    .map(ProcessId::as_str)
-                    .collect::<Vec<_>>(),
-            )
             .execute(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?

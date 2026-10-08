@@ -86,7 +86,7 @@ async fn scan_started_processes(
     pool: &PgPool,
     scan: &DurableScan,
 ) -> Result<DurableScanPage, StoreError> {
-    let rows = sqlx::query_as::<_, (String, String, Option<String>, String)>(
+    let rows = sqlx::query_as::<_, (String, String, String)>(
         crate::process_sql::process_sql()
             .process_postgres
             .list_live_for_preflight
@@ -103,17 +103,15 @@ async fn scan_started_processes(
     let returned = rows.len();
     let items: Vec<DurableItem> = rows
         .into_iter()
-        .map(
-            |(process_id, status, wake_session_id, record_json)| DurableItem {
-                surface: DurableSurface::StartedProcess,
-                process_id: ProcessId::parse(&process_id).ok(),
-                cursor: process_id,
-                session_id: wake_session_id.and_then(|id| SessionId::parse(id).ok()),
-                status: Some(status),
-                owner_record: Some(record_json.clone()),
-                payload: DurablePayload::Json(record_json),
-            },
-        )
+        .map(|(process_id, status, record_json)| DurableItem {
+            surface: DurableSurface::StartedProcess,
+            process_id: ProcessId::parse(&process_id).ok(),
+            cursor: process_id,
+            session_id: None,
+            status: Some(status),
+            owner_record: Some(record_json.clone()),
+            payload: DurablePayload::Json(record_json),
+        })
         .collect();
     let next = page_cursor(scan, items.last().map(|item| item.cursor.clone()), returned);
     Ok(scanned(items, next))

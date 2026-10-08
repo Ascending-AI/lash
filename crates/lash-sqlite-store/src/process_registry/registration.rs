@@ -84,8 +84,7 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
 
 impl SqliteProcessRegistry {
     /// Apply one prepared registration on `tx`, inside the caller's
-    /// transaction: the registrar's own, or a trigger start's, which binds
-    /// its delivery in the same commit (ADR 0132 §12). The row, its
+    /// transaction (ADR 0132 §12). The row, its
     /// observers and its actor, ready, are written together.
     pub(crate) fn apply_registration_conn(
         tx: &rusqlite::Connection,
@@ -100,12 +99,11 @@ impl SqliteProcessRegistry {
         let mut observers = observers;
         observers.sort();
         observers.dedup();
-        let wake_session_id = registration.wake_session_id.clone();
         let consumer_hold = registration.consumer_hold.clone();
         // While the process minted for a key is retained, a
         // start under the same key returns that process untouched
         // (ADR 0107); a host's key must also present its start,
-        // wake target included.
+        // with equal content.
         if let Some(start_key) = registration.start_key.as_ref()
             && let Some(existing) = Self::load_process_by_start_key_conn(tx, start_key)?
         {
@@ -117,11 +115,7 @@ impl SqliteProcessRegistry {
                     .into(),
                 );
             }
-            lash_core_execution::runtime::check_retained_start(
-                &registration,
-                &existing,
-                Self::wake_session_id_conn(tx, &existing.id)?.as_ref(),
-            )?;
+            lash_core_execution::runtime::check_retained_start(&registration, &existing)?;
             return Ok(lash_core_execution::ProcessRegistrationReceipt::existing(
                 existing,
             ));
@@ -185,7 +179,6 @@ impl SqliteProcessRegistry {
                     .as_ref()
                     .map(lash_core_execution::StartKey::as_str),
                 originator_id.as_str(),
-                wake_session_id.as_deref(),
                 record.identity.kind.as_str(),
                 record.identity.label.as_deref(),
                 record.created_at_ms as i64,

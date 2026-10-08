@@ -77,10 +77,10 @@ async fn open_ingress_reads_seek_state_indexes_with_settled_history() {
     .expect("seed checkpoint-accepted input");
     sqlx::query(
         "INSERT INTO lash_queued_work_batches
-            (enqueue_seq, batch_id, session_id, delivery_policy, work_kind,
+            (enqueue_seq, batch_id, session_id, delivery_policy,
              authority_json, submission_digest, enqueued_at_ms, payload_json, admitted_run, admitted_by)
          SELECT n, 'admitted-' || n, 'history', 'earliest_safe_boundary',
-                'turn', '{}', 'digest', 0, jsonb_build_object('type', 'process_wake')::text, 'root', 'admit'
+                '{}', 'digest', 0, jsonb_build_object('type', 'session_command')::text, 'root', 'admit'
          FROM generate_series(1, 10000) AS n",
     )
     .execute(&mut *connection)
@@ -88,9 +88,9 @@ async fn open_ingress_reads_seek_state_indexes_with_settled_history() {
     .expect("seed admitted queued work");
     sqlx::query(
         "INSERT INTO lash_queued_work_batches
-            (enqueue_seq, batch_id, session_id, delivery_policy, work_kind,
+            (enqueue_seq, batch_id, session_id, delivery_policy,
              authority_json, submission_digest, enqueued_at_ms, payload_json)
-         VALUES (10001, 'open', 'history', 'earliest_safe_boundary', 'turn', '{}', 'digest', 0, jsonb_build_object('type', 'process_wake')::text)",
+         VALUES (10001, 'open', 'history', 'earliest_safe_boundary', '{}', 'digest', 0, jsonb_build_object('type', 'session_command')::text)",
     )
     .execute(&mut *connection)
     .await
@@ -195,14 +195,6 @@ async fn open_ingress_reads_seek_state_indexes_with_settled_history() {
         ),
         (
             &sql.queued_batches_postgres.admission_candidates_idle,
-            vec![PlanParam::Text("history"), PlanParam::Number(16)],
-        ),
-        (
-            &sql.queued_batches_postgres.admission_candidates_turn_lane,
-            vec![PlanParam::Text("history"), PlanParam::Number(16)],
-        ),
-        (
-            &sql.queued_batches_postgres.admission_candidates_boundary,
             vec![PlanParam::Text("history"), PlanParam::Number(16)],
         ),
     ];

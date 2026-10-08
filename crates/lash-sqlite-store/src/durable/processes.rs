@@ -12,7 +12,7 @@
 use lash_core_execution::runtime::actor::process::{scope_id, scope_index, subtree_roots};
 use lash_durable::domain::{
     CANCEL_MAIL, CancelAnswer, CancelRequest, DomainRefusal, ProcessActorRow, ProcessStartRows,
-    ProcessWrite, SIGNAL_MAIL, ScopeKey,
+    ProcessWrite, ScopeKey,
 };
 use lash_durable::{
     ActorKey, DurableError, DurableInstant, Epoch, MailRefusal, StoreFailure, StoreFailureKind,
@@ -143,29 +143,6 @@ pub(crate) fn cancel_mail_within(
     Ok(Ok(woken))
 }
 
-/// Append `signal` to its process actor's mailbox and wake it, inside the
-/// registry transaction that admits it: what a new signal append writes.
-pub(crate) fn signal_mail_within(
-    tx: &Connection,
-    process: &ProcessId,
-    signal: &lash_core_execution::ProcessSignal,
-    now: DurableInstant,
-) -> Result<(), lash_core_execution::PluginError> {
-    let failure = |message: String| lash_core_execution::PluginError::Session(message);
-    let actor = ActorKey::process(process.as_str()).map_err(|error| failure(error.to_string()))?;
-    let body = serde_json::to_string(signal).map_err(|error| failure(error.to_string()))?;
-    let (_, seq) = wake_within(tx, &actor, false, now)
-        .map_err(|error| failure(error.to_string()))?
-        .map_err(|error| failure(error.to_string()))?;
-    cached_execute(
-        tx,
-        SQL.mail.append.sql(),
-        rusqlite::params![actor.as_str(), seq.0, SIGNAL_MAIL, body, now.0],
-    )
-    .map_err(|error| failure(error.to_string()))?;
-    Ok(())
-}
-
 /// Register a store-local start on the commit's connection: its row, its
 /// observers and its actor, ready, as the registrar applies them. A start
 /// the registrar refuses, or whose key another process holds, refuses the
@@ -216,51 +193,9 @@ fn register_within(
     }
 }
 
-/// Send a store-local signal on the commit's connection: its event,
-/// exactly once under its identity, with its mail and its target's wake. A
-/// target that is unknown or already terminal takes nothing.
-fn signal_within(
-    tx: &Connection,
-    commit: &Committing<'_>,
-    now_ms: u64,
-    process: &ProcessId,
-    signal_json: &str,
-) -> Result<(), DurableError> {
-    let Ok(signal) = serde_json::from_str::<lash_core_execution::ProcessSignal>(signal_json) else {
-        return Err(super::corrupt("process signal", signal_json));
-    };
-    let Some(mut record) = SqliteProcessRegistry::load_process_conn(tx, process)
-        .map_err(|error| registry_failure(&error))?
-    else {
-        return Ok(());
-    };
-    if record.is_terminal() {
-        return Ok(());
-    }
-    SqliteProcessRegistry::append_event_conn(
-        tx,
-        &mut record,
-        signal.append_request(),
-        now_ms,
-        commit.fleet,
-    )
-    .map(drop)
-    .map_err(|error| registry_failure(&error))
-}
-
 pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWrite) -> Answer<()> {
     match write {
         ProcessWrite::Register(rows) => Ok(register_within(tx, commit, rows)),
-        ProcessWrite::Signal {
-            process,
-            signal_json,
-        } => Ok(signal_within(
-            tx,
-            commit,
-            millis(commit.now)?,
-            process,
-            signal_json,
-        )),
         ProcessWrite::Advance {
             process,
             expected_rev,
@@ -301,22 +236,23 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWri
             )?;
             Ok(Ok(()))
         }
-        ProcessWrite::Emit {
+        ProcessWrite::AppendEvent {
             process,
             event_type,
             payload_json,
             replay_key,
-            wake_suppressed,
         } => {
             let Ok(payload) = serde_json::from_str(payload_json) else {
                 return Ok(Err(super::corrupt("process event payload", payload_json)));
             };
-            let mut request =
-                lash_core_execution::ProcessEventAppendRequest::new(event_type.as_str(), payload)
-                    .with_replay_key(replay_key.as_str());
-            if *wake_suppressed {
-                request = request.without_wake();
-            }
+            let request = match lash_core_execution::ProcessEventAppendRequest::from_stored(
+                event_type.as_str(),
+                payload,
+                replay_key.as_str(),
+            ) {
+                Ok(request) => request,
+                Err(error) => return Ok(Err(registry_failure(&error))),
+            };
             Ok(SqliteProcessRegistry::record_event_conn(
                 tx,
                 process,

@@ -35,7 +35,7 @@ crate::statements! {
              ORDER BY enqueue_seq";
 
         /// Session `?1`'s open, unbound queued work batches, in ingress order.
-        open_batches = "SELECT batch_id, enqueue_seq, work_kind, delivery_policy, payload_json
+        open_batches = "SELECT batch_id, enqueue_seq, delivery_policy, payload_json
              FROM queued_work_batches
              WHERE session_id = ?1 AND admitted_run IS NULL AND terminal_cause IS NULL
              ORDER BY enqueue_seq";

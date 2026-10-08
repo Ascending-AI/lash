@@ -23,7 +23,6 @@ pub(super) fn settle_commit_ingress_conn(
         }
     }
     let mut affected_inputs = Vec::new();
-    let mut affected_wakes = Vec::new();
     if let Some(ingress) = commit.ingress.as_ref() {
         let run = &ingress.run;
         for completion in &ingress.completed_inputs {
@@ -98,17 +97,9 @@ pub(super) fn settle_commit_ingress_conn(
                     }
                     lash_core_execution::store::IngressRowId::Batch(batch_id) => {
                         match disposition {
-                            // A released wake keeps its position and its
-                            // redelivery floor; its record says it was
-                            // deferred (FIG-3543).
+                            // A deferred command keeps its ingress position.
                             lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer => {
-                                let batch = admitted_batch_conn(tx, session_id, run, batch_id)?;
                                 release_admitted_batch_conn(tx, session_id, run, batch_id)?;
-                                affected_wakes.extend(
-                                    lash_core_execution::store_backend_support::deferred_wake_records(
-                                        std::slice::from_ref(&batch),
-                                    ),
-                                );
                             }
                             lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop => {
                                 crate::queued_work::complete_admitted_batch_conn(
@@ -137,7 +128,6 @@ pub(super) fn settle_commit_ingress_conn(
             .into_iter()
             .map(|(_, affected)| affected)
             .collect(),
-        affected_wakes,
     })
 }
 

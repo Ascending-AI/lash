@@ -18,10 +18,10 @@
 use std::sync::Arc;
 
 use lash_core_execution::{
-    ProcessCompletionAuthority, ProcessEventAppendRequest, ProcessEventLog as _,
-    ProcessLifecycle as _, ProcessProvenance, ProcessRegistrar as _,
+    ProcessCompletionAuthority, ProcessEventLog as _, ProcessLifecycle as _, ProcessProvenance,
+    ProcessRegistrar as _,
 };
-use lash_sqlite_store::{SqliteProcessRegistry, SqliteTriggerStore};
+use lash_sqlite_store::SqliteProcessRegistry;
 
 #[path = "conformance/backend_fixture.rs"]
 mod backend_fixture;
@@ -39,7 +39,7 @@ mod schema_refusal;
 
 #[cfg(feature = "testing")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
+async fn a_lifecycle_page_read_keeps_its_identity_snapshot_during_prune() {
     let dir = tempfile::tempdir().expect("process-event snapshot tempdir");
     let path = dir.path().to_path_buf();
     let pauses = lash_sqlite_store::testing::SqlitePauses::default();
@@ -56,33 +56,23 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
     lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
     let reader = stores.process_registry();
     let process_id = reader
-        .register_process(
-            lash_core::testing::held_engine_registration(
-                serde_json::Value::Null,
-                ProcessProvenance::host(),
-                lash_core_execution::Lifetime::Detached,
-            )
-            .with_extra_event_types([lash_core_execution::ProcessEventType {
-                name: "snapshot.tail".to_string(),
-                payload_schema: lash_core_execution::JsonSchema::any(),
-                semantics: lash_core_execution::ProcessEventSemanticsSpec::default(),
-            }]),
-        )
+        .register_process(lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
+            ProcessProvenance::host(),
+            lash_core_execution::Lifetime::Detached,
+        ))
         .await
         .expect("register snapshot process")
         .id;
-    for sequence in 0..3 {
-        reader
-            .append_event(
-                &process_id,
-                ProcessEventAppendRequest::new(
-                    "snapshot.tail",
-                    serde_json::json!({ "sequence": sequence }),
-                ),
-            )
-            .await
-            .expect("append unread event tail");
-    }
+    reader
+        .request_process_cancel(
+            &process_id,
+            lash_core_execution::CancelOrigin::OperatorRequested,
+            "snapshot-operator".to_owned(),
+            None,
+        )
+        .await
+        .expect("record lifecycle cancellation");
     let terminal = reader
         .complete_process(
             &process_id,
@@ -134,7 +124,7 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
             std::process::Command::new(std::env::current_exe().expect("test executable"))
                 .args([
                     "--exact",
-                    "process_event_snapshot_competing_pruner",
+                    "lifecycle_snapshot_competing_pruner",
                     "--include-ignored",
                     "--nocapture",
                 ])
@@ -172,12 +162,12 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
 const SNAPSHOT_PRUNER_ROOT: &str = "LASH_SQLITE_SNAPSHOT_PRUNER_ROOT";
 const SNAPSHOT_PRUNER_CUTOFF_MS: &str = "LASH_SQLITE_SNAPSHOT_PRUNER_CUTOFF_MS";
 
-/// The competing writer of `process_event_page_identity_and_rows_share_one_read_snapshot`:
+/// The competing writer of `a_lifecycle_page_read_keeps_its_identity_snapshot_during_prune`:
 /// prune the law's store set from this process's own connections.
 #[cfg(feature = "testing")]
 #[tokio::test]
-#[ignore = "spawned by process_event_page_identity_and_rows_share_one_read_snapshot"]
-async fn process_event_snapshot_competing_pruner() {
+#[ignore = "spawned by a_lifecycle_page_read_keeps_its_identity_snapshot_during_prune"]
+async fn lifecycle_snapshot_competing_pruner() {
     use lash_core_execution::ProcessRetention as _;
 
     let root = std::env::var_os(SNAPSHOT_PRUNER_ROOT).expect("the law's store root");
@@ -199,55 +189,6 @@ async fn process_event_snapshot_competing_pruner() {
         .await
         .expect("prune process through competing connection");
     println!("pruned_processes={}", prune.pruned_processes);
-}
-
-#[test]
-fn trigger_subscription_owner_filter_is_pushed_down() {
-    lash_conformance::trigger_subscription_owner_filter_is_pushed_down(
-        "SQLite",
-        lash_sqlite_store::testing::trigger_subscription_list_sql,
-    );
-}
-
-#[cfg(feature = "testing")]
-#[tokio::test]
-async fn fenced_process_and_trigger_registration_stays_typed() {
-    let root = tempfile::tempdir().expect("store root");
-    let stores = lash_sqlite_store::SqliteStoreSet::open(root.path().join("lash.db"))
-        .await
-        .expect("open older writer");
-    // An epoch past this build's writable range: a newer release finalized.
-    let newer = lash_core_execution::FleetFormat::writable().max() + 1;
-    lash_sqlite_store::testing::finalize_fleet_format(stores.location(), newer)
-        .expect("finalize newer fleet format");
-    let snapshot = || {
-        let mut rows = std::collections::BTreeMap::new();
-        let connection =
-            rusqlite::Connection::open(root.path().join("lash.db")).expect("open snapshot");
-        let tables: Vec<String> = connection
-            .prepare("SELECT name FROM sqlite_schema WHERE type = 'table'")
-            .expect("list tables")
-            .query_map([], |row| row.get(0))
-            .expect("query tables")
-            .collect::<rusqlite::Result<_>>()
-            .expect("table names");
-        for table in tables {
-            let count: i64 = connection
-                .query_row(&format!("SELECT count(*) FROM \"{table}\""), [], |row| {
-                    row.get(0)
-                })
-                .expect("count rows");
-            rows.insert(table, count);
-        }
-        rows
-    };
-    let before = snapshot();
-    lash_conformance::fenced_process_and_trigger_registration_stays_typed(
-        stores.process_registry(),
-        stores.trigger_store(),
-    )
-    .await;
-    assert_eq!(snapshot(), before, "fenced writers changed rows");
 }
 
 #[path = "conformance/attachment_fail_closed.rs"]

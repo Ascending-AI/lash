@@ -34,8 +34,6 @@ async fn plan_for(filter: &lash_core_execution::ProcessListFilter) -> Option<Str
         .bind(filter.identity_kind.as_deref())
         .bind(filter.identity_label.as_deref())
         .bind(Option::<serde_json::Value>::None)
-        .bind(filter.caused_by_occurrence_id.as_deref())
-        .bind(filter.caused_by_subscription_id.as_deref())
         .bind(filter.created_at_start_ms.map(crate::clamp_epoch_ms))
         .bind(filter.created_at_end_ms.map(crate::clamp_epoch_ms))
         .bind(filter.retired_since_ms.map(crate::clamp_epoch_ms));

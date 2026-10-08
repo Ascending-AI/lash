@@ -448,10 +448,7 @@ pub(crate) fn head_ownership_facts_conn(
                 .family
                 .pending_session_work_ordering
                 .sql(),
-            params![
-                session_id.as_str(),
-                lash_core_execution::QueuedWorkKind::Control.as_str()
-            ],
+            params![session_id.as_str()],
             |row| row.get(1),
         )
         .map_err(sqlite_error)?;

@@ -122,12 +122,6 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
         sql.queued_batches_sqlite.settlement_facts.sql(),
         sql.queued_batches_sqlite.select_cancelable.sql(),
         sql.queued_batches_sqlite.admission_candidates_idle.sql(),
-        sql.queued_batches_sqlite
-            .admission_candidates_turn_lane
-            .sql(),
-        sql.queued_batches_sqlite
-            .admission_candidates_boundary
-            .sql(),
         sql.cancel_requests.delete_by_session.sql(),
         sql.cancel_requests.select_request.sql(),
     ] {
@@ -205,8 +199,6 @@ fn every_open_queued_work_read_seeks_the_admission_index() {
     for statement in [
         &sql.queued_batches.list_open,
         &sql.queued_batches_sqlite.admission_candidates_idle,
-        &sql.queued_batches_sqlite.admission_candidates_turn_lane,
-        &sql.queued_batches_sqlite.admission_candidates_boundary,
     ] {
         assert_uses(&conn, statement, "idx_queued_work_admission_order");
     }

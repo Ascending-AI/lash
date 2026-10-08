@@ -449,18 +449,6 @@ async fn a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_f
         Some(TRANSITIONS),
         "the engine's state did not survive the move: {output}"
     );
-    // The feed holds each emitted event once, in order.
-    let events: Vec<String> = cluster
-        .event_types(&process)
-        .await
-        .into_iter()
-        .filter(|event| event == BEFORE || event == AFTER)
-        .collect();
-    assert_eq!(
-        events,
-        vec![BEFORE.to_owned(), AFTER.to_owned()],
-        "the process's feed"
-    );
     // The start key still names the process, and starting it again under
     // that key answers it instead of starting another.
     assert_eq!(

@@ -24,7 +24,7 @@ pub(crate) const TABLES: &str = "
 CREATE TABLE IF NOT EXISTS session_close (
     session_id TEXT PRIMARY KEY,
     done_step TEXT CONSTRAINT ck_session_close_step
-        CHECK (done_step IN ('cancel', 'revoke', 'end_scope', 'triggers', 'artifacts', 'tombstone')),
+        CHECK (done_step IN ('cancel', 'revoke', 'end_scope', 'artifacts', 'tombstone')),
     begun_at_ms INTEGER NOT NULL,
     written_epoch INTEGER NOT NULL
 );

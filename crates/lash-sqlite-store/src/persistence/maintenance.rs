@@ -31,9 +31,7 @@ impl StoreMaintenance for SqliteStore {
                         .sql(),
                     params![session_id.as_str()],
                 )?;
-                // Every queued-work tombstone goes: a vacuumed wake's
-                // redelivery still meets its receiver floor, and a vacuumed
-                // command's replay meets its revision check (ADR 0101 §8).
+                // A vacuumed command's replay meets its revision check.
                 let removed_queued_work_tombstone_count = crate::conn::cached_execute(tx,
                     crate::turn_ingress::turn_ingress_sql()
                         .queued_batches

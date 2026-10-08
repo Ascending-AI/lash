@@ -121,7 +121,6 @@ pub(super) async fn prune_terminal_processes(
         return Ok(ProcessPruneReport {
             pruned_processes: 0,
             pruned_events: 0,
-            pruned_trigger_deliveries: 0,
         });
     }
 

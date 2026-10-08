@@ -34,21 +34,10 @@ pub(crate) fn queued_batch_row(row: PgRow) -> Result<QueuedBatchRow, StoreError>
                 record_kind: "QueuedWorkBatch",
                 message: "unknown queued-work delivery policy".to_string(),
             })?;
-    let kind = QueuedWorkKind::from_wire_str(row.get::<String, _>("work_kind").as_str())
-        .ok_or_else(|| StoreError::StoredDataCorrupt {
-            record_kind: "QueuedWorkBatch",
-            message: "unknown queued-work kind".to_string(),
-        })?;
     let payload: QueuedWorkPayload = store_decode_json(
         row.get::<String, _>("payload_json").as_str(),
         "queued work payload",
     )?;
-    if kind != payload.kind() {
-        return Err(StoreError::StoredDataCorrupt {
-            record_kind: "QueuedWorkBatch",
-            message: "work kind contradicts its payload".into(),
-        });
-    }
     let authority_json: String = row.get("authority_json");
     Ok(QueuedBatchRow {
         enqueue_seq: u64_from_sql("QueuedWorkBatch", "enqueue_seq", row.get("enqueue_seq"))?,

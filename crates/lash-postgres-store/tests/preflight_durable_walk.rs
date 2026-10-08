@@ -370,22 +370,18 @@ async fn seed_process(
     scratch: &ScratchSchema,
     process_id: &ProcessId,
     status: &str,
-    wake: Option<&str>,
+    _wake: Option<&str>,
 ) {
-    let wake = match wake {
-        Some(session_id) => format!("'{session_id}'"),
-        None => "NULL".to_string(),
-    };
     scratch
         .apply(&format!(
             "INSERT INTO lash_processes (
-                 process_id, start_key, originator_id, wake_session_id,
+                 process_id, start_key, originator_id,
                  identity_kind, identity_label, created_at_ms, updated_at_ms,
                  last_event_sequence, change_seq, status, lifetime_scope_kind, lifetime_scope_id,
                  lifetime,
                  record_json
              ) VALUES (
-                 '{process_id}', NULL, 'originator', {wake},
+                 '{process_id}', NULL, 'originator',
                  'program', NULL, 0, 0, 0, 1, '{status}', NULL, NULL, 'detached',
                  '{{\"process\":\"{process_id}\"}}'
              )",

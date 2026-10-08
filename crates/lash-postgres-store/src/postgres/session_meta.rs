@@ -38,10 +38,6 @@ pub(crate) fn stored_relation_from_row(row: &PgRow) -> Result<StoredRelation, St
                 })
                 .transpose()?,
             process_event_sequence: row.get("caused_by_process_event_sequence"),
-            occurrence_id: row.get("caused_by_occurrence_id"),
-            subscription_id: row.get("caused_by_subscription_id"),
-            subscription_incarnation: row.get("caused_by_subscription_incarnation"),
-            subscription_revision: row.get("caused_by_subscription_revision"),
             node_id: row.get("caused_by_node_id"),
         },
         source_session_id: row
@@ -122,10 +118,6 @@ pub(crate) async fn write_session_meta_tx(
         .bind(&stored.cause.call_id)
         .bind(stored.cause.process_id.as_deref())
         .bind(stored.cause.process_event_sequence)
-        .bind(&stored.cause.occurrence_id)
-        .bind(&stored.cause.subscription_id)
-        .bind(&stored.cause.subscription_incarnation)
-        .bind(stored.cause.subscription_revision)
         .bind(&stored.cause.node_id)
         .bind(stored.source_session_id.as_deref())
         .bind(&stored.source_node_id)

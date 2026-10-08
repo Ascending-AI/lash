@@ -85,12 +85,11 @@ pub(super) fn read(tx: &Connection, session: &SessionId) -> Answer<SessionMailbo
                 row.get::<_, i64>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    for (batch, seq, work_kind, policy, payload_json) in batches {
-        match decode_batch(batch, seq, &work_kind, &policy, &payload_json) {
+    for (batch, seq, policy, payload_json) in batches {
+        match decode_batch(batch, seq, &policy, &payload_json) {
             Ok(batch) => mailbox.batches.push(batch),
             Err(error) => return Ok(Err(error)),
         }
@@ -124,26 +123,19 @@ fn decode_input(
 fn decode_batch(
     batch: String,
     seq: i64,
-    work_kind: &str,
     policy: &str,
     payload_json: &str,
 ) -> Result<MailBatch, DurableError> {
     let payload: lash_core_execution::runtime::QueuedWorkPayload =
         serde_json::from_str(payload_json).map_err(|error| undecodable("batch payload", error))?;
-    let kind = match (work_kind, &payload) {
-        ("turn", _) => MailBatchKind::Turn,
-        (
-            "control",
-            lash_core_execution::runtime::QueuedWorkPayload::SessionCommand { command },
-        ) if matches!(
-            **command,
-            lash_core_execution::runtime::SessionCommand::RunPluginTask { .. }
-        ) =>
-        {
-            MailBatchKind::Operation
-        }
-        ("control", _) => MailBatchKind::Control,
-        (other, _) => return Err(undecodable("batch kind", other)),
+    let lash_core_execution::runtime::QueuedWorkPayload::SessionCommand { command } = &payload;
+    let kind = if matches!(
+        **command,
+        lash_core_execution::runtime::SessionCommand::RunPluginTask { .. }
+    ) {
+        MailBatchKind::Operation
+    } else {
+        MailBatchKind::Control
     };
     Ok(MailBatch {
         batch: BatchId::parse(batch).map_err(|error| undecodable("batch id", error))?,

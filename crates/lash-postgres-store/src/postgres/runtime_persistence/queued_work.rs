@@ -157,7 +157,6 @@ impl PostgresStore {
                 .sql(),
         )
         .bind(session_id.as_str())
-        .bind(QueuedWorkKind::Control.as_str())
         .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;

@@ -160,17 +160,6 @@ pub async fn cut_session_wakes(pool: &sqlx::PgPool, armed: bool) -> sqlx::Result
     crate::durable::cut_session_wakes(pool, armed).await
 }
 
-/// Returns the production trigger-subscription listing SQL for conformance assertions.
-///
-/// The filter no longer builds the statement; it selects one (FIG-3385). The
-/// text is the named statement its shape is served by, which is what the
-/// listing actually issues.
-pub fn trigger_subscription_list_sql(
-    filter: &lash_core_execution::TriggerSubscriptionFilter,
-) -> String {
-    crate::trigger_store::subscription_list_sql(filter).to_string()
-}
-
 /// One stored value: where it is, its bytes, and every JSON document those
 /// bytes decode to as this store writes them. The twin of
 /// `lash_sqlite_store::testing::StoredCell`.

@@ -14,8 +14,8 @@ use lash_core_execution::runtime::actor::round::{Material, SettledOutput};
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
     EngineAction, EngineEvent, EngineState, EngineStateFormat, HostWaitKind, KeyName,
-    ProcessEngine, ProcessEventType, ProcessInfraError, ProcessOutcome, ProcessRecord, StepName,
-    StepRequest, ToolCallOutput, ToolCancellation,
+    ProcessEngine, ProcessInfraError, ProcessOutcome, ProcessRecord, StepName, StepRequest,
+    ToolCallOutput, ToolCancellation,
 };
 use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
 use lash_sansio::{ExecutionLimit, ExecutionPolicy, ToolId};
@@ -33,9 +33,8 @@ pub const AFTER: &str = "after";
 /// The pinned key's name.
 const WAIT: &str = "wait";
 /// The transitions an uncut run takes, and so the count its terminal
-/// carries: start, emitted, step settled, key pinned, timed out, emitted,
-/// step settled.
-pub const TRANSITIONS: u64 = 7;
+/// carries: start, step settled, key pinned, timed out, step settled.
+pub const TRANSITIONS: u64 = 5;
 
 /// The start payload of a process that waits `wait` between its steps.
 #[must_use]
@@ -55,24 +54,6 @@ fn step(name: &str) -> StepRequest {
         input: json!({ "step": name }),
         site: None,
     }
-}
-
-fn event_type(name: &str) -> Result<ProcessEventType, ProcessInfraError> {
-    Ok(ProcessEventType {
-        name: name.to_owned(),
-        payload_schema: lash_sansio::JsonSchema::admit(json!({ "type": "object" }))
-            .map_err(infra)?,
-        semantics: Default::default(),
-    })
-}
-
-/// The event types the engine emits, which its registration declares.
-///
-/// # Errors
-///
-/// A payload schema is refused.
-pub fn declared_event_types() -> Result<Vec<ProcessEventType>, ProcessInfraError> {
-    Ok(vec![event_type(BEFORE)?, event_type(AFTER)?])
 }
 
 /// The runbook's process engine.
@@ -133,16 +114,7 @@ impl ProcessEngine for WorkerEngine {
         script["n"] = json!(script["n"].as_u64().unwrap_or(0) + 1);
         let phase = script["phase"].as_str().unwrap_or_default().to_owned();
         let (next, action) = match event {
-            EngineEvent::Started { .. } => (
-                "emit-before",
-                EngineAction::Emit {
-                    event_type: event_type(BEFORE)?,
-                    payload: json!({ "n": script["n"] }),
-                },
-            ),
-            EngineEvent::Emitted if phase == "emit-before" => {
-                ("step-before", EngineAction::Steps(vec![step(BEFORE)]))
-            }
+            EngineEvent::Started { .. } => ("step-before", EngineAction::Steps(vec![step(BEFORE)])),
             EngineEvent::StepSettled { .. } if phase == "step-before" => (
                 "pin",
                 EngineAction::PinKey {
@@ -154,14 +126,7 @@ impl ProcessEngine for WorkerEngine {
                 },
             ),
             EngineEvent::KeyPinned { name, .. } => ("await", EngineAction::AwaitExternal { name }),
-            EngineEvent::ExternalTimedOut { .. } | EngineEvent::ExternalResolved { .. } => (
-                "emit-after",
-                EngineAction::Emit {
-                    event_type: event_type(AFTER)?,
-                    payload: json!({ "n": script["n"] }),
-                },
-            ),
-            EngineEvent::Emitted if phase == "emit-after" => {
+            EngineEvent::ExternalTimedOut { .. } | EngineEvent::ExternalResolved { .. } => {
                 ("step-after", EngineAction::Steps(vec![step(AFTER)]))
             }
             EngineEvent::StepSettled { .. } if phase == "step-after" => (

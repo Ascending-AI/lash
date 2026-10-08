@@ -9,9 +9,7 @@ pub const INSERT_COLUMNS: &str =
     "session_id, session_state_version, relation_kind, parent_session_id,
               caused_by_kind, caused_by_session_id, caused_by_turn_id,
               caused_by_effect_id, caused_by_call_id, caused_by_process_id,
-              caused_by_process_event_sequence, caused_by_occurrence_id,
-              caused_by_subscription_id, caused_by_subscription_incarnation,
-              caused_by_subscription_revision, caused_by_node_id, source_session_id,
+              caused_by_process_event_sequence, caused_by_node_id, source_session_id,
               source_node_id, created_at_ms, last_commit_at_ms, owning_process_id";
 
 /// The stored relation, as `StoredRelation` decodes it positionally.
@@ -24,9 +22,7 @@ pub const INSERT_COLUMNS: &str =
 pub const RELATION_COLUMNS: &str = "session_id, relation_kind, parent_session_id,
     caused_by_kind, caused_by_session_id, caused_by_turn_id,
     caused_by_effect_id, caused_by_call_id, caused_by_process_id,
-    caused_by_process_event_sequence, caused_by_occurrence_id,
-    caused_by_subscription_id, caused_by_subscription_incarnation,
-    caused_by_subscription_revision, caused_by_node_id, source_session_id,
+    caused_by_process_event_sequence, caused_by_node_id, source_session_id,
     source_node_id";
 
 /// The SQLite catalog projection: [`RELATION_COLUMNS`] qualified by the
@@ -43,9 +39,7 @@ pub const CATALOG_COLUMNS_SQLITE: &str =
                     meta.caused_by_session_id, meta.caused_by_turn_id,
                     meta.caused_by_effect_id, meta.caused_by_call_id,
                     meta.caused_by_process_id, meta.caused_by_process_event_sequence,
-                    meta.caused_by_occurrence_id, meta.caused_by_subscription_id,
-                    meta.caused_by_subscription_incarnation,
-                    meta.caused_by_subscription_revision, meta.caused_by_node_id,
+                    meta.caused_by_node_id,
                     meta.source_session_id, meta.source_node_id,
                     meta.created_at_ms,
                     meta.last_commit_at_ms, COALESCE(head.head_revision, 0), 0 AS deleted";

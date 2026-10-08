@@ -72,7 +72,6 @@ pub(super) async fn prune_process_rows_tx(
     Ok(ProcessPruneReport {
         pruned_processes: pruned_processes as usize,
         pruned_events: pruned_events as usize,
-        pruned_trigger_deliveries: 0,
     })
 }
 

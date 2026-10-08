@@ -18,16 +18,6 @@ pub use crate::migration::{SqliteMigrationFault, SqliteMigrationHook, SqliteMigr
 pub fn cut_session_wakes(conn: &rusqlite::Connection, armed: bool) -> rusqlite::Result<()> {
     crate::durable::cut_session_wakes(conn, armed)
 }
-/// Returns the production trigger-subscription listing SQL for conformance assertions.
-///
-/// The filter no longer builds the statement; it selects one (FIG-3385). The
-/// text is the named statement its shape is served by, which is what the
-/// listing actually issues.
-pub fn trigger_subscription_list_sql(
-    filter: &lash_core_execution::TriggerSubscriptionFilter,
-) -> String {
-    crate::triggers::subscription_list_sql(filter).to_string()
-}
 
 /// The shared-fragment DDL statements provisioning applies to the database.
 /// Fixtures that shadow a schema table with their own declaration apply these

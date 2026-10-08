@@ -815,22 +815,6 @@
     "peak_bytes": 26591232,
     "samples": 18
   },
-  "//crates/lash-sqlite-store:fencing_backstop__test": {
-    "cpu_count": 1,
-    "memory_kb": 262144,
-    "p95_cores": 1.04,
-    "p99_peak_bytes": 22511616,
-    "peak_bytes": 22523904,
-    "samples": 159
-  },
-  "//crates/lash-sqlite-store:fencing_backstop__test__fv_007948e0": {
-    "cpu_count": 1,
-    "memory_kb": 262144,
-    "p95_cores": 0.98,
-    "p99_peak_bytes": 18948096,
-    "peak_bytes": 18948096,
-    "samples": 19
-  },
   "//crates/lash-sqlite-store:integration__test": {
     "cpu_count": 2,
     "memory_kb": 262144,

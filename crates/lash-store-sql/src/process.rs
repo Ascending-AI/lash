@@ -2,7 +2,7 @@
 //!
 //! One family because they are one transactional unit: an event append writes
 //! the event, the process projection and the parent-end ledger in the same
-//! transaction (and, for a wake, the target session's queued work), and a
+//! transaction , and a
 //! prune moves a process row, its events, its tombstone and its artifact
 //! cleanup together.
 //!

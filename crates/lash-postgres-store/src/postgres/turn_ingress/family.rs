@@ -12,31 +12,14 @@ lash_store_sql::statements! {
              WHERE binding.session_id = ?1 AND binding.run = ?2
              ORDER BY pti.enqueue_seq FOR UPDATE OF pti";
 
-        /// Whether session `?1`'s run `?5` has checkpoint work for turn
-        /// `?2` at the `after_work` checkpoint: rows step `?6` already bound
-        /// (a re-executed step reads them back), open active-turn input while
-        /// `?3` inputs may still be admitted, or a non-command item at the
-        /// open boundary head while `?4` batches may.
+        /// Whether session `?1`'s run `?4` has checkpoint input for turn
+        /// `?2` at `after_work`: rows step `?5` already bound, or open
+        /// active-turn input while `?3` inputs may still be admitted.
         ///
-        /// One probe, so one statement: the admission it guards takes a write
-        /// transaction, and asking the halves separately would let a
-        /// checkpoint open a transaction for work that had already gone. The
-        /// boundary head is the one the candidate scan reads, because the
-        /// probe must agree with the scan it decides for.
-        checkpoint_work_pending_after_work = "WITH queued_work_head_candidate AS (
-                 SELECT batch_id AS head_batch_id, delivery_policy AS head_delivery_policy
-                 FROM queued_work_batches
-                 WHERE session_id = ?1 AND work_kind = 'turn' AND admitted_run IS NULL
-                   AND terminal_cause IS NULL
-                 ORDER BY enqueue_seq ASC
-                 LIMIT 1
-             )
-             SELECT EXISTS (
+        /// One probe matches the input scan in the admission transaction.
+        checkpoint_work_pending_after_work = "SELECT EXISTS (
                 SELECT 1 FROM pending_turn_inputs
-                WHERE session_id = ?1 AND admitted_run = ?5 AND admitted_by = ?6
-             ) OR EXISTS (
-                SELECT 1 FROM queued_work_batches
-                WHERE session_id = ?1 AND admitted_run = ?5 AND admitted_by = ?6
+                WHERE session_id = ?1 AND admitted_run = ?4 AND admitted_by = ?5
              ) OR (
                 ?3 > 0 AND EXISTS (
                     SELECT 1
@@ -51,32 +34,14 @@ lash_store_sql::statements! {
                           IN ('after_work')
                     LIMIT 1
                 )
-             ) OR (
-                ?4 > 0 AND EXISTS (
-                    SELECT 1
-                    FROM queued_work_head_candidate AS head
-                    WHERE head.head_delivery_policy = 'earliest_safe_boundary'
-                    LIMIT 1
-                )
              )";
 
         /// [`checkpoint_work_pending_after_work`](Self::checkpoint_work_pending_after_work)
         /// at the `before_completion` checkpoint, which admits both minimum
         /// boundaries.
-        checkpoint_work_pending_before_completion = "WITH queued_work_head_candidate AS (
-                 SELECT batch_id AS head_batch_id, delivery_policy AS head_delivery_policy
-                 FROM queued_work_batches
-                 WHERE session_id = ?1 AND work_kind = 'turn' AND admitted_run IS NULL
-                   AND terminal_cause IS NULL
-                 ORDER BY enqueue_seq ASC
-                 LIMIT 1
-             )
-             SELECT EXISTS (
+        checkpoint_work_pending_before_completion = "SELECT EXISTS (
                 SELECT 1 FROM pending_turn_inputs
-                WHERE session_id = ?1 AND admitted_run = ?5 AND admitted_by = ?6
-             ) OR EXISTS (
-                SELECT 1 FROM queued_work_batches
-                WHERE session_id = ?1 AND admitted_run = ?5 AND admitted_by = ?6
+                WHERE session_id = ?1 AND admitted_run = ?4 AND admitted_by = ?5
              ) OR (
                 ?3 > 0 AND EXISTS (
                     SELECT 1
@@ -89,13 +54,6 @@ lash_store_sql::statements! {
                       AND ingress_json::jsonb ->> 'turn_id' = ?2
                       AND COALESCE(ingress_json::jsonb ->> 'min_boundary', 'after_work')
                           IN ('after_work', 'before_completion')
-                    LIMIT 1
-                )
-             ) OR (
-                ?4 > 0 AND EXISTS (
-                    SELECT 1
-                    FROM queued_work_head_candidate AS head
-                    WHERE head.head_delivery_policy = 'earliest_safe_boundary'
                     LIMIT 1
                 )
              )";

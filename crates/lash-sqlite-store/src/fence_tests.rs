@@ -12,8 +12,7 @@ use std::time::Duration;
 use lash_core_execution::compat::{CompatRefusal, VersionRange};
 use lash_core_execution::{
     FleetFormat, FleetFormatStore, ProcessOriginator, ProcessRegistrar as _,
-    SessionCatalogStore as _, SessionId, SessionMeta, SessionRelation, StoreError, TriggerCommand,
-    TriggerOwnerScope, TriggerStore as _,
+    SessionCatalogStore as _, SessionId, SessionMeta, SessionRelation, StoreError,
 };
 use rusqlite::Connection;
 
@@ -60,8 +59,8 @@ async fn file_set() -> (tempfile::TempDir, SqliteStoreSet) {
 }
 
 /// A table of each family the database holds (the durable core, the process
-/// registry, the trigger store), and an insert of one row into it.
-const PROBES: [(&str, &str); 3] = [
+/// registry), and an insert of one row into it.
+const PROBES: [(&str, &str); 2] = [
     (
         "session_meta",
         "INSERT INTO session_meta (session_id, relation_kind) \
@@ -72,13 +71,6 @@ const PROBES: [(&str, &str); 3] = [
         "INSERT INTO process_tombstones \
          (process_id, terminal_label, pruned_at_ms, pruned_change_seq) \
          VALUES ('fence-probe-' || (SELECT COUNT(*) FROM process_tombstones), 'completed', 0, 0)",
-    ),
-    (
-        "trigger_mutation_receipts",
-        "INSERT INTO trigger_mutation_receipts \
-         (operation_id, owner_kind, owner_id, request_fingerprint, result_json, created_at_ms) \
-         VALUES ('fence-probe-' || (SELECT COUNT(*) FROM trigger_mutation_receipts), \
-                 'host', 'h', 'f', '{}', 0)",
     ),
 ];
 
@@ -115,14 +107,6 @@ fn is_fenced(error: &StoreError, recorded: u32) -> bool {
 async fn sqlite_fence_refuses_a_writer_of_each_family_after_finalize() {
     let (_run, set) = file_set().await;
     let location = set.location().clone();
-    raw(&location)
-        .execute(
-            "INSERT INTO trigger_mutation_receipts \
-             (operation_id, owner_kind, owner_id, request_fingerprint, result_json, created_at_ms) \
-             VALUES ('seeded', 'host', 'h', 'f', '{}', 0)",
-            [],
-        )
-        .expect("seed a receipt so the fenced trigger mutation's insert is detectable");
     let core = set.process_env_store();
     core.admit_session(
         &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(
@@ -177,29 +161,6 @@ async fn sqlite_fence_refuses_a_writer_of_each_family_after_finalize() {
         processes_before,
         "a fenced process-registry writer wrote nothing"
     );
-
-    let trigger_error = set
-        .trigger_store()
-        .execute_command(
-            "fence-trigger-mutation",
-            TriggerCommand::Prune {
-                owner_scope: TriggerOwnerScope::host("fence").expect("host owner scope"),
-                actor: ProcessOriginator::host(),
-                subscription_keys: Vec::new(),
-            },
-        )
-        .await
-        .expect_err("the trigger writer is fenced");
-    assert!(
-        trigger_error.to_string().contains("writer fenced"),
-        "{trigger_error}"
-    );
-    assert_eq!(
-        count(&location, "trigger_mutation_receipts"),
-        1,
-        "a fenced trigger writer journaled no receipt"
-    );
-
     // A connection-level writer opened before finalize is refused typed,
     // whichever family's table it writes.
     for (table, sql) in PROBES {

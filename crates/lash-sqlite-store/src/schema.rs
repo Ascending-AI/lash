@@ -9,7 +9,6 @@
 //! 15-second `busy_timeout` (see `conn.rs`).
 
 use super::*;
-pub(crate) use crate::trigger_schema::TRIGGER_SCHEMA;
 
 /// Canonical SQLite schema for a factory-wide lash durable-core catalog.
 ///
@@ -142,10 +141,6 @@ CREATE TABLE IF NOT EXISTS session_meta (
     caused_by_call_id                TEXT,
     caused_by_process_id             TEXT,
     caused_by_process_event_sequence TEXT,
-    caused_by_occurrence_id           TEXT,
-    caused_by_subscription_id         TEXT,
-    caused_by_subscription_incarnation TEXT,
-    caused_by_subscription_revision   TEXT,
     caused_by_node_id                 TEXT,
     source_session_id                 TEXT,
     source_node_id                    TEXT,
@@ -162,9 +157,9 @@ CREATE TABLE IF NOT EXISTS session_meta (
     -- (no marker). A closing session was raised by its close.
     CONSTRAINT ck_session_meta_retention CHECK ((retention_kind IN ('until_gc', 'head_only') AND retention_last_turns IS NULL) OR (retention_kind = 'last_turns' AND retention_last_turns > 0)),
     CONSTRAINT ck_session_meta_relation_kind CHECK (relation_kind IN ('root', 'child', 'fork')),
-    CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')),
+    CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'session_node')),
     CONSTRAINT ck_session_meta_relation_family CHECK ((relation_kind = 'root' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NULL AND source_node_id IS NULL) OR (relation_kind = 'child' AND parent_session_id IS NOT NULL AND source_session_id IS NULL AND source_node_id IS NULL) OR (relation_kind = 'fork' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NOT NULL) OR (relation_kind IS NOT NULL AND NOT (relation_kind IN ('root', 'child', 'fork')))),
-    CONSTRAINT ck_session_meta_caused_by_family CHECK ((caused_by_kind IS NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'turn' AND caused_by_session_id IS NOT NULL AND caused_by_turn_id IS NOT NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'effect_address' AND caused_by_effect_id IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'tool_call' AND caused_by_session_id IS NOT NULL AND caused_by_call_id IS NOT NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'process' AND caused_by_process_id IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'process_event' AND caused_by_process_id IS NOT NULL AND caused_by_process_event_sequence IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'trigger_occurrence' AND caused_by_occurrence_id IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'session_node' AND caused_by_session_id IS NOT NULL AND caused_by_node_id IS NOT NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL) OR (caused_by_kind IS NOT NULL AND NOT (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node'))))
+    CONSTRAINT ck_session_meta_caused_by_family CHECK ((caused_by_kind IS NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'turn' AND caused_by_session_id IS NOT NULL AND caused_by_turn_id IS NOT NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'effect_address' AND caused_by_effect_id IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'tool_call' AND caused_by_session_id IS NOT NULL AND caused_by_call_id IS NOT NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'process' AND caused_by_process_id IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'process_event' AND caused_by_process_id IS NOT NULL AND caused_by_process_event_sequence IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'session_node' AND caused_by_session_id IS NOT NULL AND caused_by_node_id IS NOT NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL) OR (caused_by_kind IS NOT NULL AND NOT (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'session_node'))))
 );
 
 -- The fault listing (ADR 0109 §9).
@@ -251,7 +246,6 @@ CREATE TABLE IF NOT EXISTS queued_work_batches (
     session_id        TEXT NOT NULL,
     source_key        TEXT,
     delivery_policy   TEXT NOT NULL,
-    work_kind         TEXT NOT NULL,
     payload_json TEXT NOT NULL,
     authority_json    TEXT NOT NULL,
     merge_key         TEXT,
@@ -263,7 +257,7 @@ CREATE TABLE IF NOT EXISTS queued_work_batches (
     terminal_cause    TEXT, -- NULL while open or admitted; the tombstone's cause after.
     terminal_at_ms    INTEGER,
     trace_cause_json  TEXT, -- The batch's trace cause, written once at enqueue; NULL is a root cause.
-    CONSTRAINT ck_queued_work_batches_work_kind CHECK ((json_valid(payload_json) AND json_type(payload_json) = 'object' AND ((work_kind = 'turn' AND json_extract(payload_json, '$.type') = 'process_wake') OR (work_kind = 'control' AND json_extract(payload_json, '$.type') = 'session_command'))) IS TRUE),
+    CONSTRAINT ck_queued_work_batches_payload CHECK ((json_valid(payload_json) AND json_type(payload_json) = 'object' AND json_extract(payload_json, '$.type') = 'session_command') IS TRUE),
     CONSTRAINT ck_queued_work_batches_delivery_policy CHECK (delivery_policy IN ('earliest_safe_boundary', 'after_current_turn_commit')),
     CONSTRAINT ck_queued_work_batches_admission_all_or_none CHECK ((admitted_run IS NULL) = (admitted_by IS NULL)),
     CONSTRAINT ck_queued_work_batches_terminal CHECK ((terminal_cause IS NULL AND terminal_at_ms IS NULL) OR (terminal_cause IN ('delivered', 'applied', 'cancelled', 'stale_config_revision') AND terminal_at_ms IS NOT NULL AND admitted_run IS NULL)),
@@ -275,7 +269,7 @@ CREATE TABLE IF NOT EXISTS queued_work_batches (
 -- Both scans range over live batches only: a tombstone never lengthens an
 -- open-work scan (ADR 0101 §8).
 CREATE INDEX IF NOT EXISTS idx_queued_work_session_command_order
-    ON queued_work_batches(session_id, work_kind, enqueued_at_ms, enqueue_seq)
+    ON queued_work_batches(session_id, enqueued_at_ms, enqueue_seq)
     WHERE terminal_cause IS NULL;
 
 DROP INDEX IF EXISTS idx_queued_work_admitted;
@@ -505,15 +499,14 @@ CREATE TABLE IF NOT EXISTS lash_plugin_writers (
 );
 ";
 
-/// The process registry's tables: processes, their events, observers, wake
-/// deliveries, segment handovers and tombstones. They are provisioned in the
+/// The process registry's tables: processes, their events, observers,
+/// segment handovers and tombstones. They are provisioned in the
 /// deployment's one database beside [`SCHEMA`].
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
     process_id            TEXT PRIMARY KEY,
     start_key             TEXT,
     originator_id         TEXT NOT NULL,
-    wake_session_id       TEXT,
     identity_kind         TEXT NOT NULL,
     identity_label        TEXT,
     created_at_ms         INTEGER NOT NULL,
@@ -565,8 +558,6 @@ CREATE INDEX IF NOT EXISTS idx_processes_created
 CREATE INDEX IF NOT EXISTS idx_processes_recent_retired
     ON processes(updated_at_ms, process_id)
     WHERE status NOT IN ('running', 'waiting');
-CREATE INDEX IF NOT EXISTS idx_processes_wake_session
-    ON processes(wake_session_id);
 -- The pending-cancel sweep's scan: rows whose cancel request is older than a
 -- horizon and whose outcome is still open. The predicate is the negation of
 -- the terminal statuses. It must stay
@@ -723,14 +714,14 @@ pub(crate) const FRAGMENTS: [&str; 11] = [
 ];
 
 /// Everything provisioning applies, in order: the durable core's, process
-/// registry's and trigger store's schema bodies, the shared fragments, then
+/// registry's schema bodies, the shared fragments, then
 /// every step of the migration catalog up to this build's version
 /// ([`crate::migration::provisioning_steps`]), so a database this build
 /// creates has the shape a migrated one has. Fixtures that shadow one table
 /// apply this to complete the catalog: every statement is idempotent, so
 /// the shadowed declaration stands while every other table is created.
 pub(crate) fn provisioning_statements() -> impl Iterator<Item = &'static str> {
-    [SCHEMA, PROCESS_SCHEMA, TRIGGER_SCHEMA]
+    [SCHEMA, PROCESS_SCHEMA]
         .into_iter()
         .chain(FRAGMENTS)
         .chain(crate::migration::provisioning_steps())

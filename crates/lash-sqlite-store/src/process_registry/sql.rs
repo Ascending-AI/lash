@@ -45,7 +45,7 @@ lash_store_sql::statements! {
         /// The preflight's started-process walk (FIG-3571): every live
         /// process strictly after key `?1` (`NULL` from the start), at most
         /// `?2`, in key order.
-        list_live_for_preflight = "SELECT process_id, status, wake_session_id, record_json
+        list_live_for_preflight = "SELECT process_id, status, record_json
              FROM processes
              WHERE {{live_process_status(status)}}
                AND (?1 IS NULL OR process_id > ?1)
@@ -57,7 +57,7 @@ lash_store_sql::statements! {
         /// constraint error is the right report. PostgreSQL cannot hold that
         /// read across statements and swallows the race instead.
         insert_registration = "INSERT INTO processes (
-                            process_id, start_key, originator_id, wake_session_id,
+                            process_id, start_key, originator_id,
                             identity_kind, identity_label,
                             created_at_ms, updated_at_ms, last_event_sequence,
                             change_seq, status,
@@ -65,7 +65,7 @@ lash_store_sql::statements! {
                             record_json, consumer_hold_key, consumer_hold_scope_kind,
                             consumer_hold_scope_id, consumer_hold_cancels
                          )
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)";
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)";
 
         /// SQLite spells a bound id list `json_each`; PostgreSQL deletes these
         /// rows inside its one-statement prune instead.
@@ -163,12 +163,8 @@ lash_store_sql::statements! {
        AND (?4 IS NULL OR identity_label = ?4)
        AND (?5 IS NULL OR
             (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
-       AND (?6 IS NULL OR
-            json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
-       AND (?7 IS NULL OR
-            json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?7)
-       AND (?8 IS NULL OR created_at_ms >= ?8)
-       AND (?9 IS NULL OR created_at_ms < ?9)
+       AND (?6 IS NULL OR created_at_ms >= ?6)
+       AND (?7 IS NULL OR created_at_ms < ?7)
      ORDER BY process_id ASC";
         /// The same, narrowed to lifetime scope `?10` / `?11`.
         list_by_lifetime_scope = "SELECT record_json FROM processes
@@ -178,14 +174,10 @@ lash_store_sql::statements! {
        AND (?4 IS NULL OR identity_label = ?4)
        AND (?5 IS NULL OR
             (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
-       AND (?6 IS NULL OR
-            json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
-       AND (?7 IS NULL OR
-            json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?7)
-       AND (?8 IS NULL OR created_at_ms >= ?8)
-       AND (?9 IS NULL OR created_at_ms < ?9)
-           AND lifetime_scope_kind = ?10
-           AND lifetime_scope_id IS ?11
+       AND (?6 IS NULL OR created_at_ms >= ?6)
+       AND (?7 IS NULL OR created_at_ms < ?7)
+           AND lifetime_scope_kind = ?8
+           AND lifetime_scope_id IS ?9
      ORDER BY process_id ASC";
         /// The same, narrowed to rows whose cancel request is older than `?10`
         /// and whose outcome is still open.
@@ -196,14 +188,10 @@ lash_store_sql::statements! {
        AND (?4 IS NULL OR identity_label = ?4)
        AND (?5 IS NULL OR
             (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
-       AND (?6 IS NULL OR
-            json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
-       AND (?7 IS NULL OR
-            json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?7)
-       AND (?8 IS NULL OR created_at_ms >= ?8)
-       AND (?9 IS NULL OR created_at_ms < ?9)
+       AND (?6 IS NULL OR created_at_ms >= ?6)
+       AND (?7 IS NULL OR created_at_ms < ?7)
            AND cancel_requested_at_ms IS NOT NULL
-           AND cancel_requested_at_ms < ?10
+           AND cancel_requested_at_ms < ?8
            AND {{nonterminal_process_status(status)}}
      ORDER BY process_id ASC";
         /// Both narrowings at once.
@@ -214,16 +202,12 @@ lash_store_sql::statements! {
        AND (?4 IS NULL OR identity_label = ?4)
        AND (?5 IS NULL OR
             (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
-       AND (?6 IS NULL OR
-            json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
-       AND (?7 IS NULL OR
-            json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?7)
-       AND (?8 IS NULL OR created_at_ms >= ?8)
-       AND (?9 IS NULL OR created_at_ms < ?9)
-           AND lifetime_scope_kind = ?10
-           AND lifetime_scope_id IS ?11
+       AND (?6 IS NULL OR created_at_ms >= ?6)
+       AND (?7 IS NULL OR created_at_ms < ?7)
+           AND lifetime_scope_kind = ?8
+           AND lifetime_scope_id IS ?9
            AND cancel_requested_at_ms IS NOT NULL
-           AND cancel_requested_at_ms < ?12
+           AND cancel_requested_at_ms < ?10
            AND {{nonterminal_process_status(status)}}
      ORDER BY process_id ASC";
         /// Every live process plus those retired since `?10`.
@@ -239,28 +223,20 @@ lash_store_sql::statements! {
            AND (?4 IS NULL OR identity_label = ?4)
            AND (?5 IS NULL OR
                 (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
-           AND (?6 IS NULL OR
-                json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
-           AND (?7 IS NULL OR
-                json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?7)
-           AND (?8 IS NULL OR created_at_ms >= ?8)
-           AND (?9 IS NULL OR created_at_ms < ?9)
+           AND (?6 IS NULL OR created_at_ms >= ?6)
+           AND (?7 IS NULL OR created_at_ms < ?7)
          UNION ALL
          SELECT process_id, record_json FROM processes
          WHERE {{retired_process_status(status)}}
-           AND updated_at_ms >= ?10
+           AND updated_at_ms >= ?8
            AND (?1 IS NULL OR status IN (SELECT value FROM json_each(?1)))
            AND (?2 IS NULL OR originator_id = ?2)
            AND (?3 IS NULL OR identity_kind = ?3)
            AND (?4 IS NULL OR identity_label = ?4)
            AND (?5 IS NULL OR
                 (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
-           AND (?6 IS NULL OR
-                json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
-           AND (?7 IS NULL OR
-                json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?7)
-           AND (?8 IS NULL OR created_at_ms >= ?8)
-           AND (?9 IS NULL OR created_at_ms < ?9)
+           AND (?6 IS NULL OR created_at_ms >= ?6)
+           AND (?7 IS NULL OR created_at_ms < ?7)
      ) ORDER BY process_id ASC";
         /// The same, narrowed to lifetime scope `?11` / `?12`.
         list_recent_retired_by_lifetime_scope = "SELECT record_json FROM (
@@ -272,32 +248,24 @@ lash_store_sql::statements! {
            AND (?4 IS NULL OR identity_label = ?4)
            AND (?5 IS NULL OR
                 (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
-           AND (?6 IS NULL OR
-                json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
-           AND (?7 IS NULL OR
-                json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?7)
-           AND (?8 IS NULL OR created_at_ms >= ?8)
-           AND (?9 IS NULL OR created_at_ms < ?9)
-           AND lifetime_scope_kind = ?11
-           AND lifetime_scope_id IS ?12
+           AND (?6 IS NULL OR created_at_ms >= ?6)
+           AND (?7 IS NULL OR created_at_ms < ?7)
+           AND lifetime_scope_kind = ?9
+           AND lifetime_scope_id IS ?10
          UNION ALL
          SELECT process_id, record_json FROM processes
          WHERE {{retired_process_status(status)}}
-           AND updated_at_ms >= ?10
+           AND updated_at_ms >= ?8
            AND (?1 IS NULL OR status IN (SELECT value FROM json_each(?1)))
            AND (?2 IS NULL OR originator_id = ?2)
            AND (?3 IS NULL OR identity_kind = ?3)
            AND (?4 IS NULL OR identity_label = ?4)
            AND (?5 IS NULL OR
                 (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
-           AND (?6 IS NULL OR
-                json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
-           AND (?7 IS NULL OR
-                json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?7)
-           AND (?8 IS NULL OR created_at_ms >= ?8)
-           AND (?9 IS NULL OR created_at_ms < ?9)
-           AND lifetime_scope_kind = ?11
-           AND lifetime_scope_id IS ?12
+           AND (?6 IS NULL OR created_at_ms >= ?6)
+           AND (?7 IS NULL OR created_at_ms < ?7)
+           AND lifetime_scope_kind = ?9
+           AND lifetime_scope_id IS ?10
      ) ORDER BY process_id ASC";
         /// The same, narrowed to rows whose cancel request is older than `?11`
         /// and whose outcome is still open.
@@ -310,33 +278,25 @@ lash_store_sql::statements! {
            AND (?4 IS NULL OR identity_label = ?4)
            AND (?5 IS NULL OR
                 (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
-           AND (?6 IS NULL OR
-                json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
-           AND (?7 IS NULL OR
-                json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?7)
-           AND (?8 IS NULL OR created_at_ms >= ?8)
-           AND (?9 IS NULL OR created_at_ms < ?9)
+           AND (?6 IS NULL OR created_at_ms >= ?6)
+           AND (?7 IS NULL OR created_at_ms < ?7)
            AND cancel_requested_at_ms IS NOT NULL
-           AND cancel_requested_at_ms < ?11
+           AND cancel_requested_at_ms < ?9
            AND {{nonterminal_process_status(status)}}
          UNION ALL
          SELECT process_id, record_json FROM processes
          WHERE {{retired_process_status(status)}}
-           AND updated_at_ms >= ?10
+           AND updated_at_ms >= ?8
            AND (?1 IS NULL OR status IN (SELECT value FROM json_each(?1)))
            AND (?2 IS NULL OR originator_id = ?2)
            AND (?3 IS NULL OR identity_kind = ?3)
            AND (?4 IS NULL OR identity_label = ?4)
            AND (?5 IS NULL OR
                 (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
-           AND (?6 IS NULL OR
-                json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
-           AND (?7 IS NULL OR
-                json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?7)
-           AND (?8 IS NULL OR created_at_ms >= ?8)
-           AND (?9 IS NULL OR created_at_ms < ?9)
+           AND (?6 IS NULL OR created_at_ms >= ?6)
+           AND (?7 IS NULL OR created_at_ms < ?7)
            AND cancel_requested_at_ms IS NOT NULL
-           AND cancel_requested_at_ms < ?11
+           AND cancel_requested_at_ms < ?9
            AND {{nonterminal_process_status(status)}}
      ) ORDER BY process_id ASC";
         /// Both narrowings at once.
@@ -349,37 +309,29 @@ lash_store_sql::statements! {
            AND (?4 IS NULL OR identity_label = ?4)
            AND (?5 IS NULL OR
                 (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
-           AND (?6 IS NULL OR
-                json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
-           AND (?7 IS NULL OR
-                json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?7)
-           AND (?8 IS NULL OR created_at_ms >= ?8)
-           AND (?9 IS NULL OR created_at_ms < ?9)
-           AND lifetime_scope_kind = ?11
-           AND lifetime_scope_id IS ?12
+           AND (?6 IS NULL OR created_at_ms >= ?6)
+           AND (?7 IS NULL OR created_at_ms < ?7)
+           AND lifetime_scope_kind = ?9
+           AND lifetime_scope_id IS ?10
            AND cancel_requested_at_ms IS NOT NULL
-           AND cancel_requested_at_ms < ?13
+           AND cancel_requested_at_ms < ?11
            AND {{nonterminal_process_status(status)}}
          UNION ALL
          SELECT process_id, record_json FROM processes
          WHERE {{retired_process_status(status)}}
-           AND updated_at_ms >= ?10
+           AND updated_at_ms >= ?8
            AND (?1 IS NULL OR status IN (SELECT value FROM json_each(?1)))
            AND (?2 IS NULL OR originator_id = ?2)
            AND (?3 IS NULL OR identity_kind = ?3)
            AND (?4 IS NULL OR identity_label = ?4)
            AND (?5 IS NULL OR
                 (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
-           AND (?6 IS NULL OR
-                json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
-           AND (?7 IS NULL OR
-                json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?7)
-           AND (?8 IS NULL OR created_at_ms >= ?8)
-           AND (?9 IS NULL OR created_at_ms < ?9)
-           AND lifetime_scope_kind = ?11
-           AND lifetime_scope_id IS ?12
+           AND (?6 IS NULL OR created_at_ms >= ?6)
+           AND (?7 IS NULL OR created_at_ms < ?7)
+           AND lifetime_scope_kind = ?9
+           AND lifetime_scope_id IS ?10
            AND cancel_requested_at_ms IS NOT NULL
-           AND cancel_requested_at_ms < ?13
+           AND cancel_requested_at_ms < ?11
            AND {{nonterminal_process_status(status)}}
      ) ORDER BY process_id ASC";
     }
@@ -503,16 +455,14 @@ lash_store_sql::statements! {
         /// `?3`. Artifact cleanup obligations live independently of tombstones.
         select_max_compactable_change_seq = "SELECT MAX(pruned_change_seq) FROM process_tombstones
              WHERE pruned_at_ms < ?1
-               AND (?2 IS NULL OR pruned_change_seq <= ?2)
-               AND process_id NOT IN (SELECT value FROM json_each(?3))";
+               AND (?2 IS NULL OR pruned_change_seq <= ?2)";
 
         /// Delete exactly the rows
         /// [`TombstoneSqliteStatements::select_max_compactable_change_seq`]
         /// measured.
         delete_compactable = "DELETE FROM process_tombstones
          WHERE pruned_at_ms < ?1
-           AND (?2 IS NULL OR pruned_change_seq <= ?2)
-           AND process_id NOT IN (SELECT value FROM json_each(?3))";
+           AND (?2 IS NULL OR pruned_change_seq <= ?2)";
     }
 }
 
@@ -633,8 +583,6 @@ pub(crate) fn list_processes_query(
         text(filter.identity_kind.clone()),
         text(filter.identity_label.clone()),
         text(definition),
-        text(filter.caused_by_occurrence_id.clone()),
-        text(filter.caused_by_subscription_id.clone()),
         integer(filter.created_at_start_ms),
         integer(filter.created_at_end_ms),
     ];

@@ -58,13 +58,12 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use lash_core_execution::runtime::{
-    AdmissionBoundary, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
-    QueuedWorkEnqueueOutcome, QueuedWorkKind, QueuedWorkPayload, TurnLaneAdmissionPolicy,
-    prepare_process_event_append, prepare_process_registration,
+    QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkEnqueueOutcome,
+    QueuedWorkPayload, prepare_process_event_append, prepare_process_registration,
 };
 use lash_core_execution::store::queued_work::{
     SESSION_COMMAND_BATCHES_PER_RUN, TurnLaneCandidate, admission_scan_limit, derive_batch_id,
-    select_leading_session_command, select_turn_work_prefix,
+    select_leading_session_command,
 };
 use lash_core_execution::store::{
     HydratedCheckpointComponent, HydratedSessionCheckpoint, RuntimeCommit, RuntimeCommitReceipt,
@@ -137,8 +136,6 @@ mod store_ownership;
 mod test_support;
 #[cfg(feature = "testing")]
 pub mod testing;
-mod trigger_schema;
-mod triggers;
 mod turn_ingress;
 
 pub use attachment_store::SqliteAttachmentStore;
@@ -164,8 +161,6 @@ use forks::*;
 use pending_turn_inputs::*;
 use queued_work::*;
 use schema::{apply_pragmas, ensure_versioned_schema};
-
-pub use triggers::SqliteTriggerStore;
 
 /// SQLite-backed store for checkpoint blobs, runtime session state, and
 /// Lashlang artifacts.

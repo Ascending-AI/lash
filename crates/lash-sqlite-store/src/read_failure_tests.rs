@@ -246,40 +246,6 @@ async fn readonly_connection_rejects_every_surviving_blob_write_path() {
     );
 }
 
-#[tokio::test]
-async fn queued_work_hydration_rejects_kind_payload_contradiction() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("family-corrupt.db");
-    let store = SqliteStore::open_file_for_testing(&path)
-        .await
-        .expect("open store");
-    let batch = store
-        .enqueue_queued_work(lash_core_execution::runtime::QueuedWorkBatchDraft::new(
-            "family-corrupt",
-            lash_core_execution::DeliveryPolicy::EarliestSafeBoundary,
-            lash_core_execution::runtime::SessionCommand::RefreshToolCatalog {
-                reason: "family test".into(),
-            },
-        ))
-        .await
-        .expect("enqueue command");
-    let raw = rusqlite::Connection::open(&path).expect("open raw connection");
-    // Plant corruption past the SQL CHECK to exercise the row decoder.
-    raw.pragma_update(None, "ignore_check_constraints", true)
-        .expect("allow the planted family contradiction");
-    raw.execute(
-        "UPDATE queued_work_batches SET work_kind = 'turn' WHERE batch_id = ?1",
-        params![batch.batch_id.as_str()],
-    )
-    .expect("contradict stored family");
-    assert_corrupt(
-        store
-            .list_queued_work(&SessionId::from("family-corrupt"))
-            .await,
-        "QueuedWorkBatch",
-    );
-}
-
 /// A queued batch and its payload come from one row snapshot. A competing
 /// delete after that read must preserve the fetched payload until the reader
 /// returns; the next read sees the deletion.

@@ -223,7 +223,7 @@ impl SqliteStore {
                                 .family
                                 .pending_session_work_ordering
                                 .sql(),
-                            params![session_id.as_str(), QueuedWorkKind::Control.as_str()],
+                            params![session_id.as_str()],
                             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
                         )
                         .map_err(sqlite_error)?;

@@ -144,22 +144,6 @@ impl FenceIntegrityInjector for PostgresFenceIntegrityInjector {
                 tx.commit().await.expect("commit corrupt pointer");
                 result
             }
-            FenceIntegrityTarget::TriggerRevision { subscription_id } => {
-                sqlx::query(
-                    "UPDATE lash_trigger_subscriptions
-                 SET revision = $1,
-                     record_json = jsonb_set(
-                         record_json::jsonb,
-                         '{revision}',
-                         to_jsonb($1::bigint)
-                     )::text
-                 WHERE subscription_id = $2",
-                )
-                .bind(value)
-                .bind(subscription_id)
-                .execute(self.storage.pool())
-                .await
-            }
         }
         .expect("inject raw Postgres fence value");
         assert_eq!(
@@ -189,21 +173,6 @@ impl FenceIntegrityInjector for PostgresFenceIntegrityInjector {
                 FenceIntegrityObservation {
                     value,
                     mutation_fingerprint: format!("{head_json}:{leaf:?}:{checkpoint:?}"),
-                }
-            }
-            FenceIntegrityTarget::TriggerRevision { subscription_id } => {
-                let (value, json, lifecycle, deleted_at_ms): (i64, String, String, Option<i64>) =
-                    sqlx::query_as(
-                        "SELECT revision, record_json, lifecycle, deleted_at_ms
-                         FROM lash_trigger_subscriptions WHERE subscription_id = $1",
-                    )
-                    .bind(subscription_id)
-                    .fetch_one(self.storage.pool())
-                    .await
-                    .expect("observe Postgres trigger revision");
-                FenceIntegrityObservation {
-                    value,
-                    mutation_fingerprint: format!("{json}:{lifecycle}:{deleted_at_ms:?}"),
                 }
             }
         }

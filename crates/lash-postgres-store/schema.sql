@@ -190,14 +190,9 @@ CREATE TABLE IF NOT EXISTS lash_session_meta (
     caused_by_effect_id TEXT,
     caused_by_call_id TEXT,
     caused_by_process_id TEXT,
-    -- caused_by_process_event_sequence and caused_by_subscription_revision are
-    -- u64 in `CausalRef`; the full u64 range does not fit PostgreSQL's signed
-    -- BIGINT, so both are stored as decimal TEXT and parsed on read.
+    -- caused_by_process_event_sequence is u64 in `CausalRef`; the full range
+    -- does not fit signed BIGINT, so it is decimal TEXT and parsed on read.
     caused_by_process_event_sequence TEXT,
-    caused_by_occurrence_id TEXT,
-    caused_by_subscription_id TEXT,
-    caused_by_subscription_incarnation TEXT,
-    caused_by_subscription_revision TEXT,
     caused_by_node_id TEXT,
     source_session_id TEXT,
     source_node_id TEXT,
@@ -211,9 +206,9 @@ CREATE TABLE IF NOT EXISTS lash_session_meta (
     fault_at_ms BIGINT CONSTRAINT ck_session_meta_fault CHECK ((fault_json IS NULL) = (fault_at_ms IS NULL)),
     CONSTRAINT ck_session_meta_retention CHECK ((retention_kind IN ('until_gc', 'head_only') AND retention_last_turns IS NULL) OR (retention_kind = 'last_turns' AND retention_last_turns > 0)),
     CONSTRAINT ck_session_meta_relation_kind CHECK (relation_kind IN ('root', 'child', 'fork')),
-    CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')),
+    CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'session_node')),
     CONSTRAINT ck_session_meta_relation_family CHECK ((relation_kind = 'root' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NULL AND source_node_id IS NULL) OR (relation_kind = 'child' AND parent_session_id IS NOT NULL AND source_session_id IS NULL AND source_node_id IS NULL) OR (relation_kind = 'fork' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NOT NULL) OR (relation_kind IS NOT NULL AND NOT (relation_kind IN ('root', 'child', 'fork')))),
-    CONSTRAINT ck_session_meta_caused_by_family CHECK ((caused_by_kind IS NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'turn' AND caused_by_session_id IS NOT NULL AND caused_by_turn_id IS NOT NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'effect_address' AND caused_by_effect_id IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'tool_call' AND caused_by_session_id IS NOT NULL AND caused_by_call_id IS NOT NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'process' AND caused_by_process_id IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'process_event' AND caused_by_process_id IS NOT NULL AND caused_by_process_event_sequence IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'trigger_occurrence' AND caused_by_occurrence_id IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'session_node' AND caused_by_session_id IS NOT NULL AND caused_by_node_id IS NOT NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL) OR (caused_by_kind IS NOT NULL AND NOT (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node'))))
+    CONSTRAINT ck_session_meta_caused_by_family CHECK ((caused_by_kind IS NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'turn' AND caused_by_session_id IS NOT NULL AND caused_by_turn_id IS NOT NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'effect_address' AND caused_by_effect_id IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'tool_call' AND caused_by_session_id IS NOT NULL AND caused_by_call_id IS NOT NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'process' AND caused_by_process_id IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'process_event' AND caused_by_process_id IS NOT NULL AND caused_by_process_event_sequence IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'session_node' AND caused_by_session_id IS NOT NULL AND caused_by_node_id IS NOT NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL) OR (caused_by_kind IS NOT NULL AND NOT (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'session_node'))))
 );
 
 -- The fault listing (ADR 0109 §9).
@@ -316,7 +311,6 @@ CREATE TABLE IF NOT EXISTS lash_queued_work_batches (
     session_id TEXT NOT NULL,
     source_key TEXT,
     delivery_policy TEXT NOT NULL,
-    work_kind TEXT NOT NULL,
     payload_json TEXT NOT NULL,
     authority_json TEXT NOT NULL,
     merge_key TEXT,
@@ -328,7 +322,7 @@ CREATE TABLE IF NOT EXISTS lash_queued_work_batches (
     terminal_cause TEXT, -- NULL while open or admitted; the tombstone's cause after.
     terminal_at_ms BIGINT,
     trace_cause_json TEXT, -- The batch's trace cause, written once at enqueue; NULL is a root cause.
-    CONSTRAINT ck_queued_work_batches_work_kind CHECK ((jsonb_typeof(payload_json::jsonb) = 'object' AND ((work_kind = 'turn' AND payload_json::jsonb ->> 'type' = 'process_wake') OR (work_kind = 'control' AND payload_json::jsonb ->> 'type' = 'session_command'))) IS TRUE),
+    CONSTRAINT ck_queued_work_batches_payload CHECK ((payload_json::jsonb ->> 'type' = 'session_command') IS TRUE),
     CONSTRAINT ck_queued_work_batches_delivery_policy CHECK (delivery_policy IN ('earliest_safe_boundary', 'after_current_turn_commit')),
     CONSTRAINT ck_queued_work_batches_admission_all_or_none CHECK ((admitted_run IS NULL) = (admitted_by IS NULL)),
     CONSTRAINT ck_queued_work_batches_terminal CHECK ((terminal_cause IS NULL AND terminal_at_ms IS NULL) OR (terminal_cause IN ('delivered', 'applied', 'cancelled', 'stale_config_revision') AND terminal_at_ms IS NOT NULL AND admitted_run IS NULL)),
@@ -341,7 +335,7 @@ CREATE INDEX IF NOT EXISTS idx_lash_queued_work_admission_order
     ON lash_queued_work_batches(session_id, admitted_run, enqueue_seq)
     WHERE terminal_cause IS NULL;
 CREATE INDEX IF NOT EXISTS idx_lash_queued_work_session_command_order
-    ON lash_queued_work_batches(session_id, work_kind, enqueued_at_ms, enqueue_seq)
+    ON lash_queued_work_batches(session_id, enqueued_at_ms, enqueue_seq)
     WHERE terminal_cause IS NULL;
 
 CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs (
@@ -520,7 +514,6 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     process_id TEXT COLLATE "C" PRIMARY KEY,
     start_key TEXT COLLATE "C",
     originator_id TEXT NOT NULL,
-    wake_session_id TEXT,
     identity_kind TEXT NOT NULL,
     identity_label TEXT,
     created_at_ms BIGINT NOT NULL,
@@ -588,8 +581,6 @@ CREATE INDEX IF NOT EXISTS idx_lash_processes_created
     ON lash_processes(created_at_ms);
 CREATE INDEX IF NOT EXISTS idx_lash_processes_updated
     ON lash_processes(updated_at_ms);
-CREATE INDEX IF NOT EXISTS idx_lash_processes_wake_session
-    ON lash_processes(wake_session_id);
 -- The pending-cancel sweep's scan: rows whose cancel request is older than a
 -- horizon and whose outcome is still open. The predicate is the negation of
 -- the terminal statuses. It must stay
@@ -688,115 +679,6 @@ CREATE TABLE IF NOT EXISTS lash_tool_intent_retired_owners (
     owner TEXT PRIMARY KEY
 );
 
-CREATE TABLE IF NOT EXISTS lash_trigger_subscription_change_clock (
-    singleton BOOLEAN PRIMARY KEY
-        CONSTRAINT ck_trigger_subscription_change_clock_singleton CHECK (singleton),
-    current_seq BIGINT NOT NULL
-        CONSTRAINT ck_trigger_subscription_change_clock_current_seq CHECK (current_seq >= 0),
-    pruned_through BIGINT NOT NULL
-        CONSTRAINT ck_trigger_subscription_change_clock_pruned_through
-        CHECK (pruned_through >= 0 AND pruned_through <= current_seq)
-);
-INSERT INTO lash_trigger_subscription_change_clock (singleton, current_seq, pruned_through)
-    VALUES (TRUE, 0, 0) ON CONFLICT (singleton) DO NOTHING;
-CREATE TABLE IF NOT EXISTS lash_trigger_subscription_changes (
-    subscription_id TEXT PRIMARY KEY,
-    change_seq BIGINT NOT NULL UNIQUE
-        CONSTRAINT ck_trigger_subscription_changes_change_seq CHECK (change_seq > 0),
-    deleted_at_ms BIGINT CONSTRAINT ck_trigger_subscription_changes_reclaimable CHECK ((deleted_at_ms IS NULL OR record_json::jsonb -> 'lifecycle' ->> 'lifecycle' = 'tombstoned') IS TRUE),
-    record_json TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_lash_trigger_subscription_changes_deleted
-    ON lash_trigger_subscription_changes(deleted_at_ms, change_seq)
-    WHERE deleted_at_ms IS NOT NULL;
-
-CREATE TABLE IF NOT EXISTS lash_trigger_subscriptions (
-    subscription_id TEXT PRIMARY KEY,
-    owner_scope TEXT NOT NULL,
-    subscription_key TEXT NOT NULL,
-    incarnation TEXT NOT NULL,
-    revision BIGINT NOT NULL,
-    definition_fingerprint TEXT NOT NULL,
-    source_type TEXT NOT NULL,
-    source_key TEXT NOT NULL,
-    lifecycle TEXT NOT NULL,
-    deleted_at_ms BIGINT,
-    created_at_ms BIGINT NOT NULL,
-    updated_at_ms BIGINT NOT NULL,
-    record_json TEXT NOT NULL,
-    CONSTRAINT ck_trigger_subscriptions_lifecycle
-        CHECK (lifecycle IN ('enabled', 'disabled', 'tombstoned')),
-    CONSTRAINT ck_trigger_subscriptions_lifecycle_deleted_at CHECK ((lifecycle IN ('enabled', 'disabled') AND deleted_at_ms IS NULL) OR (lifecycle = 'tombstoned' AND deleted_at_ms IS NOT NULL)),
-    UNIQUE(owner_scope, subscription_key)
-);
-CREATE INDEX IF NOT EXISTS idx_lash_trigger_subscriptions_registrant
-    ON lash_trigger_subscriptions(owner_scope, subscription_key);
-CREATE INDEX IF NOT EXISTS idx_lash_trigger_subscriptions_source
-    ON lash_trigger_subscriptions(source_type, source_key, lifecycle);
-
-CREATE TABLE IF NOT EXISTS lash_trigger_occurrences (
-    occurrence_id TEXT PRIMARY KEY,
-    idempotency_key TEXT NOT NULL UNIQUE,
-    source_type TEXT NOT NULL,
-    source_key TEXT NOT NULL,
-    occurred_at_ms BIGINT NOT NULL,
-    outcome_kind TEXT NOT NULL,
-    reclaimable_at_ms BIGINT,
-    record_json TEXT NOT NULL,
-    CONSTRAINT ck_trigger_occurrences_outcome_kind CHECK (outcome_kind IN ('fired', 'dropped')),
-    CONSTRAINT ck_trigger_occurrences_reclaimable CHECK (outcome_kind = 'fired' OR reclaimable_at_ms IS NULL),
-    UNIQUE (occurrence_id, outcome_kind)
-);
-CREATE INDEX IF NOT EXISTS idx_lash_trigger_occurrences_source
-    ON lash_trigger_occurrences(source_type, source_key, occurred_at_ms);
-CREATE INDEX IF NOT EXISTS idx_lash_trigger_occurrences_reclaimable
-    ON lash_trigger_occurrences(reclaimable_at_ms, occurrence_id)
-    WHERE reclaimable_at_ms IS NOT NULL;
-
--- An occurrence retention reclaimed (FIG-4513): written with the delete, so
--- an ingest that presents the identity again writes nothing back. The
--- host explicitly forgets it once its source will not redeliver (FIG-4610).
-CREATE TABLE IF NOT EXISTS lash_trigger_occurrence_tombstones (
-    occurrence_id TEXT PRIMARY KEY,
-    reclaimed_at_ms BIGINT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_lash_trigger_occurrence_tombstones_reclaimed
-    ON lash_trigger_occurrence_tombstones(reclaimed_at_ms);
-
-CREATE TABLE IF NOT EXISTS lash_trigger_deliveries (
-    occurrence_id TEXT NOT NULL,
-    occurrence_outcome_kind TEXT NOT NULL DEFAULT 'fired'
-        CONSTRAINT lash_trigger_deliveries_occurrence_outcome_kind_check
-        CHECK (occurrence_outcome_kind = 'fired'),
-    subscription_id TEXT NOT NULL,
-    process_id TEXT,
-    status TEXT NOT NULL,
-    refusal_json TEXT,
-    CONSTRAINT ck_trigger_deliveries_disposition CHECK (
-        (status = 'started' AND process_id IS NOT NULL AND refusal_json IS NULL)
-        OR (status = 'refused' AND process_id IS NULL AND refusal_json IS NOT NULL)
-    ),
-    subscription_incarnation TEXT NOT NULL,
-    subscription_revision BIGINT NOT NULL,
-    subscription_snapshot_json TEXT NOT NULL,
-    created_at_ms BIGINT NOT NULL,
-    PRIMARY KEY (occurrence_id, subscription_id),
-    FOREIGN KEY (occurrence_id, occurrence_outcome_kind) REFERENCES lash_trigger_occurrences(occurrence_id, outcome_kind) ON DELETE CASCADE
-);
-CREATE TABLE IF NOT EXISTS lash_trigger_mutation_receipts (
-    operation_id TEXT PRIMARY KEY,
-    owner_kind TEXT NOT NULL,
-    owner_id TEXT NOT NULL,
-    request_fingerprint TEXT NOT NULL,
-    result_json TEXT NOT NULL,
-    created_at_ms BIGINT NOT NULL,
-    CONSTRAINT ck_trigger_receipts_owner_kind CHECK (owner_kind IN ('session', 'host', 'platform'))
-);
-CREATE INDEX IF NOT EXISTS idx_lash_trigger_deliveries_subscription
-    ON lash_trigger_deliveries(subscription_id);
-CREATE INDEX IF NOT EXISTS idx_lash_trigger_deliveries_process
-    ON lash_trigger_deliveries(process_id);
-
 CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
     namespace TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,
@@ -806,7 +688,7 @@ CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
 CREATE TABLE IF NOT EXISTS lash_artifact_referrer_edges (
     namespace TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'source')),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'start', 'execution', 'host_pin', 'source')),
     referrer_id TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_id CHECK (char_length(referrer_id) > 0),
     PRIMARY KEY (namespace, artifact_ref, referrer_kind, referrer_id),
     FOREIGN KEY (namespace, artifact_ref) REFERENCES lash_lashlang_artifacts(namespace, artifact_ref) ON DELETE CASCADE
@@ -814,13 +696,13 @@ CREATE TABLE IF NOT EXISTS lash_artifact_referrer_edges (
 CREATE INDEX IF NOT EXISTS idx_lash_artifact_referrer_edges_referrer
     ON lash_artifact_referrer_edges(referrer_kind, referrer_id);
 CREATE TABLE IF NOT EXISTS lash_referrer_fences (
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_referrer_fences_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'start_input', 'execution', 'host_pin', 'session', 'upload', 'source')),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_referrer_fences_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'start', 'start_input', 'execution', 'host_pin', 'session', 'upload', 'source')),
     referrer_id   TEXT NOT NULL CONSTRAINT ck_referrer_fences_id CHECK (char_length(referrer_id) > 0),
     ended_at_ms   BIGINT NOT NULL,
     PRIMARY KEY (referrer_kind, referrer_id)
 );
 CREATE TABLE IF NOT EXISTS lash_artifact_cleanup_obligations (
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'start_input', 'execution', 'host_pin', 'session', 'upload', 'source')),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'start', 'start_input', 'execution', 'host_pin', 'session', 'upload', 'source')),
     referrer_id TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_id CHECK (char_length(referrer_id) > 0),
     cleanup_json TEXT NOT NULL,
     obligation_id TEXT NOT NULL,
@@ -982,7 +864,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_lash_run_records_outcome
 CREATE TABLE IF NOT EXISTS lash_session_close (
     session_id TEXT COLLATE "C" PRIMARY KEY,
     done_step TEXT CONSTRAINT ck_session_close_step
-        CHECK (done_step IN ('cancel', 'revoke', 'end_scope', 'triggers', 'artifacts', 'tombstone')),
+        CHECK (done_step IN ('cancel', 'revoke', 'end_scope', 'artifacts', 'tombstone')),
     begun_at_ms BIGINT NOT NULL,
     written_epoch BIGINT NOT NULL
 );
@@ -1107,7 +989,7 @@ CREATE TABLE IF NOT EXISTS lash_waits (
     owner_actor TEXT COLLATE "C" NOT NULL,
     owner_scope TEXT COLLATE "C" NOT NULL,
     kind TEXT NOT NULL CONSTRAINT ck_waits_kind CHECK (kind IN
-        ('tool_completion', 'custom', 'process_terminal', 'signal', 'timer', 'child_session')),
+        ('tool_completion', 'custom', 'process_terminal', 'timer', 'child_session')),
     host_resolvable BOOLEAN NOT NULL,
     target_process TEXT COLLATE "C",
     state TEXT NOT NULL CONSTRAINT ck_waits_state

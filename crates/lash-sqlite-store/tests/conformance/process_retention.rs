@@ -36,11 +36,9 @@ async fn assert_waiting_process_is_live_not_prunable(registry: &dyn ProcessRegis
             &process_id,
             lash_core_execution::WaitState {
                 since_ms: 1,
-                kind: lash_core_execution::WaitKind::Signal {
-                    name: "retention".to_string(),
-                    event_type: "retention.signal".to_string(),
-                    key: format!("{process_id}:wait"),
-                    ordinal: 1,
+                kind: lash_core_execution::WaitKind::Call {
+                    call_id: lash_core_execution::ToolCallId::fixture("retention-call"),
+                    tool_id: lash_core_execution::ToolId::new("retention"),
                 },
             },
             Vec::new(),

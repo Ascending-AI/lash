@@ -17,33 +17,21 @@ pub(crate) fn compact_process_tombstones_conn(
     conn: &Connection,
     cutoff_epoch_ms: i64,
     max_change_seq: Option<i64>,
-    outstanding_trigger_delivery_process_ids: &[ProcessId],
 ) -> Result<usize, lash_core_execution::PluginError> {
-    let outstanding_trigger_delivery_process_ids =
-        serde_json::to_string(outstanding_trigger_delivery_process_ids)
-            .map_err(process_decode_error)?;
     let compacted_through: Option<i64> = conn
         .query_row(
             process_sql()
                 .tombstone_sqlite
                 .select_max_compactable_change_seq
                 .sql(),
-            params![
-                cutoff_epoch_ms,
-                max_change_seq,
-                outstanding_trigger_delivery_process_ids
-            ],
+            params![cutoff_epoch_ms, max_change_seq,],
             |row| row.get(0),
         )
         .map_err(process_sqlite_error)?;
     let deleted = conn
         .execute(
             process_sql().tombstone_sqlite.delete_compactable.sql(),
-            params![
-                cutoff_epoch_ms,
-                max_change_seq,
-                outstanding_trigger_delivery_process_ids
-            ],
+            params![cutoff_epoch_ms, max_change_seq,],
         )
         .map_err(process_sqlite_error)?;
     if let Some(compacted_through) = compacted_through {
@@ -149,7 +137,6 @@ pub(crate) fn prune_terminal_processes_conn(
         return Ok(ProcessPruneReport {
             pruned_processes: 0,
             pruned_events: 0,
-            pruned_trigger_deliveries: 0,
         });
     }
 
@@ -237,12 +224,10 @@ fn prune_process_rows_conn(
     Ok(ProcessPruneReport {
         pruned_processes,
         pruned_events,
-        pruned_trigger_deliveries: 0,
     })
 }
 
-/// The prune eligibility predicate: retired rows with no wake still owed and
-/// no parent-end plan outstanding.
+/// The prune eligibility predicate: retired rows with no parent-end plan outstanding.
 pub(crate) fn prunable_terminal_process_ids_conn(
     conn: &Connection,
     cutoff: i64,

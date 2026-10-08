@@ -66,18 +66,13 @@ const SHAPE_ARTIFACT: &str = include_str!("../../schema-shape.txt");
 /// outside the verified scope, so a host port that omits it can hold a
 /// `singleton = FALSE` row that satisfies "the table has rows" and then fails
 /// every runtime read.
-const SEED_ROWS: [(&str, &str, &str); 4] = [
+const SEED_ROWS: [(&str, &str, &str); 3] = [
     (
         "lash_process_change_clock",
         "transactional process-change clock",
         "TRUE",
     ),
     ("lash_catalog_identity", "catalog identity", "TRUE"),
-    (
-        "lash_trigger_subscription_change_clock",
-        "transactional trigger-subscription change clock",
-        "TRUE",
-    ),
     (
         "lash_turn_change_clock",
         "transactional turn-change clock",

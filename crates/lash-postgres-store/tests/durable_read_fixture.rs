@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
-use lash_core_execution::{DeploymentStore, ProcessExecutionEnvStore, TriggerStore};
+use lash_core_execution::{DeploymentStore, ProcessExecutionEnvStore};
 use lash_postgres_store::PostgresStorage;
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
@@ -160,12 +160,7 @@ fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::Fixtur
             ),
     );
     let process_envs = Arc::new(storage.process_env_store());
-    let triggers = Arc::new(
-        storage
-            .trigger_store()
-            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>)
-            .with_incarnation_for_testing("durable-read-trigger-incarnation"),
-    );
+
     let store = Arc::new(
         storage
             .session_store_factory()
@@ -179,7 +174,6 @@ fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::Fixtur
         processes: Arc::clone(&processes)
             as Arc<dyn lash_core_execution::ConformanceProcessRegistry>,
         process_envs: process_envs as Arc<dyn ProcessExecutionEnvStore>,
-        triggers: triggers as Arc<dyn TriggerStore>,
         durable: Arc::new(storage.durable_store()) as Arc<dyn lash_core_execution::DurableStore>,
     }
 }

@@ -10,15 +10,6 @@ pub(crate) fn decode_delivery_policy(value: String) -> Result<DeliveryPolicy, St
     })
 }
 
-pub(crate) fn decode_work_kind(value: String) -> Result<QueuedWorkKind, StoreError> {
-    QueuedWorkKind::from_wire_str(&value).ok_or_else(|| {
-        stored_data_corrupt(
-            "QueuedWorkBatch",
-            format_args!("unknown queued-work kind `{value}`"),
-        )
-    })
-}
-
 pub(crate) fn decode_authority(value: String) -> Result<QueuedWorkAuthority, StoreError> {
     serde_json::from_str(&value).map_err(|err| stored_data_corrupt("QueuedWorkAuthority", err))
 }
@@ -49,7 +40,6 @@ pub(crate) struct QueuedBatchRow {
     pub(crate) session_id: SessionId,
     pub(crate) source_key: Option<String>,
     pub(crate) delivery_policy: String,
-    pub(crate) work_kind: String,
     pub(crate) payload_json: String,
     pub(crate) authority_json: String,
     pub(crate) merge_key: Option<String>,
@@ -66,12 +56,6 @@ impl QueuedBatchRow {
     /// Decode the batch and its sole payload from one row.
     fn into_batch(self) -> Result<QueuedWorkBatch, StoreError> {
         let payload = decode_queued_payload(self.payload_json)?;
-        if decode_work_kind(self.work_kind)? != payload.kind() {
-            return Err(stored_data_corrupt(
-                "QueuedWorkBatch",
-                "work kind contradicts its payload",
-            ));
-        }
         let batch = QueuedWorkBatch {
             batch_id: self.batch_id.try_into()?,
             session_id: self.session_id,
@@ -111,7 +95,6 @@ pub(crate) fn queued_batch_row_from_sql(
         session_id: crate::codec::sql_identity(row.get::<_, String>("session_id")?)?,
         source_key: row.get("source_key")?,
         delivery_policy: row.get("delivery_policy")?,
-        work_kind: row.get("work_kind")?,
         payload_json: row.get("payload_json")?,
         authority_json: row.get("authority_json")?,
         merge_key: row.get("merge_key")?,
@@ -206,7 +189,6 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
             batch.session_id.as_str(),
             batch.source_key.as_deref(),
             batch.delivery_policy.as_str(),
-            batch.kind().as_str(),
             encode_json(&batch.authority)?,
             batch.merge_key.as_deref(),
             now as i64,

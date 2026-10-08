@@ -84,18 +84,26 @@ impl SqliteProcessRegistry {
                 break;
             }
             for (sequence, json) in rows {
-                let mut event: ProcessEvent =
+                let event: ProcessEvent =
                     serde_json::from_str(&json).map_err(process_decode_error)?;
                 if let Some(digest) =
-                    lash_core_execution::runtime::release_process_event_payload(&mut event)
+                    lash_core_execution::runtime::release_process_event_payload(&event)
                 {
+                    let released = lash_core_execution::ReleasedProcessEvent {
+                        process_id: event.process_id.clone(),
+                        sequence: event.sequence,
+                        event_type: event.fact.event_type().to_owned(),
+                        invocation: event.invocation,
+                        trace_cause: event.trace_cause,
+                        occurred_at: event.occurred_at,
+                    };
                     crate::conn::cached_execute(
                         conn,
                         process_sql().event.release.sql(),
                         params![
                             process_id.as_str(),
                             sequence,
-                            process_encode_json(&event)?,
+                            process_encode_json(&released)?,
                             digest
                         ],
                     )

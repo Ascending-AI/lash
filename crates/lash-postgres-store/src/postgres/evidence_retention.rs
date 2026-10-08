@@ -69,20 +69,6 @@ pub(crate) async fn reclaim(
                 .map_err(store_sqlx_error)?
                 .rows_affected() as usize;
 
-        // Trigger mutation receipts are durable evidence under the same lever
-        // (FIG-4108): ownerless rows by age, session rows once the owner is
-        // durably deleted and no outstanding delivery names it.
-        let removed_trigger_mutation_receipt_count = sqlx::query(
-            crate::trigger_store::trigger_sql()
-                .retention_postgres
-                .reclaim_mutation_receipts
-                .sql(),
-        )
-        .bind(cutoff)
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?
-        .rows_affected() as usize;
         // The host tool-intent submission ledger is evidence of its owner
         // session under the same lever (FIG-1509): fence each durably
         // deleted owner with a row past the bound, then delete every fenced
@@ -110,7 +96,6 @@ pub(crate) async fn reclaim(
         Ok(lash_core_execution::store::RetentionReport {
             removed_receipt_count,
             removed_session_terminal_count,
-            removed_trigger_mutation_receipt_count,
             removed_tool_intent_submission_count,
             removed_attachment_root_count: 0,
             // Effect scopes are the engine's to retire; this catalog holds

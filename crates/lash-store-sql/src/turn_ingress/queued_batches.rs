@@ -9,12 +9,11 @@ pub const TABLE: &str = "queued_work_batches";
 /// each call site `join(", ")`ed into a `format!`; it is one list now, and the
 /// row decoders read by column name so the order is the list's to choose.
 pub const COLUMNS: &str = "enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-     work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest, admitted_run,
+     authority_json, merge_key, enqueued_at_ms, submission_digest, admitted_run,
      admitted_by, terminal_cause, terminal_at_ms, payload_json, trace_cause_json";
 
 /// The columns written after allocation under the session lock.
-pub const INSERT_COLUMNS: &str =
-    "enqueue_seq, batch_id, session_id, source_key, delivery_policy, work_kind,
+pub const INSERT_COLUMNS: &str = "enqueue_seq, batch_id, session_id, source_key, delivery_policy,
      authority_json, merge_key, enqueued_at_ms, submission_digest, payload_json, trace_cause_json";
 
 /// The facts the settlement verdict
@@ -30,7 +29,7 @@ crate::statements! {
     /// `queued_work_batches` statements both backends issue verbatim.
     pub struct QueuedBatchStatements @ "queued_work_batch" {
         select_by_id = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
+                    authority_json, merge_key, enqueued_at_ms, submission_digest,
                     admitted_run, admitted_by, terminal_cause, terminal_at_ms, payload_json, trace_cause_json
              FROM queued_work_batches
              WHERE batch_id = ?1";
@@ -57,7 +56,7 @@ crate::statements! {
         /// Every live batch of session `?1`, open or admitted, in enqueue
         /// order: tombstones are not queued work.
         list_by_session = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
+                    authority_json, merge_key, enqueued_at_ms, submission_digest,
                     admitted_run, admitted_by, terminal_cause, terminal_at_ms, payload_json, trace_cause_json
              FROM queued_work_batches
              WHERE session_id = ?1 AND terminal_cause IS NULL
@@ -67,7 +66,7 @@ crate::statements! {
         /// admitted, in enqueue order. Session commands are never admitted,
         /// so they are open until their tombstone.
         list_open = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
+                    authority_json, merge_key, enqueued_at_ms, submission_digest,
                     admitted_run, admitted_by, terminal_cause, terminal_at_ms, payload_json, trace_cause_json
              FROM queued_work_batches
              WHERE session_id = ?1 AND admitted_run IS NULL AND terminal_cause IS NULL
@@ -77,7 +76,7 @@ crate::statements! {
         /// `enqueue_seq` order: what a re-executed admission step reads back
         /// instead of choosing again (FIG-3927).
         select_admitted_by_step = "SELECT enqueue_seq, batch_id, session_id, source_key,
-                    delivery_policy, work_kind, authority_json, merge_key,
+                    delivery_policy, authority_json, merge_key,
                     enqueued_at_ms, submission_digest, admitted_run, admitted_by,
                     terminal_cause, terminal_at_ms, payload_json, trace_cause_json
              FROM queued_work_batches

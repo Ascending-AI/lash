@@ -31,7 +31,7 @@ use SqliteMigrationStep::{
 const FILE: &str = "lash.db";
 
 /// The rows the predecessor fixture writes, one per family of tables.
-const FIXTURE_ROWS: [(&str, &str); 3] = [
+const FIXTURE_ROWS: [(&str, &str); 2] = [
     (
         "session_meta",
         "INSERT INTO session_meta (session_id, relation_kind) VALUES ('fixture-session', 'root')",
@@ -41,12 +41,6 @@ const FIXTURE_ROWS: [(&str, &str); 3] = [
         "INSERT INTO process_tombstones \
          (process_id, terminal_label, pruned_at_ms, pruned_change_seq) \
          VALUES ('fixture', 'completed', 7, 7)",
-    ),
-    (
-        "trigger_mutation_receipts",
-        "INSERT INTO trigger_mutation_receipts \
-         (operation_id, owner_kind, owner_id, request_fingerprint, result_json, created_at_ms) \
-         VALUES ('fixture', 'host', 'h', 'f', '{}', 7)",
     ),
 ];
 
@@ -541,33 +535,4 @@ async fn sqlite_migration_backups_follow_the_configured_location_and_retention()
     assert_eq!(kept[0].1["state"], "migrated");
     assert_backup_holds(&kept[0].0, &kept[0].1, &rewound);
     assert_migrated(root.path()).await;
-}
-
-/// A component opened on its own never migrates: its installer refuses a
-/// database older than the build writes, typed, and leaves it unchanged.
-#[tokio::test]
-async fn sqlite_component_open_refuses_an_unmigrated_database() {
-    let (root, before) = predecessor().await;
-    let error = crate::SqliteTriggerStore::open(&database_path(root.path()))
-        .await
-        .map(drop)
-        .map_err(crate::sqlite_async_error)
-        .expect_err("an unmigrated database is refused");
-    assert!(
-        matches!(
-            error,
-            StoreError::Incompatible {
-                refusal: lash_core_execution::compat::CompatRefusal::MigrationPending {
-                    found,
-                    target,
-                    ..
-                }
-            } if (i64::from(found), i64::from(target)) == versions()
-        ),
-        "{error}"
-    );
-    assert!(
-        bytes(root.path()) == before,
-        "the refused open changed nothing"
-    );
 }

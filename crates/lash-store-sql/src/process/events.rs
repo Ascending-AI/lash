@@ -51,11 +51,6 @@ crate::statements! {
                                0)
                          ORDER BY sequence DESC LIMIT ?2";
 
-        /// How many `?2`-typed events process `?1` recorded at or before
-        /// sequence `?3`.
-        count_by_type_through_sequence = "SELECT COUNT(*) FROM process_events
-                 WHERE process_id = ?1 AND event_type = ?2 AND sequence <= ?3";
-
         /// At most `?4` rows of process `?1` after `?2` and at or below `?3`,
         /// in order: the next page of a prefix release.
         page_release = "SELECT sequence, event_json FROM process_events

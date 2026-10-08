@@ -45,7 +45,7 @@ lash_store_sql::statements! {
         /// The preflight's started-process walk (FIG-3571): every live
         /// process strictly after key `?1` (`NULL` from the start), at most
         /// `?2`, in key order.
-        list_live_for_preflight = "SELECT process_id, status, wake_session_id, record_json
+        list_live_for_preflight = "SELECT process_id, status, record_json
              FROM processes
              WHERE {{live_process_status(status)}}
                AND (?1::text IS NULL OR process_id > ?1::text)
@@ -85,7 +85,7 @@ lash_store_sql::statements! {
         /// The minted id itself never collides. SQLite reads the absence under
         /// the lock it inserts under.
         insert_registration = "INSERT INTO processes (
-                process_id, start_key, originator_id, wake_session_id,
+                process_id, start_key, originator_id,
                 identity_kind, identity_label,
                 created_at_ms, updated_at_ms, last_event_sequence,
                 status,
@@ -93,7 +93,7 @@ lash_store_sql::statements! {
                 record_json, consumer_hold_key, consumer_hold_scope_kind, consumer_hold_scope_id,
                 consumer_hold_cancels
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
              ON CONFLICT (start_key) WHERE start_key IS NOT NULL DO NOTHING";
 
         /// How many processes are live.
@@ -207,16 +207,12 @@ lash_store_sql::statements! {
                AND (?4::TEXT IS NULL OR identity_label = ?4)
                AND (?5::JSONB IS NULL OR
                     (record_json::JSONB #> '{identity,definition_id}') = ?5)
-               AND (?6::TEXT IS NULL OR
-                    (record_json::JSONB #>> '{provenance,caused_by,occurrence_id}') = ?6)
-               AND (?7::TEXT IS NULL OR
-                    (record_json::JSONB #>> '{provenance,caused_by,subscription_id}') = ?7)
-               AND (?8::BIGINT IS NULL OR created_at_ms >= ?8)
-               AND (?9::BIGINT IS NULL OR created_at_ms < ?9)
-               AND (?10::BIGINT IS NULL OR {{live_process_status(status)}}
-                    OR updated_at_ms >= ?10)
+               AND (?6::BIGINT IS NULL OR created_at_ms >= ?6)
+               AND (?7::BIGINT IS NULL OR created_at_ms < ?7)
+               AND (?8::BIGINT IS NULL OR {{live_process_status(status)}}
+                    OR updated_at_ms >= ?8)
              ORDER BY process_id ASC";
-        /// The same, narrowed to lifetime scope `?11` / `?12`.
+        /// The same, narrowed to lifetime scope `?9` / `?10`.
         list_by_lifetime_scope = "SELECT record_json FROM processes
              WHERE (?1::TEXT[] IS NULL OR status = ANY(?1))
                AND (?2::TEXT IS NULL OR originator_id = ?2)
@@ -224,18 +220,14 @@ lash_store_sql::statements! {
                AND (?4::TEXT IS NULL OR identity_label = ?4)
                AND (?5::JSONB IS NULL OR
                     (record_json::JSONB #> '{identity,definition_id}') = ?5)
-               AND (?6::TEXT IS NULL OR
-                    (record_json::JSONB #>> '{provenance,caused_by,occurrence_id}') = ?6)
-               AND (?7::TEXT IS NULL OR
-                    (record_json::JSONB #>> '{provenance,caused_by,subscription_id}') = ?7)
-               AND (?8::BIGINT IS NULL OR created_at_ms >= ?8)
-               AND (?9::BIGINT IS NULL OR created_at_ms < ?9)
-               AND (?10::BIGINT IS NULL OR {{live_process_status(status)}}
-                    OR updated_at_ms >= ?10)
-               AND lifetime_scope_kind = ?11
-               AND lifetime_scope_id IS NOT DISTINCT FROM ?12::TEXT
+               AND (?6::BIGINT IS NULL OR created_at_ms >= ?6)
+               AND (?7::BIGINT IS NULL OR created_at_ms < ?7)
+               AND (?8::BIGINT IS NULL OR {{live_process_status(status)}}
+                    OR updated_at_ms >= ?8)
+               AND lifetime_scope_kind = ?9
+               AND lifetime_scope_id IS NOT DISTINCT FROM ?10::TEXT
              ORDER BY process_id ASC";
-        /// The same, narrowed to rows whose cancel request is older than `?11`
+        /// The same, narrowed to rows whose cancel request is older than `?9`
         /// and whose outcome is still open.
         list_pending_cancel = "SELECT record_json FROM processes
              WHERE (?1::TEXT[] IS NULL OR status = ANY(?1))
@@ -244,16 +236,12 @@ lash_store_sql::statements! {
                AND (?4::TEXT IS NULL OR identity_label = ?4)
                AND (?5::JSONB IS NULL OR
                     (record_json::JSONB #> '{identity,definition_id}') = ?5)
-               AND (?6::TEXT IS NULL OR
-                    (record_json::JSONB #>> '{provenance,caused_by,occurrence_id}') = ?6)
-               AND (?7::TEXT IS NULL OR
-                    (record_json::JSONB #>> '{provenance,caused_by,subscription_id}') = ?7)
-               AND (?8::BIGINT IS NULL OR created_at_ms >= ?8)
-               AND (?9::BIGINT IS NULL OR created_at_ms < ?9)
-               AND (?10::BIGINT IS NULL OR {{live_process_status(status)}}
-                    OR updated_at_ms >= ?10)
+               AND (?6::BIGINT IS NULL OR created_at_ms >= ?6)
+               AND (?7::BIGINT IS NULL OR created_at_ms < ?7)
+               AND (?8::BIGINT IS NULL OR {{live_process_status(status)}}
+                    OR updated_at_ms >= ?8)
                AND cancel_requested_at_ms IS NOT NULL
-               AND cancel_requested_at_ms < ?11
+               AND cancel_requested_at_ms < ?9
                AND {{nonterminal_process_status(status)}}
              ORDER BY process_id ASC";
         /// Both narrowings at once.
@@ -264,18 +252,14 @@ lash_store_sql::statements! {
                AND (?4::TEXT IS NULL OR identity_label = ?4)
                AND (?5::JSONB IS NULL OR
                     (record_json::JSONB #> '{identity,definition_id}') = ?5)
-               AND (?6::TEXT IS NULL OR
-                    (record_json::JSONB #>> '{provenance,caused_by,occurrence_id}') = ?6)
-               AND (?7::TEXT IS NULL OR
-                    (record_json::JSONB #>> '{provenance,caused_by,subscription_id}') = ?7)
-               AND (?8::BIGINT IS NULL OR created_at_ms >= ?8)
-               AND (?9::BIGINT IS NULL OR created_at_ms < ?9)
-               AND (?10::BIGINT IS NULL OR {{live_process_status(status)}}
-                    OR updated_at_ms >= ?10)
-               AND lifetime_scope_kind = ?11
-               AND lifetime_scope_id IS NOT DISTINCT FROM ?12::TEXT
+               AND (?6::BIGINT IS NULL OR created_at_ms >= ?6)
+               AND (?7::BIGINT IS NULL OR created_at_ms < ?7)
+               AND (?8::BIGINT IS NULL OR {{live_process_status(status)}}
+                    OR updated_at_ms >= ?8)
+               AND lifetime_scope_kind = ?9
+               AND lifetime_scope_id IS NOT DISTINCT FROM ?10::TEXT
                AND cancel_requested_at_ms IS NOT NULL
-               AND cancel_requested_at_ms < ?13
+               AND cancel_requested_at_ms < ?11
                AND {{nonterminal_process_status(status)}}
              ORDER BY process_id ASC";
     }
@@ -457,16 +441,14 @@ lash_store_sql::statements! {
         /// after the process row has been pruned.
         select_max_compactable_change_seq = "SELECT MAX(pruned_change_seq) FROM process_tombstones
              WHERE pruned_at_ms < ?1
-               AND (?2::BIGINT IS NULL OR pruned_change_seq <= ?2)
-               AND NOT (process_id = ANY(?3::TEXT[]))";
+               AND (?2::BIGINT IS NULL OR pruned_change_seq <= ?2)";
 
         /// Delete exactly the rows
         /// [`TombstonePostgresStatements::select_max_compactable_change_seq`]
         /// measured.
         delete_compactable = "DELETE FROM process_tombstones
              WHERE pruned_at_ms < ?1
-               AND (?2::BIGINT IS NULL OR pruned_change_seq <= ?2)
-               AND NOT (process_id = ANY(?3::TEXT[]))";
+               AND (?2::BIGINT IS NULL OR pruned_change_seq <= ?2)";
     }
 }
 

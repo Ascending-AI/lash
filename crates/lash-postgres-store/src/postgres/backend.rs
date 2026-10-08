@@ -11,7 +11,6 @@ use lash_core_execution::{AttachmentStore, Clock};
 
 use crate::{
     PostgresLashlangArtifactStore, PostgresProcessRegistry, PostgresStorage, PostgresStore,
-    PostgresTriggerStore,
 };
 
 /// Every persistence port of one PostgreSQL database: the
@@ -36,7 +35,6 @@ struct StoreParts {
     durable_clock: Option<Arc<dyn Clock>>,
     session_store_factory: Arc<PostgresStore>,
     process_registry: Arc<PostgresProcessRegistry>,
-    trigger_store: Arc<PostgresTriggerStore>,
     process_env_store: Arc<PostgresLashlangArtifactStore>,
     attachment_store: Arc<dyn AttachmentStore>,
 }
@@ -69,7 +67,6 @@ impl PostgresStoreSet {
                 process_registry: Arc::new(
                     storage.process_registry().with_clock(Arc::clone(&clock)),
                 ),
-                trigger_store: Arc::new(storage.trigger_store().with_clock(Arc::clone(&clock))),
                 process_env_store: Arc::new(
                     storage.process_env_store().with_clock(Arc::clone(&clock)),
                 ),
@@ -110,11 +107,6 @@ impl PostgresStoreSet {
     /// The process registry, in the same database as the sessions.
     pub fn process_registry(&self) -> Arc<PostgresProcessRegistry> {
         Arc::clone(&self.inner.process_registry)
-    }
-
-    /// The trigger subscriptions and occurrences.
-    pub fn trigger_store(&self) -> Arc<PostgresTriggerStore> {
-        Arc::clone(&self.inner.trigger_store)
     }
 
     /// The store that serves process execution environments and Lashlang
@@ -160,10 +152,6 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
 
     fn process_registry(&self) -> Arc<dyn lash_core_execution::ProcessRegistry> {
         PostgresStoreSet::process_registry(self)
-    }
-
-    fn trigger_store(&self) -> Arc<dyn lash_core_execution::TriggerStore> {
-        PostgresStoreSet::trigger_store(self)
     }
 
     fn tool_material_store(&self) -> Arc<dyn lash_core_execution::store::ToolMaterialStore> {

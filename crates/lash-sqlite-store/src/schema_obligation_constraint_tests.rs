@@ -1,6 +1,6 @@
 //! Execute each physical obligation CHECK against every tagged field shape.
 
-use super::{PROCESS_SCHEMA, SCHEMA, TRIGGER_SCHEMA};
+use super::{PROCESS_SCHEMA, SCHEMA};
 use crate::schema_fragments::SESSION_RUNS_TABLES;
 use rusqlite::Connection;
 
@@ -76,7 +76,6 @@ fn sqlite_obligation_checks_reject_incomplete_variants() {
         ("core", SCHEMA),
         ("process", PROCESS_SCHEMA),
         ("roots", SESSION_RUNS_TABLES),
-        ("trigger", TRIGGER_SCHEMA),
     ] {
         for constraint in ddl.lines().filter_map(obligation_constraint) {
             constraints += 1;

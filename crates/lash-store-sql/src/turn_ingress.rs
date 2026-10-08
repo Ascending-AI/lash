@@ -102,7 +102,6 @@ crate::statements! {
                 SELECT enqueued_at_ms, enqueue_seq
                 FROM queued_work_batches AS queued
                 WHERE session_id = ?1
-                  AND work_kind = ?2
                   AND terminal_cause IS NULL
                 ORDER BY enqueue_seq ASC
                 LIMIT 1

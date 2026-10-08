@@ -81,7 +81,6 @@ pub mod recovery_leader;
 pub mod session;
 pub mod session_ingress;
 pub mod session_runs;
-pub mod trigger;
 pub mod turn_ingress;
 
 pub use render::{
@@ -129,13 +128,6 @@ pub const TABLES: &[&str] = &[
     process::processes::TABLE,
     process::tombstones::TABLE,
     recovery_leader::TABLE,
-    trigger::deliveries::TABLE,
-    trigger::mutation_receipts::TABLE,
-    trigger::occurrence_tombstones::TABLE,
-    trigger::occurrences::TABLE,
-    trigger::subscriptions::TABLE,
-    trigger::subscription_changes::TABLE,
-    trigger::subscription_change_clock::TABLE,
     turn_ingress::cancel_requests::TABLE,
     turn_ingress::pending_inputs::TABLE,
     turn_ingress::run_specs::TABLE,
@@ -184,17 +176,6 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(attachment::uploads::UploadStatements::NEUTRAL);
     statements.extend_from_slice(attachment::condemnation::CondemnationStatements::NEUTRAL);
     statements.extend_from_slice(attachment::sweep_clock::SweepClockStatements::NEUTRAL);
-    statements.extend_from_slice(trigger::deliveries::DeliveryStatements::NEUTRAL);
-    statements.extend_from_slice(trigger::mutation_receipts::MutationReceiptStatements::NEUTRAL);
-    statements
-        .extend_from_slice(trigger::occurrence_tombstones::OccurrenceTombstoneStatements::NEUTRAL);
-    statements.extend_from_slice(trigger::occurrences::OccurrenceStatements::NEUTRAL);
-    statements.extend_from_slice(trigger::subscriptions::SubscriptionStatements::NEUTRAL);
-    statements
-        .extend_from_slice(trigger::subscription_changes::SubscriptionChangeStatements::NEUTRAL);
-    statements.extend_from_slice(
-        trigger::subscription_change_clock::SubscriptionChangeClockStatements::NEUTRAL,
-    );
     statements.extend_from_slice(process::events::EventStatements::NEUTRAL);
     statements.extend_from_slice(process::event_horizons::EventHorizonStatements::NEUTRAL);
     statements.extend_from_slice(process::observers::ObserverStatements::NEUTRAL);

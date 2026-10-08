@@ -169,7 +169,6 @@ pub(super) async fn read(
             get(row, 1)?,
             &get::<String>(row, 2)?,
             &get::<String>(row, 3)?,
-            &get::<String>(row, 4)?,
         )?);
     }
     Ok(mailbox)
@@ -201,26 +200,19 @@ fn decode_input(
 fn decode_batch(
     batch: String,
     seq: i64,
-    work_kind: &str,
     policy: &str,
     payload_json: &str,
 ) -> Result<MailBatch, DurableError> {
     let payload: lash_core_execution::runtime::QueuedWorkPayload =
         serde_json::from_str(payload_json).map_err(|error| undecodable("batch payload", error))?;
-    let kind = match (work_kind, &payload) {
-        ("turn", _) => MailBatchKind::Turn,
-        (
-            "control",
-            lash_core_execution::runtime::QueuedWorkPayload::SessionCommand { command },
-        ) if matches!(
-            **command,
-            lash_core_execution::runtime::SessionCommand::RunPluginTask { .. }
-        ) =>
-        {
-            MailBatchKind::Operation
-        }
-        ("control", _) => MailBatchKind::Control,
-        (other, _) => return Err(undecodable("batch kind", other)),
+    let lash_core_execution::runtime::QueuedWorkPayload::SessionCommand { command } = &payload;
+    let kind = if matches!(
+        **command,
+        lash_core_execution::runtime::SessionCommand::RunPluginTask { .. }
+    ) {
+        MailBatchKind::Operation
+    } else {
+        MailBatchKind::Control
     };
     Ok(MailBatch {
         batch: BatchId::parse(batch).map_err(|error| undecodable("batch id", error))?,

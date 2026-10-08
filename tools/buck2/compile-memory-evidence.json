@@ -432,12 +432,6 @@
       "p99_anon_peak_bytes": 110358528,
       "samples": 15
     },
-    "lash-internal-sqlite-store/fencing_backstop": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 61427712,
-      "samples": 7
-    },
     "lash-internal-sqlite-store/integration": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
@@ -1183,12 +1177,6 @@
       "oom_kills": 0,
       "p99_anon_peak_bytes": 519245824,
       "samples": 22
-    },
-    "lash-internal-sqlite-store/fencing_backstop": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 320749568,
-      "samples": 18
     },
     "lash-internal-sqlite-store/integration": {
       "legacy_peak_bytes": 0,

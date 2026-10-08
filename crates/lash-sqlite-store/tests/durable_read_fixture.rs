@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use lash_core_execution::{DeploymentStore, ProcessExecutionEnvStore, TriggerStore};
+use lash_core_execution::{DeploymentStore, ProcessExecutionEnvStore};
 use lash_sqlite_store::{SqliteStoreSet, SqliteStoreSetOptions};
 use serde::{Deserialize, Serialize};
 
@@ -182,7 +182,6 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
     .expect("open the coherent SQLite fixture");
     let runtime = stores.session_store_factory();
     let processes = stores.process_registry();
-    let triggers = stores.trigger_store();
     let durable = Arc::new(stores.durable_store());
     drop(stores);
     // The handles outlive the dropped assembly; take ownership only to pin
@@ -192,18 +191,13 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
             .unwrap_or_else(|_| panic!("fixture owns the catalog handle"))
             .with_commit_count_seed_for_testing(0),
     );
-    let triggers = Arc::new(
-        Arc::try_unwrap(triggers)
-            .unwrap_or_else(|_| panic!("fixture owns the trigger handle"))
-            .with_incarnation_for_testing("durable-read-trigger-incarnation"),
-    );
+
     fixture::FixtureHandles {
         clock: Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
         store: Arc::clone(&runtime) as Arc<dyn DeploymentStore>,
         processes: Arc::clone(&processes)
             as Arc<dyn lash_core_execution::ConformanceProcessRegistry>,
         process_envs: runtime as Arc<dyn ProcessExecutionEnvStore>,
-        triggers: triggers as Arc<dyn TriggerStore>,
         durable: durable as Arc<dyn lash_core_execution::DurableStore>,
     }
 }

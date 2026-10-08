@@ -21,14 +21,3 @@ mod session_history;
 mod suite;
 
 const SUBSTRATE: backend_fixture::Substrate = backend_fixture::Substrate::Memory;
-
-#[tokio::test]
-async fn ingress_and_replay_preserve_canonical_subscription_order() {
-    let stores = lash_sqlite_store::SqliteStoreSet::memory()
-        .await
-        .expect("memory store set");
-    lash_conformance::first_ingress_and_replay_share_canonical_subscription_order(
-        lash_conformance::TriggerStores::of(&stores),
-    )
-    .await;
-}

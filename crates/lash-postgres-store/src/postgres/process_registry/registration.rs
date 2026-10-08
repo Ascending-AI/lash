@@ -1,6 +1,5 @@
 //! One prepared registration applied on a caller's PostgreSQL transaction:
-//! the registrar's own, or a trigger start's, which binds its delivery in
-//! the same commit (ADR 0132 §12).
+//! the registrar's own transaction (ADR 0132 §12).
 
 use super::*;
 
@@ -13,16 +12,10 @@ pub(crate) enum AppliedRegistration {
     Created(ProcessRecord),
     /// The process a retained start under the key already holds, and its
     /// wake session; nothing was written.
-    Retained {
-        record: ProcessRecord,
-        wake: Option<SessionId>,
-    },
+    Retained { record: ProcessRecord },
     /// A concurrent start under the same key won the insert: the caller rolls
     /// its transaction back, and the winner is the start's process.
-    LostRace {
-        winner: ProcessRecord,
-        wake: Option<SessionId>,
-    },
+    LostRace { winner: ProcessRecord },
 }
 
 /// Apply one prepared registration on `tx`.
@@ -43,12 +36,11 @@ pub(crate) async fn apply_registration_tx(
     let mut observers = observers;
     observers.sort();
     observers.dedup();
-    let wake_session_id = registration.wake_session_id.clone();
     let consumer_hold = registration.consumer_hold.clone();
     let start_key = registration.start_key.clone();
     // While the process minted for a key is retained, a start under the
     // same key returns that process untouched (ADR 0107); a host's key
-    // must also present its start, wake target included.
+    // must also present its start, with equal content.
     if let Some(start_key) = start_key.as_ref()
         && let Some(existing) = load_process_by_start_key_tx(tx, start_key).await?
     {
@@ -60,11 +52,7 @@ pub(crate) async fn apply_registration_tx(
                 .into(),
             );
         }
-        let wake = wake_session_id_tx(tx, &existing.id).await?;
-        return Ok(AppliedRegistration::Retained {
-            record: existing,
-            wake,
-        });
+        return Ok(AppliedRegistration::Retained { record: existing });
     }
     if retained {
         return Err(
@@ -129,7 +117,6 @@ pub(crate) async fn apply_registration_tx(
                 .map(lash_core_execution::StartKey::as_str),
         )
         .bind(record.originator_id().as_str())
-        .bind(wake_session_id.as_deref())
         .bind(record.identity.kind.as_str())
         .bind(&record.identity.label)
         .bind(record.created_at_ms as i64)
@@ -177,8 +164,7 @@ pub(crate) async fn apply_registration_tx(
                 record.id
             )));
         };
-        let wake = wake_session_id_tx(tx, &winner.id).await?;
-        return Ok(AppliedRegistration::LostRace { winner, wake });
+        return Ok(AppliedRegistration::LostRace { winner });
     }
     if let Some(env) = record.env_ref.as_ref() {
         crate::artifact_store::acquire_process_env_tx(tx, env, &record.id).await?;

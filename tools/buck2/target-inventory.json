@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 0,
   "cargo_package_count": 53,
-  "cargo_target_count": 218,
+  "cargo_target_count": 217,
   "facade_production_check_targets": [
     "//crates/lash-core-effect:lash-core-effect__fv_48d34494[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_e38b9031[check]",
@@ -475,8 +475,6 @@
     "//crates/lash-sqlite-store:conformance_memory__test__fv_6074d511",
     "//crates/lash-sqlite-store:durable_read_fixture__test__fv_007948e0",
     "//crates/lash-sqlite-store:durable_read_fixture__test__fv_6074d511",
-    "//crates/lash-sqlite-store:fencing_backstop__test__fv_007948e0",
-    "//crates/lash-sqlite-store:fencing_backstop__test__fv_6074d511",
     "//crates/lash-sqlite-store:integration__test__fv_007948e0",
     "//crates/lash-sqlite-store:integration__test__fv_6074d511",
     "//crates/lash-sqlite-store:lash-sqlite-store__fv_051f7430[static]",
@@ -1281,8 +1279,6 @@
     "//crates/lash-sqlite-store:conformance_memory__test__fv_6074d511[check]",
     "//crates/lash-sqlite-store:durable_read_fixture__test__fv_007948e0[check]",
     "//crates/lash-sqlite-store:durable_read_fixture__test__fv_6074d511[check]",
-    "//crates/lash-sqlite-store:fencing_backstop__test__fv_007948e0[check]",
-    "//crates/lash-sqlite-store:fencing_backstop__test__fv_6074d511[check]",
     "//crates/lash-sqlite-store:integration__test__fv_007948e0[check]",
     "//crates/lash-sqlite-store:integration__test__fv_6074d511[check]",
     "//crates/lash-sqlite-store:lash-sqlite-store__fv_051f7430[check]",
@@ -2087,8 +2083,6 @@
     "//crates/lash-sqlite-store:conformance_memory__test__fv_6074d511",
     "//crates/lash-sqlite-store:durable_read_fixture__test__fv_007948e0",
     "//crates/lash-sqlite-store:durable_read_fixture__test__fv_6074d511",
-    "//crates/lash-sqlite-store:fencing_backstop__test__fv_007948e0",
-    "//crates/lash-sqlite-store:fencing_backstop__test__fv_6074d511",
     "//crates/lash-sqlite-store:integration__test__fv_007948e0",
     "//crates/lash-sqlite-store:integration__test__fv_6074d511",
     "//crates/lash-sqlite-store:lash-sqlite-store__fv_051f7430",
@@ -2521,7 +2515,6 @@
     "//crates/lash-sqlite-store:conformance__test__fv_6074d511",
     "//crates/lash-sqlite-store:conformance_memory__test__fv_6074d511",
     "//crates/lash-sqlite-store:durable_read_fixture__test__fv_6074d511",
-    "//crates/lash-sqlite-store:fencing_backstop__test__fv_6074d511",
     "//crates/lash-sqlite-store:integration__test__fv_6074d511",
     "//crates/lash-sqlite-store:lash-sqlite-store__unit_test__fv_6074d511",
     "//crates/lash-sqlite-store:process_change_horizon__test__fv_6074d511",
@@ -28403,52 +28396,6 @@
       "package": "lash-internal-sqlite-store"
     },
     {
-      "build_label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_007948e0",
-      "check_label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_007948e0[check]",
-      "clippy_label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_007948e0__clippy[clippy.txt]",
-      "features": [
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_007948e0",
-      "package": "lash-internal-sqlite-store"
-    },
-    {
-      "build_label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_007948e0",
-      "check_label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_007948e0[check]",
-      "clippy_label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_007948e0__clippy[clippy.txt]",
-      "features": [
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_007948e0",
-      "package": "lash-internal-sqlite-store"
-    },
-    {
-      "build_label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_6074d511",
-      "check_label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_6074d511[check]",
-      "clippy_label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_6074d511__clippy[clippy.txt]",
-      "features": [
-        "synthetic-next",
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_6074d511",
-      "package": "lash-internal-sqlite-store"
-    },
-    {
-      "build_label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_6074d511",
-      "check_label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_6074d511[check]",
-      "clippy_label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_6074d511__clippy[clippy.txt]",
-      "features": [
-        "synthetic-next",
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_6074d511",
-      "package": "lash-internal-sqlite-store"
-    },
-    {
       "build_label": "//crates/lash-sqlite-store:integration__test__fv_007948e0",
       "check_label": "//crates/lash-sqlite-store:integration__test__fv_007948e0[check]",
       "clippy_label": "//crates/lash-sqlite-store:integration__test__fv_007948e0__clippy[clippy.txt]",
@@ -41725,7 +41672,6 @@
       "//crates/lash-sqlite-store:conformance__test__fv_007948e0",
       "//crates/lash-sqlite-store:conformance_memory__test__fv_007948e0",
       "//crates/lash-sqlite-store:durable_read_fixture__test__fv_007948e0",
-      "//crates/lash-sqlite-store:fencing_backstop__test__fv_007948e0",
       "//crates/lash-sqlite-store:integration__test__fv_007948e0",
       "//crates/lash-sqlite-store:lash-sqlite-store__fv_28c773e1",
       "//crates/lash-sqlite-store:lash-sqlite-store__fv_2e321abf",
@@ -41960,8 +41906,6 @@
       "//crates/lash-sqlite-store:conformance_memory__test__fv_6074d511",
       "//crates/lash-sqlite-store:durable_read_fixture__test__fv_007948e0",
       "//crates/lash-sqlite-store:durable_read_fixture__test__fv_6074d511",
-      "//crates/lash-sqlite-store:fencing_backstop__test__fv_007948e0",
-      "//crates/lash-sqlite-store:fencing_backstop__test__fv_6074d511",
       "//crates/lash-sqlite-store:integration__test__fv_007948e0",
       "//crates/lash-sqlite-store:integration__test__fv_6074d511",
       "//crates/lash-sqlite-store:lash-sqlite-store__fv_051f7430",
@@ -42047,7 +41991,7 @@
       "//crates/lashlang:lashlang__unit_test__fv_fc3b3750"
     ]
   },
-  "generated_label_count": 280,
+  "generated_label_count": 279,
   "packages": [
     {
       "declared_features": [
@@ -44993,15 +44937,6 @@
           "tags": []
         },
         {
-          "build_label": "//crates/lash-sqlite-store:fencing_backstop__test",
-          "cargo": "fencing_backstop",
-          "check_label": "//crates/lash-sqlite-store:fencing_backstop__test[check]",
-          "clippy_label": "//crates/lash-sqlite-store:fencing_backstop__test__clippy[clippy.txt]",
-          "kind": "test",
-          "label": "//crates/lash-sqlite-store:fencing_backstop__test",
-          "tags": []
-        },
-        {
           "build_label": "//crates/lash-sqlite-store:process_change_horizon__test",
           "cargo": "process_change_horizon",
           "check_label": "//crates/lash-sqlite-store:process_change_horizon__test[check]",
@@ -46947,9 +46882,6 @@
     "//crates/lash-sqlite-store:durable_read_fixture__test": 300,
     "//crates/lash-sqlite-store:durable_read_fixture__test__fv_007948e0": 300,
     "//crates/lash-sqlite-store:durable_read_fixture__test__fv_6074d511": 300,
-    "//crates/lash-sqlite-store:fencing_backstop__test": 300,
-    "//crates/lash-sqlite-store:fencing_backstop__test__fv_007948e0": 300,
-    "//crates/lash-sqlite-store:fencing_backstop__test__fv_6074d511": 300,
     "//crates/lash-sqlite-store:integration__test": 300,
     "//crates/lash-sqlite-store:integration__test__fv_007948e0": 300,
     "//crates/lash-sqlite-store:integration__test__fv_6074d511": 300,
@@ -47404,7 +47336,6 @@
     "//crates/lash-sqlite-store:conformance__test",
     "//crates/lash-sqlite-store:conformance_memory__test",
     "//crates/lash-sqlite-store:durable_read_fixture__test",
-    "//crates/lash-sqlite-store:fencing_backstop__test",
     "//crates/lash-sqlite-store:integration__test",
     "//crates/lash-sqlite-store:lash-sqlite-store[static]",
     "//crates/lash-sqlite-store:lash-sqlite-store__unit_test",
@@ -47718,7 +47649,6 @@
     "//crates/lash-sqlite-store:conformance__test[check]",
     "//crates/lash-sqlite-store:conformance_memory__test[check]",
     "//crates/lash-sqlite-store:durable_read_fixture__test[check]",
-    "//crates/lash-sqlite-store:fencing_backstop__test[check]",
     "//crates/lash-sqlite-store:integration__test[check]",
     "//crates/lash-sqlite-store:lash-sqlite-store[check]",
     "//crates/lash-sqlite-store:lash-sqlite-store__fv_fb420eb2[check]",
@@ -48012,7 +47942,6 @@
     "//crates/lash-sqlite-store:conformance__test__clippy[clippy.txt]",
     "//crates/lash-sqlite-store:conformance_memory__test__clippy[clippy.txt]",
     "//crates/lash-sqlite-store:durable_read_fixture__test__clippy[clippy.txt]",
-    "//crates/lash-sqlite-store:fencing_backstop__test__clippy[clippy.txt]",
     "//crates/lash-sqlite-store:integration__test__clippy[clippy.txt]",
     "//crates/lash-sqlite-store:lash-sqlite-store__clippy[clippy.txt]",
     "//crates/lash-sqlite-store:lash-sqlite-store__unit_test__clippy[clippy.txt]",
@@ -48293,7 +48222,6 @@
     "//crates/lash-sqlite-store:conformance__test",
     "//crates/lash-sqlite-store:conformance_memory__test",
     "//crates/lash-sqlite-store:durable_read_fixture__test",
-    "//crates/lash-sqlite-store:fencing_backstop__test",
     "//crates/lash-sqlite-store:integration__test",
     "//crates/lash-sqlite-store:lash-sqlite-store",
     "//crates/lash-sqlite-store:lash-sqlite-store__unit_test",
@@ -48575,7 +48503,6 @@
     "//crates/lash-sqlite-store:conformance__test",
     "//crates/lash-sqlite-store:conformance_memory__test",
     "//crates/lash-sqlite-store:durable_read_fixture__test",
-    "//crates/lash-sqlite-store:fencing_backstop__test",
     "//crates/lash-sqlite-store:integration__test",
     "//crates/lash-sqlite-store:lash-sqlite-store",
     "//crates/lash-sqlite-store:lash-sqlite-store__unit_test",
@@ -48795,7 +48722,6 @@
     "//crates/lash-sqlite-store:conformance__test",
     "//crates/lash-sqlite-store:conformance_memory__test",
     "//crates/lash-sqlite-store:durable_read_fixture__test",
-    "//crates/lash-sqlite-store:fencing_backstop__test",
     "//crates/lash-sqlite-store:integration__test",
     "//crates/lash-sqlite-store:lash-sqlite-store__unit_test",
     "//crates/lash-sqlite-store:process_change_horizon__test",
@@ -48945,7 +48871,6 @@
     "//crates/lash-sqlite-store:conformance__test",
     "//crates/lash-sqlite-store:conformance_memory__test",
     "//crates/lash-sqlite-store:durable_read_fixture__test",
-    "//crates/lash-sqlite-store:fencing_backstop__test",
     "//crates/lash-sqlite-store:integration__test",
     "//crates/lash-sqlite-store:lash-sqlite-store__unit_test",
     "//crates/lash-sqlite-store:process_change_horizon__test",
@@ -49119,7 +49044,6 @@
     "//crates/lash-sqlite-store:conformance__test",
     "//crates/lash-sqlite-store:conformance_memory__test",
     "//crates/lash-sqlite-store:durable_read_fixture__test",
-    "//crates/lash-sqlite-store:fencing_backstop__test",
     "//crates/lash-sqlite-store:integration__test",
     "//crates/lash-sqlite-store:lash-sqlite-store__unit_test",
     "//crates/lash-sqlite-store:process_change_horizon__test",
@@ -49485,7 +49409,6 @@
     "//crates/lash-sqlite-store:conformance__test",
     "//crates/lash-sqlite-store:conformance_memory__test",
     "//crates/lash-sqlite-store:durable_read_fixture__test",
-    "//crates/lash-sqlite-store:fencing_backstop__test",
     "//crates/lash-sqlite-store:integration__test",
     "//crates/lash-sqlite-store:lash-sqlite-store__unit_test",
     "//crates/lash-sqlite-store:process_change_horizon__test",
@@ -49669,7 +49592,6 @@
     "//crates/lash-sqlite-store:conformance__test",
     "//crates/lash-sqlite-store:conformance_memory__test",
     "//crates/lash-sqlite-store:durable_read_fixture__test",
-    "//crates/lash-sqlite-store:fencing_backstop__test",
     "//crates/lash-sqlite-store:integration__test",
     "//crates/lash-sqlite-store:lash-sqlite-store__unit_test",
     "//crates/lash-sqlite-store:process_change_horizon__test",

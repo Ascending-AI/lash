@@ -13,11 +13,11 @@ lash_store_sql::statements! {
         /// the same transaction, so its unique constraint is only the
         /// backstop.
         insert_new = "INSERT INTO queued_work_batches (enqueue_seq,
-                 batch_id, session_id, source_key, delivery_policy, work_kind,
+                 batch_id, session_id, source_key, delivery_policy,
                  authority_json, merge_key, enqueued_at_ms, submission_digest, payload_json,
                  trace_cause_json
              )
-             VALUES (?9, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?10, ?11, ?12)";
+             VALUES (?8, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?9, ?10, ?11)";
 
         /// The facts the settlement verdict consults about live batch `?2`
         /// of session `?1`: a tombstone answers nothing, as a missing row
@@ -32,7 +32,7 @@ lash_store_sql::statements! {
         ///
         /// Same lock fork as [`settlement_facts`](Self::settlement_facts).
         select_cancelable = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
+                    authority_json, merge_key, enqueued_at_ms, submission_digest,
                     admitted_run, admitted_by, terminal_cause, terminal_at_ms, payload_json, trace_cause_json
              FROM queued_work_batches
              WHERE session_id = ?1
@@ -44,81 +44,24 @@ lash_store_sql::statements! {
         ///
         /// At an idle boundary the head is whatever is open, commands first:
         /// the command lane drains before the turn lane (ADR 0101 §4). The
-        /// candidate set is the run of the head's own kind from the head
-        /// onwards.
+        /// candidate set is the open command prefix from the head onwards.
         admission_candidates_idle = "WITH queued_work_head_candidate AS (
-                 SELECT enqueue_seq AS head_enqueue_seq, work_kind AS head_work_kind
+                 SELECT enqueue_seq AS head_enqueue_seq
                  FROM queued_work_batches
                  WHERE session_id = ?1 AND admitted_run IS NULL AND terminal_cause IS NULL
-                 ORDER BY CASE WHEN work_kind = 'control' THEN 0 ELSE 1 END, enqueue_seq ASC
+                 ORDER BY enqueue_seq ASC
                  LIMIT 1
              )
              SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
+                    authority_json, merge_key, enqueued_at_ms, submission_digest,
                     admitted_run, admitted_by, terminal_cause, terminal_at_ms, payload_json, trace_cause_json
              FROM queued_work_batches
              CROSS JOIN queued_work_head_candidate
              WHERE session_id = ?1
                AND admitted_run IS NULL AND terminal_cause IS NULL
                AND enqueue_seq >= head_enqueue_seq
-               AND work_kind = head_work_kind
              ORDER BY enqueue_seq ASC
              LIMIT ?2";
 
-        /// Session `?1`'s open queued turn work a run's admission composes
-        /// from at an idle boundary, up to `?2` of them (ADR 0101 §4, §5).
-        ///
-        /// The admission chose the turn lane at a boundary whose command
-        /// lane was empty, so a command enqueued since holds back only the
-        /// rows after it: the run starts at the earliest open turn work and
-        /// ends at the earliest open command, exactly as the next-turn input
-        /// scan does.
-        admission_candidates_turn_lane = "WITH queued_work_head_candidate AS (
-                 SELECT enqueue_seq AS head_enqueue_seq
-                 FROM queued_work_batches
-                 WHERE session_id = ?1 AND work_kind = 'turn' AND admitted_run IS NULL AND terminal_cause IS NULL
-                 ORDER BY enqueue_seq ASC
-                 LIMIT 1
-             )
-             SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
-                    admitted_run, admitted_by, terminal_cause, terminal_at_ms, payload_json, trace_cause_json
-             FROM queued_work_batches
-             CROSS JOIN queued_work_head_candidate
-             WHERE session_id = ?1 AND work_kind = 'turn'
-               AND admitted_run IS NULL AND terminal_cause IS NULL
-               AND enqueue_seq >= head_enqueue_seq
-               AND NOT EXISTS (
-                    SELECT 1 FROM queued_work_batches AS commands
-                    WHERE commands.session_id = ?1 AND commands.work_kind = 'control'
-                      AND commands.terminal_cause IS NULL
-                      AND commands.enqueue_seq < queued_work_batches.enqueue_seq
-               )
-             ORDER BY enqueue_seq ASC
-             LIMIT ?2";
-
-        /// [`admission_candidates_idle`](Self::admission_candidates_idle) at
-        /// a turn checkpoint, where only work whose delivery policy admits the
-        /// earliest safe boundary may start: an open head that must wait for
-        /// the current turn's commit blocks everything behind it.
-        admission_candidates_boundary = "WITH queued_work_head_candidate AS (
-                 SELECT enqueue_seq AS head_enqueue_seq,
-                        delivery_policy AS head_delivery_policy
-                 FROM queued_work_batches
-                 WHERE session_id = ?1 AND work_kind = 'turn' AND admitted_run IS NULL AND terminal_cause IS NULL
-                 ORDER BY enqueue_seq ASC
-                 LIMIT 1
-             )
-             SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
-                    admitted_run, admitted_by, terminal_cause, terminal_at_ms, payload_json, trace_cause_json
-             FROM queued_work_batches
-             CROSS JOIN queued_work_head_candidate
-             WHERE session_id = ?1 AND work_kind = 'turn'
-               AND admitted_run IS NULL AND terminal_cause IS NULL
-               AND head_delivery_policy = 'earliest_safe_boundary'
-               AND enqueue_seq >= head_enqueue_seq
-             ORDER BY enqueue_seq ASC
-             LIMIT ?2";
     }
 }

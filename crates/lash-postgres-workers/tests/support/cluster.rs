@@ -456,10 +456,7 @@ impl Cluster {
         .with_execution_env_ref(Some(
             lash_core_execution::testing::process_execution_env_fixture_ref(),
         ))
-        .with_start_key(Some(lash_core_execution::StartKey::for_host(start_key)))
-        .with_extra_event_types(
-            lash_postgres_workers::process::declared_event_types().expect("the event types"),
-        );
+        .with_start_key(Some(lash_core_execution::StartKey::for_host(start_key)));
         self.backend
             .process_registry()
             .register_process(registration)
@@ -486,18 +483,6 @@ impl Cluster {
             .await
             .expect("read the process")
             .expect("the process is retained")
-    }
-
-    /// The types of a process's events, in sequence order.
-    pub async fn event_types(&self, process: &ProcessId) -> Vec<String> {
-        self.backend
-            .process_registry()
-            .recent_events(process, 100)
-            .await
-            .expect("read the process's events")
-            .into_iter()
-            .map(|event| event.event_type)
-            .collect()
     }
 
     /// Every report so far, in arrival order.

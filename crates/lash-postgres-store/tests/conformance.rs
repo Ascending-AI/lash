@@ -61,20 +61,18 @@ mod attachment_recovery;
 mod durable_laws;
 #[path = "conformance/obligation_relay.rs"]
 mod obligation_relay;
-#[path = "conformance/occurrence_listing.rs"]
-mod occurrence_listing;
 
 use std::sync::Arc;
 
 use lash_conformance::{
     FenceIntegrityHandles, FenceIntegrityInjector, FenceIntegrityObservation, FenceIntegrityTarget,
     GraphFactObservation, LineageConformanceHandles, LineageConformanceInjector,
-    ReopenableProcessRegistry, ReopenableTriggerStore,
+    ReopenableProcessRegistry,
 };
 use lash_core_execution::compat::CompatRefusal;
 use lash_core_execution::{
     AttachmentReferrers as _, DeploymentStore, ProcessExecutionEnvStore, ProcessRegistry,
-    RuntimeStore, SessionCatalogStore as _, SessionCommitStore as _, StoreError, TriggerStore,
+    RuntimeStore, SessionCatalogStore as _, SessionCommitStore as _, StoreError,
 };
 use lash_postgres_store::PostgresStorage;
 
@@ -95,7 +93,6 @@ mod session_mail;
 
 use injectors::{PostgresFenceIntegrityInjector, PostgresLineageConformanceInjector};
 use lash_postgres_store::testing::IsolatedDatabase;
-use occurrence_listing::PostgresTriggerOccurrenceRetentionFaultInjector;
 use support::{IsolatedSchema, database_url, reset};
 
 lash_conformance::lineage_tests!({
@@ -184,7 +181,6 @@ lash_conformance::fence_integrity_tests!({
             reset(storage.pool()).await;
             FenceIntegrityHandles {
                 runtime: Arc::new(storage.store()),
-                triggers: Arc::new(storage.trigger_store()),
                 injector: Arc::new(PostgresFenceIntegrityInjector {
                     _database_fixture: database_fixture,
                     storage,
@@ -733,35 +729,6 @@ lash_conformance::process_projection_repair_tests!({
     )
 });
 
-lash_conformance::process_trigger_retention_tests!({
-    let Some((database_fixture, storage)) = storage().await else {
-        eprintln!(
-            "skipping Postgres process-trigger retention conformance: LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        return;
-    };
-    let storage = Arc::new(storage);
-    (database_fixture, move || {
-        let storage = Arc::clone(&storage);
-        async move {
-            reset(storage.pool()).await;
-            lash_core::testing::process_execution_env_fixture(&storage.process_env_store()).await;
-            lash_conformance::ProcessTriggerRetentionHandles {
-                stores: Arc::new(lash_postgres_store::PostgresStoreSet::new(
-                    &storage,
-                    Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
-                )) as Arc<dyn lash_core_execution::StoreSet>,
-                registry: Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>,
-                triggers: Arc::new(storage.trigger_store()) as Arc<dyn TriggerStore>,
-                sessions: Arc::new(storage.store())
-                    as Arc<dyn lash_core_execution::DeploymentStore>,
-                process_env: Arc::new(storage.process_env_store())
-                    as Arc<dyn lash_core_execution::ProcessExecutionEnvStore>,
-            }
-        }
-    })
-});
-
 lash_conformance::tool_intent_retention_tests!({
     let Some((database_fixture, storage)) = storage().await else {
         eprintln!(
@@ -788,31 +755,6 @@ lash_conformance::tool_intent_retention_tests!({
             lash_conformance::ToolIntentRetentionFixture { open, reopen }
         }
     })
-});
-
-lash_conformance::trigger_occurrence_tombstone_retention_tests!({
-    let Some((database_fixture, storage)) = storage().await else {
-        eprintln!(
-            "skipping Postgres trigger-occurrence tombstone retention laws: LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        return;
-    };
-    let storage = Arc::new(storage);
-    (
-        database_fixture,
-        move |clock: Arc<dyn lash_core_execution::Clock>| {
-            let storage = Arc::clone(&storage);
-            async move {
-                reset(storage.pool()).await;
-                lash_conformance::TriggerStores {
-                    triggers: Arc::new(storage.trigger_store().with_clock(clock)),
-                    registry: Arc::new(storage.process_registry()),
-                    durable: Arc::new(storage.durable_store()),
-                    process_envs: Arc::new(storage.process_env_store()),
-                }
-            }
-        },
-    )
 });
 
 lash_conformance::store_contract_state_machine_tests!({
@@ -852,55 +794,6 @@ lash_conformance::session_graph_state_machine_tests!({
                 as Arc<dyn lash_core_execution::store::ConformanceDeployment>
         }
     })
-});
-
-#[test]
-fn trigger_subscription_owner_filter_is_pushed_down() {
-    lash_conformance::trigger_subscription_owner_filter_is_pushed_down(
-        "PostgreSQL",
-        lash_postgres_store::testing::trigger_subscription_list_sql,
-    );
-}
-
-/// One catalog's trigger store, with the registry and durable store its
-/// occurrences start through.
-fn trigger_stores(storage: &PostgresStorage) -> lash_conformance::TriggerStores {
-    lash_conformance::TriggerStores {
-        triggers: Arc::new(storage.trigger_store()),
-        registry: Arc::new(storage.process_registry()),
-        durable: Arc::new(storage.durable_store()),
-        process_envs: Arc::new(storage.process_env_store()),
-    }
-}
-
-lash_conformance::trigger_store_reopenable_tests!({
-    let Some((database_fixture, storage)) = storage().await else {
-        eprintln!("skipping Postgres trigger conformance: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    let storage = Arc::new(storage);
-    (database_fixture, move || {
-        let storage = Arc::clone(&storage);
-        sync_await(async move {
-            reset(storage.pool()).await;
-            ReopenableTriggerStore {
-                open: trigger_stores(&storage),
-                reopen: trigger_stores(&storage),
-            }
-        })
-    })
-});
-
-lash_conformance::trigger_retention_fault_tests!({
-    let Some((database_fixture, storage)) = storage().await else {
-        eprintln!("skipping Postgres trigger retention fault laws: database is not configured");
-        return;
-    };
-    reset(storage.pool()).await;
-    let pool = storage.pool().clone();
-    let store = trigger_stores(&storage);
-    let fault = Arc::new(PostgresTriggerOccurrenceRetentionFaultInjector { pool });
-    (database_fixture, store, fault)
 });
 
 #[path = "conformance/process_retention.rs"]
@@ -1012,40 +905,6 @@ mod session_history {
         })
         .await;
     }
-}
-
-#[tokio::test]
-async fn fenced_process_and_trigger_registration_stays_typed() {
-    let Some(url) = database_url() else {
-        return;
-    };
-    let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
-    let storage = lash_postgres_store::testing::connect(database.url())
-        .await
-        .expect("open older writer");
-    // An epoch past this build's writable range: a newer release finalized.
-    let newer = lash_core_execution::FleetFormat::writable().max() + 1;
-    lash_postgres_store::testing::finalize_fleet_epoch(storage.pool(), newer)
-        .await
-        .expect("finalize newer fleet format");
-    lash_conformance::fenced_process_and_trigger_registration_stays_typed(
-        Arc::new(storage.process_registry()),
-        Arc::new(storage.trigger_store()),
-    )
-    .await;
-    for table in [
-        "lash_processes",
-        "lash_process_events",
-        "lash_trigger_subscriptions",
-        "lash_trigger_mutation_receipts",
-    ] {
-        let count: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {table}"))
-            .fetch_one(storage.pool())
-            .await
-            .expect("count rows");
-        assert_eq!(count, 0, "fenced writer added rows to {table}");
-    }
-    storage.pool().close().await;
 }
 
 lash_conformance::attachment_referrer_tests!({

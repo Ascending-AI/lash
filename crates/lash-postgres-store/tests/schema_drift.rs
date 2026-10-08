@@ -467,11 +467,6 @@ async fn an_alter_built_equivalent_schema_opens_clean() {
              CREATE INDEX host_named_leaf_index ON lash_session_revisions(leaf_node_id);
 
              -- Host-chosen constraint names over the same columns.
-             ALTER TABLE lash_trigger_subscriptions
-                 DROP CONSTRAINT lash_trigger_subscriptions_owner_scope_subscription_key_key;
-             ALTER TABLE lash_trigger_subscriptions
-                 ADD CONSTRAINT host_named_subscription_key
-                 UNIQUE (owner_scope, subscription_key);
              ALTER TABLE lash_process_observers
                  DROP CONSTRAINT lash_process_observers_process_id_fkey;
              ALTER TABLE lash_process_observers
@@ -838,100 +833,6 @@ async fn a_raised_reader_floor_is_fatal_in_every_mode() {
     scratch.cleanup().await;
 }
 
-/// A pre-cutover queued-work shape is unsafe even when its compatibility stamp
-/// declares a newer version with a reader floor this build admits.
-#[tokio::test]
-async fn pre_queued_work_cutover_install_is_refused_even_under_warn_only() {
-    let Some(database_url) = database_url() else {
-        eprintln!("skipping queued-work version crossing: database URL is not set");
-        return;
-    };
-    let scratch = ScratchSchema::provision(&database_url).await;
-    scratch
-        .apply(
-            "ALTER TABLE lash_queued_work_batches
-                 DROP COLUMN work_kind,
-                 DROP COLUMN authority_json,
-                 DROP COLUMN merge_key;
-             ALTER TABLE lash_queued_work_batches
-                 ADD COLUMN slot_policy TEXT NOT NULL DEFAULT 'join',
-                 ADD COLUMN merge_key_json TEXT NOT NULL DEFAULT '\"never\"';
-             UPDATE lash_schema_versions
-                SET version = version + 1
-              WHERE component = 'lash-postgres-store'",
-        )
-        .await;
-
-    let error = lash_postgres_store::testing::from_pool(
-        scratch.pool.clone(),
-        &lash_postgres_store::PostgresHostConfig {
-            schema_check: SchemaCheck::WarnOnly,
-            ..lash_postgres_store::PostgresHostConfig::default()
-        },
-    )
-    .await
-    .err()
-    .unwrap_or_else(|| panic!("WarnOnly must refuse the pre-cutover install"));
-    assert!(
-        matches!(
-            error,
-            StoreError::Incompatible {
-                refusal: CompatRefusal::ShapeRefused { .. }
-            }
-        ),
-        "the old queued-work shape must be refused: {error}"
-    );
-    scratch.cleanup().await;
-}
-
-/// A compatible expansion cannot hide a missing queued-work column.
-#[tokio::test]
-async fn an_expanded_stamp_cannot_hide_queued_work_drift() {
-    let Some(database_url) = database_url() else {
-        eprintln!("skipping queued-work drift refusal: database URL is not set");
-        return;
-    };
-    let scratch = ScratchSchema::provision(&database_url).await;
-    scratch
-        .apply(
-            "UPDATE lash_schema_versions
-                SET version = version + 1
-              WHERE component = 'lash-postgres-store';
-             ALTER TABLE lash_queued_work_batches DROP COLUMN work_kind",
-        )
-        .await;
-
-    let error = lash_postgres_store::testing::from_pool(
-        scratch.pool.clone(),
-        &lash_postgres_store::PostgresHostConfig::default(),
-    )
-    .await
-    .err()
-    .unwrap_or_else(|| panic!("missing queued-work shape must be refused"));
-    assert!(
-        matches!(
-            error,
-            StoreError::Incompatible {
-                refusal: CompatRefusal::ShapeRefused { .. }
-            }
-        ),
-        "{error}"
-    );
-    let version: i32 = sqlx::query_scalar(
-        "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
-    )
-    .fetch_one(&scratch.pool)
-    .await
-    .expect("read the refused catalog's component stamp");
-    assert_eq!(
-        version,
-        PostgresStorage::schema_version() + 1,
-        "a refused expanded catalog must retain its stamp"
-    );
-
-    scratch.cleanup().await;
-}
-
 /// A reader floor past this build refuses before open can use an old catalog
 /// without its durable vocabulary CHECKs.
 #[tokio::test]
@@ -949,9 +850,6 @@ async fn a_raised_reader_floor_is_rejected_without_adding_check_constraints() {
                  DROP CONSTRAINT ck_session_meta_caused_by_kind;
              ALTER TABLE lash_processes
                  DROP CONSTRAINT ck_processes_status;
-             ALTER TABLE lash_trigger_subscriptions
-                 DROP CONSTRAINT ck_trigger_subscriptions_lifecycle,
-                 DROP CONSTRAINT ck_trigger_subscriptions_lifecycle_deleted_at;
              UPDATE lash_schema_versions
                 SET version = {above}, min_reader = {above}
               WHERE component = 'lash-postgres-store'",
@@ -1008,8 +906,6 @@ async fn a_raised_reader_floor_is_rejected_without_adding_check_constraints() {
         "ck_session_meta_relation_kind",
         "ck_session_meta_caused_by_kind",
         "ck_processes_status",
-        "ck_trigger_subscriptions_lifecycle",
-        "ck_trigger_subscriptions_lifecycle_deleted_at",
     ])
     .fetch_one(&scratch.pool)
     .await

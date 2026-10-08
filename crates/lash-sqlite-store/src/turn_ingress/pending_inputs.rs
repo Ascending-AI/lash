@@ -58,11 +58,8 @@ lash_store_sql::statements! {
         ///
         /// The admission chose the turn lane at a boundary whose command
         /// lane was empty, so a command enqueued since holds back only the
-        /// rows after it: the prefix ends at the earliest open command. It
-        /// also ends at the earliest open queued turn work, because the turn
-        /// lane is one FIFO over both admission tables and no input accepted
-        /// after it is taken past it. PostgreSQL takes `FOR UPDATE` here;
-        /// SQLite is already the only writer.
+        /// rows after it: the prefix ends at the earliest open command.
+        /// PostgreSQL takes `FOR UPDATE` here; SQLite is already the only writer.
         admission_candidates_next_turn = "SELECT enqueue_seq, input_id, session_id, source_key,
                     ingress_json, state, input_json, enqueued_at_ms, admitted_run,
                     admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json
@@ -72,16 +69,9 @@ lash_store_sql::statements! {
                AND admitted_run IS NULL
                AND NOT EXISTS (
                     SELECT 1 FROM queued_work_batches AS commands
-                    WHERE commands.session_id = ?1 AND commands.work_kind = 'control'
+                    WHERE commands.session_id = ?1
                       AND commands.terminal_cause IS NULL
                       AND commands.enqueue_seq < pending_turn_inputs.enqueue_seq
-               )
-               AND NOT EXISTS (
-                    SELECT 1 FROM queued_work_batches AS turn_work
-                    WHERE turn_work.session_id = ?1 AND turn_work.work_kind = 'turn'
-                      AND turn_work.admitted_run IS NULL
-                      AND turn_work.terminal_cause IS NULL
-                      AND turn_work.enqueue_seq < pending_turn_inputs.enqueue_seq
                )
              ORDER BY enqueue_seq ASC
              LIMIT ?2";

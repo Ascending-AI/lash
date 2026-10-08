@@ -239,16 +239,13 @@ fn read_started_processes(
             .sql(),
     )?;
     let rows = statement.query_map(params![after, limit_binding(limit)], |row| {
-        let record: String = row.get(3)?;
+        let record: String = row.get(2)?;
         Ok(DurableItem {
             surface: DurableSurface::StartedProcess,
             cursor: row.get(0)?,
             process_id: Some(crate::row_process_id(row, 0)?),
             status: Some(row.get(1)?),
-            session_id: row
-                .get::<_, Option<String>>(2)?
-                .map(crate::codec::sql_identity)
-                .transpose()?,
+            session_id: None,
             owner_record: Some(record.clone()),
             payload: DurablePayload::Json(record),
         })

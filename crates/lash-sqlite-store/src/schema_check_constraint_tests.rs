@@ -196,55 +196,6 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
             "ck_process_tombstones_terminal_label",
         );
     }
-
-    let triggers = Connection::open_in_memory().expect("open trigger constraint fixture");
-    triggers
-        .execute_batch(TRIGGER_SCHEMA)
-        .expect("create trigger constraint fixture");
-    assert_check_rejects(
-        &triggers,
-        "INSERT INTO trigger_subscriptions (
-             subscription_id, owner_scope, subscription_key, incarnation, revision,
-             definition_fingerprint, source_type, source_key, lifecycle, deleted_at_ms,
-             created_at_ms, updated_at_ms, record_json
-         ) VALUES (
-             'bad-vocabulary', 'owner', 'key', 'incarnation', 1, 'fingerprint',
-             'source', 'key', 'archived', NULL, 0, 0, '{}'
-         )",
-        "ck_trigger_subscriptions_lifecycle",
-    );
-    assert_check_rejects(
-        &triggers,
-        "INSERT INTO trigger_subscriptions (
-             subscription_id, owner_scope, subscription_key, incarnation, revision,
-             definition_fingerprint, source_type, source_key, lifecycle, deleted_at_ms,
-             created_at_ms, updated_at_ms, record_json
-         ) VALUES (
-             'tombstone-without-time', 'owner', 'key', 'incarnation', 1, 'fingerprint',
-             'source', 'key', 'tombstoned', NULL, 0, 0, '{}'
-         )",
-        "ck_trigger_subscriptions_lifecycle_deleted_at",
-    );
-    assert_check_rejects(
-        &triggers,
-        "INSERT INTO trigger_subscriptions (
-             subscription_id, owner_scope, subscription_key, incarnation, revision,
-             definition_fingerprint, source_type, source_key, lifecycle, deleted_at_ms,
-             created_at_ms, updated_at_ms, record_json
-         ) VALUES (
-             'live-with-a-deletion-time', 'owner', 'key', 'incarnation', 1, 'fingerprint',
-             'source', 'key', 'enabled', 7, 0, 0, '{}'
-         )",
-        "ck_trigger_subscriptions_lifecycle_deleted_at",
-    );
-    assert_check_rejects(
-        &triggers,
-        "INSERT INTO trigger_mutation_receipts (
-             operation_id, owner_kind, owner_id,
-             request_fingerprint, result_json, created_at_ms
-         ) VALUES ('bad-owner-kind', 'workflow', 'owner', 'fingerprint', '{}', 0)",
-        "ck_trigger_receipts_owner_kind",
-    );
 }
 
 #[test]
@@ -271,48 +222,4 @@ fn turn_cancellation_shape_is_guarded() {
             constraint,
         );
     }
-}
-
-#[test]
-fn reclaim_markers_require_terminal_owners() {
-    let process = Connection::open_in_memory().expect("open parent-end fixture");
-    process
-        .execute_batch(PROCESS_SCHEMA)
-        .expect("create process schema");
-    let triggers = Connection::open_in_memory().expect("open change-feed fixture");
-    triggers
-        .execute_batch(TRIGGER_SCHEMA)
-        .expect("create trigger schema");
-    for lifecycle in [
-        serde_json::json!({}),
-        serde_json::json!({"lifecycle":"enabled"}),
-        serde_json::json!({"lifecycle":"disabled"}),
-        serde_json::json!({"lifecycle":"unknown"}),
-    ] {
-        let json = serde_json::json!({"lifecycle": lifecycle}).to_string();
-        triggers
-            .execute("DELETE FROM trigger_subscription_changes", [])
-            .expect("clear fixture");
-        triggers
-            .execute(
-                "INSERT INTO trigger_subscription_changes VALUES ('subscription', 1, NULL, ?1)",
-                [&json],
-            )
-            .expect("a live change is retained");
-        assert_check_rejects(
-            &triggers,
-            "UPDATE trigger_subscription_changes SET deleted_at_ms = 1",
-            "ck_trigger_subscription_changes_reclaimable",
-        );
-    }
-    triggers
-        .execute("DELETE FROM trigger_subscription_changes", [])
-        .expect("clear fixture");
-    let json = serde_json::json!({"lifecycle": lash_core_execution::triggers::TriggerSubscriptionLifecycle::Tombstoned(1)}).to_string();
-    triggers
-        .execute(
-            "INSERT INTO trigger_subscription_changes VALUES ('subscription', 1, 1, ?1)",
-            [&json],
-        )
-        .expect("a tombstoned change may be reclaimed");
 }

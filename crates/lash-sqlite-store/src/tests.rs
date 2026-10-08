@@ -61,35 +61,9 @@ fn queued_work_checks_reject_illegal_vocabulary() {
 
     assert_rejected(
         "INSERT INTO queued_work_batches (enqueue_seq,
-             batch_id, session_id, delivery_policy, work_kind, authority_json,
+             batch_id, session_id, delivery_policy, authority_json,
              submission_digest, enqueued_at_ms, payload_json
-         ) VALUES (1,
-             'bad-kind', 'session', 'earliest_safe_boundary', 'cancel', '{}', 'digest', 0, json_object('type', 'process_wake')
-         )",
-        "ck_queued_work_batches_work_kind",
-    );
-    for (kind, payload) in [
-        ("turn", "{}"),
-        ("turn", "null"),
-        ("turn", "[]"),
-        ("turn", r#"{"type":"session_command"}"#),
-        ("control", r#"{"type":"process_wake"}"#),
-    ] {
-        assert_rejected(
-            &format!(
-                "INSERT INTO queued_work_batches (enqueue_seq, batch_id, session_id,
-                 delivery_policy, work_kind, authority_json, submission_digest,
-                 enqueued_at_ms, payload_json) VALUES (1, 'bad-payload', 'session',
-                 'earliest_safe_boundary', '{kind}', '{{}}', 'digest', 0, '{payload}')"
-            ),
-            "ck_queued_work_batches_work_kind",
-        );
-    }
-    assert_rejected(
-        "INSERT INTO queued_work_batches (enqueue_seq,
-             batch_id, session_id, delivery_policy, work_kind, authority_json,
-             submission_digest, enqueued_at_ms, payload_json
-         ) VALUES (1, 'bad-policy', 'session', 'eventually', 'turn', '{}', 'digest', 0, json_object('type', 'process_wake'))",
+         ) VALUES (1, 'bad-policy', 'session', 'eventually', '{}', 'digest', 0, json_object('type', 'session_command'))",
         "ck_queued_work_batches_delivery_policy",
     );
 }
@@ -125,10 +99,10 @@ fn ingress_admission_binding_must_be_all_or_none() {
             .execute(
                 &format!(
                     "INSERT INTO queued_work_batches (enqueue_seq,
-                         batch_id, session_id, delivery_policy, work_kind, authority_json,
+                         batch_id, session_id, delivery_policy, authority_json,
                          submission_digest, enqueued_at_ms, payload_json, {fields}
-                     ) VALUES (1, 'batch', 'session', 'earliest_safe_boundary', 'turn',
-                               '{{}}', 'digest', 0, json_object('type', 'process_wake'), {values})"
+                     ) VALUES (1, 'batch', 'session', 'earliest_safe_boundary',
+                               '{{}}', 'digest', 0, json_object('type', 'session_command'), {values})"
                 ),
                 [],
             )
@@ -218,10 +192,10 @@ fn queued_work_batches_reject_a_duplicate_source_key_insert() {
         .execute_batch(crate::schema::SCHEMA)
         .expect("apply SQLite schema to constraint witness");
     let insert = "INSERT INTO queued_work_batches (enqueue_seq,
-             batch_id, session_id, source_key, delivery_policy, work_kind,
+             batch_id, session_id, source_key, delivery_policy,
              authority_json, submission_digest, enqueued_at_ms, payload_json
-         ) VALUES (?1, ?2, 'session', 'key', 'earliest_safe_boundary', 'turn',
-                   '{}', 'digest', 0, json_object('type', 'process_wake'))";
+         ) VALUES (?1, ?2, 'session', 'key', 'earliest_safe_boundary',
+                   '{}', 'digest', 0, json_object('type', 'session_command'))";
     connection
         .execute(insert, rusqlite::params![1, "first"])
         .expect("admit the first row");

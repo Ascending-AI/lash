@@ -463,7 +463,6 @@ pub(crate) async fn head_ownership_facts_conn(
             .sql(),
     )
     .bind(session_id.as_str())
-    .bind(lash_core_execution::QueuedWorkKind::Control.as_str())
     .fetch_one(crate::observed_sql::executor(&mut *conn))
     .await
     .map_err(store_sqlx_error)?;

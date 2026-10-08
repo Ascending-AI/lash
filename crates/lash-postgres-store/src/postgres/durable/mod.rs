@@ -789,7 +789,7 @@ async fn apply_owner(
 ///
 /// Every producer transaction that writes work for an actor (pending
 /// inputs, queued work, control intents, turn cancel requests, process
-/// registration, trigger occurrences) calls this in its own transaction, so
+/// registration) calls this in its own transaction, so
 /// the work and the wake commit together. `control` marks a cancel or a
 /// redrive: only a control wake readies a parked actor.
 pub(crate) async fn wake_within(
@@ -929,25 +929,6 @@ async fn apply_mail_domain(
         MailDomainWrite::Redrive(request) => {
             let (answer, woken) = park_events::redrive(tx, request, now).await?;
             (MailAnswer::Redrive(answer), woken.into_iter().collect())
-        }
-        // Each started process's actor is created ready in the start's own
-        // transaction (ADR 0132 §12).
-        MailDomainWrite::StartTrigger(start) => {
-            let answer = Box::pin(crate::trigger_store::start::start_within(
-                tx, start, now, fleet,
-            ))
-            .await?;
-            let woken = answer
-                .processes
-                .iter()
-                .filter_map(|process| ActorKey::process(process.as_str()).ok())
-                .map(|actor| Woken {
-                    actor,
-                    state: ActorState::Ready,
-                    owner: None,
-                })
-                .collect();
-            (MailAnswer::StartTrigger(answer), woken)
         }
     })
 }
@@ -1473,7 +1454,7 @@ mod constraint_tests {
             .execute(crate::observed_sql::executor(&mut conn))
             .await
             .expect("create constraint fixture");
-        sqlx::query("INSERT INTO lash_waits (wait_id, owner_actor, owner_scope, kind, host_resolvable, state, created_epoch) VALUES ('wait', 's/session', 's/session', 'signal', false, 'pending', 1)").execute(crate::observed_sql::executor(&mut conn)).await.expect("pending signal");
+        sqlx::query("INSERT INTO lash_waits (wait_id, owner_actor, owner_scope, kind, host_resolvable, state, created_epoch) VALUES ('wait', 's/session', 's/session', 'custom', false, 'pending', 1)").execute(crate::observed_sql::executor(&mut conn)).await.expect("pending custom wait");
         for (assignment, constraint) in [
             ("kind = 'timer'", "ck_waits_timer_deadline"),
             ("resolved_at_ms = 1", "ck_waits_settled_at"),

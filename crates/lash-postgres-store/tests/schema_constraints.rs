@@ -138,10 +138,10 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
             &mut connection,
             &format!(
                 "INSERT INTO lash_queued_work_batches (enqueue_seq,
-                     batch_id, session_id, delivery_policy, work_kind, authority_json,
+                     batch_id, session_id, delivery_policy, authority_json,
                      submission_digest, enqueued_at_ms, payload_json, {fields}
-                 ) VALUES (1, 'batch', 'session', 'earliest_safe_boundary', 'turn',
-                           '{{}}', 'digest', 0, jsonb_build_object('type', 'process_wake')::text, {values})"
+                 ) VALUES (1, 'batch', 'session', 'earliest_safe_boundary',
+                           '{{}}', 'digest', 0, jsonb_build_object('type', 'session_command')::text, {values})"
             ),
             "ck_queued_work_batches_admission_all_or_none",
         )
@@ -163,39 +163,9 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     assert_check_rejects(
         &mut connection,
         "INSERT INTO lash_queued_work_batches (enqueue_seq,
-             batch_id, session_id, delivery_policy, work_kind, authority_json,
+             batch_id, session_id, delivery_policy, authority_json,
              submission_digest, enqueued_at_ms, payload_json
-         ) VALUES (1,
-             'bad-kind', 'session', 'earliest_safe_boundary', 'cancel', '{}', 'digest', 0, jsonb_build_object('type', 'process_wake')::text
-         )",
-        "ck_queued_work_batches_work_kind",
-    )
-    .await;
-    for (kind, payload) in [
-        ("turn", "{}"),
-        ("turn", "null"),
-        ("turn", "[]"),
-        ("turn", r#"{"type":"session_command"}"#),
-        ("control", r#"{"type":"process_wake"}"#),
-    ] {
-        assert_check_rejects(
-            &mut connection,
-            &format!(
-                "INSERT INTO lash_queued_work_batches (enqueue_seq, batch_id, session_id,
-                 delivery_policy, work_kind, authority_json, submission_digest,
-                 enqueued_at_ms, payload_json) VALUES (1, 'bad-payload', 'session',
-                 'earliest_safe_boundary', '{kind}', '{{}}', 'digest', 0, '{payload}')"
-            ),
-            "ck_queued_work_batches_work_kind",
-        )
-        .await;
-    }
-    assert_check_rejects(
-        &mut connection,
-        "INSERT INTO lash_queued_work_batches (enqueue_seq,
-             batch_id, session_id, delivery_policy, work_kind, authority_json,
-             submission_digest, enqueued_at_ms, payload_json
-         ) VALUES (1, 'bad-policy', 'session', 'eventually', 'turn', '{}', 'digest', 0, jsonb_build_object('type', 'process_wake')::text)",
+         ) VALUES (1, 'bad-policy', 'session', 'eventually', '{}', 'digest', 0, jsonb_build_object('type', 'session_command')::text)",
         "ck_queued_work_batches_delivery_policy",
     )
     .await;
@@ -364,55 +334,6 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
         .await;
     }
 
-    assert_check_rejects(
-        &mut connection,
-        "INSERT INTO lash_trigger_subscriptions (
-             subscription_id, owner_scope, subscription_key, incarnation, revision,
-             definition_fingerprint, source_type, source_key, lifecycle, deleted_at_ms,
-             created_at_ms, updated_at_ms, record_json
-         ) VALUES (
-             'bad-vocabulary', 'owner', 'key', 'incarnation', 1, 'fingerprint',
-             'source', 'key', 'archived', NULL, 0, 0, '{}'
-         )",
-        "ck_trigger_subscriptions_lifecycle",
-    )
-    .await;
-    assert_check_rejects(
-        &mut connection,
-        "INSERT INTO lash_trigger_subscriptions (
-             subscription_id, owner_scope, subscription_key, incarnation, revision,
-             definition_fingerprint, source_type, source_key, lifecycle, deleted_at_ms,
-             created_at_ms, updated_at_ms, record_json
-         ) VALUES (
-             'tombstone-without-time', 'owner', 'key', 'incarnation', 1, 'fingerprint',
-             'source', 'key', 'tombstoned', NULL, 0, 0, '{}'
-         )",
-        "ck_trigger_subscriptions_lifecycle_deleted_at",
-    )
-    .await;
-    assert_check_rejects(
-        &mut connection,
-        "INSERT INTO lash_trigger_subscriptions (
-             subscription_id, owner_scope, subscription_key, incarnation, revision,
-             definition_fingerprint, source_type, source_key, lifecycle, deleted_at_ms,
-             created_at_ms, updated_at_ms, record_json
-         ) VALUES (
-             'live-with-a-deletion-time', 'owner', 'key', 'incarnation', 1, 'fingerprint',
-             'source', 'key', 'enabled', 7, 0, 0, '{}'
-         )",
-        "ck_trigger_subscriptions_lifecycle_deleted_at",
-    )
-    .await;
-    assert_check_rejects(
-        &mut connection,
-        "INSERT INTO lash_trigger_mutation_receipts (
-             operation_id, owner_kind, owner_id,
-             request_fingerprint, result_json, created_at_ms
-         ) VALUES ('bad-owner-kind', 'workflow', 'owner', 'fingerprint', '{}', 0)",
-        "ck_trigger_receipts_owner_kind",
-    )
-    .await;
-
     sqlx::query("ROLLBACK")
         .execute(&mut connection)
         .await
@@ -433,109 +354,6 @@ mod obligation_constraint_cases;
 #[tokio::test]
 async fn postgres_obligation_checks_reject_incomplete_variants() {
     obligation_constraint_cases::postgres_obligation_checks_reject_incomplete_variants().await;
-}
-
-#[tokio::test]
-#[ignore = "requires PostgreSQL"]
-async fn trigger_retention_uses_typed_outcomes() {
-    use lash_core_execution::{
-        TriggerOccurrenceOutcome, TriggerOccurrenceRequest, TriggerStore as _,
-    };
-    let database = lash_postgres_store::testing::IsolatedDatabase::create(
-        &lash_postgres_store::testing::required_database_url(),
-    )
-    .await;
-    let storage = lash_postgres_store::testing::connect(database.url())
-        .await
-        .expect("open isolated PostgreSQL");
-    let store = storage.trigger_store();
-    let registry = storage.process_registry();
-    let durable = storage.durable_store();
-    for (key, outcome) in [
-        ("fired", TriggerOccurrenceOutcome::Fired),
-        (
-            "dropped",
-            TriggerOccurrenceOutcome::Dropped {
-                reason: "audit".into(),
-            },
-        ),
-    ] {
-        lash_core::testing::record_trigger_occurrence(
-            &store,
-            &registry,
-            &durable,
-            TriggerOccurrenceRequest::new("source", "key", serde_json::json!({}), key)
-                .with_outcome(outcome),
-        )
-        .await
-        .expect("record occurrence");
-    }
-    sqlx::query("UPDATE lash_trigger_occurrences SET record_json = '{broken'")
-        .execute(storage.pool())
-        .await
-        .expect("corrupt presentation bytes");
-    let report = store
-        .reclaim_trigger_occurrences(u64::MAX)
-        .await
-        .expect("reclaim must never decode record_json");
-    assert_eq!(report.reclaimed_occurrence_count, 1);
-    assert_eq!(report.audit_retained_count, 1);
-    assert_eq!(
-        store
-            .prune_non_fired_occurrences(u64::MAX)
-            .await
-            .expect("prune must never decode record_json"),
-        1
-    );
-    let tombstones: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM lash_trigger_occurrence_tombstones")
-            .fetch_one(storage.pool())
-            .await
-            .expect("tombstone count");
-    assert_eq!(tombstones, 2);
-}
-
-#[tokio::test]
-#[ignore = "requires PostgreSQL"]
-async fn dropped_trigger_occurrences_cannot_be_reclaimed_or_have_deliveries() {
-    use lash_core_execution::{TriggerOccurrenceOutcome, TriggerOccurrenceRequest};
-    let database = lash_postgres_store::testing::IsolatedDatabase::create(
-        &lash_postgres_store::testing::required_database_url(),
-    )
-    .await;
-    let storage = lash_postgres_store::testing::connect(database.url())
-        .await
-        .expect("open isolated PostgreSQL");
-    let record = lash_core::testing::record_trigger_occurrence(
-        &storage.trigger_store(),
-        &storage.process_registry(),
-        &storage.durable_store(),
-        TriggerOccurrenceRequest::new("source", "key", serde_json::json!({}), "dropped")
-            .with_outcome(TriggerOccurrenceOutcome::Dropped {
-                reason: "audit".into(),
-            }),
-    )
-    .await
-    .expect("dropped occurrence")
-    .occurrence;
-    assert!(
-        sqlx::query(
-            "UPDATE lash_trigger_occurrences SET reclaimable_at_ms = 0 WHERE occurrence_id = $1"
-        )
-        .bind(&record.occurrence_id)
-        .execute(storage.pool())
-        .await
-        .is_err(),
-        "dropped rows cannot arm reclamation"
-    );
-    assert!(sqlx::query("INSERT INTO lash_trigger_deliveries (occurrence_id, subscription_id, subscription_incarnation, subscription_revision, subscription_snapshot_json, created_at_ms, process_id, status) VALUES ($1, 'sub', 'incarnation', 1, '{}', 0, 'process', 'started')").bind(&record.occurrence_id).execute(storage.pool()).await.is_err(), "dropped rows cannot reserve a delivery");
-    assert!(
-        sqlx::query("UPDATE lash_trigger_occurrences SET outcome_kind = 'unknown'")
-            .execute(storage.pool())
-            .await
-            .is_err(),
-        "outcome vocabulary is closed"
-    );
 }
 
 #[tokio::test]
@@ -577,64 +395,6 @@ async fn turn_cancellation_shape_is_guarded() {
         .execute(&mut *conn)
         .await
         .expect("rollback");
-}
-
-#[tokio::test]
-async fn reclaim_markers_require_terminal_owners_when_configured() {
-    let Some(url) = database_url() else {
-        panic!("the reclaim CHECK witness requires hermetic PostgreSQL");
-    };
-    let _database_lock = SharedDatabaseLock::acquire(&url).await;
-    let mut connection = PgConnection::connect(&url)
-        .await
-        .expect("connect CHECK fixture");
-    sqlx::raw_sql("BEGIN; CREATE SCHEMA lash_fig1606_constraints; SET LOCAL search_path TO lash_fig1606_constraints;")
-        .execute(&mut connection).await.expect("isolate reclaim fixture");
-    sqlx::raw_sql(PostgresStorage::schema_ddl())
-        .execute(&mut connection)
-        .await
-        .expect("apply production DDL");
-    for tag in ["enabled", "disabled", "unknown"] {
-        sqlx::raw_sql(&format!(
-            r#"DELETE FROM lash_trigger_subscription_changes;
-            INSERT INTO lash_trigger_subscription_changes VALUES ('subscription', 1, NULL,
-                '{{"lifecycle":{{"lifecycle":"{tag}"}}}}')"#
-        ))
-        .execute(&mut connection)
-        .await
-        .expect("retain live change");
-        assert_check_rejects(
-            &mut connection,
-            "UPDATE lash_trigger_subscription_changes SET deleted_at_ms = 1",
-            "ck_trigger_subscription_changes_reclaimable",
-        )
-        .await;
-    }
-    sqlx::raw_sql(
-        "DELETE FROM lash_trigger_subscription_changes;
-        INSERT INTO lash_trigger_subscription_changes VALUES ('subscription', 1, NULL, '{}')",
-    )
-    .execute(&mut connection)
-    .await
-    .expect("retain untagged change");
-    assert_check_rejects(
-        &mut connection,
-        "UPDATE lash_trigger_subscription_changes SET deleted_at_ms = 1",
-        "ck_trigger_subscription_changes_reclaimable",
-    )
-    .await;
-    sqlx::raw_sql(
-        r#"DELETE FROM lash_trigger_subscription_changes;
-        INSERT INTO lash_trigger_subscription_changes VALUES ('subscription', 1, 1,
-            '{"lifecycle":{"lifecycle":"tombstoned","deleted_at_ms":1}}')"#,
-    )
-    .execute(&mut connection)
-    .await
-    .expect("a tombstoned change may be reclaimed");
-    sqlx::query("ROLLBACK")
-        .execute(&mut connection)
-        .await
-        .expect("remove isolated fixture");
 }
 
 // FIG-5282: independent cells must not force cluster-wide checkpoints.

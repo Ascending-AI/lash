@@ -567,14 +567,6 @@
     "peak_bytes": 164257792,
     "samples": 154
   },
-  "lash-internal-sqlite-store/fencing_backstop": {
-    "cpu_count": 1,
-    "memory_kb": 524288,
-    "p95_cores": 1.06,
-    "p99_peak_bytes": 166014976,
-    "peak_bytes": 166014976,
-    "samples": 62
-  },
   "lash-internal-sqlite-store/integration": {
     "cpu_count": 1,
     "memory_kb": 524288,

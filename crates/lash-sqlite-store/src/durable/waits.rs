@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS waits (
     owner_actor TEXT NOT NULL,
     owner_scope TEXT NOT NULL,
     kind TEXT NOT NULL CONSTRAINT ck_waits_kind CHECK (kind IN
-        ('tool_completion', 'custom', 'process_terminal', 'signal', 'timer', 'child_session')),
+        ('tool_completion', 'custom', 'process_terminal', 'timer', 'child_session')),
     host_resolvable INTEGER NOT NULL,
     target_process TEXT,
     state TEXT NOT NULL CONSTRAINT ck_waits_state

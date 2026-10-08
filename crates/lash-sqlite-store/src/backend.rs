@@ -5,7 +5,7 @@
 //! keeps it in the one database file its host configures, a memory store set
 //! as one named `memdb` database pinned by an anchor connection. Every
 //! component shares the store set's one writer connection, so a transaction
-//! that writes a process-registry row, a trigger row and a session row
+//! that writes a process-registry row and a session row
 //! commits all of them or none. Every component is opened once and handed
 //! out as a shared handle.
 //!
@@ -21,8 +21,7 @@ use lash_core_execution::Clock;
 
 use crate::location::{DatabaseLocation, MemoryAnchors, SqliteLocation};
 use crate::{
-    BuiltinBlobProfile, SqliteAttachmentStore, SqliteProcessRegistry, SqliteStore,
-    SqliteTriggerStore, StoreOptions,
+    BuiltinBlobProfile, SqliteAttachmentStore, SqliteProcessRegistry, SqliteStore, StoreOptions,
 };
 
 /// Construction-time choices for a [`SqliteStoreSet`], which opens no effect
@@ -93,7 +92,6 @@ struct StoreParts {
     options: SqliteStoreSetOptions,
     clock: Arc<dyn Clock>,
     process_registry: Arc<SqliteProcessRegistry>,
-    trigger_store: Arc<SqliteTriggerStore>,
     process_env_store: Arc<SqliteStore>,
     attachment_store: Arc<SqliteAttachmentStore>,
     recovery_leader: Arc<crate::recovery_leader::SqliteRecoveryLeader>,
@@ -232,11 +230,6 @@ impl SqliteStoreSet {
             )
             .with_process_id_mint_for_testing(options.process_id_mint.clone()),
         );
-        let trigger_store = Arc::new(SqliteTriggerStore::on_connection(
-            process_env_store.conn.clone(),
-            database,
-            Arc::clone(&clock),
-        ));
         let attachment_store = Arc::new(SqliteAttachmentStore::for_store(&process_env_store));
         let recovery_leader = Arc::new(crate::recovery_leader::SqliteRecoveryLeader::new(
             process_env_store.conn.clone(),
@@ -261,7 +254,6 @@ impl SqliteStoreSet {
                 options,
                 clock,
                 process_registry,
-                trigger_store,
                 process_env_store,
                 attachment_store,
                 recovery_leader,
@@ -300,12 +292,6 @@ impl SqliteStoreSet {
     /// The process registry, on the store set's writer connection.
     pub fn process_registry(&self) -> Arc<SqliteProcessRegistry> {
         Arc::clone(&self.inner.process_registry)
-    }
-
-    /// The trigger subscriptions and occurrences, on the store set's writer
-    /// connection.
-    pub fn trigger_store(&self) -> Arc<SqliteTriggerStore> {
-        Arc::clone(&self.inner.trigger_store)
     }
 
     /// The [`SqliteStore`] that serves process execution environments and
@@ -375,10 +361,6 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
 
     fn process_registry(&self) -> Arc<dyn lash_core_execution::ProcessRegistry> {
         SqliteStoreSet::process_registry(self)
-    }
-
-    fn trigger_store(&self) -> Arc<dyn lash_core_execution::TriggerStore> {
-        SqliteStoreSet::trigger_store(self)
     }
 
     fn tool_material_store(&self) -> Arc<dyn lash_core_execution::store::ToolMaterialStore> {

@@ -68,14 +68,9 @@ impl lash_core_execution::ProcessRetention for SqliteProcessRegistry {
         &self,
         cutoff_epoch_ms: u64,
         watermark: lash_core_execution::ProjectionWatermark,
-        trigger_store: Option<&dyn lash_core_execution::TriggerStore>,
     ) -> Result<usize, lash_core_execution::PluginError> {
         let max_change_seq = crate::process_registry_change::max_change_sequence(watermark);
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
-        let outstanding_trigger_delivery_process_ids = match trigger_store {
-            Some(trigger_store) => trigger_store.list_delivery_process_ids().await?,
-            None => Vec::new(),
-        };
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome(
@@ -83,7 +78,6 @@ impl lash_core_execution::ProcessRetention for SqliteProcessRegistry {
                         tx,
                         cutoff_epoch_ms,
                         max_change_seq,
-                        &outstanding_trigger_delivery_process_ids,
                     ),
                 ))
             })

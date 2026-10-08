@@ -17,14 +17,14 @@ use std::sync::{Arc, Mutex};
 use lash_conformance::{
     FenceIntegrityHandles, FenceIntegrityInjector, FenceIntegrityObservation, FenceIntegrityTarget,
     GraphFactObservation, LineageConformanceHandles, LineageConformanceInjector,
-    ReopenableProcessRegistry, ReopenableTriggerStore,
+    ReopenableProcessRegistry,
 };
 use lash_core_execution::store::{ConformanceDeployment, RuntimeStore};
 use lash_core_execution::{
     DeploymentStore, ProcessCompletionAuthority, ProcessExecutionEnvStore, ProcessIdentity,
     ProcessLifecycle as _, ProcessListFilter, ProcessProvenance, ProcessQuery as _,
     ProcessRegistrar as _, ProcessRegistry, ProcessStatusFilter, SessionCatalogStore,
-    SessionCommitStore, TriggerStore,
+    SessionCommitStore,
 };
 
 use super::SUBSTRATE;
@@ -54,8 +54,6 @@ mod session_mail;
 mod store_maintenance;
 #[path = "tool_intent_retention.rs"]
 mod tool_intent_retention;
-#[path = "trigger_occurrence_retention.rs"]
-mod trigger_occurrence_retention;
 
 include!("append_identity.rs");
 
@@ -329,41 +327,6 @@ fn artifact_store_handles(
     }
 }
 
-struct SqliteTriggerOccurrenceListingFaultInjector {
-    backend: TestBackend,
-}
-
-#[async_trait::async_trait]
-impl lash_conformance::TriggerOccurrenceListingFaultInjector
-    for SqliteTriggerOccurrenceListingFaultInjector
-{
-    async fn insert_malformed_occurrence(&self) {
-        let conn = self.backend.raw();
-        conn.execute(
-            "INSERT INTO trigger_occurrences (
-                occurrence_id, idempotency_key, source_type, source_key,
-                occurred_at_ms, outcome_kind, record_json
-             ) VALUES (?1, ?2, ?3, ?4, ?5, 'fired', ?6)",
-            rusqlite::params![
-                "occurrence-listing-malformed",
-                "occurrence-listing-malformed",
-                "ui.button.pressed",
-                "occurrence-listing-malformed-source",
-                0_i64,
-                "{not valid json",
-            ],
-        )
-        .expect("insert malformed SQLite occurrence");
-    }
-
-    async fn make_occurrence_query_unavailable(&self) {
-        self.backend
-            .raw()
-            .execute_batch("DROP TABLE trigger_occurrences")
-            .expect("make SQLite occurrence query unavailable");
-    }
-}
-
 struct SqliteFenceIntegrityInjector {
     backend: TestBackend,
 }
@@ -384,13 +347,6 @@ impl FenceIntegrityInjector for SqliteFenceIntegrityInjector {
             FenceIntegrityTarget::SessionHeadRevision { session_id } => conn.execute(
                 "UPDATE session_head SET head_revision = ?1 WHERE session_id = ?2",
                 rusqlite::params![value, session_id.as_str()],
-            ),
-            FenceIntegrityTarget::TriggerRevision { subscription_id } => conn.execute(
-                "UPDATE trigger_subscriptions
-                 SET revision = ?1,
-                     record_json = json_set(record_json, '$.revision', ?1)
-                 WHERE subscription_id = ?2",
-                rusqlite::params![value, subscription_id],
             ),
         }
         .expect("inject raw SQLite fence value");
@@ -421,23 +377,6 @@ impl FenceIntegrityInjector for SqliteFenceIntegrityInjector {
                     },
                 )
                 .expect("observe SQLite session-head revision"),
-            FenceIntegrityTarget::TriggerRevision { subscription_id } => conn
-                .query_row(
-                    "SELECT revision, record_json, lifecycle, deleted_at_ms
-                     FROM trigger_subscriptions WHERE subscription_id = ?1",
-                    [subscription_id],
-                    |row| {
-                        let value: i64 = row.get(0)?;
-                        let json: String = row.get(1)?;
-                        let lifecycle: String = row.get(2)?;
-                        let deleted_at_ms: Option<i64> = row.get(3)?;
-                        Ok(FenceIntegrityObservation {
-                            value,
-                            mutation_fingerprint: format!("{json}:{lifecycle}:{deleted_at_ms:?}"),
-                        })
-                    },
-                )
-                .expect("observe SQLite trigger revision"),
         }
     }
 }
@@ -447,7 +386,6 @@ lash_conformance::fence_integrity_tests!({
         let backend = TestBackend::open(SUBSTRATE).await;
         FenceIntegrityHandles {
             runtime: backend.store().await,
-            triggers: backend.trigger_store(),
             injector: Arc::new(SqliteFenceIntegrityInjector { backend }),
         }
     })
@@ -693,102 +631,6 @@ lash_conformance::session_graph_append_tests!({
     let factory = backend.store().await as Arc<dyn DeploymentStore>;
     (backend, factory)
 });
-
-lash_conformance::trigger_store_reopenable_tests!({
-    let retained: Retained<TestBackend> = Retained::default();
-    (retained.clone(), move || {
-        let backend = retained.open_blocking();
-        let reopened = sync_await({
-            let backend = backend.clone();
-            async move { backend.reopen().await }
-        });
-        retained.keep(&reopened);
-        ReopenableTriggerStore {
-            open: lash_conformance::TriggerStores::of(&*backend),
-            reopen: lash_conformance::TriggerStores::of(&*reopened),
-        }
-    })
-});
-
-lash_conformance::trigger_occurrence_listing_tests!({
-    let backend = TestBackend::open(SUBSTRATE).await;
-    let store = lash_conformance::TriggerStores::of(&*backend);
-    let injector = Arc::new(SqliteTriggerOccurrenceListingFaultInjector {
-        backend: backend.clone(),
-    });
-    (backend, store, injector)
-});
-
-#[tokio::test]
-async fn sqlite_trigger_ingress_skips_malformed_matching_subscription() {
-    let backend = TestBackend::open(SUBSTRATE).await;
-    let source_type = "ui.button.pressed";
-    let source_key = lash_core_execution::facade_support::empty_trigger_source_key(source_type)
-        .expect("source key");
-    let store = backend.trigger_store();
-    let register = |owner: &str, key: &str| lash_core_execution::TriggerCommand::Register {
-        owner_scope: lash_core_execution::TriggerOwnerScope::session(SessionId::fixture(
-            owner.to_string(),
-        )),
-        actor: lash_core_execution::ProcessOriginator::session(
-            lash_core_execution::SessionScope::new(SessionId::fixture(owner.to_string())),
-        ),
-        draft: lash_core_execution::TriggerSubscriptionDraft::for_process(
-            key,
-            lash_core::testing::process_execution_env_fixture_ref(),
-            source_type,
-            source_key.clone(),
-            lash_core_execution::ProcessInput::Engine {
-                kind: "test".to_string(),
-                payload: serde_json::json!({ "owner": owner }),
-            },
-            lash_core_execution::ProcessIdentity::new("test"),
-        )
-        .with_payload_schema(lash_core_execution::JsonSchema::any()),
-    };
-    let malformed = store
-        .execute_command("register-malformed", register("malformed", "malformed-key"))
-        .await
-        .expect("execute malformed registration")
-        .expect("register malformed row");
-    let current = store
-        .execute_command("register-current", register("current", "current-key"))
-        .await
-        .expect("execute current registration")
-        .expect("register current row");
-    let lash_core_execution::TriggerCommandOutcome::Mutation { receipt: malformed } = malformed
-    else {
-        panic!("expected malformed registration receipt")
-    };
-    let lash_core_execution::TriggerCommandOutcome::Mutation { receipt: current } = current else {
-        panic!("expected current registration receipt")
-    };
-    drop(store);
-
-    let conn = backend.raw();
-    conn.execute(
-        "UPDATE trigger_subscriptions SET record_json = ?2 WHERE subscription_id = ?1",
-        rusqlite::params![malformed.subscription_id(), "{not valid json"],
-    )
-    .expect("poison trigger row");
-    drop(conn);
-
-    let reopened = backend.reopen().await;
-    let ingress = lash_conformance::TriggerStores::of(&*reopened)
-        .record_occurrence(lash_core_execution::TriggerOccurrenceRequest::new(
-            source_type,
-            source_key,
-            serde_json::json!({ "button": "Blue" }),
-            "malformed-row-occurrence",
-        ))
-        .await
-        .expect("one malformed row must not halt trigger ingress");
-    assert_eq!(ingress.reservations.len(), 1);
-    assert_eq!(
-        ingress.reservations[0].subscription.subscription_id,
-        current.record.subscription_id
-    );
-}
 
 lash_conformance::store_recovery_tests!({
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(10_000));

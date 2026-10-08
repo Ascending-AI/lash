@@ -8,12 +8,10 @@ use lash_sansio::SessionId;
 /// sequence never decides what a caller returns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProcessEventAppendArm {
-    /// The replay arm. No event row was written, so the wake allocation floor
-    /// stays where the original insert left it. `repaired` reports whether the
+    /// The replay arm. No event row was written. `repaired` reports whether the
     /// stale record projection was repaired from the persisted tail event.
     Replayed { repaired: bool },
-    /// The insert arm. Exactly one event row was written and the wake
-    /// allocation floor advanced to its sequence.
+    /// The insert arm. Exactly one lifecycle event row was written.
     Inserted,
 }
 
@@ -215,52 +213,6 @@ impl SqliteProcessRegistry {
             .map_err(process_sqlite_error)?
     }
 
-    pub(crate) async fn retarget_subscription_impl(
-        &self,
-        process_id: &ProcessId,
-        target: Option<&str>,
-    ) -> Result<(), lash_core_execution::PluginError> {
-        let process_id = process_id.clone();
-        let target = target.map(ToOwned::to_owned);
-        let now = self.clock.timestamp_ms();
-        self.conn
-            .write_flow(move |tx| {
-                let fleet_format = tx.fleet();
-                Ok(tx_outcome((|| {
-                    let mut record = Self::require_process_conn(tx, &process_id)?;
-                    let previous: Option<String> = tx
-                        .query_row(
-                            process_sql().process.select_wake_session_id.sql(),
-                            params![process_id.as_str()],
-                            |row| row.get(0),
-                        )
-                        .map_err(process_sqlite_error)?;
-                    if previous == target {
-                        return Ok(());
-                    }
-                    Self::append_event_conn(
-                        tx,
-                        &mut record,
-                        ProcessEventAppendRequest::subscription_retargeted(
-                            &process_id,
-                            target.as_deref(),
-                        ),
-                        now,
-                        fleet_format,
-                    )?;
-                    crate::conn::cached_execute(
-                        tx,
-                        process_sql().process.set_wake_session_id.sql(),
-                        params![process_id.as_str(), target],
-                    )
-                    .map_err(process_sqlite_error)?;
-                    Ok(())
-                })()))
-            })
-            .await
-            .map_err(process_sqlite_error)?
-    }
-
     /// Open a standalone registry on the database file at `path`, outside
     /// any store set.
     ///
@@ -397,22 +349,6 @@ impl SqliteProcessRegistry {
         .map_err(process_sqlite_error)
     }
 
-    pub(crate) fn wake_session_id_conn(
-        conn: &Connection,
-        process_id: &ProcessId,
-    ) -> Result<Option<SessionId>, lash_core_execution::PluginError> {
-        conn.query_row(
-            process_sql().process.select_wake_session_id.sql(),
-            params![process_id.as_str()],
-            |row| {
-                row.get::<_, Option<String>>(0)?
-                    .map(crate::codec::sql_identity)
-                    .transpose()
-            },
-        )
-        .map_err(process_sqlite_error)
-    }
-
     /// The event `request`'s replay key already recorded, if any. A released
     /// event comes back with `request`'s payload when it carries the released
     /// digest, and refuses as a conflict when it does not.
@@ -433,12 +369,14 @@ impl SqliteProcessRegistry {
         let Some((json, released_digest)) = row else {
             return Ok(None);
         };
-        let mut event: ProcessEvent = serde_json::from_str(&json).map_err(process_decode_error)?;
-        if let Some(digest) = released_digest {
-            lash_core_execution::runtime::restore_released_process_event_payload(
-                &mut event, &digest, request,
-            )?;
-        }
+        let event = match released_digest {
+            Some(digest) => lash_core_execution::runtime::restore_released_process_event(
+                serde_json::from_str(&json).map_err(process_decode_error)?,
+                &digest,
+                request,
+            )?,
+            None => serde_json::from_str(&json).map_err(process_decode_error)?,
+        };
         Ok(Some(event))
     }
 
@@ -466,25 +404,6 @@ impl SqliteProcessRegistry {
         Ok((receipt, arm))
     }
 
-    /// How many `event_type` events process `process_id`'s log holds.
-    fn count_events_of_type_conn(
-        conn: &Connection,
-        process_id: &ProcessId,
-        event_type: &str,
-    ) -> Result<u64, lash_core_execution::PluginError> {
-        conn.query_row(
-            process_sql().event.count_by_type_through_sequence.sql(),
-            params![
-                process_id.as_str(),
-                event_type,
-                crate::clamp_sequence_bound(u64::MAX)
-            ],
-            |row| row.get::<_, i64>(0),
-        )
-        .map(|count| count as u64)
-        .map_err(process_sqlite_error)
-    }
-
     /// Stage `requests` in order as one batch (FIG-3571): each goes through
     /// the append sequence against the in-memory projection, and the process
     /// is saved once, advancing the change clock once, when any of them moved
@@ -510,10 +429,9 @@ impl SqliteProcessRegistry {
     /// the process save.
     ///
     /// Every entry point runs these steps, in this order: replay-key lookup,
-    /// wake session id, next sequence number, prepare, the replay-or-insert
-    /// decision, the five-bind event insert, the projection update, the
-    /// parent-end retention, the wake-delivery insert, and the wake
-    /// allocation floor. The caller saves the process once the projection
+    /// next sequence number, prepare, the replay-or-insert decision, the
+    /// event insert, the projection update and parent-end retention.
+    /// The caller saves the process once the projection
     /// has moved ([`ProcessEventAppendArm::record_changed`]): after this one
     /// append, or after the batch it belongs to. Entry points keep their own
     /// prologue, transaction lifetime and outcome mapping.
@@ -535,25 +453,6 @@ impl SqliteProcessRegistry {
             } else {
                 None
             };
-        // A signal's first append selects the wait it resolves from the
-        // signals of its type the log already holds (FIG-4298); a replayed
-        // signal carries the wait its first append selected.
-        let signal_events_before = if replay_lookup.is_none()
-            && lash_core_execution::runtime::process_signal_name_from_event_type(
-                &request.event_type,
-            )
-            .is_some()
-        {
-            Some(Self::count_events_of_type_conn(
-                conn,
-                &process_id,
-                &request.event_type,
-            )?)
-        } else {
-            None
-        };
-        let signal = request.signal();
-        let wake_session_id = Self::wake_session_id_conn(conn, &process_id)?;
         let (last_sequence, sequence) = Self::next_event_sequence_conn(conn, &process_id)?;
         let prepared = prepare_process_event_append(
             record,
@@ -561,16 +460,13 @@ impl SqliteProcessRegistry {
             sequence,
             last_sequence,
             replay_lookup,
-            signal_events_before,
             occurred_at_ms,
-            wake_session_id.as_ref(),
             fleet_format,
         )?;
         match prepared {
             lash_core_execution::facade_support::ProcessEventAppendPlan::Replay {
                 event,
                 repair_record,
-                wake_delivery,
                 ..
             } => {
                 let repaired = if let Some(repaired) = repair_record {
@@ -584,7 +480,6 @@ impl SqliteProcessRegistry {
                         last_event_sequence: record.last_event_sequence,
                         realization: lash_core_execution::StoreRealization::Coalesced,
                         event,
-                        wake_delivery,
                     },
                     ProcessEventAppendArm::Replayed { repaired },
                 ))
@@ -592,7 +487,6 @@ impl SqliteProcessRegistry {
             lash_core_execution::facade_support::ProcessEventAppendPlan::Insert {
                 event,
                 projected_record,
-                wake_delivery,
             } => {
                 crate::conn::cached_execute(
                     conn,
@@ -600,24 +494,12 @@ impl SqliteProcessRegistry {
                     params![
                         process_id.as_str(),
                         sequence as i64,
-                        event.event_type.as_str(),
+                        event.fact.event_type(),
                         event.invocation.effect_replay_key(),
                         process_encode_json(&event)?,
                     ],
                 )
                 .map_err(process_sqlite_error)?;
-                // A new signal reaches the engine as mail, in the append's
-                // own transaction (ADR 0132 §10).
-                if let Some(signal) = &signal {
-                    crate::durable::processes::signal_mail_within(
-                        conn,
-                        &process_id,
-                        signal,
-                        lash_durable::DurableInstant(
-                            i64::try_from(occurred_at_ms).unwrap_or(i64::MAX),
-                        ),
-                    )?;
-                }
                 *record = projected_record;
                 // A process that just reached a terminal status is an ended
                 // parent scope: its ledger row rides the same transaction as
@@ -631,13 +513,11 @@ impl SqliteProcessRegistry {
                         fleet_format,
                     )?;
                 }
-                Self::deliver_process_wake_conn(conn, wake_delivery.as_ref(), occurred_at_ms)?;
                 Ok((
                     ProcessEventAppendReceipt {
                         last_event_sequence: event.sequence,
                         realization: lash_core_execution::StoreRealization::Realized,
                         event,
-                        wake_delivery,
                     },
                     ProcessEventAppendArm::Inserted,
                 ))
@@ -662,46 +542,6 @@ impl SqliteProcessRegistry {
         Ok((receipt, arm.record_changed()))
     }
 
-    /// Hand a process event's wake to its target session as queued work,
-    /// inside the append's own transaction: the producer admits the batch
-    /// under its source key (so a repeat is the same batch) and wakes the
-    /// session actor (ADR 0132 §12). A target session that is deleted, or
-    /// that never existed, receives nothing.
-    pub(crate) fn deliver_process_wake_conn(
-        conn: &Connection,
-        wake: Option<&lash_core_execution::ProcessWakeDelivery>,
-        occurred_at_ms: u64,
-    ) -> Result<(), lash_core_execution::PluginError> {
-        let Some(wake) = wake else {
-            return Ok(());
-        };
-        let to_plugin = |error: lash_core_execution::StoreError| {
-            lash_core_execution::PluginError::Session(error.to_string())
-        };
-        if crate::persistence::ensure_session_not_deleted_conn(conn, &wake.target_session_id)
-            .is_err()
-            || crate::session_meta::load_session_meta_in_tx(conn, Some(&wake.target_session_id))
-                .map_err(to_plugin)?
-                .is_none()
-        {
-            tracing::debug!(
-                process_id = %wake.process_id,
-                target_session_id = %wake.target_session_id,
-                sequence = wake.sequence,
-                "process wake target is not a live session; nothing is queued"
-            );
-            return Ok(());
-        }
-        crate::queued_work::enqueue_queued_work_conn_with_outcome(
-            conn,
-            &lash_core_execution::facade_support::process_wake_batch_draft(wake.clone()),
-            occurred_at_ms,
-            wake.sequence,
-        )
-        .map_err(to_plugin)?;
-        Ok(())
-    }
-
     pub(crate) fn next_event_sequence_conn(
         conn: &Connection,
         process_id: &ProcessId,
@@ -717,7 +557,7 @@ impl SqliteProcessRegistry {
             .map(|sequence| plugin_u64_from_sql("ProcessEvent", "sequence", sequence))
             .transpose()?;
         let sequence =
-            lash_core_execution::runtime::allocate_process_event_sequence(last_sequence, None)?;
+            lash_core_execution::runtime::allocate_process_event_sequence(last_sequence)?;
         Ok((last_sequence, sequence))
     }
 }

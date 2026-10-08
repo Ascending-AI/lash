@@ -8,8 +8,7 @@
 //! the row still being open.
 
 use super::*;
-use lash_core_execution::store::queued_work::TurnWorkPrefix;
-use lash_core_execution::store::{CheckpointAdmission, CheckpointAdmissionRequest, TurnLaneStop};
+use lash_core_execution::store::{CheckpointAdmission, CheckpointAdmissionRequest};
 
 /// Lower a transaction body's outcome into the write flow's commit decision:
 /// an error rolls back and carries the typed error to the caller.
@@ -47,7 +46,6 @@ pub(crate) async fn admit_at_checkpoint_sqlite(
         .checkpoint_write_transaction_count
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let request = request.clone();
-    let now = store.clock.timestamp_ms();
     store
         .conn
         .write_flow(move |tx| {
@@ -81,22 +79,7 @@ pub(crate) async fn admit_at_checkpoint_sqlite(
                 if let Some(inputs) = inputs.as_ref() {
                     bind_turn_inputs_conn(tx, &request.run, &request.step, inputs)?;
                 }
-                let batches = compose_turn_lane_batches_conn(
-                    tx,
-                    now,
-                    session_id,
-                    AdmissionBoundary::ActiveTurnCheckpoint,
-                    Some(&request.turn_id),
-                    &request.policy,
-                )?;
-                bind_batches_conn(tx, session_id, &request.run, &request.step, &batches)?;
-                let queued = (!batches.is_empty()).then(|| {
-                    lash_core_execution::runtime::AdmittedQueuedWork {
-                        session_id: session_id.clone(),
-                        batches,
-                    }
-                });
-                Ok(TxOutcome::Commit(CheckpointAdmission { inputs, queued }))
+                Ok(TxOutcome::Commit(CheckpointAdmission { inputs }))
             })())
         })
         .await
@@ -146,7 +129,6 @@ async fn checkpoint_work_pending_sqlite(
     let step = request.step.clone();
     let checkpoint = request.checkpoint;
     let max_inputs = request.max_inputs;
-    let max_batches = request.policy.max_rows;
     conn.call(move |conn| {
         let outcome: Result<bool, StoreError> = (|| {
             let family = &crate::turn_ingress::turn_ingress_sql().family_sqlite;
@@ -168,7 +150,6 @@ async fn checkpoint_work_pending_sqlite(
                         session_id.as_str(),
                         turn_id.as_str(),
                         i64::try_from(max_inputs).unwrap_or(i64::MAX),
-                        i64::try_from(max_batches).unwrap_or(i64::MAX),
                         run.as_str(),
                         step.as_str(),
                     ],
@@ -205,33 +186,16 @@ fn read_step_admission_conn(
             .map_err(sqlite_error)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
     };
-    let batch_rows = {
-        let mut stmt = tx
-            .prepare_cached(sql.queued_batches.select_admitted_by_step.sql())
-            .map_err(sqlite_error)?;
-        let rows = stmt
-            .query_map(
-                params![session_id.as_str(), run.as_str(), step],
-                queued_batch_row_from_sql,
-            )
-            .map_err(sqlite_error)?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
-    };
     let inputs = input_rows
         .into_iter()
         .map(pending_turn_input_from_row)
         .collect::<Result<Vec<_>, _>>()?;
-    let batches = queued_work_batches_from_rows(&batch_rows)?;
     Ok(CheckpointAdmission {
         inputs: (!inputs.is_empty()).then(|| lash_core_execution::AdmittedTurnInputs {
             session_id: session_id.clone(),
             mode,
             inputs,
             applications: Vec::new(),
-        }),
-        queued: (!batches.is_empty()).then(|| lash_core_execution::runtime::AdmittedQueuedWork {
-            session_id: session_id.clone(),
-            batches,
         }),
     })
 }
@@ -313,80 +277,6 @@ fn bind_turn_inputs_conn(
     Ok(())
 }
 
-/// Bind every batch of `batches` to `run` under `step`.
-fn bind_batches_conn(
-    tx: &Connection,
-    session_id: &SessionId,
-    run: &TurnId,
-    step: &str,
-    batches: &[QueuedWorkBatch],
-) -> Result<(), StoreError> {
-    let statement = &crate::turn_ingress::turn_ingress_sql().queued_batches.admit;
-    for batch in batches {
-        let bound = crate::conn::cached_execute(
-            tx,
-            statement.sql(),
-            params![
-                session_id.as_str(),
-                batch.batch_id.as_str(),
-                run.as_str(),
-                step,
-            ],
-        )
-        .map_err(sqlite_error)?;
-        lash_core_execution::store_backend_support::require_fenced_write_applied(
-            lash_core_execution::store_backend_support::FencedWrite::IngressAdmission,
-            crate::SQLITE_BACKEND,
-            batch.batch_id.as_str(),
-            u64::try_from(bound).unwrap_or(u64::MAX),
-            || StoreError::Contended,
-        )?;
-    }
-    Ok(())
-}
-
-/// The open queued turn work one composition at `boundary` takes, by the
-/// shared prefix rule: stopped before the earliest open next-turn input
-/// while `running_turn` runs (`None` at idle) (ADR 0101 §5) and bounded by
-/// `policy`.
-fn compose_turn_lane_batches_conn(
-    tx: &Connection,
-    now: u64,
-    session_id: &SessionId,
-    boundary: AdmissionBoundary,
-    running_turn: Option<&TurnId>,
-    policy: &TurnLaneAdmissionPolicy,
-) -> Result<Vec<QueuedWorkBatch>, StoreError> {
-    if policy.max_rows == 0 {
-        return Ok(Vec::new());
-    }
-    // The boundary is a closed two-variant choice, so it selects a named
-    // statement rather than splicing a predicate: an optional boundary filter
-    // cannot seek the `(session_id, enqueue_seq)` primary key cleanly, and
-    // this query is the admission path's hottest. An idle run's execution is the
-    // turn lane's, which a command enqueued since the session chose it never
-    // holds back (ADR 0101 §4).
-    let sql = &crate::turn_ingress::turn_ingress_sql().queued_batches_sqlite;
-    let statement = match boundary {
-        AdmissionBoundary::Idle => sql.admission_candidates_turn_lane.sql(),
-        AdmissionBoundary::ActiveTurnCheckpoint => sql.admission_candidates_boundary.sql(),
-    };
-    let (_, mut batches, candidates) =
-        scan_queued_work_candidates_sqlite(tx, session_id, statement, policy.max_rows)?;
-    let admitted = TurnLaneStop::before(earliest_next_turn_candidate_seq_conn(
-        tx,
-        session_id,
-        running_turn,
-    )?)
-    .queued_prefix(&candidates);
-    let selected = match select_turn_work_prefix(&candidates[..admitted], boundary, policy, now)? {
-        TurnWorkPrefix::Selected { len } => len,
-        TurnWorkPrefix::Refused { .. } => 0,
-    };
-    batches.truncate(selected);
-    Ok(batches)
-}
-
 /// The rows as read, the batches they hydrate to, and the candidates the
 /// shared prefix rule decides over.
 type QueuedWorkCandidateScan = (
@@ -416,26 +306,4 @@ fn scan_queued_work_candidates_sqlite(
     let batches = queued_work_batches_from_rows(&rows)?;
     let candidates = batches.iter().map(turn_lane_candidate).collect();
     Ok((rows, batches, candidates))
-}
-
-/// The `enqueue_seq` of session `session_id`'s earliest open next-turn
-/// input while `running_turn` runs (`None` at idle): the turn-lane head of
-/// the input table.
-fn earliest_next_turn_candidate_seq_conn(
-    tx: &Connection,
-    session_id: &SessionId,
-    running_turn: Option<&TurnId>,
-) -> Result<Option<u64>, StoreError> {
-    let seq: Option<i64> = tx
-        .query_row(
-            crate::turn_ingress::turn_ingress_sql()
-                .pending_inputs
-                .earliest_next_turn_candidate_seq
-                .sql(),
-            params![session_id.as_str(), running_turn.map(TurnId::as_str)],
-            |row| row.get(0),
-        )
-        .map_err(sqlite_error)?;
-    seq.map(|seq| u64_from_sql("turn_lane", "enqueue_seq", seq).map_err(sqlite_error))
-        .transpose()
 }

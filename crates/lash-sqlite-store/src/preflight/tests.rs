@@ -277,7 +277,6 @@ mod walk {
             ),
             lash_core_execution::Lifetime::Detached,
         )
-        .with_wake_session_id(Some(SessionId::from("wake-session")))
     }
 
     /// Register a live process and answer the id the registrar minted.

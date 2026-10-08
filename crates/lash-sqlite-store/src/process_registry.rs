@@ -370,30 +370,6 @@ impl lash_core_execution::ProcessObserverRegistry for SqliteProcessRegistry {
             .map_err(process_sqlite_error)?
     }
 
-    async fn wake_target(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<Option<SessionId>, lash_core_execution::PluginError> {
-        let process_id = process_id.clone();
-        self.conn
-            .call(move |conn| {
-                Ok((|| {
-                    Self::require_process_conn(conn, &process_id)?;
-                    Self::wake_session_id_conn(conn, &process_id)
-                })())
-            })
-            .await
-            .map_err(process_sqlite_error)?
-    }
-
-    async fn retarget_subscription(
-        &self,
-        process_id: &ProcessId,
-        target: Option<&str>,
-    ) -> Result<(), lash_core_execution::PluginError> {
-        self.retarget_subscription_impl(process_id, target).await
-    }
-
     async fn delete_session_process_state(
         &self,
         session_id: &SessionId,
@@ -402,7 +378,7 @@ impl lash_core_execution::ProcessObserverRegistry for SqliteProcessRegistry {
         let session_id_owned = session_id.to_string();
         // The session's scope is not closed here: its `CloseSession` intent
         // is the one owner of that row (FIG-3607 R10, ADR 0108 §5).
-        let (removed_observer_count, cleared_subscription_count) = self
+        let removed_observer_count = self
             .conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
@@ -413,13 +389,7 @@ impl lash_core_execution::ProcessObserverRegistry for SqliteProcessRegistry {
                             params![session_id],
                         )
                         .map_err(process_sqlite_error)?;
-                    let cleared_subscription_count = tx
-                        .execute(
-                            process_sql().process.clear_wake_session_for_session.sql(),
-                            params![session_id],
-                        )
-                        .map_err(process_sqlite_error)?;
-                    Ok((removed_observer_count, cleared_subscription_count))
+                    Ok(removed_observer_count)
                 })()))
             })
             .await
@@ -427,7 +397,6 @@ impl lash_core_execution::ProcessObserverRegistry for SqliteProcessRegistry {
         Ok(lash_core_execution::ProcessSessionDeleteReport {
             session_id: session_id.clone(),
             removed_observer_count,
-            cleared_subscription_count,
         })
     }
 }
@@ -589,7 +558,18 @@ impl lash_core_execution::ProcessEventLog for SqliteProcessRegistry {
                                                     Box::new(error),
                                                 )
                                             })?,
-                                            event_type: row.get(1)?,
+                                            kind: lash_core_execution::ProcessEventKind::parse(
+                                                &row.get::<_, String>(1)?,
+                                            )
+                                            .ok_or_else(|| {
+                                                rusqlite::Error::FromSqlConversionFailure(
+                                                    1,
+                                                    rusqlite::types::Type::Text,
+                                                    Box::new(std::io::Error::other(
+                                                        "unknown process lifecycle event kind",
+                                                    )),
+                                                )
+                                            })?,
                                         })
                                     },
                                 )
@@ -601,35 +581,6 @@ impl lash_core_execution::ProcessEventLog for SqliteProcessRegistry {
                         }
                     };
                     Ok(lash_core_execution::ProcessEventReadOutcome::Retained(page))
-                })())
-            })
-            .await
-            .map_err(process_sqlite_error)?
-    }
-
-    async fn count_events_through(
-        &self,
-        process_id: &ProcessId,
-        event_type: &str,
-        up_to_sequence: u64,
-    ) -> Result<u64, lash_core_execution::PluginError> {
-        let process_id = process_id.clone();
-        let event_type = event_type.to_string();
-        self.conn
-            .call(move |conn| {
-                Ok((|| {
-                    Self::require_process_conn(conn, &process_id)?;
-                    conn.query_row(
-                        process_sql().event.count_by_type_through_sequence.sql(),
-                        params![
-                            process_id.as_str(),
-                            event_type,
-                            crate::clamp_sequence_bound(up_to_sequence)
-                        ],
-                        |row| row.get::<_, i64>(0),
-                    )
-                    .map(|count| count as u64)
-                    .map_err(process_sqlite_error)
                 })())
             })
             .await

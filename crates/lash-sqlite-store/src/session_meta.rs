@@ -35,17 +35,13 @@ pub(crate) fn stored_relation_from_row(
                 .map(|value| crate::sql_process_id(8, value))
                 .transpose()?,
             process_event_sequence: row.get(9)?,
-            occurrence_id: row.get(10)?,
-            subscription_id: row.get(11)?,
-            subscription_incarnation: row.get(12)?,
-            subscription_revision: row.get(13)?,
-            node_id: row.get(14)?,
+            node_id: row.get(10)?,
         },
         source_session_id: row
-            .get::<_, Option<String>>(15)?
+            .get::<_, Option<String>>(11)?
             .map(crate::codec::sql_identity)
             .transpose()?,
-        source_node_id: row.get(16)?,
+        source_node_id: row.get(12)?,
         pending_observer_intents: Vec::new(),
     })
 }
@@ -91,10 +87,6 @@ pub(crate) fn write_session_meta(
                 stored.cause.call_id,
                 stored.cause.process_id.as_deref(),
                 stored.cause.process_event_sequence,
-                stored.cause.occurrence_id,
-                stored.cause.subscription_id,
-                stored.cause.subscription_incarnation,
-                stored.cause.subscription_revision,
                 stored.cause.node_id,
                 stored.source_session_id.as_deref(),
                 stored.source_node_id,

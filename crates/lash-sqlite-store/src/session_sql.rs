@@ -21,12 +21,9 @@ lash_store_sql::statements! {
              (session_id, session_state_version, relation_kind, parent_session_id,
               caused_by_kind, caused_by_session_id, caused_by_turn_id,
               caused_by_effect_id, caused_by_call_id, caused_by_process_id,
-              caused_by_process_event_sequence, caused_by_occurrence_id,
-              caused_by_subscription_id, caused_by_subscription_incarnation,
-              caused_by_subscription_revision, caused_by_node_id, source_session_id,
+              caused_by_process_event_sequence, caused_by_node_id, source_session_id,
               source_node_id, created_at_ms, last_commit_at_ms, owning_process_id)
-             VALUES (?1, ?19, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                     ?13, ?14, ?15, ?16, ?17, ?18, NULL, ?20)";
+             VALUES (?1, ?15, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, NULL, ?16)";
 
         /// The stored relation of `?1`.
         ///
@@ -36,9 +33,7 @@ lash_store_sql::statements! {
         select_relation = "SELECT session_id, relation_kind, parent_session_id,
     caused_by_kind, caused_by_session_id, caused_by_turn_id,
     caused_by_effect_id, caused_by_call_id, caused_by_process_id,
-    caused_by_process_event_sequence, caused_by_occurrence_id,
-    caused_by_subscription_id, caused_by_subscription_incarnation,
-    caused_by_subscription_revision, caused_by_node_id, source_session_id,
+    caused_by_process_event_sequence, caused_by_node_id, source_session_id,
     source_node_id FROM session_meta WHERE session_id = ?1";
 
         /// The sole recorded session, if this catalog holds exactly one.
@@ -71,9 +66,7 @@ lash_store_sql::statements! {
                     meta.caused_by_session_id, meta.caused_by_turn_id,
                     meta.caused_by_effect_id, meta.caused_by_call_id,
                     meta.caused_by_process_id, meta.caused_by_process_event_sequence,
-                    meta.caused_by_occurrence_id, meta.caused_by_subscription_id,
-                    meta.caused_by_subscription_incarnation,
-                    meta.caused_by_subscription_revision, meta.caused_by_node_id,
+                    meta.caused_by_node_id,
                     meta.source_session_id, meta.source_node_id,
                     meta.created_at_ms,
                     meta.last_commit_at_ms, COALESCE(head.head_revision, 0), 0 AS deleted,
@@ -83,7 +76,7 @@ lash_store_sql::statements! {
              UNION ALL
              SELECT session_id, relation_kind,
                     parent_session_id, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-                    NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                    NULL, NULL, NULL,
                     created_at_ms, last_commit_at_ms, head_revision, 1, 0
              FROM deleted_sessions
          )

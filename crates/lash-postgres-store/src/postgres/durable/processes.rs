@@ -13,7 +13,7 @@ use crate::guarded_tx::GuardedTx;
 use lash_core_execution::runtime::actor::process::{scope_id, scope_index, subtree_roots};
 use lash_durable::domain::{
     CANCEL_MAIL, CancelAnswer, CancelRequest, DomainRefusal, ProcessActorRow, ProcessStartRows,
-    ProcessWrite, SIGNAL_MAIL, ScopeKey,
+    ProcessWrite, ScopeKey,
 };
 use lash_durable::{
     ActorKey, DurableError, DurableInstant, Epoch, MailRefusal, StoreFailure, StoreFailureKind,
@@ -107,32 +107,6 @@ pub(crate) async fn cancel_mail_within(
     Ok(woken)
 }
 
-/// Append `signal` to its process actor's mailbox and wake it, inside the
-/// registry transaction that admits it: what a new signal append writes.
-pub(crate) async fn signal_mail_within(
-    tx: &mut PgConnection,
-    process: &ProcessId,
-    signal: &lash_core_execution::ProcessSignal,
-    now: DurableInstant,
-) -> Result<(), lash_core_execution::PluginError> {
-    let failure = |message: String| lash_core_execution::PluginError::Session(message);
-    let actor = process_actor(process).map_err(|error| failure(error.to_string()))?;
-    let body = serde_json::to_string(signal).map_err(|error| failure(error.to_string()))?;
-    let (_, seq) = wake_within(tx, &actor, false, now)
-        .await
-        .map_err(|error| failure(error.to_string()))?;
-    sqlx::query(SQL.mail.append.sql())
-        .bind(actor.as_str())
-        .bind(seq.0)
-        .bind(SIGNAL_MAIL)
-        .bind(body)
-        .bind(now.0)
-        .execute(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(|error| failure(error.to_string()))?;
-    Ok(())
-}
-
 /// Record `origin`'s cancel of `process` unless one stands, append its
 /// cancel mail and control-wake it: what a cancel request and each child of
 /// a cascade batch write. A terminal process is answered `AlreadyEnded`
@@ -223,39 +197,6 @@ async fn register_within(
     }
 }
 
-/// Send a store-local signal on the commit's connection: its event,
-/// exactly once under its identity, with its mail and its target's wake. A
-/// target that is unknown or already terminal takes nothing.
-async fn signal_within(
-    tx: &mut GuardedTx<'_>,
-    commit: &Committing<'_>,
-    process: &ProcessId,
-    signal_json: &str,
-) -> Result<(), DurableError> {
-    let Ok(signal) = serde_json::from_str::<lash_core_execution::ProcessSignal>(signal_json) else {
-        return Err(corrupt("process signal", signal_json));
-    };
-    let Some(mut record) = crate::process_helpers::load_process_tx(tx, process)
-        .await
-        .map_err(|error| registry_failure(&error))?
-    else {
-        return Ok(());
-    };
-    if record.is_terminal() {
-        return Ok(());
-    }
-    crate::process_helpers::append_process_event_tx(
-        tx,
-        &mut record,
-        signal.append_request(),
-        millis(commit.now)?,
-        commit.fleet,
-    )
-    .await
-    .map(drop)
-    .map_err(|error| registry_failure(&error))
-}
-
 pub(super) async fn apply(
     tx: &mut GuardedTx<'_>,
     commit: &Committing<'_>,
@@ -263,10 +204,6 @@ pub(super) async fn apply(
 ) -> Result<(), DurableError> {
     match write {
         ProcessWrite::Register(rows) => register_within(tx, commit, rows).await,
-        ProcessWrite::Signal {
-            process,
-            signal_json,
-        } => signal_within(tx, commit, process, signal_json).await,
         ProcessWrite::Advance {
             process,
             expected_rev,
@@ -302,21 +239,20 @@ pub(super) async fn apply(
                 .map_err(sqlx_failure)?;
             Ok(())
         }
-        ProcessWrite::Emit {
+        ProcessWrite::AppendEvent {
             process,
             event_type,
             payload_json,
             replay_key,
-            wake_suppressed,
         } => {
             let payload = serde_json::from_str(payload_json)
                 .map_err(|_| corrupt("process event payload", payload_json))?;
-            let mut request =
-                lash_core_execution::ProcessEventAppendRequest::new(event_type.as_str(), payload)
-                    .with_replay_key(replay_key.as_str());
-            if *wake_suppressed {
-                request = request.without_wake();
-            }
+            let request = lash_core_execution::ProcessEventAppendRequest::from_stored(
+                event_type.as_str(),
+                payload,
+                replay_key.as_str(),
+            )
+            .map_err(|error| registry_failure(&error))?;
             record_event_tx(tx, process, request, millis(commit.now)?, commit.fleet)
                 .await
                 .map_err(|error| registry_failure(&error))

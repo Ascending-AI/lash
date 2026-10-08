@@ -28,7 +28,6 @@ fn every_rendered_statement_set_renders() {
     let _ = crate::blobs::blob_sql();
     let _ = crate::process_sql::process_sql();
     let _ = crate::session_sql::session_sql();
-    let _ = crate::trigger_store::trigger_sql();
     let _ = crate::turn_ingress::turn_ingress_sql();
 }
 

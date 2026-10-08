@@ -243,7 +243,6 @@ pub(crate) async fn enqueue_queued_work_with_outcome_tx(
         .bind(batch.session_id.as_str())
         .bind(&batch.source_key)
         .bind(batch.delivery_policy.as_str())
-        .bind(batch.kind().as_str())
         .bind(encode_json(&batch.authority)?)
         .bind(&batch.merge_key)
         .bind(now as i64)

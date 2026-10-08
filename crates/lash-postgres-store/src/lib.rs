@@ -2,7 +2,7 @@
 //!
 //! One [`PostgresStorage`] owns the role pools of one [`PostgresHostConfig`]
 //! and creates durable implementations for the runtime session store, process
-//! registry, trigger store, Lashlang artifact store, process execution
+//! registry, Lashlang artifact store, process execution
 //! environment store, and attachment manifest. Every connection it opens is
 //! made by the role-aware factory in [`host`]: named, sized and guarded by the
 //! one validated configuration (FIG-5240).
@@ -38,13 +38,13 @@ mod observed_sql;
 use lash_core_execution::facade_support::StoreObserver;
 use std::sync::Arc;
 
+use lash_core_execution::PluginError;
 use lash_core_execution::runtime::{
-    AdmissionBoundary, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
-    QueuedWorkEnqueueOutcome, QueuedWorkKind, TurnLaneAdmissionPolicy,
+    QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkEnqueueOutcome,
 };
 use lash_core_execution::store::queued_work::{
     SESSION_COMMAND_BATCHES_PER_RUN, TurnLaneCandidate, admission_scan_limit, derive_batch_id,
-    select_leading_session_command, select_turn_work_prefix,
+    select_leading_session_command,
 };
 use lash_core_execution::store::{
     HydratedCheckpointComponent, HydratedSessionCheckpoint, RuntimeCommit, RuntimeCommitReceipt,
@@ -60,10 +60,6 @@ use lash_core_execution::{
     SessionStoreCreateRequest, SessionView, StoreError, StoreMaintenance, VacuumReport,
     facade_support::ProcessStartPlan, facade_support::ProcessTransition,
     facade_support::ProcessTransitionPlan, facade_support::registry_transitions,
-};
-use lash_core_execution::{
-    PluginError, TriggerDeliveryReservation, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
-    TriggerStore, TriggerSubscriptionFilter, TriggerSubscriptionRecord,
 };
 use sqlx::pool::PoolConnection;
 use sqlx::postgres::{PgPool, PgRow};
@@ -179,7 +175,7 @@ pub struct PostgresProcessRegistry {
     /// Where registration mints process ids (ADR 0107).
     process_id_mint: lash_core_execution::ProcessIdMint,
     /// The storage's writer fence: every mutation fences on `F`, and every
-    /// wake-delivery and process-event payload the registry stamps goes
+    /// process-event payload the registry stamps goes
     /// through the fenced `F`'s `writer_version`, never a bare build constant
     /// (FIG-3796).
     fence: guarded_tx::WriterFence,
@@ -199,27 +195,6 @@ impl PostgresProcessRegistry {
         mint: lash_core_execution::ProcessIdMint,
     ) -> Self {
         self.process_id_mint = mint;
-        self
-    }
-}
-
-#[derive(Clone)]
-pub struct PostgresTriggerStore {
-    pool: PgPool,
-    fence: guarded_tx::WriterFence,
-    clock: Arc<dyn lash_core_execution::Clock>,
-    fixed_incarnation: Option<String>,
-}
-
-impl PostgresTriggerStore {
-    pub fn with_clock(mut self, clock: Arc<dyn lash_core_execution::Clock>) -> Self {
-        self.clock = clock;
-        self
-    }
-
-    /// Pin otherwise-random trigger incarnation identity for durable fixture generation.
-    pub fn with_incarnation_for_testing(mut self, incarnation: impl Into<String>) -> Self {
-        self.fixed_incarnation = Some(incarnation.into());
         self
     }
 }
@@ -744,15 +719,6 @@ impl PostgresStorage {
         }
     }
 
-    pub fn trigger_store(&self) -> PostgresTriggerStore {
-        PostgresTriggerStore {
-            pool: self.pool.clone(),
-            fence: self.fence.clone(),
-            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
-            fixed_incarnation: None,
-        }
-    }
-
     pub fn lashlang_artifact_store(&self) -> PostgresLashlangArtifactStore {
         PostgresLashlangArtifactStore {
             pool: self.pool.clone(),
@@ -916,13 +882,6 @@ mod test_support;
 #[cfg(any(test, feature = "testing"))]
 #[path = "postgres/testing.rs"]
 pub mod testing;
-/// Planner witnesses for the named trigger listings, and the dispatch that
-/// picks them.
-#[cfg(test)]
-#[path = "postgres/trigger_listing_plan_tests.rs"]
-mod trigger_listing_plan_tests;
-#[path = "postgres/trigger_store.rs"]
-mod trigger_store;
 #[path = "postgres/turn_ingress.rs"]
 mod turn_ingress;
 

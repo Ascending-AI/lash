@@ -15,7 +15,7 @@ pub const TABLE: &str = "processes";
 /// Every column, in insert order. The only statements that name all of them
 /// are the two backends' registration inserts.
 pub const INSERT_COLUMNS: &str = "process_id, start_key, originator_id,
-                wake_session_id, identity_kind, identity_label, created_at_ms, updated_at_ms,
+                identity_kind, identity_label, created_at_ms, updated_at_ms,
                 last_event_sequence, change_seq, status, lifetime_scope_kind, lifetime_scope_id,
                 lifetime, cancel_requested_at_ms, record_json, consumer_hold_key,
                 consumer_hold_scope_kind, consumer_hold_scope_id, consumer_hold_cancels";
@@ -39,14 +39,6 @@ crate::statements! {
         select_record_json_by_start_key = "SELECT record_json FROM processes WHERE start_key = ?1";
 
         exists_by_id = "SELECT EXISTS(SELECT 1 FROM processes WHERE process_id = ?1)";
-
-        /// The session `?1`'s wakes are delivered to, if any.
-        select_wake_session_id = "SELECT wake_session_id FROM processes WHERE process_id = ?1";
-
-        /// Retarget `?1`'s wake session to `?2`.
-        set_wake_session_id = "UPDATE processes SET wake_session_id = ?2 WHERE process_id = ?1";
-
-        clear_wake_session_for_session = "UPDATE processes SET wake_session_id = NULL WHERE wake_session_id = ?1";
 
         /// Release the consumer hold `?2` holds on `?1` (ADR 0116 §3.6): a
         /// no-op when the row carries another hold or none.

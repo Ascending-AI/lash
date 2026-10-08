@@ -56,9 +56,7 @@ impl PostgresStore {
         .await
         .map_err(store_sqlx_error)?
         .rows_affected();
-        // Every queued-work tombstone goes: a vacuumed wake's redelivery
-        // still meets its receiver floor, and a vacuumed command's replay
-        // meets its revision check (ADR 0101 §8).
+        // A vacuumed command's replay meets its revision check.
         let removed_queued_work_tombstone_count = sqlx::query(
             crate::turn_ingress::turn_ingress_sql()
                 .queued_batches
