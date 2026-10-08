@@ -473,6 +473,29 @@ impl TurnServices for SimServices {
             ))),
         }
     }
+
+    /// A [`TurnScript::Round`] turn is traced, so its admission's export is
+    /// recorded under `turn.traced`, which the matrix cuts (FIG-5457).
+    fn propose_turn_trace(&self, cx: &ActorContext, run: &TurnId) -> Option<TraceProposal> {
+        let session = session_id(cx.actor().id());
+        if TurnScript::of(&session) != Some(TurnScript::Round) {
+            return None;
+        }
+        let anchor = lash::tracing::TraceAnchor::Context(told_carrier()?);
+        let scope = lash::tracing::TraceScopeId::admission(lash::tracing::TraceScopeOwner::Turn {
+            session_id: session,
+            turn_id: run.clone(),
+        });
+        Some(TraceProposal {
+            scope: lash::tracing::DurableTraceScope {
+                scope,
+                cause: lash::tracing::TraceCause::Root,
+                anchor: anchor.clone(),
+                started_at_ms: 0,
+            },
+            candidate: Box::new(Untold(anchor)),
+        })
+    }
 }
 
 impl SimServices {
@@ -741,8 +764,19 @@ struct Catalog {
     run: TurnId,
 }
 
-/// A round call's trace admission candidate: an anchor exported nowhere.
+/// A traced turn's or round call's trace admission candidate: an anchor
+/// exported nowhere.
 struct Untold(lash::tracing::TraceAnchor);
+
+/// The carrier every traced scope of the matrix is anchored by.
+fn told_carrier() -> Option<lash::tracing::TraceCarrier> {
+    Some(lash::tracing::TraceCarrier::new(
+        lash::tracing::W3cTraceId::from_bytes(1_u128.to_be_bytes()).ok()?,
+        lash::tracing::W3cSpanId::from_bytes(1_u64.to_be_bytes()).ok()?,
+        lash::tracing::W3cTraceFlags::from_byte(lash::tracing::W3cTraceFlags::SAMPLED),
+        lash::tracing::W3cTraceState::default(),
+    ))
+}
 
 impl lash::tracing::TraceAdmissionCandidate for Untold {
     fn anchor(&self) -> lash::tracing::TraceAnchor {
@@ -760,13 +794,7 @@ impl RoundTools for Catalog {
         if TurnScript::of(&self.session) != Some(TurnScript::Round) {
             return None;
         }
-        let carrier = lash::tracing::TraceCarrier::new(
-            lash::tracing::W3cTraceId::from_bytes(1_u128.to_be_bytes()).ok()?,
-            lash::tracing::W3cSpanId::from_bytes(1_u64.to_be_bytes()).ok()?,
-            lash::tracing::W3cTraceFlags::from_byte(lash::tracing::W3cTraceFlags::SAMPLED),
-            lash::tracing::W3cTraceState::default(),
-        );
-        let anchor = lash::tracing::TraceAnchor::Context(carrier);
+        let anchor = lash::tracing::TraceAnchor::Context(told_carrier()?);
         let mut scope = lash_core_execution::trace::tool_trace_scope(
             &EffectOpener::turn(self.session.clone(), self.run.clone()),
             None,

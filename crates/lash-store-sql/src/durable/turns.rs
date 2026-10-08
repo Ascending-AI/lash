@@ -11,7 +11,8 @@
 /// the phase with what a restore resumes it from: the encoded checkpoint
 /// and, in the model phase, the model pin (its attempt is `phase_arg`, its
 /// call `model_calls`, and the live replay cursor its first attempt streamed
-/// after), and how many model calls the turn admitted.
+/// after), how many model calls the turn admitted, and whether its
+/// admission's trace export is recorded (FIG-5457).
 pub const TABLE: &str = "turn_phases";
 
 /// The table of the plugin namespaces an unfinished turn's run changed
@@ -52,6 +53,14 @@ crate::statements! {
              WHERE session_id = ?1 AND run = ?2
              RETURNING run";
 
+        /// Record that run `?2` of session `?1` exported its admission's
+        /// trace admission, at epoch `?3`. No row when the run has no phase
+        /// row.
+        trace_exported = "UPDATE turn_phases
+             SET trace_exported = TRUE, written_epoch = ?3
+             WHERE session_id = ?1 AND run = ?2
+             RETURNING run";
+
         /// End unfinished run `?2` of session `?1` with cause `?4`, whose kind
         /// is `?3`, and head revision `?5` at `?6`. No row when it is not
         /// unfinished.
@@ -85,7 +94,8 @@ crate::statements! {
         /// Session `?1`'s unfinished turn with its phase row.
         unfinished = "SELECT r.run, r.admission_json, p.phase, p.phase_arg, p.iteration,
                     p.checkpoint_ref, p.model_request_ref, p.model_deadline_ms,
-                    p.turn_deadline_ms, p.written_epoch, p.model_calls, p.model_stream_from
+                    p.turn_deadline_ms, p.written_epoch, p.model_calls, p.model_stream_from,
+                    p.trace_exported
              FROM session_runs AS r
              JOIN turn_phases AS p ON p.session_id = r.session_id AND p.run = r.run
              WHERE r.session_id = ?1 AND r.admission_json IS NOT NULL

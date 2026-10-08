@@ -116,6 +116,22 @@ pub(super) async fn apply(
             }
             Ok(())
         }
+        TurnWrite::TraceExported { session, run } => {
+            let recorded: Option<String> = sqlx::query_scalar(SQL.trace_exported.sql())
+                .bind(session.as_str())
+                .bind(run.as_str())
+                .bind(commit.epoch.0)
+                .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(sqlx_failure)?;
+            if recorded.is_none() {
+                return refuse(DomainRefusal::TurnNotOpen {
+                    session: session.clone(),
+                    run: run.clone(),
+                });
+            }
+            Ok(())
+        }
         TurnWrite::Namespaces {
             session,
             run,
@@ -435,6 +451,7 @@ pub(super) async fn turn(
     let admission: String = row.try_get(1).map_err(decode)?;
     let admission =
         RunAdmissionRecord::from_stored(&admission).map_err(|error| encoding(&error))?;
+    let trace_exported: bool = row.try_get(12).map_err(decode)?;
     let cancel = cancel_of(tx, session, &run).await?;
     Ok(Some(TurnRow {
         session: session.clone(),
@@ -446,6 +463,7 @@ pub(super) async fn turn(
         turn_deadline: turn_deadline.map(DurableInstant),
         written_epoch,
         cancel,
+        trace_exported,
     }))
 }
 

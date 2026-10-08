@@ -24,6 +24,11 @@ impl CommitLabel {
     pub const TURN_ACCEPT: Self = Self::new("turn.accept");
     /// `turn.admit`: A turn admitted: inputs bound, deadline recorded (C2).
     pub const TURN_ADMIT: Self = Self::new("turn.admit");
+    /// `turn.traced`: The turn's record that the admission of the trace
+    /// scope its admission retained is exported, by the owner that exported
+    /// it: it discharges the export the admission owes before the turn's
+    /// first phase commit (FIG-5457).
+    pub const TURN_TRACED: Self = Self::new("turn.traced");
     /// `turn.prepare`: The prepared context, checkpoint and model pin, before the first byte (C3).
     pub const TURN_PREPARE: Self = Self::new("turn.prepare");
     /// `model.start`: A model call started: its request pinned and its deadline recorded.
@@ -157,7 +162,7 @@ impl CommitLabel {
     }
 
     /// Every label in the catalog, L1's lease labels first.
-    pub const ALL: [Self; 46] = [
+    pub const ALL: [Self; 47] = [
         Self::CLAIM,
         Self::HEARTBEAT,
         Self::REAP,
@@ -166,6 +171,7 @@ impl CommitLabel {
         Self::NODE_DRAIN,
         Self::TURN_ACCEPT,
         Self::TURN_ADMIT,
+        Self::TURN_TRACED,
         Self::TURN_PREPARE,
         Self::MODEL_START,
         Self::MODEL_DONE,

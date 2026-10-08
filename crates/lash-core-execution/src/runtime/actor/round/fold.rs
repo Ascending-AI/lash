@@ -200,12 +200,21 @@ impl RoundView {
         self.presented.as_deref()
     }
 
-    /// Whether an owner recorded that it exported the trace admissions the
-    /// admission retained, discharging the export the admission owes
-    /// (FIG-5452).
+    /// The traced scopes whose admission exports the admission still owes:
+    /// its members' scopes with an anchor to export, until an owner records
+    /// that it exported them (`round.traced`), which discharges them
+    /// (FIG-5452, FIG-5457). An owner that holds the admission without that
+    /// record exports these, then records so.
     #[must_use]
-    pub fn trace_exported(&self) -> bool {
-        self.trace_exported
+    pub fn owed_trace_exports(&self) -> Vec<&lash_trace::DurableTraceScope> {
+        if self.trace_exported {
+            return Vec::new();
+        }
+        self.members
+            .iter()
+            .filter_map(|member| member.draft.trace())
+            .filter(|scope| scope.anchor.context().is_some())
+            .collect()
     }
 
     /// Whether every member has its final outcome.

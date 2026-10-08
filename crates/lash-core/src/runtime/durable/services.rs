@@ -290,6 +290,10 @@ impl TurnServices for RuntimeTurnServices {
         })
     }
 
+    fn export_turn_admission(&self, scope: &lash_trace::DurableTraceScope) {
+        self.runtimes.tracing().scopes().export_admitted(scope);
+    }
+
     async fn announce_head(&self, cx: &ActorContext, session: &SessionId) {
         announce_head(
             cx.backend(),

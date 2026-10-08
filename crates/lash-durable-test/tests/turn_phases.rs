@@ -1997,6 +1997,7 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
         turn_deadline: None,
         written_epoch: lash_durable::Epoch(1),
         cancel: None,
+        trace_exported: false,
     };
     let cx = ActorContext::detached(backend.clone());
     let mut heads = HeadCache::default();

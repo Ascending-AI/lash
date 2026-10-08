@@ -73,11 +73,6 @@ pub(super) enum RoundExit {
     },
 }
 
-/// Whether a call's trace scope anchored by `anchor` is exported.
-fn traced(anchor: &lash_trace::TraceAnchor) -> bool {
-    matches!(anchor, lash_trace::TraceAnchor::Context(_))
-}
-
 /// Commit the record that `round`'s traced calls' admissions are exported,
 /// discharging the export its admission owes (FIG-5452).
 async fn record_trace_exported(cx: &ActorContext, round: &AdmittedRound) -> Result<(), TurnError> {
@@ -152,12 +147,8 @@ pub(super) async fn run(
         Some(view) => {
             let drafts: Vec<_> = view.members().iter().map(|member| member.draft()).collect();
             round::require_admitted(&opener, run, &drafts, &calls).map_err(exec)?;
-            let owed: Vec<_> = drafts
-                .iter()
-                .filter_map(|draft| draft.trace())
-                .filter(|scope| traced(&scope.anchor))
-                .collect();
-            if !view.trace_exported() && !owed.is_empty() {
+            let owed = view.owed_trace_exports();
+            if !owed.is_empty() {
                 for scope in owed {
                     tools.export_admitted(scope);
                 }
@@ -231,7 +222,7 @@ pub(super) async fn run(
             // reconciles their admissions if so.
             let exports = candidates
                 .iter()
-                .any(|candidate| traced(&candidate.anchor()));
+                .any(|candidate| candidate.anchor().context().is_some());
             let committed = cx.commit(tx, CommitLabel::MODEL_DONE).await;
             for candidate in candidates {
                 super::session::settle_trace_admission(candidate, &committed);

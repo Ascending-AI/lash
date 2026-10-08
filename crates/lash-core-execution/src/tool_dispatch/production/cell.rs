@@ -11,10 +11,13 @@
 //!
 //! A tool call's trace scope is retained by the cell's admission of it
 //! ([`CellMembers::propose_trace`]), and every attempt traces the call
-//! under it: the call is admitted once, not once per attempt. Its candidate
-//! is selected when the call's first body is built, which only an admitted
-//! call's is; an owner without the candidate reconciles the admission's
-//! export instead, which the exporter dedupes (FIG-5395).
+//! under it: the call is admitted once, not once per attempt. The
+//! admission owes its calls' admission exports until an owner records that
+//! it exported them (`round.traced`): the cell's owner exports them before
+//! any of their bodies runs, selecting the candidates it proposed or
+//! reconciling the exports of another owner's, and then records so. A node
+//! that takes the cell over after that record exports none of its calls'
+//! admissions again (FIG-5395, FIG-5457).
 
 use super::round::{
     catalog_policies, completed_answer, discharge_member, member_body, member_pin,
@@ -253,7 +256,7 @@ pub struct CellMembers {
     tools: CellTools,
     calls: Mutex<BTreeMap<crate::ToolCallId, CellMember>>,
     /// The trace candidates of the tool calls this owner proposed, until
-    /// their admission is known to have committed.
+    /// their admission's exports are owed ([`CellMembers::export_trace_admissions`]).
     candidates: Mutex<BTreeMap<crate::ToolCallId, Box<dyn lash_trace::TraceAdmissionCandidate>>>,
 }
 
@@ -284,8 +287,8 @@ impl CellMembers {
 
     /// Propose the trace admission of `member`, a tool call, requested at
     /// `now_ms`: the scope the cell's admission of it retains. The candidate
-    /// is held until the call's first body is built. `None` without
-    /// tracing.
+    /// is held until the admission, committed, has its exports discharged.
+    /// `None` without tracing.
     pub fn propose_trace(
         &self,
         member: &CellMember,
@@ -310,21 +313,6 @@ impl CellMembers {
             earlier.settle(lash_trace::TraceCandidateOutcome::Refused);
         }
         Some(proposal.scope)
-    }
-
-    /// `execution`'s admission committed, as its body is being built:
-    /// select the candidate this owner proposed for its call, or reconcile
-    /// the admission's export when another owner proposed it.
-    fn admitted(&self, execution: &AdmittedExecution) {
-        let candidate = self.candidates.lock_recover().remove(execution.call());
-        match candidate {
-            Some(candidate) => candidate.settle(lash_trace::TraceCandidateOutcome::Selected),
-            None => {
-                if let Some(scope) = execution.draft().trace() {
-                    self.tools.context.export_tool_trace_admission(scope);
-                }
-            }
-        }
     }
 
     /// Know `member`, admitted or open, so its body can be built.
@@ -368,12 +356,23 @@ fn unknown_member() -> MemberBody {
 }
 
 impl MemberBodies for CellMembers {
+    fn export_trace_admissions(&self, members: &[AdmittedExecution]) {
+        let mut candidates = self.candidates.lock_recover();
+        for execution in members {
+            match candidates.remove(execution.call()) {
+                Some(candidate) => candidate.settle(lash_trace::TraceCandidateOutcome::Selected),
+                None => {
+                    if let Some(scope) = execution.draft().trace() {
+                        self.tools.context.export_tool_trace_admission(scope);
+                    }
+                }
+            }
+        }
+    }
+
     fn body(&self, execution: &AdmittedExecution) -> MemberBody {
         match self.member(execution) {
-            Some(CellMember::Tool(call)) => {
-                self.admitted(execution);
-                self.tools.body(&call, execution)
-            }
+            Some(CellMember::Tool(call)) => self.tools.body(&call, execution),
             None => unknown_member(),
         }
     }

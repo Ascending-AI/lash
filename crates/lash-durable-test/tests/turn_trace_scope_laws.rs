@@ -24,6 +24,13 @@
 //!   another process, whose adapter remembers nothing the parking node
 //!   exported: the call's admission export is owed only until an owner
 //!   discharged it, and the takeover reconciles nothing (FIG-5452).
+//! - **Admissions across a lost node (FIG-5457):** a node that loses its
+//!   life with an admission it exported but no phase or outcome after it is
+//!   taken over by another process, whose adapter remembers nothing the
+//!   lost node exported. A turn whose node is lost between `turn.admit` and
+//!   `model.start`, and a code cell's call whose node is lost while its
+//!   body runs, are each admitted exactly once: the lost node discharged
+//!   the admission's export durably, so the takeover reconciles nothing.
 //!
 //! The crash half, a turn cut at a phase commit and resumed on the other
 //! node, is `Turn::Trace` in `tool_crash_laws.rs`.
@@ -32,6 +39,8 @@
 
 #[path = "support/served.rs"]
 mod served;
+#[path = "support/sim.rs"]
+mod sim;
 #[path = "support/telemetry.rs"]
 mod telemetry;
 
@@ -227,7 +236,218 @@ async fn a_turn_resumed_on_a_takeover_node_keeps_its_trace_scope(tier: Tier) {
     resumed_turn_keeps_its_trace_scope(tier, Resume::Takeover).await;
 }
 
+/// The tool a code cell's call runs, which holds on the node the law
+/// loses.
+const HELD: &str = "trace_held";
+
+/// The plugin whose before-turn callback holds on the node the law loses.
+const HOLD_PLUGIN: &str = "trace-hold-law";
+
+fn held_definition() -> lash_core::ToolDefinition {
+    let object = serde_json::json!({ "type": "object", "additionalProperties": true });
+    lash_core::ToolDefinition::raw(
+        format!("tool:{HELD}"),
+        HELD,
+        "Holds on the node the trace law loses.",
+        object.clone(),
+        object,
+    )
+    .expect("the tool's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
+    .with_tool_binding(lash_core::ToolBinding::new(["tools"], HELD))
+    // A call its node lost while it ran runs again on the node that takes
+    // the cell over, which builds its body without the candidate.
+    .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+        std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
+        1,
+        1,
+    ))
+}
+
+/// What holds on the node the law loses: told on `held` once it holds,
+/// and never answered. `None` on the node that takes over, where nothing
+/// holds.
+#[derive(Clone)]
+struct Hold {
+    held: Option<tokio::sync::mpsc::UnboundedSender<()>>,
+}
+
+impl Hold {
+    /// Hold forever on the lost node; go on at once on any other.
+    async fn hold(&self) {
+        if let Some(held) = &self.held {
+            held.send(()).expect("the law waits for the hold");
+            std::future::pending::<()>().await;
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for Hold {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![held_definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == HELD).then(|| Arc::new(held_definition().contract()))
+    }
+
+    async fn execute(&self, _call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        self.hold().await;
+        lash_core::ToolOutcome::ok(serde_json::json!({ "answered": true })).into()
+    }
+}
+
+impl lash::plugins::PluginDefinition for Hold {
+    fn declaration() -> lash::plugins::PluginDeclaration {
+        lash::plugins::PluginDeclaration::initial(HOLD_PLUGIN)
+    }
+}
+
+impl lash::plugins::PluginFactory for Hold {
+    fn id(&self) -> &'static str {
+        HOLD_PLUGIN
+    }
+
+    fn build(
+        &self,
+        _: &lash::plugins::PluginSessionContext,
+    ) -> Result<Arc<dyn lash::plugins::SessionPlugin>, lash::plugins::PluginError> {
+        Ok(Arc::new(self.clone()))
+    }
+}
+
+impl lash::plugins::SessionPlugin for Hold {
+    fn id(&self) -> &'static str {
+        HOLD_PLUGIN
+    }
+
+    fn register(
+        &self,
+        reg: &mut lash::plugins::PluginRegistrar,
+    ) -> Result<(), lash::plugins::PluginError> {
+        let hold = self.clone();
+        reg.turn().before(
+            lash::hook_key!("hold"),
+            Arc::new(move |_| {
+                let hold = hold.clone();
+                Box::pin(async move {
+                    hold.hold().await;
+                    Ok(lash_core::plugin::TurnContributions::default())
+                })
+            }),
+        )
+    }
+}
+
+/// Where the lost node holds.
+#[derive(Clone, Copy, Debug)]
+enum Lost {
+    /// In the turn's before-turn callback: after `turn.admit` committed and
+    /// its candidate was selected, before `model.start`.
+    BeforeModelStart,
+    /// In the body of the call a code cell's quiet point admitted, once its
+    /// candidate was selected.
+    InCellCall,
+}
+
+/// The builder of a core serving `telemetry` and `hold`: an RLM core whose
+/// cells call the held tool, or a standard core whose turns run the
+/// holding before-turn callback.
+fn held_builder(
+    lost: Lost,
+    telemetry: &Telemetry,
+    hold: Hold,
+) -> impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder {
+    let telemetry = telemetry.clone();
+    move |backend| {
+        let builder = match lost {
+            Lost::BeforeModelStart => {
+                lash::LashCore::standard_builder(backend.clone()).plugin(Arc::new(hold))
+            }
+            Lost::InCellCall => lash::LashCore::rlm_builder(
+                backend.clone(),
+                served::rlm(backend, None, sim::untimed_workers()),
+            )
+            .tools(Arc::new(hold)),
+        };
+        builder.trace_runtime(telemetry.runtime())
+    }
+}
+
+/// A turn whose node is lost where `lost` says, once the admission there
+/// was exported, and which a node of another process takes over, is
+/// admitted once, as is its cell's call (FIG-5457).
+async fn a_lost_nodes_admission_is_exported_once(tier: Tier, lost: Lost) {
+    let telemetry = Telemetry::default();
+    let (held, mut holding) = tokio::sync::mpsc::unbounded_channel();
+    let Some(mut world) = World::new(
+        tier,
+        held_builder(lost, &telemetry, Hold { held: Some(held) }),
+    )
+    .await
+    else {
+        return;
+    };
+    let name = format!("trace-lost-{lost:?}").to_lowercase();
+    if let Lost::InCellCall = lost {
+        world.script(
+            &name,
+            vec![served::cell(&format!("await tools.{HELD}({{}});"))],
+        );
+    }
+    let session = world.session(&name, served::spec(8)).await;
+    let sent = session
+        .send(lash::TurnInput::text(name.as_str()))
+        .await
+        .expect("the input is accepted");
+    tokio::time::timeout(WATCHDOG, holding.recv())
+        .await
+        .expect("deadlock watchdog: the lost node never held")
+        .expect("the hold tells the law");
+    // The node is lost where it holds, and a node of another process takes
+    // the session over: its adapter remembers nothing the lost node
+    // exported.
+    world
+        .restart(
+            "trace-lost-takeover-boot",
+            held_builder(lost, &telemetry.restarted(), Hold { held: None }),
+        )
+        .await;
+    // The send's handle belonged to the lost node: a follow-up on the
+    // taking-over node settles once the taken-over turn has.
+    drop(sent);
+    let session = world
+        .core
+        .session(lash::SessionId::try_from(name.clone()).expect("a session id"))
+        .durable()
+        .await
+        .expect("the session is open on the taking-over node");
+    let output = world.send(&session, "after the takeover").await;
+    served::assert_answered("the follow-up turn", &output);
+    let mut violations = telemetry.first_turn_violations(&name);
+    if let Lost::InCellCall = lost {
+        violations.extend(telemetry.first_turn_tool_violations(&name));
+    }
+    world.shutdown().await;
+    assert!(
+        violations.is_empty(),
+        "{lost:?}: the taken-over turn broke its admissions:\n  {}",
+        violations.join("\n  ")
+    );
+}
+
+async fn a_turn_whose_node_is_lost_before_its_model_starts_is_admitted_once(tier: Tier) {
+    a_lost_nodes_admission_is_exported_once(tier, Lost::BeforeModelStart).await;
+}
+
+async fn a_cells_call_whose_node_is_lost_while_it_runs_is_admitted_once(tier: Tier) {
+    a_lost_nodes_admission_is_exported_once(tier, Lost::InCellCall).await;
+}
+
 tiered_laws!(
     a_turn_resumed_on_its_node_keeps_its_trace_scope,
     a_turn_resumed_on_a_takeover_node_keeps_its_trace_scope,
+    a_turn_whose_node_is_lost_before_its_model_starts_is_admitted_once,
+    a_cells_call_whose_node_is_lost_while_it_runs_is_admitted_once,
 );

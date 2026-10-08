@@ -22,10 +22,10 @@ use std::time::Duration;
 use lash_core_execution::ActorContext;
 use lash_core_execution::runtime::actor::round::lifecycle::{Act, Lifecycle, MemberBodies};
 use lash_core_execution::runtime::actor::round::{
-    AdmittedExecution, PolicyView, RoundError, RunFold, SettledOutput, fold,
+    self, AdmittedExecution, PolicyView, RoundError, RunFold, SettledOutput, fold,
 };
 use lash_durable::domain::{OwnerKey, RunRecordKind, RunRecordRow, RunSeq};
-use lash_durable::{CommitLabel, DueSource, DurableInstant};
+use lash_durable::{CommitLabel, DueSource, DurableError, DurableInstant};
 use tokio_util::sync::CancellationToken;
 
 /// One admitted member of the operation a host performs, as its committed
@@ -182,6 +182,42 @@ impl Members {
         Ok(fold(&rows, &self.policies)?)
     }
 
+    /// Discharge the trace admissions an admission of `folded` still owes
+    /// ([`RoundView::owed_trace_exports`]), before any of its members'
+    /// bodies runs: the bodies export them (selecting this owner's
+    /// candidates, reconciling another owner's), and the export is recorded
+    /// (`round.traced`). An owner that takes the execution over after that
+    /// record exports none of them again; only one lost between the export
+    /// and the record leaves them to be exported twice (FIG-5457). `true`
+    /// when it committed or its commit was refused (fold again).
+    ///
+    /// [`RoundView::owed_trace_exports`]: lash_core_execution::runtime::actor::round::RoundView::owed_trace_exports
+    async fn export_traces(&mut self, folded: &RunFold) -> Result<bool, RoundError> {
+        let Some(bodies) = self.bodies.clone() else {
+            return Ok(false);
+        };
+        let Some(admitted) = folded
+            .rounds()
+            .find(|view| !view.owed_trace_exports().is_empty())
+            .and_then(|view| folded.admitted_round(view.run()))
+        else {
+            return Ok(false);
+        };
+        bodies.export_trace_admissions(admitted.members());
+        let mut tx = self.cx.begin().await?;
+        round::record_trace_exported(&mut tx, &admitted);
+        // A refused record or a lost acknowledgement folds again: a record
+        // that landed discharges the exports, and one that did not leaves
+        // them owed, which this owner's adapter dedupes.
+        match self.cx.commit(tx, CommitLabel::ROUND_TRACED).await {
+            Ok(_) => {}
+            Err(error @ DurableError::OwnershipLost(_)) => return Err(error.into()),
+            Err(_) => {}
+        }
+        self.rows = None;
+        Ok(true)
+    }
+
     /// Act once on the folded records: `None` when it committed or its
     /// commit was refused (fold again), else what it waits on.
     async fn act(
@@ -189,6 +225,9 @@ impl Members {
         folded: &RunFold,
     ) -> Result<Option<lash_core_execution::runtime::actor::round::lifecycle::Idle>, RoundError>
     {
+        if self.export_traces(folded).await? {
+            return Ok(None);
+        }
         match self.lifecycle()?.act(folded).await? {
             Act::Committed(appended) => {
                 if let Some(rows) = self.rows.as_mut() {

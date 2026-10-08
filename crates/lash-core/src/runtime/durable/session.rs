@@ -133,6 +133,30 @@ pub trait TurnServices: Send + Sync {
     ) -> Option<lash_core_execution::runtime::actor::round::TraceProposal> {
         None
     }
+
+    /// Reconcile the admission of `scope`, the trace scope a turn's
+    /// admission retained, whose export that admission still owes: the
+    /// owner that committed `turn.admit` may have lost its life or the
+    /// commit's acknowledgement before it selected the candidate. The
+    /// adapter dedupes the identity (FIG-5395, FIG-5457).
+    fn export_turn_admission(&self, _scope: &lash_trace::DurableTraceScope) {}
+}
+
+/// Commit the record that `run`'s admission exported the admission of the
+/// trace scope it retained, discharging the export the admission owes
+/// (FIG-5457).
+async fn record_turn_traced(
+    cx: &ActorContext,
+    session: &SessionId,
+    run: &TurnId,
+) -> Result<(), TurnError> {
+    let mut tx = cx.begin().await?;
+    tx.write(DomainWrite::Turn(TurnWrite::TraceExported {
+        session: session.clone(),
+        run: run.clone(),
+    }));
+    cx.commit(tx, CommitLabel::TURN_TRACED).await?;
+    Ok(())
 }
 
 /// Settle `candidate`, the trace admission a commit retains, on that
@@ -531,16 +555,26 @@ impl SessionActivation {
                         admission: admitted.admission.with_trace(trace),
                         ..admitted
                     };
+                    let run = admitted.run.clone();
                     admit_turn(cx, &mut tx, admitted).await?;
                     // The turn's rows are this build's session state:
                     // from now only a node that decodes it claims the
                     // session.
                     tx.stamp_formats(cx.backend().formats().session().clone());
+                    let exports = candidate
+                        .as_ref()
+                        .is_some_and(|candidate| candidate.anchor().context().is_some());
                     let committed = cx.commit(tx, CommitLabel::TURN_ADMIT).await;
                     if let Some(candidate) = candidate {
                         settle_trace_admission(candidate, &committed);
                     }
                     committed?;
+                    // The candidate is selected: the admission's export is
+                    // discharged before the turn starts, so an owner that
+                    // takes the turn over exports it no more (FIG-5457).
+                    if exports {
+                        record_turn_traced(cx, session, &run).await?;
+                    }
                     Ok(Pass::Again)
                 }
                 // A command run binds nothing: the commit that applies it
@@ -588,6 +622,20 @@ impl SessionActivation {
                     "the cancelled turn's children may still be running past its stop grace"
                 );
             }
+            return Ok(Pass::Again);
+        }
+        // A turn still admitted owes its admission's export until an owner
+        // records it: the owner that committed `turn.admit` may have lost
+        // its life or the commit's acknowledgement before it selected the
+        // candidate. This owner reconciles it and records so, before the
+        // turn starts (FIG-5395, FIG-5457).
+        if row.phase == UnfinishedPhase::Admitted
+            && !row.trace_exported
+            && let Some(scope) = row.admission.trace()
+            && scope.anchor.context().is_some()
+        {
+            self.services.export_turn_admission(scope);
+            record_turn_traced(cx, session, &row.run).await?;
             return Ok(Pass::Again);
         }
         let opened = match row.phase {
@@ -1051,6 +1099,7 @@ pub async fn admit_turn(
         turn_deadline: None,
         written_epoch: cx.epoch(),
         cancel: None,
+        trace_exported: false,
     })
 }
 

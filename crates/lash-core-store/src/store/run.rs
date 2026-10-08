@@ -562,9 +562,10 @@ pub enum RunAdmissionRecord {
         took: AdmittedTurnRows,
         /// The turn's trace scope, retained by the `turn.admit` commit that
         /// writes this record, before its candidate is selected (FIG-5395).
-        /// While the turn is admitted, its admission's export is owed: the
-        /// owner that starts the turn reconciles it. `None` when the
-        /// admission traced nothing.
+        /// While the turn is admitted, its admission's export is owed until
+        /// an owner records it exported (`turn.traced`): an owner that finds
+        /// the turn admitted without that record reconciles it (FIG-5457).
+        /// `None` when the admission traced nothing.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         trace: Option<Box<lash_trace::DurableTraceScope>>,
     },

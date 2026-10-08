@@ -1817,13 +1817,16 @@ async fn a_turns_puts_are_held_by_its_execution_across_a_crash(tier: Tier) {
 /// FIG-5395). Its call's scope, admitted with its round, is admitted
 /// exactly once on that trace, also when its owner was killed after the
 /// round's admission committed, before it learned so (FIG-5382, FIG-5395),
-/// and when the record of its export (`round.traced`) is cut (FIG-5452).
+/// and when the record of its export (`round.traced`) is cut (FIG-5452). The
+/// turn's admission is exported once too when the record of its export
+/// (`turn.traced`) is cut (FIG-5457).
 async fn a_turns_and_its_calls_trace_admissions_are_exported_once_across_a_crash(tier: Tier) {
     prove_at(
         Turn::Trace,
         tier,
         &[
             CommitLabel::TURN_ADMIT,
+            CommitLabel::TURN_TRACED,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_DONE,
             CommitLabel::ROUND_TRACED,
@@ -1835,7 +1838,8 @@ async fn a_turns_and_its_calls_trace_admissions_are_exported_once_across_a_crash
 
 /// A code cell's call, cut anywhere, is admitted exactly once, on its
 /// turn's trace: its cell's admission retains its scope, which every
-/// attempt and every later owner reads back (FIG-5395).
+/// attempt and every later owner reads back (FIG-5395), and the record of
+/// its export (`round.traced`) is among the cuts (FIG-5457).
 async fn a_cells_call_trace_admission_is_exported_once_across_a_crash(tier: Tier) {
     prove(Turn::CellTrace, tier).await;
 }

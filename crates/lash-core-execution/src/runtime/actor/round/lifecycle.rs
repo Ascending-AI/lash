@@ -126,6 +126,15 @@ pub trait MemberBodies: Send + Sync {
     /// Observers keep their own live deduplication; this runs after every fold.
     fn observe(&self, _round: &RoundView) {}
 
+    /// Export the trace admissions of `members`, an admission that
+    /// committed and still owes its exports
+    /// ([`RoundView::owed_trace_exports`]): select the candidate this owner
+    /// proposed for a member's call, or reconcile the admission's export
+    /// through the adapter when another owner proposed it. Its owner then
+    /// records the exports (`round.traced`), before any member's body runs
+    /// (FIG-5457). Bodies that trace nothing export nothing.
+    fn export_trace_admissions(&self, _members: &[AdmittedExecution]) {}
+
     /// The body of `execution`'s attempt, for its call and request.
     fn body(&self, execution: &AdmittedExecution) -> MemberBody;
 

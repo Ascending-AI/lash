@@ -44,9 +44,9 @@ a cell's admission of its call. Its candidate is selected once that commit
 lands, and deferred to the adapter when the commit's acknowledgement was
 lost. An owner that dies or loses the acknowledgement first leaves the
 export owed, and the next reader of the retained admission reconciles it
-through `TraceScopeFactory::export_admitted`: the owner that starts a turn
-still admitted, the owner that resumes a round whose exports are not
-recorded, the owner that builds a cell call's body. The adapter dedupes the
+through `TraceScopeFactory::export_admitted`: the owner that holds a turn
+still admitted, a round or a cell's admission of its calls, whose exports
+are not recorded. The adapter dedupes the
 admission's identity, its anchor, and a reconcile selects a deferred
 candidate of that anchor. The SDK mints every span id, so an adapter that no
 longer holds the candidate exports the admission as a span under the
@@ -54,13 +54,23 @@ anchor, which names its identity. Each admission is therefore exported once
 per adapter, and at least once under one identity across owners.
 
 An adapter's dedupe lives in its process, so an obligation is discharged
-durably by the owner that exported it (FIG-5452). A round's owner records
-the decision `round.traced` once its calls' candidates are selected, before
-any body runs, and an owner that resumes the round without that record
-reconciles the exports and then records it. A node that takes a round over
-after its exports are recorded exports none of its calls' admissions again;
-only a node lost between selecting them and recording so leaves them to be
-exported twice. A turn's admission is discharged by its first phase commit.
+durably by the owner that exported it (FIG-5452, FIG-5457):
+
+- A turn's owner records `turn.traced` on the turn's phase row once its
+  admission's candidate is selected, before the turn starts. An owner that
+  finds the turn still admitted without that record reconciles the export
+  and then records it.
+- A round's owner records the decision `round.traced` once its calls'
+  candidates are selected, before any body runs. An owner that resumes the
+  round without that record reconciles the exports and then records it.
+- A cell's owner exports its admission's calls (selecting the candidates
+  it proposed, reconciling another owner's) and records the same
+  `round.traced` decision on the admission's run before any of their
+  bodies runs.
+
+A node that takes a turn, a round or a cell over after its exports are
+recorded exports none of those admissions again. Only a node lost between
+the export and its record leaves an admission to be exported twice.
 
 Every other export is best effort. A crash after commit and before emission
 can lose an observation. A body that exports before its result commits can

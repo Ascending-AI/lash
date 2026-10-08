@@ -943,7 +943,8 @@ CREATE INDEX IF NOT EXISTS idx_lash_prompt_snapshot_texts_hash
 -- phase with what a restore resumes it from: no checkpoint while admitted and
 -- one after, and the pinned model call exactly in the model phase, whose
 -- attempt is phase_arg and whose call is model_calls, the count of model
--- calls the turn admitted.
+-- calls the turn admitted. trace_exported records that the admission's trace
+-- export is discharged (FIG-5457).
 CREATE TABLE IF NOT EXISTS lash_turn_phases (
     session_id TEXT NOT NULL,
     run TEXT NOT NULL,
@@ -958,6 +959,7 @@ CREATE TABLE IF NOT EXISTS lash_turn_phases (
     turn_deadline_ms BIGINT,
     written_epoch BIGINT NOT NULL,
     model_calls BIGINT NOT NULL DEFAULT 0,
+    trace_exported BOOLEAN NOT NULL DEFAULT FALSE,
     PRIMARY KEY (session_id, run),
     CONSTRAINT ck_turn_phases_arg CHECK ((phase IN ('model', 'tools')) = (phase_arg IS NOT NULL)),
     CONSTRAINT ck_turn_phases_checkpoint CHECK ((phase = 'admitted') = (checkpoint_ref IS NULL)),

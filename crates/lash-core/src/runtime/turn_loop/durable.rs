@@ -62,9 +62,9 @@ impl LashRuntime {
         self.resolve_turn_config(controller, run, admitted_run_spec.as_ref())
             .await?;
         Self::emit_physical_turn_start(observer, controller, run, self.tool_restore_report.take());
-        let (recorded_before_turn, retained_trace, export_owed) = match recorded {
-            Some(recorded) => (Some(recorded.before_turn), recorded.trace, false),
-            None => (None, admitted_trace, true),
+        let (recorded_before_turn, retained_trace) = match recorded {
+            Some(recorded) => (Some(recorded.before_turn), recorded.trace),
+            None => (None, admitted_trace),
         };
         let tracing = &self.host.core.tracing;
         // An admission that traced nothing leaves the turn untraced.
@@ -77,14 +77,6 @@ impl LashRuntime {
                 tracing.clock().timestamp_ms(),
             )
         });
-        // A turn still admitted owes its admission's export: the owner that
-        // committed `turn.admit` may have lost its life or the commit's
-        // acknowledgement before it selected the candidate. Its first phase
-        // commit discharges the obligation, as only an owner that started
-        // the turn here writes one (FIG-5395).
-        if export_owed {
-            tracing.scopes().export_admitted(&retained_trace);
-        }
         let turn_context = crate::TurnContext::default();
         let turn_boundary = tracing
             .record_boundary(
