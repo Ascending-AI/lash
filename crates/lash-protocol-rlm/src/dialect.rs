@@ -615,10 +615,22 @@ impl SessionDialect {
         let vocabulary = self.prompt_vocabulary();
         let tags = vocabulary.cell_tags;
         format!(
-            "That reply opened a line with `{open}` in a position the {noun} grammar could not read, so nothing ran and no code was executed. The tag lines are what this depends on: `{open}` must stand alone on its own line with nothing else on it, the source goes on the lines after it, and `{close}` must stand alone on a later line.",
+            "That reply opened a line with `{open}` in a position the {noun} grammar could not read, so nothing ran and no code was executed. The tag lines are what this depends on: `{open}` must stand alone on its own line with nothing else on it, the source goes on the lines after it, and `{close}` must stand alone on a later line. To mention a tag in prose instead, wrap it in backticks.",
             noun = vocabulary.cell_noun,
             open = tags.open,
             close = tags.close,
+        )
+    }
+
+    /// What to tell a native-tool-channel model that wrote a cell in its reply
+    /// text. That channel runs code only through `execute_code` and its prompt
+    /// teaches no cell tags, so a text cell is never executed there — well
+    /// formed or not — and is never the answer either (FIG-5302).
+    pub(crate) fn native_text_cell_copy(&self) -> String {
+        format!(
+            "No code executed: a `{open}` block in reply text is not executed in this session. Resend the program as the `code` argument of an `{tool}` call. To mention a tag in prose instead, wrap it in backticks.",
+            open = self.cell_tags().open,
+            tool = crate::native::NATIVE_EXECUTE_TOOL_NAME,
         )
     }
 }

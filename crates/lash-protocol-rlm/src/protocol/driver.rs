@@ -151,15 +151,12 @@ impl RlmDriver {
         // the same reply, and nothing in the loop ever names what was wrong
         // with it (FIG-1475).
         //
-        // Only where a cell is *required*. On a `Natural` turn prose is an
-        // answer, and prose about cells — "`<open>` and `</close>`
-        // are the tags you asked about" — opens a line with the tag while
-        // being exactly what the user wanted. Correcting a fence there would
-        // bury the answer under a lecture and spend the turn's attempts on a
-        // reply that had nothing wrong with it.
-        if !termination.prose_ends_turn()
-            && malformed_cell_fence(reply.assistant_text, self.dialect.cell_tags())
-        {
+        // On a `Natural` turn too: read as prose there, the refused cell
+        // *is* the answer, committed verbatim as the turn's reply with its
+        // program never run (FIG-5302). Prose that mentions the tags wraps
+        // them in backticks or starts the line with something else, and the
+        // correction says so.
+        if malformed_cell_fence(reply.assistant_text, self.dialect.cell_tags()) {
             return ReplyClass::Repair(Box::new(RepairPrompt {
                 decision: "retry_malformed_cell_fence",
                 assistant_message: Some((reply.visible_prose, "assistant_response")),

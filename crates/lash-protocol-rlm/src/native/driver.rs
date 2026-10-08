@@ -26,7 +26,8 @@ use crate::rlm_support::decode_rlm_termination_options;
 
 use super::finish::{
     finish_required_reminder_message, finish_schema_mismatch_message,
-    internal_assistant_prose_message_for_turn, no_progress_stop_message, validate_finish_value,
+    internal_assistant_prose_message_for_turn, no_progress_stop_message,
+    text_cell_correction_message, validate_finish_value,
 };
 use super::stall::{
     LLM_EXTRACTION_PHASE, NO_PROGRESS_BUDGET_PHASE, native_reply_fingerprint, stalled_attempts,
@@ -129,6 +130,12 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
             content: prose.clone(),
         }));
         let action = super::tool::normalize(&parts);
+        // This channel runs code only through `execute_code`. A reply with no
+        // call that writes a cell in its text meant to run it: read as prose,
+        // a natural turn would commit the cell as its answer, unrun
+        // (FIG-5302), so it is corrected toward the tool instead.
+        let text_cell = matches!(action, super::tool::NativeAction::ProseOnly)
+            && crate::cell_scan::malformed_cell_fence(&prose, self.dialect.cell_tags());
         if matches!(action, super::tool::NativeAction::ProseOnly) && prose.trim().is_empty() {
             actions.push(DriverAction::Emit(make_error_event(
                 TurnFailureKind::LlmProvider,
@@ -236,7 +243,9 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 format!("execute_{}", self.dialect.language_id())
             }
             super::tool::NativeAction::Malformed { decision, .. } => decision.to_string(),
-            super::tool::NativeAction::ProseOnly => if termination.prose_ends_turn() {
+            super::tool::NativeAction::ProseOnly => if text_cell {
+                "retry_text_cell"
+            } else if termination.prose_ends_turn() {
                 "prose_only"
             } else {
                 "request_finish"
@@ -276,7 +285,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 }
             }
             super::tool::NativeAction::ProseOnly => {
-                if termination.prose_ends_turn() {
+                if termination.prose_ends_turn() && !text_cell {
                     if !reasoning.is_empty() {
                         actions.push(DriverAction::AppendEvents(vec![conversation_event(
                             internal_assistant_prose_message_for_turn(
@@ -309,15 +318,26 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                             prose,
                             &reasoning,
                         )),
-                        conversation_event(finish_required_reminder_message(
-                            self.dialect.as_ref(),
-                            rlm_message_id(
-                                ctx.turn_id(),
-                                ctx.protocol_iteration(),
-                                "finish_reminder",
-                            ),
-                            termination.finish_schema().is_some(),
-                        )),
+                        conversation_event(if text_cell {
+                            text_cell_correction_message(
+                                self.dialect.as_ref(),
+                                rlm_message_id(
+                                    ctx.turn_id(),
+                                    ctx.protocol_iteration(),
+                                    "text_cell",
+                                ),
+                            )
+                        } else {
+                            finish_required_reminder_message(
+                                self.dialect.as_ref(),
+                                rlm_message_id(
+                                    ctx.turn_id(),
+                                    ctx.protocol_iteration(),
+                                    "finish_reminder",
+                                ),
+                                termination.finish_schema().is_some(),
+                            )
+                        }),
                     ];
                     if let Err(error) = continue_or_stop_after_nonterminal(
                         &ctx,

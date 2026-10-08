@@ -7,7 +7,7 @@ use lash_sansio::TurnId;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
+pub(super) fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
     let factory = crate::RlmProtocolPluginFactory::new(
         crate::RlmProtocolPluginConfig::builder()
             .channel(if native {
@@ -119,7 +119,7 @@ fn rlm_catalog_distinguishes_ambient_from_restricted_empty_access() {
     );
 }
 
-fn text(text: &str) -> LlmOutputPart {
+pub(super) fn text(text: &str) -> LlmOutputPart {
     LlmOutputPart::Text {
         text: text.to_string(),
         response_meta: None,
@@ -144,7 +144,7 @@ fn typescript_cell_config(termination: RlmTermination) -> TurnMachineConfig {
     )));
     config
 }
-fn call(id: &str, name: &str, args: &str) -> LlmOutputPart {
+pub(super) fn call(id: &str, name: &str, args: &str) -> LlmOutputPart {
     LlmOutputPart::ToolCall {
         call_id: id.to_string(),
         tool_name: name.to_string(),
@@ -158,7 +158,7 @@ fn call(id: &str, name: &str, args: &str) -> LlmOutputPart {
 }
 /// Every ready effect, with each execution-environment sync answered by an
 /// empty environment on the way.
-fn drain(machine: &mut TurnMachine) -> Vec<Effect> {
+pub(super) fn drain(machine: &mut TurnMachine) -> Vec<Effect> {
     let mut effects = Vec::new();
     while let Some(effect) = machine.poll_effect() {
         if let Effect::SyncExecutionEnvironment { id } = effect {
@@ -175,7 +175,7 @@ fn drain(machine: &mut TurnMachine) -> Vec<Effect> {
 fn reply(machine: &mut TurnMachine, effects: &[Effect], parts: Vec<LlmOutputPart>) -> Vec<Effect> {
     reply_with_reason(machine, effects, parts, Default::default())
 }
-fn reply_with_reason(
+pub(super) fn reply_with_reason(
     machine: &mut TurnMachine,
     effects: &[Effect],
     parts: Vec<LlmOutputPart>,

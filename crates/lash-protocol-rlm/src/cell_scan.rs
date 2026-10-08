@@ -229,9 +229,9 @@ pub(crate) fn complete_cell_start(
 /// extraction found no cell, so a well-formed cell never reaches it.
 ///
 /// It cannot tell an attempted cell from prose that happens to begin a line with
-/// the tag, because nothing can. Callers must therefore ask it only where the
-/// turn *requires* a cell; on a turn where prose is a legal answer, a line
-/// opening with the tag is as likely to be the answer as a mistake.
+/// the tag, because nothing can. Callers read a match as an attempted cell on
+/// every turn: read as prose, it would be committed as the answer with its
+/// program unrun (FIG-5302). Prose names the tags in backticks or mid-line.
 pub(crate) fn malformed_cell_fence(text: &str, tags: CellTags) -> bool {
     text.lines().any(|line| {
         let squeezed = line

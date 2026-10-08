@@ -141,7 +141,7 @@ fn non_cell_reply_classification_table_is_byte_identical() {
             Outcome::Finish,
         ),
         (
-            "a malformed fence stays a finish on a natural turn",
+            "a malformed fence is repaired on a natural turn too",
             classify(
                 Ok(None),
                 LlmTerminalReason::Stop,
@@ -153,7 +153,11 @@ fn non_cell_reply_classification_table_is_byte_identical() {
                     &reasoning,
                 ),
             ),
-            Outcome::Finish,
+            repair(
+                "retry_malformed_cell_fence",
+                Some(("tag-stripped prose", "assistant_response")),
+                "malformed_cell_fence",
+            ),
         ),
         (
             "finish-required with visible prose",
