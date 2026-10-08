@@ -5,6 +5,10 @@
 # By class: mechanical 198, semantic 130, delete 888, replace 471.
 # By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 92, L9c 354, L9d 100, L9e 138, L9f 125, L9g 98, L9h 123, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
 # By status: todo 266, ported 135, deleted 1286.
+# 1611 rows over 873 files, 3984 laws.
+# By class: mechanical 164, semantic 111, delete 871, replace 465.
+# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 73, L9c 342, L9d 79, L9e 131, L9f 125, L9g 98, L9h 106, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
+# By status: todo 322, ported 107, deleted 1182.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -17,6 +21,30 @@
 #   mixed discovery refusals and admitted calls are each reported once
 # - L9c: crates/lash-protocol-standard/src/provider_part_persistence_tests.rs
 #   final and tool calling responses persist identical typed provider parts
+# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::attempt_context_provider_realizes_every_v2_intent_through_the_coordinator
+#   attempt context provider realizes every v2 intent through the coordinator
+# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::before_tool_hook_receives_resolved_argument_projection_policy
+#   before tool hook receives resolved argument projection policy
+# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::dispatch_allows_unknown_mcp_args_when_schema_does_not_forbid_them
+#   dispatch allows unknown mcp args when schema does not forbid them
+# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::explicit_execution_grant_runs_non_catalog_tool_with_binding
+#   explicit execution grant runs non catalog tool with binding
+# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::retry_ladder_survives_a_later_pending_completion
+#   retry ladder survives a later pending completion
+# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/attachment_normalization.rs
+#   denied second source records no manifest intent for the first; and 4 more law(s) of the file, by test name
+# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::after_checks_fail_or_abort_but_never_replace
+#   after checks fail or abort but never replace
+# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::argument_transforms_chain_once_in_registration_order
+#   argument transforms chain once in registration order
+# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::checks_inspect_the_provider_prepared_call
+#   checks inspect the provider prepared call
+# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::displaced_terminals_are_published_as_composition_evidence
+#   displaced terminals are published as composition evidence
+# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::result_checks_without_a_decision_record_publish_no_state_before_settlement
+#   result checks without a decision record publish no state before settlement
+# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::result_transforms_chain_and_checks_see_the_final_result
+#   result transforms chain and checks see the final result
 # - L9c: crates/lash-restate-test/tests/one_driver.rs
 #   a host's send leaves the engine the only driver, an empty commit finishes the work without another admission, and inputs on both sides of it each run once
 # - L9c: crates/lash-restate-test/tests/run_close.rs
@@ -207,8 +235,6 @@
 #   every value type round trips or is refused
 # - L9e: crates/lash-restate/src/tests/process_recovery.rs
 #   a process resumed on another node after its worker and registry reopen keeps its snapshot plugin options, lashlang admission codes and trigger binding, and a TypeScript artifact runs to its terminal
-# - L9e: crates/lash-restate/src/tests/tool_context_conformance.rs
-#   every registered first-party tool succeeds in every tool context (inline, cell, process) on the durable engine
 # - L9e: crates/lash/src/admin/config_cancel_race_tests.rs
 #   cancelled config command before current ask is typed
 # - L9e: crates/lash/src/tests/aggregate_oracle/timer_identity.rs
@@ -279,6 +305,10 @@
 #   minimizer preserves trigger wakeup operational fixture reason
 # - L9f: crates/lash-sim/src/minimize.rs::removing_a_sessions_provider_family_removes_its_checkpoint_evidence
 #   removing a sessions provider family removes its checkpoint evidence
+# - L9f: crates/lash-sim/src/generation_disposition_matrix.rs::protocol_owned_stop_is_absent_from_the_wire_and_reported_suppressed
+#   an RLM session's protocol-owned stop sequence is left off the wire and the attempt receipt reports SuppressedProtocolOwned
+# - L9f: crates/lash-sim/src/generation_disposition_matrix.rs::runtime_clamps_a_requested_cap_and_reports_the_reduced_wire_value
+#   a session's output-token cap above the model's capacity is clamped on the wire and the turn's attempt receipt reports ClampedToCapacity
 # - L9f: crates/lash-sim/src/oracles/tests/contract_checks.rs::coverage_oracles_are_failing_capable_not_presence_only
 #   every coverage oracle can fail on a recorded run, not only on missing facts
 # - L9f: crates/lash-sim/src/oracles/tests/contract_checks.rs::every_battery_slot_declares_the_one_oracle_id_its_verdict_uses
@@ -289,30 +319,12 @@
 #   each contract's generated facts fail when mutated in a way specific to that contract
 # - L9f: crates/lash-sim/src/oracles/tests/contract_checks.rs::scenario_contract_oracles_emit_one_named_verdict_per_contract
 #   each scenario contract oracle emits exactly one verdict named for its contract
-# - L9f: crates/lash-sim/src/oracles/tests/contract_checks.rs::seeded_duplicate_raw_graph_row_mutation_fails_with_projection_contrast
-#   seeded duplicate raw graph row mutation fails with projection contrast
 # - L9f: crates/lash-sim/src/oracles/tests/contract_checks.rs::state_machine_semantic_oracle_checks_contract_outcomes_not_presence
 #   the state-machine semantic oracle checks contract outcomes, not the presence of facts
-# - L9f: crates/lash-sim/src/provider_variations.rs::rlm_stop_honoring_fixture_settles_once_without_wire_stop_or_unclosed_retry
-#   rlm stop honoring fixture settles once without wire stop or unclosed retry
-# - L9f: crates/lash-sim/src/replay.rs::promoted_queued_active_turn_cancel_regression_replays
-#   a promoted generated regression trace, recorded on the durable engine, replays with active-turn queued input hidden and the cancellation terminalizing the pending row before any later idle admission
-# - L9f: crates/lash-sim/src/request_snapshot.rs
-#   second history bearing turn snapshots the full assembled provider request
-# - L9f: crates/lash-sim/src/runner/agent_contracts_effect_boundary_tests.rs
-#   every provider tool-body invocation (scalar, batched, pending, and inside a process segment) has exactly one recorded attempt for its call and attempt ordinal; a race whose tool wins ends its turn cleanly
 # - L9f: crates/lash-sim/src/runner/agent_contracts_payload_tests.rs::lifted_process_display_name_does_not_change_the_oracle_verdict
 #   a host-declared display label on a lifted process is what observation records and does not change the lifted-process oracle verdict
-# - L9f: crates/lash-sim/src/runner/attempt_probe.rs
-#   durable content law bites on real run evidence
 # - L9f: crates/lash-sim/src/runner/generated_profiles.rs::time_budget_stops_the_sweep_cleanly_and_records_reached_seeds
 #   a spent time budget stops a generated-sim seed sweep cleanly and records the seeds it reached
-# - L9f: crates/lash-sim/src/runner/tests.rs::cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations
-#   cache dialect rlm prompt prefix is byte stable across iterations
-# - L9f: crates/lash-sim/src/runner/tests.rs::final_value_semantic_channel_proof_uses_runtime_outcome_and_event
-#   final value semantic channel proof uses runtime outcome and event
-# - L9f: crates/lash-sim/src/runner/tests.rs::full_random_seed_12_keeps_modeled_provider_exchange_slots_owned_by_scheduler
-#   full random seed 12 keeps modeled provider exchange slots owned by scheduler
 # - L9f: crates/lash-sim/src/runner/tests.rs::generated_sim_profile_writes_trace_replay_and_provider_artifacts
 #   a generated-sim profile run writes its trace, replay and provider artifacts
 # - L9f: crates/lash-sim/src/runner/tests.rs::generated_sim_search_mode_keeps_summary_lean_and_labels_shards
@@ -349,6 +361,102 @@
 #   operation catalog and fragment validation match the editor contract; and 20 more law(s) of the file, by test name
 # - L9h: examples/workflow-graph-roundtrip/tests/type_facets.rs
 #   type facets are projected and client echoes are ignored on save; and 1 more law(s) of the file, by test name
+# - L9f: crates/lash-sim/tests/stack_policy.rs::assert_product_stack_probe_passes
+#   every fixed Agent product contract runs to completion in a child process held to the 2 MiB product stack budget, one case per contract
+# - L9h: crates/lash-perf/src/bin/tool_batch_baseline/native_run_cost_tests.rs
+#   l15 census tracks native run records and all descendants
+# - L9h: crates/lash-perf/src/runtime_perf/harness/tests.rs::a_dropped_runtime_frees_its_in_process_lane
+#   a dropped runtime frees its in process lane
+# - L9h: crates/lash-perf/src/runtime_perf/harness/tests.rs::rlm_globals_keeps_fixed_session_projection_across_real_turns
+#   the RLM-globals perf scenario keeps one fixed session projection across real turns
+# - L9h: crates/lash-perf/src/runtime_perf/harness/tests.rs::scenario_wiring_drives_the_benchmark_plugin_list_in_order
+#   scenario wiring drives the benchmark plugin list in order
+# - L9h: crates/lash-perf/src/runtime_perf/measurement/contention.rs::async_settlement_smoke_drains_every_open_child_span
+#   the async-settlement scenario drains every open child span and reports spawn, settle and drain samples
+# - L9h: crates/lash-perf/src/runtime_perf/measurement/contention.rs::writer_contention_smoke_reports_wait_release_latency_and_execution
+#   the writer-contention scenario reports wait, release-latency and execution samples for same-session and many-session writers
+# - L9h: crates/lash-perf/src/runtime_perf/measurement/queued_work.rs::queued_work_admission_stress_advances_its_commit_cursor
+#   queued-work admission under stress advances its commit cursor
+# - L9h: crates/lash-perf/src/runtime_perf/measurement/queued_work.rs::turn_input_ingress_stress_advances_its_commit_cursor
+#   turn-input ingress under stress advances its commit cursor
+# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::async_completion_smoke_witnesses_match_session_geometry
+#   async-completion witnesses match the session geometry
+# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::checkpoint_state_hot_paths_capture_one_changed_component_per_turn
+#   checkpoint-state hot paths capture one changed component per turn
+# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::durable_queued_work_contention_sqlite_smoke_reports_structure_and_counters
+#   the durable queued-work contention scenario on SQLite reports its structure and counters
+# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::durable_sqlite_checkpoint_curve_reports_paired_structural_samples
+#   the durable SQLite checkpoint curve reports paired structural samples
+# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::high_traffic_sqlite_knee_smoke_reports_each_step
+#   the high-traffic SQLite knee scenario reports each step
+# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::high_traffic_sqlite_smoke_reports_load_structure
+#   the high-traffic SQLite scenario reports its load structure
+# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::high_traffic_trigger_waits_for_terminal_delivery
+#   a high-traffic trigger waits for terminal delivery
+# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::stable_durable_sqlite_turn_scenarios_report_phases_and_store_calls
+#   durable SQLite turn scenarios report their phases and store calls
+# - L9h: examples/agent-workbench/src/main_sections/tests/commit_budget.rs
+#   commit budget is explicit host policy with no implicit builder fallback
+# - L9h: examples/agent-workbench/src/main_sections/tests/continue_as_projection.rs
+#   two continue as switches keep real sends and show the current follow task; and 3 more law(s) of the file, by test name
+# - L9h: examples/agent-workbench/src/main_sections/tests/deferred_tools.rs
+#   deferred search observation enables next block call; and 1 more law(s) of the file, by test name
+# - L9h: examples/agent-workbench/src/main_sections/tests/done_stream_items.rs
+#   done stream items are transient and not snapshotted; and 1 more law(s) of the file, by test name
+# - L9h: examples/agent-workbench/src/main_sections/tests/facade_homes.rs::workbench_plugin_observes_session_config_policy_transition
+#   workbench plugin observes session config policy transition
+# - L9h: examples/agent-workbench/src/main_sections/tests/mail_payload.rs::inject_message_scopes_emission_to_requested_session
+#   inject message scopes emission to requested session
+# - L9h: examples/agent-workbench/src/main_sections/tests/multi_session.rs::a_created_session_runs_beside_the_ambient_default
+#   a created session runs beside the ambient default
+# - L9h: examples/agent-workbench/src/main_sections/tests/multi_session.rs::selecting_a_session_moves_the_query_less_default
+#   selecting a session moves the query less default
+# - L9h: examples/agent-workbench/src/main_sections/tests/multi_session.rs::the_session_roster_survives_the_web_process
+#   the session roster survives the web process
+# - L9h: examples/agent-workbench/src/main_sections/tests/observation_config.rs
+#   state get preserves config; and 4 more law(s) of the file, by test name
+# - L9h: examples/agent-workbench/src/main_sections/tests/provider_execution_evidence.rs
+#   provider execution evidence reaches the record surfaces
+# - L9h: examples/agent-workbench/src/main_sections/tests/provider_tool_projection.rs
+#   every tool a standard workbench turn offers projects under every provider tool dialect
+# - L9h: examples/agent-workbench/src/main_sections/tests/queued_work.rs
+#   workbench lists and controls individual queued batches; and 3 more law(s) of the file, by test name
+# - L9h: examples/agent-workbench/src/main_sections/tests/recoverable_chat_bare_prose.rs
+#   chat finish requires text session wide and prose still ends a turn; and 4 more law(s) of the file, by test name
+# - L9h: examples/agent-workbench/src/main_sections/tests/recoverable_chat_failures.rs::workbench_provider_failure_emits_only_fixed_public_product_copy
+#   workbench provider failure emits only fixed public product copy
+# - L9h: examples/agent-workbench/src/main_sections/tests/remote_execution_evidence.rs::workbench_remote_recovery_facades_deliver_cursor_events_and_terminal_replacement
+#   workbench remote recovery facades deliver cursor events and terminal replacement
+# - L9h: examples/agent-workbench/src/main_sections/tests/session_fence.rs::a_delete_that_lands_between_admission_and_claim_refuses_the_send
+#   a delete that lands between admission and claim refuses the send
+# - L9h: examples/agent-workbench/src/main_sections/tests/session_fence.rs::a_retiring_session_refuses_use_but_admits_the_delete_retry
+#   a retiring session refuses use but admits the delete retry
+# - L9h: examples/agent-workbench/src/main_sections/tests/session_fence.rs::deleting_a_session_with_a_running_turn_cancels_it_before_retiring
+#   deleting a session with a running turn cancels it before retiring
+# - L9h: examples/agent-workbench/src/main_sections/tests/session_fence.rs::every_session_bound_route_refuses_a_retired_id_with_the_same_conflict
+#   every session bound route refuses a retired id with the same conflict
+# - L9h: examples/agent-workbench/src/main_sections/tests/session_isolation.rs
+#   concurrent sessions isolate transcripts triggers and processes
+# - L9h: examples/agent-workbench/src/main_sections/tests/session_resume.rs
+#   committed transcript and provider history survive web process reconstruction
+# - L9h: examples/agent-workbench/src/main_sections/tests/tool_control.rs
+#   workbench tools expose typed cancellation and turn control
+# - L9h: examples/agent-workbench/src/main_sections/tests/tool_loss.rs
+#   a run that lost a tool renders the loss to the user
+# - L9h: examples/agent-workbench/src/main_sections/tests/trigger_lifecycle.rs
+#   button trigger lifecycle stays visible and queues wakes during active turn
+# - L9h: examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs::a_cell_reads_what_an_earlier_cell_bound_in_both_dialects
+#   a cell reads what an earlier cell bound in both dialects
+# - L9h: examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs::a_name_no_one_has_is_still_refused_in_both_dialects
+#   a name no one has is still refused in both dialects
+# - L9h: examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs::a_rehydrated_session_still_reads_its_earlier_bindings_in_both_dialects
+#   a rehydrated session still reads its earlier bindings in both dialects
+# - L9h: examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs::a_typescript_workbench_serves_typescript_turns_and_records_the_dialect
+#   a typescript workbench serves typescript turns and records the dialect
+# - L9h: examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs::the_code_failure_scenario_renders_a_failed_cell_and_terminates
+#   the code failure scenario renders a failed cell and terminates
+# - L9h: runbooks/workbench-cron-schedule/runbook.md
+#   a recurring schedule registered from a Workbench chat turn fires one turn per tick; disable, re-enable and delete take effect at the next boundary (judged runbook)
 # END SUMMARY
 #
 # Every test that uses the Restate server double (`lash_restate_test`), every
@@ -523,6 +631,10 @@ path = "crates/lash-durable-test/tests/process_actor_laws.rs::an_emit_the_regist
 owner = "FIG-5348"
 law = "a cron.Schedule registered from a turn fires one occurrence, one wake delivery and one completed turn per tick; a disabled schedule stays silent at its next boundary, re-enabling resumes ticks without a second subscription, and a deleted one stays silent"
 
+[planned."SIMGEN"]
+owner = "FIG-5359"
+law = "lash-sim's generated worlds run on the durable engine, and the minimizer, state-checker, seeded-mutation, attempt-probe and generated-runner laws run again from their pre-deletion bodies (5ad9641f9e^)"
+
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/executor/process_local.rs"
 test = "*"
@@ -554,8 +666,9 @@ lane = "L9b"
 laws = [
   "resolver_defaults_refuse_turn_control_without_an_explicit_host",
 ]
-disposition = "port"
-status = "todo"
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5308: adb8320db4 (FIG-5194) removed AwaitEventResolver; every effect runs on the concrete ActorContext, so no host resolver exists to default."
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/runtime/process/tests.rs"
@@ -908,8 +1021,8 @@ laws = [
   "over_budget_intent_batch_refuses_every_intent_and_executes_zero_commands",
 ]
 disposition = "port"
-status = "todo"
-note = "the attempt crossing sentinel and journal-byte equality are determinism machinery"
+status = "ported"
+note = "FIG-5308: over_budget_intent_batch_refuses_every_intent_and_executes_zero_commands -> crates/lash/src/tests/standard_protocol_turns.rs (facade turn, SQLite memory)."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/attempt_atomicity.rs"
@@ -1312,9 +1425,9 @@ laws = [
   "user_stop_mid_cell_settles_cancelled_with_recorded_evidence",
   "response_handoff_abort_settles_before_the_next_cell",
 ]
-disposition = "port"
-status = "todo"
-note = "blocked: fig-5172-prod (L3, FIG-5172): no production TurnServices runs a facade turn (the only impls are lash-durable-test's and lash-postgres-workers'), so a facade session opens on SQLite memory but its send never completes: a probe that builds a standard core over sqlite_memory_store_backend, opens a session and sends one text input times out after 20 s with the provider never called (L3s's session mail, FIG-5196, has landed); the law is not written yet"
+disposition = "covered-by:crates/lash-durable-test/tests/turn_round_crash_matrix.rs::an_immediate_cancel_during_a_long_cell_ends_the_turn_cancelled_promptly"
+status = "deleted"
+note = "FIG-5308: the executor settle handshake belonged to the resident runtime; a durable cancel drops it. user_stop_mid_cell -> turn_round_crash_matrix.rs::an_immediate_cancel_during_a_long_cell_ends_the_turn_cancelled_promptly and crates/lash/src/tests/facade_turn.rs::cancelling_a_running_input_answers_cancelled_with_accepted_detail; response_handoff_abort -> crates/lash-protocol-rlm/src/plugin/runtime_state.rs::a_cancelled_cell_leaves_the_session_usable."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/effect_direct_llm.rs"
@@ -1944,8 +2057,8 @@ laws = [
   "process_wake_admitted_at_checkpoint_is_completed_when_turn_is_cancelled",
 ]
 disposition = "port"
-status = "todo"
-note = "owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
+status = "ported"
+note = "FIG-5308: crates/lash/src/tests/turn_checkpoints.rs has normal_turn_stores_effective_user_text_in_state, retryable_llm_failures_exhaust_and_fail_turn and provider_failure_surfaces_typed_kind_and_retryability_on_turn_issue (read from the call ledger: a durable send's report carries no TurnIssue, D1 §1.5 3b), queued_checkpoint_input_preserves_images, checkpoint_observer_failure_leaves_active_input_pending_without_application_evidence, process_wake_admitted_at_checkpoint_is_completed_when_turn_is_cancelled. Covered: queued_checkpoint_input_commits_before_continuing_standard_turn and queued_checkpoint_input_accepts_and_persists_one_normal_user_message -> steering_crash_laws.rs::a_steer_sent_during_a_round_is_delivered_at_the_next_work_checkpoint; next_turn_input_turn_admits_process_wake_at_active_checkpoint -> steering_crash_laws.rs::a_process_wake_filed_during_a_round_is_delivered_at_the_next_work_checkpoint; wake_admitted_at_a_terminal_checkpoint_executes_a_follow_on_turn -> steering_crash_laws.rs::a_process_wake_after_the_last_work_checkpoint_runs_next; a_follow_on_whose_commit_is_refused_leaves_no_withheld_row_bound -> steering_crash_laws.rs::a_withheld_steer_killed_at_every_label_runs_once_next_on_sqlite_memory. Subject-deleted: checkpoint_hook_can_inject_messages and checkpoint_attachment_failure_leaves_active_input_pending_without_application_evidence (5a7f31f0d0, FIG-5258, deleted plugin message injection); assembled_turn_reports_turn_timing_from_injected_clock (a durable report is rebuilt from the store and carries no execution metrics)."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turns/config_transactions.rs"
@@ -2083,7 +2196,8 @@ laws = [
   "a_next_turn_input_admitted_after_the_acceptance_waits_for_the_next_turn",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5308: crates/lash/src/tests/provider_attempts.rs has the four provider-attempt laws by name. a_next_turn_input_admitted_after_the_acceptance_waits_for_the_next_turn -> crates/lash-sim/src/session_mail_matrix.rs::the_session_mail_laws_hold_at_every_cut_on_sqlite_memory (its journal replay half is removed machinery, c1a00eb8dd)."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turns/lease_and_admissions/attempt_usage.rs"
@@ -2978,8 +3092,8 @@ laws = [
   "one_slot_cell_that_starts_and_awaits_a_process_completes",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; not written yet"
+status = "ported"
+note = "FIG-5308: -> crates/lash-durable-test/tests/one_slot_process_await.rs on a served core (sqlite_memory, sqlite_file, postgres)."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/one_slot_process_await.rs"
@@ -2992,8 +3106,8 @@ laws = [
   "saturated_process_create_retries_without_recording_a_tool_refusal",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; not written yet"
+status = "ported"
+note = "FIG-5308: -> crates/lash-durable-test/tests/one_slot_process_await.rs, written whole and ignored on FIG-5329 (a retryable host fault from a cell's tool attempt reaches the cell as a program defect and is never retried)."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/output_retention.rs"
@@ -3036,8 +3150,8 @@ laws = [
   "every_model_code_path_runs_in_a_worker",
 ]
 disposition = "port"
-status = "todo"
-note = "its process corpus and fixture are blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; not written yet"
+status = "ported"
+note = "FIG-5308: -> crates/lash-durable-test/tests/rlm_execution_maps.rs. every_model_code_path_runs_in_a_worker passes; the two map laws are written whole and ignored on FIG-5338 (no language-execution trace on durable) and FIG-5339 (a process body's emit and nested start lack process wiring)."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/projections_and_snapshots.rs"
@@ -3109,8 +3223,8 @@ laws = [
   "session_globals_survive_cells_and_reload_and_private_slots_never_do",
 ]
 disposition = "port"
-status = "todo"
-note = "its second cell creates and starts a process: blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; not written yet"
+status = "ported"
+note = "FIG-5308: -> crates/lash-durable-test/tests/rlm_session_globals.rs (facade turns; globals read from the production BOUND VARIABLES section; restart is a new core over the same store)."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/step_trace.rs"
@@ -3849,7 +3963,8 @@ laws = [
   "malformed_tool_arguments_are_refused_not_dispatched",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5308: three laws run in place without an engine; whitespace_only_text_does_not_split_terminal_history and malformed_tool_arguments_are_refused_not_dispatched -> crates/lash/src/tests/standard_protocol_turns.rs."
 
 [[row]]
 path = "crates/lash-protocol-standard/tests/protocol_scenarios.rs"
@@ -3875,8 +3990,8 @@ laws = [
   "public_effect_emission_contract_matrix",
 ]
 disposition = "port"
-status = "todo"
-note = "the tests left run without an engine; standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_feedback runs its turn through execute_turn's acceptance: owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail; its start and signal intents realize through process_effect: blocked: L6 (FIG-5175): ActorContext::process_effect hands its process executor to RuntimeEffectLocalExecutor::execute, which refuses every process command as RuntimeEffectLocalExecutorMismatch (lash-core-execution runtime/effect/executor.rs:1042); repro crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/executor/process_local.rs::a_process_start_issued_through_the_actor_context_registers_its_process (#[ignore]d, red)"
+status = "ported"
+note = "FIG-5308: the scenarios run in place; standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_feedback -> crates/lash/src/tests/standard_protocol_turns.rs."
 
 [[row]]
 path = "crates/lash-protocol-standard/tests/render_cache_law.rs"
@@ -8241,9 +8356,9 @@ lane = "L9e"
 laws = [
   "every_registered_first_party_tool_succeeds_and_replays_in_every_context",
 ]
-disposition = "owed"
-status = "todo"
-note = "blocked: fig-5172-prod (L3, FIG-5172): no production TurnServices runs a facade turn (the only impls are lash-durable-test's and lash-postgres-workers'), so a facade session opens on SQLite memory but its send never completes: a probe that builds a standard core over sqlite_memory_store_backend, opens a session and sends one text input times out after 20 s with the provider never called (L3s's session mail, FIG-5196, has landed); the law is not written yet; its process context is also blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition"
+disposition = "replaced-by:crates/lash-durable-test/tests/first_party_tools.rs::sqlite_memory::every_registered_first_party_tool_succeeds_from_a_production_cell"
+status = "deleted"
+note = "FIG-5308: registry fixture completeness, the production cell answers the tool's result, and the body and its direct completion each run once. The 'replays from its journal' half went with the journal (c1a00eb8dd, FIG-5174)."
 owed = "every registered first-party tool succeeds in every tool context (inline, cell, process) on the durable engine"
 
 [[row]]
@@ -9130,8 +9245,8 @@ laws = [
   "strict_http_selection_refuses_wrong_order_extra_and_zero_requests",
 ]
 disposition = "port"
-status = "todo"
-note = "not a format or drain proof: provider laws for the real-host E2E runner"
+status = "ported"
+note = "FIG-5308: s27 -> crates/lash/src/tests/provider_attempts.rs::authentication_failure_stops_unretried_and_permits_the_next_turn (classification from the call ledger). Covered: l03 -> crates/lash-durable-test/tests/round_crash_matrix.rs::a_cancel_during_a_retry_backoff_starts_no_next_attempt; s26 rate limit -> provider_attempts.rs::courtesy_retry_after_regeneration_emits_one_host_visible_attempt_reset; s26 partial disconnect -> provider_attempts.rs::retryable_mid_stream_failure_preserves_durable_charge_safety_evidence; outside_effect_identity -> crates/lash-durable-test/tests/tool_crash_laws.rs (code_cells_keep_identity_and_distinguish_fresh_calls_across_a_kill) and crates/lash-plugin-mcp/src/pool/attempt_tests.rs::l02_mcp_redelivery_preserves_the_lash_call_identity_on_the_wire. Subject-deleted: strict_http_selection (a harness fixture property; the harness was deleted in 5ad9641f9e)."
 
 [[row]]
 path = "crates/lash-upgrade-harness/tests/e2e/replay.rs"
@@ -9160,8 +9275,8 @@ laws = [
   "r8_socket_outage_is_counted_and_shutdown_drains_acknowledged_export",
 ]
 disposition = "port"
-status = "todo"
-note = "not a format or drain proof: telemetry export laws for the real-host E2E runner"
+status = "ported"
+note = "FIG-5308: r8 -> examples/e2e-consumer/tests/otlp_export.rs::socket_outage_is_counted_and_shutdown_drains_acknowledged_export (durable SQLite core, the consumer's HostTelemetry, a real socket). s34 and s34_replay are subject-deleted: they asserted a shift handover (0cc1b81d98), Run transfer and journal receipts (c1a00eb8dd) through the real-cluster controller (5ad9641f9e); their OTLP outage half is the r8 law."
 
 [[row]]
 path = "crates/lash-vm-worker/tests/pool_laws/native_oom.rs"
@@ -9408,7 +9523,8 @@ laws = [
   "a_fork_runs_under_its_branch_points_generation_not_what_the_host_passes",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5308: every law restored in place on a SQLite memory backend."
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_delete_finalizer.rs"
@@ -9649,9 +9765,9 @@ laws = [
   "l02_mcp_replays_only_unrecorded_attempts_and_remote_dedup_is_explicit",
   "l03_mcp_run_cancellation_withholds_undecided_results_and_preserves_finals",
 ]
-disposition = "port"
-status = "todo"
-note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
+disposition = "covered-by:crates/lash-plugin-mcp/src/pool/attempt_tests.rs::l02_mcp_redelivery_preserves_the_lash_call_identity_on_the_wire"
+status = "deleted"
+note = "FIG-5308: l02 -> attempt_tests.rs l02 (wire identity) and crates/lash-durable-test/tests/tool_crash_laws.rs::a_native_call_cut_at_its_outcome_streams_its_activity_and_commits_one_outcome (only an unrecorded attempt re-runs); l03 -> attempt_tests.rs::l03_mcp_cancellation_never_claims_remote_success_or_termination. The RunCoordinator and Run journal records it cut were deleted in c1a00eb8dd (FIG-5174)."
 
 [[row]]
 path = "crates/lash/src/tests/output_retention.rs"
@@ -9997,8 +10113,8 @@ laws = [
   "rlm_message_append_keeps_the_committed_execution_on_sqlite",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: fig-5172-prod (L3, FIG-5172): no production TurnServices runs a facade turn (the only impls are lash-durable-test's and lash-postgres-workers'), so a facade session opens on SQLite memory but its send never completes: a probe that builds a standard core over sqlite_memory_store_backend, opens a session and sends one text input times out after 20 s with the provider never called (L3s's session mail, FIG-5196, has landed); the law is not written yet"
+status = "ported"
+note = "FIG-5308: message_append (both) -> crates/lash-durable-test/tests/rlm_session_globals.rs::{sqlite_memory,sqlite_file}::rlm_message_append_keeps_the_committed_execution. Covered: follow_on_failure_then_resident_reload (both) -> crates/lash-protocol-rlm/src/plugin/runtime_state.rs::same_frame_restore_rebinds_an_already_bound_projected_seed with crates/lash-durable-test/tests/frame_switch_crash_proof.rs; follow_on_failure_discards (both) -> runtime_state.rs::same_frame_restore_without_a_snapshot_discards_uncommitted_execution. Subject-deleted: the two storeless laws (bbffe67d98, FIG-5208: storeless and resident runtimes run no turns)."
 
 [[row]]
 path = "crates/lash/src/tests/scope_support.rs"
@@ -10109,7 +10225,8 @@ laws = [
   "a_session_close_releases_its_running_runs_execution",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5308: restored in place. It exposed two bugs, fixed: a close's mail now interrupts the running turn's model call, round or cell, and await_session_deletion waits while close mail is undrained."
 
 [[row]]
 path = "crates/lash/src/tests/session_shift.rs"
@@ -10534,8 +10651,8 @@ laws = [
   "mcp_law_turn_failures_sqlite_file_live",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round; blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; the _live legs ran on live Restate, deleted; recorded_tool_surface_is_preserved_when_advertised_tools_change runs in the file"
+status = "ported"
+note = "FIG-5308: server_instructions rewritten over composed turn prompts; storm and failure laws run on the durable backend (sqlite_memory, sqlite_file; postgres legs on the pg gate). Subject-deleted: the six native and _live legs (5ad9641f9e: they needed a native engine service) and the failure turn's journal-replay assertion (c1a00eb8dd)."
 
 [[row]]
 path = "crates/lash/tests/integration/public_process_command_replay.rs"
@@ -11303,7 +11420,8 @@ laws = [
   "cleanup_failure_marks_successful_turn_failed",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5308: wall_limit_retains_core_and_awaits_installed_factory_shutdown restored on a durable core; the two cleanup-failure laws run in place."
 
 [[row]]
 path = "examples/workflow-graph-roundtrip/src/lib.rs"
@@ -12821,10 +12939,10 @@ lane = "L9c"
 laws = [
   "all_discovery_refusals_are_reported_and_accounted_before_continuing",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/standard_protocol_turns.rs::all_discovery_refusals_are_reported_and_accounted_before_continuing"
+status = "deleted"
 owed = "all discovery refusals are reported and accounted before continuing"
-note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round; blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5308: written on a facade turn and ignored on FIG-5314 (a refused call is missing from the durable report's tool_calls and has no tool lifecycle trace)."
 
 [[row]]
 path = "crates/lash-protocol-standard/src/discovery_tests.rs"
@@ -12836,10 +12954,10 @@ lane = "L9c"
 laws = [
   "mixed_discovery_refusals_and_admitted_calls_are_each_reported_once",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/standard_protocol_turns.rs::mixed_discovery_refusals_and_admitted_calls_are_each_reported_once"
+status = "deleted"
 owed = "mixed discovery refusals and admitted calls are each reported once"
-note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round; blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5308: written on a facade turn and ignored on FIG-5314 (a refused call is missing from the durable report's tool_calls and has no tool lifecycle trace)."
 
 [[row]]
 path = "crates/lash-protocol-standard/src/provider_part_persistence_tests.rs"
@@ -12851,10 +12969,10 @@ lane = "L9c"
 laws = [
   "final_and_tool_calling_responses_persist_identical_typed_provider_parts",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/standard_protocol_turns.rs::final_and_tool_calling_responses_persist_identical_typed_provider_parts"
+status = "deleted"
 owed = "final and tool calling responses persist identical typed provider parts"
-note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round; blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5308: facade turn, SQLite memory."
 
 [[row]]
 path = "crates/lash-restate/src/controller/context.rs"
@@ -12944,10 +13062,10 @@ lane = "L9f"
 laws = [
   "generated_backend_failure_seed_records_script_evidence",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "generated backend failure seed records script evidence"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/cache_regression.rs"
@@ -12959,10 +13077,10 @@ lane = "L9f"
 laws = [
   "rlm_live_bound_state_is_prefix_stable_for_every_serializer",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/cache_regression.rs::rlm_live_bound_state_is_prefix_stable_for_every_serializer"
+status = "deleted"
 owed = "rlm live bound state is prefix stable for every serializer"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: restored on the durable SimEngine."
 
 [[row]]
 path = "crates/lash-sim/src/chaos_soak/driver/tests.rs"
@@ -13098,10 +13216,10 @@ lane = "L9f"
 laws = [
   "soak_history_host_admission_catches_unrequested_input_rows",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/invariants/tests.rs::soak_history_host_admission_catches_unrequested_input_rows"
+status = "deleted"
 owed = "soak history host admission catches unrequested input rows"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: restored over a real durable pending-tool history (SimEngine)."
 
 [[row]]
 path = "crates/lash-sim/src/invariants/tests.rs"
@@ -13113,10 +13231,10 @@ lane = "L9f"
 laws = [
   "the_clean_history_keeps_every_invariant_and_gives_each_facts",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/invariants/tests.rs::the_clean_history_keeps_every_invariant_and_gives_each_facts"
+status = "deleted"
 owed = "the clean history keeps every invariant and gives each facts"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: restored over a real durable pending-tool history (SimEngine)."
 
 [[row]]
 path = "crates/lash-sim/src/invariants/tests.rs"
@@ -13128,10 +13246,10 @@ lane = "L9f"
 laws = [
   "two_calls_sharing_a_completion_key_break_completion_ownership",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/invariants/tests.rs::two_calls_sharing_a_completion_key_break_completion_ownership"
+status = "deleted"
 owed = "two calls sharing a completion key break completion ownership"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: restored over a real durable pending-tool history (SimEngine)."
 
 [[row]]
 path = "crates/lash-sim/src/invariants/tests.rs"
@@ -13143,10 +13261,10 @@ lane = "L9f"
 laws = [
   "a_resolution_consumed_by_another_call_breaks_completion_ownership",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/invariants/tests.rs::a_resolution_consumed_by_another_call_breaks_completion_ownership"
+status = "deleted"
 owed = "a resolution consumed by another call breaks completion ownership"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: restored over a real durable pending-tool history (SimEngine)."
 
 [[row]]
 path = "crates/lash-sim/src/invariants/tests.rs"
@@ -13158,10 +13276,10 @@ lane = "L9f"
 laws = [
   "a_rerun_outside_the_window_breaks_the_effect_window",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/invariants/tests.rs::a_rerun_outside_the_window_breaks_the_effect_window"
+status = "deleted"
 owed = "a rerun outside the window breaks the effect window"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: restored over a real durable pending-tool history (SimEngine)."
 
 [[row]]
 path = "crates/lash-sim/src/invariants/tests.rs"
@@ -13173,10 +13291,10 @@ lane = "L9f"
 laws = [
   "an_obligation_left_due_or_stalled_untyped_breaks_settled_or_stalled",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/invariants/tests.rs::an_obligation_left_due_or_stalled_untyped_breaks_settled_or_stalled"
+status = "deleted"
 owed = "an obligation left due or stalled untyped breaks settled or stalled"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: restored over a real durable pending-tool history (SimEngine). Rewritten on the artifact-cleanup outbox, the only obligation ledger left after 11780f9839 (FIG-5191); its input-admission and stalled-delivery steps are subject-deleted by that commit."
 
 [[row]]
 path = "crates/lash-sim/src/invariants/tests.rs"
@@ -13188,10 +13306,10 @@ lane = "L9f"
 laws = [
   "an_artifact_nobody_holds_breaks_reachability",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/invariants/tests.rs::an_artifact_nobody_holds_breaks_reachability"
+status = "deleted"
 owed = "an artifact nobody holds breaks reachability"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: restored over a real durable pending-tool history (SimEngine)."
 
 [[row]]
 path = "crates/lash-sim/src/invariants/tests.rs"
@@ -13217,10 +13335,10 @@ lane = "L9f"
 laws = [
   "an_input_left_open_or_settled_twice_breaks_input_settlement",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/invariants/tests.rs::an_input_left_open_or_settled_twice_breaks_input_settlement"
+status = "deleted"
 owed = "an input left open or settled twice breaks input settlement"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: restored over a real durable pending-tool history (SimEngine)."
 
 [[row]]
 path = "crates/lash-sim/src/invariants/tests.rs"
@@ -13232,10 +13350,10 @@ lane = "L9f"
 laws = [
   "a_violation_renders_its_seed_invariant_and_excerpt",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/invariants/tests.rs::a_violation_renders_its_seed_invariant_and_excerpt"
+status = "deleted"
 owed = "a violation renders its seed invariant and excerpt"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: restored over a real durable pending-tool history (SimEngine)."
 
 [[row]]
 path = "crates/lash-sim/src/invariants/tests.rs"
@@ -13247,10 +13365,10 @@ lane = "L9f"
 laws = [
   "an_existing_start_answered_to_another_originator_is_caught",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/invariants/tests.rs::an_existing_start_answered_to_another_originator_is_caught"
+status = "deleted"
 owed = "an existing start answered to another originator is caught"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: restored over a real durable pending-tool history (SimEngine)."
 
 [[row]]
 path = "crates/lash-sim/src/invariants/tests.rs"
@@ -13262,10 +13380,10 @@ lane = "L9f"
 laws = [
   "a_broken_frame_chain_breaks_frame_lineage",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/invariants/tests.rs::a_broken_frame_chain_breaks_frame_lineage"
+status = "deleted"
 owed = "a broken frame chain breaks frame lineage"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: restored over a real durable pending-tool history (SimEngine)."
 
 [[row]]
 path = "crates/lash-sim/src/invariants/tests.rs"
@@ -13277,10 +13395,10 @@ lane = "L9f"
 laws = [
   "checker_failure_retains_history_and_registered_regression",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/invariants/tests.rs::checker_failure_retains_history_and_registered_regression"
+status = "deleted"
 owed = "checker failure retains history and registered regression"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: restored over a real durable pending-tool history (SimEngine)."
 
 [[row]]
 path = "crates/lash-sim/src/invariants/tests.rs"
@@ -13292,10 +13410,10 @@ lane = "L9f"
 laws = [
   "failure_artifact_keeps_seed_history_and_checker",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/invariants/tests.rs::failure_artifact_keeps_seed_history_and_checker"
+status = "deleted"
 owed = "failure artifact keeps seed history and checker"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: restored over a real durable pending-tool history (SimEngine)."
 
 [[row]]
 path = "crates/lash-sim/src/invariants/tests.rs"
@@ -13349,10 +13467,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_runtime_graph_failure_across_every_artifact",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "minimizer preserves runtime graph failure across every artifact"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13378,10 +13496,10 @@ lane = "L9f"
 laws = [
   "removing_a_sessions_provider_family_removes_its_checkpoint_evidence",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "removing a sessions provider family removes its checkpoint evidence"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13393,10 +13511,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_failing_oracle_id_and_reason",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "minimizer preserves failing oracle id and reason"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13408,10 +13526,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_scheduler_owned_boundary_bug_reason",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "minimizer preserves scheduler owned boundary bug reason"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13423,10 +13541,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_rlm_mini_oracle_fixture_reason",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "minimizer preserves rlm mini oracle fixture reason"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13438,10 +13556,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_agent_mini_oracle_fixture_reason",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "minimizer preserves agent mini oracle fixture reason"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13453,10 +13571,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_standard_mini_oracle_fixture_reason",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "minimizer preserves standard mini oracle fixture reason"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13468,10 +13586,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_standard_max_turn_stop_fixture_reason",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "minimizer preserves standard max turn stop fixture reason"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13483,10 +13601,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_rlm_typed_finish_fixture_reason",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "minimizer preserves rlm typed finish fixture reason"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13498,10 +13616,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_rlm_default_mode_fixture_reason",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "minimizer preserves rlm default mode fixture reason"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13513,10 +13631,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_agent_tuple_fixture_reason",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "minimizer preserves agent tuple fixture reason"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13528,10 +13646,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_agent_subagent_child_fixture_reason",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "minimizer preserves agent subagent child fixture reason"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13543,10 +13661,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_agent_failed_child_fixture_reason",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "minimizer preserves agent failed child fixture reason"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13558,10 +13676,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_provider_mutation_runtime_completion_fixture_reason",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "minimizer preserves provider mutation runtime completion fixture reason"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13573,10 +13691,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_backend_retry_runtime_completion_fixture_reason",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "minimizer preserves backend retry runtime completion fixture reason"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13588,10 +13706,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_queued_input_operational_fixture_reason",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "minimizer preserves queued input operational fixture reason"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13603,10 +13721,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_trigger_wakeup_operational_fixture_reason",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "minimizer preserves trigger wakeup operational fixture reason"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/oracles/tests/contract_checks.rs"
@@ -13618,10 +13736,10 @@ lane = "L9f"
 laws = [
   "seeded_duplicate_raw_graph_row_mutation_fails_with_projection_contrast",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "seeded duplicate raw graph row mutation fails with projection contrast"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/provider_variations.rs"
@@ -13633,10 +13751,10 @@ lane = "L9f"
 laws = [
   "rlm_stop_honoring_fixture_settles_once_without_wire_stop_or_unclosed_retry",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/provider_variations.rs::rlm_stop_honoring_fixture_settles_once_without_wire_stop_or_unclosed_retry"
+status = "deleted"
 owed = "rlm stop honoring fixture settles once without wire stop or unclosed retry"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: restored on the durable SimEngine. Ignored on FIG-5346 (a live LashSession's report and reads stay at the pre-turn state after a durable turn)."
 
 [[row]]
 path = "crates/lash-sim/src/replay.rs"
@@ -13690,10 +13808,10 @@ lane = "L9f"
 laws = [
   "second_history_bearing_turn_snapshots_the_full_assembled_provider_request",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/request_snapshot.rs::second_history_bearing_turn_snapshots_the_full_assembled_provider_request"
+status = "deleted"
 owed = "second history bearing turn snapshots the full assembled provider request"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: restored; the removed StandardPrompt intro (FIG-5257) is a host prompt section with the same text and the plan excludes the Standard sections, so the pinned body, length and sha256 are unchanged."
 
 [[row]]
 path = "crates/lash-sim/src/runner/attempt_probe.rs"
@@ -13705,10 +13823,10 @@ lane = "L9f"
 laws = [
   "durable_content_law_bites_on_real_run_evidence",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "durable content law bites on real run evidence"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/runner/restate_double_tests.rs"
@@ -13735,10 +13853,10 @@ lane = "L9f"
 laws = [
   "cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/runner/tests.rs::cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations"
+status = "deleted"
 owed = "cache dialect rlm prompt prefix is byte stable across iterations"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: restored on the durable SimEngine."
 
 [[row]]
 path = "crates/lash-sim/src/runner/tests.rs"
@@ -13750,10 +13868,10 @@ lane = "L9f"
 laws = [
   "full_random_seed_12_keeps_modeled_provider_exchange_slots_owned_by_scheduler",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "full random seed 12 keeps modeled provider exchange slots owned by scheduler"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/runner/tests.rs"
@@ -13765,10 +13883,10 @@ lane = "L9f"
 laws = [
   "runtime_completion_serialization_mutation_guard",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "runtime completion serialization mutation guard"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/runner/tests.rs"
@@ -13808,10 +13926,10 @@ lane = "L9f"
 laws = [
   "runtime_facade_turn_uses_scripted_transport_and_checks_invariants",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/runner/tests.rs::runtime_facade_turn_uses_scripted_transport_and_checks_invariants"
+status = "deleted"
 owed = "runtime facade turn uses scripted transport and checks invariants"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: restored on the durable SimEngine. Ignored on FIG-5346 (a live LashSession's report and reads stay at the pre-turn state after a durable turn)."
 
 [[row]]
 path = "crates/lash-sim/src/runner/tests.rs"
@@ -13823,10 +13941,10 @@ lane = "L9f"
 laws = [
   "pending_tool_completion_proof_uses_scheduler_delivered_tool_boundary",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/runner/tests.rs::pending_tool_completion_proof_uses_scheduler_delivered_tool_boundary"
+status = "deleted"
 owed = "pending tool completion proof uses scheduler delivered tool boundary"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: restored on the durable SimEngine. Ignored on FIG-5346 (a live LashSession's report and reads stay at the pre-turn state after a durable turn)."
 
 [[row]]
 path = "crates/lash-sim/src/runner/tests.rs"
@@ -13838,10 +13956,10 @@ lane = "L9f"
 laws = [
   "final_value_semantic_channel_proof_uses_runtime_outcome_and_event",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/runner/tests.rs::final_value_semantic_channel_proof_uses_runtime_outcome_and_event"
+status = "deleted"
 owed = "final value semantic channel proof uses runtime outcome and event"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: restored on the durable SimEngine. Ignored on FIG-5346 (a live LashSession's report and reads stay at the pre-turn state after a durable turn)."
 
 [[row]]
 path = "crates/lash-sim/src/runner/tests.rs"
@@ -13853,10 +13971,10 @@ lane = "L9f"
 laws = [
   "live_provider_failure_oracle_bites_on_a_committing_turn",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/runner/tests.rs::live_provider_failure_oracle_bites_on_a_committing_turn"
+status = "deleted"
 owed = "live provider failure oracle bites on a committing turn"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: restored on the durable SimEngine. Ignored on FIG-5346 (a live LashSession's report and reads stay at the pre-turn state after a durable turn)."
 
 [[row]]
 path = "crates/lash-sim/src/runner/tests.rs"
@@ -13899,10 +14017,10 @@ lane = "L9f"
 laws = [
   "runtime_feedback_real_rlm_output_limit_retry_reaches_provider_wires",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/runtime_feedback.rs::runtime_feedback_real_rlm_output_limit_retry_reaches_provider_wires"
+status = "deleted"
 owed = "runtime feedback real rlm output limit retry reaches provider wires"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: restored on the durable SimEngine."
 
 [[row]]
 path = "crates/lash-sim/src/runtime_feedback.rs"
@@ -13914,10 +14032,10 @@ lane = "L9f"
 laws = [
   "runtime_feedback_real_checkpoint_directive_reaches_provider_wires",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "subject-deleted"
+status = "deleted"
 owed = "runtime feedback real checkpoint directive reaches provider wires"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: the law's feedback was a checkpoint hook's TurnContributions.messages; 5a7f31f0d0 (FIG-5258) deleted plugin message injection."
 
 [[row]]
 path = "crates/lash-sim/src/state_checker.rs"
@@ -13929,10 +14047,10 @@ lane = "L9f"
 laws = [
   "seeded_checker_rejects_corrupted_runtime_usage",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "seeded checker rejects corrupted runtime usage"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/state_checker.rs"
@@ -13944,10 +14062,10 @@ lane = "L9f"
 laws = [
   "checker_names_a_declared_session_whose_checkpoints_all_vanished",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "checker names a declared session whose checkpoints all vanished"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/state_checker.rs"
@@ -13959,10 +14077,10 @@ lane = "L9f"
 laws = [
   "standard_generated_run_checks_commits_and_requires_v3_state",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "standard generated run checks commits and requires v3 state"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/state_checker.rs"
@@ -13974,10 +14092,10 @@ lane = "L9f"
 laws = [
   "promoted_v1_v2_commits_are_skipped_for_their_declared_schema_version",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "promoted v1 v2 commits are skipped for their declared schema version"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/src/state_checker.rs"
@@ -13989,10 +14107,10 @@ lane = "L9f"
 laws = [
   "checker_rejects_commit_session_without_runtime_facts_and_leaf_mismatch",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:SIMGEN"
+status = "deleted"
 owed = "checker rejects commit session without runtime facts and leaf mismatch"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
 
 [[row]]
 path = "crates/lash-sim/tests/chaos_soak.rs"
@@ -14024,10 +14142,10 @@ laws = [
   "a_shadowed_control_module_stops_the_frame_switch_turn_without_a_final_value",
   "terminal_checkpoint_withheld_admission_is_traced_once",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/tests/logical_turn.rs::admitted_switch_is_seeded_queued_after_earlier_work_and_exactly_once"
+status = "deleted"
 owed = "admitted switch is seeded atomic ordered and exactly once; and 4 more law(s) of the file, by test name"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: restored on durable sessions. The switch law follows ADR 0101 §3 (the follow-on takes the next ingress position, so work queued before the switch runs first; the send answers with the switch and the follow-on answers under its frame-task run); atomicity at the switch commit is crates/lash-durable-test/tests/frame_switch_crash_proof.rs. admissions_settle -> admissions_settle_for_finish_cancel_and_error; its chain bound was deleted with the legacy loop (bbffe67d98) and is a_frame_switch_chain_stops_at_its_bound, ignored on FIG-5356. rlm_continue_as_seed and the shadowed-control law run. terminal_checkpoint_withheld_admission -> crates/lash-durable-test/tests/steering_crash_laws.rs::a_process_wake_after_the_last_work_checkpoint_runs_next. The ingress.admitted/settled trace events the admission oracle read were deleted in 0cc1b81d98; the store-based input-settlement invariant each law checks judges the same property."
 
 [[row]]
 path = "crates/lash-upgrade-harness/src/e2e/cluster/leg.rs"
@@ -17513,10 +17631,10 @@ laws = [
   "switching_a_call_to_another_receivers_operation_re_synthesizes_the_receiver_call",
   "literal_expression_members_survive_projection_json_and_save",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/workflow-graph-roundtrip/tests/authoring.rs::renaming_a_node_keeps_the_authored_title_through_save_and_reprojection"
+status = "deleted"
 owed = "blank workflow full authoring round trip rejects malformed then runs; and 5 more law(s) of the file, by test name"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5308: restored from 5ad9641f9e^ onto a durable SQLite core; the example's process commands now start and signal through the core's process API. blank_workflow_full_authoring_round_trip_rejects_malformed_then_runs is ignored on FIG-5339 (a process step's tools see no enclosing process, so the run fails); the other five pass."
 
 [[row]]
 path = "examples/workflow-graph-roundtrip/tests/durable_run.rs"
@@ -17528,10 +17646,10 @@ lane = "L9h"
 laws = [
   "a_saved_workflow_runs_as_a_durable_process",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/workflow-graph-roundtrip/tests/durable_run.rs::a_saved_workflow_runs_as_a_durable_process"
+status = "deleted"
 owed = "a saved workflow runs as a durable process"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5308: restored from 5ad9641f9e^ onto a durable SQLite core; the example's process commands now start and signal through the core's process API. Ignored on FIG-5339 (a process step's display tool sees no enclosing process)."
 
 [[row]]
 path = "examples/workflow-graph-roundtrip/tests/roundtrip.rs"
@@ -17563,10 +17681,10 @@ laws = [
   "new_call_without_receiver_expression_returns_typed_error",
   "invalid_graph_post_returns_typed_unprocessable_entity",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/workflow-graph-roundtrip/tests/roundtrip.rs::operation_catalog_and_fragment_validation_match_the_editor_contract"
+status = "deleted"
 owed = "operation catalog and fragment validation match the editor contract; and 20 more law(s) of the file, by test name"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5308: restored from 5ad9641f9e^ onto a durable SQLite core; the example's process commands now start and signal through the core's process API. The eleven laws that run a workflow are ignored on FIG-5339 (a process step's display tool sees no enclosing process); the ten that do not run one pass."
 
 [[row]]
 path = "examples/workflow-graph-roundtrip/tests/type_facets.rs"
@@ -17579,10 +17697,10 @@ laws = [
   "type_facets_are_projected_and_client_echoes_are_ignored_on_save",
   "mocked_tool_schemas_project_into_seed_workflow_facets",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/workflow-graph-roundtrip/tests/type_facets.rs::type_facets_are_projected_and_client_echoes_are_ignored_on_save"
+status = "deleted"
 owed = "type facets are projected and client echoes are ignored on save; and 1 more law(s) of the file, by test name"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5308: restored from 5ad9641f9e^ onto a durable SQLite core; the example's process commands now start and signal through the core's process API. Both pass."
 
 [[row]]
 path = "runbooks/restate-postgres-workers/src/batch_journal.rs"
@@ -19351,10 +19469,10 @@ laws = [
   "scalar_lashlang_process_segment_tool_call_crosses_native_recorded_attempt_boundary",
   "a_race_turn_on_restate_succeeds",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:crates/lash-durable-test/tests/cell_restore_laws.rs::a_race_loser_in_a_cell_is_admitted_and_settles_on_sqlite_memory"
+status = "deleted"
 owed = "every provider tool-body invocation (scalar, batched, pending, and inside a process segment) has exactly one recorded attempt for its call and attempt ordinal; a race whose tool wins ends its turn cleanly"
-note = "I0 (FIG-5194) removed the three recorded-attempt boundary tests with the effect-host seam; FIG-5190 follow-up deleted the file with its race test, which needs the durable engine's backend (not assembled yet). The laws are owed together. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: the recorded-attempt laws hooked the effect-host seam I0 removed (FIG-5194). On durable, every tool body entry is an admitted member's: a race whose tool wins settles (cell_restore_laws race), a process body's calls keep one identity per call (crates/lash-durable-test/tests/process_tool_call_crash_laws.rs), and a scalar call commits one outcome (crates/lash-durable-test/tests/tool_crash_laws.rs::a_native_call_cut_at_its_outcome_streams_its_activity_and_commits_one_outcome)."
 
 [[row]]
 path = "crates/lash-sim/src/runner/agent_contracts_effect_boundary_tests.rs"
@@ -19989,10 +20107,10 @@ lane = "L9f"
 laws = [
   "promoted_queued_active_turn_cancel_regression_replays",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:crates/lash-durable-test/tests/session_send.rs::cancelling_both_sends_stops_the_running_run_and_withdraws_the_queued_one"
+status = "deleted"
 owed = "a promoted generated regression trace, recorded on the durable engine, replays with active-turn queued input hidden and the cancellation terminalizing the pending row before any later idle admission"
-note = "FIG-5190 follow-up deleted the test with its fixture, crates/lash-sim/replays/queued-active-turn-cancel-race: the trace was recorded on the Restate effect controller. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5308: the promoted fixture was a recorded generated-run trace of the deleted engine, removed in 5a64db23e0. On durable a send queued behind a running run stays unadmitted, and after the cancel it is withdrawn with no provider call."
 
 [[row]]
 path = "crates/lashlang/src/runtime/tests/projection_cases.rs"
