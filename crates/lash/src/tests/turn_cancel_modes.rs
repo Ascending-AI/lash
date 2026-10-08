@@ -1102,3 +1102,87 @@ async fn immediate_abort_during_retry_sleep_lands_at_wake_without_the_retry() ->
     core.shutdown().await?;
     Ok(())
 }
+
+/// A `Drop` request recorded before its turn's owner is lost holds across
+/// the loss: the next deployment over the same stores ends the turn
+/// cancelled with the request's evidence, and the undelivered input
+/// addressed to it is never delivered to any later turn.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "FIG-5365: the durable path never applies a Drop cancel's disposition"]
+async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelivery() -> Result<()> {
+    const ID: &str = "drop-cancel-owner-failure";
+    let backend = sqlite_memory_store_backend().await;
+    let (calls, seen) = (Arc::default(), Arc::<StdMutex<Vec<String>>>::default());
+    let deploy = |tool: TokenWatchingTool| -> Result<LashCore> {
+        Ok(
+            explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+                .serve_test_llm_profile(
+                    tool_calling_model(WATCH, &calls, &seen),
+                    mock_llm_profile_spec(),
+                )
+                .tools(Arc::new(tool))
+                .build(crate::testing::runtime_lease_owner())?,
+        )
+    };
+    // The first owner's tool never finishes: the owner is lost with the
+    // request recorded and the turn unfinished.
+    let tool = TokenWatchingTool::default();
+    let core = deploy(tool.clone())?;
+    let session_id = crate::SessionId::parse(ID).expect("nonblank host identity");
+    let session = core
+        .session(session_id.clone())
+        .create(crate::SessionCreation::root(mock_session_spec()))
+        .await?;
+    let run = crate::TurnId::parse("turn-that-cannot-finish").expect("nonblank host identity");
+    let handle = session
+        .send(TurnInput::text("use the tool"))
+        .id(run.clone())
+        .await?;
+    tool.entered.notified().await;
+    session
+        .send(TurnInput::text("must be dropped after owner failure"))
+        .ingress(crate::persistence::TurnInputIngress::active_turn(
+            run.clone(),
+            Default::default(),
+        ))
+        .await?;
+    let requested = outcome(
+        handle
+            .cancel()
+            .request_id("drop-before-owner-failure")
+            .origin("test-user")
+            .reason("drop undelivered input")
+            .mode(TurnCancelMode::AfterStep)
+            .undelivered(TurnCancelUndeliveredInputPolicy::Drop)
+            .await?,
+    );
+    assert!(
+        matches!(&requested, TurnCancelOutcome::Requested(evidence)
+            if evidence.undelivered == TurnCancelUndeliveredInputPolicy::Drop),
+        "{requested:?}"
+    );
+    drop((handle, session));
+    core.shutdown().await?;
+
+    let released = TokenWatchingTool::default();
+    released.release();
+    let core = deploy(released)?;
+    let session = core.session(session_id).open().await?;
+    let evidence = cancelled(session.attach_id(run)).await?;
+    assert_eq!(evidence.request_id, "drop-before-owner-failure");
+    assert_eq!(evidence.undelivered, TurnCancelUndeliveredInputPolicy::Drop);
+    let next = tokio::time::timeout(ENDS_WITHIN, session.send(TurnInput::text("next")).output())
+        .await
+        .expect("the next turn answers")?;
+    assert_eq!(next.assistant_message(), Some("answered: next"));
+    assert!(
+        !seen
+            .lock_recover()
+            .iter()
+            .any(|request| request.contains("must be dropped")),
+        "Drop keeps the undelivered input out of every later admission"
+    );
+    drop(session);
+    core.shutdown().await?;
+    Ok(())
+}
