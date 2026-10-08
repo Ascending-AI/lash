@@ -1857,76 +1857,6 @@ async fn a_host_starts_preparation_is_held_by_its_own_start(tier: Tier) {
 
 on_every_tier!(a_host_starts_preparation_is_held_by_its_own_start);
 
-/// A detached process its session observes outlives the session's
-/// deletion: deleted while the process is parked on a signal, the session
-/// ends at its tombstone, and a host's signal still wakes the process,
-/// which ends with the signal's payload.
-async fn a_process_outlives_its_deleted_session_and_resumes_on_a_host_signal(tier: Tier) {
-    const SESSION: &str = "outlived-session";
-    let deployment = deploy(
-        tier,
-        vec![Arc::new(ScriptEngine {
-            kind: SIGNAL_ENGINE,
-            advance: signal_engine_advance,
-        })],
-        // The session runs no turn; its creation needs a served profile.
-        |builder| {
-            builder
-                .serve_test_llm_profile(scripted(|request, _| text(request, "unused")), metadata())
-        },
-    )
-    .await;
-    let session = SessionId::from(SESSION);
-    deployment
-        .core
-        .session(session.clone())
-        .create(lash::SessionCreation::root(spec()))
-        .await
-        .expect("the session is created");
-    let process = start_as(
-        &deployment.core,
-        SIGNAL_ENGINE,
-        serde_json::Value::Null,
-        |request| {
-            request
-                .with_event_types([signal_type("go")])
-                .with_observers([session.clone()])
-        },
-    )
-    .await;
-    parked(&deployment.backend, &process).await;
-    let administration = deployment.core.session_administration().await;
-    lash::LashCore::delete_session(administration.delete_context(&session).unwrap())
-        .await
-        .expect("the delete is requested");
-    let catalog = deployment.backend.stores().session_store_factory();
-    tokio::time::timeout(Duration::from_secs(60), async {
-        while !matches!(
-            catalog.lookup_session(&session).await.unwrap(),
-            lash_core::store::SessionLookup::Deleted
-        ) {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .expect("the session's deletion completes within a minute");
-    let identity = lash_core::ProcessSignalIdentity::new(process.clone(), "go", "outlived-signal")
-        .expect("a signal identity");
-    deployment
-        .core
-        .processes()
-        .signal(
-            lash_core::ProcessSignal::new(identity, serde_json::json!({ "go": true })),
-            deployment.core.effect_host(),
-        )
-        .await
-        .expect("the signal is delivered after the session's deletion");
-    let answer = success(&ended(&deployment.core, &process).await);
-    assert_eq!(answer, serde_json::json!({ "signal": { "go": true } }));
-}
-
-on_every_tier!(a_process_outlives_its_deleted_session_and_resumes_on_a_host_signal);
-
 /// The tool whose call declares a `SignalProcess` intent.
 const SIGNAL_TOOL: &str = "core_node_signal";
 
@@ -2530,3 +2460,6 @@ on_every_tier!(an_unbound_isolated_tool_is_refused_typed_before_any_body);
 
 #[path = "core_node_processes/per_process_surface.rs"]
 mod per_process_surface;
+
+#[path = "core_node_processes/process_endstates.rs"]
+mod process_endstates;
