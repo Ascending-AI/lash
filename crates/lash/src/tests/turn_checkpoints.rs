@@ -104,6 +104,41 @@ async fn normal_turn_stores_effective_user_text_in_state() {
     core.shutdown().await.expect("shutdown");
 }
 
+/// A turn sent through an open session answers the committed head: its
+/// report's state and the session's own reads carry the turn it ran
+/// (FIG-5346).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_live_sessions_report_and_reads_reach_the_committed_head() {
+    let core = core_with(
+        sqlite_memory_store_backend().await,
+        scripted(
+            Arc::new(StdMutex::new(Vec::new())),
+            Arc::new(|_| Ok(text_response("Done"))),
+        ),
+        None,
+    );
+    created(&core, "live-committed-head").await;
+    let live = core
+        .session(crate::SessionId::from("live-committed-head"))
+        .open()
+        .await
+        .expect("opened");
+    let output = live
+        .send(crate::TurnInput::text("hi"))
+        .output()
+        .await
+        .expect("the turn answers");
+    assert!(output.is_success(), "{output:?}");
+
+    let committed =
+        |state: &lash_core::SessionSnapshot| (state.turn_index, state.read_view().messages().len());
+    assert_eq!(committed(&output.result.state), (1, 2), "the report");
+    let read_view = live.observe().read_view();
+    assert_eq!(read_view.messages().len(), 2, "the session's reads");
+    assert_eq!(live.read_view().messages().len(), 2, "the session's reads");
+    core.shutdown().await.expect("shutdown");
+}
+
 fn transient_500() -> Answer {
     Err(LlmTransportError::new("provider unavailable")
         .with_retry_verdict(TransportRetryVerdict::RetryableTransient)

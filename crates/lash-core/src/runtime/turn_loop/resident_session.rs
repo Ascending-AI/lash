@@ -305,16 +305,14 @@ impl LashRuntime {
     /// runtime committed past it (FIG-3600: a turn a session-work engine ran
     /// for this session). Answers whether it reloaded.
     ///
-    /// An open builds no capabilities (FIG-4857), so a runtime whose turns a
-    /// node ran may hold no session: it reads the head through its own store
-    /// (FIG-5310), or a park would flush its stale state over that head.
+    /// The head is read through the runtime's own store, the one its
+    /// resident session is built over. An open builds no capabilities
+    /// (FIG-4857), so a runtime whose turns a node ran may hold no session:
+    /// it still adopts the head, or its reads and reports would answer the
+    /// pre-turn state (FIG-5346) and a park would flush that state over the
+    /// head (FIG-5310).
     pub async fn adopt_committed_head(&mut self) -> Result<bool, RuntimeError> {
-        let Some(store) = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-            .or_else(|| self.services.store.clone())
-        else {
+        let Some(store) = self.services.store.clone() else {
             return Ok(false);
         };
         let head = store.load_session_head_meta().await.map_err(|err| {
@@ -352,11 +350,7 @@ impl LashRuntime {
         durable_state: &mut crate::RuntimeSessionState,
         tracing: &crate::trace::TraceRuntime,
     ) -> Result<Option<crate::ToolRestoreReport>, (ResidentReloadStage, RuntimeError)> {
-        let has_store = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-            .is_some();
+        let has_store = self.services.store.is_some();
         let mut tool_restore = None;
         let session = self.session.as_mut().ok_or_else(|| {
             (

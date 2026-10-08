@@ -1272,7 +1272,6 @@ async fn cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations() {
 }
 
 #[tokio::test]
-#[ignore = "FIG-5346: a live LashSession's report and reads stay at the pre-turn state after a durable turn"]
 async fn runtime_facade_turn_uses_scripted_transport_and_checks_invariants() {
     let proof = Box::pin(prove_runtime_facade_turn())
         .await
@@ -1312,7 +1311,6 @@ async fn runtime_facade_turn_uses_scripted_transport_and_checks_invariants() {
 }
 
 #[tokio::test]
-#[ignore = "FIG-5346: a live LashSession's report and reads stay at the pre-turn state after a durable turn"]
 async fn pending_tool_completion_proof_uses_scheduler_delivered_tool_boundary() {
     let proof = prove_pending_tool_completion_through_turn()
         .await
@@ -1326,17 +1324,15 @@ async fn pending_tool_completion_proof_uses_scheduler_delivered_tool_boundary() 
     assert!(proof.turn_suspended_before_completion);
     assert_eq!(proof.completed_event_count_before_resolution, 0);
     assert!(proof.completed_event_count_after_resolution > 0);
-    // The proof records each resolve outcome's rendering.
+    // The proof records each resolve answer's rendering: the first
+    // resolution wins, and a duplicate with another payload is refused.
     assert_eq!(
         proof.completion_outcome,
-        format!("{:?}", lash_core::ResolveOutcome::Accepted)
+        format!("{:?}", lash_core::ResolveAnswer::Resolved)
     );
-    assert!(
-        proof
-            .duplicate_completion_outcome
-            .starts_with("AlreadyResolved { terminal: Ok("),
-        "{}",
-        proof.duplicate_completion_outcome
+    assert_eq!(
+        proof.duplicate_completion_outcome,
+        format!("{:?}", lash_core::ResolveAnswer::Conflict)
     );
     assert!(proof.turn_suspension_invariant.is_passed());
     assert!(proof.scheduler_resolution_invariant.is_passed());
@@ -1344,7 +1340,6 @@ async fn pending_tool_completion_proof_uses_scheduler_delivered_tool_boundary() 
 }
 
 #[tokio::test]
-#[ignore = "FIG-5346: a live LashSession's report and reads stay at the pre-turn state after a durable turn"]
 async fn final_value_semantic_channel_proof_uses_runtime_outcome_and_event() {
     let proof = prove_final_value_semantic_channel()
         .await
@@ -1368,7 +1363,6 @@ async fn final_value_semantic_channel_proof_uses_runtime_outcome_and_event() {
 }
 
 #[tokio::test]
-#[ignore = "FIG-5346: a live LashSession's report and reads stay at the pre-turn state after a durable turn"]
 async fn live_provider_failure_oracle_bites_on_a_committing_turn() {
     // END-TO-END NEGATIVE: shift a REAL `session.send().output()` against a VALID
     // success script that streams AND COMMITS the leak prose (the same prose a

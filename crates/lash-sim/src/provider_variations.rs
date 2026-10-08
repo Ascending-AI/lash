@@ -450,7 +450,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "FIG-5346: a live LashSession's report and reads stay at the pre-turn state after a durable turn"]
     async fn rlm_stop_honoring_fixture_settles_once_without_wire_stop_or_unclosed_retry() {
         let fixture = provider_stop_fixture(
             ProviderStopDialect::AnthropicMessages,

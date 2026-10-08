@@ -13989,7 +13989,7 @@ laws = [
 disposition = "replaced-by:crates/lash-sim/src/provider_variations.rs::rlm_stop_honoring_fixture_settles_once_without_wire_stop_or_unclosed_retry"
 status = "deleted"
 owed = "rlm stop honoring fixture settles once without wire stop or unclosed retry"
-note = "FIG-5308: restored on the durable SimEngine. Ignored on FIG-5346 (a live LashSession's report and reads stay at the pre-turn state after a durable turn)."
+note = "FIG-5308: restored on the durable SimEngine. FIG-5346: un-ignored; a live LashSession adopts the committed head through its runtime's own store, so its report and reads carry the durable turn."
 
 [[row]]
 path = "crates/lash-sim/src/replay.rs"
@@ -14164,7 +14164,7 @@ laws = [
 disposition = "replaced-by:crates/lash-sim/src/runner/tests.rs::runtime_facade_turn_uses_scripted_transport_and_checks_invariants"
 status = "deleted"
 owed = "runtime facade turn uses scripted transport and checks invariants"
-note = "FIG-5308: restored on the durable SimEngine. Ignored on FIG-5346 (a live LashSession's report and reads stay at the pre-turn state after a durable turn)."
+note = "FIG-5308: restored on the durable SimEngine. FIG-5346: un-ignored; a live LashSession adopts the committed head through its runtime's own store, so its report and reads carry the durable turn."
 
 [[row]]
 path = "crates/lash-sim/src/runner/tests.rs"
@@ -14179,7 +14179,7 @@ laws = [
 disposition = "replaced-by:crates/lash-sim/src/runner/tests.rs::pending_tool_completion_proof_uses_scheduler_delivered_tool_boundary"
 status = "deleted"
 owed = "pending tool completion proof uses scheduler delivered tool boundary"
-note = "FIG-5308: restored on the durable SimEngine. Ignored on FIG-5346 (a live LashSession's report and reads stay at the pre-turn state after a durable turn)."
+note = "FIG-5308: restored on the durable SimEngine. FIG-5346: un-ignored; a live LashSession adopts the committed head through its runtime's own store, so its report and reads carry the durable turn. Its resolve answers are the facade's ResolveAnswer (Resolved, then Conflict for the duplicate)."
 
 [[row]]
 path = "crates/lash-sim/src/runner/tests.rs"
@@ -14194,7 +14194,7 @@ laws = [
 disposition = "replaced-by:crates/lash-sim/src/runner/tests.rs::final_value_semantic_channel_proof_uses_runtime_outcome_and_event"
 status = "deleted"
 owed = "final value semantic channel proof uses runtime outcome and event"
-note = "FIG-5308: restored on the durable SimEngine. Ignored on FIG-5346 (a live LashSession's report and reads stay at the pre-turn state after a durable turn)."
+note = "FIG-5308: restored on the durable SimEngine. FIG-5346: un-ignored; a live LashSession adopts the committed head through its runtime's own store, so its report and reads carry the durable turn."
 
 [[row]]
 path = "crates/lash-sim/src/runner/tests.rs"
@@ -14209,7 +14209,7 @@ laws = [
 disposition = "replaced-by:crates/lash-sim/src/runner/tests.rs::live_provider_failure_oracle_bites_on_a_committing_turn"
 status = "deleted"
 owed = "live provider failure oracle bites on a committing turn"
-note = "FIG-5308: restored on the durable SimEngine. Ignored on FIG-5346 (a live LashSession's report and reads stay at the pre-turn state after a durable turn)."
+note = "FIG-5308: restored on the durable SimEngine. FIG-5346: un-ignored; a live LashSession adopts the committed head through its runtime's own store, so its report and reads carry the durable turn."
 
 [[row]]
 path = "crates/lash-sim/src/runner/tests.rs"
