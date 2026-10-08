@@ -295,14 +295,26 @@ impl World {
     async fn new(
         session: &str,
         settings: DurableSettings,
+        engines: Vec<Arc<dyn crate::ProcessEngine>>,
+    ) -> Self {
+        Self::layered(session, settings, engines, |stores| stores).await
+    }
+
+    /// [`World::new`] over stores `layer` decorates beside the cut.
+    async fn layered(
+        session: &str,
+        settings: DurableSettings,
         mut engines: Vec<Arc<dyn crate::ProcessEngine>>,
+        layer: impl FnOnce(
+            crate::testing::runtime_helpers::LayeredStores,
+        ) -> crate::testing::runtime_helpers::LayeredStores,
     ) -> Self {
         engines.push(Arc::new(lash_core_execution::testing::HeldProcessEngine));
         let stores: Arc<dyn StoreSet> = crate::testing::sqlite_memory_store_set().await;
         let cut = CutStore::over(stores.durable_store());
         let layered = {
             let cut = Arc::clone(&cut);
-            crate::testing::runtime_helpers::LayeredStores::over(stores)
+            layer(crate::testing::runtime_helpers::LayeredStores::over(stores))
                 .map_durable_store(move |_| cut)
                 .into_store_set()
         };
@@ -385,6 +397,9 @@ impl World {
 fn turn(run: &str) -> TurnId {
     TurnId::parse(run).expect("a turn id")
 }
+
+#[path = "scope_end_tests/close_faults.rs"]
+mod close_faults;
 
 /// Cut at every session-close label in turn (and nowhere): the close resumes
 /// at the step the cut interrupted. No session state is deleted while its

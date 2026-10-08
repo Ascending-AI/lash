@@ -661,7 +661,6 @@ fn every_generator_exclusion_is_a_pinned_open_defect() {
 
 /// The snapshot round-trip law over every value type (see [`round_trip`]).
 #[test]
-#[ignore = "blocked: L6 (FIG-5175): ActorContext::process_effect refuses process-definition commands (RuntimeEffectLocalExecutorMismatch); repro persistence::a_cell_binding_a_process_literal_publishes_its_definition"]
 fn every_value_type_round_trips_or_is_refused() {
     let corpus = corpus();
     let mut failures = Vec::new();

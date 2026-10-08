@@ -118,7 +118,6 @@ fn expected(session: &SessionCase, cell: &CellCase, mode: HarnessMode) -> Observ
 }
 
 #[test]
-#[ignore = "blocked: L6 (FIG-5175): ActorContext::process_effect refuses process-definition commands (RuntimeEffectLocalExecutorMismatch), so session `process-literal-binding` cannot bind its literal; repro persistence::a_cell_binding_a_process_literal_publishes_its_definition"]
 fn every_session_observes_what_node_observes() {
     let corpus = corpus();
     let mut failures = Vec::new();

@@ -214,7 +214,6 @@ fn a_projected_scalar_read_finishes_plain_after_a_restart() {
 /// A cell that binds a process literal publishes the literal's definition
 /// through its claimed context, and goes on.
 #[test]
-#[ignore = "blocked: L6 (FIG-5175): ActorContext::process_effect refuses process-definition commands (RuntimeEffectLocalExecutorMismatch); repro persistence::a_cell_binding_a_process_literal_publishes_its_definition"]
 fn a_cell_binding_a_process_literal_publishes_its_definition() {
     let mut session = Session::open(HarnessMode::Resident);
     let outcome =

@@ -12,6 +12,7 @@
 //crates/lash-durable-test:first_party_tools__test
 //crates/lash-durable-test:frame_switch_crash_proof__test
 //crates/lash-durable-test:frame_switch_laws__test
+//crates/lash-durable-test:live_fault_park__test
 //crates/lash-durable-test:live_stream_takeover__test
 //crates/lash-durable-test:one_slot_process_await__test
 //crates/lash-durable-test:open_session_commands__test

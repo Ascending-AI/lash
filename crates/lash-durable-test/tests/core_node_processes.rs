@@ -2457,3 +2457,6 @@ async fn an_unbound_isolated_tool_is_refused_typed_before_any_body(tier: Tier) {
 
 on_every_tier!(an_isolated_rlm_tool_starts_one_process_and_answers_its_descriptor);
 on_every_tier!(an_unbound_isolated_tool_is_refused_typed_before_any_body);
+
+#[path = "core_node_processes/per_process_surface.rs"]
+mod per_process_surface;

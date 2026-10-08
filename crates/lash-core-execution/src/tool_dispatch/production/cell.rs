@@ -15,12 +15,12 @@ use std::pin::Pin;
 
 use super::round::{
     MemberEnd, answered, catalog_policies, completed_answer, discharge_member, member_body,
-    member_output, member_pin, resolved_member,
+    member_output, member_pin, present_resolved, resolved_member,
 };
 use super::*;
 use crate::runtime::actor::round::{
     AdmittedExecution, Discharge, Material, MemberBodies, MemberBody, MemberPin, PolicyView,
-    SettledOutput,
+    Presented, SettledOutput,
 };
 use crate::runtime::actor::waits::Resolution;
 use crate::session::tool_execution::{ToolInvocation, ToolInvocationReply};
@@ -239,6 +239,31 @@ impl CellTools {
     ) -> SettledOutput {
         resolved_member(&self.owner, &call.pending(), parked, resolution)
     }
+
+    /// The final answer `output` that `call`'s park resolved to as
+    /// `execution`, presented as a body presents its own (ADR 0099 §6): the
+    /// session's presentation steps run over it under the tool's name.
+    pub(crate) async fn present(
+        &self,
+        call: &CellCall,
+        execution: &AdmittedExecution,
+        output: SettledOutput,
+    ) -> SettledOutput {
+        let mut pending = call.pending();
+        if let Some(definition) = ProductionToolHandlers::new(self.context.clone(), None)
+            .leaf_definition(&call.invocation())
+        {
+            pending.tool_name = definition.manifest.name.clone();
+        }
+        present_resolved(
+            &self.context,
+            &self.owner,
+            &pending,
+            execution.draft().tool(),
+            output,
+        )
+        .await
+    }
 }
 
 /// What `call` is answered with: a pure function of its committed
@@ -378,6 +403,20 @@ impl MemberBodies for CellMembers {
             // Only a tool call parks.
             _ => SettledOutput::Interrupted,
         }
+    }
+
+    fn present<'a>(
+        &'a self,
+        execution: &'a AdmittedExecution,
+        output: SettledOutput,
+    ) -> Presented<'a> {
+        Box::pin(async move {
+            match self.member(execution) {
+                Some(CellMember::Tool(call)) => self.tools.present(&call, execution, output).await,
+                // Only a tool call parks.
+                _ => output,
+            }
+        })
     }
 
     fn discharge<'a>(

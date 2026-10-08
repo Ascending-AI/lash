@@ -1,5 +1,562 @@
 use super::*;
 
+pub(super) fn mutate_contract_execution(
+    events: &mut [DeliveredBoundary],
+    contract: &str,
+    mut mutate: impl FnMut(&mut Value),
+) {
+    let event = events
+        .iter_mut()
+        .find(|event| {
+            event
+                .observed
+                .pointer("/contract_execution/contract")
+                .and_then(Value::as_str)
+                == Some(contract)
+        })
+        .expect("contract execution event");
+    mutate(
+        event
+            .observed
+            .get_mut("contract_execution")
+            .expect("observed contract execution"),
+    );
+    mutate(
+        event
+            .payload
+            .get_mut("contract_execution")
+            .expect("payload contract execution"),
+    );
+}
+
+pub(super) fn semantic_summary() -> AbstractWorldView {
+    AbstractWorldView::with_digest(
+        2,
+        29,
+        vec![
+            AbstractSessionView {
+                alias: "session-001".to_string(),
+                opened: true,
+                ingress_count: 1,
+                provider_turns: vec![
+                    provider_turn_summary("answer for session-001 turn 1", 1, 3, 2),
+                    provider_turn_summary("answer for session-001 turn 2", 2, 5, 4),
+                    provider_turn_summary("answer for session-001 turn 3", 3, 7, 6),
+                ],
+                tool_outputs: vec!["tool result for session-001".to_string()],
+                exec_code_outputs: vec!["exec result for session-001".to_string()],
+                observer_turn_indices: vec![3],
+                observer_reconnects: 1,
+                queued_ingress_count: 1,
+                cancellation_count: 1,
+                trigger_count: 4,
+                backend_failure_count: 2,
+                provider_mutation_count: 3,
+                durable_effect_keys: vec!["durable/session-001".to_string()],
+                checkpoint_commit_count: 0,
+                checkpoint_component_stored_count: 0,
+                checkpoint_component_ref_count: 0,
+                checkpoint_head_revision: 0,
+            },
+            AbstractSessionView {
+                alias: "session-002".to_string(),
+                opened: true,
+                ingress_count: 1,
+                provider_turns: vec![
+                    provider_turn_summary("answer for session-002 turn 1", 1, 3, 2),
+                    provider_turn_summary("answer for session-002 turn 2", 2, 5, 4),
+                ],
+                tool_outputs: Vec::new(),
+                exec_code_outputs: Vec::new(),
+                observer_turn_indices: vec![2],
+                observer_reconnects: 0,
+                queued_ingress_count: 0,
+                cancellation_count: 0,
+                trigger_count: 0,
+                backend_failure_count: 0,
+                provider_mutation_count: 0,
+                durable_effect_keys: Vec::new(),
+                checkpoint_commit_count: 0,
+                checkpoint_component_stored_count: 0,
+                checkpoint_component_ref_count: 0,
+                checkpoint_head_revision: 0,
+            },
+        ],
+        vec![AbstractDurableEffectView {
+            durable_key: "durable/session-001".to_string(),
+            execution_count: 1,
+            replay_count: 1,
+            result_digest: "digest".to_string(),
+        }],
+    )
+}
+
+pub(super) fn provider_turn_summary(
+    output: &str,
+    exchange_count: u64,
+    graph_node_count: u64,
+    transcript_message_count: u64,
+) -> ProviderTurnView {
+    ProviderTurnView {
+        output: output.to_string(),
+        exchange_count: Some(exchange_count),
+        graph_node_count: Some(graph_node_count),
+        transcript_message_count: Some(transcript_message_count),
+    }
+}
+
+pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
+    let base = [
+        delivered_with_payload(
+            0,
+            "session-001:provider:001",
+            "session-001",
+            BoundaryKind::Provider,
+            json!({
+                "text": "answer for session-001 turn 1",
+                "runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, 0),
+                "expected_provider_exchange_count": 1,
+            }),
+            json!({
+                "provider_kind": "openai-compatible",
+                "provider_output": "answer for session-001 turn 1",
+                "success": true,
+                "provider_exchange_count": 1,
+                "runtime_contract": {"status": "passed"},
+            }),
+        ),
+        delivered_with_payload(
+            1,
+            "session-001:queue:001",
+            "session-001",
+            BoundaryKind::QueuedIngress,
+            json!({
+                "active_turn_id": "session-001:provider:002",
+                "ingress_mode": "active_turn",
+                "source_key": "queue/session-001/001",
+                "text": "queued follow-up hidden from live turn",
+            }),
+            json!({
+                "ingress_mode": "active_turn",
+                "input_id": "input-001",
+                "input_state": "pending_active",
+                "queued_ingress": true,
+                "session": "session-001",
+                "source_key": "queue/session-001/001",
+                "active_turn_id": "session-001:provider:002",
+            }),
+        ),
+        delivered_with_payload(
+            2,
+            "session-001:provider:002:provider-event:001:sse",
+            "session-001",
+            BoundaryKind::ProviderEvent,
+            json!({
+                "turn_boundary_id": "session-001:provider:002",
+                "event_index": 1,
+                "event_name": "sse",
+            }),
+            json!({
+                "provider_event_release": true,
+                "released_while_turn_pending": true,
+                "turn_boundary_id": "session-001:provider:002",
+            }),
+        ),
+        delivered_with_payload(
+            2,
+            "session-001:cancel:001",
+            "session-001",
+            BoundaryKind::Cancellation,
+            json!({
+                "target": "session-001:queue:001",
+                "runtime_completion": runtime_completion_registered_after(
+                    RuntimeCompletionFamily::QueuedInputCancellation,
+                    2,
+                    "session-001:queue:001",
+                )
+            }),
+            json!({
+                "cancel_outcome": "cancelled",
+                "cancelled": true,
+                "session": "session-001",
+                "target": "session-001:queue:001",
+            }),
+        ),
+        delivered_with_payload(
+            3,
+            "session-001:observer:reconnect:001",
+            "session-001",
+            BoundaryKind::Observer,
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ObserverSnapshot, 3)}),
+            json!({"reconnected": true, "turn_index": 2}),
+        ),
+        delivered_with_payload(
+            4,
+            "session-001:provider:002",
+            "session-001",
+            BoundaryKind::Provider,
+            json!({
+                "text": "answer for session-001 turn 2",
+                "runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, 4),
+                "expected_provider_exchange_count": 2,
+            }),
+            json!({
+                "provider_kind": "openai-compatible",
+                "provider_output": "answer for session-001 turn 2",
+                "success": true,
+                "provider_exchange_count": 2,
+                "runtime_contract": {"status": "passed"},
+            }),
+        ),
+        delivered_with_payload(
+            5,
+            "session-002:provider:001",
+            "session-002",
+            BoundaryKind::Provider,
+            json!({
+                "text": "answer for session-002 turn 1",
+                "runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, 5),
+                "expected_provider_exchange_count": 1,
+            }),
+            json!({
+                "provider_kind": "anthropic",
+                "provider_output": "answer for session-002 turn 1",
+                "success": true,
+                "provider_exchange_count": 1,
+                "runtime_contract": {"status": "passed"},
+            }),
+        ),
+        delivered_with_payload(
+            6,
+            "session-002:provider:002",
+            "session-002",
+            BoundaryKind::Provider,
+            json!({
+                "text": "answer for session-002 turn 2",
+                "runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, 6),
+                "expected_provider_exchange_count": 2,
+            }),
+            json!({
+                "provider_kind": "anthropic",
+                "provider_output": "answer for session-002 turn 2",
+                "success": true,
+                "provider_exchange_count": 2,
+                "runtime_contract": {"status": "passed"},
+            }),
+        ),
+        delivered_with_payload(
+            10,
+            "session-001:durable:001",
+            "session-001",
+            BoundaryKind::DurableEffect,
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::DurableEffectCompletion, 10)}),
+            json!({
+                "durable_key": "durable/session-001",
+                "replayed": true,
+                "redrive_served_recorded_result": true,
+                "runtime_effect": {
+                    "local_executor_called": true,
+                    "redrive_local_executor_called": false,
+                },
+                "result_digest": "digest",
+                "redrive_result_digest": "digest",
+                "execution_count": 1,
+                "replay_count": 1,
+            }),
+        ),
+        delivered_with_payload(
+            12,
+            "session-001:tool:001",
+            "session-001",
+            BoundaryKind::Tool,
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ToolReturn, 12)}),
+            json!({
+                "runtime_tool_output": {},
+                "runtime_tool_record": {},
+                "execution_count": 1,
+            }),
+        ),
+        delivered_with_payload(
+            13,
+            "session-001:exec:001",
+            "session-001",
+            BoundaryKind::ExecCode,
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ExecResult, 13)}),
+            json!({
+                "runtime_effect_outcome": {
+                    "result": {
+                        "Ok": {
+                            "calls": []
+                        }
+                    },
+                    "type": "exec_code"
+                },
+                "execution_count": 1,
+            }),
+        ),
+        delivered_with_payload(
+            14,
+            "session-001:trigger:001",
+            "session-001",
+            BoundaryKind::Trigger,
+            json!({
+                "session": "session-001",
+                "source_key": "trigger/button/session-001/001",
+                "started_process": true,
+            }),
+            json!({
+                "occurrence_id": "trigger:abc",
+                "reservation_count": 1,
+                "session": "session-001",
+                "source_key": "trigger/button/session-001/001",
+                "started_process": true,
+                "trigger_delivered": true,
+            }),
+        ),
+        delivered_with_payload(
+            15,
+            "session-001:backend-failure:001",
+            "session-001",
+            BoundaryKind::BackendFailure,
+            json!({
+                "operation": "commit_runtime_state:001",
+                "fault": "refused",
+                "runtime_completion": runtime_completion(RuntimeCompletionFamily::BackendRetryOrFailure, 15),
+            }),
+            json!({
+                "attempt": 1,
+                "backend_failure": true,
+                "operation": "commit_runtime_state:001",
+                "production_store_error": {
+                                        "type": "lash_core::StoreError",
+                    "variant": "StorageFailure"
+                },
+                "fault_script": {"fault": "refused", "fired": true},
+                "transient": true
+            }),
+        ),
+        delivered_with_payload(
+            16,
+            "session-001:backend-failure:002",
+            "session-001",
+            BoundaryKind::BackendFailure,
+            json!({
+                "operation": "commit_runtime_state:001",
+                "fault": "reply_lost",
+                "runtime_completion": runtime_completion(RuntimeCompletionFamily::BackendRetryOrFailure, 16),
+            }),
+            json!({
+                "attempt": 2,
+                "backend_failure": true,
+                "operation": "commit_runtime_state:001",
+                "production_store_error": {
+                                        "type": "lash_core::StoreError",
+                    "variant": "StorageFailure"
+                },
+                "fault_script": {"fault": "reply_lost", "fired": true},
+                "transient": true
+            }),
+        ),
+        delivered_with_payload(
+            17,
+            "session-001:provider-mutation:001",
+            "session-001",
+            BoundaryKind::ProviderMutation,
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderScriptMutation, 17)}),
+            json!({
+                "mutation": "malformed_sse_chunk",
+                "provider_parser_matrix": {
+                    "matrix": {
+                        "real_provider_parser_execution": true,
+                        "provider_kinds": [
+                            "anthropic",
+                            "google_oauth",
+                            "openai",
+                            "openai-compatible"
+                        ]
+                    }
+                }
+            }),
+        ),
+        delivered_with_payload(
+            18,
+            "session-001:provider-mutation:002",
+            "session-001",
+            BoundaryKind::ProviderMutation,
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderScriptMutation, 18)}),
+            json!({
+                "mutation": "rate_limit_error_envelope",
+                "provider_parser_matrix": {
+                    "matrix": {
+                        "real_provider_parser_execution": true,
+                        "provider_kinds": [
+                            "anthropic",
+                            "google_oauth",
+                            "openai",
+                            "openai-compatible"
+                        ],
+                        "proofs": [
+                            {"provider_kind": "openai-compatible", "terminal_reason": "provider_error", "status": 429, "classification": {"kind": "Http", "retryable": true, "status": 429}},
+                            {"provider_kind": "openai", "terminal_reason": "provider_error", "status": 429, "classification": {"kind": "Http", "retryable": true, "status": 429}},
+                            {"provider_kind": "anthropic", "terminal_reason": "provider_error", "status": 429, "classification": {"kind": "Http", "retryable": true, "status": 429}},
+                            {"provider_kind": "google_oauth", "terminal_reason": "provider_error", "status": 429, "classification": {"kind": "Http", "retryable": true, "status": 429}}
+                        ]
+                    }
+                }
+            }),
+        ),
+        delivered_with_payload(
+            19,
+            "session-001:provider-mutation:003",
+            "session-001",
+            BoundaryKind::ProviderMutation,
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderScriptMutation, 19)}),
+            json!({
+                "mutation": "dropped_terminal_event",
+                "provider_parser_matrix": {
+                    "matrix": {
+                        "real_provider_parser_execution": true,
+                        "provider_kinds": [
+                            "anthropic",
+                            "google_oauth",
+                            "openai",
+                            "openai-compatible"
+                        ],
+                        "proofs": [
+                            {"provider_kind": "openai-compatible", "terminal_reason": "provider_error", "classification": {"retryable": false}},
+                            {"provider_kind": "openai", "terminal_reason": "provider_error", "classification": {"retryable": false}},
+                            {"provider_kind": "anthropic", "terminal_reason": "provider_error", "classification": {"retryable": false}},
+                            {"provider_kind": "google_oauth", "terminal_reason": "provider_error", "classification": {"retryable": false}}
+                        ]
+                    }
+                }
+            }),
+        ),
+        delivered_with_payload(
+            20,
+            "session-001:provider:003:provider-event:001:sse",
+            "session-001",
+            BoundaryKind::ProviderEvent,
+            json!({
+                "turn_boundary_id": "session-001:provider:003",
+                "event_index": 1,
+                "event_name": "sse",
+            }),
+            json!({
+                "provider_event_release": true,
+                "released_while_turn_pending": true,
+                "turn_boundary_id": "session-001:provider:003",
+            }),
+        ),
+        delivered_with_payload(
+            21,
+            "session-001:provider:003",
+            "session-001",
+            BoundaryKind::Provider,
+            json!({
+                "text": "answer for session-001 turn 3",
+                "runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, 21),
+                "expected_provider_exchange_count": 3,
+            }),
+            json!({
+                "provider_kind": "openai-compatible",
+                "provider_output": "answer for session-001 turn 3",
+                "success": true,
+                "provider_exchange_count": 3,
+                "runtime_contract": {"status": "passed"},
+            }),
+        ),
+        delivered_with_payload(
+            22,
+            "session-001:contract-execution:standard-max-turn-after-tool-result",
+            "session-001",
+            BoundaryKind::Trigger,
+            json!({
+                "session": "session-001",
+                "source_key": "contract-execution/session-001/standard-max-turn-after-tool-result",
+                "started_process": false,
+                "contract_execution": standard_max_turn_execution_fixture()
+            }),
+            json!({
+                "session": "session-001",
+                "trigger_delivered": true,
+                "source_key": "contract-execution/session-001/standard-max-turn-after-tool-result",
+                "occurrence_id": "trigger:contract-execution-standard-max-turn-after-tool-result",
+                "reservation_count": 1,
+                "started_process": false,
+                "contract_execution": standard_max_turn_execution_fixture()
+            }),
+        ),
+    ];
+    let mut events: Vec<DeliveredBoundary> = base.into();
+    events.extend(contract_execution_fixture_events(24));
+    events
+}
+
+pub(super) fn standard_max_turn_execution_fixture() -> serde_json::Value {
+    let mut execution = replay_contract_execution_fixture("standard.max_turns_after_tool_result");
+    execution
+        .as_object_mut()
+        .expect("contract execution object")
+        .insert(
+            "generated_anchor".to_string(),
+            json!({
+                "tool_boundary": "session-001:tool:001",
+                "continuation_provider_boundary": "session-001:provider:003",
+                "actor": "session-001",
+                "tool_sequence": 12,
+                "continuation_provider_sequence": 21,
+                "same_actor_continuation": true
+            }),
+        );
+    execution
+}
+
+pub(super) fn replay_contract_execution_fixture(contract: &str) -> serde_json::Value {
+    crate::runner::replay_contract_execution(contract)
+        .unwrap_or_else(|err| panic!("fixed contract execution fixture `{contract}` failed: {err}"))
+}
+
+pub(super) fn contract_execution_fixture_events(start_sequence: usize) -> Vec<DeliveredBoundary> {
+    all_contract_fact_specs()
+        .enumerate()
+        .map(|(offset, row)| {
+            contract_execution_fixture_event(start_sequence + offset, row.spec.semantic_oracle)
+        })
+        .collect()
+}
+
+pub(super) fn contract_execution_fixture_event(
+    sequence: usize,
+    contract: &str,
+) -> DeliveredBoundary {
+    let proof_id = contract.replace(['.', '_'], "-");
+    let boundary_id = format!("session-001:contract-execution:{proof_id}");
+    let source_key = format!("contract-execution/session-001/{proof_id}");
+    let execution = replay_contract_execution_fixture(contract);
+    delivered_with_payload(
+        sequence,
+        &boundary_id,
+        "session-001",
+        BoundaryKind::Trigger,
+        json!({
+            "session": "session-001",
+            "source_key": source_key,
+            "started_process": false,
+            "contract_execution": execution.clone(),
+        }),
+        json!({
+            "session": "session-001",
+            "trigger_delivered": true,
+            "source_key": source_key,
+            "occurrence_id": format!("trigger:contract-execution-{proof_id}"),
+            "reservation_count": 1,
+            "started_process": false,
+            "contract_execution": execution,
+        }),
+    )
+}
+
 pub(super) fn delivered_with_payload(
     sequence: usize,
     boundary_id: &str,

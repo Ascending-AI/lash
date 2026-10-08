@@ -142,6 +142,8 @@ mod standard_contracts;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+pub(crate) use agent_contracts::require_agent_lifted_process_entries;
 use agent_contracts::*;
 use contract_facts::*;
 use frame_switch::*;

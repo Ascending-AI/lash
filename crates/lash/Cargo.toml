@@ -135,6 +135,12 @@ serde_bytes = { workspace = true }
 trybuild = "1"
 tracing-subscriber = { workspace = true }
 
+[[bin]]
+name = "lash-seam-proof-worker"
+path = "tests/seam_proof_dialect/worker.rs"
+required-features = ["rlm", "testing"]
+test = false
+
 [[example]]
 name = "worker_host"
 path = "examples/worker_host.rs"

@@ -85,6 +85,11 @@ const RETRY: &str = "ext_retry";
 const FAST: &str = "ext_fast";
 const SLOW: &str = "ext_slow";
 const HANDLE: &str = "ext_handle";
+/// The tool no catalog lists: the cell reaches it through the deferred
+/// resolver's grant.
+const GRANTED: &str = "ext_granted";
+/// The tool a redeployed catalog binds at the granted tool's path.
+const AMBIENT: &str = "ext_ambient";
 const MODEL: &str = "cell-restore-model";
 /// What the final answer starts with.
 const FINAL: &str = "final answer";
@@ -120,6 +125,9 @@ enum Cell {
     Race,
     /// A `processes.await` of a host process.
     AwaitProcess,
+    /// A granted call, a durable sleep of [`SLEEP_MS`], and the granted
+    /// call again.
+    Deferred,
 }
 
 impl Cell {
@@ -138,6 +146,12 @@ impl Cell {
                  const r = await processes.await({ handle: h });\n\
                  print(r);"
                 .to_owned(),
+            Self::Deferred => format!(
+                "const a = await tools.{GRANTED}({{ x: 1 }});\n\
+                 await sleep({SLEEP_MS});\n\
+                 const b = await tools.{GRANTED}({{ x: 2 }});\n\
+                 print([a, b]);"
+            ),
         };
         format!("<typescript>\n{body}\n</typescript>")
     }
@@ -150,6 +164,11 @@ struct ExternalWorld {
     entries: Mutex<BTreeMap<ToolCallId, Vec<(String, Value)>>>,
     /// The process `ext_handle` hands out.
     process: Mutex<Option<ProcessId>>,
+    /// How many paths the deferred resolver was asked to resolve.
+    resolved: std::sync::atomic::AtomicUsize,
+    /// Whether the deployment was redeployed: its resolver grants nothing
+    /// and its catalog binds [`AMBIENT`] at the granted tool's path.
+    redeployed: std::sync::atomic::AtomicBool,
 }
 
 impl ExternalWorld {
@@ -212,6 +231,96 @@ fn definition(name: &str, policy: ExecutionPolicy, output: Value) -> lash_core::
     .expect("the tool's schemas")
     .with_execution_policy(policy)
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], name))
+}
+
+/// The definition the resolver grants for `tools.ext_granted`, or the one
+/// a redeployed catalog binds there.
+fn granted(name: &str) -> lash_core::ToolDefinition {
+    definition(name, ExecutionPolicy::Once, json!({ "type": "object" }))
+        .with_tool_binding(lash_core::ToolBinding::new(["tools"], GRANTED))
+}
+
+/// The host tools of the deferred cell: the listed ones, the grant's body,
+/// and, once redeployed, an ambient tool at the granted tool's path.
+struct DeferredTools {
+    world: Arc<ExternalWorld>,
+    listed: Arc<dyn lash_core::ToolProvider>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for DeferredTools {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        let mut manifests = self.listed.tool_manifests();
+        if self
+            .world
+            .redeployed
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            manifests.push(granted(AMBIENT).manifest());
+        }
+        manifests
+    }
+
+    fn resolve_manifest_by_id(&self, id: &lash_core::ToolId) -> Option<lash_core::ToolManifest> {
+        [GRANTED, AMBIENT]
+            .into_iter()
+            .map(granted)
+            .find(|definition| definition.id() == id)
+            .map(|definition| definition.manifest())
+            .or_else(|| self.listed.resolve_manifest_by_id(id))
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        if [GRANTED, AMBIENT].contains(&name) {
+            return Some(Arc::new(granted(name).contract()));
+        }
+        self.listed.resolve_contract(name)
+    }
+
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        ExtTools {
+            world: Arc::clone(&self.world),
+        }
+        .execute(call)
+        .await
+    }
+}
+
+/// Grants `tools.ext_granted` until the deployment is redeployed, and
+/// counts every path it is asked.
+struct GrantingResolver {
+    world: Arc<ExternalWorld>,
+}
+
+#[async_trait::async_trait]
+impl lash_lashlang_runtime::DeferredToolResolver for GrantingResolver {
+    async fn resolve(
+        &self,
+        _cx: &lash_lashlang_runtime::DeferredResolveContext<'_>,
+        paths: &[&str],
+    ) -> BTreeMap<String, lash_lashlang_runtime::Resolution> {
+        self.world
+            .resolved
+            .fetch_add(paths.len(), std::sync::atomic::Ordering::SeqCst);
+        let redeployed = self
+            .world
+            .redeployed
+            .load(std::sync::atomic::Ordering::SeqCst);
+        paths
+            .iter()
+            .map(|path| {
+                let resolution = if *path == format!("tools.{GRANTED}") && !redeployed {
+                    lash_lashlang_runtime::Resolution::Resolved(Box::new(
+                        lash_lashlang_runtime::ToolGrant::new(granted(GRANTED))
+                            .with_source_id(lash::tools::PLUGIN_TOOL_SOURCE_ID),
+                    ))
+                } else {
+                    lash_lashlang_runtime::Resolution::NotAvailable
+                };
+                ((*path).to_owned(), resolution)
+            })
+            .collect()
+    }
 }
 
 fn ext_tools(world: Arc<ExternalWorld>) -> Arc<dyn lash_core::ToolProvider> {
@@ -475,40 +584,51 @@ impl CellTurn {
         self.core
             .lock_recover()
             .get_or_insert_with(|| {
-                lash::LashCore::rlm_builder(
-                    backend.clone(),
-                    lash::rlm::RlmProtocolPluginFactory::new(
-                        lash::rlm::RlmProtocolPluginConfig::builder()
-                            .channel(lash::rlm::RlmChannel::Cell)
-                            .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
-                            .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
-                            .build(),
-                        Arc::new(lash::rlm::TypescriptDialect),
-                        &backend,
+                let factory = lash::rlm::RlmProtocolPluginFactory::new(
+                    lash::rlm::RlmProtocolPluginConfig::builder()
+                        .channel(lash::rlm::RlmChannel::Cell)
+                        .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+                        .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+                        .build(),
+                    Arc::new(lash::rlm::TypescriptDialect),
+                    &backend,
+                )
+                .with_worker_service(sim::workers(&clock));
+                let (factory, tools) = if self.cell == Cell::Deferred {
+                    (
+                        factory.with_deferred_tool_resolver(Arc::new(GrantingResolver {
+                            world: Arc::clone(&self.world),
+                        })),
+                        Arc::new(DeferredTools {
+                            world: Arc::clone(&self.world),
+                            listed: ext_tools(Arc::clone(&self.world)),
+                        }) as Arc<dyn lash_core::ToolProvider>,
                     )
-                    .with_worker_service(sim::workers(&clock)),
-                )
-                .serve_sessions(false)
-                .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-                .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-                .serve_test_llm_profile(
-                    model(self.cell, Arc::clone(&self.requests)),
-                    lash_core::LlmProfileMetadata::builder(MODEL)
-                        .context_window_tokens(200_000)
-                        .build()
-                        .expect("the model's metadata"),
-                )
-                .tools(ext_tools(Arc::clone(&self.world)))
-                .plugin(Arc::new(
-                    lash::process_controls::SessionProcessAdminPluginFactory::new(
-                        lash_core::lifetime::session_or_starter,
-                    ),
-                ))
-                .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                    "cell-restore-deployment",
-                    "cell-restore-boot",
-                ))
-                .expect("the core builds")
+                } else {
+                    (factory, ext_tools(Arc::clone(&self.world)))
+                };
+                lash::LashCore::rlm_builder(backend.clone(), factory)
+                    .serve_sessions(false)
+                    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+                    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+                    .serve_test_llm_profile(
+                        model(self.cell, Arc::clone(&self.requests)),
+                        lash_core::LlmProfileMetadata::builder(MODEL)
+                            .context_window_tokens(200_000)
+                            .build()
+                            .expect("the model's metadata"),
+                    )
+                    .tools(tools)
+                    .plugin(Arc::new(
+                        lash::process_controls::SessionProcessAdminPluginFactory::new(
+                            lash_core::lifetime::session_or_starter,
+                        ),
+                    ))
+                    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                        "cell-restore-deployment",
+                        "cell-restore-boot",
+                    ))
+                    .expect("the core builds")
             })
             .clone()
     }
@@ -722,7 +842,9 @@ impl Scenario for CellTurn {
         match self.cell {
             Cell::Repeatable => self.repeatable_laws(nodes).await,
             Cell::Race => self.race_laws(nodes, cut).await,
-            Cell::Identity | Cell::Sleep | Cell::AwaitProcess => self.identity_laws(nodes).await,
+            Cell::Identity | Cell::Sleep | Cell::AwaitProcess | Cell::Deferred => {
+                self.identity_laws(nodes).await
+            }
         }
     }
 }
@@ -871,6 +993,97 @@ async fn sleep_across_a_crash(dialect: Dialect, postgres_url: Option<String>) {
     assert!(
         violations.is_empty(),
         "sleep across a crash on {dialect:?}:\n  {}\n{}",
+        violations.join("\n  "),
+        nodes.script().rendered_trace()
+    );
+}
+
+/// DEFER1: a cell's deferred tool resolutions are held in its snapshot and
+/// restored from it. The cell calls `tools.ext_granted`, which no catalog
+/// lists and the deployment's resolver grants, then sleeps. Node A is
+/// killed during the sleep and the deployment is redeployed: its resolver
+/// now grants nothing, and its catalog binds another tool at that path.
+/// Node B restores the cell onto its sleep; the cell's second call runs
+/// under the grant it resolved, never the changed ambient binding, and the
+/// resolver is never asked again.
+async fn deferred_grant_across_a_crash(dialect: Dialect, postgres_url: Option<String>) {
+    use std::sync::atomic::Ordering;
+    let turn = CellTurn::new(Cell::Deferred, dialect, postgres_url);
+    let (clock, database, nodes) = simulated(&turn).await;
+    turn.send().await.expect("the turn is sent");
+    nodes.start("a");
+    // Run A until the cell sleeps on its pinned timer.
+    loop {
+        let timers = database
+            .pending_waits(&actor())
+            .await
+            .expect("the session's waits read")
+            .into_iter()
+            .filter(|wait| wait.purpose.kind() == WaitKind::Timer)
+            .count();
+        if timers == 1 {
+            break;
+        }
+        assert!(
+            nodes.step().await.is_some() && clock.logical_ms() < SLEEP_MS,
+            "the cell never slept: {}\n{}",
+            turn.last_request(),
+            nodes.script().rendered_trace()
+        );
+    }
+    let slept_at = clock.logical_ms();
+    while clock.logical_ms() < slept_at + SLEEP_MS / 2 {
+        assert!(nodes.step().await.is_some(), "A stalled while sleeping");
+    }
+    nodes.kill("a");
+    nodes.quiesce().await;
+    turn.world.redeployed.store(true, Ordering::SeqCst);
+    nodes.start("b");
+    let horizon = slept_at + 3 * SLEEP_MS;
+    while !turn.done(&nodes).await {
+        assert!(
+            clock.logical_ms() < horizon,
+            "the turn is not done:\n{}",
+            nodes.script().rendered_trace()
+        );
+        assert!(
+            nodes.step().await.is_some(),
+            "B stalled:\n{}",
+            nodes.script().rendered_trace()
+        );
+    }
+    nodes.quiesce().await;
+    let mut violations = turn.identity_laws(&nodes).await;
+    let calls = turn
+        .world
+        .entries()
+        .into_values()
+        .flatten()
+        .map(|(name, args)| (name, args["x"].as_i64().unwrap_or_default()))
+        .collect::<std::collections::BTreeSet<_>>();
+    let expected = [(GRANTED.to_owned(), 1), (GRANTED.to_owned(), 2)]
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    if calls != expected {
+        violations.push(format!(
+            "the restored cell's calls ran as {calls:?}, not both under the grant it resolved"
+        ));
+    }
+    let resolved = turn.world.resolved.load(Ordering::SeqCst);
+    if resolved != 1 {
+        violations.push(format!(
+            "the resolver was asked {resolved} paths, not the one the cell resolved once"
+        ));
+    }
+    let last = turn.last_request();
+    if !last.contains(GRANTED) || last.contains(AMBIENT) {
+        violations.push(format!(
+            "the cell was not answered by the granted tool; the model saw: {last}"
+        ));
+    }
+    assert!(
+        violations.is_empty(),
+        "deferred grant across a crash on {dialect:?}:\n  {}\n{}",
         violations.join("\n  "),
         nodes.script().rendered_trace()
     );
@@ -1081,4 +1294,27 @@ async fn processes_await_in_a_cell_parks_and_resumes_on_postgres() {
         return;
     };
     await_process(Dialect::Postgres, Some(url)).await;
+}
+
+/// A restored cell keeps the deferred grants it resolved, on SQLite in
+/// memory (DEFER1).
+#[tokio::test]
+async fn a_restored_cell_keeps_its_deferred_grants_and_resolves_nothing_twice_on_sqlite_memory() {
+    deferred_grant_across_a_crash(Dialect::SqliteMemory, None).await;
+}
+
+/// The same law on a SQLite file.
+#[tokio::test]
+async fn a_restored_cell_keeps_its_deferred_grants_and_resolves_nothing_twice_on_sqlite_file() {
+    deferred_grant_across_a_crash(Dialect::SqliteFile, None).await;
+}
+
+/// The same law on PostgreSQL.
+#[tokio::test]
+async fn a_restored_cell_keeps_its_deferred_grants_and_resolves_nothing_twice_on_postgres() {
+    let Some(url) = dialect::postgres_url() else {
+        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
+        return;
+    };
+    deferred_grant_across_a_crash(Dialect::Postgres, Some(url)).await;
 }

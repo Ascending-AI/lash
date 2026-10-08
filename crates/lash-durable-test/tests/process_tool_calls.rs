@@ -33,6 +33,8 @@ struct Execution {
     call_id: lash_core::ToolCallId,
     /// Who the call ran for.
     owner: String,
+    /// The process the call names as the one it runs inside.
+    enclosing: Option<lash_core::ProcessId>,
 }
 
 /// Everything the probe did, and the gate a held call waits on.
@@ -105,6 +107,7 @@ impl lash_core::ToolProvider for Probe {
             label: label.clone(),
             call_id: call.context.call_id().clone(),
             owner: call.context.owner().runtime_owner().to_string(),
+            enclosing: call.context.enclosing_process().cloned(),
         });
         if call.args["hold"].as_bool().unwrap_or_default() {
             let mut gate = self.witness.gate.subscribe();
@@ -161,7 +164,8 @@ fn process_cell(labels: &[&str]) -> lash_core::llm::types::LlmResponse {
 
 /// A process body's call is named by the process it runs in: the same
 /// statement at the same position of two processes is two identities, each
-/// owned by its process, and each body runs once.
+/// owned by its process and naming it as its enclosing process, and each
+/// body runs once.
 async fn process_admission_names_each_call(tier: Tier) {
     let witness = Arc::new(Witness::default());
     let Some(world) = world(tier, &witness).await else {
@@ -187,6 +191,16 @@ async fn process_admission_names_each_call(tier: Tier) {
             && one.owner != two.owner,
         "each call runs for its own process: {one:?}, {two:?}"
     );
+    for execution in [&one, &two] {
+        assert_eq!(
+            execution
+                .enclosing
+                .as_ref()
+                .map(|process| format!("process:{process}")),
+            Some(execution.owner.clone()),
+            "a call names the process it runs inside: {execution:?}"
+        );
+    }
     world.shutdown().await;
 }
 
@@ -478,6 +492,58 @@ async fn process_local_helper_reaches_trigger_command_handler(tier: Tier) {
     world.shutdown().await;
 }
 
+/// A TypeScript process body reads the clock and the random source through
+/// the runtime: `new Date().toISOString()`, `Date.now()` and `Math.random()`
+/// answer real values and the process completes (FIG-3079, ported by FIG-5307
+/// from the deleted lash-protocol-rlm `typescript_runtime_values.rs`).
+async fn typescript_process_body_resolves_journaled_clock_and_randomness(tier: Tier) {
+    let witness = Arc::new(Witness::default());
+    let Some(world) = world(tier, &witness).await else {
+        return;
+    };
+    let cell = served::cell(
+        "const worker = await processes.create({ dialect: \"typescript\", source: \
+         `const worker = async () => {\n  \
+            const stamp = new Date().toISOString();\n  \
+            const ms = Date.now();\n  \
+            const roll = Math.random();\n  \
+            return { stamp: stamp, ms: ms, roll: roll };\n};` });\n\
+         const held = await processes.start({ definition: worker });\n\
+         finish(JSON.stringify(await held));",
+    );
+    let output = world
+        .run("process-runtime-values", served::spec(64), vec![cell])
+        .await;
+    served::assert_answered("the turn that awaits the process", &output);
+    let answer = output
+        .assistant_message()
+        .map(str::to_owned)
+        .or_else(|| {
+            output
+                .final_value()
+                .and_then(|value| value.as_str())
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| panic!("the turn answers the process's output: {output:?}"));
+    let value: serde_json::Value =
+        serde_json::from_str(&answer).unwrap_or_else(|error| panic!("{error}: {answer}"));
+    let stamp = value["stamp"].as_str().expect("the ISO stamp is a string");
+    assert!(
+        stamp.ends_with('Z') && stamp.len() == 24 && stamp.as_bytes()[10] == b'T',
+        "`new Date().toISOString()` returns an ISO-8601 stamp, got {stamp}"
+    );
+    let ms = value["ms"].as_f64().expect("`Date.now()` returns a number");
+    assert!(ms > 0.0, "`Date.now()` returns a positive epoch, got {ms}");
+    let roll = value["roll"]
+        .as_f64()
+        .expect("`Math.random()` returns a number");
+    assert!(
+        (0.0..1.0).contains(&roll),
+        "`Math.random()` stays in [0, 1), got {roll}"
+    );
+    world.shutdown().await;
+}
+
 tiered_laws!(
     process_admission_names_each_call,
     tool_call_limit_counts_what_a_process_holds,
@@ -485,4 +551,5 @@ tiered_laws!(
     process_tool_call_limit_staged_calls,
     process_body_uses_trigger_command_handler,
     process_local_helper_reaches_trigger_command_handler,
+    typescript_process_body_resolves_journaled_clock_and_randomness,
 );

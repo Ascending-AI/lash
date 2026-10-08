@@ -44,27 +44,1239 @@
 
 use super::*;
 
+use crate::TurnEvent;
+use crate::support::{TurnActivity, TurnActivitySink, TurnInput};
+use crate::{SessionId, TurnReport};
+use lash_core::ToolDefinitionBindingExt as _;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use tokio::sync::Mutex as TokioMutex;
+
+/// How long a rendezvous may wait before the case fails as an assertion rather
+/// than hanging the suite. It is a deadlock budget, never an ordering device:
+/// no assertion in this file depends on its value.
+const RENDEZVOUS_BUDGET: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// The event type a leaf's declared intent emits.
+const INTENT_EVENT: &str = "aggregate.oracle.leaf";
+
+/// An event type the intent target never registered: emitting it is refused.
+const UNREGISTERED_EVENT: &str = "aggregate.oracle.unregistered";
+
+// ---------------------------------------------------------------------------
+// The journaled tier
+// ---------------------------------------------------------------------------
+
+/// A journaled store tier one oracle case runs against.
+///
+/// The cases never name the backend; they take a fresh backend from this
+/// for each run and hand it to the builder. SQLite memory stores are the
+/// floor: the core's node journals every checkpoint and effect through the
+/// same stores a file backend runs, without paying a file sync per effect
+/// across the long race loops.
+///
+/// The backend commits each finished call at once (a zero group-commit
+/// window). A Run ranks the calls of one commit batch by admission, not by
+/// when each finished (ADR 0099 §5), so under a batching window a leaf the
+/// case releases right after a sibling finished could share that sibling's
+/// batch and outrank it. With no window, a leaf that finished before the
+/// case released its sibling commits, and ranks, ahead of it: the order the
+/// cases decide by construction is the commit order.
+struct JournaledTier {
+    /// Names the tier in assertion messages, so a shared case body says which
+    /// registration failed.
+    name: &'static str,
+}
+
+impl JournaledTier {
+    fn sqlite() -> Self {
+        Self { name: "sqlite" }
+    }
+
+    /// A fresh backend for one run: its own sessions and its own process
+    /// registry, served by the core's own node.
+    async fn backend(&self) -> lash_core::Backend {
+        let defaults = crate::durable::DurableSettings::default();
+        crate::durable::DurableBackendBuilder::new(sqlite_memory_store_set().await)
+            .config(crate::durable::DurableSettings {
+                group_commit: crate::durable::GroupCommit {
+                    window: std::time::Duration::ZERO,
+                    ..defaults.group_commit
+                },
+                ..defaults
+            })
+            .build()
+            .expect("the oracle's durable backend builds")
+    }
+}
 
 // ---------------------------------------------------------------------------
 // The theatre: what the host was asked to do, and who settles when
 // ---------------------------------------------------------------------------
 
+/// The host's record and the rendezvous the cases settle their leaves with.
+///
+/// Latches are keyed by a namespaced string, so a leaf's gate is named by the
+/// `id` the cell wrote — the settlement plan is authored where the aggregate
+/// is authored, and the case only says when to release it.
+///
+/// `settled` is recorded by the session's tool-result projector, which runs
+/// inside each batch child just before its future resolves
+/// (`session/tool_execution.rs::complete_tool_call`). It is the latest
+/// per-leaf observation a test can take from inside the batch — the turn's
+/// activity stream is not one, because `ToolCallCompleted` reaches the sink
+/// only once the whole batch has returned.
+///
+/// Two mechanisms that look like they would order leaves do not, and both were
+/// measured before this file settled on its own: a leaf released at the end of
+/// a sibling's *attempt* is polled ahead of the sibling that woke it, because
+/// the sibling still has its journaled attempt effect to await and
+/// `FuturesUnordered` drains its ready queue in wake order; and a leaf that
+/// waits for a sibling's turn activity waits forever.
+#[derive(Default)]
+struct OracleTheatre {
+    /// Every `oracle.step` id, in the order the host was entered.
+    started: StdMutex<Vec<String>>,
+    /// Every `oracle.step` id, in the order the runtime completed its call.
+    settled: StdMutex<Vec<String>>,
+    /// Completed tool calls of any tool, which the shape cases count.
+    completed_calls: AtomicUsize,
+    keys: StdMutex<HashMap<String, lash_core::waits::PinnedKey>>,
+    latches: StdMutex<HashMap<String, Arc<tokio::sync::watch::Sender<bool>>>>,
+    /// The process every declared intent is realized against: registered up
+    /// front, so its id is the one the registrar minted (ADR 0107).
+    intent_process: std::sync::OnceLock<lash_sansio::ProcessId>,
+}
+
+impl OracleTheatre {
+    fn intent_process(&self) -> lash_sansio::ProcessId {
+        self.intent_process
+            .get()
+            .cloned()
+            .expect("the intent target is registered before the turn runs")
+    }
+
+    fn latch(&self, key: &str) -> Arc<tokio::sync::watch::Sender<bool>> {
+        Arc::clone(
+            self.latches
+                .lock_recover()
+                .entry(key.to_string())
+                .or_insert_with(|| Arc::new(tokio::sync::watch::channel(false).0)),
+        )
+    }
+
+    fn raise(&self, key: &str) {
+        self.latch(key).send_replace(true);
+    }
+
+    /// Waits for `key`, giving up after [`RENDEZVOUS_BUDGET`] so a case that
+    /// cannot make progress fails as an assertion instead of hanging.
+    async fn wait(&self, key: &str) -> bool {
+        let latch = self.latch(key);
+        let mut receiver = latch.subscribe();
+        tokio::time::timeout(RENDEZVOUS_BUDGET, async move {
+            receiver.wait_for(|raised| *raised).await.is_ok()
+        })
+        .await
+        .unwrap_or(false)
+    }
+
+    async fn await_started(&self, id: &str) {
+        assert!(
+            self.wait(&format!("started:{id}")).await,
+            "{id} never ran; started so far: {:?}",
+            self.started()
+        );
+    }
+
+    async fn await_settled(&self, id: &str) {
+        assert!(
+            self.wait(&format!("settled:{id}")).await,
+            "{id} never settled"
+        );
+    }
+
+    /// Waits until the batch's consumer has consumed `count` settlements. The
+    /// `settled:{id}` latch is raised by the presentation step, which a group
+    /// child runs before its final commit takes a rank, so only consumption
+    /// proves where in the commit order a leaf landed.
+    async fn await_consumed(&self, count: usize) {
+        assert!(
+            self.wait(&format!("consumed:{count}")).await,
+            "the consumer never consumed {count} settlement(s)"
+        );
+    }
+
+    fn release(&self, id: &str) {
+        self.raise(&format!("release:{id}"));
+    }
+
+    fn publish_key(&self, id: &str, key: lash_core::waits::PinnedKey) {
+        self.keys.lock_recover().insert(id.to_string(), key);
+        self.raise(&format!("key:{id}"));
+    }
+
+    /// Settles a leaf that was dispatched with `defer: true`, from outside the batch.
+    async fn settle_deferred(
+        &self,
+        core: &LashCore,
+        id: &str,
+        resolution: lash_core::Resolution,
+    ) -> Result<()> {
+        assert!(
+            self.wait(&format!("key:{id}")).await,
+            "{id} never published a completion key"
+        );
+        let key = self
+            .keys
+            .lock_recover()
+            .get(id)
+            .cloned()
+            .expect("the published completion key");
+        assert_eq!(
+            core.completions().resolve(key.as_str(), resolution).await?,
+            lash_core::ResolveAnswer::Resolved,
+            "{id}'s completion must be accepted"
+        );
+        Ok(())
+    }
+
+    fn rejection(id: &str) -> lash_core::Resolution {
+        lash_core::Resolution::Err(crate::ExternalCompletionError::new(
+            crate::provider::FailureCode::foreign(
+                crate::provider::Namespace::host("oracle").expect("valid namespace"),
+                "oracle_step_failed",
+            )
+            .expect("a validated host namespace is foreign-mintable"),
+            format!("step {id} rejected"),
+        ))
+    }
+
+    fn started(&self) -> Vec<String> {
+        self.started.lock_recover().clone()
+    }
+
+    fn settled(&self) -> Vec<String> {
+        self.settled.lock_recover().clone()
+    }
+}
+
+/// The turn's activity sink: it counts completed tool calls, which the group
+/// consumer emits as it consumes settlements in commit order, and raises
+/// `consumed:{n}` once the n-th settlement has been consumed.
+#[async_trait]
+impl TurnActivitySink for OracleTheatre {
+    async fn emit(&self, activity: TurnActivity) {
+        if matches!(activity.event, TurnEvent::ToolCallCompleted { .. }) {
+            let consumed = self.completed_calls.fetch_add(1, Ordering::SeqCst) + 1;
+            self.raise(&format!("consumed:{consumed}"));
+        }
+    }
+}
+
+/// One presentation step in the session's chain: it records the leaf's
+/// settlement and raises its latch, then passes the previous step's reply
+/// through unchanged.
+fn oracle_presentation_step(
+    theatre: Arc<OracleTheatre>,
+) -> lash_core::facade_support::ToolPresentationStep {
+    Arc::new(
+        move |input: lash_core::facade_support::ToolPresentationInput| {
+            if input.context.tool_name == "oracle_step"
+                && let Some(id) = input
+                    .context
+                    .args
+                    .get("id")
+                    .and_then(serde_json::Value::as_str)
+            {
+                theatre.settled.lock_recover().push(id.to_string());
+                theatre.raise(&format!("settled:{id}"));
+            }
+            let previous = input.previous;
+            Box::pin(async move { Ok(previous) })
+        },
+    )
+}
+
+/// How one `oracle.step` leaf behaves, decoded from the arguments the cell
+/// wrote. Every knob the FIG-3397 cases need is here: block until released,
+/// report started, emit an intent, reject, and fail during preparation.
+#[derive(Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StepArgs {
+    id: String,
+    /// Reject instead of returning a value.
+    #[serde(default)]
+    fail: bool,
+    /// Park on a completion key and publish it, so the test settles this leaf
+    /// from outside the batch.
+    #[serde(default)]
+    defer: bool,
+    /// Block inside the attempt until the test releases this leaf by name.
+    #[serde(default)]
+    hold: bool,
+    #[serde(default)]
+    intent: bool,
+    /// Declare an intent the runtime refuses — an event type the target never
+    /// registered — so the call returns a value and still settles rejected.
+    #[serde(default)]
+    refused_intent: bool,
+    /// Fail in `prepare_tool_call`, before the batch dispatches anything.
+    #[serde(default)]
+    prepare_fail: bool,
+}
+
+impl StepArgs {
+    fn decode(args: &serde_json::Value) -> Self {
+        serde_json::from_value(args.clone()).unwrap_or_else(|error| {
+            panic!("oracle.step arguments must decode, got {args}: {error}")
+        })
+    }
+}
+
+/// The oracle's one leaf tool.
+///
+/// One tool, not several, because the compile-time list-batch path keys a
+/// whole aggregate on a single operation: a harness whose leaves are different
+/// tools could not express that shape at all.
+struct OracleTools {
+    theatre: Arc<OracleTheatre>,
+    session_id: String,
+}
+
+fn step_definition() -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw(
+        "tool:oracle_step",
+        "oracle_step",
+        "One aggregate leaf whose settlement the test controls.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "id": { "type": "string" },
+                "fail": { "type": "boolean" },
+                "defer": { "type": "boolean" },
+                "hold": { "type": "boolean" },
+                "intent": { "type": "boolean" },
+                "refused_intent": { "type": "boolean" },
+                "prepare_fail": { "type": "boolean" }
+            },
+            "required": ["id"],
+            "additionalProperties": false
+        }),
+        serde_json::json!({ "type": "object" }),
+    )
+    .expect("valid declared tool schemas")
+    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["oracle"], "step"))
+    // Every step call may park, and a step that emits declares its process
+    // event as an intent.
+    .with_declaration(
+        lash_core::ToolDeclaration::deferring()
+            .with_intents([lash_core::ToolIntentKind::EmitProcessEvent]),
+    )
+}
+
+#[async_trait]
+impl ToolProvider for OracleTools {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![step_definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "oracle_step").then(|| Arc::new(step_definition().contract()))
+    }
+
+    /// A leaf that asks to fail here settles during the batch's preparation
+    /// pass, before any leaf is dispatched — the preparation prefix.
+    async fn prepare_tool_call(
+        &self,
+        call: lash_core::ToolPrepareCall<'_>,
+    ) -> std::result::Result<lash_core::PreparedToolCall, lash_core::ToolOutcome> {
+        let args = StepArgs::decode(&call.pending.args);
+        if args.prepare_fail {
+            return Err(lash_core::ToolOutcome::failure(
+                lash_core::ToolFailure::runtime(
+                    lash_core::ToolFailureClass::Internal,
+                    "oracle_prepare_failed",
+                    format!("step {} refused in preparation", args.id),
+                ),
+            ));
+        }
+        Ok(lash_core::PreparedToolCall::identity(
+            call.tool_id,
+            call.pending,
+        ))
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        let args = StepArgs::decode(call.args);
+        self.theatre.started.lock_recover().push(args.id.clone());
+        self.theatre.raise(&format!("started:{}", args.id));
+
+        if args.defer {
+            let key = match call.context.completion_key() {
+                Ok(key) => key,
+                Err(error) => return lash_core::ToolOutcome::err_fmt(error).into(),
+            };
+            self.theatre.publish_key(&args.id, key);
+            return lash_core::ToolOutcome::pending(lash_core::PendingCompletion::new()).into();
+        }
+        if args.hold {
+            assert!(
+                self.theatre.wait(&format!("release:{}", args.id)).await,
+                "leaf {} was never released",
+                args.id
+            );
+        }
+
+        if args.fail {
+            return lash_core::ToolOutcome::failure(lash_core::ToolFailure::runtime(
+                lash_core::ToolFailureClass::Internal,
+                "oracle_step_failed",
+                format!("step {} rejected", args.id),
+            ))
+            .into();
+        }
+        let value = serde_json::json!({ "id": args.id });
+        if !args.intent && !args.refused_intent {
+            return lash_core::ToolOutcome::ok(value).into();
+        }
+        lash_core::ToolAttemptOutcome::done(
+            lash_core::ToolOutcomeDone::ok(value),
+            lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::EmitProcessEvent(
+                lash_core::EmitProcessEventIntent {
+                    owner: crate::RuntimeOwner::Session(SessionId::fixture(
+                        self.session_id.clone(),
+                    )),
+                    process_id: self.theatre.intent_process(),
+                    event_type: if args.refused_intent {
+                        UNREGISTERED_EVENT.to_string()
+                    } else {
+                        INTENT_EVENT.to_string()
+                    },
+                    payload: serde_json::json!({ "id": args.id }),
+                },
+            )]),
+        )
+    }
+}
+
 // ---------------------------------------------------------------------------
 // One aggregate case, run end to end
 // ---------------------------------------------------------------------------
+
+/// What one oracle run observed.
+struct OracleRun {
+    /// The value the turn finished with, if it finished with one.
+    final_value: Option<serde_json::Value>,
+    /// Every request the scripted provider was asked, serialized. The cell's
+    /// own refusals reach the model here and nowhere else.
+    requests: Vec<String>,
+    theatre: Arc<OracleTheatre>,
+    registry: Arc<dyn ProcessRegistry>,
+    tool_calls: usize,
+}
+
+impl OracleRun {
+    fn final_value(&self) -> &serde_json::Value {
+        self.final_value
+            .as_ref()
+            .expect("the scripted cells must finish the turn")
+    }
+}
+
+/// Builds a core whose provider replays `cells` and whose only leaf tool is
+/// the oracle's, over `backend`.
+fn oracle_core(
+    backend: lash_core::Backend,
+    session_id: &str,
+    cells: Vec<String>,
+    theatre: Arc<OracleTheatre>,
+    requests: Arc<StdMutex<Vec<String>>>,
+) -> Result<LashCore> {
+    oracle_builder(backend, session_id, cells, theatre, requests)
+        .build(crate::testing::runtime_lease_owner())
+}
+
+/// [`oracle_core`]'s builder, for a case that swaps one of its parts.
+fn oracle_builder(
+    backend: lash_core::Backend,
+    session_id: &str,
+    cells: Vec<String>,
+    theatre: Arc<OracleTheatre>,
+    requests: Arc<StdMutex<Vec<String>>>,
+) -> crate::core::LashCoreBuilder {
+    let scripted = Arc::new(TokioMutex::new(VecDeque::from(cells)));
+    let provider = crate::testing::TestProvider::builder()
+        .kind("aggregate-oracle")
+        .complete(move |request| {
+            let requests = Arc::clone(&requests);
+            let scripted = Arc::clone(&scripted);
+            async move {
+                requests.lock_recover().push(
+                    serde_json::to_string(&request.messages).expect("serialize request messages"),
+                );
+                let text = scripted
+                    .lock()
+                    .await
+                    .pop_front()
+                    .unwrap_or_else(|| typescript_block(r#"finish("out of cells");"#));
+                Ok(text_response(&text))
+            }
+        })
+        .build()
+        .into_handle();
+    explicit_ephemeral_facets(rlm_core_builder_over(backend))
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
+        .plugins(lash_core::facade_support::PluginStack::from_factories([Arc::new(
+            StaticPluginFactory::new(
+                lash_core::plugin::PluginDeclaration::initial("aggregate-oracle"),
+                lash_core::facade_support::PluginSpec::new()
+                    .with_presentation_step(crate::hook_key!("presentation-step-1"), oracle_presentation_step(Arc::clone(&theatre))),
+            ),
+        ) as Arc<dyn PluginFactory>]))
+        .tools(Arc::new(OracleTools {
+            theatre,
+            session_id: session_id.to_string(),
+        }))
+        // ADR 0095: `processes` is catalogue presence, so a cell that authors
+        // `processes.start` or `processes.await` needs this factory installed.
+        .plugin(Arc::new(
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_core::lifetime::session_or_starter),
+        ))
+        .plugin(lash_core::testing::process_engine_plugin_fixture())
+}
+
+/// The process a declared intent is realized against. Registered up front with
+/// the event type the leaf emits, because an emission against an unregistered
+/// event type is refused and the case would pass for the wrong reason.
+async fn register_intent_target(
+    registry: &dyn ProcessRegistry,
+    session_id: &str,
+    theatre: &OracleTheatre,
+) {
+    let intent_process = registry
+        .register_process_with_observers(
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
+                lash_core::ProcessProvenance::host(),
+                lash_core::Lifetime::Detached,
+            )
+            .with_extra_event_types(vec![lash_core::ProcessEventType {
+                name: INTENT_EVENT.to_string(),
+                payload_schema: lash_core::JsonSchema::any(),
+                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+            }]),
+            &[SessionId::fixture(session_id.to_string())],
+        )
+        .await
+        .expect("register the intent target process")
+        .id;
+    theatre
+        .intent_process
+        .set(intent_process)
+        .expect("one intent target per oracle run");
+}
+
+/// One oracle session whose turn runs on its own task.
+///
+/// A case that settles a parked leaf has to act while the batch is in flight,
+/// which it cannot do from the task that is awaiting the turn.
+struct DrivenOracle {
+    core: LashCore,
+    theatre: Arc<OracleTheatre>,
+    registry: Arc<dyn ProcessRegistry>,
+    requests: Arc<StdMutex<Vec<String>>>,
+    turn: tokio::task::JoinHandle<Result<TurnReport>>,
+}
+
+impl DrivenOracle {
+    /// Awaits the turn and collects what the run observed.
+    async fn finish(self) -> Result<OracleRun> {
+        self.finish_within(RENDEZVOUS_BUDGET).await
+    }
+
+    /// [`Self::finish`] for a turn that legitimately runs longer than a
+    /// rendezvous, such as a loop of hundreds of journaled races. `budget`
+    /// is still only a deadlock budget.
+    async fn finish_within(self, budget: std::time::Duration) -> Result<OracleRun> {
+        let result = tokio::time::timeout(budget, self.turn)
+            .await
+            .expect("the executed turn must report")
+            .expect("turn task")?;
+        let tool_calls = self.theatre.completed_calls.load(Ordering::SeqCst);
+        let requests = self.requests.lock_recover().clone();
+        Ok(OracleRun {
+            final_value: result.final_value().cloned(),
+            requests,
+            theatre: self.theatre,
+            registry: self.registry,
+            tool_calls,
+        })
+    }
+}
+
+async fn drive_cells(
+    tier: &JournaledTier,
+    session_id: &str,
+    cells: Vec<String>,
+) -> Result<DrivenOracle> {
+    let theatre = Arc::new(OracleTheatre::default());
+    let backend = tier.backend().await;
+    let registry: Arc<dyn ProcessRegistry> = backend.process_registry();
+    register_intent_target(registry.as_ref(), session_id, &theatre).await;
+    let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
+    let core = oracle_core(
+        backend,
+        session_id,
+        cells,
+        Arc::clone(&theatre),
+        Arc::clone(&requests),
+    )?;
+    let session = core
+        .session(SessionId::fixture(session_id.to_string()))
+        .created()
+        .await
+        .open()
+        .await?;
+    let streamed = Arc::clone(&theatre);
+    let turn = tokio::spawn(async move {
+        session
+            .send(TurnInput::text("settle the aggregate"))
+            .output_into(streamed.as_ref())
+            .await
+    });
+    Ok(DrivenOracle {
+        core,
+        theatre,
+        registry,
+        requests,
+        turn,
+    })
+}
+
+async fn run_cell(tier: &JournaledTier, session_id: &str, cell: &str) -> Result<OracleRun> {
+    run_cells(tier, session_id, vec![typescript_block(cell)]).await
+}
+
+async fn run_cells(
+    tier: &JournaledTier,
+    session_id: &str,
+    cells: Vec<String>,
+) -> Result<OracleRun> {
+    drive_cells(tier, session_id, cells).await?.finish().await
+}
+
+/// The cell body every rejection case shares: run the aggregate, finish with
+/// the reason if it rejects. A cell that let the rejection escape would make
+/// the RLM driver ask the provider for another cell instead, and the reason
+/// under test would never be asserted on.
+fn catching_cell(aggregate: &str) -> String {
+    format!(
+        r#"try {{
+  finish({{ resolved: await {aggregate} }});
+}} catch (error) {{
+  finish({{ reason: error.message }});
+}}"#
+    )
+}
+
+fn reason(run: &OracleRun) -> String {
+    run.final_value()
+        .get("reason")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_else(|| panic!("the aggregate must reject, got {}", run.final_value()))
+        .to_string()
+}
 
 // ---------------------------------------------------------------------------
 // Shapes: what the host is asked to do for each spelling of one aggregate
 // ---------------------------------------------------------------------------
 
+/// `Promise.all` and `Promise.allSettled` over every operand spelling the
+/// dialect admits, asserted on what the host was asked to do rather than only
+/// on the value that came back.
+///
+/// The spellings are in one case because they are one law: acceptance is a
+/// runtime question asked of the operand's *value*, so a name, a `map`, a
+/// duplicate element and a plain value cannot take different paths. A
+/// zero-tool aggregate is in the same table because the interesting fact about
+/// it is the absence of a host call.
+async fn aggregate_shapes_ask_the_host_for_exactly_their_leaves(
+    tier: &JournaledTier,
+) -> Result<()> {
+    for (label, cell, expected, expected_calls) in [
+        (
+            "a literal array",
+            r#"finish(await Promise.all([oracle.step({ id: "a" }), oracle.step({ id: "b" })]));"#
+                .to_string(),
+            serde_json::json!([{ "id": "a" }, { "id": "b" }]),
+            vec!["a", "b"],
+        ),
+        (
+            "an array bound to a name",
+            r#"const leaves = [oracle.step({ id: "a" }), oracle.step({ id: "b" })];
+finish(await Promise.all(leaves));"#
+                .to_string(),
+            serde_json::json!([{ "id": "a" }, { "id": "b" }]),
+            vec!["a", "b"],
+        ),
+        (
+            "a mapped array",
+            r#"const ids = ["a", "b"];
+finish(await Promise.all(ids.map((id) => oracle.step({ id: id }))));"#
+                .to_string(),
+            serde_json::json!([{ "id": "a" }, { "id": "b" }]),
+            vec!["a", "b"],
+        ),
+        (
+            "an async-mapped array",
+            r#"const ids = ["a", "b"];
+finish(await Promise.all(ids.map(async (id) => await oracle.step({ id: id }))));"#
+                .to_string(),
+            serde_json::json!([{ "id": "a" }, { "id": "b" }]),
+            vec!["a", "b"],
+        ),
+        (
+            "duplicate leaves",
+            r#"finish(await Promise.all([oracle.step({ id: "a" }), oracle.step({ id: "a" })]));"#
+                .to_string(),
+            serde_json::json!([{ "id": "a" }, { "id": "a" }]),
+            vec!["a", "a"],
+        ),
+        (
+            "plain values beside a leaf",
+            r#"finish(await Promise.all([7, oracle.step({ id: "a" }), "plain"]));"#.to_string(),
+            serde_json::json!([7, { "id": "a" }, "plain"]),
+            vec!["a"],
+        ),
+        (
+            "a zero-tool aggregate",
+            r#"finish(await Promise.all([1, 2, 3]));"#.to_string(),
+            serde_json::json!([1, 2, 3]),
+            vec![],
+        ),
+        (
+            "an empty aggregate",
+            r#"finish(await Promise.all([]));"#.to_string(),
+            serde_json::json!([]),
+            vec![],
+        ),
+    ] {
+        let run = run_cell(tier, "aggregate-oracle-shapes", &cell).await?;
+        assert_eq!(
+            run.final_value(),
+            &expected,
+            "{}/{label}: the aggregate value",
+            tier.name
+        );
+        // A journaled tier's group children are spawned tasks whose start
+        // order is the scheduler's (FIG-3637): the law is about *which*
+        // leaves the host was asked for, not the order it was asked in.
+        // Comparing sorted keeps the "exactly these leaves" guarantee —
+        // multiplicities included.
+        let mut started = run.theatre.started();
+        started.sort_unstable();
+        let mut expected_calls = expected_calls;
+        expected_calls.sort_unstable();
+        assert_eq!(
+            started, expected_calls,
+            "{}/{label}: the calls the host was asked for",
+            tier.name
+        );
+        assert_eq!(
+            run.tool_calls,
+            expected_calls.len(),
+            "{}/{label}: one completed tool call per leaf",
+            tier.name
+        );
+    }
+    Ok(())
+}
+
+/// `allSettled` reports every leaf as a record, in **input** order, whichever
+/// leaf settled first. The rejecting leaf is written first and settles last, so
+/// an implementation that reported settlement order would swap them.
+async fn all_settled_reports_every_leaf_in_input_order(tier: &JournaledTier) -> Result<()> {
+    let executed = drive_cells(
+        tier,
+        "aggregate-oracle-all-settled",
+        vec![typescript_block(
+            r#"finish(await Promise.allSettled([
+  oracle.step({ id: "late", hold: true, fail: true }),
+  oracle.step({ id: "early", defer: true })
+]));"#,
+        )],
+    )
+    .await?;
+
+    executed
+        .theatre
+        .settle_deferred(
+            &executed.core,
+            "early",
+            lash_core::Resolution::Ok(serde_json::json!({ "id": "early" })),
+        )
+        .await?;
+    executed.theatre.await_settled("early").await;
+    executed.theatre.release("late");
+    let run = executed.finish().await?;
+
+    assert_eq!(
+        run.theatre.settled(),
+        vec!["early", "late"],
+        "{}: leaf 1 settled first",
+        tier.name
+    );
+    let items = run
+        .final_value()
+        .as_array()
+        .unwrap_or_else(|| panic!("allSettled returns an array, got {}", run.final_value()));
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["status"], serde_json::json!("rejected"));
+    assert!(
+        items[0]["reason"]
+            .to_string()
+            .contains("step late rejected"),
+        "{}: leaf 0 keeps its input position: {}",
+        tier.name,
+        items[0]
+    );
+    assert_eq!(
+        items[1],
+        serde_json::json!({ "status": "fulfilled", "value": { "id": "early" } }),
+        "{}: leaf 1 keeps its input position",
+        tier.name
+    );
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Selection: which rejection a rejected aggregate reports
 // ---------------------------------------------------------------------------
 
+/// The decisive case of the arc, asked of the whole runtime rather than of a
+/// host that hands the VM a settlement order it made up.
+///
+/// The two leaves are written in the same order in both rows; only which one
+/// parks changes. Row one settles leaf 1 first, so an implementation reporting
+/// the input-order rejection fails it; row two settles leaf 0 first, so an
+/// implementation reporting the reverse fails that one. Neither passes both.
+///
+/// The order is decided by construction, not by timing. The held leaf blocks
+/// inside its attempt until this test releases it, and the parked leaf is
+/// resolved — and its completion accepted — before that release, so the held
+/// leaf cannot settle first whatever the scheduler does.
+async fn promise_all_reports_the_first_settled_rejection(tier: &JournaledTier) -> Result<()> {
+    for (label, first, second) in [
+        ("leaf 1 settles first", "q", "p"),
+        ("leaf 0 settles first", "p", "q"),
+    ] {
+        let cell = format!(
+            r#"Promise.all([
+  oracle.step({{ id: "p", fail: true, {p_mode} }}),
+  oracle.step({{ id: "q", fail: true, {q_mode} }})
+])"#,
+            p_mode = if first == "p" {
+                "defer: true"
+            } else {
+                "hold: true"
+            },
+            q_mode = if first == "q" {
+                "defer: true"
+            } else {
+                "hold: true"
+            },
+        );
+        let executed = drive_cells(
+            tier,
+            "aggregate-oracle-first-settled",
+            vec![typescript_block(&catching_cell(&cell))],
+        )
+        .await?;
+
+        // Both leaves are dispatched before either settles: a group child is
+        // dispatched on its own, so the held leaf is waited into its attempt
+        // rather than raced against the turn's end.
+        executed.theatre.await_started(second).await;
+        executed
+            .theatre
+            .settle_deferred(&executed.core, first, OracleTheatre::rejection(first))
+            .await?;
+        executed.theatre.await_settled(first).await;
+        // The held leaf cannot commit, so the first consumed settlement is
+        // the parked leaf's: its rank precedes the held leaf's by construction.
+        executed.theatre.await_consumed(1).await;
+        executed.theatre.release(second);
+        let run = executed.finish().await?;
+
+        // `Promise.all` resumes at its first consumed rejection, so the held
+        // leaf is a loser the turn's end may cancel before it ever settles.
+        assert_eq!(
+            run.theatre.settled().first().map(String::as_str),
+            Some(first),
+            "{}/{label}: the case decided the settlement order",
+            tier.name
+        );
+        assert!(
+            reason(&run).contains(&format!("step {first} rejected")),
+            "{}/{label}: the first-settled rejection is the one reported, got {}",
+            tier.name,
+            reason(&run)
+        );
+        assert_eq!(
+            run.theatre.started().len(),
+            2,
+            "{}/{label}: both leaves were dispatched",
+            tier.name
+        );
+    }
+    Ok(())
+}
+
+/// A terminal leaf settles ahead of a held source-earlier leaf.
+///
+/// The Run decides its calls in recorded completion order, not source order,
+/// so the held source-first leaf does not block a later sibling's terminal. The second
+/// leaf's rejection is therefore the settlement the aggregate's first-settled
+/// selection reports.
+///
+/// This is the inversion of the old head-of-line law: the pre-group batch
+/// path serialized terminal settlement behind each source-earlier leaf's
+/// intent-drain slot, and this same cell reported `step first rejected`.
+async fn a_terminal_leaf_settles_ahead_of_a_held_source_first_leaf(
+    tier: &JournaledTier,
+) -> Result<()> {
+    let executed = drive_cells(
+        tier,
+        "aggregate-oracle-head-of-line",
+        vec![typescript_block(&catching_cell(
+            r#"Promise.all([
+  oracle.step({ id: "first", hold: true, fail: true }),
+  oracle.step({ id: "second", fail: true })
+])"#,
+        ))],
+    )
+    .await?;
+
+    // A batch whose group never dispatched fails the turn instead of parking
+    // on a leaf; report that outcome rather than timing out on the rendezvous.
+    let mut probe = tokio::time::interval(std::time::Duration::from_millis(50));
+    let deadline = tokio::time::Instant::now() + RENDEZVOUS_BUDGET;
+    while tokio::time::Instant::now() < deadline {
+        probe.tick().await;
+        if executed.theatre.started().len() == 2 {
+            break;
+        }
+        if executed.turn.is_finished() {
+            let run = executed.finish().await?;
+            panic!(
+                "{}: the turn finished with no leaf ever started; started: {:?}, \
+                 final value: {:?}, provider requests: {:?}",
+                tier.name,
+                run.theatre.started(),
+                run.final_value(),
+                run.requests
+            );
+        }
+    }
+
+    // Both leaves' attempts have run; the held source-first leaf no longer
+    // blocks the later terminal leaf's settlement.
+    executed.theatre.await_started("second").await;
+    executed.theatre.await_started("first").await;
+    executed.theatre.await_settled("second").await;
+    assert_eq!(
+        executed.theatre.settled(),
+        vec!["second"],
+        "{}: a terminal leaf settles ahead of an unfinished source-earlier leaf, saw {:?}",
+        tier.name,
+        executed.theatre.settled()
+    );
+    // Consumed, not merely presented: the later leaf's rank is fixed before
+    // the held leaf can commit.
+    executed.theatre.await_consumed(1).await;
+
+    // `Promise.all` resumed at that first consumed rejection (ADR 0099 §10
+    // L2); the held source-first leaf is a loser the turn's end cancels.
+    executed.theatre.release("first");
+    let run = executed.finish().await?;
+
+    assert_eq!(
+        run.theatre.settled().first().map(String::as_str),
+        Some("second"),
+        "{}: settlement order is the group's commit order, not source order",
+        tier.name
+    );
+    assert!(
+        reason(&run).contains("step second rejected"),
+        "{}: the first-settled rejection is the reported one, got {}",
+        tier.name,
+        reason(&run)
+    );
+    Ok(())
+}
+
+/// A leaf that fails in `prepare_tool_call` settles before any leaf is
+/// dispatched, so it leads the batch's settlement order however it is written
+/// — the preparation prefix.
+///
+/// The preparation failure is written *last* and the dispatched leaf rejects
+/// on its own, so neither input order nor "whichever rejected first among the
+/// leaves that ran" produces this answer.
+async fn a_preparation_failure_leads_the_settlement_order(tier: &JournaledTier) -> Result<()> {
+    let run = run_cell(
+        tier,
+        "aggregate-oracle-preparation-prefix",
+        &catching_cell(
+            r#"Promise.all([
+  oracle.step({ id: "dispatched", fail: true }),
+  oracle.step({ id: "refused", prepare_fail: true })
+])"#,
+        ),
+    )
+    .await?;
+
+    assert!(
+        reason(&run).contains("step refused refused in preparation"),
+        "{}: the preparation prefix leads the order, got {}",
+        tier.name,
+        reason(&run)
+    );
+    // The dispatched sibling is admitted before the prefix answers (§11
+    // clause 3), but whether its attempt enters the host before the caught
+    // rejection finishes the turn is the journaled group's scheduling, not
+    // this law.
+    assert!(
+        !run.theatre.started().contains(&"refused".to_string()),
+        "{}: a call refused in preparation never reaches the host",
+        tier.name
+    );
+    Ok(())
+}
+
+/// ADR 0062 deviation 15 retired (FIG-3397): a rejected `Promise.all` resumes
+/// at the first rejection its consumer takes (ADR 0099 §10 L2), and a sibling
+/// still in flight is a loser that runs on under the opener.
+///
+/// The witness needs no clock. One leaf rejects; the other is held inside its
+/// own attempt by a release only this test can give. The catch clause calls
+/// another leaf: that leaf starting while the held one has not settled is the
+/// resume the deviation said v1 could not make.
+async fn a_rejected_promise_all_resumes_at_its_first_consumed_rejection(
+    tier: &JournaledTier,
+) -> Result<()> {
+    let executed = drive_cells(
+        tier,
+        "aggregate-oracle-deviation-15",
+        vec![typescript_block(
+            r#"try {
+  await Promise.all([
+    oracle.step({ id: "rejecting", defer: true }),
+    oracle.step({ id: "held", hold: true })
+  ]);
+  finish({ resolved: true });
+} catch (error) {
+  await oracle.step({ id: "after-rejection" });
+  finish({ reason: error.message });
+}"#,
+        )],
+    )
+    .await?;
+
+    executed
+        .theatre
+        .settle_deferred(
+            &executed.core,
+            "rejecting",
+            OracleTheatre::rejection("rejecting"),
+        )
+        .await?;
+    executed.theatre.await_started("after-rejection").await;
+    assert!(
+        !executed.theatre.settled().contains(&"held".to_string()),
+        "{}: the aggregate resumed while the held leaf was still in flight, saw {:?}",
+        tier.name,
+        executed.theatre.settled()
+    );
+
+    executed.theatre.release("held");
+    let run = executed.finish().await?;
+    assert!(
+        reason(&run).contains("step rejecting rejected"),
+        "{}: the first consumed rejection is the reported one, got {}",
+        tier.name,
+        reason(&run)
+    );
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Leaves that are not ordinary tool calls
 // ---------------------------------------------------------------------------
+
+/// `processes.await` leaves aggregate like any other leaf: two started
+/// processes, one aggregate, both durable waits settled.
+async fn an_aggregate_of_durable_waits_settles_both(tier: &JournaledTier) -> Result<()> {
+    let run = run_cell(
+        tier,
+        "aggregate-oracle-process-awaits",
+        r#"const worker = async (input: unknown) => { return input; };
+const left = await processes.start({ definition: worker, args: { input: "left" } });
+const right = await processes.start({ definition: worker, args: { input: "right" } });
+finish(await Promise.all([
+  processes.await({ handle: left }),
+  processes.await({ handle: right })
+]));"#,
+    )
+    .await?;
+
+    assert_eq!(
+        run.final_value(),
+        &serde_json::json!(["left", "right"]),
+        "{}: each durable wait yields its process's value, in input order",
+        tier.name
+    );
+    Ok(())
+}
+
+/// A bare process handle written into an aggregate is refused, and the refusal
+/// names the tool that parks on the durable wait instead.
+///
+/// The refusal is a VM-level one a cell cannot catch, so the RLM driver asks
+/// the provider for another cell — which is where the diagnostic is observed.
+async fn a_pending_handle_in_an_aggregate_is_refused(tier: &JournaledTier) -> Result<()> {
+    let run = run_cells(
+        tier,
+        "aggregate-oracle-pending-handle",
+        vec![
+            typescript_block(
+                r#"const worker = async (input: unknown) => { return input; };
+const handle = await processes.start({ definition: worker, args: { input: "only" } });
+finish(await Promise.all([handle]));"#,
+            ),
+            typescript_block(r#"finish("observed the refusal");"#),
+        ],
+    )
+    .await?;
+
+    assert_eq!(
+        run.final_value(),
+        &serde_json::json!("observed the refusal"),
+        "{}: the refused cell is followed by a second cell",
+        tier.name
+    );
+    assert!(
+        run.requests.len() >= 2,
+        "{}: the refusal must reach the model",
+        tier.name
+    );
+    assert!(
+        run.requests[1].contains("processes.await"),
+        "{}: the refusal names the tool that parks on the durable wait: {}",
+        tier.name,
+        run.requests[1]
+    );
+    Ok(())
+}
+
+/// A leaf may declare an intent, and a leaf that settled inside a successful
+/// aggregate has its declaration realized.
+///
+/// FIG-3397 asks the opposite question of the same capability — whether a
+/// *loser*'s declaration is realized — so the capability lives in the harness
+/// and this case pins the answer the winner-side already has.
+async fn an_aggregate_leafs_declared_intent_is_realized(tier: &JournaledTier) -> Result<()> {
+    let run = run_cell(
+        tier,
+        "aggregate-oracle-intents",
+        r#"finish(await Promise.all([
+  oracle.step({ id: "emitting", intent: true }),
+  oracle.step({ id: "quiet" })
+]));"#,
+    )
+    .await?;
+
+    assert_eq!(
+        run.final_value(),
+        &serde_json::json!([{ "id": "emitting" }, { "id": "quiet" }])
+    );
+    let events = run
+        .registry
+        .recent_events(&run.theatre.intent_process(), 16)
+        .await
+        .expect("read the intent target's events");
+    let emitted = events
+        .iter()
+        .filter(|event| event.event_type == INTENT_EVENT)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        emitted.len(),
+        1,
+        "{}: exactly the declaring leaf's intent is realized, saw {:?}",
+        tier.name,
+        events.iter().map(|e| &e.event_type).collect::<Vec<_>>()
+    );
+    assert_eq!(emitted[0].payload, serde_json::json!({ "id": "emitting" }));
+    Ok(())
+}
+
+/// §11 clause 4: every timer aggregate is its own group.
+#[path = "aggregate_oracle/timer_identity.rs"]
+mod timer_identity;
+
+// ---------------------------------------------------------------------------
+// SQLite registration of the case list
+// ---------------------------------------------------------------------------
+
+fn sqlite() -> JournaledTier {
+    JournaledTier::sqlite()
+}
+
+#[tokio::test]
+async fn sqlite_aggregate_shapes_ask_the_host_for_exactly_their_leaves() -> Result<()> {
+    aggregate_shapes_ask_the_host_for_exactly_their_leaves(&sqlite()).await
+}
+
+#[tokio::test]
+async fn sqlite_all_settled_reports_every_leaf_in_input_order() -> Result<()> {
+    all_settled_reports_every_leaf_in_input_order(&sqlite()).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_promise_all_reports_the_first_settled_rejection() -> Result<()> {
+    promise_all_reports_the_first_settled_rejection(&sqlite()).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_a_terminal_leaf_settles_ahead_of_a_held_source_first_leaf() -> Result<()> {
+    a_terminal_leaf_settles_ahead_of_a_held_source_first_leaf(&sqlite()).await
+}
+
+#[tokio::test]
+#[ignore = "FIG-5332: a cell admits its calls unprepared, so a preparation refusal races its dispatched siblings"]
+async fn sqlite_a_preparation_failure_leads_the_settlement_order() -> Result<()> {
+    a_preparation_failure_leads_the_settlement_order(&sqlite()).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_a_rejected_promise_all_resumes_at_its_first_consumed_rejection() -> Result<()> {
+    a_rejected_promise_all_resumes_at_its_first_consumed_rejection(&sqlite()).await
+}
+
+#[tokio::test]
+async fn sqlite_an_aggregate_of_durable_waits_settles_both() -> Result<()> {
+    an_aggregate_of_durable_waits_settles_both(&sqlite()).await
+}
+
+#[tokio::test]
+async fn sqlite_a_pending_handle_in_an_aggregate_is_refused() -> Result<()> {
+    a_pending_handle_in_an_aggregate_is_refused(&sqlite()).await
+}
+
+#[tokio::test]
+async fn sqlite_an_aggregate_leafs_declared_intent_is_realized() -> Result<()> {
+    an_aggregate_leafs_declared_intent_is_realized(&sqlite()).await
+}
 
 // ---------------------------------------------------------------------------
 // The compile-time aggregate paths, stated at the IR

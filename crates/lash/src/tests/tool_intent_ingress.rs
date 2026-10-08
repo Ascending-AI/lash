@@ -1706,3 +1706,106 @@ async fn equivalent_recorded_start_has_same_environment_sensitive_identity_acros
 }
 
 mod engine_owned;
+
+/// A process-env store whose acquisitions fail while `fail_acquire` holds.
+struct FailingEnvAcquire {
+    fail_acquire: std::sync::atomic::AtomicBool,
+    inner: Arc<dyn lash_core::ProcessExecutionEnvStore>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::ProcessExecutionEnvStore for FailingEnvAcquire {
+    async fn publish_process_execution_env(
+        &self,
+        claim: &lash_core::ReferrerClaim,
+        env_ref: &lash_core::ProcessExecutionEnvRef,
+        bytes: &[u8],
+    ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
+        self.inner
+            .publish_process_execution_env(claim, env_ref, bytes)
+            .await
+    }
+
+    async fn acquire_process_execution_env(
+        &self,
+        claim: &lash_core::ReferrerClaim,
+        env_ref: &lash_core::ProcessExecutionEnvRef,
+    ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
+        if self.fail_acquire.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(lash_core::ArtifactStoreError::Backend(
+                "injected process env acquisition failure".to_string(),
+            ));
+        }
+        self.inner
+            .acquire_process_execution_env(claim, env_ref)
+            .await
+    }
+
+    async fn end_process_env_referrer(
+        &self,
+        cleanup: &lash_core::ResolvedArtifactCleanup,
+    ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
+        self.inner.end_process_env_referrer(cleanup).await
+    }
+
+    async fn get_process_execution_env(
+        &self,
+        env_ref: &lash_core::ProcessExecutionEnvRef,
+    ) -> std::result::Result<Option<Vec<u8>>, lash_core::ArtifactStoreError> {
+        self.inner.get_process_execution_env(env_ref).await
+    }
+}
+
+/// A host-submitted start whose environment acquisition fails is a typed
+/// `CommandFailed` refusal that registers no process; the failure is a live
+/// fault, not a recorded outcome, so a resubmission of the same identity
+/// retries it and still registers nothing (re-written on SQLite memory by
+/// FIG-5307).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn start_env_store_error_is_typed_and_registers_no_process() -> Result<()> {
+    let backend = sqlite_memory_store_backend().await;
+    let env_store = Arc::new(FailingEnvAcquire {
+        fail_acquire: std::sync::atomic::AtomicBool::new(false),
+        inner: backend.process_env_store(),
+    });
+    let (core, registry, _process) = ingress_core_over(
+        backend,
+        Some(Arc::clone(&env_store) as Arc<dyn lash_core::ProcessExecutionEnvStore>),
+    )
+    .await?;
+    env_store
+        .fail_acquire
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let ingress = core.tool_intents(
+        crate::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_core::ExecutionScope::turn(SESSION, SCOPE),
+    )?;
+    let key = ingress
+        .key("start-env-store-error", 0)
+        .expect("a host submission handle");
+    for attempt in ["first submission", "resubmission"] {
+        let outcome = ingress
+            .submit(key.clone(), start_intent(&SessionId::from(SESSION)))
+            .await;
+        assert!(
+            matches!(
+                outcome,
+                crate::tools::ToolIntentIngressOutcome::Admitted {
+                    outcome: lash_core::ToolIntentExecutionOutcome::Refused {
+                        kind: lash_core::ToolIntentKind::StartProcess,
+                        refusal: lash_core::ToolIntentRefusalReason::CommandFailed { .. },
+                        ..
+                    },
+                    replayed: false,
+                }
+            ),
+            "{attempt}: {outcome:?}"
+        );
+        assert_eq!(
+            registered_process_count(&registry).await?,
+            1,
+            "{attempt}: only the fixture process is registered"
+        );
+    }
+    Ok(())
+}

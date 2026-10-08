@@ -219,6 +219,157 @@ pub(crate) fn standard_core_over(backend: lash_core::Backend) -> LashCore {
         .expect("standard core")
 }
 
+/// A catalog serving every model in `models` by its wire model, on `provider`.
+pub(crate) fn test_catalog(
+    provider: ProviderHandle,
+    models: impl IntoIterator<Item = lash_core::LlmProfileMetadata>,
+) -> Arc<lash_core::LlmProfileRegistry> {
+    let registry = models
+        .into_iter()
+        .try_fold(
+            lash_core::LlmProfileRegistry::new(),
+            |registry, metadata| {
+                registry.register(
+                    metadata.wire_model.clone(),
+                    lash_core::RegisteredLlmProfile::new(metadata, provider.clone()),
+                )
+            },
+        )
+        .expect("a test catalog registers each wire model once");
+    Arc::new(registry)
+}
+
+/// A provider that answers `text` to every request.
+fn text_provider(kind: &'static str, text: impl Into<String>) -> ProviderHandle {
+    let text: Arc<str> = text.into().into();
+    crate::testing::TestProvider::builder()
+        .kind(kind)
+        .complete(move |_request| {
+            let text = Arc::clone(&text);
+            async move { Ok(text_response(&text)) }
+        })
+        .build()
+        .into_handle()
+}
+
+/// The request's instructions, the system prompt the protocol rendered.
+fn system_text(request: &LlmRequest) -> String {
+    request
+        .instructions
+        .as_deref()
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// Every text block of the request's messages, joined.
+fn request_text(request: &LlmRequest) -> String {
+    request
+        .messages
+        .iter()
+        .flat_map(|message| message.blocks.iter())
+        .filter_map(|block| match block {
+            LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// An RLM provider that finishes every turn and records each request's
+/// instructions and message text.
+#[cfg(feature = "rlm")]
+fn recording_request_provider(seen: Arc<StdMutex<Vec<String>>>) -> ProviderHandle {
+    crate::testing::TestProvider::builder()
+        .kind("request-test")
+        .complete(move |request| {
+            let seen = Arc::clone(&seen);
+            async move {
+                seen.lock_recover().push(format!(
+                    "{}\n{}",
+                    system_text(&request),
+                    request_text(&request)
+                ));
+                Ok(text_response(&typescript_block("finish(\"ok\");")))
+            }
+        })
+        .build()
+        .into_handle()
+}
+
+/// Every node of `durable`'s ancestry from its head, newest first, paged
+/// through the history reader: prior frames stay durable but not resident.
+pub(crate) async fn durable_history(
+    durable: &crate::DurableSession,
+) -> Result<Vec<lash_core::store::HistoryNode>> {
+    let budget = lash_core::store::HistoryBudget {
+        max_nodes: std::num::NonZeroU32::new(64).expect("non-zero page"),
+        max_bytes: std::num::NonZeroU64::new(1 << 20).expect("non-zero page"),
+    };
+    let mut anchor = lash_core::store::HistoryAnchor::Head;
+    let mut nodes = Vec::new();
+    loop {
+        let page = durable.history(anchor, budget).await?;
+        nodes.extend(page.nodes);
+        match page.next {
+            Some(cursor) => anchor = lash_core::store::HistoryAnchor::Cursor(cursor),
+            None => return Ok(nodes),
+        }
+    }
+}
+
+/// The agent frames `history` records, oldest first.
+pub(crate) fn history_frames(
+    history: Vec<lash_core::store::HistoryNode>,
+    session_id: &lash_core::SessionId,
+) -> Vec<lash_core::AgentFrameRecord> {
+    use lash_core::facade_support::SessionGraphFacadeOps as _;
+    let records = history
+        .into_iter()
+        .rev()
+        .map(|node| node.record)
+        .collect::<Vec<_>>();
+    let leaf = records.last().map(|record| record.node_id.clone());
+    lash_core::SessionGraph::from_nodes(records, leaf)
+        .expect("a durable ancestry is a valid graph")
+        .agent_frame_records(session_id)
+}
+
+/// A deferring tool source with one tool, `app_lookup`.
+struct AppTools;
+
+#[async_trait]
+impl ToolProvider for AppTools {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![app_tool_definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "app_lookup").then(|| Arc::new(app_tool_definition().contract()))
+    }
+
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true })).into()
+    }
+}
+
+fn app_tool_definition() -> lash_core::ToolDefinition {
+    use lash_core::ToolDefinitionBindingExt as _;
+    lash_core::ToolDefinition::raw(
+        "tool:app_lookup",
+        "app_lookup",
+        "Look up app state.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        }),
+        serde_json::json!({ "type": "object" }),
+    )
+    .expect("valid declared tool schemas")
+    .with_tool_binding(lash_core::ToolBinding::new(["tools"], "app_lookup"))
+    .with_declaration(lash_core::ToolDeclaration::deferring())
+}
+
 /// Default RLM protocol factory for tests, over `backend`, the substrate its
 /// Lashlang artifacts live in.
 #[cfg(feature = "rlm")]
@@ -259,12 +410,18 @@ mod core_session_builder;
 mod crashed_create_drain;
 mod deployment_and_testing_facade;
 mod direct_completion;
+#[cfg(feature = "rlm")]
+mod discovery_execution;
+mod durable_session;
 mod facade_construction;
 mod facade_turn;
 mod generation_policy;
 pub(crate) mod harness;
 mod node_drain;
 mod output_retention;
+mod panic_containment;
+mod projection;
+mod tracing;
 pub(crate) use harness::{
     DecoratedBackend, explicit_ephemeral_facets, explicit_ephemeral_facets_with_budget,
     llm_profile_spec, mock_llm_profile_spec, mock_session_spec, postgres_store_set,
@@ -272,8 +429,17 @@ pub(crate) use harness::{
     store_backend_with_clock,
 };
 #[cfg(feature = "rlm")]
+mod admin_reads_without_runtime;
+#[cfg(feature = "rlm")]
+mod adr_claims;
+#[cfg(feature = "rlm")]
+mod agent_scenarios;
+#[cfg(feature = "rlm")]
+mod aggregate_await_comprehension;
+#[cfg(feature = "rlm")]
 mod aggregate_oracle;
 mod plugin_build_refusal;
+mod plugin_operations;
 mod plugin_reopen;
 mod provider_attempts;
 mod replay_origin;
@@ -286,6 +452,7 @@ mod standard_compaction_persistence;
 mod standard_protocol_turns;
 mod stream_evidence;
 mod tool_intent_ingress;
+mod tool_restore_report;
 mod turn_checkpoints;
 mod turn_streaming;
 mod writer_fence;

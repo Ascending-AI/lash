@@ -4,15 +4,13 @@
 # 1736 rows over 873 files, 4098 laws.
 # By class: mechanical 213, semantic 156, delete 907, replace 460.
 # By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 99, L9c 368, L9d 124, L9e 141, L9f 125, L9g 98, L9h 124, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
-# By status: todo 146, ported 177, deleted 1413.
+# By status: todo 44, ported 187, deleted 1505.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
 #   an operator can inspect and act on the process-operations surface on a multi-node PostgreSQL and S3 deployment, and every outcome stays truthful in durable state across a node kill (judged runbook)
 # - L8: runbooks/session-operator/runbook.md
 #   session operator verbs (withdraw an input, cancel a running run, redrive, cancel or fork parked work, repeat a lost reply) act once on live PostgreSQL and refuse stale repeats with unchanged receipts
-# - L9c: crates/lash-restate/src/tests/otel_laws.rs::golden_tree_survives_replay_and_redrive
-#   a turn's span tree is the golden tree after a kill and resume on another node
 # - L9c: crates/lash-restate/src/tests/run_coordinator_on_the_double.rs
 #   the RunCoordinator's round laws on phase rows: every admitted body enters before any completes, a committed final drains every lower rank first at every cut, a cancel during backoff starts no next body, the stream publishes only after presentation acceptance, admission ignores live isolation drift, Once never repeats, Repeatable admits only bounded ordinals after a known failure or slice timeout, and a current Once vetoes without upgrading stored Once
 # - L9c: crates/lash-restate/src/tests/run_coordinator_on_the_double/aggregate.rs
@@ -25,194 +23,14 @@
 #   an environment sync or assistant hook whose store call meets a transient fault retries the phase without recording it; a deterministic refusal is the phase's recorded outcome
 # - L9c: crates/lash-restate/src/tests/turn_cancel_modes.rs
 #   stop modes over a waiting turn: after-step lets a sleep, event wait or process await finish, immediate aborts it at wake, and escalating a deferred stop aborts the wait; the conformance turn_runner_tests re-instantiate (L9g)
-# - L9c: crates/lash/src/tests/admin_reads_without_runtime.rs
-#   every admin read answers from durable state without an activated runtime; and 1 more law(s) of the file, by test name
-# - L9c: crates/lash/src/tests/adr_claims.rs
-#   root and child materialization install the same plugin owned engines; and 2 more law(s) of the file, by test name
-# - L9c: crates/lash/src/tests/aggregate_await_comprehension.rs
-#   awaited comprehension of unwrapped calls matches the imperative loop
-# - L9c: crates/lash/src/tests/aggregate_oracle.rs::sqlite_a_pending_handle_in_an_aggregate_is_refused
-#   sqlite a pending handle in an aggregate is refused
-# - L9c: crates/lash/src/tests/aggregate_oracle.rs::sqlite_a_preparation_failure_leads_the_settlement_order
-#   sqlite a preparation failure leads the settlement order
-# - L9c: crates/lash/src/tests/aggregate_oracle.rs::sqlite_a_rejected_promise_all_resumes_at_its_first_consumed_rejection
-#   sqlite a rejected promise all resumes at its first consumed rejection
-# - L9c: crates/lash/src/tests/aggregate_oracle.rs::sqlite_a_terminal_leaf_settles_ahead_of_a_held_source_first_leaf
-#   sqlite a terminal leaf settles ahead of a held source first leaf
-# - L9c: crates/lash/src/tests/aggregate_oracle.rs::sqlite_aggregate_shapes_ask_the_host_for_exactly_their_leaves
-#   sqlite aggregate shapes ask the host for exactly their leaves
-# - L9c: crates/lash/src/tests/aggregate_oracle.rs::sqlite_all_settled_reports_every_leaf_in_input_order
-#   sqlite all settled reports every leaf in input order
-# - L9c: crates/lash/src/tests/aggregate_oracle.rs::sqlite_an_aggregate_leafs_declared_intent_is_realized
-#   sqlite an aggregate leafs declared intent is realized
-# - L9c: crates/lash/src/tests/aggregate_oracle.rs::sqlite_an_aggregate_of_durable_waits_settles_both
-#   sqlite an aggregate of durable waits settles both
-# - L9c: crates/lash/src/tests/aggregate_oracle.rs::sqlite_an_aggregate_over_a_non_array_is_refused
-#   sqlite an aggregate over a non array is refused
-# - L9c: crates/lash/src/tests/aggregate_oracle.rs::sqlite_promise_all_reports_the_first_settled_rejection
-#   sqlite promise all reports the first settled rejection
-# - L9c: crates/lash/src/tests/core_session_builder/commit_budget.rs
-#   adopted attachment intent rows fail the node budget before commit
-# - L9c: crates/lash/src/tests/core_session_builder/session_delete_failure.rs
-#   facade session delete failure preserves witnessed partial report
-# - L9c: crates/lash/src/tests/core_session_builder/session_lifecycle.rs::a_native_model_patch_reaches_all_runtime_consumers
-#   a native model patch reaches all runtime consumers
-# - L9c: crates/lash/src/tests/core_session_builder/session_lifecycle.rs::a_session_key_selects_its_transport_and_an_unserved_key_is_refused_typed
-#   a session key selects its transport and an unserved key is refused typed
-# - L9c: crates/lash/src/tests/core_session_builder/session_lifecycle.rs::malformed_rlm_create_extras_fail_child_session_creation
-#   malformed rlm create extras fail child session creation
-# - L9c: crates/lash/src/tests/core_session_builder/session_lifecycle.rs::open_with_state_keeps_supplied_policy_without_rewriting_frame_history
-#   open with state keeps supplied policy without rewriting frame history
-# - L9c: crates/lash/src/tests/core_session_builder/session_lifecycle.rs::public_session_state_appends_preserve_concurrent_retirement_refusals
-#   public session state appends preserve concurrent retirement refusals
-# - L9c: crates/lash/src/tests/core_session_builder/session_lifecycle.rs::rlm_protocol_config_sleep_ability_drives_prompt_surface
-#   rlm protocol config sleep ability drives prompt surface
-# - L9c: crates/lash/src/tests/core_session_builder/session_lifecycle.rs::rlm_root_session_final_answer_format_defaults_to_markdown_and_can_be_raw
-#   rlm root session final answer format defaults to markdown and can be raw
-# - L9c: crates/lash/src/tests/core_session_builder/session_lifecycle.rs::the_standard_prompt_comes_from_the_session_spec_and_its_command
-#   the standard prompt comes from the session spec and its command
-# - L9c: crates/lash/src/tests/core_session_builder/session_lifecycle/session_binding.rs::parent_relation_is_read_back_and_a_conflicting_create_is_refused
-#   parent relation is read back and a conflicting create is refused
-# - L9c: crates/lash/src/tests/core_session_builder/session_lifecycle_growth.rs
-#   flat commit growth after large bindings stabilize
-# - L9c: crates/lash/src/tests/core_session_builder/shifts_install.rs
-#   a core built while a dropped cores shift is in flight works on its own provider
-# - L9c: crates/lash/src/tests/core_session_builder/typed_errors.rs
-#   a native tool membership refusal preserves its cause; and 2 more law(s) of the file, by test name
-# - L9c: crates/lash/src/tests/discovery_execution.rs
-#   discovery hidden tool executes through rlm and standard batch but not native
-# - L9c: crates/lash/src/tests/durable_session.rs::a_catalog_without_the_by_id_seam_names_the_capability_not_a_missing_session
-#   a catalog without the by id seam names the capability not a missing session
-# - L9c: crates/lash/src/tests/durable_session.rs::a_held_input_is_still_listed_held_by_a_separate_durable_handle
-#   a held input is still listed held by a separate durable handle
-# - L9c: crates/lash/src/tests/durable_session.rs::a_live_observer_sees_queue_events_from_a_separately_acquired_durable_session
-#   a live observer sees queue events from a separately acquired durable session
-# - L9c: crates/lash/src/tests/durable_session.rs::a_send_links_its_input_to_the_context_its_first_acceptance_carried
-#   a send links its input to the context its first acceptance carried
-# - L9c: crates/lash/src/tests/durable_session.rs::an_input_addressed_to_an_unknown_turn_is_refused_through_the_facade
-#   an input addressed to an unknown turn is refused through the facade
-# - L9c: crates/lash/src/tests/durable_session.rs::catalog_contention_retains_its_type_and_retryability_across_existing_session_apis
-#   catalog contention retains its type and retryability across existing session apis
-# - L9c: crates/lash/src/tests/durable_session.rs::committed_row_deltas_transport_each_new_node_once
-#   committed row deltas transport each new node once
-# - L9c: crates/lash/src/tests/durable_session.rs::concurrent_creates_of_one_id_give_exactly_one_ok
-#   concurrent creates of one id give exactly one ok
-# - L9c: crates/lash/src/tests/durable_session.rs::create_admits_an_absent_id_and_builds_no_runtime
-#   create admits an absent id and builds no runtime
-# - L9c: crates/lash/src/tests/durable_session.rs::create_on_a_deleted_id_is_refused_with_the_tombstone
-#   create on a deleted id is refused with the tombstone
-# - L9c: crates/lash/src/tests/durable_session.rs::durable_acquisition_retries_contention_once_for_clones_and_reuses_bound_stores
-#   durable acquisition retries contention once for clones and reuses bound stores
-# - L9c: crates/lash/src/tests/durable_session.rs::durable_enqueue_to_an_unknown_id_stores_nothing_and_creates_nothing
-#   durable enqueue to an unknown id stores nothing and creates nothing
-# - L9c: crates/lash/src/tests/durable_session.rs::durable_operations_on_a_deleted_id_report_the_tombstone
-#   durable operations on a deleted id report the tombstone
-# - L9c: crates/lash/src/tests/durable_session.rs::durable_queue_access_on_a_grantless_core_builds_no_runtime
-#   durable queue access on a grantless core builds no runtime
-# - L9c: crates/lash/src/tests/durable_session.rs::existing_session_apis_preserve_absence_and_tombstones_without_creating
-#   existing session apis preserve absence and tombstones without creating
-# - L9c: crates/lash/src/tests/durable_session.rs::open_of_a_missing_id_is_unknown_session_and_writes_no_row
-#   open of a missing id is unknown session and writes no row
-# - L9c: crates/lash/src/tests/durable_session.rs::reused_enqueue_id_with_changed_input_is_a_typed_identity_conflict
-#   reused enqueue id with changed input is a typed identity conflict
-# - L9c: crates/lash/src/tests/durable_session.rs::sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed_ids
-#   sqlite durable acquisition covers absent metadata only and checkpointed ids
-# - L9c: crates/lash/src/tests/durable_session.rs::transcript_totally_projects_a_really_committed_rlm_trajectory
-#   transcript totally projects a really committed rlm trajectory
-# - L9c: crates/lash/src/tests/durable_session.rs::transcript_totally_projects_really_committed_nodes_in_source_order
-#   transcript totally projects really committed nodes in source order
-# - L9c: crates/lash/src/tests/durable_session.rs::two_durable_handles_operate_beside_an_independently_leased_writer
-#   two durable handles operate beside an independently leased writer
-# - L9c: crates/lash/src/tests/durable_session.rs::unsupported_catalog_lookup_retains_its_operation_across_existing_session_apis
-#   unsupported catalog lookup retains its operation across existing session apis
-# - L9c: crates/lash/src/tests/facade_construction.rs::facade_change_feeds_share_bounded_pages_and_typed_cutoffs
-#   facade change feeds share bounded pages and typed cutoffs
-# - L9c: crates/lash/src/tests/tool_restore_report.rs
-#   the restoring run delivers the tool restore report to the host; and 3 more law(s) of the file, by test name
-# - L9c: crates/lash/src/tests/turn_streaming/observation_recovery.rs::invalidated_live_observation_recovers_with_an_authoritative_snapshot
-#   invalidated live observation recovers with an authoritative snapshot
-# - L9c: crates/lash/src/tests/turn_streaming/observations.rs::completed_reasoning_part_does_not_republish_streamed_summary
-#   completed reasoning part does not republish streamed summary
-# - L9c: crates/lash/src/tests/turn_streaming/observations.rs::durable_revision_requires_replacement_evidence
-#   durable revision requires replacement evidence
-# - L9c: crates/lash/src/tests/turn_streaming/observations.rs::gap_replacement_then_continuation_after_trimmed_history
-#   gap replacement then continuation after trimmed history
-# - L9c: crates/lash/src/tests/turn_streaming/observations.rs::gap_replacement_then_continuation_after_unavailable_history
-#   gap replacement then continuation after unavailable history
-# - L9c: crates/lash/src/tests/turn_streaming/observations.rs::idle_session_reconnect_after_failed_append_yields_gap_without_another_commit
-#   idle session reconnect after failed append yields gap without another commit
-# - L9c: crates/lash/src/tests/turn_streaming/observations.rs::payload_authority_matches_revision_transition
-#   payload authority matches revision transition
-# - L9c: crates/lash/src/tests/turn_streaming/observations.rs::recoverable_chat_conformance_deduplicates_redelivery_identity
-#   recoverable chat conformance deduplicates redelivery identity
-# - L9c: crates/lash/src/tests/turn_streaming/observations.rs::recoverable_chat_conformance_disconnect_does_not_cancel_server_work
-#   recoverable chat conformance disconnect does not cancel server work
-# - L9c: crates/lash/src/tests/turn_streaming/observations.rs::rlm_natural_prose_completion_is_single_copy_in_next_request
-#   rlm natural prose completion is single copy in next request
-# - L9c: crates/lash/src/tests/turn_streaming/observations.rs::rlm_provider_failure_after_prose_is_not_retried_or_committed
-#   rlm provider failure after prose is not retried or committed
-# - L9c: crates/lash/src/tests/turn_streaming/observations.rs::semantic_publication_preserves_identical_completed_reasoning_parts_and_turns
-#   semantic publication preserves identical completed reasoning parts and turns
-# - L9c: crates/lash/src/tests/turn_streaming/observations.rs::semantic_publication_reasoning_then_tool_does_not_repeat_reasoning
-#   semantic publication reasoning then tool does not repeat reasoning
-# - L9c: crates/lash/src/tests/turn_streaming/observations.rs::semantic_publication_streamed_reasoning_keeps_nonstreamed_text
-#   semantic publication streamed reasoning keeps nonstreamed text
-# - L9c: crates/lash/src/tests/turn_streaming/observations.rs::session_observation_envelopes_scope_activity_and_commit_to_the_turn
-#   session observation envelopes scope activity and commit to the turn
-# - L9c: crates/lash/src/tests/turn_streaming/observations.rs::snapshot_subscribe_has_only_two_histories
-#   snapshot subscribe has only two histories
-# - L9c: crates/lash/src/tests/turn_streaming/observations.rs::subscriber_lag_with_trimmed_suffix_forces_gap_then_continues
-#   subscriber lag with trimmed suffix forces gap then continues
-# - L9c: crates/lash/src/tests/turn_streaming/observations.rs::trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_event
-#   trimmed gap replacement cursor preserves unseen auxiliary event
-# - L9c: crates/lash/src/tests/turn_streaming/observations/attempt_reset.rs
-#   remote reset and transcript projection agree
-# - L9c: crates/lash/tests/facade_host_wrappers.rs
-#   a facade host wraps the rlm factory and its stores on sqlite memory; and 2 more law(s) of the file, by test name
-# - L9d: crates/lash-protocol-rlm/src/executor/tests/per_process_surface.rs
-#   trigger fired process runs under session contributed event type
 # - L9d: crates/lash-restate-test/tests/crash_windows/attachment_delivery.rs
 #   a process start-input acquisition fault retries the same registered process
 # - L9d: crates/lash-restate-test/tests/resource_capacity.rs
 #   process and session lifecycles release their native resources when they end
 # - L9d: crates/lash-restate/src/tests/process_session_turn_laws.rs
 #   a session-turn process (subagent) crashed at create, acceptance or final commit resumes once from its recorded creation config, keeps its durable rows when cancelled, and a child panic is typed while the parent lives
-# - L9d: crates/lash/src/tests/agent_scenarios/cases.rs
-#   agent scenario awaited process attachment is a parent commit gc root; and 3 more law(s) of the file, by test name
-# - L9d: crates/lash/src/tests/agent_scenarios/plugin_operations.rs
-#   operation run follow returns the task terminal; and 6 more law(s) of the file, by test name
-# - L9d: crates/lash/src/tests/processes_endstate/native_process_await.rs
-#   native process await sink and prune end to end
-# - L9d: crates/lash/src/tests/stack_budget.rs
-#   stack budget rlm lashlang process turn
-# - L9d: crates/lash/src/tests/tool_intent_ingress.rs::start_env_store_error_is_typed_and_registers_no_process
-#   start env store error is typed and registers no process
-# - L9e: crates/lash-protocol-rlm/src/testing/cell_conformance/node_oracle/corpus.rs::every_session_observes_what_node_observes
-#   every session observes what node observes
-# - L9e: crates/lash-protocol-rlm/src/testing/cell_conformance/node_oracle/generated.rs::every_value_type_round_trips_or_is_refused
-#   every value type round trips or is refused
 # - L9e: crates/lash-restate/src/tests/process_recovery.rs
 #   a process resumed on another node after its worker and registry reopen keeps its snapshot plugin options, lashlang admission codes and trigger binding, and a TypeScript artifact runs to its terminal
-# - L9e: crates/lash/src/admin/config_cancel_race_tests.rs
-#   cancelled config command before current ask is typed
-# - L9e: crates/lash/src/tests/aggregate_oracle/timer_identity.rs
-#   sqlite each timer aggregate in a cell waits on its own; and 1 more law(s) of the file, by test name
-# - L9e: crates/lash/src/tests/turn_streaming/control_and_cancel.rs
-#   turn stream finish returns committed assistant prose; and 8 more law(s) of the file, by test name
-# - L9f: crates/lash-sim/src/oracles/tests/contract_checks.rs::coverage_oracles_are_failing_capable_not_presence_only
-#   every coverage oracle can fail on a recorded run, not only on missing facts
-# - L9f: crates/lash-sim/src/oracles/tests/contract_checks.rs::every_battery_slot_declares_the_one_oracle_id_its_verdict_uses
-#   every oracle battery slot's verdict uses exactly the one oracle id the slot declares
-# - L9f: crates/lash-sim/src/oracles/tests/contract_checks.rs::one_memo_across_candidates_gives_the_verdicts_a_fresh_memo_would
-#   sharing one oracle memo across candidates gives the verdicts a fresh memo per candidate would
-# - L9f: crates/lash-sim/src/oracles/tests/contract_checks.rs::scenario_contract_generated_facts_fail_on_contract_specific_mutations
-#   each contract's generated facts fail when mutated in a way specific to that contract
-# - L9f: crates/lash-sim/src/oracles/tests/contract_checks.rs::scenario_contract_oracles_emit_one_named_verdict_per_contract
-#   each scenario contract oracle emits exactly one verdict named for its contract
-# - L9f: crates/lash-sim/src/oracles/tests/contract_checks.rs::state_machine_semantic_oracle_checks_contract_outcomes_not_presence
-#   the state-machine semantic oracle checks contract outcomes, not the presence of facts
-# - L9f: crates/lash-sim/src/runner/agent_contracts_payload_tests.rs::lifted_process_display_name_does_not_change_the_oracle_verdict
-#   a host-declared display label on a lifted process is what observation records and does not change the lifted-process oracle verdict
 # - L9f: crates/lash-sim/src/runner/generated_profiles.rs::time_budget_stops_the_sweep_cleanly_and_records_reached_seeds
 #   a spent time budget stops a generated-sim seed sweep cleanly and records the seeds it reached
 # - L9f: crates/lash-sim/src/runner/tests.rs::generated_sim_profile_writes_trace_replay_and_provider_artifacts
@@ -338,6 +156,7 @@ path = "crates/lash-sim/tests/crash_matrix.rs::every_emitted_commit_label_is_cut
 [planned."ACCEPT1"]
 owner = "L3"
 law = "a direct turn's acceptance commits once: a redrive after the acceptance commit or a vacuum admits one row, and a direct turn behind earlier admissions runs after them"
+path = "crates/lash/src/tests/send_handle/arrival.rs::sends_run_once_each_in_arrival_order_one_at_a_time"
 
 [planned."WAKE1"]
 owner = "L3s"
@@ -347,6 +166,7 @@ law = "a send or cancel against an absent or deleted session wakes no session ac
 [planned."L3S-TURN"]
 owner = "L9c"
 law = "the turn and ingress laws L3s deleted with the store run admission, its final commit and the shift fence hold on the session actor's turn commit; each row's owed law names one"
+path = "crates/lash-durable-test/tests/turn_phases.rs::a_turn_of_two_model_calls_resumes_at_every_label_without_replay"
 
 [planned."L9T-TOOLS"]
 owner = "L9t"
@@ -356,14 +176,17 @@ law = "the process-dependent tool-semantics laws FIG-5208 deleted with TestTurnE
 [planned."L3S-CLOSE"]
 owner = "L9c"
 law = "a session close and its two-phase delete hold on the session actor: the close is idempotent, ends every run Cancelled(SessionDeleted) once, its acknowledgement arms the delete, and the delete waits for the session cleanup"
+path = "crates/lash-sim/tests/crash_matrix.rs::a_session_close_cut_at_every_label_ends_at_its_tombstone"
 
 [planned."PARK-FAULT"]
 owner = "L6"
 law = "a live fault at an actor's surface install or checkpoint admission parks the actor with a typed park event, and the activation after the fault clears completes it once"
+path = "crates/lash-durable-test/tests/live_fault_park.rs::a_live_surface_install_fault_parks_typed_at_the_budget_and_one_that_clears_completes_once"
 
 [planned."INTENT1"]
 owner = "L4"
 law = "a tool's declared intents realize as store-local effects in its outcome's settle transaction: an undeclared intent or one under a foreign authority is refused typed before anything is realized, and a cut at any commit label realizes each intent once or not at all"
+path = "crates/lash-sim/tests/crash_matrix.rs::a_tool_s_process_start_and_signal_cut_at_every_label_commit_only_with_its_outcome"
 
 [planned."SIGNAL1"]
 owner = "L6"
@@ -373,6 +196,7 @@ path = "crates/lash-durable-test/tests/process_actor_laws.rs::a_signal_is_admitt
 [planned."DEFER1"]
 owner = "L7"
 law = "a cell's deferred tool resolutions are held in its snapshot and restored from it: a restored cell sees the grants it resolved, never a changed ambient binding, and resolves nothing twice"
+path = "crates/lash-durable-test/tests/cell_restore_laws.rs::a_restored_cell_keeps_its_deferred_grants_and_resolves_nothing_twice_on_sqlite_memory"
 
 [planned."TS1"]
 owner = "L6"
@@ -727,7 +551,8 @@ laws = [
   "provider_desugared_construction_panics_are_typed_in_quiet_and_loud_modes",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "ported by FIG-5307: the two provider-level laws stay in place; the turn laws run through a host's send() on the core's node over SQLite memory in crates/lash/src/tests/panic_containment.rs; the auxiliary and desugared-construction laws run at the provider handle, quiet and loud, in crates/lash-core/tests/panic_containment.rs, their turn half held by the facade provider-panic law; provider_turn_panic_reaches_the_harness_when_loud folds into provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise; ignored on their tickets: provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise (FIG-5349)"
 
 [[row]]
 path = "crates/lash-core/tests/restate_double.rs"
@@ -1360,7 +1185,8 @@ laws = [
   "completed_turns_are_persisted_in_session_graph",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "ported by FIG-5307: the three store-binding laws in crates/lash-core/tests/runtime/tests/projection.rs (runtime_observability target, sqlite_recording_backend); presentation_step_only_changes_model_observation in crates/lash/src/tests/projection.rs on the core's node; completed_turns_are_persisted_in_session_graph is held by crates/lash/src/tests/durable_session.rs::transcript_totally_projects_really_committed_nodes_in_source_order"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/replay_origin.rs"
@@ -1874,7 +1700,8 @@ laws = [
   "standard_runtime_trace_records_failed_llm_calls",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "ported by FIG-5307 to crates/lash/src/tests/tracing.rs: a host's send() on the core's node over SQLite memory with a JSONL trace sink; the model-call and tool-call record laws pass; ignored on their tickets: composition_trace_is_snapshot_on_change_and_ignores_route_capacity_noise (FIG-5353), composition_trace_fires_once_when_tool_membership_changes_with_full_ordered_schemas (FIG-5353), composition_trace_fires_once_when_same_member_tool_schema_changes (FIG-5353), provider_spans_are_children_of_the_turn_span (FIG-5353), unavailable_tool_name_emits_an_ordered_lifecycle_pair (FIG-5353), golden_tree_survives_a_kill_and_resume_on_another_node (FIG-5353)"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turn_cancel_modes.rs"
@@ -2243,8 +2070,9 @@ laws = [
   "failed_attempt_partial_usage_is_a_fact",
   "all_attempts_failed_partial_usage_are_facts",
 ]
-disposition = "port"
-status = "todo"
+disposition = "covered-by:crates/lash/src/tests/provider_attempts.rs::truncated_retry_resets_partial_tool_calls_and_retains_failed_attempt_usage"
+status = "deleted"
+note = "a failed attempt keeps its billed usage in the call's ledger of a durable turn; the facade law on the core's node proves it, and a turn report's usage sums its calls' (crates/lash-durable-test/tests/core_node_processes.rs::a_turn_report_sums_two_model_calls_usage)"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turns/tool_check_control.rs"
@@ -3576,8 +3404,8 @@ laws = [
   "typescript_process_body_resolves_journaled_clock_and_randomness",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; and no durable ProcessSteps runs a lashlang process body (run_lashlang_process and its run context were deleted by FIG-5198), so the law is not written yet"
+status = "ported"
+note = "ported by FIG-5307 to crates/lash-durable-test/tests/process_tool_calls.rs::typescript_process_body_resolves_journaled_clock_and_randomness: a TypeScript process body on the core's node, every tier"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/typescript_runtime_values.rs"
@@ -6420,10 +6248,10 @@ lane = "L9c"
 laws = [
   "golden_tree_survives_replay_and_redrive",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/tracing.rs::golden_tree_survives_a_kill_and_resume_on_another_node"
+status = "deleted"
 owed = "a turn's span tree is the golden tree after a kill and resume on another node"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn: a durable turn emits no trace tree yet"
+note = "FIG-5307 wrote the law at the trace-record layer the OTel adapter projects spans from: a turn parked on a pending tool on node A, A shut down, node B over the same SQLite memory stores resolves and finishes it; A's and B's records build the golden tree of the turn run on one node, no identity repeating. The cut half passes; the law is ignored on FIG-5353 (a node-run turn writes no turn_started, turn_completed or tool_call record)"
 
 [[row]]
 path = "crates/lash-restate/src/tests/parent_end_on_the_double.rs"
@@ -8860,8 +8688,8 @@ laws = [
   "(no test functions) defines: new, after_relay, last_claim_lapse_ms, push, extend_from, capture_store, capture_store_with_transcripts, session, record, facts",
 ]
 disposition = "port"
-status = "todo"
-note = "the runner's history checkers read lash-sim runner turns; blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn). The crash matrix's invariants (design-opus §7.2, F1, F2, NR-1 to NR-4) are crates/lash-sim/src/crash_matrix/invariants.rs"
+status = "ported"
+note = "the history helpers serve the durable engine: FIG-5308 (990deeef2f) restored the invariant laws that capture a real pending-tool history from SimEngine's store through them (crates/lash-sim/src/invariants/tests.rs::the_clean_history_keeps_every_invariant_and_gives_each_facts); ToolObserver records failed_attempts_before = 0, the strictest effect window, until an engine reports its failed attempts"
 
 [[row]]
 path = "crates/lash-sim/src/recorded_termination_redrive.rs"
@@ -10783,7 +10611,8 @@ laws = [
   "eviction_recovers_the_facade_on_postgres",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "ported by FIG-5307 to crates/lash/tests/integration/facade_host_wrappers.rs (eviction_recovers_the_facade_on_{sqlite_memory,sqlite_file,postgres}): an evicted facade recovers over the durable backend; the PostgreSQL leg needs a server"
 
 [[row]]
 path = "crates/lash/tests/facade_host_wrappers/live_replay_bounds.rs"
@@ -10934,8 +10763,8 @@ laws = [
   "tiered! generates: two_keys_sharing_a_provider_kind_select_their_own_transport, a_catalog_edit_reaches_a_session_only_through_a_profile_change, a_recorded_llm_profile_whose_key_left_the_catalog_fails_typed_and_never_falls_back, a_recorded_model_whose_key_serves_another_wire_model_is_refused_typed, an_unknown_key_is_refused_before_anything_changes, a_session_turn_start_retried_after_the_host_changed_what_it_passes_keeps_its_retained_start, an_unsupported_reasoning_selection_is_refused_where_it_is_stated, a_replay_after_the_key_left_the_catalog_completes_with_zero_resolver_calls, an_unjournaled_bind_fault_seals_nothing_and_recovers_after_the_park, a_tool_is_not_run_past_a_bind_fault_of_its_direct_completion, a_completion_before_a_bind_fault_is_retried_only_while_unrecorded, a_host_process_start_refuses_unsupported_inherited_reasoning_before_recording",
 ]
 disposition = "port"
-status = "todo"
-note = "owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
+status = "ported"
+note = "ported by FIG-5307 onto the durable node: each law runs on SQLite memory and file (PostgreSQL needs a server); the always_replay variants are subject-deleted with the replaying engine; a_host_process_start_refuses_unsupported_inherited_reasoning_before_recording is subject-deleted: a session-turn start inherits no reasoning (ADR 0134, FIG-5296); ignored on their tickets: a_session_turn_start_retried_after_the_host_changed_what_it_passes_keeps_its_retained_start (FIG-5369), an_unjournaled_bind_fault_seals_nothing_and_recovers_after_the_park (FIG-5367), a_tool_is_not_run_past_a_bind_fault_of_its_direct_completion (FIG-5368), a_completion_before_a_bind_fault_is_retried_only_while_unrecorded (FIG-5368, FIG-5367)"
 
 [[row]]
 path = "crates/lash/tests/llm_profiles/session_turn_starts.rs"
@@ -10948,8 +10777,8 @@ laws = [
   "(no test functions) defines: session_turn_start, unstated_session_turn_start, session_turn_start_of, start_on, recorded_create_request, a_session_turn_start_retried_after_the_host_changed_what_it_passes_keeps_its_retained_start",
 ]
 disposition = "port"
-status = "todo"
-note = "owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
+status = "ported"
+note = "ported by FIG-5307 with crates/lash/tests/llm_profiles.rs: a host's session-turn start goes through core.processes().start on the core's effect host; unstated_session_turn_start went with the subject-deleted inherited-reasoning law; the retained-start law is ignored on FIG-5369 (the effect host's shared detached referrer ends)"
 
 [[row]]
 path = "crates/lash/tests/replay_after_advance/harness.rs"
@@ -10979,8 +10808,8 @@ laws = [
   "a_suspended_session_keeps_its_selected_dialect_on_postgres",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: fig-5172-prod (L3, FIG-5172): no production TurnServices runs a facade turn (the only impls are lash-durable-test's and lash-postgres-workers'), so a facade session opens on SQLite memory but its send never completes: a probe that builds a standard core over sqlite_memory_store_backend, opens a session and sends one text input times out after 20 s with the provider never called (L3s's session mail, FIG-5196, has landed); the law is not written yet"
+status = "ported"
+note = "ported by FIG-5307 onto the durable node with its dialect and worker restored: a real turn passes; a TypeScript host refuses the seam-proof session at its first send (an open builds no runtime), but the refusal reaches it untyped, so a_suspended_session_keeps_its_selected_dialect_on_{sqlite_memory,sqlite_file} are ignored on FIG-5324; the PostgreSQL leg needs a server"
 
 [[row]]
 path = "examples/agent-workbench/src/execution_graphs.rs"
@@ -11670,7 +11499,8 @@ laws = [
   "a_projected_workflow_with_a_lifted_process_saves_as_its_source",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "ported: the example's command client runs through core.processes() and its test files run on a durable SQLite core (4e083eb8de, FIG-5308); FIG-5307 restored the lib's own law, save_tests::a_projected_workflow_with_a_lifted_process_saves_as_its_source, on a SQLite memory durable backend"
 
 [[row]]
 path = "examples/workflow-graph-roundtrip/tests/support/runtime.rs"
@@ -12912,10 +12742,10 @@ lane = "L9d"
 laws = [
   "trigger_fired_process_runs_under_session_contributed_event_type",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-durable-test/tests/core_node_processes/per_process_surface.rs::trigger_fired_process_runs_under_session_contributed_event_type"
+status = "deleted"
 owed = "trigger fired process runs under session contributed event type"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. A trigger emission starts its process through process_effect: blocked: L6 (FIG-5175): ActorContext::process_effect hands its process executor to RuntimeEffectLocalExecutor::execute, which refuses every process command as RuntimeEffectLocalExecutorMismatch (lash-core-execution runtime/effect/executor.rs:1042); repro crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/executor/process_local.rs::a_process_start_issued_through_the_actor_context_registers_its_process (#[ignore]d, red)"
+note = "FIG-5307 re-wrote the law on the core's node: a trigger registered for a module compiled against a session plugin's contributed event type fires a process that records the type in its engine config and succeeds, every tier"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/testing/cell_conformance/durable_values.rs"
@@ -13057,10 +12887,10 @@ lane = "L9e"
 laws = [
   "every_session_observes_what_node_observes",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-protocol-rlm/src/testing/cell_conformance/node_oracle/corpus.rs::every_session_observes_what_node_observes"
+status = "deleted"
 owed = "every session observes what node observes"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; the law is written and #[ignore]d; its session `process-literal-binding` binds a process literal (its projected-value session, red on L7p, passes since e7510888f0)"
+note = "FIG-5307 removed the law's ignore: it runs again on the durable cell path and passes"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/testing/cell_conformance/node_oracle/generated.rs"
@@ -13096,10 +12926,10 @@ lane = "L9e"
 laws = [
   "every_value_type_round_trips_or_is_refused",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-protocol-rlm/src/testing/cell_conformance/node_oracle/generated.rs::every_value_type_round_trips_or_is_refused"
+status = "deleted"
 owed = "every value type round trips or is refused"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; the law is written and #[ignore]d"
+note = "FIG-5307 removed the law's ignore: it runs again on the durable cell path and passes"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/testing/cell_conformance/node_oracle/minimize.rs"
@@ -15413,10 +15243,10 @@ lane = "L9e"
 laws = [
   "cancelled_config_command_before_current_ask_is_typed",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:crates/lash-conformance/src/conformance/session_store_factory_config_commands.rs::cancelled_session_config_settlement_is_typed"
+status = "deleted"
 owed = "cancelled config command before current ask is typed"
-note = "blocked: fig-5172-prod (L3, FIG-5172): no production TurnServices runs a facade turn (the only impls are lash-durable-test's and lash-postgres-workers'), so a facade session opens on SQLite memory but its send never completes: a probe that builds a standard core over sqlite_memory_store_backend, opens a session and sends one text input times out after 20 s with the provider never called (L3s's session mail, FIG-5196, has landed); the law is not written yet"
+note = "a config command is the session actor's mail on the node; a cancelled config settlement is typed at the store contract every backend runs"
 
 [[row]]
 path = "crates/lash/src/core/runtime_host_config.rs"
@@ -15458,10 +15288,10 @@ laws = [
   "every_admin_read_answers_from_durable_state_without_an_activated_runtime",
   "a_plugin_query_on_a_never_run_session_is_refused_as_not_published",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/admin_reads_without_runtime.rs"
+status = "deleted"
 owed = "every admin read answers from durable state without an activated runtime; and 1 more law(s) of the file, by test name"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/adr_claims.rs"
@@ -15475,10 +15305,10 @@ laws = [
   "multi_model_turn_and_remote_report_keep_per_call_evidence",
   "resumed_session_observe_wait_cancel_shift_keep_original_owners",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/adr_claims.rs"
+status = "deleted"
 owed = "root and child materialization install the same plugin owned engines; and 2 more law(s) of the file, by test name"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; L6 (FIG-5175, not landed) for the process engines"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/agent_scenarios/cases.rs"
@@ -15493,10 +15323,10 @@ laws = [
   "agent_scenario_direct_completion_attempt_retry_reinvokes_provider_once",
   "agent_scenario_failed_child_preserves_failure_graph",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/agent_scenarios.rs"
+status = "deleted"
 owed = "agent scenario awaited process attachment is a parent commit gc root; and 3 more law(s) of the file, by test name"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
+note = "FIG-5307 re-wrote agent_scenario_process_llm_query_with_typed_output and agent_scenario_direct_completion_attempt_retry_reinvokes_provider_once on the core's node in crates/lash/src/tests/agent_scenarios.rs; agent_scenario_awaited_process_attachment_is_a_parent_commit_gc_root is held since 8786bf572d, whose durable commit holds every attachment the committed transcript names, and whose adoption rows crates/lash/src/tests/core_session_builder/commit_budget.rs::adopted_attachment_intent_rows_fail_the_node_budget_before_commit counts; agent_scenario_failed_child_preserves_failure_graph spawned through the subagents crate, whose subject FIG-5296 deleted; the failure graph is held by lash-sim's agent.failed_child_preserves_failure_graph contract (crates/lash-sim/src/runner/agent_contracts.rs)"
 
 [[row]]
 path = "crates/lash/src/tests/agent_scenarios/plugin_operations.rs"
@@ -15514,10 +15344,10 @@ laws = [
   "agent_scenario_plugin_task_query_command",
   "task_run_result_decodes_output_and_declared_error",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/plugin_operations.rs"
+status = "deleted"
 owed = "operation run follow returns the task terminal; and 6 more law(s) of the file, by test name"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
+note = "FIG-5307 re-wrote the plugin-operation laws on the core's node in crates/lash/src/tests/plugin_operations.rs; ignored on their tickets: operation_run_cancel_does_not_infect_a_fresh_operation (FIG-5343), a_session_lifetime_process_survives_operation_completion (FIG-5345), agent_scenario_plugin_task_query_command (FIG-5344)"
 
 [[row]]
 path = "crates/lash/src/tests/aggregate_await_comprehension.rs"
@@ -15529,10 +15359,10 @@ lane = "L9c"
 laws = [
   "awaited_comprehension_of_unwrapped_calls_matches_the_imperative_loop",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/aggregate_await_comprehension.rs"
+status = "deleted"
 owed = "awaited comprehension of unwrapped calls matches the imperative loop"
-note = "blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed); blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/aggregate_oracle.rs"
@@ -15544,10 +15374,10 @@ lane = "L9c"
 laws = [
   "sqlite_aggregate_shapes_ask_the_host_for_exactly_their_leaves",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/aggregate_oracle.rs::sqlite_aggregate_shapes_ask_the_host_for_exactly_their_leaves"
+status = "deleted"
 owed = "sqlite aggregate shapes ask the host for exactly their leaves"
-note = "blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed); blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/aggregate_oracle.rs"
@@ -15559,10 +15389,10 @@ lane = "L9c"
 laws = [
   "sqlite_all_settled_reports_every_leaf_in_input_order",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/aggregate_oracle.rs::sqlite_all_settled_reports_every_leaf_in_input_order"
+status = "deleted"
 owed = "sqlite all settled reports every leaf in input order"
-note = "blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed); blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/aggregate_oracle.rs"
@@ -15574,10 +15404,10 @@ lane = "L9c"
 laws = [
   "sqlite_promise_all_reports_the_first_settled_rejection",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/aggregate_oracle.rs::sqlite_promise_all_reports_the_first_settled_rejection"
+status = "deleted"
 owed = "sqlite promise all reports the first settled rejection"
-note = "blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed); blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/aggregate_oracle.rs"
@@ -15589,10 +15419,10 @@ lane = "L9c"
 laws = [
   "sqlite_a_terminal_leaf_settles_ahead_of_a_held_source_first_leaf",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/aggregate_oracle.rs::sqlite_a_terminal_leaf_settles_ahead_of_a_held_source_first_leaf"
+status = "deleted"
 owed = "sqlite a terminal leaf settles ahead of a held source first leaf"
-note = "blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed); blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/aggregate_oracle.rs"
@@ -15604,10 +15434,10 @@ lane = "L9c"
 laws = [
   "sqlite_a_preparation_failure_leads_the_settlement_order",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/aggregate_oracle.rs::sqlite_a_preparation_failure_leads_the_settlement_order"
+status = "deleted"
 owed = "sqlite a preparation failure leads the settlement order"
-note = "blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed); blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift; ignored on FIG-5332 (a cell's preparation-prefix race)"
 
 [[row]]
 path = "crates/lash/src/tests/aggregate_oracle.rs"
@@ -15619,10 +15449,10 @@ lane = "L9c"
 laws = [
   "sqlite_a_rejected_promise_all_resumes_at_its_first_consumed_rejection",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/aggregate_oracle.rs::sqlite_a_rejected_promise_all_resumes_at_its_first_consumed_rejection"
+status = "deleted"
 owed = "sqlite a rejected promise all resumes at its first consumed rejection"
-note = "blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed); blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/aggregate_oracle.rs"
@@ -15634,10 +15464,10 @@ lane = "L9c"
 laws = [
   "sqlite_an_aggregate_of_durable_waits_settles_both",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/aggregate_oracle.rs::sqlite_an_aggregate_of_durable_waits_settles_both"
+status = "deleted"
 owed = "sqlite an aggregate of durable waits settles both"
-note = "blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed); blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/aggregate_oracle.rs"
@@ -15649,10 +15479,10 @@ lane = "L9c"
 laws = [
   "sqlite_a_pending_handle_in_an_aggregate_is_refused",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/aggregate_oracle.rs::sqlite_a_pending_handle_in_an_aggregate_is_refused"
+status = "deleted"
 owed = "sqlite a pending handle in an aggregate is refused"
-note = "blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed); blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/aggregate_oracle.rs"
@@ -15664,10 +15494,10 @@ lane = "L9c"
 laws = [
   "sqlite_an_aggregate_over_a_non_array_is_refused",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:crates/lash-typescript/tests/aggregate_witnesses.rs::an_aggregate_over_a_non_array_is_refused_however_the_operand_is_spelled"
+status = "deleted"
 owed = "sqlite an aggregate over a non array is refused"
-note = "blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed); blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!)"
+note = "a non-array aggregate operand is a language refusal, decided of the value before any host call; the runtime's witness asks it of every spelling and asserts nothing reaches the host"
 
 [[row]]
 path = "crates/lash/src/tests/aggregate_oracle.rs"
@@ -15679,10 +15509,10 @@ lane = "L9c"
 laws = [
   "sqlite_an_aggregate_leafs_declared_intent_is_realized",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/aggregate_oracle.rs::sqlite_an_aggregate_leafs_declared_intent_is_realized"
+status = "deleted"
 owed = "sqlite an aggregate leafs declared intent is realized"
-note = "blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed); blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/aggregate_oracle/race_any.rs"
@@ -15719,10 +15549,10 @@ laws = [
   "sqlite_each_timer_aggregate_in_a_cell_waits_on_its_own",
   "sqlite_a_timer_aggregate_in_each_of_two_cells_waits_twice",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/aggregate_oracle/timer_identity.rs"
+status = "deleted"
 owed = "sqlite each timer aggregate in a cell waits on its own; and 1 more law(s) of the file, by test name"
-note = "blocked: fig-5172-prod (L3, FIG-5172): no production TurnServices runs a facade turn (the only impls are lash-durable-test's and lash-postgres-workers'), so a facade session opens on SQLite memory but its send never completes: a probe that builds a standard core over sqlite_memory_store_backend, opens a session and sends one text input times out after 20 s with the provider never called (L3s's session mail, FIG-5196, has landed); the law is not written yet"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/control_admin.rs"
@@ -15764,10 +15594,10 @@ lane = "L9c"
 laws = [
   "adopted_attachment_intent_rows_fail_the_node_budget_before_commit",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/core_session_builder/commit_budget.rs::adopted_attachment_intent_rows_fail_the_node_budget_before_commit"
+status = "deleted"
 owed = "adopted attachment intent rows fail the node budget before commit"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/config_settlement.rs"
@@ -15860,10 +15690,10 @@ lane = "L9c"
 laws = [
   "facade_session_delete_failure_preserves_witnessed_partial_report",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:crates/lash-core/src/runtime/durable/scope_end_tests/close_faults.rs::a_failed_close_step_answers_its_typed_cause_and_the_next_claim_resumes_there"
+status = "deleted"
 owed = "facade session delete failure preserves witnessed partial report"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; L6b (FIG-5176, not landed): a session delete is session mail"
+note = "a facade delete is the session actor's close; FIG-5307's close law fails a close step in the store and holds that its typed cause and step are answered and the next claim resumes at that step"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs"
@@ -15875,10 +15705,10 @@ lane = "L9c"
 laws = [
   "the_standard_prompt_comes_from_the_session_spec_and_its_command",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-durable-test/tests/core_node_processes.rs::a_child_uses_exactly_its_explicit_prompt_plan"
+status = "deleted"
 owed = "the standard prompt comes from the session spec and its command"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "the standard prompt plugin is deleted (FIG-5257, FIG-5258): a session's prompt is the plan its spec states, which the node law holds for a child that states it"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs"
@@ -15890,10 +15720,10 @@ lane = "L9c"
 laws = [
   "a_session_key_selects_its_transport_and_an_unserved_key_is_refused_typed",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:crates/lash/tests/llm_profiles.rs::two_keys_sharing_a_provider_kind_select_their_own_transport"
+status = "deleted"
 owed = "a session key selects its transport and an unserved key is refused typed"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "a session's key selects its own transport on the node; an unserved key is refused typed by crates/lash/tests/llm_profiles.rs::an_unknown_key_is_refused_before_anything_changes"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs"
@@ -15919,10 +15749,10 @@ lane = "L9c"
 laws = [
   "rlm_protocol_config_sleep_ability_drives_prompt_surface",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/core_session_builder/session_lifecycle.rs::rlm_protocol_config_sleep_ability_drives_prompt_surface"
+status = "deleted"
 owed = "rlm protocol config sleep ability drives prompt surface"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs"
@@ -15949,10 +15779,10 @@ lane = "L9c"
 laws = [
   "rlm_root_session_final_answer_format_defaults_to_markdown_and_can_be_raw",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/core_session_builder/session_lifecycle.rs::rlm_root_session_final_answer_format_defaults_to_markdown_and_can_be_raw"
+status = "deleted"
 owed = "rlm root session final answer format defaults to markdown and can be raw"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs"
@@ -15978,10 +15808,10 @@ lane = "L9c"
 laws = [
   "malformed_rlm_create_extras_fail_child_session_creation",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/core_session_builder/session_lifecycle.rs::malformed_rlm_create_extras_fail_child_session_creation"
+status = "deleted"
 owed = "malformed rlm create extras fail child session creation"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/session_lifecycle.rs)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs"
@@ -16050,10 +15880,10 @@ lane = "L9c"
 laws = [
   "public_session_state_appends_preserve_concurrent_retirement_refusals",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/core_session_builder/session_lifecycle.rs::public_session_state_appends_preserve_concurrent_retirement_refusals"
+status = "deleted"
 owed = "public session state appends preserve concurrent retirement refusals"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/session_lifecycle.rs)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs"
@@ -16065,10 +15895,10 @@ lane = "L9c"
 laws = [
   "a_native_model_patch_reaches_all_runtime_consumers",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/core_session_builder/session_lifecycle.rs::a_native_model_patch_reaches_all_runtime_consumers"
+status = "deleted"
 owed = "a native model patch reaches all runtime consumers"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs"
@@ -16080,10 +15910,10 @@ lane = "L9c"
 laws = [
   "open_with_state_keeps_supplied_policy_without_rewriting_frame_history",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/core_session_builder/session_lifecycle.rs::open_with_state_keeps_supplied_policy_without_rewriting_frame_history"
+status = "deleted"
 owed = "open with state keeps supplied policy without rewriting frame history"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/session_lifecycle.rs)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_lifecycle/commit_budget.rs"
@@ -16140,10 +15970,10 @@ lane = "L9c"
 laws = [
   "parent_relation_is_read_back_and_a_conflicting_create_is_refused",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/core_session_builder/session_lifecycle/session_binding.rs::parent_relation_is_read_back_and_a_conflicting_create_is_refused"
+status = "deleted"
 owed = "parent relation is read back and a conflicting create is refused"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/session_lifecycle.rs)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_lifecycle/session_binding.rs"
@@ -16169,10 +15999,10 @@ lane = "L9c"
 laws = [
   "flat_commit_growth_after_large_bindings_stabilize",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-protocol-rlm/src/executor/state/tests.rs::large_scalar_edit_commits_changed_state_not_retained_session"
+status = "deleted"
 owed = "flat commit growth after large bindings stabilize"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "a cell's commit carries only its changed state, so a session's commit growth flattens once its large bindings stabilize; the law holds that at the cell state the commit is built from"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/shifts_install.rs"
@@ -16184,10 +16014,10 @@ lane = "L9c"
 laws = [
   "a_core_built_while_a_dropped_cores_shift_is_in_flight_works_on_its_own_provider",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "subject-deleted"
+status = "deleted"
 owed = "a core built while a dropped cores shift is in flight works on its own provider"
-note = "blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!; blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "SessionShifts and the per-core shift install are deleted (0cc1b81d98): a node serves its own core's sessions, so no shift outlives the core that built it"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/typed_errors.rs"
@@ -16201,10 +16031,10 @@ laws = [
   "a_native_cold_open_preserves_state_codec_refusals",
   "session_cleanup_failures_preserve_step_and_source",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/core_session_builder/typed_errors.rs"
+status = "deleted"
 owed = "a native tool membership refusal preserves its cause; and 2 more law(s) of the file, by test name"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift; a_native_cold_open_preserves_state_codec_refusals is ignored on FIG-5324; session_cleanup_failures_preserve_step_and_source is the session actor's close, held by crates/lash-core/src/runtime/durable/scope_end_tests/close_faults.rs::a_failed_close_step_answers_its_typed_cause_and_the_next_claim_resumes_there"
 
 [[row]]
 path = "crates/lash/src/tests/deployment_and_testing_facade.rs"
@@ -16244,10 +16074,10 @@ lane = "L9c"
 laws = [
   "discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_native",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/discovery_execution.rs"
+status = "deleted"
 owed = "discovery hidden tool executes through rlm and standard batch but not native"
-note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round; blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -16259,10 +16089,10 @@ lane = "L9c"
 laws = [
   "catalog_contention_retains_its_type_and_retryability_across_existing_session_apis",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/durable_session.rs::catalog_contention_retains_its_type_and_retryability_across_existing_session_apis"
+status = "deleted"
 owed = "catalog contention retains its type and retryability across existing session apis"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/durable_session.rs)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -16274,10 +16104,10 @@ lane = "L9c"
 laws = [
   "unsupported_catalog_lookup_retains_its_operation_across_existing_session_apis",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/durable_session.rs::unsupported_catalog_lookup_retains_its_operation_across_existing_session_apis"
+status = "deleted"
 owed = "unsupported catalog lookup retains its operation across existing session apis"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/durable_session.rs)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -16289,10 +16119,10 @@ lane = "L9c"
 laws = [
   "existing_session_apis_preserve_absence_and_tombstones_without_creating",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/durable_session.rs::existing_session_apis_preserve_absence_and_tombstones_without_creating"
+status = "deleted"
 owed = "existing session apis preserve absence and tombstones without creating"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/durable_session.rs)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -16304,10 +16134,10 @@ lane = "L9c"
 laws = [
   "durable_acquisition_retries_contention_once_for_clones_and_reuses_bound_stores",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/durable_session.rs::durable_acquisition_retries_contention_once_for_clones_and_reuses_bound_stores"
+status = "deleted"
 owed = "durable acquisition retries contention once for clones and reuses bound stores"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/durable_session.rs)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -16319,10 +16149,10 @@ lane = "L9c"
 laws = [
   "open_of_a_missing_id_is_unknown_session_and_writes_no_row",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/durable_session.rs::open_of_a_missing_id_is_unknown_session_and_writes_no_row"
+status = "deleted"
 owed = "open of a missing id is unknown session and writes no row"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/durable_session.rs)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -16334,10 +16164,10 @@ lane = "L9c"
 laws = [
   "concurrent_creates_of_one_id_give_exactly_one_ok",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/durable_session.rs::concurrent_creates_of_one_id_give_exactly_one_ok"
+status = "deleted"
 owed = "concurrent creates of one id give exactly one ok"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/durable_session.rs)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -16349,10 +16179,10 @@ lane = "L9c"
 laws = [
   "durable_enqueue_to_an_unknown_id_stores_nothing_and_creates_nothing",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/durable_session.rs::durable_enqueue_to_an_unknown_id_stores_nothing_and_creates_nothing"
+status = "deleted"
 owed = "durable enqueue to an unknown id stores nothing and creates nothing"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/durable_session.rs)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -16364,10 +16194,10 @@ lane = "L9c"
 laws = [
   "durable_operations_on_a_deleted_id_report_the_tombstone",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/durable_session.rs::durable_operations_on_a_deleted_id_report_the_tombstone"
+status = "deleted"
 owed = "durable operations on a deleted id report the tombstone"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/durable_session.rs)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -16379,10 +16209,10 @@ lane = "L9c"
 laws = [
   "an_input_addressed_to_an_unknown_turn_is_refused_through_the_facade",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/durable_session.rs::an_input_addressed_to_an_unknown_turn_is_refused_through_the_facade"
+status = "deleted"
 owed = "an input addressed to an unknown turn is refused through the facade"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/durable_session.rs)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -16394,10 +16224,10 @@ lane = "L9c"
 laws = [
   "sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed_ids",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/durable_session.rs::sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed_ids"
+status = "deleted"
 owed = "sqlite durable acquisition covers absent metadata only and checkpointed ids"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -16409,10 +16239,10 @@ lane = "L9c"
 laws = [
   "a_send_links_its_input_to_the_context_its_first_acceptance_carried",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/durable_session.rs::a_send_links_its_input_to_the_context_its_first_acceptance_carried"
+status = "deleted"
 owed = "a send links its input to the context its first acceptance carried"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -16424,10 +16254,10 @@ lane = "L9c"
 laws = [
   "a_live_observer_sees_queue_events_from_a_separately_acquired_durable_session",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/durable_session.rs::a_live_observer_sees_queue_events_from_a_separately_acquired_durable_session"
+status = "deleted"
 owed = "a live observer sees queue events from a separately acquired durable session"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -16453,10 +16283,10 @@ lane = "L9c"
 laws = [
   "two_durable_handles_operate_beside_an_independently_leased_writer",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/durable_session.rs::two_durable_handles_operate_beside_an_independently_leased_writer"
+status = "deleted"
 owed = "two durable handles operate beside an independently leased writer"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -16468,10 +16298,10 @@ lane = "L9c"
 laws = [
   "durable_queue_access_on_a_grantless_core_builds_no_runtime",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/durable_session.rs::durable_queue_access_on_a_grantless_core_builds_no_runtime"
+status = "deleted"
 owed = "durable queue access on a grantless core builds no runtime"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -16483,10 +16313,10 @@ lane = "L9c"
 laws = [
   "a_catalog_without_the_by_id_seam_names_the_capability_not_a_missing_session",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/durable_session.rs::a_catalog_without_the_by_id_seam_names_the_capability_not_a_missing_session"
+status = "deleted"
 owed = "a catalog without the by id seam names the capability not a missing session"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/durable_session.rs)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -16498,10 +16328,10 @@ lane = "L9c"
 laws = [
   "a_held_input_is_still_listed_held_by_a_separate_durable_handle",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/durable_session.rs::a_held_input_is_still_listed_held_by_a_separate_durable_handle"
+status = "deleted"
 owed = "a held input is still listed held by a separate durable handle"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -16513,10 +16343,10 @@ lane = "L9c"
 laws = [
   "create_admits_an_absent_id_and_builds_no_runtime",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/durable_session.rs::create_admits_an_absent_id_and_builds_no_runtime"
+status = "deleted"
 owed = "create admits an absent id and builds no runtime"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/durable_session.rs)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -16542,10 +16372,10 @@ lane = "L9c"
 laws = [
   "create_on_a_deleted_id_is_refused_with_the_tombstone",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/durable_session.rs::create_on_a_deleted_id_is_refused_with_the_tombstone"
+status = "deleted"
 owed = "create on a deleted id is refused with the tombstone"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/durable_session.rs)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -16557,10 +16387,10 @@ lane = "L9c"
 laws = [
   "reused_enqueue_id_with_changed_input_is_a_typed_identity_conflict",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/durable_session.rs::reused_enqueue_id_with_changed_input_is_a_typed_identity_conflict"
+status = "deleted"
 owed = "reused enqueue id with changed input is a typed identity conflict"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -16572,10 +16402,10 @@ lane = "L9c"
 laws = [
   "transcript_totally_projects_really_committed_nodes_in_source_order",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/durable_session.rs::transcript_totally_projects_really_committed_nodes_in_source_order"
+status = "deleted"
 owed = "transcript totally projects really committed nodes in source order"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -16587,10 +16417,10 @@ lane = "L9c"
 laws = [
   "committed_row_deltas_transport_each_new_node_once",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/durable_session.rs::committed_row_deltas_transport_each_new_node_once"
+status = "deleted"
 owed = "committed row deltas transport each new node once"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift; ignored on FIG-5387 (under load a resume from a snapshot's cursor replays a commit the snapshot already holds)"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -16602,10 +16432,10 @@ lane = "L9c"
 laws = [
   "transcript_totally_projects_a_really_committed_rlm_trajectory",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/durable_session.rs::transcript_totally_projects_a_really_committed_rlm_trajectory"
+status = "deleted"
 owed = "transcript totally projects a really committed rlm trajectory"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/facade_construction.rs"
@@ -16617,10 +16447,10 @@ lane = "L9c"
 laws = [
   "facade_change_feeds_share_bounded_pages_and_typed_cutoffs",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/facade_construction.rs::facade_change_feeds_share_bounded_pages_and_typed_cutoffs"
+status = "deleted"
 owed = "facade change feeds share bounded pages and typed cutoffs"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/facade-support.diff)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/failure_settlement.rs"
@@ -16649,10 +16479,10 @@ lane = "L9d"
 laws = [
   "native_process_await_sink_and_prune_end_to_end",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:crates/lash-durable-test/tests/core_node_processes.rs::lashlang_signal_wait_resolves_with_the_hosts_signal"
+status = "deleted"
 owed = "native process await sink and prune end to end"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
+note = "a host's signal resumes a parked lashlang process with its payload as the wait's value, through the core's process API on every tier; a pruned process's await and history answer the typed retained-history miss in crates/lash-durable-test/tests/process_actor_laws.rs::an_awaiter_reads_the_outcome_of_a_process_pruned_after_it_ended"
 
 [[row]]
 path = "crates/lash/src/tests/response_phase_replay/catalog_fork.rs"
@@ -16680,10 +16510,10 @@ lane = "L9d"
 laws = [
   "stack_budget_rlm_lashlang_process_turn",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:crates/lash-sim/tests/stack_policy.rs"
+status = "deleted"
 owed = "stack budget rlm lashlang process turn"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
+note = "lash-sim's stack-policy probes run every fixed agent product contract, the lashlang process contracts among them, on a thread of the product's 2 MiB stack"
 
 [[row]]
 path = "crates/lash/src/tests/tool_intent_ingress.rs"
@@ -16695,10 +16525,10 @@ lane = "L9d"
 laws = [
   "start_env_store_error_is_typed_and_registers_no_process",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/tool_intent_ingress.rs::start_env_store_error_is_typed_and_registers_no_process"
+status = "deleted"
 owed = "start env store error is typed and registers no process"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. A start intent realizes through process_effect (tool_dispatch/intent_executor.rs:625): blocked: L6 (FIG-5175): ActorContext::process_effect hands its process executor to RuntimeEffectLocalExecutor::execute, which refuses every process command as RuntimeEffectLocalExecutorMismatch (lash-core-execution runtime/effect/executor.rs:1042); repro crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/executor/process_local.rs::a_process_start_issued_through_the_actor_context_registers_its_process (#[ignore]d, red)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/tool_restore_report.rs"
@@ -16713,10 +16543,10 @@ laws = [
   "a_per_open_override_states_the_policy_for_one_session",
   "require_refuses_a_shift_rebuild_that_lost_a_tool_source",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/tool_restore_report.rs"
+status = "deleted"
 owed = "the restoring run delivers the tool restore report to the host; and 3 more law(s) of the file, by test name"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift; require_refuses_a_shift_rebuild_that_lost_a_tool_source is require_refuses_a_cold_rebuild_that_lost_a_tool_source (a node rebuilds a session's runtime from its head, not per shift); a_per_open_override_states_the_policy_for_one_session is subject-deleted: SessionBuilder::tool_source_policy is gone (8f0d6b2d05)"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/control_and_cancel.rs"
@@ -16736,10 +16566,10 @@ laws = [
   "checkpoint_admitted_steer_cancel_reaches_its_run",
   "turn_event_fanout_streams_to_collector_and_live_sink",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/turn_streaming/control_and_cancel.rs"
+status = "deleted"
 owed = "turn stream finish returns committed assistant prose; and 8 more law(s) of the file, by test name"
-note = "blocked: fig-5172-prod (L3, FIG-5172): no production TurnServices runs a facade turn (the only impls are lash-durable-test's and lash-postgres-workers'), so a facade session opens on SQLite memory but its send never completes: a probe that builds a standard core over sqlite_memory_store_backend, opens a session and sends one text input times out after 20 s with the provider never called (L3s's session mail, FIG-5196, has landed); the law is not written yet. Steering delivery itself is covered by crates/lash-durable-test/tests/steering_crash_laws.rs (FIG-5293, FIG-5294): the steer laws left here owe its interplay with a run cancel (the Defer and interrupt dispositions, a cancel addressed to a checkpoint-admitted input)."
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift; ignored on their tickets: send_cancel_defaults_to_deferring_undelivered_active_input (FIG-5321), active_steer_after_last_call_defers_to_next_turn_first_call (FIG-5320), accepted_active_steer_interrupt_is_not_requeued (FIG-5320)"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/control_and_cancel.rs"
@@ -16777,10 +16607,10 @@ lane = "L9c"
 laws = [
   "invalidated_live_observation_recovers_with_an_authoritative_snapshot",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/turn_streaming/observation_recovery.rs::invalidated_live_observation_recovers_with_an_authoritative_snapshot"
+status = "deleted"
 owed = "invalidated live observation recovers with an authoritative snapshot"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observation_recovery.rs"
@@ -16806,10 +16636,10 @@ lane = "L9c"
 laws = [
   "completed_reasoning_part_does_not_republish_streamed_summary",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/turn_streaming/observations.rs::completed_reasoning_part_does_not_republish_streamed_summary"
+status = "deleted"
 owed = "completed reasoning part does not republish streamed summary"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -16821,10 +16651,10 @@ lane = "L9c"
 laws = [
   "semantic_publication_reasoning_then_tool_does_not_repeat_reasoning",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/turn_streaming/observations.rs::semantic_publication_reasoning_then_tool_does_not_repeat_reasoning"
+status = "deleted"
 owed = "semantic publication reasoning then tool does not repeat reasoning"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -16836,10 +16666,10 @@ lane = "L9c"
 laws = [
   "semantic_publication_streamed_reasoning_keeps_nonstreamed_text",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/turn_streaming/observations.rs::semantic_publication_streamed_reasoning_keeps_nonstreamed_text"
+status = "deleted"
 owed = "semantic publication streamed reasoning keeps nonstreamed text"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -16851,10 +16681,10 @@ lane = "L9c"
 laws = [
   "semantic_publication_preserves_identical_completed_reasoning_parts_and_turns",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/turn_streaming/observations.rs::semantic_publication_preserves_identical_completed_reasoning_parts_and_turns"
+status = "deleted"
 owed = "semantic publication preserves identical completed reasoning parts and turns"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -16866,10 +16696,10 @@ lane = "L9c"
 laws = [
   "rlm_provider_failure_after_prose_is_not_retried_or_committed",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/turn_streaming/observations.rs::rlm_provider_failure_after_prose_is_not_retried_or_committed"
+status = "deleted"
 owed = "rlm provider failure after prose is not retried or committed"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -16881,10 +16711,10 @@ lane = "L9c"
 laws = [
   "rlm_natural_prose_completion_is_single_copy_in_next_request",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/turn_streaming/observations.rs::rlm_natural_prose_completion_is_single_copy_in_next_request"
+status = "deleted"
 owed = "rlm natural prose completion is single copy in next request"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -16896,10 +16726,10 @@ lane = "L9c"
 laws = [
   "session_observation_envelopes_scope_activity_and_commit_to_the_turn",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/turn_streaming/observations.rs::session_observation_envelopes_scope_activity_and_commit_to_the_turn"
+status = "deleted"
 owed = "session observation envelopes scope activity and commit to the turn"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -16925,10 +16755,10 @@ lane = "L9c"
 laws = [
   "trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_event",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/turn_streaming/observations.rs::trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_event"
+status = "deleted"
 owed = "trimmed gap replacement cursor preserves unseen auxiliary event"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift; ignored on FIG-5322 (under load the gap's replacement cursor answers another gap)"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -16940,10 +16770,10 @@ lane = "L9c"
 laws = [
   "durable_revision_requires_replacement_evidence",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/turn_streaming/observations.rs::durable_revision_requires_replacement_evidence"
+status = "deleted"
 owed = "durable revision requires replacement evidence"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -16955,10 +16785,10 @@ lane = "L9c"
 laws = [
   "idle_session_reconnect_after_failed_append_yields_gap_without_another_commit",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/turn_streaming/observations.rs::idle_session_reconnect_after_failed_append_yields_gap_without_another_commit"
+status = "deleted"
 owed = "idle session reconnect after failed append yields gap without another commit"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -16970,10 +16800,10 @@ lane = "L9c"
 laws = [
   "snapshot_subscribe_has_only_two_histories",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/turn_streaming/observations.rs::snapshot_subscribe_has_only_two_histories"
+status = "deleted"
 owed = "snapshot subscribe has only two histories"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -16985,10 +16815,10 @@ lane = "L9c"
 laws = [
   "payload_authority_matches_revision_transition",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/turn_streaming/observations.rs::payload_authority_matches_revision_transition"
+status = "deleted"
 owed = "payload authority matches revision transition"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -17000,10 +16830,10 @@ lane = "L9c"
 laws = [
   "recoverable_chat_conformance_deduplicates_redelivery_identity",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/turn_streaming/observations.rs::recoverable_chat_conformance_deduplicates_redelivery_identity"
+status = "deleted"
 owed = "recoverable chat conformance deduplicates redelivery identity"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -17015,10 +16845,10 @@ lane = "L9c"
 laws = [
   "gap_replacement_then_continuation_after_unavailable_history",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/turn_streaming/observations.rs::gap_replacement_then_continuation_after_unavailable_history"
+status = "deleted"
 owed = "gap replacement then continuation after unavailable history"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -17030,10 +16860,10 @@ lane = "L9c"
 laws = [
   "gap_replacement_then_continuation_after_trimmed_history",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/turn_streaming/observations.rs::gap_replacement_then_continuation_after_trimmed_history"
+status = "deleted"
 owed = "gap replacement then continuation after trimmed history"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -17045,10 +16875,10 @@ lane = "L9c"
 laws = [
   "subscriber_lag_with_trimmed_suffix_forces_gap_then_continues",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/turn_streaming/observations.rs::subscriber_lag_with_trimmed_suffix_forces_gap_then_continues"
+status = "deleted"
 owed = "subscriber lag with trimmed suffix forces gap then continues"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -17060,10 +16890,10 @@ lane = "L9c"
 laws = [
   "recoverable_chat_conformance_disconnect_does_not_cancel_server_work",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/turn_streaming/observations.rs::recoverable_chat_conformance_disconnect_does_not_cancel_server_work"
+status = "deleted"
 owed = "recoverable chat conformance disconnect does not cancel server work"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations/attempt_reset.rs"
@@ -17075,10 +16905,10 @@ lane = "L9c"
 laws = [
   "remote_reset_and_transcript_projection_agree",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/turn_streaming/observations.rs::remote_reset_and_transcript_projection_agree"
+status = "deleted"
 owed = "remote reset and transcript projection agree"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/replica_feed.rs"
@@ -17150,10 +16980,10 @@ laws = [
   "a_facade_host_wraps_the_rlm_factory_and_its_stores_on_sqlite_file",
   "a_facade_host_wraps_the_rlm_factory_and_its_stores_on_postgres",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/tests/integration/facade_host_wrappers.rs"
+status = "deleted"
 owed = "a facade host wraps the rlm factory and its stores on sqlite memory; and 2 more law(s) of the file, by test name"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed)"
+note = "FIG-5307 re-wrote the laws on the durable backend in the integration target (crates/lash/tests/integration/facade_host_wrappers.rs): each forward of the host's RLM factory hands on exactly one engine and the host's StoreSet wraps every store, on SQLite memory and file; the PostgreSQL legs need a server"
 
 [[row]]
 path = "crates/lash/tests/replay_after_advance.rs"
@@ -19728,10 +19558,10 @@ lane = "L9f"
 laws = [
   "lifted_process_display_name_does_not_change_the_oracle_verdict",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/runner/agent_contracts_payload_tests.rs::lifted_process_display_name_does_not_change_the_oracle_verdict"
+status = "deleted"
 owed = "a host-declared display label on a lifted process is what observation records and does not change the lifted-process oracle verdict"
-note = "FIG-5190 follow-up deleted this test: it replays a contract on the durable engine, whose backend is not assembled yet (FIG-5194). blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5307 restored the law: it replays the contract world on the durable engine and passes"
 
 [[row]]
 path = "crates/lash-sim/src/oracles/tests/contract_checks.rs"
@@ -19743,10 +19573,10 @@ lane = "L9f"
 laws = [
   "scenario_contract_oracles_emit_one_named_verdict_per_contract",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/oracles/tests/contract_checks.rs::scenario_contract_oracles_emit_one_named_verdict_per_contract"
+status = "deleted"
 owed = "each scenario contract oracle emits exactly one verdict named for its contract"
-note = "FIG-5190 follow-up deleted this test: it replays a contract on the durable engine, whose backend is not assembled yet (FIG-5194). blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5307 restored the law from 5a64db23e0^ with its fixtures (fixtures_and_interleaving.rs): every contract fixture replays on the durable engine (the agent.durable_input_suspension_resolution fixture since FIG-5337), and agent.started_process_subagent_spawn is agent.started_process_child_spawn since FIG-5296"
 
 [[row]]
 path = "crates/lash-sim/src/oracles/tests/contract_checks.rs"
@@ -19758,10 +19588,10 @@ lane = "L9f"
 laws = [
   "scenario_contract_generated_facts_fail_on_contract_specific_mutations",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/oracles/tests/contract_checks.rs::scenario_contract_generated_facts_fail_on_contract_specific_mutations"
+status = "deleted"
 owed = "each contract's generated facts fail when mutated in a way specific to that contract"
-note = "FIG-5190 follow-up deleted this test: it replays a contract on the durable engine, whose backend is not assembled yet (FIG-5194). blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5307 restored the law from 5a64db23e0^ with its fixtures (fixtures_and_interleaving.rs): every contract fixture replays on the durable engine (the agent.durable_input_suspension_resolution fixture since FIG-5337), and agent.started_process_subagent_spawn is agent.started_process_child_spawn since FIG-5296"
 
 [[row]]
 path = "crates/lash-sim/src/oracles/tests/contract_checks.rs"
@@ -19773,10 +19603,10 @@ lane = "L9f"
 laws = [
   "state_machine_semantic_oracle_checks_contract_outcomes_not_presence",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/oracles/tests/contract_checks.rs::state_machine_semantic_oracle_checks_contract_outcomes_not_presence"
+status = "deleted"
 owed = "the state-machine semantic oracle checks contract outcomes, not the presence of facts"
-note = "FIG-5190 follow-up deleted this test: it replays a contract on the durable engine, whose backend is not assembled yet (FIG-5194). blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5307 restored the law from 5a64db23e0^ with its fixtures (fixtures_and_interleaving.rs): every contract fixture replays on the durable engine (the agent.durable_input_suspension_resolution fixture since FIG-5337), and agent.started_process_subagent_spawn is agent.started_process_child_spawn since FIG-5296"
 
 [[row]]
 path = "crates/lash-sim/src/oracles/tests/contract_checks.rs"
@@ -19788,10 +19618,10 @@ lane = "L9f"
 laws = [
   "coverage_oracles_are_failing_capable_not_presence_only",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/oracles/tests/contract_checks.rs::coverage_oracles_are_failing_capable_not_presence_only"
+status = "deleted"
 owed = "every coverage oracle can fail on a recorded run, not only on missing facts"
-note = "FIG-5190 follow-up deleted this test: it replays a contract on the durable engine, whose backend is not assembled yet (FIG-5194). blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5307 restored the law from 5a64db23e0^ with its fixtures (fixtures_and_interleaving.rs): every contract fixture replays on the durable engine (the agent.durable_input_suspension_resolution fixture since FIG-5337), and agent.started_process_subagent_spawn is agent.started_process_child_spawn since FIG-5296"
 
 [[row]]
 path = "crates/lash-sim/src/oracles/tests/contract_checks.rs"
@@ -19803,10 +19633,10 @@ lane = "L9f"
 laws = [
   "every_battery_slot_declares_the_one_oracle_id_its_verdict_uses",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/oracles/tests/contract_checks.rs::every_battery_slot_declares_the_one_oracle_id_its_verdict_uses"
+status = "deleted"
 owed = "every oracle battery slot's verdict uses exactly the one oracle id the slot declares"
-note = "FIG-5190 follow-up deleted this test: it replays a contract on the durable engine, whose backend is not assembled yet (FIG-5194). blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5307 restored the law from 5a64db23e0^ with its fixtures (fixtures_and_interleaving.rs): every contract fixture replays on the durable engine (the agent.durable_input_suspension_resolution fixture since FIG-5337), and agent.started_process_subagent_spawn is agent.started_process_child_spawn since FIG-5296"
 
 [[row]]
 path = "crates/lash-sim/src/oracles/tests/contract_checks.rs"
@@ -19818,10 +19648,10 @@ lane = "L9f"
 laws = [
   "one_memo_across_candidates_gives_the_verdicts_a_fresh_memo_would",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/oracles/tests/contract_checks.rs::one_memo_across_candidates_gives_the_verdicts_a_fresh_memo_would"
+status = "deleted"
 owed = "sharing one oracle memo across candidates gives the verdicts a fresh memo per candidate would"
-note = "FIG-5190 follow-up deleted this test: it replays a contract on the durable engine, whose backend is not assembled yet (FIG-5194). blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5307 restored the law from 5a64db23e0^ with its fixtures (fixtures_and_interleaving.rs): every contract fixture replays on the durable engine (the agent.durable_input_suspension_resolution fixture since FIG-5337), and agent.started_process_subagent_spawn is agent.started_process_child_spawn since FIG-5296"
 
 [[row]]
 path = "crates/lash-sim/src/runner/tests.rs"

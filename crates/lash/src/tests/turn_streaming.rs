@@ -1,6 +1,16 @@
 use super::*;
+use crate::TurnEvent;
+use crate::support::{
+    SessionObservationSubscription, SessionResume, TurnActivity, TurnInput, TurnOutcome,
+};
+use lash_core::llm::transport::LlmTransportError;
+use lash_core::llm::types::ResponseTextMeta;
+use lash_core::{SessionId, TurnId};
+
+use tokio::sync::{Mutex as TokioMutex, oneshot};
 
 mod builders_and_queue;
+mod control_and_cancel;
 mod observations;
 mod publication_gap;
 mod rlm_streaming;
@@ -137,5 +147,174 @@ impl ToolProvider for PendingAppTools {
             let _ = tx.send(key);
         }
         lash_core::ToolAttemptOutcome::Pending(lash_core::PendingCompletion::new())
+    }
+}
+
+/// A provider that calls `app_lookup` once, then answers "done".
+fn tool_roundtrip_provider() -> ProviderHandle {
+    let responses = Arc::new(tokio::sync::Mutex::new(std::collections::VecDeque::from([
+        LlmResponse {
+            parts: vec![LlmOutputPart::ToolCall {
+                call_id: "call-1".to_string(),
+                tool_name: "app_lookup".to_string(),
+                input_json: "{}".to_string(),
+                replay: None,
+            }],
+            response_metadata: Default::default(),
+            ..LlmResponse::default()
+        },
+        text_response("done"),
+    ])));
+    crate::testing::TestProvider::builder()
+        .kind("embed-test")
+        .complete(move |_request| {
+            let responses = Arc::clone(&responses);
+            async move { Ok(responses.lock().await.pop_front().expect("queued response")) }
+        })
+        .build()
+        .into_handle()
+}
+
+fn semantic_group_provider() -> ProviderHandle {
+    crate::testing::TestProvider::builder()
+        .kind("embed-test")
+        .complete(|_request| async move {
+            Ok(LlmResponse {
+                parts: vec![
+                    LlmOutputPart::Text {
+                        text: "first".to_string(),
+                        response_meta: Some(ResponseTextMeta {
+                            id: Some("assistant:first".to_string()),
+                            status: None,
+                            phase: None,
+                            ..ResponseTextMeta::default()
+                        }),
+                    },
+                    LlmOutputPart::Text {
+                        text: "second".to_string(),
+                        response_meta: Some(ResponseTextMeta {
+                            id: Some("assistant:second".to_string()),
+                            status: None,
+                            phase: None,
+                            ..ResponseTextMeta::default()
+                        }),
+                    },
+                ],
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            })
+        })
+        .build()
+        .into_handle()
+}
+
+fn retry_once_provider() -> ProviderHandle {
+    let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    crate::testing::TestProvider::builder()
+        .kind("retry-test")
+        .requires_streaming(true)
+        .options(lash_core::facade_support::ProviderOptions {
+            reliability: lash_core::provider::ProviderReliability::default()
+                .max_attempts(2)
+                .base_delay_ms(0)
+                .max_delay_ms(0),
+            ..lash_core::facade_support::ProviderOptions::default()
+        })
+        .complete(move |_request| {
+            let attempts = Arc::clone(&attempts);
+            async move {
+                if attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                    return Err(LlmTransportError::new("retry me").with_retry_verdict(
+                        lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
+                    ));
+                }
+                Ok(LlmResponse {
+                    parts: vec![LlmOutputPart::Text {
+                        text: "retried".to_string(),
+                        response_meta: None,
+                    }],
+                    response_metadata: Default::default(),
+                    ..LlmResponse::default()
+                })
+            }
+        })
+        .build()
+        .into_handle()
+}
+
+fn checkpoint_gated_provider(
+    entered_tx: oneshot::Sender<()>,
+    release_rx: oneshot::Receiver<()>,
+) -> ProviderHandle {
+    let entered_tx = Arc::new(std::sync::Mutex::new(Some(entered_tx)));
+    let release_rx = Arc::new(TokioMutex::new(Some(release_rx)));
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    crate::testing::TestProvider::builder()
+        .kind("checkpoint-gated")
+        .complete(move |request| {
+            let entered_tx = Arc::clone(&entered_tx);
+            let release_rx = Arc::clone(&release_rx);
+            let calls = Arc::clone(&calls);
+            async move {
+                let call = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if call == 0 {
+                    if let Some(tx) = entered_tx.lock_recover().take() {
+                        let _ = tx.send(());
+                    }
+                    if let Some(rx) = release_rx.lock().await.take() {
+                        let _ = rx.await;
+                    }
+                    Ok(text_response("first"))
+                } else {
+                    Ok(text_response(&format!(
+                        "after {}",
+                        last_user_text(&request)
+                    )))
+                }
+            }
+        })
+        .build()
+        .into_handle()
+}
+
+struct QueuedWorkHydrationProbeFactory {
+    builds: Arc<AtomicUsize>,
+}
+
+impl lash_core::facade_support::PluginFactory for QueuedWorkHydrationProbeFactory {
+    fn id(&self) -> &'static str {
+        "queued-work-hydration-probe"
+    }
+
+    fn build(
+        &self,
+        _ctx: &lash_core::facade_support::PluginSessionContext,
+    ) -> std::result::Result<
+        Arc<dyn lash_core::facade_support::SessionPlugin>,
+        lash_core::PluginError,
+    > {
+        self.builds.fetch_add(1, Ordering::SeqCst);
+        Ok(Arc::new(QueuedWorkHydrationProbePlugin))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for QueuedWorkHydrationProbeFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("queued-work-hydration-probe")
+    }
+}
+
+struct QueuedWorkHydrationProbePlugin;
+
+impl lash_core::facade_support::SessionPlugin for QueuedWorkHydrationProbePlugin {
+    fn id(&self) -> &'static str {
+        "queued-work-hydration-probe"
+    }
+
+    fn register(
+        &self,
+        _reg: &mut lash_core::facade_support::PluginRegistrar,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        Ok(())
     }
 }

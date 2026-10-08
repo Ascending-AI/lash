@@ -425,6 +425,29 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
+    name = "live_fault_park__test",
+    crate_features = [],
+    crate_name = "live_fault_park",
+    crate_root = "tests/live_fault_park.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-durable-test", "live_fault_park", "//crates/lash-durable-test:live_fault_park__test"),
+    extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    library = ":lash-durable-test",
+    library_crate_name = "lash_durable_test",
+    manifest_dir = "crates/lash-durable-test",
+    package_name = "lash-internal-durable-test",
+    rustc_env = {},
+    tags = [
+        "hermetic-postgres",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "live_stream_takeover__test",
     crate_features = [],
     crate_name = "live_stream_takeover",
