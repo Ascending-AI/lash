@@ -406,9 +406,11 @@ fn untimed_fixture_workers() -> crate::rlm::WorkerService {
     crate::rlm::WorkerService::new(config)
 }
 
+mod absent_session_delete;
 mod config_transactions;
 mod core_session_builder;
 mod crashed_create_drain;
+mod deleted_session_run_replay;
 mod deployment_and_testing_facade;
 mod direct_completion;
 #[cfg(feature = "rlm")]
