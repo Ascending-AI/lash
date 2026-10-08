@@ -273,13 +273,13 @@ SAME_NODES = """() => {
 }"""
 
 ORDER = """() => {
-  const occurrence = document.querySelector('#timeline .occurrence');
+  const event = document.querySelector('#timeline [data-key="msg:host-event-1"]');
   const reply = document.querySelector('#timeline .message.assistant');
   const code = document.querySelector('#timeline .code-block');
-  if (!occurrence || !reply || !code) return 'missing rows';
+  if (!event || !reply || !code) return 'missing rows';
   const before = (a, b) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
-  if (!before(code, occurrence)) return 'the press renders above the code block that ran before it';
-  if (!before(occurrence, reply)) return 'the press renders below the reply that began after it';
+  if (!before(code, event)) return 'the host event renders above the code block that ran before it';
+  if (!before(event, reply)) return 'the host event renders below the reply that began after it';
   return 'ok';
 }"""
 
@@ -347,21 +347,21 @@ def page_laws(browser, page_file: Path, artifacts: Path | None) -> Laws:
         bench.activity(turn, {"type": "code_block_completed", "language": "typescript", "output": "sunny", "duration_ms": 30,
                               "tool_call_ids": ["tc_1"]})
         page.wait_for_function("() => document.querySelector('#timeline .code-block .tool:not(.pending)')")
-        pressed = datetime.now(timezone.utc)
+        happened = datetime.now(timezone.utc)
         page.wait_for_timeout(300)
         if artifacts:
             page.screenshot(path=str(artifacts / "mid-turn-1440.png"), full_page=True)
-        # The press happened before the reply began; its workflow publishes it late.
+        # The host event happened before the reply began; it is published late.
         bench.activity(turn, {"type": "assistant_prose_delta", "text": "It will be ", "correlation_id": "p1"})
         page.wait_for_function("() => document.querySelector('#timeline .message.assistant')")
         bench.push_product({"type": "message", "message": {
-            "id": "trigger:press-1", "role": "event", "text": "red pressed", "at": iso(pressed),
-            "provenance": {"kind": "trigger_occurrence", "occurrence_id": "trigger:press-1", "process_ids": []}}})
+            "id": "host-event-1", "role": "event", "text": "connected mock account `inbox.work`",
+            "at": iso(happened)}})
         bench.activity(turn, {"type": "assistant_prose_delta", "text": "sunny.", "correlation_id": "p1"})
-        page.wait_for_function("() => document.querySelector('#timeline .occurrence')")
+        page.wait_for_function("() => document.querySelector('#timeline [data-key=\"msg:host-event-1\"]')")
         page.wait_for_timeout(100)
         if artifacts:
-            page.screenshot(path=str(artifacts / "trigger-before-reply-1440.png"), full_page=True)
+            page.screenshot(path=str(artifacts / "event-before-reply-1440.png"), full_page=True)
         live_order = page.evaluate(ORDER)
         live = page.evaluate(ROW_NODES)
         page.evaluate(CAPTURE)
@@ -386,7 +386,7 @@ def page_laws(browser, page_file: Path, artifacts: Path | None) -> Laws:
         settled = page.evaluate(ROW_NODES)
         settled_order = page.evaluate(ORDER)
         laws.check(live_order == "ok" and settled_order == "ok",
-                   "a press made before the reply renders above it, and stays there after settlement",
+                   "a host event made before the reply renders above it, and stays there after settlement",
                    f"live: {live_order}; settled: {settled_order}")
         changed = page.evaluate(SAME_NODES)
         laws.check(not changed, "the user row, reasoning, code block, tool row and reply are the same nodes before and after commit",

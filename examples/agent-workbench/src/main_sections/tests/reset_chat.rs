@@ -367,81 +367,15 @@ async fn deleting_a_chat_removes_only_its_row_and_hands_back_the_most_recent_one
     workbench.shutdown().await;
 }
 
-/// The cell that registers a trigger on the button: its target emits a
-/// process event and returns.
-pub(crate) const BUTTON_TRIGGER_REGISTRATION: &str = r#"<typescript>
-const remember = async (event: unknown) => {
-  await processes.emit({ value: { kind: "button_pressed", button: event.button, message: event.message } });
-  return { button: event.button, ok: true };
-};
-const handle = await triggers.register({
-  source: ui.button.pressed({}),
-  target: { definition: remember },
-  inputs: (event) => ({ event: event }),
-  name: "remembered"
-});
-finish("registered");
-</typescript>"#;
-
-/// Register [`BUTTON_TRIGGER_REGISTRATION`] in the current session with one
-/// turn.
-pub(crate) async fn register_button_trigger(state: &AppState) {
-    let session = state
-        .create_or_open_session(&state.current_session_id(), "test")
-        .await
-        .expect("open the session");
-    let output = session
-        .send(lash::TurnInput::text("register trigger"))
-        .output()
-        .await
-        .expect("register trigger turn");
-    assert_eq!(output.final_value(), Some(&json!("registered")));
-}
-
-/// A reset retires the old session with its trigger-started work, and hands
-/// the page a fresh session with no work, rows, graphs or accounts.
+/// A reset retires the old session and hands the page a fresh session with
+/// no work, rows, graphs or accounts.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn reset_chat_deletes_old_session_and_clears_trigger_started_work() {
-    let workbench = Workbench::replying(BUTTON_TRIGGER_REGISTRATION).await;
+async fn reset_chat_deletes_old_session_and_hands_back_a_fresh_one() {
+    let workbench = Workbench::silent().await;
     let state = &workbench.state;
     let old_session_id = state.current_session_id();
     let _deleted_session_events = state.event_tx.subscribe(&old_session_id);
     assert!(state.event_tx.contains(&old_session_id));
-    register_button_trigger(state).await;
-    let Json(pressed) = button_trigger(
-        State(state.clone()),
-        Query(SessionQuery::default()),
-        Json(ButtonEventRequest {
-            button: ButtonChoice::Red,
-            model: None,
-            model_variant: None,
-        }),
-    )
-    .await
-    .expect("press the button");
-    assert!(pressed.accepted);
-    let press = state
-        .messages_snapshot()
-        .into_iter()
-        .find(|message| message.role == "event")
-        .expect("the press is one row");
-    let Some(ChatMessageProvenance::TriggerOccurrence { process_ids, .. }) = press.provenance
-    else {
-        panic!("the press row names its occurrence: {press:?}");
-    };
-    assert_eq!(process_ids.len(), 1, "the press started the trigger's work");
-    let old_work_before_reset = state
-        .process_observer
-        .snapshot_for_session(&old_session_id)
-        .await
-        .expect("old work before reset");
-    assert_eq!(
-        old_work_before_reset
-            .visible_processes
-            .into_iter()
-            .collect::<Vec<_>>(),
-        process_ids
-    );
     state
         .mail_world
         .add_account("Reset Probe")

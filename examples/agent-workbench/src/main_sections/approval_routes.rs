@@ -1,37 +1,52 @@
 use super::*;
 use lash::SessionId;
 
-// Operator durable-wait discovery plus the separate, host-owned approval
-// routes. A wait key is not itself an approval request: approval context stays
-// in the workbench ledger below.
+// The host-owned approval routes. A pending approval is a parked call of the
+// approval tool; its context (arguments, requesting session) stays in the
+// workbench ledger.
 
-pub(crate) async fn list_session_waits(
-    State(state): State<AppState>,
-    AxumPath(session_id): AxumPath<String>,
-) -> Result<Json<Vec<String>>, AppError> {
-    let session_id = SessionId::parse(session_id)?;
-    state
-        .authorization
-        .authorize(WorkbenchAuthorizationAction::Observe {
-            session_id: session_id.clone(),
-        })?;
-    // Returned keys carry resolution authority. This example reuses its
-    // deployment-wide operator capability; production hosts should map the
-    // same requirement to their own session-aware authorization policy.
-    state
-        .authorization
-        .authorize(WorkbenchAuthorizationAction::ManageApprovals)?;
-    Ok(Json(
-        state
+/// Every pending approval: each live session's parked calls of the approval
+/// tool (`Completions::parked`), with the request its call recorded. A call
+/// whose wait settled or was revoked (its turn ended) is no longer parked,
+/// so it is no longer listed.
+pub(crate) async fn pending_approvals(
+    state: &AppState,
+) -> Result<Vec<approvals::PendingApproval>, AppError> {
+    let mut pending = Vec::new();
+    for view in state
+        .core
+        .sessions_filtered(lash::SessionListFilter {
+            deleted: Some(false),
+            ..Default::default()
+        })
+        .await
+        .map_err(AppError::internal)?
+    {
+        // Returned keys carry resolution authority: the caller authorized
+        // the deployment-wide operator capability.
+        for call in state
             .core
             .completions()
-            .parked(lash::admin::CallOwner::Session(session_id))
+            .parked(lash::admin::CallOwner::Session(view.session_id.clone()))
             .await
             .map_err(AppError::internal)?
-            .iter()
-            .map(|call| call.key.as_str().to_owned())
-            .collect(),
-    ))
+        {
+            if call.tool_id.as_str() != approvals::APPROVAL_TOOL_ID {
+                continue;
+            }
+            if let Some(request) = state
+                .approvals
+                .undecided(call.call_id.as_str())
+                .map_err(AppError::internal)?
+            {
+                pending.push(request);
+            }
+        }
+    }
+    pending.sort_by(|left, right| {
+        (left.requested_at_ms, &left.key).cmp(&(right.requested_at_ms, &right.key))
+    });
+    Ok(pending)
 }
 
 pub(crate) async fn list_approvals(
@@ -40,7 +55,7 @@ pub(crate) async fn list_approvals(
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::ManageApprovals)?;
-    Ok(Json(state.approvals.pending().map_err(AppError::internal)?))
+    Ok(Json(pending_approvals(&state).await?))
 }
 
 pub(crate) async fn approve_wait(
@@ -67,10 +82,8 @@ pub(crate) async fn decide_approval(
         .authorize(WorkbenchAuthorizationAction::ManageApprovals)?;
     let pending = state
         .approvals
-        .pending()
-        .map_err(AppError::internal)?
-        .into_iter()
-        .find(|approval| approval.key == key_id);
+        .undecided(key_id)
+        .map_err(AppError::internal)?;
     // The ledger row is the decision's durable record, so it is written first
     // and the wait resolution is derived from it. A crash between the two
     // writes leaves a decided row over an outstanding wait; the decided arm

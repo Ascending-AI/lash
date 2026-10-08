@@ -23,6 +23,7 @@ mod deferred_tools;
 mod e2e_live_budget;
 mod execution_graphs;
 mod failure_provider;
+mod host_triggers;
 mod mail;
 mod mcp_fixture;
 mod mcp_host;
@@ -46,7 +47,7 @@ use axum::body::Body;
 use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{Html, IntoResponse, Response};
-use axum::routing::{delete, get, post, put};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use base64::Engine as _;
 use chrono::Utc;
@@ -57,7 +58,6 @@ use lash::plugins::{
 };
 use lash::provider::ProviderHandle;
 use lash::sync::MutexExt;
-use lash::triggers::TriggerEvent;
 use lash::{
     LashCore, SessionSpec, TurnActivity, TurnActivitySink, TurnEvent,
     tracing::{
@@ -93,15 +93,6 @@ const AGENT_WORKBENCH_DELTA_FIRST_IMMEDIATE_ENV: &str = "AGENT_WORKBENCH_DELTA_F
 const MIN_CONTEXT_WINDOW_TOKENS: usize = 40_000;
 static WORKBENCH_CONTEXT_WINDOW_TOKENS: OnceLock<usize> = OnceLock::new();
 const OPENROUTER_API_KEY_ENV: &str = "OPENROUTER_API_KEY";
-pub(crate) const BUTTON_TRIGGER_RESOURCE: &str = "Button";
-pub(crate) const BUTTON_TRIGGER_ALIAS: &str = "ui.button";
-pub(crate) const BUTTON_TRIGGER_EVENT: &str = "pressed";
-pub(crate) const BUTTON_TRIGGER_SOURCE_TYPE: &str = "ui.button.pressed";
-pub(crate) const CRON_SCHEDULE_SOURCE_TYPE: &str = "cron.Schedule";
-pub(crate) const MAIL_EVENT_RESOURCE: &str = "Mail";
-pub(crate) const MAIL_EVENT_ALIAS: &str = "mail";
-pub(crate) const MAIL_EVENT_EVENT: &str = "received";
-pub(crate) const MAIL_RECEIVED_SOURCE_TYPE: &str = "mail.received";
 const DEFAULT_TOKIO_THREAD_STACK_BYTES: usize = 8 * 1024 * 1024;
 
 /// How long a cancel route stays attached waiting for a terminal before it

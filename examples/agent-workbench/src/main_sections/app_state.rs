@@ -486,14 +486,6 @@ pub(crate) fn trace_work_item(item: &WorkItem) -> Value {
         "created_at_ms": item.process.created_at_ms,
         "updated_at_ms": item.process.updated_at_ms,
         "input": item.process.input.clone(),
-        "events": item.events.iter().map(|event| {
-            json!({
-                "sequence": event.sequence,
-                "event_type": event.event_type.clone(),
-                "occurred_at_ms": event.occurred_at_ms,
-                "payload": event.payload.clone(),
-            })
-        }).collect::<Vec<_>>(),
     })
 }
 
@@ -703,11 +695,6 @@ pub(crate) fn work_item_from_observed(item: lash::process::ObservedWorkItem) -> 
     process.status_label = work_item_status_label(state, process.status_label);
     WorkItem {
         process,
-        events: item
-            .events
-            .into_iter()
-            .map(work_event_from_observed)
-            .collect(),
         state,
         kind,
         label,
@@ -745,15 +732,6 @@ pub(crate) fn work_process_from_observed(process: lash::process::ObservedProcess
             .map(compact_payload),
         child_session_id: process.child_session_id,
         label,
-    }
-}
-
-pub(crate) fn work_event_from_observed(event: lash::process::ObservedProcessEvent) -> WorkEvent {
-    WorkEvent {
-        sequence: event.sequence,
-        event_type: event.event_type,
-        occurred_at_ms: event.occurred_at_ms,
-        payload: compact_payload(event.payload),
     }
 }
 

@@ -77,17 +77,25 @@ fn typescript_prompt_programs() -> Vec<String> {
 
 /// The host surface the tutorials call, as the linker sees it.
 ///
-/// The trigger sources and their event types come from the Workbench's own
-/// declaration (`workbench_lashlang_resources`), so a change there is a change
-/// here. The tool modules are stated at the paths the real bindings produce —
+/// The tool modules are stated at the paths the real bindings produce —
 /// `with_tool_binding` writes the binding at the same path a TypeScript call
-/// uses.
+/// uses. `workbench.register_trigger` carries the shipped tool's own contract.
 fn workbench_link_environment() -> lash::rlm::lang::LashlangHostEnvironment {
-    let mut resources = workbench_lashlang_resources();
-    lash::rlm::lang::add_trigger_resource_operations(&mut resources)
-        .expect("trigger resource operations are unique");
-    lash::rlm::lang::add_trigger_register_tool_binding(&mut resources)
-        .expect("trigger register tool binding is unique");
+    let mut resources = lash::rlm::lang::LashlangHostCatalog::new();
+    let register = host_triggers::register_trigger_tool_definition();
+    let contract = register.contract();
+    resources
+        .add_module_operation_contract(
+            ["workbench"],
+            "Workbench",
+            "register_trigger",
+            register.manifest().id.to_string(),
+            &lash::rlm::lang::OperationContract::new(
+                contract.input_schema.canonical().clone(),
+                contract.output_schema.canonical().clone(),
+            ),
+        )
+        .expect("link the trigger registration operation");
     let modules: [(&[&str], &str, &[&str]); 5] = [
         (&["agents"], "Agents", &["spawn"]),
         (&["control"], "Control", &["continue_as"]),
@@ -145,26 +153,15 @@ fn workbench_link_environment() -> lash::rlm::lang::LashlangHostEnvironment {
 ///
 /// The module is catalogue presence, not an ability bit (ADR 0095): a session
 /// sees it only because `bootstrap` installs
-/// `SessionProcessAdminPluginFactory`, so this fixture declares exactly the
-/// operations that plugin binds, each carrying the shipped tool's own contract.
+/// `SessionProcessAdminPluginFactory`, so this fixture declares the
+/// operations the tutorials may call, each carrying the shipped tool's own
+/// contract.
 fn add_process_control_operations(resources: &mut lash::rlm::lang::LashlangHostCatalog) {
     for (operation, definition) in [
         (
             "start",
             lash::process_controls::process_tool_definition(
                 lash::process_controls::ProcessControlTool::Start,
-            ),
-        ),
-        (
-            "signal",
-            lash::process_controls::process_tool_definition(
-                lash::process_controls::ProcessControlTool::Signal,
-            ),
-        ),
-        (
-            "emit",
-            lash::process_controls::process_tool_definition(
-                lash::process_controls::ProcessControlTool::Emit,
             ),
         ),
         (
@@ -251,28 +248,8 @@ struct TutorialHost {
     environment: lash::rlm::lang::LashlangHostEnvironment,
 }
 
-/// The one subscription key the tutorial host hands back.
-const TUTORIAL_SUBSCRIPTION_KEY: &str = "workbench-tutorial-subscription";
-
-/// A registration handle shaped like the one the runtime returns.
-///
-/// `execute_trigger_command` (lash-lashlang-runtime) serializes the mutation
-/// receipt and adds `type`/`id`. What this fixture depends on is only what the
-/// ticket depends on: it is a plain record, and `subscription_key` is the
-/// string-formed field the tutorials render.
-fn tutorial_trigger_handle() -> serde_json::Value {
-    serde_json::json!({
-        "type": "trigger_handle",
-        "id": TUTORIAL_SUBSCRIPTION_KEY,
-        "subscription_key": TUTORIAL_SUBSCRIPTION_KEY,
-        "subscription_id": "workbench-tutorial-subscription-id",
-        "incarnation": "1",
-        "revision": 1,
-        "definition_fingerprint": "workbench-tutorial-fingerprint",
-        "enabled": true,
-        "disposition": "created"
-    })
-}
+/// The one subscription id the tutorial host hands back.
+const TUTORIAL_SUBSCRIPTION_ID: &str = "workbench-tutorial-subscription";
 
 /// The two field names a handle record carries.
 ///
@@ -336,13 +313,15 @@ impl TutorialHost {
         .manifest()
         .id
         .to_string();
-        if host_operation == lash::rlm::lang::REGISTER_TRIGGER_TOOL_ID {
-            return Ok(lash::rlm::lang::from_json(tutorial_trigger_handle()));
-        }
-        if host_operation == lash::rlm::lang::TriggerHostOperation::List.host_operation() {
-            return Ok(lash::rlm::lang::from_json(serde_json::json!([
-                tutorial_trigger_handle()
-            ])));
+        if host_operation
+            == host_triggers::register_trigger_tool_definition()
+                .manifest()
+                .id
+                .to_string()
+        {
+            return Ok(lash::rlm::lang::from_json(serde_json::json!({
+                "subscription_id": TUTORIAL_SUBSCRIPTION_ID
+            })));
         }
         if host_operation == "tool:create_process" {
             // Creation now takes source text. Keep the tutorial law's check
@@ -417,10 +396,9 @@ async fn run_tutorial(source: &str) -> Result<lash::rlm::lang::ExecutionOutcome,
 
 /// Every tutorial the prompt ships runs to a finish, with no `TS_` refusal.
 ///
-/// FIG-3211: the button-watcher tutorial ended in
-/// `finish("… `" + handle + "` …")`, and `triggers.register` returns a plain
-/// record, so the cell the prompt taught failed on its last line. Linking never
-/// saw it.
+/// FIG-3211: a tutorial ended in `finish("… `" + handle + "` …")` over a plain
+/// record, so the cell the prompt taught failed on its last line. Linking
+/// never saw it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_workbench_typescript_tutorials_run_without_a_dialect_refusal() {
     let programs = typescript_prompt_programs();
@@ -461,7 +439,7 @@ fn the_workbench_tutorials_never_print_a_registration_key() {
     );
     let quoting = finishes
         .iter()
-        .filter(|line| line.contains("subscription_key") || line.contains("handle"))
+        .filter(|line| line.contains("subscription_id") || line.contains("handle"))
         .collect::<Vec<_>>();
     assert!(
         quoting.is_empty(),

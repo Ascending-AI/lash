@@ -30,6 +30,8 @@ pub(crate) struct WorkbenchBuilder {
     event_tx: Option<SessionEventRegistry>,
     active_turns: Option<ActiveTurns>,
     tool_provider: Option<Arc<dyn lash::tools::ToolProvider>>,
+    approvals: Option<approvals::WorkbenchApprovals>,
+    host_triggers: Option<host_triggers::HostTriggers>,
 }
 
 impl Workbench {
@@ -45,6 +47,8 @@ impl Workbench {
             event_tx: None,
             active_turns: None,
             tool_provider: None,
+            approvals: None,
+            host_triggers: None,
         }
     }
 
@@ -60,6 +64,7 @@ impl Workbench {
 
     pub(crate) async fn shutdown(self) {
         self.state.cron.stop();
+        self.state.trigger_passes.stop();
         self.state
             .core
             .shutdown()
@@ -121,6 +126,20 @@ impl WorkbenchBuilder {
         self
     }
 
+    /// Keep approvals in `approvals`, e.g. the ledger an earlier workbench
+    /// kept: a restart over the same data directory.
+    pub(crate) fn approvals(mut self, approvals: approvals::WorkbenchApprovals) -> Self {
+        self.approvals = Some(approvals);
+        self
+    }
+
+    /// Keep triggers in `host_triggers`, e.g. the tables an earlier workbench
+    /// kept: a restart over the same data directory.
+    pub(crate) fn host_triggers(mut self, host_triggers: host_triggers::HostTriggers) -> Self {
+        self.host_triggers = Some(host_triggers);
+        self
+    }
+
     pub(crate) async fn build(self) -> Workbench {
         let stores: Arc<dyn lash::StoreSet> = match self.stores {
             Some(stores) => stores,
@@ -140,8 +159,12 @@ impl WorkbenchBuilder {
             model_variant: None,
         };
         let session_defaults = workbench_session_defaults(&selection, None);
-        let approvals =
-            approvals::WorkbenchApprovals::in_memory().expect("open the approval ledger");
+        let approvals = self.approvals.unwrap_or_else(|| {
+            approvals::WorkbenchApprovals::in_memory().expect("open the approval ledger")
+        });
+        let host_triggers = self.host_triggers.unwrap_or_else(|| {
+            host_triggers::HostTriggers::in_memory().expect("open the trigger tables")
+        });
         let live_replay = match self.live_replay {
             Some(store) => store,
             None => WorkbenchLiveReplay::from_environment()
@@ -162,6 +185,7 @@ impl WorkbenchBuilder {
             deferred_tools: deferred_tools::WorkbenchDeferredTools::in_memory()
                 .expect("open the deferred-tool grants"),
             approvals: approvals.clone(),
+            host_triggers: host_triggers.clone(),
             mcp: Arc::new(mcp),
             live_replay,
             #[cfg(feature = "e2e-tools")]
@@ -201,6 +225,7 @@ impl WorkbenchBuilder {
                 active_turns: self.active_turns.unwrap_or_default(),
                 mail_world: self.mail_world,
                 approvals,
+                host_triggers,
                 selected_llm_profile: selection,
                 trace_sink: Some(trace_sink),
                 lashlang_execution,

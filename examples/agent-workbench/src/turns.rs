@@ -7,8 +7,8 @@
 //! active-turn claim.
 //!
 //! The engine also starts runs nobody sent from here: a next-turn input, a
-//! process wake, a cron occurrence. A watch on each session this process
-//! serves follows those too, so every run's answer reaches the page.
+//! process-end notice. A watch on each session this process serves follows
+//! those too, so every run's answer reaches the page.
 
 use std::collections::HashSet;
 use std::panic::AssertUnwindSafe;
@@ -231,8 +231,8 @@ async fn resume_turn_follower(state: AppState, session_id: SessionId, turn_id: T
 }
 
 /// Who started a followed run: the page's send, or the engine on its own
-/// (a next-turn input, a wake, a cron occurrence). It names the follower's
-/// traces and the reason its cron resynchronisation reports.
+/// (a next-turn input, a process-end notice). It names the follower's traces
+/// and the reason its resynchronisation reports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FollowOrigin {
     UserTurn,
@@ -395,7 +395,7 @@ async fn follow_once(
 /// it ends when the session can no longer be opened.
 ///
 /// The watch subscribes before this returns, so a run the engine starts once
-/// the caller goes on — the send, wake or trigger it is about to admit — is one
+/// the caller goes on — the send or notice it is about to admit — is one
 /// the watch sees. An open that fails here is retried by the watch itself.
 pub(crate) async fn watch_session_runs(state: &AppState, session_id: &SessionId) {
     if !state.active_turns.follows.watch(session_id) {
@@ -453,7 +453,7 @@ async fn session_run_watch_task(
 /// How often an idle watch checks whether the session still has work.
 const WATCH_IDLE_CHECK: Duration = Duration::from_secs(1);
 /// Consecutive idle checks after which a watch ends: long enough for a
-/// process a trigger started to deliver its wake.
+/// session's next input to arrive.
 const WATCH_IDLE_CHECKS: u32 = 5;
 
 /// Follow each run the engine starts on `session_id` until the session has

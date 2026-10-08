@@ -9,6 +9,7 @@ fn workbench_plugin(factory: &WorkbenchPluginFactory) -> Arc<dyn SessionPlugin> 
         config_changes: factory.config_changes.clone(),
         deferred_tools: factory.deferred_tools.clone(),
         approvals: factory.approvals.clone(),
+        host_triggers: factory.host_triggers.clone(),
     })
 }
 

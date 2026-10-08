@@ -78,10 +78,6 @@ mod tool_control_tests;
 #[path = "tests/tool_loss.rs"]
 mod tool_loss_tests;
 #[cfg(test)]
-#[path = "tests/trigger_lifecycle.rs"]
-mod trigger_lifecycle_tests;
-#[cfg(test)]
-#[cfg(test)]
 #[path = "tests/typescript_dialect.rs"]
 mod typescript_dialect_tests;
 
@@ -131,7 +127,7 @@ mod ui_contract_tests;
 
 #[test]
 fn mail_received_account_contract_uses_slugs() {
-    const ACCOUNT_SLUG_CONTRACT: &str = "`mail.Received.account` carries the account SLUG, not its display name: use the slug from the account enumeration (for example `work` or `personal`), not a display name such as `Work`, when filtering deliveries.";
+    const ACCOUNT_SLUG_CONTRACT: &str = "`account` carries the account SLUG, not its display name: use the slug from the account enumeration (for example `work` or `personal`), not a display name such as `Work`, when filtering deliveries.";
 
     assert!(
         workbench_prompt().contains(ACCOUNT_SLUG_CONTRACT),
@@ -175,8 +171,8 @@ mod attachments_usage_tests;
 #[path = "tests/concurrent_send.rs"]
 mod concurrent_send_tests;
 #[cfg(test)]
-#[path = "tests/cron_schedule.rs"]
-mod cron_schedule_tests;
+#[path = "tests/host_primitives.rs"]
+mod host_primitives_tests;
 #[cfg(test)]
 #[path = "tests/no_progress_budget.rs"]
 mod no_progress_budget_tests;
@@ -192,9 +188,6 @@ mod session_fence_tests;
 #[cfg(test)]
 #[path = "tests/store_maintenance.rs"]
 mod store_maintenance_tests;
-#[cfg(test)]
-#[path = "tests/trigger_retention.rs"]
-mod trigger_retention_tests;
 
 /// FIG-5045: composer text always uses chat admission and model validation.
 #[test]
@@ -954,203 +947,6 @@ async fn inbox_authority_resolves_for_any_account_name() {
             1
         );
     }
-}
-
-fn press(button: ButtonChoice) -> Json<ButtonEventRequest> {
-    Json(ButtonEventRequest {
-        button,
-        model: None,
-        model_variant: None,
-    })
-}
-
-/// The `(occurrence_id, started_process_ids)` of every press `trace` saw.
-fn traced_presses(trace: &RecordingTrace) -> Vec<(String, Vec<lash::ProcessId>)> {
-    trace
-        .custom("button_trigger.trigger_occurrence")
-        .into_iter()
-        .map(|(_, payload)| {
-            (
-                payload["occurrence_id"]
-                    .as_str()
-                    .expect("the occurrence id")
-                    .to_string(),
-                serde_json::from_value(payload["started_process_ids"].clone())
-                    .expect("the started process ids"),
-            )
-        })
-        .collect()
-}
-
-/// A press selects the model it names and emits one button occurrence for
-/// its session, carrying the button, whose delivery starts the registered
-/// trigger's work.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_button_press_emits_its_occurrence_under_the_selected_model() {
-    let trace = Arc::new(RecordingTrace::default());
-    let workbench = Workbench::builder(replying_provider(
-        reset_chat_tests::BUTTON_TRIGGER_REGISTRATION,
-    ))
-    .trace_sink(Arc::clone(&trace) as Arc<dyn TraceSink>)
-    .build()
-    .await;
-    let state = &workbench.state;
-    let session_id = state.current_session_id();
-    reset_chat_tests::register_button_trigger(state).await;
-
-    let Json(accepted) = button_trigger(
-        State(state.clone()),
-        Query(SessionQuery::default()),
-        Json(ButtonEventRequest {
-            button: ButtonChoice::Blue,
-            model: Some("button-model".to_string()),
-            model_variant: Some("high".to_string()),
-        }),
-    )
-    .await
-    .expect("button command");
-    assert!(accepted.accepted);
-    let selected_llm_profile = state.selected_llm_profile();
-    assert_eq!(selected_llm_profile.model, "button-model");
-    assert_eq!(selected_llm_profile.model_variant.as_deref(), Some("high"));
-
-    let emitted = trace.custom("trigger.emit");
-    let [(emitted_session, emitted)] = emitted.as_slice() else {
-        panic!("one press is one emission: {emitted:?}");
-    };
-    assert_eq!(emitted_session.as_ref(), Some(&session_id));
-    assert_eq!(emitted["source_type"], json!(BUTTON_TRIGGER_SOURCE_TYPE));
-    assert_eq!(emitted["payload"]["button"], json!("Blue"));
-    let presses = traced_presses(&trace);
-    let [(_, started)] = presses.as_slice() else {
-        panic!("one press is one occurrence: {presses:?}");
-    };
-    assert_eq!(started.len(), 1, "the delivery starts the trigger's work");
-}
-
-/// FIG-5036: a press is one row, published with the occurrence it emitted,
-/// once however often it is published, stamped when the press happened and
-/// naming the processes it started so the page folds the woken work into it.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_button_press_is_one_row_published_by_its_occurrence() {
-    let trace = Arc::new(RecordingTrace::default());
-    let workbench = Workbench::builder(replying_provider(
-        reset_chat_tests::BUTTON_TRIGGER_REGISTRATION,
-    ))
-    .trace_sink(Arc::clone(&trace) as Arc<dyn TraceSink>)
-    .build()
-    .await;
-    let state = &workbench.state;
-    let session_id = state.current_session_id();
-    reset_chat_tests::register_button_trigger(state).await;
-
-    let Json(accepted) = button_trigger(
-        State(state.clone()),
-        Query(SessionQuery::default()),
-        press(ButtonChoice::Red),
-    )
-    .await
-    .expect("button command");
-    assert!(accepted.accepted);
-    let presses = traced_presses(&trace);
-    let [(occurrence_id, started)] = presses.as_slice() else {
-        panic!("one press is one occurrence: {presses:?}");
-    };
-    let rows = state
-        .messages_snapshot()
-        .into_iter()
-        .filter(|message| message.role == "event")
-        .collect::<Vec<_>>();
-    assert_eq!(rows.len(), 1, "the press is one row: {rows:?}");
-    assert_eq!(rows[0].id, *occurrence_id);
-    assert_eq!(rows[0].text, "red pressed");
-    assert!(matches!(
-        &rows[0].provenance,
-        Some(ChatMessageProvenance::TriggerOccurrence { occurrence_id: named, process_ids })
-            if named == occurrence_id && process_ids == started
-    ));
-
-    let report = lash::triggers::TriggerEmitReport {
-        occurrence_id: "trigger:workbench-button-trigger:press-1".to_string(),
-        deliveries: vec![lash::triggers::TriggerDeliveryEmitReceipt {
-            occurrence_id: "trigger:workbench-button-trigger:press-1".to_string(),
-            subscription_id: "trigger-subscription:watch".to_string(),
-            outcome: lash::triggers::TriggerDeliveryEmitOutcome::Started {
-                process_id: lash::ProcessId::fixture("p_watch"),
-            },
-        }],
-    };
-    for _ in 0..2 {
-        state.push_trigger_occurrence_for_session(
-            &session_id,
-            "red pressed",
-            &report,
-            "2026-06-02T12:00:00Z",
-        );
-    }
-    let republished = state
-        .messages_snapshot()
-        .into_iter()
-        .filter(|message| message.id == report.occurrence_id)
-        .collect::<Vec<_>>();
-    assert_eq!(
-        republished.len(),
-        1,
-        "one occurrence is one row: {republished:?}"
-    );
-    assert_eq!(
-        republished[0].at, "2026-06-02T12:00:00Z",
-        "the row is stamped when the press happened, not when it was published"
-    );
-    assert!(matches!(
-        &republished[0].provenance,
-        Some(ChatMessageProvenance::TriggerOccurrence { occurrence_id, process_ids })
-            if *occurrence_id == report.occurrence_id
-                && *process_ids == vec![lash::ProcessId::fixture("p_watch")]
-    ));
-}
-
-/// A trigger one build registered fires from the button route of a later
-/// build over the same stores: the subscription, its compiled artifacts and
-/// the process registry are read back from them.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn persisted_trigger_route_fires_after_reopening_the_core() {
-    let old = Workbench::replying(reset_chat_tests::BUTTON_TRIGGER_REGISTRATION).await;
-    let session_id = old.state.current_session_id();
-    reset_chat_tests::register_button_trigger(&old.state).await;
-    tokio::time::timeout(Duration::from_secs(30), old.state.core.drain())
-        .await
-        .expect("the old build drains")
-        .expect("the old build releases its sessions");
-
-    let trace = Arc::new(RecordingTrace::default());
-    let new = Workbench::builder(silent_provider())
-        .stores(Arc::clone(&old.stores))
-        .trace_sink(Arc::clone(&trace) as Arc<dyn TraceSink>)
-        .build()
-        .await;
-    let Json(accepted) = button_trigger(
-        State(new.state.clone()),
-        Query(SessionQuery {
-            session_id: Some(session_id),
-        }),
-        press(ButtonChoice::Blue),
-    )
-    .await
-    .expect("press the button on the reopened core");
-    assert!(accepted.accepted);
-    let presses = traced_presses(&trace);
-    let [(_, started)] = presses.as_slice() else {
-        panic!("one press is one occurrence: {presses:?}");
-    };
-    assert_eq!(started.len(), 1, "the persisted trigger delivers");
-    tokio::time::timeout(
-        Duration::from_secs(30),
-        new.state.core.processes().await_output(&started[0]),
-    )
-    .await
-    .expect("the trigger's process finishes in time")
-    .expect("trigger process should finish");
 }
 
 #[path = "tests/session_delete_faults.rs"]

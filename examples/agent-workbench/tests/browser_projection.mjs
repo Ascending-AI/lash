@@ -12,22 +12,9 @@ const source = html.match(
 )?.[1];
 assert.ok(source, "production projection state block is missing");
 
-const triggerIdentities = JSON.parse(
-  process.env.LASH_WORKBENCH_TRIGGER_IDENTITIES ?? "null",
-);
-assert.ok(
-  triggerIdentities,
-  "LASH_WORKBENCH_TRIGGER_IDENTITIES must come from the Rust projection gate",
-);
 const stopTerminal = JSON.parse(process.env.LASH_WORKBENCH_STOP_TERMINAL ?? "null");
 assert.ok(stopTerminal, "Stop terminal must come from the Rust projection gate");
 const stopReceipt = { accepted: true, cancellations: [{ terminal: stopTerminal }] };
-
-function expectedSubscriptionIdDetail(value) {
-  const prefix = "trigger-subscription:v2:blake3:";
-  assert.match(value, /^trigger-subscription:v2:blake3:[0-9a-f]{64}$/);
-  return `blake3:${value.slice(prefix.length, prefix.length + 10)}…`;
-}
 
 const context = { Set };
 vm.runInNewContext(
@@ -116,7 +103,6 @@ test("one running process is one row in the work rail", () => {
     String,
     Boolean,
     kindLabel: kind => String(kind),
-    eventLabel: event => String(event),
     formatTime: () => "",
     shortId: value => String(value).slice(0, 8),
     graphIndexByKey: new Map([["process:" + processId, { node_count: 7 }]]),
@@ -133,7 +119,6 @@ test("one running process is one row in the work rail", () => {
            lifecycle: "running",
            terminal: false,
          },
-         events: [],
        }],
        [{
          kind: "process",
@@ -162,7 +147,7 @@ test("a graph-only process still renders, and an incarnation is not needed to ma
   const rows = vm.runInNewContext(
     `${markedSource("WORKBENCH_EXECUTION_ROWS", "WORKBENCH_EXECUTION_ROWS")}
      executionRows(
-       [{ kind: "process", process: { process_id: "in-the-work-api", lifecycle: "running" }, events: [] }],
+       [{ kind: "process", process: { process_id: "in-the-work-api", lifecycle: "running" } }],
        [
          { kind: "process", graph_key: "process:in-the-work-api", title: "__process_dedup_me", node_count: 1 },
          { kind: "process", graph_key: "process:graph-only", title: "__process_keep_me", node_count: 2 },
@@ -174,7 +159,6 @@ test("a graph-only process still renders, and an incarnation is not needed to ma
       String,
       Boolean,
       kindLabel: kind => String(kind),
-      eventLabel: event => String(event),
       formatTime: () => "",
       shortId: value => String(value).slice(0, 8),
       graphIndexByKey: new Map(),
@@ -856,7 +840,7 @@ test("a successful response is what promotes the shell to session claims", () =>
   assert.equal(render.placeholderClass, "empty");
   assert.equal(render.placeholder, shell.timelinePlaceholder("live"));
 
-  // The hint ends in a working link to the view that fires a trigger: the same
+  // The hint ends in a working link to the triggers view: the same
   // setView("triggers") the sidebar entry calls.
   assert.equal(render.placeholderLink.textContent, "triggers page");
   render.placeholderLink.click();
@@ -1336,255 +1320,6 @@ test("the boot path bounds its snapshot request and retries it", () => {
   assert.match(html, /AbortSignal\.timeout\(timeoutMs\)/);
   assert.match(html, /function scheduleStateRetry\(\)/);
   assert.doesNotMatch(html, /renderNote\("transcript updates reconnecting"\)/);
-});
-
-test("trigger registration controls use the payload subscription key", () => {
-  assert.doesNotMatch(html, /registration\.handle/);
-  assert.match(html, /registration\.subscription_key/);
-  assert.match(html, /dataset\.triggerSubscriptionKey/);
-});
-
-test("trigger registration rows separate display name, identity, and trigger key", () => {
-  const subscriptionIdA = triggerIdentities.session_a;
-  const subscriptionIdB = triggerIdentities.session_b;
-  const rowContext = {};
-  vm.runInNewContext(
-    `${markedSource(
-      "WORKBENCH_TRIGGER_REGISTRATION_PROJECTION",
-      "WORKBENCH_TRIGGER_REGISTRATION_PROJECTION",
-    )}
-     const shared = {
-       name: "shared-blue-watch",
-       source_type: "cron.Schedule",
-       source: {
-         $lash_host_descriptor_type: "cron.Schedule",
-         $lash_host_descriptor_value: { expr: "*/2 * * * * *", tz: "UTC" }
-       },
-       target: { label: "mirror_job", identity: { label: "ignored-fallback" } },
-       subscription_key: "derived/v2/content-address",
-       incarnation: "incarnation-a"
-     };
-     this.rows = [
-       triggerRegistrationRowModel({
-         ...shared,
-         subscription_id: ${JSON.stringify(subscriptionIdA)},
-         registrant_scope: "session:session-a"
-       }),
-       triggerRegistrationRowModel({
-         ...shared,
-         subscription_id: ${JSON.stringify(subscriptionIdB)},
-         registrant_scope: "session:session-b"
-       })
-     ];`,
-    rowContext,
-  );
-
-  assert.match(subscriptionIdA, /^trigger-subscription:v2:blake3:[0-9a-f]{64}$/);
-  assert.match(subscriptionIdB, /^trigger-subscription:v2:blake3:[0-9a-f]{64}$/);
-  assert.equal(rowContext.rows[0].name, "mirror_job ← cron.Schedule (every 2s)");
-  assert.equal(rowContext.rows[1].name, rowContext.rows[0].name);
-  assert.equal(
-    rowContext.rows[0].detail,
-    `alias shared-blue-watch · id ${expectedSubscriptionIdDetail(subscriptionIdA)} · trigger key v2/content-ad… · scope session:session-a · incarnation incarnation-…`,
-  );
-  assert.equal(
-    rowContext.rows[0].title,
-    `id ${subscriptionIdA} · trigger key derived/v2/content-address · scope session:session-a · alias shared-blue-watch · incarnation incarnation-a`,
-  );
-  assert.doesNotMatch(rowContext.rows[0].name, /shared-blue-watch/);
-  const detailId = (detail) => {
-    const id = detail.match(/(?:^|· )id ([^·]+)/)?.[1];
-    assert.ok(id, `the collapsed row must carry an id column: ${detail}`);
-    return id;
-  };
-  assert.notEqual(
-    detailId(rowContext.rows[0].detail),
-    detailId(rowContext.rows[1].detail),
-    "same-name, same-key registrations must render visibly distinct ids",
-  );
-});
-
-test("the registration alias is on the collapsed rail row, not only in the title", () => {
-  const context = {};
-  vm.runInNewContext(
-    `${markedSource(
-      "WORKBENCH_TRIGGER_REGISTRATION_PROJECTION",
-      "WORKBENCH_TRIGGER_REGISTRATION_PROJECTION",
-    )}
-     const base = {
-       source_type: "cron.Schedule",
-       source: {
-         $lash_host_descriptor_type: "cron.Schedule",
-         $lash_host_descriptor_value: { expr: "*/2 * * * * *", tz: "UTC" }
-       },
-       target: { label: "mirror_job" },
-       subscription_id: "trigger-subscription:v2:blake3:${"a".repeat(64)}",
-       subscription_key: "derived/v2/content-address",
-       incarnation: "incarnation-a"
-     };
-     this.named = triggerRegistrationRowModel({ ...base, name: "blue-watch" });
-     this.anonymous = triggerRegistrationRowModel({ ...base });
-     this.long = triggerRegistrationRowModel({
-       ...base,
-       name: "a-very-long-registration-alias-that-overflows"
-     });`,
-    context,
-  );
-
-  // The alias is the only human-memorable handle a registration has, and the
-  // row's display name is built from the target and the source, never from it.
-  assert.doesNotMatch(context.named.name, /blue-watch/);
-  assert.match(context.named.detail, /^alias blue-watch · id /);
-  assert.match(context.named.title, /· alias blue-watch ·/);
-  // An unnamed registration must not grow an "alias unknown" column.
-  assert.doesNotMatch(context.anonymous.detail, /alias/);
-  assert.match(context.anonymous.detail, /^id /);
-  // A long alias truncates like every other rail value rather than pushing the
-  // identities off the row.
-  assert.match(context.long.detail, /^alias a-very-long-registration… · id /);
-  // The expanded panel still carries the untruncated alias.
-  assert.equal(
-    context.long.full.find(([label]) => label === "alias")?.[1],
-    "a-very-long-registration-alias-that-overflows",
-  );
-});
-
-test("trigger detail truncation keeps the distinguishing suffix of namespaced values", () => {
-  const context = {};
-  vm.runInNewContext(
-    `${markedSource(
-      "WORKBENCH_TRIGGER_REGISTRATION_PROJECTION",
-      "WORKBENCH_TRIGGER_REGISTRATION_PROJECTION",
-    )}
-     this.scopeA = truncateTriggerScope("session:workbench-0f3a9d2c-aaaa-bbbb-cccc-111111111111");
-     this.scopeB = truncateTriggerScope("session:workbench-0f3a9d2c-aaaa-bbbb-cccc-222222222222");
-     this.hostScope = truncateTriggerScope("host");
-     this.futureId = truncateSubscriptionId(
-       "trigger-subscription:v3:sha256:9c4d0a71ee000000000000000000000000000000000000000000000000feedbeef"
-     );
-     this.rawCronElsewhere = triggerRegistrationSourceSummary({
-       source_type: "timer.Schedule",
-       source: {
-         $lash_host_descriptor_type: "timer.Schedule",
-         $lash_host_descriptor_value: { expr: "*/2 * * * * *" }
-       }
-     });`,
-    context,
-  );
-
-  // Same-prefix session scopes must stay visibly distinct after truncation.
-  assert.match(context.scopeA, /^session:…/);
-  assert.notEqual(context.scopeA, context.scopeB, "same-prefix scopes must render distinct tails");
-  assert.equal(context.hostScope, "host");
-  // An unrecognized (future-versioned) id keeps its distinguishing digest tail,
-  // never a constant head — the FIG-774 zero-bit truncation must not return.
-  assert.match(context.futureId, /feedbeef…?$|…feedbeef$/);
-  // The seconds-cron compaction is gated on cron.Schedule: other sources render raw.
-  assert.equal(context.rawCronElsewhere, "*/2 * * * * *");
-});
-
-test("trigger registration names preserve raw fallbacks and omit empty summaries", () => {
-  const fallbackContext = {};
-  vm.runInNewContext(
-    `${markedSource(
-      "WORKBENCH_TRIGGER_REGISTRATION_PROJECTION",
-      "WORKBENCH_TRIGGER_REGISTRATION_PROJECTION",
-    )}
-     const base = {
-       subscription_id: "trigger-subscription:v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-       subscription_key: "literal-key",
-       registrant_scope: "host:calendar",
-       incarnation: "9f2a5950-7fe8-4b51-b1d4-c47e43697b89"
-     };
-     this.raw = triggerRegistrationRowModel({
-       ...base,
-       source_type: "future.Schedule",
-       source: { $lash_host_descriptor_value: { expr: "rate(5m)" } },
-       target: { identity: { label: "fallback_job" } }
-     });
-     this.empty = triggerRegistrationRowModel({
-       ...base,
-       source_type: "ui.button.pressed",
-       source: {},
-       target: {}
-     });
-     this.generic = triggerRegistrationRowModel({
-       ...base,
-       source_type: "future.Source",
-       source: { first: 1, second: true, third: "visible-truncation" },
-       target: { label: "generic_job" }
-     });`,
-    fallbackContext,
-  );
-
-  assert.equal(
-    fallbackContext.raw.name,
-    "fallback_job ← future.Schedule (rate(5m))",
-  );
-  assert.match(fallbackContext.raw.detail, /scope host:calendar/);
-  assert.equal(fallbackContext.empty.name, "process ← ui.button.pressed");
-  assert.doesNotMatch(fallbackContext.empty.name, /\(/);
-  assert.equal(
-    fallbackContext.generic.name,
-    "generic_job ← future.Source (first 1 · second true · …)",
-  );
-});
-
-test("renderTriggers wires the projected name and detail into the rail", () => {
-  function element(tagName) {
-    return {
-      tagName,
-      children: [],
-      dataset: {},
-      append(...children) {
-        this.children.push(...children);
-      },
-      appendChild(child) {
-        this.children.push(child);
-      },
-      addEventListener() {},
-    };
-  }
-
-  const triggerCount = element("span");
-  const triggerRegistrations = element("div");
-  const renderContext = {
-    document: { createElement: element },
-    triggerCount,
-    triggerRegistrations,
-    setTriggerEnabled() {},
-    deleteTrigger() {},
-  };
-  vm.runInNewContext(
-    `${markedSource(
-      "WORKBENCH_TRIGGER_REGISTRATION_PROJECTION",
-      "WORKBENCH_TRIGGER_REGISTRATION_PROJECTION",
-    )}
-     ${markedSource(
-       "WORKBENCH_TRIGGER_REGISTRATION_RENDERING",
-       "WORKBENCH_TRIGGER_REGISTRATION_RENDERING",
-     )}
-     renderTriggers([{
-       enabled: true,
-       source_type: "cron.Schedule",
-       source: { $lash_host_descriptor_value: { expr: "*/2 * * * * *" } },
-       target: { label: "wired_job" },
-       subscription_id: ${JSON.stringify(triggerIdentities.wired)},
-       subscription_key: "wired-key",
-       registrant_scope: "session:wired-session",
-       incarnation: "wired-incarnation"
-     }]);`,
-    renderContext,
-  );
-
-  const row = triggerRegistrations.children[0];
-  assert.equal(triggerCount.textContent, "1");
-  assert.equal(row.children[0].textContent, "wired_job ← cron.Schedule (every 2s)");
-  assert.match(
-    row.children[1].textContent,
-    new RegExp(`^id ${expectedSubscriptionIdDetail(triggerIdentities.wired)}`),
-  );
-  assert.match(row.children[1].title, /trigger key wired-key/);
 });
 
 test("a typed model survives an intervening snapshot and is what the turn sends", () => {

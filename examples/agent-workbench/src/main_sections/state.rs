@@ -27,7 +27,6 @@ pub(crate) struct AppState {
     /// names it rather than reaching into the core for a store it did not
     /// choose.
     pub(crate) session_store_factory: Arc<dyn lash::persistence::DeploymentStore>,
-    pub(crate) trigger_store: Arc<dyn lash::triggers::TriggerStore>,
     pub(crate) process_observer: lash::process::ProcessWorkObserver,
     pub(crate) sessions: WorkbenchSessions,
     pub(crate) messages: Arc<Mutex<Vec<ChatMessage>>>,
@@ -39,7 +38,12 @@ pub(crate) struct AppState {
     pub(crate) active_turns: ActiveTurns,
     pub(crate) authorization: WorkbenchAuthorization,
     pub(crate) approvals: approvals::WorkbenchApprovals,
-    /// The `cron.Schedule` timer: the host, not lash, fires each tick.
+    /// The workbench's trigger tables: its subscriptions, occurrences and
+    /// deliveries.
+    pub(crate) host_triggers: crate::host_triggers::HostTriggers,
+    /// The trigger delivery and process-end notice passes.
+    pub(crate) trigger_passes: crate::host_triggers::TriggerPasses,
+    /// The `cron` source's timer: the host, not lash, fires each tick.
     pub(crate) cron: crate::cron::CronTimer,
 }
 
@@ -123,9 +127,8 @@ pub(crate) enum WorkbenchAuthorizationAction {
     /// Deployment-wide operator policy. Approval decisions are deliberately
     /// separate from chat/session participation.
     ManageApprovals,
-    /// Destructive, deployment-wide store-growth maintenance: trigger
-    /// occurrence reclamation, explicit tombstone forget, session-store vacuum,
-    /// and attachment reclamation. It is deliberately not session-scoped: no
+    /// Destructive, deployment-wide store-growth maintenance: session-store
+    /// vacuum and attachment reclamation. It is deliberately not session-scoped: no
     /// chat participant should ever be able to reach it, it deletes durable
     /// rows and bytes across sessions, and the caller owns the safety
     /// argument.
@@ -177,27 +180,14 @@ impl WorkbenchAuthorizer for AllowAllWorkbenchAuthorizer {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum ChatMessageProvenance {
-    TurnInput {
-        turn_id: TurnId,
-    },
-    TurnOutput {
-        turn_id: TurnId,
-    },
-    /// The one row a host trigger occurrence shows (a button press, a mail
-    /// delivery). It names the processes the occurrence started, so the page
-    /// folds the wake those processes cause, and the turn it starts, into
-    /// this row instead of rendering them as rows of their own (FIG-5036).
-    TriggerOccurrence {
-        occurrence_id: String,
-        process_ids: Vec<ProcessId>,
-    },
+    TurnInput { turn_id: TurnId },
+    TurnOutput { turn_id: TurnId },
 }
 
 impl ChatMessageProvenance {
-    pub(crate) fn turn_id(&self) -> Option<&TurnId> {
+    pub(crate) fn turn_id(&self) -> &TurnId {
         match self {
-            Self::TurnInput { turn_id } | Self::TurnOutput { turn_id } => Some(turn_id),
-            Self::TriggerOccurrence { .. } => None,
+            Self::TurnInput { turn_id } | Self::TurnOutput { turn_id } => turn_id,
         }
     }
 }
@@ -411,35 +401,6 @@ pub(crate) struct SessionListResponse {
 pub(crate) struct SessionDeleted {
     pub(crate) session_id: SessionId,
     pub(crate) successor_session_id: SessionId,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-pub(crate) enum ButtonChoice {
-    Red,
-    Blue,
-}
-
-impl ButtonChoice {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Red => "Red",
-            Self::Blue => "Blue",
-        }
-    }
-
-    pub(crate) fn lower(self) -> &'static str {
-        match self {
-            Self::Red => "red",
-            Self::Blue => "blue",
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct ButtonEventRequest {
-    pub(crate) button: ButtonChoice,
-    pub(crate) model: Option<String>,
-    pub(crate) model_variant: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -897,7 +858,7 @@ impl SessionEventRegistry {
             let owned_by_turn = message
                 .provenance
                 .as_ref()
-                .and_then(ChatMessageProvenance::turn_id)
+                .map(ChatMessageProvenance::turn_id)
                 .is_some_and(|owner| owner == turn_id);
             if owned_by_turn {
                 retired.insert(message.id.clone());
@@ -939,44 +900,6 @@ impl SessionEventRegistry {
     pub(crate) fn contains(&self, session_id: &SessionId) -> bool {
         self.senders.lock_recover().contains_key(session_id)
     }
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub(crate) struct TriggerEnabledRequest {
-    pub(crate) enabled: bool,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub(crate) struct WorkbenchTriggerRegistration {
-    // Keep these sibling names absent from the flattened core DTO: serde would
-    // otherwise emit duplicate JSON keys with order-dependent browser values.
-    #[serde(flatten)]
-    pub(crate) registration: lash::triggers::TriggerRegistration,
-    pub(crate) subscription_id: String,
-    pub(crate) registrant_scope: String,
-    /// When an occurrence last reserved a delivery for this registration.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) last_fired_at_ms: Option<u64>,
-}
-
-impl WorkbenchTriggerRegistration {
-    pub(crate) fn new(
-        record: &lash::triggers::TriggerSubscriptionRecord,
-        last_fired_at_ms: Option<u64>,
-    ) -> Self {
-        Self {
-            registration: lash::triggers::TriggerRegistration::from(record),
-            subscription_id: record.subscription_id.clone(),
-            registrant_scope: record.registrant_scope_id(),
-            last_fired_at_ms,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub(crate) struct TriggerMutationResponse {
-    pub(crate) changed: bool,
-    pub(crate) registration: Option<lash::triggers::TriggerRegistration>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1025,10 +948,10 @@ impl lash::process::ProcessEventSink for ChannelProcessEventSink {
 // Process work is now resolved through LashCore's substrate port.
 // The AppState no longer mirrors that driver as a second source of truth.
 
+/// One work rail card: a process's lifecycle status, never its events.
 #[derive(Debug, Serialize)]
 pub(crate) struct WorkItem {
     pub(crate) process: WorkProcess,
-    pub(crate) events: Vec<WorkEvent>,
     pub(crate) state: lash::process::ObservedWorkItemState,
     pub(crate) kind: String,
     pub(crate) label: String,
@@ -1048,14 +971,6 @@ pub(crate) struct WorkProcess {
     pub(crate) external_ref: Option<Value>,
     pub(crate) child_session_id: Option<SessionId>,
     pub(crate) label: String,
-}
-
-#[derive(Debug, Serialize)]
-pub(crate) struct WorkEvent {
-    pub(crate) sequence: u64,
-    pub(crate) event_type: String,
-    pub(crate) occurred_at_ms: u64,
-    pub(crate) payload: Value,
 }
 
 #[derive(Debug, Serialize)]

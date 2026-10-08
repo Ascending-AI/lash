@@ -133,7 +133,7 @@ async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_ta
             message
                 .provenance
                 .as_ref()
-                .and_then(ChatMessageProvenance::turn_id)
+                .map(ChatMessageProvenance::turn_id)
         })
         .cloned()
         .collect::<Vec<_>>();

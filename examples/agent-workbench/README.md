@@ -1,8 +1,8 @@
 # Agent Workbench
 
 A production-grade recoverable-chat host reference for RLM background
-processes, subagents, web tools, deferred-tool discovery, button triggers, and
-cron triggers. Its subagents are the host-written delegation tool of
+processes, subagents, web tools, deferred-tool discovery, human approvals, and
+mail and cron triggers the host builds from lash's primitives. Its subagents are the host-written delegation tool of
 [`examples/delegation`](../delegation/README.md): each child is created with
 the workbench's own session defaults, never copied from its parent.
 
@@ -137,7 +137,7 @@ Configuration is read from `.env` or the process environment:
   `verify_only` runs no DDL and refuses tables that differ from
   `crates/lash/postgres-live-replay-schema.sql`.
 - `AGENT_WORKBENCH_DATABASE_URL`: use the `lash-postgres-store` session, process,
-  trigger, artifact, and process-environment stores at this URL. Unset defaults to
+  artifact, and process-environment stores at this URL. Unset defaults to
   SQLite.
 - `AGENT_WORKBENCH_POSTGRES`: set to `1` to have the dev entrypoint start a managed
   Postgres 18 container and synthesize `AGENT_WORKBENCH_DATABASE_URL`.
@@ -192,15 +192,14 @@ background.
 Open the workbench at `http://127.0.0.1:3030` by default, or at the port passed
 to the `just` recipe.
 
-The browser UI has three work areas: the left rail contains red and blue trigger
-buttons, a cron schedule card, per-turn model controls, and the persisted session token
-ledger; the center
-pane is a chat/event stream; and the right rail polls the process registry for
-visible background work. A **chat / accounts** tab switch at the top of the
-center pane opens a dedicated mock-email view (see below). The buttons emit
-`ui.button.pressed` trigger occurrences. Ask the agent to schedule something and
-it can construct a typed `cron.Schedule` source; the cron card lists its
-registrations. Started background processes appear in the right rail. The rail is a
+The browser UI has three work areas: the left rail holds the sessions, the
+triggers and accounts pages, per-turn model controls, and the persisted session
+token ledger; the center pane is a chat/event stream; and the right rail polls
+the process registry for visible background work, showing each process's
+lifecycle status. The **triggers** page describes the two sources and lists
+this chat's registrations; ask the agent to schedule something or to watch the
+mail (see [Host trigger sources](#host-trigger-sources)). Started background
+processes appear in the right rail. The rail is a
 runtime-wide view, so a process remains visible after the session that started it is
 deleted or reset. Non-terminal cards expose **cancel**, which submits cooperative
 cancellation through `POST /api/work/{process_id}/cancel`; the resulting
@@ -239,22 +238,21 @@ preserved three-layer acceptance gates.
 ### Durable approval is host policy
 
 The resident `ops.apply_change` demo tool shows the approval pattern without
-adding an approval concept to Lash. The provider calls
-`AttemptContext::completion_key()`, writes the key, tool arguments, requesting
-session, and request time to the host-owned `<data-dir>/approvals.db`, and
-returns `ToolOutcome::Pending`. The right-rail approval ledger and
-`GET /api/approvals` list those waits; approve and deny actions resolve the
-existing key through `LashCore::completions()`.
+adding an approval concept to Lash. It is a deferring tool: the body calls
+`AttemptContext::completion_key()`, writes the key, tool arguments,
+requesting session, and request time to the host-owned
+`<data-dir>/approvals.db`, and returns `ToolOutcome::Pending`. The tool
+declares a short execution bound for that body and a park that lasts until the
+turn that asked ends (`ParkBound::UntilScopeEnd`), so an approval waits for a
+human as long as the turn does and never times out on its own.
 
-`GET /api/sessions/{session_id}/waits` separately demonstrates the
-deployment-administrative discovery read. It returns every currently
-registered, unresolved durable wait for that session, not approval requests;
-tool arguments, classification, and decision history remain in the approval
-ledger. The result is a concurrent snapshot, so a key can settle before an
-operator acts on it. Because each returned key carries the authority accepted
-by `Completions::resolve`, the example protects the route with both session
-observation and deployment-operator authorization; production hosts must apply
-their own equivalent policy.
+`GET /api/approvals` lists each live session's parked calls of this tool
+(`Completions::parked`) with the request the ledger recorded for each; a call
+whose wait settled or was revoked is no longer parked and no longer listed.
+Approve and deny write the decision to the ledger, then resolve the call's key
+through `LashCore::completions()`; a boot pass re-resolves decided rows a crash
+left unresolved. Returned keys carry resolution authority, so the routes
+require the deployment-operator authorization.
 
 Approval is host policy. Lash core will never grow a manifest approval flag or
 approval/revert API: hosts decide which tools need sign-off, how operators are
@@ -323,8 +321,8 @@ The lanes never share a broadcast channel. Internal observation, provider, and
 serialization failures are traced server-side; no raw error string is a
 product-stream variant. The UI renders stable safe failure copy.
 
-At a `continue_as` boundary, all old-frame assistant replies and trigger-driven
-inputs collapse by design; user chat rows persist across the switch.
+At a `continue_as` boundary, all old-frame assistant replies and process-end
+notices collapse by design; user chat rows persist across the switch.
 
 Provisional prose and reasoning are keyed by Lash correlation id. A
 `model_attempt_reset` retracts only the superseded chunks. Provisional rows
@@ -344,7 +342,7 @@ with a partial product log. The live agent row is always
 turn stops running rather than when a committed message happens to share its id,
 so a live/canonical pair is one row, never two. Which copy is canonical depends
 on how the turn terminated. A turn that finishes *as* an assistant message —
-bare prose, the shape a queued or wake turn reaches because it runs without
+bare prose, the shape a queued or notice turn reaches because it runs without
 `require_finish` — already has that reply committed by the runtime as the turn's
 terminal message under a runtime-minted id, and the workbench commits nothing on
 top of it. When that answer carries reasoning the copy is committed one layer
@@ -403,8 +401,7 @@ idempotent or split them into explicit durable process steps.
 
 Leaf providers use sealed `AttemptContext` and return versioned `ToolIntents`;
 Lash records the final attempt before realizing each declaration. Process
-starts, signalling, cancellation, and typed process-event emission are
-therefore declarations. A detached start records `on_parent_end: Abandon`;
+starts and cancellation are therefore declarations. A detached start records `on_parent_end: Abandon`;
 owned children use the default `Cancel`. Lash processes are cooperative and
 Lash deliberately has no hard-kill primitive; engines own kill semantics, so
 v1 records the deviation from Temporal's three-way Parent Close Policy as the
@@ -451,8 +448,7 @@ multi-account showcase:
 <typescript>
 const triage = async (box: Inbox) => {
   const items = await box.list({});
-  await processes.emit({ value: { kind: "triage", account: items.account, count: items.messages.length } });
-  return true;
+  return { account: items.account, count: items.messages.length };
 };
 
 const work = await processes.start({ definition: triage, args: { box: inbox.work } });
@@ -469,213 +465,59 @@ accounts, so a session persisted with a since-removed account's tools still
 reopens cleanly; the refresh then drops the stale entries, and executing one
 fails with the world's unknown-account error.
 
-Delivering a message is the third trigger
-source in the demo: the host appends it to the inbox and emits `mail.received`
-with payload `mail.Received { account: str, title: str, text: str }`. Like the
-button, the emission runs inside a durable execution scope so any registered
-trigger starts a durable process. Register an inbox concierge once and it fires on every delivery:
+## Host trigger sources
+
+Lash has no trigger API: the workbench's two sources, mail arrival and cron
+ticks, are its own, kept in `<data-dir>/host-triggers.db` (`src/host_triggers.rs`)
+and built from lash's primitives, each shown once:
+
+- **`call_id` dedup and caller context.** `workbench.register_trigger` is a host
+  tool. It upserts one subscription keyed by `AttemptContext::call_id()`, so a
+  redriven call registers once, records the caller's session from its owner,
+  checks the input mapping against the definition with the start-args check
+  (`LashCore::process_definitions().check_args`), and pins the definition
+  under a host pin so it outlives the frame that created it. Its `source` is
+  `{ kind: "mail" }` or `{ kind: "cron", expr, tz? }`; the event is passed in
+  the argument `event_arg` names, and `args` fixes the others. Event payloads
+  are the host's types: `{ account, title, text }` and `{ fired_at }`.
+- **`with_host_start_key` dedup.** A source firing records its occurrence and
+  one delivery per matching subscription in one host transaction. The delivery
+  pass then starts each delivery's process under the host start key
+  `{occurrence}:{subscription}`, with an environment the host chooses, and
+  binds the process id. The pass runs at boot first, so a crash between start
+  and bind is repaired: the key answers the process the first start made.
+  Delivered processes are host-originated and the workbench prunes only
+  session-originated processes, so no process is pruned before its delivery is
+  bound.
+- **Lifecycle cursor plus `send().id`.** The notice pass follows
+  `processes_changed_since`. When a delivered process reaches a terminal, it
+  sends the subscribing session one short input with id
+  `process-end:{process_id}`, then commits its cursor. A retried send after a
+  lost acknowledgement is the same input.
+
+The cron timer (`src/cron.rs`) reads the cron registrations every quarter
+second and fires, for each, the latest tick it has not passed yet; on boot that
+is the latest tick missed since the registration, once. A tick's occurrence id
+names the registration and the tick, and the mail tool's occurrence id names
+its call, so a repeated firing records nothing new. The triggers page lists
+the chat's registrations and deletes one; deleting a session deletes its
+registrations.
 
 ```text
 <typescript>
-const onMail = async (event: mail.Received) => {
-  const [work, personal] = await Promise.all([
-    inbox.work.list({}),
-    inbox.personal.list({})
-  ]);
-  await processes.emit({ value: {
-    kind: "mail_brief",
-    arrived_in: event.account,
-    title: event.title,
-    waiting: work.messages.length + personal.messages.length
-  } });
-  return true;
+const on_mail = await processes.create({ dialect: "typescript", source: `
+const on_mail = async (event: unknown) => {
+  return { arrived_in: event.account, title: event.title };
 };
-
-const handle = await triggers.register({
-  source: mail.received({}),
-  target: { definition: onMail },
-  inputs: (event) => ({ event }),
+` });
+await workbench.register_trigger({
+  source: { kind: "mail" },
+  definition: on_mail,
+  event_arg: "event",
   name: "inbox concierge"
 });
-finish(`Inbox concierge registered as \`${handle.subscription_key}\`.`);
+finish("Inbox concierge is watching every delivery.");
 </typescript>
-```
-
-This gives the demo three kinds of trigger source — a UI button trigger
-occurrence, an inbound email data occurrence, and a cron schedule tick — all
-activating durable processes through the same registry. Source constructors such
-as `cron.Schedule` and `mail.received` live in the plugin's
-`lashlang_resources()` hook. The button source is zero-config and exposed from
-its trigger declaration.
-
-The button source config is `{}`. Red/blue selection arrives in the event
-payload:
-
-```text
-<typescript>
-const onButton = async (event: ui.button.Pressed) => {
-  await processes.emit({ value: { kind: "button_pressed", button: event.button, message: event.message } });
-  return true;
-};
-
-const handle = await triggers.register({
-  source: ui.button.pressed({}),
-  target: { definition: onButton },
-  inputs: (event) => ({ event }),
-  name: "button watcher"
-});
-const registrations = await triggers.list({ name: "button watcher" });
-finish(
-  `Registered button watcher \`${handle.subscription_key}\`. ` +
-  `Active matching registrations: ${registrations.length}.`
-);
-</typescript>
-```
-
-The cron card is the schedule reference integration: there is no `schedule`
-syntax in the language and no UI tick button. The workbench plugin declares the `cron.Schedule` source; the cell
-builds a `cron.Schedule` value and registers it with the runtime trigger
-registry:
-
-```text
-<typescript>
-const dailyDigest = async (tick: cron.Tick) => {
-  await processes.emit({ value: { kind: "daily_digest_due", tick } });
-  return true;
-};
-
-const source = cron.Schedule({ expr: "0 8 * * *", tz: "UTC" });
-const handle = await triggers.register({
-  source,
-  target: { definition: dailyDigest },
-  inputs: (tick) => ({ tick }),
-  name: "daily_digest"
-});
-const registrations = await triggers.list({ target: { definition: dailyDigest } });
-finish(
-  `Registered daily digest \`${handle.subscription_key}\`. ` +
-  `Active matching registrations: ${registrations.length}.`
-);
-</typescript>
-```
-
-Lash has no scheduler: a host dispatches every trigger occurrence itself. The
-workbench runs its own `cron.Schedule` timer (`src/cron.rs`). Every quarter
-second it reads the enabled `cron.Schedule` registrations and, for each
-session's source, emits the latest tick it has not passed yet through the
-host trigger emit (`core.triggers().emit`), scoped to that session. The
-occurrence carries `cron.Tick { fired_at }`, and its idempotency key names the
-session, the source and the tick instant, so a second workbench over the same
-database, a restart or a retried emission lands each tick once. On boot the
-timer catches up the latest tick missed since the registration last changed,
-once. Because the timer reads the registration before it emits, a disable, a
-re-enable or a delete takes effect at the next tick, and a re-enabled
-schedule keeps its subscription. While no workbench runs, nothing ticks.
-
-Host wiring has two pieces: source constructors such as `cron.Schedule` and
-`mail.received` are declared through the plugin's `lashlang_resources()` hook,
-while the button is a zero-config source exposed by its trigger declaration. The
-button payload is validated by that registration:
-
-```rust
-fn schedule_config_type() -> lashlang::TypeExpr {
-    lashlang::TypeExpr::Object(vec![
-        lashlang::TypeField {
-            name: "expr".into(),
-            ty: lashlang::TypeExpr::Str,
-            optional: false,
-        },
-        lashlang::TypeField {
-            name: "tz".into(),
-            ty: lashlang::TypeExpr::Str,
-            optional: true,
-        },
-    ])
-}
-
-fn cron_tick_event_type() -> lashlang::NamedDataType {
-    lashlang::NamedDataType::object(
-        "cron.Tick",
-        vec![lashlang::TypeField {
-            name: "fired_at".into(),
-            ty: lashlang::TypeExpr::Str,
-            optional: false,
-        }],
-    )
-    .expect("valid cron tick type")
-}
-
-fn button_trigger_event_type() -> lashlang::NamedDataType {
-    lashlang::NamedDataType::object(
-        "ui.button.Pressed",
-        vec![
-            lashlang::TypeField {
-                name: "button".into(),
-                ty: lashlang::TypeExpr::union(vec![
-                    lashlang::TypeExpr::Enum(vec!["Red".into()]),
-                    lashlang::TypeExpr::Enum(vec!["Blue".into()]),
-                ]),
-                optional: false,
-            },
-            lashlang::TypeField {
-                name: "message".into(),
-                ty: lashlang::TypeExpr::Str,
-                optional: false,
-            },
-            lashlang::TypeField {
-                name: "pressed_at".into(),
-                ty: lashlang::TypeExpr::Str,
-                optional: false,
-            },
-        ],
-    )
-    .expect("valid button trigger event type")
-}
-
-fn mail_received_event_type() -> lashlang::NamedDataType {
-    lashlang::NamedDataType::object(
-        "mail.Received",
-        vec![
-            lashlang::TypeField {
-                name: "account".into(),
-                ty: lashlang::TypeExpr::Str,
-                optional: false,
-            },
-            lashlang::TypeField {
-                name: "title".into(),
-                ty: lashlang::TypeExpr::Str,
-                optional: false,
-            },
-            lashlang::TypeField {
-                name: "text".into(),
-                ty: lashlang::TypeExpr::Str,
-                optional: false,
-            },
-        ],
-    )
-    .expect("valid mail received event type")
-}
-
-fn workbench_lashlang_resources() -> lashlang::LashlangHostCatalog {
-    let mut resources = lashlang::LashlangHostCatalog::new();
-    resources.add_trigger_source_constructor(
-        ["cron", "Schedule"],
-        schedule_config_type(),
-        cron_tick_event_type(),
-    )
-    .expect("valid cron trigger source");
-    resources.add_trigger_source_constructor(
-        ["mail", "received"],
-        lashlang::TypeExpr::Object(vec![]),
-        mail_received_event_type(),
-    )
-    .expect("valid mail trigger source");
-    resources
-}
-
-reg.triggers().declare(
-    TriggerEvent::new("Button", "ui.button", "pressed", button_trigger_event_type()),
-)?;
 ```
 
 ## Conformance and projection gates
@@ -728,6 +570,5 @@ Usage is provider result data, metered at the host's provider seam (ADR 0127).
 
 The commented builder block in `src/main_sections/bootstrap.rs` demonstrates
 output retention, attachment limits and expiry, recovery lease and pass
-budgets, termination, abort drain grace, trigger route restoration, process
-observation, live replay and trace context. Those deployment policies are
+budgets, termination, abort drain grace, process observation, live replay and trace context. Those deployment policies are
 chosen before building the core; session changes use recorded commands.

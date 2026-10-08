@@ -377,38 +377,11 @@ async fn every_session_bound_route_refuses_a_retired_id_with_the_same_conflict()
             ),
         ),
         (
-            "POST /api/button-trigger",
-            Box::pin(
-                button_trigger(
-                    State(state.clone()),
-                    Query(query()),
-                    Json(ButtonEventRequest {
-                        button: ButtonChoice::Red,
-                        model: Some(TEST_MODEL.to_string()),
-                        model_variant: None,
-                    }),
-                )
-                .map_ok(drop),
-            ),
-        ),
-        (
             "GET /api/triggers",
             Box::pin(list_triggers(State(state.clone()), Query(query())).map_ok(drop)),
         ),
         (
-            "PUT /api/triggers/{key}/enabled",
-            Box::pin(
-                set_trigger_enabled(
-                    AxumPath("any-subscription".to_string()),
-                    State(state.clone()),
-                    Query(query()),
-                    Json(TriggerEnabledRequest { enabled: false }),
-                )
-                .map_ok(drop),
-            ),
-        ),
-        (
-            "DELETE /api/triggers/{key}",
+            "DELETE /api/triggers/{subscription_id}",
             Box::pin(
                 delete_trigger(
                     AxumPath("any-subscription".to_string()),

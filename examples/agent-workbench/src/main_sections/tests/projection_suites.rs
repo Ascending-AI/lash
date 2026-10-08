@@ -196,36 +196,17 @@ async fn canonical_rows_survive_every_registered_production_renderer() {
     );
 }
 
-/// The browser projection suite's env fixtures are pure typed values the
-/// facade produces: the subscription ids a host derives and the typed Stop
-/// terminal a cancel receipt carries. The suite pins the workbench's
-/// projection state and rail rendering over them.
+/// The browser projection suite's env fixture is a pure typed value the
+/// facade produces: the typed Stop terminal a cancel receipt carries. The
+/// suite pins the workbench's projection state and rail rendering over it.
 #[test]
 fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session_cursors() {
     let script =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/browser_projection.mjs");
-    let trigger_identities = json!({
-        "session_a": lash::triggers::deterministic_subscription_id(
-            &lash::triggers::TriggerOwnerScope::session("session-a"),
-            "derived/v2/content-address",
-        ),
-        "session_b": lash::triggers::deterministic_subscription_id(
-            &lash::triggers::TriggerOwnerScope::session("session-b"),
-            "derived/v2/content-address",
-        ),
-        "wired": lash::triggers::deterministic_subscription_id(
-            &lash::triggers::TriggerOwnerScope::session("wired-session"),
-            "wired-key",
-        ),
-    });
     let node = std::env::var_os("LASH_WORKBENCH_TEST_NODE").unwrap_or_else(|| "node".into());
     let output = std::process::Command::new(node)
         .arg("--test")
         .arg(script)
-        .env(
-            "LASH_WORKBENCH_TRIGGER_IDENTITIES",
-            trigger_identities.to_string(),
-        )
         .env(
             "LASH_WORKBENCH_STOP_TERMINAL",
             serde_json::to_string(&lash::TurnTerminal::Committed {

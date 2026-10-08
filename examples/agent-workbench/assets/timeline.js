@@ -1,7 +1,7 @@
 /* The workbench timeline: one keyed projection of a session, patched in place.
 
    Every row has one key, derived from typed provenance only (a turn id, an
-   input id, an occurrence id, a call id, a row id), never from display text.
+   input id, a call id, a row id), never from display text.
    The live form of a row and its committed form share that key, so a commit
    patches the node the reader is already looking at instead of replacing it.
 
@@ -93,7 +93,7 @@ function payloadSummaryLabel(kind, body) {
     + (lines > 1 ? " · " + lines + " lines" : "");
 }
 
-/* Long payloads — wake inputs, event bodies, raw errors — collapse to one
+/* Long payloads — event bodies, raw errors — collapse to one
    summary line. The body is a real, selectable, copyable block. */
 function payloadDisclosure(kind, text, opts = {}) {
   const body = !opts.verbatim && looksLikeJson(text) ? prettyJson(text) : String(text ?? "");
@@ -130,52 +130,19 @@ function timeStamp(value) {
   return stamp;
 }
 
-/* A process wake reaches the transcript as one opaque blob:
-     Background process wake / Process: <id> / Event: <type> #<n> /
-     Wake input: / <payload>
-   Parsed for display only — a labelled header, a copyable id and a collapsed
-   payload. Nothing keys, joins or places a row by this text. */
-function parseProcessWake(text) {
-  const lines = String(text || "").split("\n");
-  if (lines[0]?.trim() !== "Background process wake") return null;
-  const wake = { processId: "", event: "", input: "" };
-  let index = 1;
-  while (index < lines.length) {
-    const line = lines[index];
-    if (line.startsWith("Process: ")) { wake.processId = line.slice(9).trim(); index += 1; continue; }
-    if (line.startsWith("Event: ")) { wake.event = line.slice(7).trim(); index += 1; continue; }
-    if (line.startsWith("Wake input:")) { index += 1; }
-    break;
-  }
-  wake.input = lines.slice(index).join("\n");
-  return wake;
-}
-
 /* The one renderer for the system/process lane: a boxed, left-aligned,
    mono row that can never be mistaken for an agent reply. */
 function fillEventLane(node, body, kind, text, at) {
-  const wake = parseProcessWake(text);
   const head = el("div", "event-head");
   const kindLabelNode = el("span", "event-kind");
   const title = el("span", "event-title");
   const raw = String(text ?? "");
-  node.classList.toggle("wake", Boolean(wake));
-  if (wake) {
-    kindLabelNode.textContent = "process wake";
-    title.textContent = wake.event || "process.wake";
-  } else {
-    kindLabelNode.textContent = kind || "event";
-    title.textContent = raw.split("\n")[0] || "";
-  }
+  kindLabelNode.textContent = kind || "event";
+  title.textContent = raw.split("\n")[0] || "";
   head.append(kindLabelNode, title);
   const stamp = timeStamp(at);
   if (stamp) head.appendChild(stamp);
   body.appendChild(head);
-  if (wake) {
-    if (wake.processId) body.appendChild(valueRow("process", wake.processId, { max: 34 }));
-    if (wake.input.trim()) body.appendChild(payloadDisclosure("wake input", wake.input));
-    return;
-  }
   const rest = raw.split("\n").slice(1).join("\n");
   /* Committed event text is canonical prose, including JSON detail lines.
      Reformatting it would change what the transcript row says. */
@@ -526,7 +493,6 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
   const appliedObservations = new Set();
   const committedKeys = new Map();
   const committedCounters = new Map();
-  const occurrenceLinks = new Map();
   const admittedInputs = new Set();
   let pendingSends = 0;
   /* Every change takes the next epoch. A snapshot read that started at
@@ -931,50 +897,6 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
         patchAttachments(view, attachments);
       }
     },
-    occurrence: {
-      create() {
-        const node = el("div", "message event occurrence");
-        const body = el("div", "msg-body occurrence-body");
-        const head = el("div", "event-head");
-        const dot = el("span", "occurrence-dot");
-        const title = el("span", "event-title");
-        const outcome = el("span", "occurrence-outcome");
-        const detail = el("details", "occurrence-detail");
-        const summary = el("summary", "", "details");
-        const pre = document.createElement("pre");
-        detail.append(summary, pre);
-        head.append(dot, title, outcome);
-        body.appendChild(head);
-        node.appendChild(body);
-        return { node, head, dot, title, outcome, detail, pre, stamp: null, stampValue: "" };
-      },
-      patch(row, view) {
-        const message = row.sources.product?.message || {};
-        const provenance = message.provenance || {};
-        const occurrenceId = provenance.occurrence_id || message.id || "";
-        const link = occurrenceLinks.get(occurrenceId);
-        const processes = provenance.process_ids || [];
-        view.node.dataset.occurrenceId = occurrenceId;
-        view.node.dataset.processIds = processes.join(" ");
-        view.node.dataset.turnStarted = String(Boolean(link));
-        const tone = /^(red|blue)\b/.exec(message.text || "");
-        if (tone) view.dot.dataset.tone = tone[1];
-        view.title.textContent = message.text || "trigger occurrence";
-        view.outcome.textContent = link
-          ? "→ turn started"
-          : processes.length ? "" : "· nothing registered";
-        const lines = [["occurrence", occurrenceId], ...processes.map(id => ["process", id])];
-        if (link?.wakeInput) lines.push(["wake input", link.wakeInput]);
-        view.pre.textContent = lines.map(([key, value]) => key + ": " + value).join("\n");
-        if (String(message.at || "") !== view.stampValue) {
-          view.stampValue = String(message.at || "");
-          if (view.stamp) view.stamp.remove();
-          view.stamp = timeStamp(message.at);
-          if (view.stamp) view.head.appendChild(view.stamp);
-        }
-        if (view.detail.parentNode !== view.head || view.head.lastChild !== view.detail) view.head.appendChild(view.detail);
-      }
-    },
     retry: {
       create() {
         const node = el("div", "message event retry-status");
@@ -1217,14 +1139,11 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
 
   // ── sources ──
 
-  /* The product lane's rows: the UI-owned input, the live reply, a trigger
-     occurrence, and host event rows. Other roles without provenance are not
-     conversation rows of this lane. */
+  /* The product lane's rows: the UI-owned input, the live reply, and host
+     event rows. Other roles without provenance are not conversation rows of
+     this lane. */
   function productEntry(message) {
     const provenance = message?.provenance || {};
-    if (provenance.kind === "trigger_occurrence") {
-      return { key: `occ:${provenance.occurrence_id || message.id}`, kind: "occurrence" };
-    }
     if (message.role === "user" && provenance.kind === "turn_input") {
       return { key: `input:${provenance.turn_id}`, kind: "input", turnId: provenance.turn_id };
     }
@@ -1320,18 +1239,6 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
     hooks.turnActivity?.(event, turnId);
     if (!turnId) return;
     const state = turn(turnId);
-    if (event.type === "queued_work_started") {
-      for (const cause of event.causes || []) {
-        const causedBy = cause?.origin?.caused_by;
-        if (causedBy?.type !== "trigger_occurrence") continue;
-        occurrenceLinks.set(causedBy.occurrence_id, {
-          turnId,
-          wakeInput: parseProcessWake(cause.text)?.input?.trim() || ""
-        });
-        const occurrence = rows.get(`occ:${causedBy.occurrence_id}`);
-        if (occurrence) occurrence.dirty = true;
-      }
-    }
     if (event.type === "turn_input_applied") {
       for (const application of event.applications || []) {
         if (!application?.input_id) continue;
@@ -1575,7 +1482,6 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
     appliedObservations.clear();
     committedKeys.clear();
     committedCounters.clear();
-    occurrenceLinks.clear();
     admittedInputs.clear();
     pendingSends = 0;
     list.replaceChildren();

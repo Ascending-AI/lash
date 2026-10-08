@@ -183,13 +183,15 @@ pub(crate) fn configure_workbench_plugins(
     delegation: Arc<dyn PluginFactory>,
     deferred_tools: deferred_tools::WorkbenchDeferredTools,
     approvals: approvals::WorkbenchApprovals,
+    host_triggers: host_triggers::HostTriggers,
     mcp: Arc<dyn PluginFactory>,
 ) {
     plugins.push(Arc::new(
         WorkbenchPluginFactory::new()
             .with_mail_world(mail_world)
             .with_deferred_tools(deferred_tools)
-            .with_approvals(approvals),
+            .with_approvals(approvals)
+            .with_host_triggers(host_triggers),
     ));
     plugins.push(Arc::new(
         lash::process_controls::SessionProcessAdminPluginFactory::new(
@@ -244,6 +246,7 @@ pub(crate) struct WorkbenchCorePlugins {
     pub(crate) child_spec: SessionSpec,
     pub(crate) deferred_tools: deferred_tools::WorkbenchDeferredTools,
     pub(crate) approvals: approvals::WorkbenchApprovals,
+    pub(crate) host_triggers: host_triggers::HostTriggers,
     pub(crate) mcp: Arc<dyn PluginFactory>,
     /// The live replay store the core publishes to and its feeds tail.
     pub(crate) live_replay: Arc<dyn lash::observe::LiveReplayStore>,
@@ -269,6 +272,7 @@ pub(crate) async fn workbench_core_builder(
         child_spec,
         deferred_tools,
         approvals,
+        host_triggers,
         mcp,
         live_replay,
         #[cfg(feature = "e2e-tools")]
@@ -327,6 +331,7 @@ pub(crate) async fn workbench_core_builder(
             delegation,
             deferred_tools,
             approvals,
+            host_triggers,
             mcp,
         );
         #[cfg(feature = "e2e-tools")]
@@ -405,8 +410,8 @@ pub(crate) async fn build_workbench_core(
 }
 
 /// What the workbench keeps beside its core: its session defaults, roster,
-/// product events, turn routing, mail world, approvals, model selection and
-/// tracing.
+/// product events, turn routing, mail world, approvals, trigger tables, model
+/// selection and tracing.
 pub(crate) struct WorkbenchHost {
     pub(crate) session_defaults: lash::SessionSpec,
     pub(crate) sessions: WorkbenchSessions,
@@ -414,6 +419,7 @@ pub(crate) struct WorkbenchHost {
     pub(crate) active_turns: ActiveTurns,
     pub(crate) mail_world: mail::MailWorld,
     pub(crate) approvals: approvals::WorkbenchApprovals,
+    pub(crate) host_triggers: host_triggers::HostTriggers,
     pub(crate) selected_llm_profile: LlmProfileSelection,
     pub(crate) trace_sink: Option<Arc<dyn TraceSink>>,
     pub(crate) lashlang_execution: Arc<TraceLashlangGraphStore>,
@@ -430,12 +436,12 @@ pub(crate) fn workbench_app_state(
         .processes()
         .observer()
         .context("process observer was configured for the workbench core")?;
+    host.host_triggers.bind_core(core.clone());
     Ok(AppState {
         core,
         session_defaults: host.session_defaults,
         attachment_store: stores.attachment_store(),
         session_store_factory: stores.session_store_factory(),
-        trigger_store: stores.trigger_store(),
         process_observer,
         sessions: host.sessions,
         messages: Arc::new(Mutex::new(Vec::new())),
@@ -447,6 +453,8 @@ pub(crate) fn workbench_app_state(
         active_turns: host.active_turns,
         authorization: WorkbenchAuthorization::allow_all(),
         approvals: host.approvals,
+        host_triggers: host.host_triggers,
+        trigger_passes: host_triggers::TriggerPasses::default(),
         cron: crate::cron::CronTimer::new(stores.clock()),
     })
 }
@@ -454,9 +462,10 @@ pub(crate) fn workbench_app_state(
 /// What a workbench does before it serves: create its current session,
 /// reconcile the approvals decided while it was down, take up the turns a
 /// previous incarnation was following (the session's engine settles them
-/// whoever follows them) and the current session's runs, and start its
-/// `cron.Schedule` timer, which first catches up the ticks missed while no
-/// workbench ran.
+/// whoever follows them) and the current session's runs, start its trigger
+/// passes, whose first delivery pass starts and binds what a crash left
+/// unbound, and start its cron timer, which first catches up the ticks missed
+/// while no workbench ran.
 pub(crate) async fn start_workbench(state: &AppState) -> AnyhowResult<()> {
     state
         .ensure_current_session()
@@ -465,6 +474,7 @@ pub(crate) async fn start_workbench(state: &AppState) -> AnyhowResult<()> {
     reconcile_decided_approvals(state).await;
     turns::resume_turn_followers(state).await;
     turns::watch_session_runs(state, &state.current_session_id()).await;
+    state.trigger_passes.start(state.clone());
     state.cron.start(state.clone());
     Ok(())
 }
@@ -615,6 +625,8 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             .context("open workbench deferred-tool grants")?;
     let approvals = approvals::WorkbenchApprovals::open(data_dir.join("approvals.db"))
         .context("open workbench approval ledger")?;
+    let host_triggers = host_triggers::HostTriggers::open(data_dir.join("host-triggers.db"))
+        .context("open workbench trigger tables")?;
     // Freshness feed for appended process events (ADR 0017). The sink is a
     // freshness overlay on the durable event log, never truth: each event
     // arrives at least once, identified by its (process, sequence), and a
@@ -695,6 +707,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         child_spec: session_defaults.clone(),
         deferred_tools,
         approvals: approvals.clone(),
+        host_triggers: host_triggers.clone(),
         mcp: Arc::clone(&mcp_search) as Arc<dyn PluginFactory>,
         live_replay: WorkbenchLiveReplay::from_environment()?.store().await?,
         #[cfg(feature = "e2e-tools")]
@@ -717,13 +730,11 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     //     })
     //     .termination(lash::runtime::TerminationPolicy::default())
     //     .execution_budgets(lash::ExecutionBudgets::default())
-    //     .trigger_route_restorer(host_trigger_route_restorer)
     //     .process_observation_config(lash::process_observation::ProcessObservationConfig::default())
     //     .live_replay_store(Arc::new(lash::observe::InMemoryLiveReplayStore::new(
     //         lash::observe::InMemoryLiveReplayStoreConfig::default(),
     //     )))
     //     .trace_context(TraceContext::default());
-    // host_trigger_route_restorer is the host's Arc<dyn lash::triggers::TriggerRouteRestorer>.
     let core = build_workbench_core(
         &stores.stores,
         rlm_channel,
@@ -805,6 +816,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                 active_turns,
                 mail_world,
                 approvals,
+                host_triggers,
                 selected_llm_profile: LlmProfileSelection {
                     model,
                     model_variant: Some(model_variant),
@@ -841,7 +853,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .route("/assets/timeline.js", get(timeline_script))
         .route("/healthz", get(healthz))
         .route("/api/state", get(app_state))
-        .route("/api/sessions/{session_id}/waits", get(list_session_waits))
         .route("/api/approvals", get(list_approvals))
         .route("/api/approvals/{key}/approve", post(approve_wait))
         .route("/api/approvals/{key}/deny", post(deny_wait))
@@ -876,14 +887,8 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .route("/api/sessions", get(list_sessions).post(create_session))
         .route("/api/sessions/select", post(select_session))
         .route("/api/sessions/{session_id}", delete(delete_session))
-        .route("/api/button-trigger", post(button_trigger))
         .route("/api/triggers", get(list_triggers))
-        .route(
-            "/api/triggers/{subscription_key}/enabled",
-            put(set_trigger_enabled),
-        )
-        .route("/api/triggers/{subscription_key}", delete(delete_trigger))
-        .merge(trigger_occurrence_admin_routes())
+        .route("/api/triggers/{subscription_id}", delete(delete_trigger))
         // Deliberately absent from the UI, and deliberately unscheduled: see
         // the handler's contract.
         .route("/api/admin/store-maintenance", post(run_store_maintenance))
@@ -946,8 +951,9 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             .await
             .context("serve");
         let _ = host_shutdown.send(true);
-        // No tick is emitted into a core that is shutting down.
+        // Nothing is fired or delivered into a core that is shutting down.
         state.cron.stop();
+        state.trigger_passes.stop();
         serve_result
     }
     .await;

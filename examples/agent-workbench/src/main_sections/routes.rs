@@ -67,7 +67,7 @@ async fn read_state_snapshot(
     // Read after the product lane: a turn this reports as running has not
     // settled yet, so its `done` is still in (or after) the lane snapshot.
     let active_turn = state.active_turns.for_session(session_id);
-    let pending_approvals = state.approvals.pending().map_err(AppError::internal)?;
+    let pending_approvals = pending_approvals(state).await?;
     let observation = RemoteSessionObservation::from_core(lash::observe::SessionObservation {
         read_view,
         cursor: cursor.clone(),
@@ -400,38 +400,6 @@ pub(crate) async fn send_turn(
     Ok(Json(TurnAccepted::started(turn_id)))
 }
 
-pub(crate) async fn button_trigger(
-    State(state): State<AppState>,
-    Query(query): Query<SessionQuery>,
-    Json(request): Json<ButtonEventRequest>,
-) -> Result<Json<CommandAccepted>, AppError> {
-    // Side-effect ingress: the fence refuses before any message is pushed or
-    // any occurrence emitted for a retired session.
-    let session_id = state.admit_session(&query, "api.button_trigger").await?;
-    let turn_profile = llm_profile_selection_for_request(
-        &state.selected_llm_profile(),
-        request.model.as_deref(),
-        request.model_variant.as_deref(),
-    )?;
-    state.set_selected_llm_profile(turn_profile.clone());
-    state.trace_for_session(
-        &session_id,
-        "api.button_trigger.request",
-        json!({
-            "button": request.button,
-            "model": serde_json::to_value(&turn_profile).unwrap_or(Value::Null),
-        }),
-    );
-    // The press shows as one row, published once its occurrence has an
-    // identity (FIG-5036), stamped when the press happened.
-    let pressed_at = Utc::now().to_rfc3339();
-    let operation_id = format!("workbench-button-{}", uuid::Uuid::new_v4());
-    state
-        .emit_button_press(&session_id, request.button, pressed_at, &operation_id)
-        .await?;
-    Ok(Json(CommandAccepted { accepted: true }))
-}
-
 pub(crate) async fn list_accounts(
     State(state): State<AppState>,
 ) -> Json<Vec<mail::AccountSummary>> {
@@ -441,146 +409,33 @@ pub(crate) async fn list_accounts(
 pub(crate) async fn list_triggers(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
-) -> Result<Json<Vec<WorkbenchTriggerRegistration>>, AppError> {
+) -> Result<Json<Vec<host_triggers::Subscription>>, AppError> {
     let session_id = state.admit_session(&query, "api.triggers.list").await?;
-    let records = state
-        .trigger_store
-        .list_subscriptions(lash::triggers::TriggerSubscriptionFilter::for_session(
-            &session_id,
-        ))
-        .await
-        // Audited: first-party trigger-store reads have no session tombstone path or effect-controller boundary.
-        .map_err(AppError::internal)?;
-    let mut registrations = Vec::with_capacity(records.len());
-    for record in &records {
-        let last_fired_at_ms = state
-            .trigger_store
-            .list_deliveries_by_subscription_id(&record.subscription_id)
-            .await
-            // Audited: first-party trigger-store reads have no session tombstone path or effect-controller boundary.
-            .map_err(AppError::internal)?
-            .iter()
-            .map(|delivery| delivery.created_at_ms)
-            .max();
-        registrations.push(WorkbenchTriggerRegistration::new(record, last_fired_at_ms));
-    }
-    Ok(Json(registrations))
-}
-
-pub(crate) async fn set_trigger_enabled(
-    AxumPath(subscription_key): AxumPath<String>,
-    State(state): State<AppState>,
-    Query(query): Query<SessionQuery>,
-    Json(request): Json<TriggerEnabledRequest>,
-) -> Result<Json<TriggerMutationResponse>, AppError> {
-    let session_id = state.admit_session(&query, "api.triggers.enable").await?;
-    let record = trigger_record_for_session(&state, &session_id, &subscription_key).await?;
-    let changed = record.lifecycle.enabled() != request.enabled;
-    let command = if request.enabled {
-        lash::triggers::TriggerCommand::Enable {
-            owner_scope: record.owner_scope.clone(),
-            actor: lash::process::ProcessOriginator::session(lash::process::SessionScope::new(
-                &session_id,
-            )),
-            subscription_key: record.subscription_key.clone(),
-            expected_revision: record.revision,
-        }
-    } else {
-        lash::triggers::TriggerCommand::Disable {
-            owner_scope: record.owner_scope.clone(),
-            actor: lash::process::ProcessOriginator::session(lash::process::SessionScope::new(
-                &session_id,
-            )),
-            subscription_key: record.subscription_key.clone(),
-            expected_revision: record.revision,
-        }
-    };
-    let outcome = state
-        .trigger_store
-        .execute_command(
-            &format!("workbench-trigger-enabled-{}", uuid::Uuid::new_v4()),
-            command,
-        )
-        .await
-        // Audited: first-party trigger mutation stores return only local validation/backend PluginError values.
-        .map_err(AppError::internal)?
-        // Audited: TriggerOperationError carries only conflict, validation, or string-valued store failures.
-        .map_err(AppError::internal)?;
-    let lash::triggers::TriggerCommandOutcome::Mutation { receipt } = outcome else {
-        // Audited: this locally generated error guards an impossible command/outcome shape.
-        return Err(AppError::internal(
-            "trigger mutation returned a list outcome",
-        ));
-    };
-    state.trace_for_session(
-        &session_id,
-        "api.triggers.enabled",
-        json!({
-            "subscription_key": subscription_key,
-            "enabled": request.enabled,
-            "changed": changed,
-        }),
-    );
-    let registration = lash::triggers::TriggerRegistration::from(&receipt.record);
-    Ok(Json(TriggerMutationResponse {
-        changed,
-        registration: Some(registration),
-    }))
+    Ok(Json(state.trigger_subscriptions(&session_id)?))
 }
 
 pub(crate) async fn delete_trigger(
-    AxumPath(subscription_key): AxumPath<String>,
+    AxumPath(subscription_id): AxumPath<String>,
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
-) -> Result<Json<TriggerMutationResponse>, AppError> {
+) -> Result<Json<CommandAccepted>, AppError> {
     let session_id = state.admit_session(&query, "api.triggers.delete").await?;
-    let record = trigger_record_for_session(&state, &session_id, &subscription_key).await?;
-    state
-        .trigger_store
-        .execute_command(
-            &format!("workbench-trigger-delete-{}", uuid::Uuid::new_v4()),
-            lash::triggers::TriggerCommand::Delete {
-                owner_scope: record.owner_scope.clone(),
-                actor: lash::process::ProcessOriginator::session(lash::process::SessionScope::new(
-                    &session_id,
-                )),
-                subscription_key: record.subscription_key.clone(),
-                expected_revision: record.revision,
-            },
-        )
+    let deleted = state
+        .host_triggers
+        .delete(&session_id, &subscription_id)
         .await
-        // Audited: first-party trigger mutation stores return only local validation/backend PluginError values.
-        .map_err(AppError::internal)?
-        // Audited: TriggerOperationError carries only conflict, validation, or string-valued store failures.
         .map_err(AppError::internal)?;
-    let changed = true;
+    if !deleted {
+        return Err(AppError::not_found(format!(
+            "unknown trigger `{subscription_id}`"
+        )));
+    }
     state.trace_for_session(
         &session_id,
         "api.triggers.delete",
-        json!({ "subscription_key": subscription_key, "changed": changed }),
+        json!({ "subscription_id": subscription_id }),
     );
-    Ok(Json(TriggerMutationResponse {
-        changed,
-        registration: None,
-    }))
-}
-
-pub(crate) async fn trigger_record_for_session(
-    state: &AppState,
-    session_id: &SessionId,
-    subscription_key: &str,
-) -> Result<lash::triggers::TriggerSubscriptionRecord, AppError> {
-    let mut filter = lash::triggers::TriggerSubscriptionFilter::for_session(session_id);
-    filter.subscription_key = Some(subscription_key.to_string());
-    state
-        .trigger_store
-        .list_subscriptions(filter)
-        .await
-        // Audited: first-party trigger-store reads have no session tombstone path or effect-controller boundary.
-        .map_err(AppError::internal)?
-        .into_iter()
-        .next()
-        .ok_or_else(|| AppError::not_found(format!("unknown trigger `{subscription_key}`")))
+    Ok(Json(CommandAccepted { accepted: true }))
 }
 
 pub(crate) async fn add_account(
@@ -692,7 +547,7 @@ pub(crate) async fn inject_message(
     Json(request): Json<InjectMessageRequest>,
 ) -> Result<Json<CommandAccepted>, AppError> {
     // Side-effect ingress: the fence refuses before mail is delivered or any
-    // occurrence emitted for a retired session.
+    // occurrence recorded for a retired session.
     let session_id = state.admit_session(&query, "api.accounts.inject").await?;
     let turn_profile = llm_profile_selection_for_request(
         &state.selected_llm_profile(),
@@ -711,10 +566,13 @@ pub(crate) async fn inject_message(
         "api.accounts.inject",
         json!({ "account": slug, "title": message.title }),
     );
-    let operation_id = format!("workbench-mail-{}", uuid::Uuid::new_v4());
     state
-        .emit_mail_received(&session_id, &delivery, &operation_id)
-        .await?;
+        .host_triggers
+        .fire_mail(
+            &format!("mail:workbench-delivery-{}", uuid::Uuid::new_v4()),
+            &delivery,
+        )
+        .map_err(AppError::internal)?;
     Ok(Json(CommandAccepted { accepted: true }))
 }
 /// Retire `old_session_id` and report the session that replaced it.

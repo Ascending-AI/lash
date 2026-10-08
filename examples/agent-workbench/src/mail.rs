@@ -24,14 +24,11 @@ use std::{
     sync::{Arc, Mutex, RwLock},
 };
 
-use crate::MAIL_RECEIVED_SOURCE_TYPE;
 use async_trait::async_trait;
 use lash::tools::{
-    EmitTriggerIntent, ExecutionPolicy, ToolAttemptOutcome, ToolBinding, ToolCall, ToolContract,
-    ToolDeclaration, ToolDefinition, ToolDefinitionBindingExt, ToolIntent, ToolIntentKind,
-    ToolIntents, ToolManifest, ToolOutcome, ToolOutcomeDone, ToolProvider,
+    ExecutionPolicy, ToolAttemptOutcome, ToolBinding, ToolCall, ToolContract, ToolDefinition,
+    ToolDefinitionBindingExt, ToolManifest, ToolOutcome, ToolProvider,
 };
-use lash::triggers::{TriggerOccurrenceRequest, empty_trigger_source_key};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -52,7 +49,7 @@ impl MailMessage {
     }
 }
 
-/// One delivered mock message, used to build the `mail.received` trigger occurrence.
+/// One delivered mock message: the event a `mail` trigger delivers.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct MailDelivery {
     pub account: String,
@@ -236,39 +233,21 @@ impl MailWorld {
         Ok(delivered)
     }
 
-    /// The receipt and the declaration are produced together: there is no
-    /// point between them at which the row is durable and the emission is
-    /// merely hoped for. The caller returns both in one attempt outcome and
-    /// the intent executor emits after that outcome commits.
-    pub(crate) fn send_with_trigger(
+    /// Send under `call_id` and record its arrival as the `mail` source's
+    /// occurrence `mail:{call_id}`. Both halves are keyed by the call, so a
+    /// redriven call sends one message and records one occurrence.
+    pub(crate) fn send_and_fire(
         &self,
+        triggers: &crate::host_triggers::HostTriggers,
         call_id: &str,
-        owner: &lash::RuntimeOwner,
         slug: &str,
         args: &Value,
-    ) -> Result<(Value, ToolIntent), String> {
+    ) -> Result<Value, String> {
         let delivered = self.op_send_once(call_id, slug, args)?;
-        let payload = serde_json::to_value(&delivered.delivery).map_err(|err| err.to_string())?;
-        let source_key =
-            empty_trigger_source_key(MAIL_RECEIVED_SOURCE_TYPE).map_err(|err| err.to_string())?;
-        // Both halves of this key are stable under redrive: the tool-call
-        // replay key and the memoized message id. The trigger store therefore
-        // ingests one occurrence however often the declaration is re-executed.
-        let idempotency_key = format!("{call_id}:mail.received:{}", delivered.message.id);
-        let intent = ToolIntent::EmitTrigger(EmitTriggerIntent {
-            owner: owner.clone(),
-            request: TriggerOccurrenceRequest::new(
-                MAIL_RECEIVED_SOURCE_TYPE,
-                source_key,
-                payload,
-                idempotency_key,
-            )
-            .with_source(json!({})),
-        });
-        Ok((
-            json!({ "account": slug, "id": delivered.message.id }),
-            intent,
-        ))
+        triggers
+            .fire_mail(&format!("mail:{call_id}"), &delivered.delivery)
+            .map_err(|error| error.to_string())?;
+        Ok(json!({ "account": slug, "id": delivered.message.id }))
     }
 
     fn op_list(&self, slug: &str, _args: &Value) -> Result<Value, String> {
@@ -392,11 +371,6 @@ fn definition_for(slug: &str, display_name: &str, operation: &str) -> ToolDefini
         ),
         _ => ExecutionPolicy::Once,
     };
-    // A send declares its `mail.received` emission as a trigger intent.
-    let declaration = match operation {
-        "send" => ToolDeclaration::default().with_intents([ToolIntentKind::EmitTrigger]),
-        _ => ToolDeclaration::default(),
-    };
     ToolDefinition::raw(
         format!("tool:{name}"),
         name,
@@ -407,18 +381,18 @@ fn definition_for(slug: &str, display_name: &str, operation: &str) -> ToolDefini
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_execution_policy(execution_policy)
-    .with_declaration(declaration)
     .with_tool_binding(ToolBinding::new(["inbox", slug], operation).with_authority_type("Inbox"))
 }
 
 /// Dynamic provider: one `Inbox` authority per account, three operations each.
 pub(crate) struct MockMailProvider {
     world: MailWorld,
+    triggers: crate::host_triggers::HostTriggers,
 }
 
 impl MockMailProvider {
-    pub(crate) fn new(world: MailWorld) -> Self {
-        Self { world }
+    pub(crate) fn new(world: MailWorld, triggers: crate::host_triggers::HostTriggers) -> Self {
+        Self { world, triggers }
     }
 
     fn definitions(&self) -> Vec<ToolDefinition> {
@@ -492,19 +466,13 @@ impl ToolProvider for MockMailProvider {
         }
         // The call's `ToolCallId` is its idempotency key: the same across a
         // crash replay and a reported-failure retry.
-        match self.world.send_with_trigger(
+        match self.world.send_and_fire(
+            &self.triggers,
             call.context.call_id().as_str(),
-            &call.context.owner().runtime_owner(),
             &slug,
             call.args,
         ) {
-            // One attempt outcome carries the committed row and the declared
-            // emission. The row can no longer become durable without the
-            // `mail.received` occurrence that follows it.
-            Ok((receipt, intent)) => ToolAttemptOutcome::done(
-                ToolOutcomeDone::ok(receipt),
-                ToolIntents::v3(vec![intent]),
-            ),
+            Ok(receipt) => ToolOutcome::ok(receipt).into(),
             Err(message) => ToolOutcome::err_fmt(message).into(),
         }
     }
@@ -513,7 +481,6 @@ impl ToolProvider for MockMailProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash::SessionId;
 
     #[test]
     fn slugify_normalizes_names() {
@@ -558,59 +525,5 @@ mod tests {
             .op_delete("work", &json!({ "id": id }))
             .expect("delete");
         assert_eq!(world.account_summaries()[0].total, 0);
-    }
-
-    #[test]
-    fn send_commits_the_row_and_declares_its_emission_in_one_outcome() {
-        let world = MailWorld::new();
-        world.add_account("Work").expect("add work");
-        let args = json!({ "title": "Contract", "text": "Please review." });
-
-        let (receipt, intent) = world
-            .send_with_trigger(
-                "turn-1:call-1",
-                &lash::RuntimeOwner::Session(SessionId::from("session-1")),
-                "work",
-                &args,
-            )
-            .expect("send declares its emission");
-
-        assert_eq!(receipt, json!({ "account": "work", "id": "work-1" }));
-        assert_eq!(world.inbox("work").expect("work inbox").len(), 1);
-        assert_eq!(intent.kind(), lash::tools::ToolIntentKind::EmitTrigger);
-        let ToolIntent::EmitTrigger(declared) = intent else {
-            panic!("inbox send must declare a trigger emission")
-        };
-        assert_eq!(
-            declared.owner,
-            lash::RuntimeOwner::Session(lash::SessionId::from("session-1"))
-        );
-        assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);
-        assert_eq!(
-            declared.request.idempotency_key,
-            "turn-1:call-1:mail.received:work-1"
-        );
-
-        let (replayed_receipt, replayed_intent) = world
-            .send_with_trigger(
-                "turn-1:call-1",
-                &lash::RuntimeOwner::Session(SessionId::from("session-1")),
-                "work",
-                &args,
-            )
-            .expect("redriving the same call re-declares the same emission");
-        let ToolIntent::EmitTrigger(replayed) = replayed_intent else {
-            panic!("the redrive must declare a trigger emission")
-        };
-        assert_eq!(replayed_receipt, receipt);
-        assert_eq!(
-            replayed.request.idempotency_key,
-            declared.request.idempotency_key
-        );
-        assert_eq!(
-            world.inbox("work").expect("work inbox").len(),
-            1,
-            "the redrive neither redelivers nor forks the occurrence key"
-        );
     }
 }

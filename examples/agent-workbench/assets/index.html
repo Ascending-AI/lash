@@ -811,8 +811,6 @@
       letter-spacing: 0.02em;
       color: var(--ash-text);
     }
-    .message.event.wake { border-left-color: var(--sodium); }
-    .message.event.wake .event-kind { color: var(--sodium-soft); }
 
     .event-head {
       display: flex;
@@ -2197,62 +2195,6 @@
     }
     .source p code { font-size: var(--text-xs); color: var(--chalk-mid); }
 
-    .trigger-buttons {
-      display: flex;
-      gap: var(--space-sm);
-      margin-top: var(--space-xs);
-    }
-    .host-trigger {
-      --trigger-color: var(--error);
-      --trigger-line: var(--line-danger);
-      position: relative;
-      width: 5.5rem;
-      aspect-ratio: 1;
-      border: 0;
-      padding: 0;
-      background: none;
-      cursor: pointer;
-      display: grid;
-      place-items: center;
-      touch-action: manipulation;
-      -webkit-user-select: none;
-      user-select: none;
-    }
-    .host-trigger[data-button="Blue"] {
-      --trigger-color: var(--info);
-      --trigger-line: oklch(0.68 0.040 245 / 0.58);
-    }
-    .trigger-face {
-      position: absolute;
-      inset: 0.375rem;
-      border-radius: 50%;
-      background: var(--form-raised);
-      border: 1px solid var(--trigger-line);
-      display: grid;
-      place-content: center;
-      gap: var(--space-3xs);
-      font-family: var(--font-ui);
-      text-align: center;
-      transition: transform 120ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms ease-out;
-    }
-    .trigger-face strong {
-      font-size: var(--text-sm);
-      font-weight: 500;
-      letter-spacing: 0.16em;
-      text-transform: uppercase;
-      color: var(--trigger-color);
-    }
-    .trigger-face span {
-      font-size: var(--text-2xs);
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      color: var(--ash-text);
-    }
-    .host-trigger:hover .trigger-face { border-color: var(--trigger-color); }
-    .host-trigger:active .trigger-face { transform: scale(0.96); border-color: var(--sodium); }
-    .host-trigger:focus-visible .trigger-face { border-color: var(--sodium); }
-    .host-trigger[aria-disabled="true"] { cursor: not-allowed; filter: saturate(0.4) brightness(0.7); }
-
     .registration-list { display: grid; gap: var(--space-xs); }
     .trigger-registration {
       display: grid;
@@ -2265,7 +2207,6 @@
       background: var(--form);
       font-family: var(--font-ui);
     }
-    .trigger-registration[data-enabled="false"] { opacity: 0.6; }
     .trigger-registration-name {
       grid-column: 1;
       grid-row: 1;
@@ -2315,64 +2256,13 @@
     .inline-action:hover { color: var(--chalk); border-color: var(--line-strong); }
     .trigger-registration-actions button.danger:hover,
     .trigger-registration-actions button[data-armed="true"] { color: var(--error); border-color: var(--line-danger); }
-    .trigger-registration[data-expanded="true"] .trigger-registration-detail { display: none; }
-    .trigger-registration:not([data-expanded="true"]) .trigger-registration-full { display: none; }
-    .trigger-registration-full {
-      grid-column: 1 / -1;
-      display: grid;
-      gap: var(--space-2xs);
-      padding-top: var(--space-xs);
-      border-top: 1px solid var(--line);
-    }
 
-    /* ─── compact timeline rows: occurrences, queued batches, approvals ─── */
+    /* ─── compact timeline rows: queued batches, approvals ─── */
 
-    .message.event.occurrence,
     .message.event.queued-batch {
       padding: var(--space-2xs) var(--space-sm);
     }
-    .occurrence .event-head,
     .queued-batch .event-head { align-items: center; }
-    .occurrence-dot {
-      flex: none;
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--sodium);
-    }
-    .occurrence-dot[data-tone="red"] { background: var(--error); }
-    .occurrence-dot[data-tone="blue"] { background: var(--info); }
-    .occurrence-outcome { color: var(--ash-text); }
-    .occurrence[data-turn-started="true"] .occurrence-outcome { color: var(--lichen); }
-    .occurrence .event-head { flex-wrap: wrap; row-gap: 0; }
-    .occurrence .msg-time { margin-left: auto; }
-    .occurrence-detail { display: contents; }
-    .occurrence-detail > summary {
-      order: 9;
-      flex: none;
-      color: var(--ash-text);
-      cursor: pointer;
-      list-style: none;
-      font-size: var(--text-2xs);
-      letter-spacing: 0.04em;
-    }
-    .occurrence-detail > summary::-webkit-details-marker { display: none; }
-    .occurrence-detail > summary::before { content: "▸ "; color: var(--sodium); }
-    .occurrence-detail[open] > summary::before { content: "▾ "; }
-    .occurrence-detail > summary:hover { color: var(--chalk); }
-    .occurrence-detail > pre {
-      order: 10;
-      flex: 1 1 100%;
-      margin: var(--space-2xs) 0 0;
-      padding: var(--space-xs) var(--space-sm);
-      border-top: 1px solid var(--line);
-      color: var(--chalk-mid);
-      font-size: var(--text-2xs);
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      -webkit-user-select: all;
-      user-select: all;
-    }
     .queued-batch .inline-action { margin-left: auto; }
 
     .approval-card {
@@ -2823,7 +2713,7 @@
                     <label class="field">
                       <span>model</span>
                       <input id="modelInput" list="modelList" autocomplete="off" spellcheck="false"
-                             title="Provider model slug, e.g. z-ai/glm-5.3-flash. Applies to chat sends and button trigger occurrences." />
+                             title="Provider model slug, e.g. z-ai/glm-5.3-flash. Applies to chat sends." />
                       <datalist id="modelList"></datalist>
                       <small id="modelHint" class="field-hint" hidden></small>
                       <small id="modelPending" class="field-hint pending" hidden>edited · sends with the next turn</small>
@@ -2882,28 +2772,12 @@
           <h2 class="section-title" id="sourcesTitle">sources</h2>
           <ul class="source-list">
             <li class="source">
-              <div class="source-head"><code>ui.button.pressed</code></div>
-              <p>The red and blue buttons. A press emits one occurrence; a registration watching this source starts its process.</p>
-              <div class="trigger-buttons">
-                <button class="host-trigger" type="button" data-trigger-button data-button="Red"
-                        aria-label="Emit the red button trigger occurrence"
-                        title="Emit a red button trigger occurrence.">
-                  <span class="trigger-face"><strong>red</strong><span>fire</span></span>
-                </button>
-                <button class="host-trigger" type="button" data-trigger-button data-button="Blue"
-                        aria-label="Emit the blue button trigger occurrence"
-                        title="Emit a blue button trigger occurrence.">
-                  <span class="trigger-face"><strong>blue</strong><span>fire</span></span>
-                </button>
-              </div>
+              <div class="source-head"><code>cron</code></div>
+              <p>Ask the agent to schedule something. Each tick starts the registered process with <code>{ fired_at }</code>.</p>
             </li>
             <li class="source">
-              <div class="source-head"><code>cron.Schedule(...)</code></div>
-              <p>Ask the agent to schedule something. A registered cron trigger delivers <code>cron.Tick { fired_at }</code> to its target.</p>
-            </li>
-            <li class="source">
-              <div class="source-head"><code>mail.received</code></div>
-              <p>A message lands in a mock inbox, from the accounts view or <code>inbox.&lt;account&gt;.send</code>.</p>
+              <div class="source-head"><code>mail</code></div>
+              <p>A message lands in a mock inbox, from the accounts view or <code>inbox.&lt;account&gt;.send</code>. Each arrival starts the registered process with <code>{ account, title, text }</code>.</p>
             </li>
           </ul>
         </section>
@@ -3042,8 +2916,6 @@
     const injectNowButton = document.getElementById("injectNow");
     const queueNextButton = document.getElementById("queueNext");
     const stopButton = document.getElementById("stop");
-    const buttonTriggerButtons = Array.from(document.querySelectorAll("[data-trigger-button]"));
-    const triggerButtons = buttonTriggerButtons;
     const modelInput = document.getElementById("modelInput");
     const variantSelect = document.getElementById("variantSelect");
     const streamState = document.getElementById("streamState");
@@ -3599,7 +3471,7 @@
 
     function timelinePlaceholder(phase) {
       if (phase === "live") {
-        return "no turns yet. ask the agent something below, or fire a trigger from the triggers page.";
+        return "no turns yet. ask the agent something below, or see what it can watch on the triggers page.";
       }
       if (phase === "connecting") return "connecting to the workbench…";
       if (phase === "reconnecting") {
@@ -4022,9 +3894,6 @@
       attachButton.disabled = busy || attachmentUploadInFlight;
       injectNowButton.disabled = !busy || modelEmpty();
       queueNextButton.disabled = !busy || modelEmpty();
-      for (const button of triggerButtons) {
-        button.setAttribute("aria-disabled", String(modelEmpty()));
-      }
     }
 
     const STATUS_LABELS = {
@@ -4041,28 +3910,8 @@
       canceled: "stopped"
     };
 
-    const EVENT_LABELS = {
-      reasoning_delta: "thinking",
-      assistant_prose_delta: "writing reply",
-      queued_work_started: "queued work started",
-      tool_call_started: "tool started",
-      tool_call_completed: "tool finished",
-      code_block_started: "code started",
-      code_block_completed: "code finished",
-      final_value: "final value",
-      tool_value: "tool result",
-      retry_status: "retrying",
-      error: "error",
-      started: "started",
-      completed: "finished"
-    };
-
     function humanize(token) {
       return String(token || "").replaceAll("_", " ").trim();
-    }
-
-    function eventLabel(type) {
-      return EVENT_LABELS[type] || humanize(type) || "update";
     }
 
     function statusLabel(terminal) {
@@ -4711,51 +4560,7 @@
       }
     });
 
-    function fireButtonTrigger(event) {
-      const button = event.currentTarget;
-      if (button.getAttribute("aria-disabled") === "true") return;
-      if (modelEmpty()) { validateModel(); openModelMenu(); return; }
-      postTriggerCommand({ button: button.dataset.button, ...selectedModelPayload() });
-    }
-
-    async function postTriggerCommand(payload) {
-      try {
-        const response = await fetch("/api/button-trigger", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
-        if (!response.ok) {
-          await response.text();
-          renderError("the trigger could not be submitted");
-        }
-      } catch (_) {
-        renderError("the trigger could not be submitted");
-      } finally {
-        refreshWork();
-      }
-    }
-
-    for (const button of buttonTriggerButtons) {
-      button.addEventListener("click", fireButtonTrigger);
-    }
-
-    /* Expansion is view state the 1.4s poll must not destroy. Two guards:
-       an unchanged payload does not re-render at all, and a re-render restores
-       the rows the reader had opened. */
-    const expandedTriggerRows = new Set();
     let lastTriggerSignature = "";
-
-    function restoreTriggerExpansion() {
-      for (const row of triggerRegistrations.querySelectorAll(".trigger-registration")) {
-        if (!expandedTriggerRows.has(row.dataset.triggerSubscriptionKey)) continue;
-        row.dataset.expanded = "true";
-        const button = row.querySelector("[data-trigger-expand]");
-        if (!button) continue;
-        button.textContent = "hide identity";
-        button.setAttribute("aria-expanded", "true");
-      }
-    }
 
     async function loadTriggers() {
       try {
@@ -4766,144 +4571,23 @@
         if (signature === lastTriggerSignature) return;
         lastTriggerSignature = signature;
         renderTriggers(registrations);
-        restoreTriggerExpansion();
       } catch (_) { /* polling retries */ }
     }
 
-    // BEGIN WORKBENCH_TRIGGER_REGISTRATION_PROJECTION
-    function triggerRegistrationSourceConfig(registration) {
-      const source = registration.source;
-      if (!source || typeof source !== "object" || Array.isArray(source)) return null;
-      const descriptorValue = source.$lash_host_descriptor_value;
-      if (descriptorValue && typeof descriptorValue === "object" && !Array.isArray(descriptorValue)) {
-        return descriptorValue;
-      }
-      return source;
-    }
-
-    function triggerRegistrationSourceSummary(registration) {
-      const config = triggerRegistrationSourceConfig(registration);
-      if (!config) return "";
-      if (typeof config.expr === "string") {
-        if (registration.source_type === "cron.Schedule") {
-          const everySeconds = config.expr.match(/^\*\/(\d+) \* \* \* \* \*$/);
-          if (everySeconds) return "every " + everySeconds[1] + "s";
-        }
-        return typeof config.tz === "string" && config.tz
-          ? config.expr + " · " + config.tz
-          : config.expr;
-      }
-      const entries = Object.entries(config)
-        .filter(([key, value]) => !key.startsWith("$") && ["string", "number", "boolean"].includes(typeof value));
-      const summary = entries
-        .slice(0, 2)
-        .map(([key, value]) => key + " " + String(value))
-        .join(" · ");
-      return summary + (entries.length > 2 ? " · …" : "");
-    }
-
-    function truncateTriggerDetail(value, length) {
-      if (!value) return "unknown";
-      return value.length <= length ? value : value.slice(0, length) + "…";
-    }
-
-    // Tail truncation keeps the distinguishing suffix of namespaced values
-    // (session:<id>, derived/v2/<digest>, vN:<digest>); head truncation of
-    // those renders the constant prefix and makes every row look identical.
-    function truncateTriggerDetailTail(value, length) {
-      if (!value) return "unknown";
-      return value.length <= length ? value : "…" + value.slice(-length);
-    }
-
-    function truncateSubscriptionId(value) {
-      const prefix = "trigger-subscription:v2:blake3:";
-      if (!value) return "unknown";
-      if (value.startsWith(prefix)) {
-        return "blake3:" + truncateTriggerDetail(value.slice(prefix.length), 10);
-      }
-      return truncateTriggerDetailTail(value, 12);
-    }
-
-    function truncateSubscriptionKey(value) {
-      const derivedPrefix = "derived/v2/";
-      if (!value) return "unknown";
-      if (value.startsWith(derivedPrefix)) {
-        return "v2/" + truncateTriggerDetail(value.slice(derivedPrefix.length), 10);
-      }
-      // Author-supplied keys are human names whose head is the distinct part.
-      return truncateTriggerDetail(value, 12);
-    }
-
-    function truncateTriggerScope(value) {
-      if (!value) return "unknown";
-      const split = value.indexOf(":");
-      if (split < 0) return truncateTriggerDetail(value, 18);
-      const namespace = value.slice(0, split + 1);
-      const rest = value.slice(split + 1);
-      return namespace + (rest.length <= 10 ? rest : "…" + rest.slice(-8));
-    }
-
-    function triggerRegistrationScope(registration) {
-      const scope = registration.registrant_scope || "";
-      return scope
-        || (registration.registrant?.scope?.session_id
-          ? "session:" + registration.registrant.scope.session_id
-          : "")
-        || "unknown";
-    }
-
-    function triggerRegistrationRowModel(registration) {
-      const processName = registration.target?.label
-        || registration.target?.identity?.label
-        || "process";
-      const sourceType = registration.source_type || "trigger source";
-      const sourceSummary = triggerRegistrationSourceSummary(registration);
-      const subscriptionId = registration.subscription_id || "unknown";
-      const subscriptionKey = registration.subscription_key || "unknown";
-      const scope = triggerRegistrationScope(registration);
-      /* The alias is the only human-memorable handle a registration has, and
-         the row's display name is built from the target and the source, not
-         from it. Leaving it to the `title` attribute and the expanded panel
-         put it out of reach of anything reading the rail. */
-      const details = [];
-      if (registration.name) {
-        details.push(["alias", truncateTriggerDetail(registration.name, 24)]);
-      }
-      details.push(
-        ["id", truncateSubscriptionId(subscriptionId)],
-        ["trigger key", truncateSubscriptionKey(subscriptionKey)],
-        ["scope", truncateTriggerScope(scope)],
-        ["incarnation", truncateTriggerDetail(registration.incarnation, 12)]
-      );
-      const titleDetails = [
-        ["id", subscriptionId],
-        ["trigger key", subscriptionKey],
-        ["scope", scope]
-      ];
-      if (registration.name) titleDetails.push(["alias", registration.name]);
-      titleDetails.push(["incarnation", registration.incarnation || "unknown"]);
-      /* The untruncated projection. `detail` is the one-line convenience; this
-         is what the expanded row renders, one copyable value per line, so no
-         identity in the rail is reachable only as an ellipsis. */
-      const full = [
-        ["target", processName],
-        ["source", sourceType + (sourceSummary ? " (" + sourceSummary + ")" : "")],
-        ["id", subscriptionId],
-        ["trigger key", subscriptionKey],
-        ["scope", scope]
-      ];
-      if (registration.name) full.push(["alias", registration.name]);
-      full.push(["incarnation", registration.incarnation || "unknown"]);
-      return {
-        name: processName + " ← " + sourceType + (sourceSummary ? " (" + sourceSummary + ")" : ""),
-        detail: details.map(([label, value]) => label + " " + value).join(" · "),
-        title: titleDetails.map(([label, value]) => label + " " + value).join(" · "),
-        full
-      };
-    }
-    // END WORKBENCH_TRIGGER_REGISTRATION_PROJECTION
-
     // BEGIN WORKBENCH_TRIGGER_REGISTRATION_RENDERING
+    /* What a registration watches, in a few words. */
+    function triggerSourceSummary(source) {
+      if (!source || typeof source !== "object") return "a source";
+      if (source.kind === "mail") return "every mail";
+      if (source.kind === "cron") {
+        const expr = String(source.expr || "");
+        const everySeconds = expr.match(/^\*\/(\d+) \* \* \* \* \*$/);
+        const schedule = everySeconds ? "every " + everySeconds[1] + "s" : expr;
+        return "cron " + schedule + (source.tz ? " · " + source.tz : "");
+      }
+      return String(source.kind || "a source");
+    }
+
     function renderTriggers(registrations) {
       triggerCount.textContent = String(registrations.length);
       triggerCount.hidden = !registrations.length;
@@ -4916,104 +4600,38 @@
         return;
       }
       for (const registration of registrations) {
-        const subscriptionKey = registration.subscription_key;
-        const model = triggerRegistrationRowModel(registration);
+        const watched = triggerSourceSummary(registration.source);
         const row = document.createElement("div");
         row.className = "trigger-registration";
-        row.dataset.enabled = String(registration.enabled);
-        row.dataset.triggerSubscriptionKey = subscriptionKey;
-        row.dataset.expanded = "false";
-        /* A registration reads by the name it was given; what fires it and
-           what it starts follow on the line under it. */
-        const alias = String(registration.name || "").trim();
+        row.dataset.subscriptionId = registration.id;
+        /* A registration reads by the name it was given, else by what it
+           watches; the line under it says how the event reaches the process. */
         const name = document.createElement("span");
         name.className = "trigger-registration-name";
-        name.textContent = alias || model.name;
-        name.title = model.name;
+        name.textContent = String(registration.name || "").trim() || watched;
         const detail = document.createElement("span");
         detail.className = "trigger-registration-detail";
-        detail.textContent = model.detail;
-        detail.title = model.title;
-        const fired = document.createElement("span");
-        fired.className = "trigger-registration-fired";
-        const sourceSummary = triggerRegistrationSourceSummary(registration);
-        const firedBy = registration.source_type + (sourceSummary ? " (" + sourceSummary + ")" : "");
-        fired.textContent = (alias ? "on " + firedBy + " · " : "")
-          + (registration.enabled ? "" : "disabled · ")
-          + (registration.last_fired_at_ms
-            ? "last fired " + formatClockTime(registration.last_fired_at_ms)
-            : "never fired");
+        detail.textContent = "on " + watched + " · event as `" + registration.event_arg + "`";
+        const registered = document.createElement("span");
+        registered.className = "trigger-registration-fired";
+        registered.textContent = "registered " + formatClockTime(registration.created_at_ms);
         const actions = document.createElement("span");
         actions.className = "trigger-registration-actions";
-        const expand = document.createElement("button");
-        expand.type = "button";
-        expand.textContent = "identity";
-        expand.title = "Show the full, copyable registration identity";
-        expand.dataset.triggerExpand = "1";
-        const toggle = document.createElement("button");
-        toggle.type = "button";
-        toggle.textContent = registration.enabled ? "disable" : "re-enable";
-        toggle.addEventListener("click", () => setTriggerEnabled(subscriptionKey, !registration.enabled));
         const remove = document.createElement("button");
         remove.type = "button";
         remove.className = "danger";
         remove.textContent = "cancel";
         remove.title = "Delete this registration: it starts no more work";
-        remove.addEventListener("click", () => deleteTrigger(subscriptionKey, remove));
-        actions.append(expand, toggle, remove);
-        /* The expanded panel is the whole truth about this registration: each
-           identity in full, selectable, with a copy control. The collapsed
-           summary above it is only a convenience. */
-        const full = document.createElement("div");
-        full.className = "trigger-registration-full";
-        for (const entry of model.full || []) {
-          const line = document.createElement("div");
-          line.className = "value-row";
-          const key = document.createElement("span");
-          key.className = "value-key";
-          key.textContent = entry[0];
-          const value = document.createElement("span");
-          value.className = "value-text";
-          value.textContent = entry[1];
-          value.title = entry[1];
-          const copy = document.createElement("button");
-          copy.type = "button";
-          copy.className = "copy-btn";
-          copy.textContent = "copy";
-          copy.title = "Copy the full value";
-          copy.dataset.copyValue = entry[1];
-          line.append(key, value, copy);
-          full.appendChild(line);
-        }
-        expand.addEventListener("click", () => {
-          const next = row.dataset.expanded !== "true";
-          row.dataset.expanded = String(next);
-          expand.textContent = next ? "hide identity" : "identity";
-          expand.setAttribute("aria-expanded", String(next));
-          if (next) expandedTriggerRows.add(subscriptionKey);
-          else expandedTriggerRows.delete(subscriptionKey);
-        });
-        row.append(name, detail, fired, actions, full);
+        remove.addEventListener("click", () => deleteTrigger(registration.id, remove));
+        actions.append(remove);
+        row.append(name, detail, registered, actions);
         triggerRegistrations.appendChild(row);
       }
     }
     // END WORKBENCH_TRIGGER_REGISTRATION_RENDERING
 
-    async function setTriggerEnabled(subscriptionKey, enabled) {
-      const response = await fetch("/api/triggers/" + encodeURIComponent(subscriptionKey) + "/enabled", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled })
-      });
-      if (!response.ok) {
-        await response.text();
-        renderError("the trigger could not be updated");
-      }
-      await loadTriggers();
-    }
-
     /* The first click arms the cancel in place; a second one deletes. */
-    async function deleteTrigger(subscriptionKey, button) {
+    async function deleteTrigger(subscriptionId, button) {
       if (button && button.dataset.armed !== "true") {
         button.dataset.armed = "true";
         button.textContent = "cancel? confirm";
@@ -5024,7 +4642,7 @@
         }, 4000);
         return;
       }
-      const response = await fetch("/api/triggers/" + encodeURIComponent(subscriptionKey), { method: "DELETE" });
+      const response = await fetch("/api/triggers/" + encodeURIComponent(subscriptionId), { method: "DELETE" });
       if (!response.ok) {
         await response.text();
         renderError("the trigger could not be deleted");
@@ -6058,7 +5676,6 @@
         const processId = process.process_id || processIdFromGraphKey(graphKey);
         const graph = graphIndexByKey.get(graphKey)
           || (processId ? graphIndexByKey.get("process:" + processId) : undefined);
-        const recent = (item.events || []).slice(-3).map(event => eventLabel(event.event_type));
         rows.push({
           key: graphKey,
           graph_key: graphKey,
@@ -6073,9 +5690,7 @@
             graph ? graph.node_count + (graph.node_count === 1 ? " node" : " nodes") : "pending graph",
             formatTime(process.updated_at_ms)
           ].filter(Boolean).join(" · "),
-          detail: process.error
-            ? "error: " + process.error
-            : (recent.length ? "latest: " + recent.join(" -> ") : "no events yet")
+          detail: process.error ? "error: " + process.error : ""
         });
       }
       rows.sort((left, right) => {

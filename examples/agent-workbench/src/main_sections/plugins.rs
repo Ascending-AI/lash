@@ -6,6 +6,7 @@ pub(crate) struct WorkbenchPluginFactory {
     pub(crate) config_changes: WorkbenchConfigChanges,
     pub(crate) deferred_tools: deferred_tools::WorkbenchDeferredTools,
     pub(crate) approvals: approvals::WorkbenchApprovals,
+    pub(crate) host_triggers: host_triggers::HostTriggers,
 }
 
 impl WorkbenchPluginFactory {
@@ -22,6 +23,8 @@ impl WorkbenchPluginFactory {
                 .expect("open in-memory deferred-tool grants"),
             approvals: approvals::WorkbenchApprovals::in_memory()
                 .expect("open in-memory approval ledger"),
+            host_triggers: host_triggers::HostTriggers::in_memory()
+                .expect("open in-memory trigger tables"),
         }
     }
 
@@ -40,6 +43,11 @@ impl WorkbenchPluginFactory {
 
     pub(crate) fn with_approvals(mut self, approvals: approvals::WorkbenchApprovals) -> Self {
         self.approvals = approvals;
+        self
+    }
+
+    pub(crate) fn with_host_triggers(mut self, host_triggers: host_triggers::HostTriggers) -> Self {
+        self.host_triggers = host_triggers;
         self
     }
 }
@@ -67,7 +75,7 @@ impl PluginFactory for WorkbenchPluginFactory {
                 lash::rlm::LashlangSurfaceContribution::new(
                     workbench_lashlang_abilities(),
                     lash::rlm::LashlangLanguageFeatures::default(),
-                    workbench_lashlang_resources(),
+                    lash::rlm::lang::LashlangHostCatalog::new(),
                 ),
             )
             .expect("workbench lashlang surface serializes"),
@@ -98,6 +106,7 @@ impl PluginFactory for WorkbenchPluginFactory {
             config_changes: self.config_changes.clone(),
             deferred_tools: self.deferred_tools.clone(),
             approvals: self.approvals.clone(),
+            host_triggers: self.host_triggers.clone(),
         }))
     }
 }
@@ -113,6 +122,7 @@ pub(crate) struct WorkbenchSessionPlugin {
     pub(crate) config_changes: WorkbenchConfigChanges,
     pub(crate) deferred_tools: deferred_tools::WorkbenchDeferredTools,
     pub(crate) approvals: approvals::WorkbenchApprovals,
+    pub(crate) host_triggers: host_triggers::HostTriggers,
 }
 
 impl SessionPlugin for WorkbenchSessionPlugin {
@@ -121,25 +131,15 @@ impl SessionPlugin for WorkbenchSessionPlugin {
     }
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-        reg.triggers().declare(TriggerEvent::new(
-            BUTTON_TRIGGER_RESOURCE,
-            BUTTON_TRIGGER_ALIAS,
-            BUTTON_TRIGGER_EVENT,
-            button_trigger_payload_schema(),
-        ))?;
-        reg.triggers().declare(TriggerEvent::new(
-            MAIL_EVENT_RESOURCE,
-            MAIL_EVENT_ALIAS,
-            MAIL_EVENT_EVENT,
-            mail_received_payload_schema(),
-        ))?;
         reg.tools()
             .provider(self.deferred_tools.search_provider())?;
         reg.tools()
             .provider(self.deferred_tools.execution_provider())?;
         reg.tools().provider(self.approvals.provider())?;
+        reg.tools().provider(self.host_triggers.provider())?;
         reg.tools().provider(Arc::new(mail::MockMailProvider::new(
             self.mail_world.clone(),
+            self.host_triggers.clone(),
         )))?;
         register_workbench_sections(reg)?;
         reg.turn().after(
@@ -431,132 +431,6 @@ pub(crate) fn workbench_note_summary(state: &lash::persistence::SessionReadView)
     )
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "the three workbench trigger source types register against distinct split type \
-              names and event types built here from valid object shapes"
-)]
-pub(crate) fn workbench_lashlang_resources() -> lash::rlm::lang::LashlangHostCatalog {
-    let mut resources = lash::rlm::lang::LashlangHostCatalog::new();
-    resources
-        .add_trigger_source_constructor(
-            CRON_SCHEDULE_SOURCE_TYPE.split('.'),
-            cron_schedule_config_type(),
-            cron_tick_event_type(),
-        )
-        .expect("valid cron trigger source");
-    resources
-        .add_trigger_source_constructor(
-            BUTTON_TRIGGER_SOURCE_TYPE.split('.'),
-            lash::rlm::lang::TypeExpr::Object(vec![]),
-            button_pressed_event_type(),
-        )
-        .expect("valid button trigger source");
-    resources
-        .add_trigger_source_constructor(
-            MAIL_RECEIVED_SOURCE_TYPE.split('.'),
-            lash::rlm::lang::TypeExpr::Object(vec![]),
-            mail_received_event_type(),
-        )
-        .expect("valid mail trigger source");
-    resources
-}
-
-/// The configuration contract `cron.Schedule` declares, and therefore the
-/// contract a registration captures and a delivery's start checks every
-/// emitted occurrence source against. `tz` is optional, so an occurrence for a schedule
-/// registered without one must omit the key rather than send `null`.
-pub(crate) fn cron_schedule_config_type() -> lash::rlm::lang::TypeExpr {
-    lash::rlm::lang::TypeExpr::Object(vec![
-        lash::rlm::lang::TypeField {
-            name: "expr".into(),
-            ty: lash::rlm::lang::TypeExpr::Str,
-            optional: false,
-        },
-        lash::rlm::lang::TypeField {
-            name: "tz".into(),
-            ty: lash::rlm::lang::TypeExpr::Str,
-            optional: true,
-        },
-    ])
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "`ui.button.Pressed` and its all-string fields satisfy NamedDataType::object's validation"
-)]
-pub(crate) fn button_pressed_event_type() -> lash::rlm::lang::NamedDataType {
-    lash::rlm::lang::NamedDataType::object(
-        "ui.button.Pressed",
-        vec![
-            field("button", lash::rlm::lang::TypeExpr::Str),
-            field("message", lash::rlm::lang::TypeExpr::Str),
-            field("pressed_at", lash::rlm::lang::TypeExpr::Str),
-        ],
-    )
-    .expect("valid button pressed event type")
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "`mail.Received` and its all-string fields satisfy NamedDataType::object's validation"
-)]
-pub(crate) fn mail_received_event_type() -> lash::rlm::lang::NamedDataType {
-    lash::rlm::lang::NamedDataType::object(
-        "mail.Received",
-        vec![
-            field("account", lash::rlm::lang::TypeExpr::Str),
-            field("title", lash::rlm::lang::TypeExpr::Str),
-            field("text", lash::rlm::lang::TypeExpr::Str),
-        ],
-    )
-    .expect("valid mail received event type")
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "this module declares the tool or payload schema and admission checks its invariant"
-)]
-pub(crate) fn mail_received_payload_schema() -> lash::schema::JsonSchema {
-    lash::schema::JsonSchema::admit(serde_json::json!({
-        "type": "object",
-        "properties": {
-            "account": { "type": "string" },
-            "title": { "type": "string" },
-            "text": { "type": "string" }
-        },
-        "required": ["account", "title", "text"],
-        "additionalProperties": false
-    }))
-    .expect("valid declared payload schema")
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "this module declares the tool or payload schema and admission checks its invariant"
-)]
-pub(crate) fn button_trigger_payload_schema() -> lash::schema::JsonSchema {
-    lash::schema::JsonSchema::admit(serde_json::json!({
-        "type": "object",
-        "properties": {
-            "button": { "type": "string", "enum": ["Red", "Blue"] },
-            "message": { "type": "string" },
-            "pressed_at": { "type": "string" }
-        },
-        "required": ["button", "message", "pressed_at"],
-        "additionalProperties": false
-    }))
-    .expect("valid declared payload schema")
-}
-
-pub(crate) fn field(name: &str, ty: lash::rlm::lang::TypeExpr) -> lash::rlm::lang::TypeField {
-    lash::rlm::lang::TypeField {
-        name: name.into(),
-        ty,
-        optional: false,
-    }
-}
-
 impl AppState {
     /// What the workbench creates a session with: its default spec, running
     /// the host's model selection and stating the connected accounts at the
@@ -699,20 +573,4 @@ pub(crate) fn connected_accounts_prompt(mail_world: &mail::MailWorld) -> String 
         `inbox.work` / `inbox.personal` names used in the examples above are illustrative only; \
         substitute the real authorities listed here."
     )
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "`cron.Tick` and its single string field satisfy NamedDataType::object's validation"
-)]
-pub(crate) fn cron_tick_event_type() -> lash::rlm::lang::NamedDataType {
-    lash::rlm::lang::NamedDataType::object(
-        "cron.Tick",
-        vec![lash::rlm::lang::TypeField {
-            name: "fired_at".into(),
-            ty: lash::rlm::lang::TypeExpr::Str,
-            optional: false,
-        }],
-    )
-    .expect("valid cron tick type")
 }

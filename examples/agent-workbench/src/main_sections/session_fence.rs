@@ -298,6 +298,11 @@ async fn retire_session_attempt(state: &AppState, session_id: &SessionId) -> Res
     if matches!(deletion, lash::SessionDeletion::Requested { .. }) {
         await_session_tombstone(state, session_id).await?;
     }
+    // A deleted session's registrations deliver to nobody.
+    let subscriptions = match state.host_triggers.delete_owned_by(session_id).await {
+        Ok(()) => json!("deleted"),
+        Err(error) => json!({ "error": error.to_string() }),
+    };
     // The close detaches the global process rows the session originated
     // rather than deleting them; reclaim its finished ones so the work rail
     // does not keep a deleted session's work forever (FIG-989).
@@ -305,7 +310,6 @@ async fn retire_session_attempt(state: &AppState, session_id: &SessionId) -> Res
         Ok(report) => json!({
             "pruned_processes": report.pruned_processes,
             "pruned_events": report.pruned_events,
-            "pruned_trigger_deliveries": report.pruned_trigger_deliveries,
         }),
         Err(error) => json!({ "error": error.to_string() }),
     };
@@ -315,6 +319,7 @@ async fn retire_session_attempt(state: &AppState, session_id: &SessionId) -> Res
         json!({
             "session_id": session_id,
             "deletion": format!("{deletion:?}"),
+            "trigger_subscriptions": subscriptions,
             "process_retention": retention,
         }),
     );
@@ -327,22 +332,21 @@ async fn retire_session_attempt(state: &AppState, session_id: &SessionId) -> Res
 /// owes nothing to this request: a wait that runs out leaves the delete
 /// requested, so its answer is ambiguous, never "the session remains live".
 async fn await_session_tombstone(state: &AppState, session_id: &SessionId) -> Result<(), AppError> {
-    let deadline = tokio::time::Instant::now() + SESSION_DELETE_CONFIRM_TIMEOUT;
-    loop {
-        match state.session_store_factory.lookup_session(session_id).await {
-            Ok(lash::persistence::SessionLookup::Deleted) => return Ok(()),
-            Ok(_) => {}
-            Err(error) if tokio::time::Instant::now() >= deadline => {
-                return Err(AppError::session_delete_unconfirmed(session_id, error));
-            }
-            Err(_) => {}
-        }
-        if tokio::time::Instant::now() >= deadline {
-            return Err(AppError::session_delete_unconfirmed(
-                session_id,
-                format!("its close did not finish within {SESSION_DELETE_CONFIRM_TIMEOUT:?}"),
-            ));
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
+    match tokio::time::timeout(
+        SESSION_DELETE_CONFIRM_TIMEOUT,
+        state.core.await_session_deletion(session_id),
+    )
+    .await
+    {
+        Ok(Ok(lash::SessionDeleteCompletion::Deleted)) => Ok(()),
+        Ok(Ok(completion)) => Err(AppError::session_delete_unconfirmed(
+            session_id,
+            format!("its close was requested but the session reads {completion:?}"),
+        )),
+        Ok(Err(error)) => Err(AppError::session_delete_unconfirmed(session_id, error)),
+        Err(_) => Err(AppError::session_delete_unconfirmed(
+            session_id,
+            format!("its close did not finish within {SESSION_DELETE_CONFIRM_TIMEOUT:?}"),
+        )),
     }
 }

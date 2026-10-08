@@ -1,8 +1,12 @@
 //! Host-owned approval policy for the Agent Workbench.
 //!
-//! Lash owns only the durable completion-key wait. This module owns the
-//! product policy around that primitive: which tool requires approval, the
-//! operator ledger, and the approve/deny decision.
+//! Lash owns only the parked tool call: the deferring tool's body records
+//! its completion key and parks, under a short execution bound for the body
+//! and a park that lasts until the turn that asked ends, so a human decides
+//! in their own time. This module owns the product policy around it: which
+//! tool requires approval, the operator ledger, and the approve/deny
+//! decision. The pending approvals are the sessions' parked calls of this
+//! tool (`Completions::parked`), joined with the ledger's request rows.
 
 use lash::SessionId;
 use std::path::Path;
@@ -18,6 +22,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 pub(crate) const APPROVAL_TOOL_NAME: &str = "workbench_ops_apply_change";
+pub(crate) const APPROVAL_TOOL_ID: &str = "tool:workbench_ops_apply_change";
 
 #[derive(Clone)]
 pub(crate) struct WorkbenchApprovals {
@@ -159,42 +164,45 @@ impl WorkbenchApprovals {
         Ok(())
     }
 
-    pub(crate) fn pending(&self) -> Result<Vec<PendingApproval>, ApprovalError> {
+    /// The undecided request the call `call_id` recorded, if it recorded one.
+    pub(crate) fn undecided(
+        &self,
+        call_id: &str,
+    ) -> Result<Option<PendingApproval>, ApprovalError> {
         let now_ms = chrono::Utc::now().timestamp_millis();
         let connection = self
             .connection
             .lock()
             .map_err(|_| ApprovalError::Poisoned)?;
-        let mut statement = connection.prepare(
-            "SELECT key_id, tool_name, arguments_json, session_id, requested_at_ms
-             FROM approval_waits
-             WHERE decision IS NULL
-             ORDER BY requested_at_ms, key_id",
-        )?;
-        let rows = statement.query_map([], |row| {
-            let requested_at_ms: i64 = row.get(4)?;
-            let arguments_json: String = row.get(2)?;
-            let corrupt = |len: usize, error: serde_json::Error| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    len,
-                    rusqlite::types::Type::Text,
-                    Box::new(error),
-                )
-            };
-            let key: String = row.get(0)?;
-            let call_id = Some(key.clone());
-            Ok(PendingApproval {
-                key,
-                tool: row.get(1)?,
-                call_id,
-                arguments: serde_json::from_str(&arguments_json)
-                    .map_err(|error| corrupt(arguments_json.len(), error))?,
-                requesting_session: row.get(3)?,
-                requested_at_ms,
-                age_ms: now_ms.saturating_sub(requested_at_ms),
-            })
-        })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+        connection
+            .query_row(
+                "SELECT key_id, tool_name, arguments_json, session_id, requested_at_ms
+                 FROM approval_waits
+                 WHERE key_id = ?1 AND decision IS NULL",
+                [call_id],
+                |row| {
+                    let requested_at_ms: i64 = row.get(4)?;
+                    let arguments_json: String = row.get(2)?;
+                    let key: String = row.get(0)?;
+                    Ok(PendingApproval {
+                        call_id: Some(key.clone()),
+                        key,
+                        tool: row.get(1)?,
+                        arguments: serde_json::from_str(&arguments_json).map_err(|error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                arguments_json.len(),
+                                rusqlite::types::Type::Text,
+                                Box::new(error),
+                            )
+                        })?,
+                        requesting_session: row.get(3)?,
+                        requested_at_ms,
+                        age_ms: now_ms.saturating_sub(requested_at_ms),
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
     }
 
     pub(crate) fn completion_key(
@@ -300,7 +308,7 @@ impl ApprovalToolProvider {
     )]
     fn definition() -> ToolDefinition {
         ToolDefinition::raw(
-            "tool:workbench_ops_apply_change",
+            APPROVAL_TOOL_ID,
             APPROVAL_TOOL_NAME,
             "Stage an operational change and wait durably for a human operator to approve or deny it. Approval is required before the operation reports success.",
             json!({

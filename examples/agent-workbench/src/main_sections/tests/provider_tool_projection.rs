@@ -62,6 +62,7 @@ async fn every_tool_a_standard_workbench_turn_offers_projects_under_every_provid
                 delegation,
                 deferred_tools,
                 approvals,
+                host_triggers::HostTriggers::in_memory().expect("open the trigger tables"),
                 mcp,
             );
         })

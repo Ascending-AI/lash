@@ -28,9 +28,7 @@ const userInput = (turnId, text, at, nonce) => product({
   ...(nonce ? { client_nonce: nonce } : {})
 });
 const productReply = (id, turnId, text, at) => product({ id, role: "assistant", text, at: iso(at), provenance: { kind: "turn_output", turn_id: turnId } });
-const occurrence = (id, text, at) => product({
-  id, role: "event", text, at: iso(at), provenance: { kind: "trigger_occurrence", occurrence_id: id, process_ids: [] }
-});
+const hostEvent = (id, text, at) => product({ id, role: "event", text, at: iso(at) });
 
 let cursor = 0;
 const activity = (turnId, event, correlationId = "") => {
@@ -171,20 +169,20 @@ export const laws = [
     }
   },
   {
-    name: "a press made before a later reply renders above it, and stays there after settlement",
+    name: "a host event made before a later reply renders above it, and stays there after settlement",
     async run(env) {
       const time = clock();
       const view = env.timeline(time);
       const turn = "turn-press";
       const { rows } = streamTurn(view, time, turn, {
-        // The press happens between the code block and the reply; the
-        // workflow that records it publishes it only after the reply began.
-        beforeReply: () => { view.pressedAt = time.now(); }
+        // The event happens between the code block and the reply; the host
+        // publishes it only after the reply began.
+        beforeReply: () => { view.happenedAt = time.now(); }
       });
-      view.timeline.applyProductEvent(occurrence("trigger:press", "red pressed", view.pressedAt));
+      view.timeline.applyProductEvent(hostEvent("host-event", "connected mock account", view.happenedAt));
       const live = rowKeys(view.list);
-      env.assert.ok(live.indexOf(`code:${turn}:0`) < live.indexOf("occ:trigger:press"), `live: ${live}`);
-      env.assert.ok(live.indexOf("occ:trigger:press") < live.indexOf(`reply:${turn}`), `live: ${live}`);
+      env.assert.ok(live.indexOf(`code:${turn}:0`) < live.indexOf("msg:host-event"), `live: ${live}`);
+      env.assert.ok(live.indexOf("msg:host-event") < live.indexOf(`reply:${turn}`), `live: ${live}`);
       settle(view, time, turn, rows);
       env.assert.deepEqual(rowKeys(view.list), live, "settlement moved a row");
     }
@@ -252,18 +250,18 @@ export const laws = [
       ]);
       view.timeline.applyProductEvent(done(turn));
       view.timeline.applyObservation(commit);
-      const occurrenceEvent = occurrence("trigger:blue", "blue pressed", T0 + 5);
-      view.timeline.applyProductEvent(occurrenceEvent);
+      const eventRow = hostEvent("host-event-blue", "removed mock account", T0 + 5);
+      view.timeline.applyProductEvent(eventRow);
       const settled = serialize(view.list);
       view.timeline.applyObservation(commit);
-      view.timeline.applyProductEvent(occurrenceEvent);
+      view.timeline.applyProductEvent(eventRow);
       env.assert.deepEqual(serialize(view.list), settled, "redelivery changed the rows");
       const nodes = [...view.list.children];
       // The authoritative read a replay gap takes: the same committed rows and
       // product lane the streams already delivered.
       view.timeline.applySnapshot({
         transcript: commit.rows,
-        product_events: { cursor: sequence, events: [userInput(turn, "hello", T0), occurrenceEvent, done(turn)] },
+        product_events: { cursor: sequence, events: [userInput(turn, "hello", T0), eventRow, done(turn)] },
         active_turns: [], pending_turn_inputs: [], turn_input_applications: []
       }, view.timeline.epoch());
       env.assert.deepEqual(serialize(view.list), settled, "the replay-gap rebuild changed the rows");
