@@ -405,6 +405,17 @@ async fn run_process_corpus(world: &World, corpus: &str, count: usize) {
     let ended = tokio::time::timeout(served::WATCHDOG, async {
         loop {
             let listed = registered().await;
+            for record in &listed {
+                if record.is_terminal() {
+                    assert_eq!(
+                        record.status(),
+                        lash_core::ProcessStatus::Completed,
+                        "process `{}` failed before its execution map is checked: {:?}",
+                        record.id,
+                        record.outcome(),
+                    );
+                }
+            }
             if listed.len() == count && listed.iter().all(|record| record.status().is_terminal()) {
                 return listed;
             }

@@ -14,6 +14,26 @@ use sqlx::PgConnection;
 
 use super::{Committing, SQL, get, sqlx_failure};
 
+impl super::PostgresDurableStore {
+    /// A producer takes the session actor before the history and referrer
+    /// locks its admission needs, in the same order as an owner commit.
+    /// Holding those locks while waiting for the owner would deadlock the
+    /// producer with a concurrent head commit (FIG-5423).
+    pub(crate) async fn lock_session_admission(
+        tx: &mut PgConnection,
+        session: &SessionId,
+    ) -> Result<(), crate::StoreError> {
+        let actor = lash_durable::ActorKey::session(session.as_str())
+            .map_err(|error| crate::StoreError::Backend(error.to_string()))?;
+        sqlx::query(SQL.postgres.lock_actors.sql())
+            .bind([actor.as_str()].as_slice())
+            .execute(crate::observed_sql::executor(tx))
+            .await
+            .map_err(crate::support::store_sqlx_error)?;
+        Ok(())
+    }
+}
+
 fn undecodable(what: &str, detail: impl std::fmt::Display) -> DurableError {
     DurableError::Store(StoreFailure {
         kind: StoreFailureKind::Corrupt,

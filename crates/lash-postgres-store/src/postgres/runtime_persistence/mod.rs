@@ -197,6 +197,10 @@ pub(crate) async fn enqueue_queued_work_with_outcome_tx(
     now: u64,
 ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
     lash_core_execution::store_backend_support::validate_queued_work_draft(batch)?;
+    crate::PostgresDurableStore::lock_session_admission(tx, &batch.session_id).await?;
+    // Owner commits take history before referrers, too. An admission from
+    // another domain's transaction must preserve the same order.
+    lock_session_history_mutation_tx(tx, &batch.session_id).await?;
     let claim = lash_core_execution::ReferrerClaim::unguarded(
         lash_core_execution::ArtifactReferrer::Session(batch.session_id.clone()),
     )
@@ -209,9 +213,8 @@ pub(crate) async fn enqueue_queued_work_with_outcome_tx(
     use lash_core_execution::store_backend_support as support;
     let sql = crate::turn_ingress::turn_ingress_sql();
     let submission_digest = support::queued_work_submission_digest(batch)?;
-    // The session's write authority, taken before the source-key read and
-    // held to the commit, so the absence it answers holds until the insert.
-    lock_session_history_mutation_tx(tx, &batch.session_id).await?;
+    // The session's write authority is held from before the source-key
+    // read until commit, so the absence it answers holds until the insert.
     if let Some(source_key) = batch.source_key.as_deref() {
         let by_source_key: Option<(String, String)> =
             sqlx::query_as(sql.queued_batches.select_id_by_source_key.sql())

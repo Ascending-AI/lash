@@ -485,8 +485,9 @@ pub(crate) async fn deliver_process_wake_tx(
     let Some(wake) = wake else {
         return Ok(());
     };
-    let to_plugin =
-        |error: lash_core_execution::StoreError| PluginError::Session(error.to_string());
+    crate::PostgresDurableStore::lock_session_admission(tx, &wake.target_session_id)
+        .await
+        .map_err(PluginError::from)?;
     let sql = crate::session_sql::session_sql();
     let deleted: bool = sqlx::query_scalar(sql.deleted_postgres.exists.sql())
         .bind(wake.target_session_id.as_str())
@@ -518,7 +519,7 @@ pub(crate) async fn deliver_process_wake_tx(
         occurred_at_ms,
     )
     .await
-    .map_err(to_plugin)?;
+    .map_err(PluginError::from)?;
     savepoint.commit().await.map_err(plugin_sqlx_error)?;
     Ok(())
 }

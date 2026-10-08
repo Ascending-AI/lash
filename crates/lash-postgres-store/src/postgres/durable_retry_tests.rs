@@ -26,6 +26,127 @@ use crate::testing::{CommitFault, IsolatedDatabase, LostCommit};
 
 const LABEL: CommitLabel = CommitLabel::new("law.write");
 
+/// FIG-5423: an admission blocked by the owner takes no lock that the
+/// owner's head commit needs. The old referrer -> history -> actor order
+/// deadlocked with the owner's actor -> history -> referrer order.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_queued_admission_waiting_for_the_owner_holds_no_history_or_referrer_lock() {
+    use lash_core_execution::runtime::QueuedWorkBatchDraft;
+    use lash_core_execution::{
+        ArtifactReferrer, DeliveryPolicy, MaxToolCalls, SessionCatalogStore as _,
+        SessionCreationHead, SessionPolicy, SessionRelation, SessionStoreCreateRequest, TurnBudget,
+    };
+
+    let (_database, storage) = storage(
+        "a_queued_admission_waiting_for_the_owner_holds_no_history_or_referrer_lock",
+        &PostgresHostConfig::default(),
+    )
+    .await
+    .expect("hermetic PostgreSQL is available");
+    let session = lash_sansio::SessionId::from("admission-lock-order");
+    storage
+        .session_store_factory()
+        .admit_session(&SessionStoreCreateRequest {
+            session_id: session.clone(),
+            relation: SessionRelation::Root,
+            config: SessionPolicy::new(TurnBudget::Unbounded, MaxToolCalls::new(16)).into(),
+            head: SessionCreationHead::Config,
+            owning_process_id: None,
+            pending_observer_intents: Vec::new(),
+        })
+        .await
+        .expect("the catalog admits the session");
+    let store = storage.durable_store();
+    create(&store, &actor(session.as_str())).await;
+    let mut owner = crate::begin_guarded(storage.pool(), &storage.fence)
+        .await
+        .expect("the owner's transaction opens");
+    crate::PostgresDurableStore::lock_session_admission(&mut owner, &session)
+        .await
+        .expect("the owner holds its actor row");
+
+    let (started, pid) = tokio::sync::oneshot::channel();
+    let admission = tokio::spawn({
+        let pool = storage.pool().clone();
+        let fence = storage.fence.clone();
+        let session = session.clone();
+        async move {
+            let mut tx = crate::begin_guarded(&pool, &fence)
+                .await
+                .expect("admission opens");
+            let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+                .fetch_one(&mut **tx)
+                .await
+                .expect("the admission's backend pid");
+            started.send(pid).expect("the owner awaits the pid");
+            let batch = QueuedWorkBatchDraft::new(
+                session,
+                DeliveryPolicy::EarliestSafeBoundary,
+                lash_core_execution::facade_support::SessionCommand::RefreshToolCatalog {
+                    reason: "concurrent owner commit".into(),
+                },
+            );
+            let outcome =
+                crate::runtime_persistence::enqueue_queued_work_with_outcome_tx(&mut tx, &batch, 1)
+                    .await
+                    .expect("the admission commits without contention");
+            tx.commit().await.expect("the admission commits");
+            outcome
+        }
+    });
+    let pid = pid.await.expect("the admission started");
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let waiting: bool = sqlx::query_scalar(
+                "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid = $1 AND wait_event_type = 'Lock')",
+            )
+            .bind(pid)
+            .fetch_one(storage.pool())
+            .await
+            .expect("read the admission's lock wait");
+            if waiting {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the admission waits on the owner");
+
+    let history_free: bool =
+        sqlx::query_scalar("SELECT pg_try_advisory_xact_lock(hashtextextended($1, 1::bigint))")
+            .bind(session.as_str())
+            .fetch_one(&mut **owner)
+            .await
+            .expect("the owner probes its history lock");
+    let referrer = ArtifactReferrer::Session(session);
+    let referrer_free: bool =
+        sqlx::query_scalar("SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0))")
+            .bind(format!(
+                "lash-artifact-referrer:{}:{}",
+                referrer.kind().as_str(),
+                referrer.canonical_id(),
+            ))
+            .fetch_one(&mut **owner)
+            .await
+            .expect("the owner probes its referrer lock");
+    // Release the owner and join even on the red side: no task or lock is
+    // left behind by the assertion.
+    owner
+        .rollback()
+        .await
+        .expect("the owner releases its locks");
+    admission.await.expect("the admission ends");
+    assert!(
+        history_free,
+        "the blocked admission holds the owner's history lock"
+    );
+    assert!(
+        referrer_free,
+        "the blocked admission holds the owner's referrer lock"
+    );
+}
+
 fn formats() -> FormatSet {
     FormatSet::new("law-formats")
 }

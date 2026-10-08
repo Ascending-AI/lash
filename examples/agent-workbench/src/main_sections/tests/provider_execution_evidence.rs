@@ -11,29 +11,22 @@ use lash::remote::llm::{
 
 /// The next model-call record the remote observation stream delivers.
 async fn next_remote_model_call(
-    observations: &mut lash::observe::RemoteSessionObservationStream,
+    observations: &mut lash::observe::RemoteSessionObservationEventStream,
 ) -> RemoteLlmCallRecord {
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
-            let item = observations
+            let remote = observations
                 .next()
                 .await
                 .expect("the remote observation stream stays open")
                 .expect("a remote observation update");
-            match item {
-                lash::observe::RemoteSessionObservationStreamItem::Event(remote) => {
-                    if let lash::remote::observations::RemoteSessionObservationEventPayload::TurnActivity {
-                        activity,
-                    } = remote.event
-                        && let lash::remote::usage::RemoteTurnEvent::ModelCallRecorded { record } =
-                            activity.event
-                    {
-                        return record;
-                    }
-                }
-                lash::observe::RemoteSessionObservationStreamItem::Gap { .. } => {
-                    panic!("a live provider observation must not gap")
-                }
+            if let lash::remote::observations::RemoteSessionObservationEventPayload::TurnActivity {
+                activity,
+            } = remote.event
+                && let lash::remote::usage::RemoteTurnEvent::ModelCallRecorded { record } =
+                    activity.event
+            {
+                return record;
             }
         }
     })
@@ -155,11 +148,21 @@ async fn provider_execution_evidence_reaches_the_record_surfaces() {
             .recoverable_chat_snapshot()
             .await
             .expect("a durable snapshot");
-        let mut observations = observable
-            .subscribe_and_recover_remote(lash::remote::observations::RemoteSessionCursor::new(
+        // Establish the subscription before the route's model-selection
+        // command changes the durable head. A recovery stream subscribes
+        // only on its first poll, which could observe the config commit
+        // before its publication and correctly report a gap (FIG-5423).
+        let subscribed = observable
+            .subscribe_from_remote_cursor(&lash::remote::observations::RemoteSessionCursor::new(
                 initial.cursor.to_string(),
             ))
+            .await
             .expect("subscribe through the remote observation facade");
+        let lash::observe::RemoteSessionObservationSubscription::Subscribed(mut observations) =
+            subscribed
+        else {
+            panic!("a live provider observation must not gap");
+        };
         drop(session);
 
         let mut observed = Vec::new();
