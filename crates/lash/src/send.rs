@@ -97,16 +97,12 @@ impl SendContext {
     /// the session's turns run on its actor, so an open session's resident
     /// runtime holds the state it opened with, not what its runs committed.
     async fn session_snapshot(&self) -> Result<lash_core::SessionSnapshot> {
-        lash_core::store::load_session_window_state(
-            &self.parts.store,
-            lash_core::store::WindowSelector::Current,
-        )
-        .await
-        .map_err(EmbedError::Store)?
-        .map(|loaded| loaded.state.to_snapshot())
-        .ok_or_else(|| EmbedError::UnknownSession {
-            session_id: self.parts.session_id.clone(),
-        })
+        lash_core::store::load_stored_session_snapshot(&self.parts.store)
+            .await
+            .map_err(EmbedError::Store)?
+            .ok_or_else(|| EmbedError::UnknownSession {
+                session_id: self.parts.session_id.clone(),
+            })
     }
 }
 

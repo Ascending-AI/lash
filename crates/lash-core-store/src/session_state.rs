@@ -1380,7 +1380,6 @@ pub(crate) fn apply_session_checkpoint(
 ) -> Result<(), crate::StoreError> {
     let Some(checkpoint) = checkpoint else {
         state.checkpoint_components = RuntimeCheckpointComponents::complete_empty();
-        state.ensure_agent_frame_initialized();
         return Ok(());
     };
     // All production next-turn sites rely on RESTORED_TURN_INDEX_HEADROOM, and
@@ -1393,7 +1392,6 @@ pub(crate) fn apply_session_checkpoint(
     state.last_prompt_usage = checkpoint.turn_state.last_prompt_usage.clone();
     state.checkpoint_components =
         RuntimeCheckpointComponents::from_hydrated(&checkpoint, fleet_format)?;
-    state.ensure_agent_frame_initialized();
     Ok(())
 }
 
@@ -1406,7 +1404,26 @@ pub(crate) fn apply_session_checkpoint(
 /// graph becomes exactly the window, so residency starts proportional to the
 /// current frame (§9). No resident copy of a durable fact is preserved. The
 /// window names the session in `RuntimeSessionState::session_id`.
+///
+/// A head no commit has given a graph gets its initial frame here, dated by
+/// the wall clock: the state is a runtime's, about to write that frame. A
+/// read that answers what the store holds adopts through
+/// [`adopt_stored_head`] instead.
 pub fn adopt_durable_head(
+    state: &mut RuntimeSessionState,
+    head: crate::store::SessionWindowRead,
+    fleet_format: crate::store::FleetFormat,
+) -> Result<(), crate::StoreError> {
+    adopt_stored_head(state, head, fleet_format)?;
+    // The config is already adopted, so a checkpointless graph's initial
+    // frame captures it.
+    state.ensure_agent_frame_initialized();
+    Ok(())
+}
+
+/// [`adopt_durable_head`] without the initial frame: `state` is a function
+/// of `head` alone, so a head without a graph leaves it without a frame.
+pub(crate) fn adopt_stored_head(
     state: &mut RuntimeSessionState,
     head: crate::store::SessionWindowRead,
     fleet_format: crate::store::FleetFormat,
@@ -1446,10 +1463,7 @@ pub fn adopt_durable_head(
     state.authority.run_view = None;
     state.undelivered_config_change = config.undelivered_change.clone();
     adopt_session_config(state, &config);
-    // The config is adopted before the checkpoint restore, so a
-    // checkpointless graph's initial frame captures it.
-    apply_session_checkpoint(state, checkpoint, fleet_format)?;
-    Ok(())
+    apply_session_checkpoint(state, checkpoint, fleet_format)
 }
 
 pub fn append_session_nodes_to_state_with_clock(

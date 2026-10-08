@@ -168,6 +168,49 @@ async fn a_run_whose_live_report_is_gone_answers_its_durable_report() -> Result<
     Ok(())
 }
 
+/// A settled run's durable report is a function of the store: every
+/// follower that reattaches while the store stands still answers the same
+/// report. A turn cancelled before its first commit leaves the session's
+/// head without a graph, and a report must not date a frame no commit wrote
+/// with the instant it was read (FIG-5489).
+async fn a_reattached_follower_answers_the_same_durable_report() -> Result<()> {
+    let fixture = fixture(1).await?;
+    let session = fixture
+        .core
+        .session(crate::SessionId::parse("send-same-report").expect("nonblank host identity"))
+        .created()
+        .await
+        .durable()
+        .await?;
+
+    let handle = session
+        .send(TurnInput::text(HELD))
+        .id(crate::TurnId::parse("cancelled-run").expect("nonblank host identity"))
+        .await?;
+    let input_id = handle.input_id().clone();
+    drop(handle);
+    provider_called(&fixture, 1).await;
+    let receipt = session.attach(input_id.clone()).cancel().await?;
+    assert!(
+        matches!(receipt, crate::CancelReceipt::Cancelled { .. }),
+        "{receipt:?}"
+    );
+
+    let first = session.attach(input_id.clone()).output().await?;
+    let again = session.attach(input_id).output().await?;
+    assert_eq!(first.status(), crate::TurnStatus::Cancelled);
+    assert_eq!(first.result.source, crate::ReportSource::Durable);
+    // The sealed calls a follower watched stay its own evidence; the
+    // terminal and the session state beside it are the store's.
+    assert_eq!(again.result.outcome, first.result.outcome);
+    assert_eq!(
+        serde_json::to_value(&again.result.state)?,
+        serde_json::to_value(&first.result.state)?,
+        "a reattached follower answers another session state"
+    );
+    Ok(())
+}
+
 /// A settled run whose report no execution in this process can still deposit
 /// answers from the store at once: the follower waits for a live report only
 /// while a run here may still deposit one, never on a run that ran elsewhere
@@ -1416,6 +1459,11 @@ macro_rules! send_handle_laws {
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn a_run_whose_live_report_is_gone_answers_its_durable_report() -> Result<()> {
                 super::a_run_whose_live_report_is_gone_answers_its_durable_report().await
+            }
+
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn a_reattached_follower_answers_the_same_durable_report() -> Result<()> {
+                super::a_reattached_follower_answers_the_same_durable_report().await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -44,7 +44,30 @@ pub async fn load_session_window_state(
     window_state(read, store.fleet_format()).map(Some)
 }
 
-/// The canonical read-only view of the session's current frame, together
+/// The session's current frame as the store holds it, with nothing a load
+/// adds: two reads of an unchanged store answer the same snapshot. A session
+/// no commit has given a graph answers one without a frame, where
+/// [`load_session_window_state`] opens the initial frame a runtime is about
+/// to write and dates it by the wall clock (FIG-5489).
+///
+/// `Ok(None)` means the session has no head row.
+pub async fn load_stored_session_snapshot(
+    store: &SessionStore,
+) -> Result<Option<crate::SessionSnapshot>, StoreError> {
+    store.read_session_state_version().await?;
+    let Some(read) = store.load_session_window(WindowSelector::Current).await? else {
+        return Ok(None);
+    };
+    validate_window_session(store.session_id(), &read)?;
+    let mut state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+        read.config.turn_budget,
+        read.config.max_tool_calls,
+        crate::NoProgressBudget::bounded(12),
+    ));
+    crate::runtime::state::adopt_stored_head(&mut state, read, store.fleet_format())?;
+    Ok(Some(state.to_snapshot()))
+}
+
 /// with its durable session relation.
 ///
 /// Failure evidence is not part of the view; it is paged through

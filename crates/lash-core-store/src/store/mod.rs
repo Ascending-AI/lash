@@ -197,8 +197,8 @@ pub use testing::{
     append_request_commit_with_clock_for_testing,
 };
 pub use window_load::{
-    LoadedSessionWindow, load_session_read_view, load_session_window_state, refresh_session_window,
-    window_state,
+    LoadedSessionWindow, load_session_read_view, load_session_window_state,
+    load_stored_session_snapshot, refresh_session_window, window_state,
 };
 
 fn default_root_session_id() -> SessionId {
