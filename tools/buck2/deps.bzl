@@ -292,6 +292,8 @@ PACKAGE_DEPS = {
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
             "lash_typescript": "//crates/lash-typescript:lash-typescript",
             "lash_vm_broker": "//crates/lash-vm-broker:lash-vm-broker",
+            "lash_vm_client": "//crates/lash-vm-client:lash-vm-client",
+            "lash_vm_protocol": "//crates/lash-vm-protocol:lash-vm-protocol",
             "lashlang": "//crates/lashlang:lashlang",
             "serde_json": "//third-party/rust:p0313",
             "sqlx": "//third-party/rust:p0333",

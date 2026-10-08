@@ -2174,6 +2174,8 @@ dependencies = [
  "lash-internal-sqlite-store",
  "lash-internal-typescript",
  "lash-internal-vm-broker",
+ "lash-internal-vm-client",
+ "lash-internal-vm-protocol",
  "lash-runtime",
  "serde_json",
  "sqlx",

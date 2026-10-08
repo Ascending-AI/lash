@@ -431,6 +431,26 @@ impl World {
         self.send(&session, name).await
     }
 
+    /// The serving node dies and a new core `builder` makes over the same
+    /// database serves in its place, under the boot `boot`: what it knows of
+    /// any session it reads back from the store.
+    pub async fn restart(
+        &mut self,
+        boot: &str,
+        builder: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
+    ) {
+        self.core.shutdown().await.expect("the core shuts down");
+        self.core = builder(&self.backend)
+            .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+            .serve_test_llm_profile(model(Arc::clone(&self.scripts)), metadata())
+            .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                "tool-semantics-deployment",
+                boot,
+            ))
+            .expect("the restarted core builds");
+    }
+
     /// Stop the core's node before the database goes away.
     pub async fn shutdown(self) {
         self.core.shutdown().await.expect("the core shuts down");
