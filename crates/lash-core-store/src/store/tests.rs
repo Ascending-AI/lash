@@ -292,32 +292,6 @@ fn session_head_meta_refuses_a_head_json_naming_another_session() {
 }
 
 #[test]
-fn session_head_meta_refuses_a_head_json_missing_its_session_id() {
-    // An absent `session_id` decodes through the payload's `"root"` default;
-    // the row key is what decides whether that is this session's identity.
-    let payload: SessionHeadPayload = serde_json::from_value(serde_json::json!({
-        "schema_version": SESSION_HEAD_META_SCHEMA_VERSION,
-        "config": crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024),crate::NoProgressBudget::bounded(12)),
-    }))
-    .expect("a head payload without a session id still decodes");
-
-    let error = SessionHeadMeta::assemble(
-        &SessionId::from("keyed-session"),
-        payload,
-        0,
-        None,
-        None,
-        None,
-    )
-    .expect_err("an absent head session id must not be invented as `run`");
-
-    assert!(
-        matches!(&error, StoreError::StoredDataCorrupt { record_kind, .. } if *record_kind == "SessionHeadMeta"),
-        "the refusal is corrupt stored data: {error:?}"
-    );
-}
-
-#[test]
 fn session_head_payload_excludes_the_leaf_derived_frame() {
     let meta = SessionHeadMeta::assemble(
         &SessionId::from("column-owned-head"),

@@ -8,6 +8,79 @@ use lash_core::plugin::SessionReadyContext;
 use lash_core::{PluginError, PluginStateError};
 use std::error::Error;
 
+/// FIG-5500: cold open requires recorded identity even when the row is root.
+#[tokio::test]
+async fn a_cold_open_refuses_a_head_without_identity_even_for_root() {
+    let files = tempfile::tempdir().expect("SQLite directory");
+    let path = files.path().join("lash.db");
+    let stores = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::open(&path)
+            .await
+            .expect("SQLite stores"),
+    );
+    let backend = lash_conformance::backend_over(stores);
+    let build = || {
+        explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+            .serve_sessions(false)
+            .build(crate::testing::runtime_lease_owner())
+            .expect("core")
+    };
+    let creating = build();
+    for id in ["root", "host-chosen-session"] {
+        creating
+            .session(crate::SessionId::from(id))
+            .create(crate::SessionCreation::root(mock_session_spec()))
+            .await
+            .expect("create with explicit identity");
+    }
+    creating.shutdown().await.expect("shutdown creator");
+    let reopened = build();
+    for id in ["root", "host-chosen-session"] {
+        let session = reopened
+            .session(crate::SessionId::from(id))
+            .open()
+            .await
+            .expect("recorded identity permits cold open");
+        assert_eq!(session.session_id().as_str(), id);
+        drop(session);
+    }
+    reopened.shutdown().await.expect("shutdown reader");
+    let raw = rusqlite::Connection::open(&path).expect("raw SQLite connection");
+    assert_eq!(
+        raw.execute(
+            "UPDATE session_revisions SET head_json = json_remove(head_json, '$.session_id')",
+            [],
+        )
+        .expect("remove only the stored identities"),
+        2,
+    );
+    drop(raw);
+    let refusing = build();
+    for id in ["root", "host-chosen-session"] {
+        let error = match refusing.session(crate::SessionId::from(id)).open().await {
+            Ok(_) => panic!("a head missing identity must not reopen as {id}"),
+            Err(error) => error,
+        };
+        assert!(
+            matches!(
+                &error,
+                EmbedError::Session(lash_core::SessionError::Store {
+                    source: StoreError::StoredDataCorrupt {
+                        record_kind: "SessionHeadMeta",
+                        message,
+                    },
+                    ..
+                }) if message.contains("missing field `session_id`")
+            ),
+            "cold open keeps the truthful typed cause: {error:?}"
+        );
+        assert!(error.is_terminal(), "{error:?}");
+        assert!(!error.is_retryable(), "{error:?}");
+    }
+    refusing.shutdown().await.expect("shutdown refusing core");
+}
+
 /// A refused tool-membership change answers its typed validation cause,
 /// changes nothing and submits nothing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -95,7 +95,8 @@ impl From<String> for BlobRef {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SessionHeadPayload {
     pub schema_version: u32,
-    #[serde(default = "default_root_session_id")]
+    /// Required recorded identity, checked against the row key on assembly.
+    /// An omitted identity is corrupt stored data, including for a root row.
     pub session_id: SessionId,
     pub config: crate::PersistedSessionConfig,
 }
@@ -213,7 +214,7 @@ impl Default for SessionHeadPayload {
     fn default() -> Self {
         Self {
             schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
-            session_id: default_root_session_id(),
+            session_id: SessionId::from("root"),
             config: crate::PersistedSessionConfig::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),

@@ -35,6 +35,41 @@ fn persisted_state_hydrates_the_recorded_llm_profile_without_live_rebinding() {
 }
 
 #[test]
+fn session_head_decode_requires_recorded_identity_even_for_root() {
+    let mut value = serde_json::to_value(SessionHeadPayload::default()).expect("head JSON");
+    value
+        .as_object_mut()
+        .expect("head object")
+        .remove("session_id");
+    let json = serde_json::to_string(&value).expect("head without identity");
+    let exact = decode_versioned_json_record::<SessionHeadPayload>(
+        &json,
+        "SessionHeadMeta",
+        SESSION_HEAD_META_SCHEMA_VERSION,
+    );
+    let fleet = decode_versioned_json_record_for_fleet::<SessionHeadPayload>(
+        &json,
+        "SessionHeadMeta",
+        crate::surface_format!(SESSION_HEAD_META_SCHEMA_VERSION),
+        FleetFormat::current(),
+    );
+    for result in [exact, fleet] {
+        let error = result.expect_err("missing identity must not decode as root");
+        assert!(
+            matches!(
+                &error,
+                StoreError::StoredDataCorrupt {
+                    record_kind: "SessionHeadMeta",
+                    message,
+                } if message.contains("missing field `session_id`")
+            ),
+            "the refusal names the missing identity: {error:?}"
+        );
+        assert!(!error.is_transient(), "{error:?}");
+    }
+}
+
+#[test]
 fn versioned_json_record_rejects_missing_schema_version() {
     let err = decode_versioned_json_record::<SessionHeadPayload>(
         "{}",
