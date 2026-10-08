@@ -53,7 +53,7 @@ use lash_durable::domain::TurnWrite;
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DomainWrite, DurableStore};
 use lash_durable_test::{
-    Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Tripwire,
+    Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire,
 };
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt as _;
@@ -547,6 +547,32 @@ impl Storage {
         Ok(())
     }
 
+    /// Hand the released session to b before a can compete for the next
+    /// input. A's runner remains available for recovery after b's claim,
+    /// including a cut that prevents that claim from committing.
+    async fn handoff(&self, nodes: &SimNodes) {
+        nodes.quiesce().await;
+        nodes.pause("a");
+        let before = nodes.script().trace().len();
+        self.send(STEADY).await.expect("the steady turn is sent");
+        loop {
+            nodes.quiesce().await;
+            let claimed_or_cut = nodes.script().trace()[before..].iter().any(|write| {
+                write.node.as_ref() == "b"
+                    && write.point.label == CommitLabel::CLAIM
+                    && (matches!(write.stored, Stored::Committed { effective: true })
+                        || write.cut.is_some())
+            });
+            if claimed_or_cut || !nodes.serving("b") {
+                break;
+            }
+            // These are the scenario's virtual timer steps, not another
+            // send or claim attempt: b's existing runner owns the claim.
+            assert!(nodes.step().await.is_some(), "b has an armed claim timer");
+        }
+        nodes.resume("a");
+    }
+
     async fn laws(&self, nodes: &SimNodes, cut: Option<&Cut>) -> Vec<String> {
         let mut violations = Vec::new();
         let trace = nodes.script().trace();
@@ -714,7 +740,7 @@ impl Scenario for Storage {
             return false;
         }
         if !self.ledger.steady.swap(true, Ordering::SeqCst) {
-            self.send(STEADY).await.expect("the steady turn is sent");
+            self.handoff(nodes).await;
             return false;
         }
         commits >= 2
@@ -758,6 +784,17 @@ async fn prove(shape: Shape, tier: Tier) {
         labels.join(", ")
     );
     report.assert_held();
+    let admissions: Vec<&str> = report
+        .baseline
+        .iter()
+        .filter(|write| write.point.label == CommitLabel::TURN_ADMIT && write.committed())
+        .map(|write| write.node.as_ref())
+        .collect();
+    assert_eq!(
+        admissions,
+        ["a", "b"],
+        "each turn follows its scripted owner"
+    );
     let mut expected = vec![
         CommitLabel::MODEL_START,
         CommitLabel::MODEL_DONE,
@@ -789,6 +826,62 @@ async fn a_cells_pruned_calls_keep_their_changes_and_never_rewrite_an_unchanged_
     tier: Tier,
 ) {
     prove(Shape::Cell, tier).await;
+}
+
+/// FIG-5517: even when both claim loops have just polled the released,
+/// empty session, the scripted handoff gives the steady turn to b.
+#[tokio::test]
+async fn a_released_storage_session_hands_the_steady_turn_to_b_after_empty_polls() {
+    let storage = Storage::new(Shape::Cell, Dialect::SqliteMemory, None);
+    let clock = SimClock::new();
+    let database = storage.database(Arc::clone(&clock)).await;
+    let nodes = Arc::new(SimNodes::new(
+        database,
+        clock,
+        lash_durable_test::Script::new(),
+        storage.config(),
+        storage.activation(),
+    ));
+    storage.start(&nodes).await.unwrap();
+    // Stop at the released seed, before done() sends the next input.
+    loop {
+        nodes.quiesce().await;
+        if matches!(nodes.database().actor(&actor()).await,
+            Ok(Some(snapshot)) if snapshot.state == ActorState::Idle)
+            && nodes
+                .script()
+                .trace()
+                .iter()
+                .any(|write| write.point.label == CommitLabel::TURN_COMMIT && write.committed())
+        {
+            break;
+        }
+        assert!(nodes.step().await.is_some(), "the seed has an armed timer");
+    }
+    // Both fresh boots poll the idle actor now, then arm equal backoffs.
+    // Without a scripted handoff their next contested claims prefer a.
+    nodes.restart("a");
+    nodes.restart("b");
+    nodes.quiesce().await;
+    while !storage.done(&nodes).await {
+        assert!(
+            nodes.step().await.is_some(),
+            "the steady turn has an armed timer"
+        );
+    }
+    let admissions: Vec<String> = nodes
+        .script()
+        .trace()
+        .iter()
+        .filter(|write| write.point.label == CommitLabel::TURN_ADMIT && write.committed())
+        .map(|write| write.node.to_string())
+        .collect();
+    assert_eq!(
+        admissions,
+        ["a", "b"],
+        "each turn follows its scripted owner"
+    );
+    assert!(storage.laws(&nodes, None).await.is_empty());
 }
 
 /// The session's head revision.
