@@ -15,11 +15,26 @@ pub(crate) use harness::*;
 #[path = "tests/after_turn_note.rs"]
 mod after_turn_note_tests;
 #[cfg(test)]
+#[path = "tests/commit_budget.rs"]
+mod commit_budget_tests;
+#[cfg(test)]
+#[path = "tests/continue_as_projection.rs"]
+mod continue_as_projection_tests;
+#[cfg(test)]
+#[path = "tests/deferred_tools.rs"]
+mod deferred_tools_tests;
+#[cfg(test)]
+#[path = "tests/done_stream_items.rs"]
+mod done_stream_items_tests;
+#[cfg(test)]
 #[path = "tests/mail_payload.rs"]
 mod mail_payload_tests;
 #[cfg(test)]
 #[path = "tests/multi_session.rs"]
 mod multi_session_tests;
+#[cfg(test)]
+#[path = "tests/observation_config.rs"]
+mod observation_config_tests;
 #[cfg(test)]
 #[path = "tests/product_event_persistence.rs"]
 mod product_event_persistence_tests;
@@ -30,11 +45,41 @@ mod projection_suites_tests;
 #[path = "tests/prompt_sections.rs"]
 mod prompt_sections_tests;
 #[cfg(test)]
+#[path = "tests/provider_execution_evidence.rs"]
+mod provider_execution_evidence_tests;
+#[cfg(test)]
+#[path = "tests/provider_tool_projection.rs"]
+mod provider_tool_projection_tests;
+#[cfg(test)]
+#[path = "tests/queued_work.rs"]
+mod queued_work_tests;
+#[cfg(test)]
+#[path = "tests/recoverable_chat_bare_prose.rs"]
+mod recoverable_chat_bare_prose_tests;
+#[cfg(test)]
 #[path = "tests/recoverable_chat_failures.rs"]
 mod recoverable_chat_failures_tests;
 #[cfg(test)]
 #[path = "tests/recoverable_chat.rs"]
 mod recoverable_chat_tests;
+#[cfg(test)]
+#[path = "tests/remote_execution_evidence.rs"]
+mod remote_execution_evidence_tests;
+#[cfg(test)]
+#[path = "tests/session_isolation.rs"]
+mod session_isolation_tests;
+#[cfg(test)]
+#[path = "tests/session_resume.rs"]
+mod session_resume_tests;
+#[cfg(test)]
+#[path = "tests/tool_control.rs"]
+mod tool_control_tests;
+#[cfg(test)]
+#[path = "tests/tool_loss.rs"]
+mod tool_loss_tests;
+#[cfg(test)]
+#[path = "tests/trigger_lifecycle.rs"]
+mod trigger_lifecycle_tests;
 #[cfg(test)]
 #[cfg(test)]
 #[path = "tests/typescript_dialect.rs"]

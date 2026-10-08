@@ -109,6 +109,468 @@ fn a_confirmed_retirement_is_never_lifted() {
     );
 }
 
+/// A retiring session refuses use but admits the delete retry; an ambiguous
+/// delete outcome keeps the mark, a definitive failure follows the durable
+/// fact and lifts it, and once the tombstone exists use is refused with the
+/// deleted conflict.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_retiring_session_refuses_use_but_admits_the_delete_retry() {
+    let workbench = Workbench::silent().await;
+    let state = &workbench.state;
+    let session_id = state.current_session_id();
+    let query = SessionQuery {
+        session_id: Some(session_id.clone()),
+    };
+    state
+        .admit_session(&query, "api.state")
+        .await
+        .expect("a live session is admitted");
+    state.active_turns.begin_retirement(&session_id);
+
+    let error = state
+        .admit_session(&query, "api.state")
+        .await
+        .expect_err("a retiring session refuses use");
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert_eq!(error.verdict, AppErrorVerdict::Terminal);
+    assert_eq!(error.message, retiring_session_message(&session_id));
+    state
+        .admit_session_id_for_delete(&session_id, "api.session.delete")
+        .await
+        .expect("a retiring session admits the delete retry");
+
+    state
+        .settle_retirement_mark(&session_id, &Err(AppError::internal("ambiguous")))
+        .await;
+    assert_eq!(
+        state.active_turns.retirement(&session_id),
+        Some(SessionRetirement::Retiring),
+        "an ambiguous outcome keeps the mark"
+    );
+    state
+        .settle_retirement_mark(&session_id, &Err(AppError::conflict("remains live")))
+        .await;
+    assert_eq!(
+        state.active_turns.retirement(&session_id),
+        None,
+        "a definitive failure over a live session lifts the mark"
+    );
+    state
+        .admit_session(&query, "api.state")
+        .await
+        .expect("the session is live again");
+
+    tombstone_session(state, &session_id).await;
+    let error = state
+        .admit_session(&query, "api.state")
+        .await
+        .expect_err("a tombstoned session refuses use");
+    super::recoverable_chat_tests::assert_deleted_session_conflict(&error, &session_id);
+    workbench.shutdown().await;
+}
+
+/// A send that passed its admission read and is held at the claim while a
+/// delete runs to completion is refused at the claim: the typed deleted
+/// conflict, no claim left behind, no user row, no provider call.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_delete_that_lands_between_admission_and_claim_refuses_the_send() {
+    let (gate, entered_rx) = super::concurrent_send_tests::TurnAdmissionGate::new(
+        "agent_workbench.api.turn.claim_ready",
+    );
+    let workbench = Workbench::builder(silent_provider())
+        .trace_sink(Arc::clone(&gate) as Arc<dyn TraceSink>)
+        .build()
+        .await;
+    let state = &workbench.state;
+    let old_session_id = state.current_session_id();
+    let send = tokio::spawn({
+        let state = state.clone();
+        let old_session_id = old_session_id.clone();
+        async move {
+            send_text(
+                &state,
+                Some(&old_session_id),
+                "send that loses to the delete",
+            )
+            .await
+        }
+    });
+    super::concurrent_send_tests::entered(entered_rx).await;
+
+    let Json(snapshot) = Box::pin(reset_chat(
+        State(state.clone()),
+        Query(SessionQuery {
+            session_id: Some(old_session_id.clone()),
+        }),
+    ))
+    .await
+    .expect("the delete completes while the send is held at the claim");
+    assert_ne!(snapshot.settings.session_id, old_session_id);
+    assert_eq!(
+        state.active_turns.retirement(&old_session_id),
+        Some(SessionRetirement::Retired)
+    );
+
+    gate.open();
+    let error = send
+        .await
+        .expect("send task")
+        .expect_err("the send released after the delete is refused at the claim");
+    super::recoverable_chat_tests::assert_deleted_session_conflict(&error, &old_session_id);
+    assert!(
+        state.active_turns.for_session(&old_session_id).is_none(),
+        "a refused send leaves no active-turn claim behind"
+    );
+    assert!(
+        product_rows(state, &old_session_id, "user").is_empty(),
+        "a refused send commits no user row"
+    );
+    workbench.shutdown().await;
+}
+
+/// The position of the first trace named `name` among `trace`'s records.
+fn trace_position(trace: &RecordingTrace, name: &str) -> Option<usize> {
+    let name = format!("agent_workbench.{name}");
+    trace.records().iter().position(|record| {
+        matches!(&record.event, TraceEvent::Custom { name: recorded, .. } if *recorded == name)
+    })
+}
+
+/// Deleting a session whose turn awaits a real process cancels that turn
+/// before the close is requested: the delete's cancel step precedes its
+/// retirement, the awaited process ends cancelled, the session's claim is
+/// released, and the retired id is refused afterwards.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn deleting_a_session_with_a_running_turn_cancels_it_before_retiring() {
+    let trace = Arc::new(RecordingTrace::default());
+    let workbench = Workbench::builder(replying_provider(
+        r#"<typescript>
+const hold_for_delete = await processes.create({ dialect: "typescript", source: `
+const hold = async () => {
+  await sleep(600000);
+  return "unreachable";
+};
+` });
+const handle = await processes.start({ definition: hold_for_delete });
+finish(String(await handle));
+</typescript>"#,
+    ))
+    .trace_sink(Arc::clone(&trace) as Arc<dyn TraceSink>)
+    .build()
+    .await;
+    let state = &workbench.state;
+    let old_session_id = state.current_session_id();
+    send_text(state, None, "start and await the held process")
+        .await
+        .expect("send the process-await turn");
+    let registry = workbench.stores.process_registry();
+    let process_id = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let live = registry
+                .list_non_terminal_processes_page(
+                    std::num::NonZeroUsize::new(16).expect("non-zero test page size"),
+                    None,
+                )
+                .await
+                .expect("list the live process while the turn awaits")
+                .records;
+            if let [process] = live.as_slice() {
+                break process.id.clone();
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the turn reaches a real process await");
+
+    let Json(snapshot) = Box::pin(reset_chat(
+        State(state.clone()),
+        Query(SessionQuery {
+            session_id: Some(old_session_id.clone()),
+        }),
+    ))
+    .await
+    .expect("the delete cancels the running turn and retires the session");
+    assert_ne!(snapshot.settings.session_id, old_session_id);
+    assert_eq!(state.current_session_id(), snapshot.settings.session_id);
+    assert_eq!(
+        state.active_turns.retirement(&old_session_id),
+        Some(SessionRetirement::Retired)
+    );
+    let cancelled = trace.custom("api.session.delete.turns_cancelled");
+    let [(_, cancelled)] = cancelled.as_slice() else {
+        panic!("the delete cancels the session's turns once: {cancelled:?}");
+    };
+    assert!(
+        cancelled["cancellations"]
+            .as_array()
+            .is_some_and(|cancellations| cancellations.len() == 1),
+        "the delete cancelled the running turn: {cancelled}"
+    );
+    assert!(
+        trace_position(&trace, "api.session.delete.turns_cancelled")
+            < trace_position(&trace, "session.retirement_settled"),
+        "the running turn is cancelled before the session retires"
+    );
+    // The delete reclaims the finished work its session originated, so the
+    // process may already be pruned: either way it ended cancelled.
+    match tokio::time::timeout(
+        Duration::from_secs(30),
+        state.core.processes().await_output(&process_id),
+    )
+    .await
+    .expect("the awaited process settles after the delete")
+    {
+        Ok(outcome) => assert_eq!(
+            outcome.terminal_status(),
+            Some(lash::process::TerminalProcessStatus::Cancelled),
+            "{outcome:?}"
+        ),
+        Err(lash::EmbedError::Plugin(lash::plugins::PluginError::ProcessNoLongerRetained {
+            terminal_label,
+            ..
+        })) => assert_eq!(
+            terminal_label,
+            lash::process::RetiredProcessStatus::Cancelled
+        ),
+        Err(error) => panic!("the awaited process outcome: {error:?}"),
+    }
+    assert!(state.active_turns.for_session(&old_session_id).is_none());
+    let error = send_text(state, Some(&old_session_id), "must not be admitted")
+        .await
+        .expect_err("the retired id is refused after the delete");
+    super::recoverable_chat_tests::assert_deleted_session_conflict(&error, &old_session_id);
+    workbench.shutdown().await;
+}
+
+// FIG-2359: every session-bound route resolves its id through the one
+// admission read, so a retired id gets the same typed 409 everywhere —
+// side-effect ingress included — instead of a 200 for a dead session.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn every_session_bound_route_refuses_a_retired_id_with_the_same_conflict() {
+    use futures_util::TryFutureExt as _;
+
+    let workbench = Workbench::silent().await;
+    let state = &workbench.state;
+    let session_id = state.current_session_id();
+    tombstone_session(state, &session_id).await;
+
+    let query = || SessionQuery {
+        session_id: Some(session_id.clone()),
+    };
+    type RouteCall<'a> =
+        std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), AppError>> + 'a>>;
+    let routes: Vec<(&'static str, RouteCall<'_>)> = vec![
+        (
+            "GET /api/state",
+            Box::pin(app_state(State(state.clone()), Query(query())).map_ok(drop)),
+        ),
+        (
+            "GET /api/events",
+            Box::pin(
+                session_events_with_shutdown(
+                    State(state.clone()),
+                    Query(ProductEventsQuery {
+                        cursor: None,
+                        session_id: Some(session_id.clone()),
+                    }),
+                    None,
+                )
+                .map_ok(drop),
+            ),
+        ),
+        (
+            "GET /api/observations",
+            Box::pin(
+                session_observations_with_shutdown(
+                    State(state.clone()),
+                    Query(EventsQuery {
+                        cursor: None,
+                        session_id: Some(session_id.clone()),
+                    }),
+                    remote_hello_headers(),
+                    None,
+                )
+                .map_ok(drop),
+            ),
+        ),
+        (
+            "POST /api/turn",
+            Box::pin(
+                send_turn(
+                    State(state.clone()),
+                    Query(query()),
+                    Json(turn_request("refused")),
+                )
+                .map_ok(drop),
+            ),
+        ),
+        (
+            "POST /api/turn/input",
+            Box::pin(
+                enqueue_turn_input(
+                    State(state.clone()),
+                    Query(query()),
+                    Json(TurnInputRequest {
+                        text: "refused".to_string(),
+                        ingress: TurnInputIngressRequest::NextTurn,
+                    }),
+                )
+                .map_ok(drop),
+            ),
+        ),
+        (
+            "POST /api/turn/cancel",
+            Box::pin(
+                cancel_turn(
+                    State(state.clone()),
+                    Query(TurnCancelQuery {
+                        session: query(),
+                        mode: WorkbenchTurnCancelMode::Abort,
+                    }),
+                )
+                .map_ok(drop),
+            ),
+        ),
+        (
+            "DELETE /api/session",
+            Box::pin(Box::pin(reset_chat(State(state.clone()), Query(query()))).map_ok(drop)),
+        ),
+        (
+            "POST /api/button-trigger",
+            Box::pin(
+                button_trigger(
+                    State(state.clone()),
+                    Query(query()),
+                    Json(ButtonEventRequest {
+                        button: ButtonChoice::Red,
+                        model: Some(TEST_MODEL.to_string()),
+                        model_variant: None,
+                    }),
+                )
+                .map_ok(drop),
+            ),
+        ),
+        (
+            "GET /api/triggers",
+            Box::pin(list_triggers(State(state.clone()), Query(query())).map_ok(drop)),
+        ),
+        (
+            "PUT /api/triggers/{key}/enabled",
+            Box::pin(
+                set_trigger_enabled(
+                    AxumPath("any-subscription".to_string()),
+                    State(state.clone()),
+                    Query(query()),
+                    Json(TriggerEnabledRequest { enabled: false }),
+                )
+                .map_ok(drop),
+            ),
+        ),
+        (
+            "DELETE /api/triggers/{key}",
+            Box::pin(
+                delete_trigger(
+                    AxumPath("any-subscription".to_string()),
+                    State(state.clone()),
+                    Query(query()),
+                )
+                .map_ok(drop),
+            ),
+        ),
+        (
+            "POST /api/accounts/{slug}/messages",
+            Box::pin(
+                inject_message(
+                    AxumPath("personal".to_string()),
+                    State(state.clone()),
+                    Query(query()),
+                    Json(InjectMessageRequest {
+                        title: "refused".to_string(),
+                        text: "refused".to_string(),
+                        model: Some(TEST_MODEL.to_string()),
+                        model_variant: None,
+                    }),
+                )
+                .map_ok(drop),
+            ),
+        ),
+        (
+            "GET /api/work",
+            Box::pin(list_work(State(state.clone()), Query(query())).map_ok(drop)),
+        ),
+        (
+            "GET /api/queued-work",
+            Box::pin(list_queued_work(State(state.clone()), Query(query())).map_ok(drop)),
+        ),
+        (
+            "POST /api/queued-work/{batch}/cancel",
+            Box::pin(
+                cancel_queued_work_batch(
+                    AxumPath("any-batch".to_string()),
+                    State(state.clone()),
+                    Query(query()),
+                )
+                .map_ok(drop),
+            ),
+        ),
+        (
+            "GET /api/lashlang-graphs",
+            Box::pin(list_lashlang_graphs(State(state.clone()), Query(query())).map_ok(drop)),
+        ),
+        (
+            "GET /api/lashlang-graph/{key}",
+            Box::pin(
+                lashlang_graph(
+                    AxumPath("any-graph".to_string()),
+                    State(state.clone()),
+                    Query(query()),
+                )
+                .map_ok(drop),
+            ),
+        ),
+        (
+            "POST /api/sessions/select",
+            Box::pin(
+                select_session(
+                    State(state.clone()),
+                    Json(SessionSelectRequest {
+                        session_id: session_id.clone(),
+                    }),
+                )
+                .map_ok(drop),
+            ),
+        ),
+    ];
+    for (route, call) in routes {
+        let error = match call.await {
+            Ok(()) => panic!("{route} must refuse the retired session"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            error.status,
+            StatusCode::CONFLICT,
+            "{route} must return the shared 409: {}",
+            error.message
+        );
+        assert_eq!(
+            error.message,
+            deleted_session_message(&session_id),
+            "{route} must return the shared refusal message"
+        );
+        assert_eq!(
+            error.verdict,
+            AppErrorVerdict::Terminal,
+            "{route} must return the terminal verdict"
+        );
+    }
+    assert!(
+        state.messages_snapshot().is_empty(),
+        "no side-effect ingress committed anything for the retired session"
+    );
+    workbench.shutdown().await;
+}
+
 // FIG-3292: the ledger is keyed by session, so the states the old
 // `BTreeSet<(SessionId, TurnId)>` beside a separate prompt map could represent
 // are gone from memory. A file written by that build can still hold them, so

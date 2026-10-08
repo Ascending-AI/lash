@@ -101,3 +101,102 @@ fn host_llm_profile_capability_validates_reasoning_effort_selections() {
             .contains("missing advertised effort `high`")
     );
 }
+
+/// The workbench plugin observes a session's model change through its
+/// config-change hook, after the change commits: it sees the previous and
+/// the new model, and the session it reads already serves the new one. The
+/// session actor delivers the change from the command run that applied it,
+/// after `apply` returns, so the law runs a turn behind it in the same actor
+/// and reads the observation once that turn has answered (FIG-5333).
+#[tokio::test]
+async fn workbench_plugin_observes_session_config_policy_transition() {
+    let stores: Arc<dyn lash::StoreSet> = Arc::new(
+        lash::sqlite::SqliteStoreSet::memory()
+            .await
+            .expect("open a SQLite memory store set"),
+    );
+    let backend = lash::durable::DurableBackendBuilder::new(stores)
+        .build()
+        .expect("the durable backend builds");
+    let plugin = WorkbenchPluginFactory::new();
+    let config_changes = plugin.config_changes.clone();
+    let core = LashCore::standard_builder(backend)
+        .llm_profiles(Arc::new(WorkbenchLlmProfiles {
+            provider: replying_provider("done"),
+        }))
+        .plugin(Arc::new(plugin))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "agent-workbench-test",
+            uuid::Uuid::new_v4().to_string(),
+        ))
+        .expect("build the config-change core");
+    let session_id = lash::SessionId::from("workbench-config-change-session");
+    core.session(session_id.clone())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "workbench-model-before",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(8),
+        )))
+        .await
+        .expect("create the config-change session");
+    let session = core
+        .session(session_id.clone())
+        .open()
+        .await
+        .expect("open the config-change session");
+    let config = session.admin().config();
+    let outcome = config
+        .apply(
+            lash::config::ConfigWrite::new(
+                "workbench-model-after",
+                config.revision().await.expect("read the config revision"),
+            ),
+            lash::config::ConfigTransaction::of(lash::config::SetLlmProfile {
+                model: lash::LlmProfileKey::new("workbench-model-after"),
+            }),
+        )
+        .await
+        .expect("patch the session's model");
+    assert!(
+        matches!(
+            outcome,
+            lash::config::ConfigTransactionOutcome::Applied { .. }
+        ),
+        "{outcome:?}"
+    );
+    // The session actor runs this turn after the command run that applied
+    // the change: its answer means the observer has run.
+    let turn = session
+        .send(lash::TurnInput::text("after the change"))
+        .output()
+        .await
+        .expect("the turn after the change answers");
+    assert!(turn.is_success(), "{turn:?}");
+
+    assert_eq!(
+        config_changes.latest.lock_recover().clone(),
+        Some(WorkbenchConfigChange {
+            session_id: session_id.clone(),
+            previous_profile_key: "workbench-model-before".to_string(),
+            current_profile_key: "workbench-model-after".to_string(),
+            service_profile_key: "workbench-model-after".to_string(),
+        })
+    );
+    let reopened = core
+        .session(session_id)
+        .open()
+        .await
+        .expect("reopen the config-change session");
+    assert_eq!(
+        reopened
+            .policy_snapshot()
+            .profile_key()
+            .map(ToString::to_string),
+        Some("workbench-model-after".to_string())
+    );
+    drop(reopened);
+    drop(session);
+    core.shutdown().await.expect("the core shuts down");
+}

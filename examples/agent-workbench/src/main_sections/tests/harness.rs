@@ -29,6 +29,7 @@ pub(crate) struct WorkbenchBuilder {
     sessions: Option<WorkbenchSessions>,
     event_tx: Option<SessionEventRegistry>,
     active_turns: Option<ActiveTurns>,
+    tool_provider: Option<Arc<dyn lash::tools::ToolProvider>>,
 }
 
 impl Workbench {
@@ -43,6 +44,7 @@ impl Workbench {
             sessions: None,
             event_tx: None,
             active_turns: None,
+            tool_provider: None,
         }
     }
 
@@ -112,6 +114,12 @@ impl WorkbenchBuilder {
         self
     }
 
+    /// Serve host tools from `tools`, as a deployment's tool fixture does.
+    pub(crate) fn tool_provider(mut self, tools: Arc<dyn lash::tools::ToolProvider>) -> Self {
+        self.tool_provider = Some(tools);
+        self
+    }
+
     pub(crate) async fn build(self) -> Workbench {
         let stores: Arc<dyn lash::StoreSet> = match self.stores {
             Some(stores) => stores,
@@ -146,7 +154,7 @@ impl WorkbenchBuilder {
             .expect("an MCP factory with no servers");
         let plugins = WorkbenchCorePlugins {
             rlm_workers: workbench_rlm_workers().expect("the VM worker deployment"),
-            tool_provider: None,
+            tool_provider: self.tool_provider,
             mail_world: self.mail_world.clone(),
             child_spec: session_defaults.clone(),
             deferred_tools: deferred_tools::WorkbenchDeferredTools::in_memory()
@@ -404,6 +412,16 @@ pub(crate) async fn run_turn(state: &AppState, text: &str) -> TurnId {
         .expect("the send is admitted");
     let turn_id = started_turn_id(&accepted);
     wait_for_turn_released(state, &session_id, &turn_id, Duration::from_secs(30)).await;
+    turn_id
+}
+
+/// [`run_turn`] in `session_id`, named by the send's query.
+pub(crate) async fn run_turn_in(state: &AppState, session_id: &SessionId, text: &str) -> TurnId {
+    let accepted = send_text(state, Some(session_id), text)
+        .await
+        .expect("the send is admitted");
+    let turn_id = started_turn_id(&accepted);
+    wait_for_turn_released(state, session_id, &turn_id, Duration::from_secs(30)).await;
     turn_id
 }
 

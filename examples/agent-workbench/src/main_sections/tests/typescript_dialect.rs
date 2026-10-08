@@ -531,3 +531,226 @@ fn every_scripted_dev_provider_reply_is_a_cell_of_the_hosts_dialect() {
         "scripted replies a session cannot run: {hits:#?}"
     );
 }
+
+// The laws below run through the workbench's chat route on the in-process
+// durable workbench, whose engine runs every turn.
+
+fn assert_no_lashlang_words(prompts: &[String]) {
+    let mut violations = prompts
+        .iter()
+        .flat_map(|prompt| foreign_words_in(prompt, HOST_FOREIGN_MARKERS))
+        .collect::<Vec<_>>();
+    violations.sort();
+    violations.dedup();
+    assert!(
+        violations.is_empty(),
+        "a TypeScript session was served Lashlang words: {violations:?}"
+    );
+}
+
+/// The language of every code-block row of the rendered transcript.
+fn transcript_code_languages(snapshot: &StateReadSnapshot) -> Vec<String> {
+    snapshot
+        .transcript
+        .iter()
+        .filter(|row| row.kind == lash::transcript::TranscriptRowKind::CodeBlock)
+        .filter_map(|row| row.content.language.clone())
+        .collect()
+}
+
+/// Everything the rendered transcript says back to the user: assistant rows
+/// and the output of each executed cell.
+fn transcript_answers(snapshot: &StateReadSnapshot) -> Vec<String> {
+    snapshot
+        .transcript
+        .iter()
+        .filter(|row| row.suppressed.is_none())
+        .flat_map(|row| {
+            [Some(row.content.text.clone()), row.content.output.clone()]
+                .into_iter()
+                .flatten()
+        })
+        .collect()
+}
+
+/// A served turn reaches the model with the TypeScript prompt, carries none
+/// of the retired language's words, and the rendered transcript labels its
+/// executed cell `typescript`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_typescript_workbench_serves_typescript_turns_and_records_the_dialect() {
+    let served_prompts: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let provider = {
+        let served_prompts = Arc::clone(&served_prompts);
+        lash::testing::TestProvider::builder()
+            .kind("workbench-harness")
+            .complete(move |request: lash::provider::LlmRequest| {
+                // The request's own rendering, so this fixture needs no
+                // message-vocabulary types the facade does not export.
+                served_prompts.lock_recover().push(format!("{request:?}"));
+                async { Ok(text_response(&finish_cell("canonical answer"))) }
+            })
+            .build()
+            .into_handle()
+    };
+    let workbench = Workbench::builder(provider).build().await;
+    let state = &workbench.state;
+    run_turn(state, "say the canonical answer").await;
+
+    let prompts = served_prompts.lock_recover().clone();
+    assert!(!prompts.is_empty(), "the turn must reach the provider");
+    assert!(
+        prompts
+            .iter()
+            .all(|prompt| prompt.contains("## TypeScript execution")),
+        "every served prompt must be the TypeScript one: {prompts:#?}"
+    );
+    // The substrate's own walker covers the fragments the RLM crate
+    // contributes; this covers the host's, where the workbench's worked
+    // tutorials are injected.
+    assert_no_lashlang_words(&prompts);
+    let projected = read_state(state, None).await.expect("project the session");
+    assert_eq!(
+        transcript_code_languages(&projected),
+        vec!["typescript".to_string()],
+        "the rendered transcript must label the executed cell"
+    );
+    workbench.shutdown().await;
+}
+
+/// The `code-failure` scenario renders a failed cell, recovers and
+/// terminates. With the workbench's turn budget a scenario that cannot
+/// commit re-asks the provider until the budget ends, so the watchdog is the
+/// regression guard: a scenario that cannot terminate fails here.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_code_failure_scenario_renders_a_failed_cell_and_terminates() {
+    let workbench =
+        Workbench::builder(failure_provider::DevProviderScenario::CodeFailure.provider())
+            .build()
+            .await;
+    let state = &workbench.state;
+    tokio::time::timeout(
+        Duration::from_secs(60),
+        run_turn(state, "run the deterministic code failure"),
+    )
+    .await
+    .expect("the code-failure scenario reaches a terminal state");
+
+    let projected = read_state(state, None)
+        .await
+        .expect("project the code-failure session");
+    let blocks = projected
+        .transcript
+        .iter()
+        .filter(|row| row.kind == lash::transcript::TranscriptRowKind::CodeBlock)
+        .map(|row| (row.content.language.clone(), row.content.success))
+        .collect::<Vec<_>>();
+    assert!(
+        blocks
+            .iter()
+            .any(|block| *block == (Some("typescript".to_string()), Some(false))),
+        "the scenario must render a failed cell: {blocks:?}"
+    );
+    let answers = transcript_answers(&projected);
+    assert!(
+        answers
+            .iter()
+            .any(|answer| answer.contains("session recovered after code failure")),
+        "the scenario must recover and finish within the turn budget: {answers:?}"
+    );
+    workbench.shutdown().await;
+}
+
+/// Cell A binds, cell B reads, cell C rebinds and reads back, each in its
+/// own turn through the chat route: top-level bindings persist across cells
+/// as the prompt promises under `=== BOUND VARIABLES ===`. ADR 0096: this ran
+/// once per dialect; TypeScript is the sole RLM language.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cell_reads_what_an_earlier_cell_bound_in_both_dialects() {
+    let workbench = Workbench::builder(scripted_cells_provider(vec![
+        "<typescript>\nconst findings = { summary: \"first pass\" };\nfinish(\"bound\");\n</typescript>"
+            .to_string(),
+        "<typescript>\nfinish(findings.summary);\n</typescript>".to_string(),
+        "<typescript>\nconst findings = { summary: \"second pass\" };\nfinish(findings.summary);\n</typescript>"
+            .to_string(),
+    ]))
+    .build()
+    .await;
+    let state = &workbench.state;
+    for prompt in ["bind it", "read it back", "rebind and read"] {
+        run_turn(state, prompt).await;
+    }
+    let answers = transcript_answers(&read_state(state, None).await.expect("project"));
+    assert!(
+        answers.iter().any(|answer| answer.contains("first pass")),
+        "a cell must read the binding a previous cell made: {answers:#?}"
+    );
+    assert!(
+        answers.iter().any(|answer| answer.contains("second pass")),
+        "a cell must read back a rebound session global: {answers:#?}"
+    );
+    workbench.shutdown().await;
+}
+
+/// The same session model across a restart: a second workbench over the
+/// same stores runs the next cell, which still reads what the first bound.
+/// ADR 0096: this ran once per dialect; the Lashlang half is gone.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_rehydrated_session_still_reads_its_earlier_bindings_in_both_dialects() {
+    let first = Workbench::builder(scripted_cells_provider(vec![
+        "<typescript>\nconst findings = { summary: \"survived\" };\nfinish(\"bound\");\n</typescript>"
+            .to_string(),
+    ]))
+    .build()
+    .await;
+    let session_id = first.state.current_session_id();
+    run_turn(&first.state, "bind it").await;
+    let stores = Arc::clone(&first.stores);
+    first.shutdown().await;
+
+    let second = Workbench::builder(scripted_cells_provider(vec![
+        "<typescript>\nfinish(findings.summary);\n</typescript>".to_string(),
+    ]))
+    .stores(stores)
+    .build()
+    .await;
+    run_turn_in(&second.state, &session_id, "read it back").await;
+    let answers = transcript_answers(
+        &read_state(&second.state, Some(&session_id))
+            .await
+            .expect("project the rehydrated session"),
+    );
+    assert!(
+        answers.iter().any(|answer| answer.contains("survived")),
+        "a session must read its earlier binding after a restart: {answers:#?}"
+    );
+    second.shutdown().await;
+}
+
+/// The negative control: a name neither the cell nor the session has is
+/// refused, and the refusal reaches the model. ADR 0096: this ran once per
+/// dialect; the Lashlang half is gone.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_name_no_one_has_is_still_refused_in_both_dialects() {
+    let workbench = Workbench::builder(scripted_cells_provider(vec![
+        "<typescript>\nfinish(nowhere);\n</typescript>".to_string(),
+        "<typescript>\nfinish(\"recovered\");\n</typescript>".to_string(),
+    ]))
+    .build()
+    .await;
+    let state = &workbench.state;
+    run_turn(state, "read a name nobody has").await;
+    let failures = read_state(state, None)
+        .await
+        .expect("project the session")
+        .transcript
+        .iter()
+        .filter_map(|row| row.content.error.clone())
+        .collect::<Vec<_>>();
+    assert!(
+        failures
+            .iter()
+            .any(|error| error.contains("TS_UNKNOWN_BINDING")),
+        "a name nobody has must be refused: {failures:#?}"
+    );
+    workbench.shutdown().await;
+}

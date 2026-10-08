@@ -208,14 +208,14 @@ async fn deleting_a_non_current_session_preserves_selected_session_buffers() {
 }
 
 /// Blocks the route at one of its own trace events until released.
-struct TurnAdmissionGate {
+pub(crate) struct TurnAdmissionGate {
     event_name: &'static str,
     entered: std::sync::mpsc::SyncSender<()>,
     release: Arc<(Mutex<bool>, std::sync::Condvar)>,
 }
 
 impl TurnAdmissionGate {
-    fn new(event_name: &'static str) -> (Arc<Self>, std::sync::mpsc::Receiver<()>) {
+    pub(crate) fn new(event_name: &'static str) -> (Arc<Self>, std::sync::mpsc::Receiver<()>) {
         let (entered, entered_rx) = std::sync::mpsc::sync_channel(1);
         (
             Arc::new(Self {
@@ -227,7 +227,7 @@ impl TurnAdmissionGate {
         )
     }
 
-    fn open(&self) {
+    pub(crate) fn open(&self) {
         let (released, condition) = &*self.release;
         *released.lock().unwrap_or_else(|error| error.into_inner()) = true;
         condition.notify_all();
@@ -256,7 +256,7 @@ impl TraceSink for TurnAdmissionGate {
     }
 }
 
-async fn entered(gate: std::sync::mpsc::Receiver<()>) {
+pub(crate) async fn entered(gate: std::sync::mpsc::Receiver<()>) {
     tokio::task::spawn_blocking(move || gate.recv_timeout(Duration::from_secs(10)))
         .await
         .expect("gate wait")

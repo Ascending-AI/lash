@@ -4,7 +4,7 @@
 # 1671 rows over 873 files, 4033 laws.
 # By class: mechanical 184, semantic 128, delete 888, replace 471.
 # By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 87, L9c 352, L9d 91, L9e 138, L9f 125, L9g 98, L9h 123, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
-# By status: todo 342, ported 116, deleted 1213.
+# By status: todo 312, ported 116, deleted 1243.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -379,66 +379,6 @@
 #   a high-traffic trigger waits for terminal delivery
 # - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::stable_durable_sqlite_turn_scenarios_report_phases_and_store_calls
 #   durable SQLite turn scenarios report their phases and store calls
-# - L9h: examples/agent-workbench/src/main_sections/tests/commit_budget.rs
-#   commit budget is explicit host policy with no implicit builder fallback
-# - L9h: examples/agent-workbench/src/main_sections/tests/continue_as_projection.rs
-#   two continue as switches keep real sends and show the current follow task; and 3 more law(s) of the file, by test name
-# - L9h: examples/agent-workbench/src/main_sections/tests/deferred_tools.rs
-#   deferred search observation enables next block call; and 1 more law(s) of the file, by test name
-# - L9h: examples/agent-workbench/src/main_sections/tests/done_stream_items.rs
-#   done stream items are transient and not snapshotted; and 1 more law(s) of the file, by test name
-# - L9h: examples/agent-workbench/src/main_sections/tests/facade_homes.rs::workbench_plugin_observes_session_config_policy_transition
-#   workbench plugin observes session config policy transition
-# - L9h: examples/agent-workbench/src/main_sections/tests/mail_payload.rs::inject_message_scopes_emission_to_requested_session
-#   inject message scopes emission to requested session
-# - L9h: examples/agent-workbench/src/main_sections/tests/multi_session.rs::a_created_session_runs_beside_the_ambient_default
-#   a created session runs beside the ambient default
-# - L9h: examples/agent-workbench/src/main_sections/tests/multi_session.rs::selecting_a_session_moves_the_query_less_default
-#   selecting a session moves the query less default
-# - L9h: examples/agent-workbench/src/main_sections/tests/multi_session.rs::the_session_roster_survives_the_web_process
-#   the session roster survives the web process
-# - L9h: examples/agent-workbench/src/main_sections/tests/observation_config.rs
-#   state get preserves config; and 4 more law(s) of the file, by test name
-# - L9h: examples/agent-workbench/src/main_sections/tests/provider_execution_evidence.rs
-#   provider execution evidence reaches the record surfaces
-# - L9h: examples/agent-workbench/src/main_sections/tests/provider_tool_projection.rs
-#   every tool a standard workbench turn offers projects under every provider tool dialect
-# - L9h: examples/agent-workbench/src/main_sections/tests/queued_work.rs
-#   workbench lists and controls individual queued batches; and 3 more law(s) of the file, by test name
-# - L9h: examples/agent-workbench/src/main_sections/tests/recoverable_chat_bare_prose.rs
-#   chat finish requires text session wide and prose still ends a turn; and 4 more law(s) of the file, by test name
-# - L9h: examples/agent-workbench/src/main_sections/tests/recoverable_chat_failures.rs::workbench_provider_failure_emits_only_fixed_public_product_copy
-#   workbench provider failure emits only fixed public product copy
-# - L9h: examples/agent-workbench/src/main_sections/tests/remote_execution_evidence.rs::workbench_remote_recovery_facades_deliver_cursor_events_and_terminal_replacement
-#   workbench remote recovery facades deliver cursor events and terminal replacement
-# - L9h: examples/agent-workbench/src/main_sections/tests/session_fence.rs::a_delete_that_lands_between_admission_and_claim_refuses_the_send
-#   a delete that lands between admission and claim refuses the send
-# - L9h: examples/agent-workbench/src/main_sections/tests/session_fence.rs::a_retiring_session_refuses_use_but_admits_the_delete_retry
-#   a retiring session refuses use but admits the delete retry
-# - L9h: examples/agent-workbench/src/main_sections/tests/session_fence.rs::deleting_a_session_with_a_running_turn_cancels_it_before_retiring
-#   deleting a session with a running turn cancels it before retiring
-# - L9h: examples/agent-workbench/src/main_sections/tests/session_fence.rs::every_session_bound_route_refuses_a_retired_id_with_the_same_conflict
-#   every session bound route refuses a retired id with the same conflict
-# - L9h: examples/agent-workbench/src/main_sections/tests/session_isolation.rs
-#   concurrent sessions isolate transcripts triggers and processes
-# - L9h: examples/agent-workbench/src/main_sections/tests/session_resume.rs
-#   committed transcript and provider history survive web process reconstruction
-# - L9h: examples/agent-workbench/src/main_sections/tests/tool_control.rs
-#   workbench tools expose typed cancellation and turn control
-# - L9h: examples/agent-workbench/src/main_sections/tests/tool_loss.rs
-#   a run that lost a tool renders the loss to the user
-# - L9h: examples/agent-workbench/src/main_sections/tests/trigger_lifecycle.rs
-#   button trigger lifecycle stays visible and queues wakes during active turn
-# - L9h: examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs::a_cell_reads_what_an_earlier_cell_bound_in_both_dialects
-#   a cell reads what an earlier cell bound in both dialects
-# - L9h: examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs::a_name_no_one_has_is_still_refused_in_both_dialects
-#   a name no one has is still refused in both dialects
-# - L9h: examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs::a_rehydrated_session_still_reads_its_earlier_bindings_in_both_dialects
-#   a rehydrated session still reads its earlier bindings in both dialects
-# - L9h: examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs::a_typescript_workbench_serves_typescript_turns_and_records_the_dialect
-#   a typescript workbench serves typescript turns and records the dialect
-# - L9h: examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs::the_code_failure_scenario_renders_a_failed_cell_and_terminates
-#   the code failure scenario renders a failed cell and terminates
 # - L9h: examples/workflow-graph-roundtrip/tests/authoring.rs
 #   blank workflow full authoring round trip rejects malformed then runs; and 5 more law(s) of the file, by test name
 # - L9h: examples/workflow-graph-roundtrip/tests/durable_run.rs
@@ -16789,10 +16729,10 @@ lane = "L9h"
 laws = [
   "commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/commit_budget.rs::commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback"
+status = "deleted"
 owed = "commit budget is explicit host policy with no implicit builder fallback"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: a builder law: it builds cores over a durable SQLite memory backend directly, as no AppState is involved"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/continue_as_projection.rs"
@@ -16807,10 +16747,10 @@ laws = [
   "a_frame_switch_keeps_sends_the_workbench_never_saw_commit",
   "canonical_transcript_scenario_survives_a_frame_switch",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/continue_as_projection.rs"
+status = "deleted"
 owed = "two continue as switches keep real sends and show the current follow task; and 3 more law(s) of the file, by test name"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: a switch now ends its run and the engine starts the follow-frame run on its own (ADR 0101 §3), so each law waits for the follow frame's rows; the never-observed-commit race is driven by a rebuild that sees no committed inputs after each routed turn"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/deferred_tools.rs"
@@ -16823,10 +16763,10 @@ laws = [
   "deferred_search_observation_enables_next_block_call",
   "same_block_discovery_cannot_relink_and_unknown_paths_report_link_errors",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/deferred_tools.rs"
+status = "deleted"
 owed = "deferred search observation enables next block call; and 1 more law(s) of the file, by test name"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: each turn runs through the chat route on the workbench's own deferred-tool resolver"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/done_stream_items.rs"
@@ -16839,10 +16779,10 @@ laws = [
   "done_stream_items_are_transient_and_not_snapshotted",
   "trigger_dispatch_done_does_not_clear_an_active_turn",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/done_stream_items.rs"
+status = "deleted"
 owed = "done stream items are transient and not snapshotted; and 1 more law(s) of the file, by test name"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: a turn's Done now retires from the snapshot at its settlement (retire_settled_product_rows), which the transient law pins on a routed turn; the dispatch law presses the button route with and without a foreground claim"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs"
@@ -16854,10 +16794,10 @@ lane = "L9h"
 laws = [
   "workbench_plugin_observes_session_config_policy_transition",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/facade_homes.rs::workbench_plugin_observes_session_config_policy_transition"
+status = "deleted"
 owed = "workbench plugin observes session config policy transition"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: a plugin law on a minimal durable core carrying the workbench plugin (as FIG-5260's prompt-section law); FIG-5333 delivers the change from the applying command run after apply returns, so the law reads the observer after a turn the session actor runs behind it, without sleeping"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs"
@@ -16884,10 +16824,10 @@ lane = "L9h"
 laws = [
   "inject_message_scopes_emission_to_requested_session",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/mail_payload.rs::inject_message_scopes_emission_to_requested_session"
+status = "deleted"
 owed = "inject message scopes emission to requested session"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: two sessions register mail listeners through turns and the inject route delivers in the scoped one only"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/multi_session.rs"
@@ -16899,10 +16839,10 @@ lane = "L9h"
 laws = [
   "a_created_session_runs_beside_the_ambient_default",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/multi_session.rs::a_created_session_runs_beside_the_ambient_default"
+status = "deleted"
 owed = "a created session runs beside the ambient default"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: turns run through the chat route; the restart is a second workbench over the same stores and roster file"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/multi_session.rs"
@@ -16914,10 +16854,10 @@ lane = "L9h"
 laws = [
   "selecting_a_session_moves_the_query_less_default",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/multi_session.rs::selecting_a_session_moves_the_query_less_default"
+status = "deleted"
 owed = "selecting a session moves the query less default"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: turns run through the chat route; the restart is a second workbench over the same stores and roster file"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/multi_session.rs"
@@ -16929,10 +16869,10 @@ lane = "L9h"
 laws = [
   "the_session_roster_survives_the_web_process",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/multi_session.rs::the_session_roster_survives_the_web_process"
+status = "deleted"
 owed = "the session roster survives the web process"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: turns run through the chat route; the restart is a second workbench over the same stores and roster file"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/observation_config.rs"
@@ -16948,10 +16888,10 @@ laws = [
   "sessions_get_preserves_config",
   "events_get_preserves_config",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/observation_config.rs"
+status = "deleted"
 owed = "state get preserves config; and 4 more law(s) of the file, by test name"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: each read route is served over HTTP by the harness's AppState"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/provider_execution_evidence.rs"
@@ -16963,10 +16903,10 @@ lane = "L9h"
 laws = [
   "provider_execution_evidence_reaches_the_record_surfaces",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/provider_execution_evidence.rs::provider_execution_evidence_reaches_the_record_surfaces"
+status = "deleted"
 owed = "provider execution evidence reaches the record surfaces"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: the scripted wire providers serve routed sends; the ledgers are read off the remote observation stream and the product snapshot"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/provider_tool_projection.rs"
@@ -16978,10 +16918,10 @@ lane = "L9h"
 laws = [
   "every_tool_a_standard_workbench_turn_offers_projects_under_every_provider_tool_dialect",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/provider_tool_projection.rs::every_tool_a_standard_workbench_turn_offers_projects_under_every_provider_tool_dialect"
+status = "deleted"
 owed = "every tool a standard workbench turn offers projects under every provider tool dialect"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: a plugin-stack law: the workbench's Standard composition (configure_workbench_plugins) over a durable SQLite memory backend, as the harness boots the selected RLM protocol"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/queued_work.rs"
@@ -16996,10 +16936,10 @@ laws = [
   "wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered",
   "a_wake_turn_leaves_the_previous_reasoned_reply_rendered",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/queued_work.rs"
+status = "deleted"
 owed = "workbench lists and controls individual queued batches; and 3 more law(s) of the file, by test name"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: the queue controls act while a gated foreground turn holds the session, and the wake turns are woken by a real button trigger's emission. workbench_wake_redelivery_absorbs_into_the_live_receiver_row is subject-deleted: its subject, the wake outbox and its redelivery driver (WakeDeliveryDriver, wake allocation floors, redelivery fences), went in e47f096f7f (FIG-5175)"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/recoverable_chat_bare_prose.rs"
@@ -17015,10 +16955,10 @@ laws = [
   "mid_turn_protocol_prose_stays_out_of_the_chat_rows",
   "a_resettled_turn_publishes_its_reply_once",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/recoverable_chat_bare_prose.rs"
+status = "deleted"
 owed = "chat finish requires text session wide and prose still ends a turn; and 4 more law(s) of the file, by test name"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: turns run through the chat route; the re-settlement is resume_turn_followers re-following a claimed settled turn"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/recoverable_chat_failures.rs"
@@ -17030,10 +16970,10 @@ lane = "L9h"
 laws = [
   "workbench_provider_failure_emits_only_fixed_public_product_copy",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/recoverable_chat_failures.rs::workbench_provider_failure_emits_only_fixed_public_product_copy"
+status = "deleted"
 owed = "workbench provider failure emits only fixed public product copy"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: the failing turn runs through the chat route"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/remote_execution_evidence.rs"
@@ -17045,10 +16985,10 @@ lane = "L9h"
 laws = [
   "workbench_remote_recovery_facades_deliver_cursor_events_and_terminal_replacement",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/remote_execution_evidence.rs::workbench_remote_recovery_facades_deliver_cursor_events_and_terminal_replacement"
+status = "deleted"
 owed = "workbench remote recovery facades deliver cursor events and terminal replacement"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: the turn runs through the chat route; its terminal replacement follows the route's model-selection commit"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/restate_endpoint.rs"
@@ -17128,10 +17068,10 @@ lane = "L9h"
 laws = [
   "a_retiring_session_refuses_use_but_admits_the_delete_retry",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/session_fence.rs::a_retiring_session_refuses_use_but_admits_the_delete_retry"
+status = "deleted"
 owed = "a retiring session refuses use but admits the delete retry"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: the delete is the route's own retirement through the core's session close; the retiring law's tombstone tail asserts the use refusal, as FIG-5347 admits a delete retry over a tombstone"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/session_fence.rs"
@@ -17143,10 +17083,10 @@ lane = "L9h"
 laws = [
   "a_delete_that_lands_between_admission_and_claim_refuses_the_send",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/session_fence.rs::a_delete_that_lands_between_admission_and_claim_refuses_the_send"
+status = "deleted"
 owed = "a delete that lands between admission and claim refuses the send"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: the delete is the route's own retirement through the core's session close; the retiring law's tombstone tail asserts the use refusal, as FIG-5347 admits a delete retry over a tombstone"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/session_fence.rs"
@@ -17158,10 +17098,10 @@ lane = "L9h"
 laws = [
   "deleting_a_session_with_a_running_turn_cancels_it_before_retiring",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/session_fence.rs::deleting_a_session_with_a_running_turn_cancels_it_before_retiring"
+status = "deleted"
 owed = "deleting a session with a running turn cancels it before retiring"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: the delete is the route's own retirement through the core's session close; the retiring law's tombstone tail asserts the use refusal, as FIG-5347 admits a delete retry over a tombstone"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/session_fence.rs"
@@ -17173,10 +17113,10 @@ lane = "L9h"
 laws = [
   "every_session_bound_route_refuses_a_retired_id_with_the_same_conflict",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/session_fence.rs::every_session_bound_route_refuses_a_retired_id_with_the_same_conflict"
+status = "deleted"
 owed = "every session bound route refuses a retired id with the same conflict"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: the delete is the route's own retirement through the core's session close; the retiring law's tombstone tail asserts the use refusal, as FIG-5347 admits a delete retry over a tombstone"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/session_isolation.rs"
@@ -17188,10 +17128,10 @@ lane = "L9h"
 laws = [
   "concurrent_sessions_isolate_transcripts_triggers_and_processes",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/session_isolation.rs::concurrent_sessions_isolate_transcripts_triggers_and_processes"
+status = "deleted"
 owed = "concurrent sessions isolate transcripts triggers and processes"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: two rostered sessions register and press through the routes"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/session_resume.rs"
@@ -17203,10 +17143,10 @@ lane = "L9h"
 laws = [
   "committed_transcript_and_provider_history_survive_web_process_reconstruction",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/session_resume.rs::committed_transcript_and_provider_history_survive_web_process_reconstruction"
+status = "deleted"
 owed = "committed transcript and provider history survive web process reconstruction"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: the restart is a second workbench over the same stores and roster file"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/tool_control.rs"
@@ -17218,10 +17158,10 @@ lane = "L9h"
 laws = [
   "workbench_tools_expose_typed_cancellation_and_turn_control",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/tool_control.rs::workbench_tools_expose_typed_cancellation_and_turn_control"
+status = "deleted"
 owed = "workbench tools expose typed cancellation and turn control"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: the control tools are the harness's host tool provider (WorkbenchCorePlugins::tool_provider), and each turn is a send on the workbench's session"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/tool_loss.rs"
@@ -17233,10 +17173,10 @@ lane = "L9h"
 laws = [
   "a_run_that_lost_a_tool_renders_the_loss_to_the_user",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/tool_loss.rs::a_run_that_lost_a_tool_renders_the_loss_to_the_user"
+status = "deleted"
 owed = "a run that lost a tool renders the loss to the user"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: the seeding workbench serves the tool as a host tool; the restarted one, over the same stores, does not, and its routed turn's follower renders the loss"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/trigger_lifecycle.rs"
@@ -17248,10 +17188,10 @@ lane = "L9h"
 laws = [
   "button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_turn",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/trigger_lifecycle.rs::button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_turn"
+status = "deleted"
 owed = "button trigger lifecycle stays visible and queues wakes during active turn"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: the lifecycle runs through the trigger and button routes while a gated foreground turn holds the session"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs"
@@ -17263,10 +17203,10 @@ lane = "L9h"
 laws = [
   "a_typescript_workbench_serves_typescript_turns_and_records_the_dialect",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs::a_typescript_workbench_serves_typescript_turns_and_records_the_dialect"
+status = "deleted"
 owed = "a typescript workbench serves typescript turns and records the dialect"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: turns run through the chat route; the rehydration is a second workbench over the same stores"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs"
@@ -17278,10 +17218,10 @@ lane = "L9h"
 laws = [
   "the_code_failure_scenario_renders_a_failed_cell_and_terminates",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs::the_code_failure_scenario_renders_a_failed_cell_and_terminates"
+status = "deleted"
 owed = "the code failure scenario renders a failed cell and terminates"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: turns run through the chat route; the rehydration is a second workbench over the same stores"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs"
@@ -17293,10 +17233,10 @@ lane = "L9h"
 laws = [
   "a_cell_reads_what_an_earlier_cell_bound_in_both_dialects",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs::a_cell_reads_what_an_earlier_cell_bound_in_both_dialects"
+status = "deleted"
 owed = "a cell reads what an earlier cell bound in both dialects"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: turns run through the chat route; the rehydration is a second workbench over the same stores"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs"
@@ -17308,10 +17248,10 @@ lane = "L9h"
 laws = [
   "a_rehydrated_session_still_reads_its_earlier_bindings_in_both_dialects",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs::a_rehydrated_session_still_reads_its_earlier_bindings_in_both_dialects"
+status = "deleted"
 owed = "a rehydrated session still reads its earlier bindings in both dialects"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: turns run through the chat route; the rehydration is a second workbench over the same stores"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs"
@@ -17323,10 +17263,10 @@ lane = "L9h"
 laws = [
   "a_name_no_one_has_is_still_refused_in_both_dialects",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs::a_name_no_one_has_is_still_refused_in_both_dialects"
+status = "deleted"
 owed = "a name no one has is still refused in both dialects"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: turns run through the chat route; the rehydration is a second workbench over the same stores"
 
 [[row]]
 path = "examples/agent-workbench/src/restate/tests.rs"
