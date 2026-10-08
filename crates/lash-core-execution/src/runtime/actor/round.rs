@@ -99,7 +99,7 @@ mod tools;
 pub use fold::{MemberState, RoundMember, RoundView, fold};
 pub use lifecycle::{Discharge, MemberBodies, MemberBody, MemberResult, Presented, member_body};
 pub use output::{Material, NamesMaterial, SettledOutput, SettledOutputRefusal};
-pub use parked::{CallOwner, ParkedCall, parked};
+pub use parked::{CallOwner, ParkedCall, PinnedWaits, parked};
 pub use records::RUN_RECORD_FORMAT_VERSION;
 pub use rounds::{
     admit_round, present, presentation, record_trace_exported, settle_retry, start_retry,

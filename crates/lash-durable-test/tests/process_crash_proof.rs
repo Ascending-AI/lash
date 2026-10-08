@@ -730,7 +730,10 @@ impl Proof {
             (ToolId::new(ONCE), policy(&ToolId::new(ONCE))),
             (ToolId::new(AGAIN), policy(&ToolId::new(AGAIN))),
         ]);
-        let fold = match round::fold(&rows, &policies) {
+        let waits = round::PinnedWaits::read(database.as_ref(), &rows)
+            .await
+            .unwrap_or_default();
+        let fold = match round::fold(&rows, &policies, &waits) {
             Ok(fold) => fold,
             Err(refusal) => return vec![format!("R's run records do not fold: {refusal}")],
         };

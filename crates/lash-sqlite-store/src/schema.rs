@@ -503,6 +503,12 @@ CREATE TABLE IF NOT EXISTS lash_plugin_writers (
 /// segment handovers and tombstones. They are provisioned in the
 /// deployment's one database beside [`SCHEMA`].
 pub(crate) const PROCESS_SCHEMA: &str = "
+-- `record_json` is the process record and the row's one authority for the
+-- process's lifecycle. `status`, `last_event_sequence` and
+-- `cancel_requested_at_ms` are the database's own projections of it, kept
+-- for the indexes below: no statement can write them, so none can make them
+-- disagree with the record. A record whose lifecycle does not name a status
+-- generates NULL and is refused by the column's NOT NULL.
 CREATE TABLE IF NOT EXISTS processes (
     process_id            TEXT PRIMARY KEY,
     start_key             TEXT,
@@ -511,13 +517,26 @@ CREATE TABLE IF NOT EXISTS processes (
     identity_label        TEXT,
     created_at_ms         INTEGER NOT NULL,
     updated_at_ms         INTEGER NOT NULL,
-    last_event_sequence   INTEGER NOT NULL,
+    last_event_sequence   INTEGER NOT NULL GENERATED ALWAYS AS (json_extract(record_json, '$.last_event_sequence')) STORED,
     change_seq            INTEGER NOT NULL,
-    status                TEXT NOT NULL,
+    status                TEXT NOT NULL GENERATED ALWAYS AS (
+        CASE json_extract(record_json, '$.lifecycle.state')
+            WHEN 'running' THEN 'running'
+            WHEN 'waiting' THEN 'waiting'
+            WHEN 'terminal' THEN CASE json_extract(record_json, '$.lifecycle.outcome.type')
+                WHEN 'abandoned' THEN 'abandoned'
+                WHEN 'settled' THEN CASE json_extract(record_json, '$.lifecycle.outcome.output.outcome.status')
+                    WHEN 'success' THEN 'completed'
+                    WHEN 'failure' THEN 'failed'
+                    WHEN 'cancelled' THEN 'cancelled'
+                END
+            END
+        END
+    ) STORED,
     lifetime              TEXT NOT NULL,
     lifetime_scope_kind   TEXT,
     lifetime_scope_id     TEXT,
-    cancel_requested_at_ms INTEGER,
+    cancel_requested_at_ms INTEGER GENERATED ALWAYS AS (json_extract(record_json, '$.cancel_request.requested_at_ms')) STORED,
     state_rev             INTEGER NOT NULL DEFAULT 0,
     driver_json           TEXT,
     cascade_cursor        TEXT,
@@ -530,6 +549,8 @@ CREATE TABLE IF NOT EXISTS processes (
     consumer_hold_cancels INTEGER,
     CONSTRAINT ck_processes_consumer_hold CHECK ((consumer_hold_key IS NULL) = (consumer_hold_scope_kind IS NULL) AND (consumer_hold_key IS NULL) = (consumer_hold_scope_id IS NULL)),
     CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned')),
+    CONSTRAINT ck_processes_last_event_sequence CHECK (typeof(last_event_sequence) = 'integer'),
+    CONSTRAINT ck_processes_cancel_requested_at CHECK (typeof(cancel_requested_at_ms) = CASE WHEN json_type(record_json, '$.cancel_request') IS NULL THEN 'null' ELSE 'integer' END),
     CONSTRAINT ck_processes_lifetime CHECK (lifetime IN ('until', 'detached')),
     CONSTRAINT ck_processes_lifetime_scope CHECK ((lifetime = 'detached' AND lifetime_scope_kind IS NULL AND lifetime_scope_id IS NULL) OR (lifetime = 'until' AND lifetime_scope_kind IN ('turn', 'session_operation', 'process', 'session') AND lifetime_scope_id IS NOT NULL))
 );

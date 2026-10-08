@@ -155,12 +155,15 @@ async fn interrupted_hang(
     run: &lash_sansio::TurnId,
 ) -> bool {
     use lash_core_execution::runtime::actor::round::SettledOutput;
-    use lash_core_execution::runtime::actor::round::{PolicyView, Recovery, fold};
+    use lash_core_execution::runtime::actor::round::{PinnedWaits, PolicyView, Recovery, fold};
     let owner = lash_durable::domain::OwnerKey::Turn(session.clone(), run.clone());
     let Ok(rows) = nodes.database().run_records(&owner).await else {
         return false;
     };
-    let Ok(folded) = fold(&rows, &PolicyView::new([])) else {
+    let Ok(waits) = PinnedWaits::read(nodes.database().as_ref(), &rows).await else {
+        return false;
+    };
+    let Ok(folded) = fold(&rows, &PolicyView::new([]), &waits) else {
         return false;
     };
     folded.recoveries().iter().any(|(id, recovery)| {

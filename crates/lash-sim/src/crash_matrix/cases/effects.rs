@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use lash_core::sync::MutexExt as _;
 use lash_core_execution::runtime::actor::round::SettledOutput;
-use lash_core_execution::runtime::actor::round::{PolicyView, Recovery, fold};
+use lash_core_execution::runtime::actor::round::{PinnedWaits, PolicyView, Recovery, fold};
 use lash_core_store::store::RunTerminalKind;
 use lash_durable::domain::OwnerKey;
 use lash_durable_test::{Cut, SimNodes};
@@ -106,7 +106,10 @@ async fn outcomes(
         .run_records(&owner)
         .await
         .map_err(|error| format!("the round's records do not read: {error}"))?;
-    let folded = fold(&rows, &PolicyView::new([]))
+    let waits = PinnedWaits::read(nodes.database().as_ref(), &rows)
+        .await
+        .map_err(|error| format!("the round's pinned waits do not read: {error}"))?;
+    let folded = fold(&rows, &PolicyView::new([]), &waits)
         .map_err(|refusal| format!("the round's records do not fold: {refusal:?}"))?;
     let mut settled = Vec::new();
     for (id, recovery) in folded.recoveries() {

@@ -121,8 +121,6 @@ pub(crate) async fn apply_registration_tx(
         .bind(&record.identity.label)
         .bind(record.created_at_ms as i64)
         .bind(record.updated_at_ms as i64)
-        .bind(record.last_event_sequence as i64)
-        .bind(process_status_label(&record))
         .bind(
             record
                 .lifetime
@@ -136,7 +134,6 @@ pub(crate) async fn apply_registration_tx(
                 .map(lash_core_execution::ScopeId::storage_id),
         )
         .bind(record.lifetime.storage_label())
-        .bind(cancel_requested_at_ms(&record))
         .bind(record_json)
         .bind(consumer_hold.as_ref().map(|hold| hold.key.clone()))
         .bind(consumer_hold.as_ref().map(|hold| hold.owner.storage_kind()))

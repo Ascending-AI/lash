@@ -20,7 +20,9 @@ use tokio_util::sync::CancellationToken;
 
 use super::super::ActorContext;
 use super::lifecycle::{Act, Lifecycle, MemberBodies};
-use super::{AdmittedRound, FoldRefusal, PolicyView, RoundView, RunFold, SettleRefusal, fold};
+use super::{
+    AdmittedRound, FoldRefusal, PinnedWaits, PolicyView, RoundView, RunFold, SettleRefusal, fold,
+};
 
 /// How a round's run ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -155,7 +157,7 @@ impl RoundRunner {
     /// [`RoundError`]: ownership lost or another store failure on a read,
     /// inconsistent records, or the activation stopping.
     pub async fn run(mut self) -> Result<RoundEnd, RoundError> {
-        let mut rows = load(&self.cx, &self.owner, self.run).await?;
+        let (mut rows, mut waits) = load(&self.cx, &self.owner, self.run).await?;
         let clock = Arc::clone(self.cx.clock());
         let idle_evict = self.cx.backend().config().settings().idle_evict;
         // Since when the round has run nothing and waited only on rows.
@@ -165,7 +167,7 @@ impl RoundRunner {
             if cancelled {
                 self.lifecycle.cancel_runs_before(RunSeq(self.run.0 + 1));
             }
-            let folded = fold(&rows, &self.policies)?;
+            let folded = fold(&rows, &self.policies, &waits)?;
             let settled = folded
                 .round(self.run)
                 .ok_or(RoundError::NotAdmitted(self.run))?
@@ -177,7 +179,7 @@ impl RoundRunner {
                     continue;
                 }
                 Act::Refused => {
-                    rows = load(&self.cx, &self.owner, self.run).await?;
+                    (rows, waits) = load(&self.cx, &self.owner, self.run).await?;
                     continue;
                 }
                 Act::Idle(idle) => idle,
@@ -213,12 +215,21 @@ impl RoundRunner {
     }
 }
 
-/// `owner`'s committed records of `run`, read once.
+/// `owner`'s committed records of `run` and the completion waits its
+/// admission pinned, read once: a wait's binding and deadline never change,
+/// so the rows a commit appends fold against the same waits.
 async fn load(
     cx: &ActorContext,
     owner: &OwnerKey,
     run: RunSeq,
-) -> Result<Vec<RunRecordRow>, RoundError> {
-    let rows = cx.durable_reads()?.run_records(owner).await?;
-    Ok(rows.into_iter().filter(|row| row.run == run).collect())
+) -> Result<(Vec<RunRecordRow>, PinnedWaits), RoundError> {
+    let reads = cx.durable_reads()?;
+    let rows: Vec<_> = reads
+        .run_records(owner)
+        .await?
+        .into_iter()
+        .filter(|row| row.run == run)
+        .collect();
+    let waits = PinnedWaits::read(reads, &rows).await?;
+    Ok((rows, waits))
 }

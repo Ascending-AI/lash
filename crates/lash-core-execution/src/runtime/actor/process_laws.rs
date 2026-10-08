@@ -48,11 +48,13 @@ macro_rules! ensure {
 }
 
 mod engine_keys;
+mod parked_calls;
 
 pub use engine_keys::{
     a_pinned_engine_key_is_listed_from_its_wait_after_a_restart_and_a_handover,
     an_awaited_engine_key_records_a_waiting_fact,
 };
+pub use parked_calls::a_parked_call_is_reopened_from_its_completion_wait_after_a_restart_and_a_handover;
 
 /// The kind every law process runs.
 pub const LAW_ENGINE_KIND: &str = "law-process";
@@ -1537,7 +1539,8 @@ pub async fn a_repeatable_step_that_fails_retryably_once_succeeds_on_its_second_
             .durable()
             .run_records(&lash_durable::domain::OwnerKey::Process(process.clone()))
             .await?;
-        let fold = round::fold(&rows, &PolicyView::default())
+        let waits = round::PinnedWaits::read(backend.durable().as_ref(), &rows).await?;
+        let fold = round::fold(&rows, &PolicyView::default(), &waits)
             .map_err(|refusal| LawBroken(refusal.to_string()))?;
         let member = fold
             .rounds()
@@ -1628,7 +1631,8 @@ pub async fn a_step_parked_on_its_wait_settles_when_the_wait_resolves(
             .durable()
             .run_records(&lash_durable::domain::OwnerKey::Process(process.clone()))
             .await?;
-        let fold = round::fold(&rows, &PolicyView::default())
+        let waits = round::PinnedWaits::read(backend.durable().as_ref(), &rows).await?;
+        let fold = round::fold(&rows, &PolicyView::default(), &waits)
             .map_err(|refusal| LawBroken(refusal.to_string()))?;
         let call = fold
             .rounds()

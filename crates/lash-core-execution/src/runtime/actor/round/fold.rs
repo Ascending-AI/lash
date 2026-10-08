@@ -13,8 +13,8 @@ use super::records::{
     first_start,
 };
 use super::{
-    AdmittedExecution, ExecutionDraft, FoldRefusal, Material, PolicyView, Recovery, RunCursor,
-    RunFold, SettledOutput,
+    AdmittedExecution, ExecutionDraft, FoldRefusal, Material, PinnedWaits, PolicyView, Recovery,
+    RunCursor, RunFold, SettledOutput,
 };
 use crate::ToolCallId;
 
@@ -299,7 +299,9 @@ fn out_of_order(row: &RunRecordRow) -> FoldRefusal {
 }
 
 /// Fold an owner's run records into what each admitted execution recovers
-/// to, under the policies `current` declares. Calls no producer.
+/// to, under the policies `current` declares. Calls no producer. A member
+/// that may park takes its park from its completion wait's row in `waits`
+/// ([`PinnedWaits::read`] of the same rows).
 ///
 /// Each run's records must take its ordinals from 0 without a gap, start
 /// with its admission, and keep each call's order: an attempt starts only
@@ -308,8 +310,13 @@ fn out_of_order(row: &RunRecordRow) -> FoldRefusal {
 ///
 /// # Errors
 ///
-/// [`FoldRefusal`] when the rows are inconsistent.
-pub fn fold(rows: &[RunRecordRow], current: &PolicyView) -> Result<RunFold, FoldRefusal> {
+/// [`FoldRefusal`] when the rows are inconsistent, or an admission's pinned
+/// wait is missing from `waits` or is not its call's.
+pub fn fold(
+    rows: &[RunRecordRow],
+    current: &PolicyView,
+    waits: &PinnedWaits,
+) -> Result<RunFold, FoldRefusal> {
     let mut runs: BTreeMap<RunSeq, Vec<&RunRecordRow>> = BTreeMap::new();
     for row in rows {
         runs.entry(row.run).or_default().push(row);
@@ -325,7 +332,7 @@ pub fn fold(rows: &[RunRecordRow], current: &PolicyView) -> Result<RunFold, Fold
                 });
             }
         }
-        let view = fold_run(run, &records)?;
+        let view = fold_run(run, &records, waits)?;
         for member in &view.members {
             folded
                 .recoveries
@@ -336,7 +343,11 @@ pub fn fold(rows: &[RunRecordRow], current: &PolicyView) -> Result<RunFold, Fold
     Ok(folded)
 }
 
-fn fold_run(run: RunSeq, records: &[&RunRecordRow]) -> Result<RoundView, FoldRefusal> {
+fn fold_run(
+    run: RunSeq,
+    records: &[&RunRecordRow],
+    waits: &PinnedWaits,
+) -> Result<RoundView, FoldRefusal> {
     let Some(admit) = records
         .first()
         .filter(|row| row.ordinal == ADMIT_ORDINAL && row.kind == RunRecordKind::Admit)
@@ -352,7 +363,7 @@ fn fold_run(run: RunSeq, records: &[&RunRecordRow]) -> Result<RoundView, FoldRef
     let drafts: Vec<ExecutionDraft> = body
         .members
         .iter()
-        .map(super::records::AdmittedMember::draft)
+        .map(|member| member.draft(&admit.owner, waits))
         .collect::<Result<_, _>>()
         .map_err(|reason| FoldRefusal::Undecodable {
             run,

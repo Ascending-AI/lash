@@ -16,6 +16,7 @@
 )]
 
 use lash_core_execution::ProcessIdMint;
+use lash_core_execution::ProcessStatus;
 use lash_core_execution::store::SessionCheckpoint;
 use lash_core_execution::{
     ArtifactReferrer, BlobRef, CheckpointComponentDescriptor, DurablePayload, DurableScan,
@@ -146,8 +147,13 @@ async fn a_live_process_is_walked_with_its_record_and_terminal_ones_are_not() {
     };
     let scratch = ScratchSchema::provision(&database_url).await;
     let live = ProcessId::fixture("proc-live");
-    seed_process(&scratch, &live, "running").await;
-    seed_process(&scratch, &ProcessId::fixture("proc-done"), "completed").await;
+    let record = seed_process(&scratch, &live, ProcessStatus::Running).await;
+    seed_process(
+        &scratch,
+        &ProcessId::fixture("proc-done"),
+        ProcessStatus::Completed,
+    )
+    .await;
 
     let preflight = PostgresStorePreflight::from_pool(scratch.pool.clone());
     let page = preflight
@@ -163,10 +169,7 @@ async fn a_live_process_is_walked_with_its_record_and_terminal_ones_are_not() {
     assert_eq!(item.process_id.as_ref(), Some(&live));
     assert_eq!(item.session_id, None);
     assert_eq!(item.status.as_deref(), Some("running"));
-    assert_eq!(
-        item.payload,
-        DurablePayload::Json(format!(r#"{{"process":"{live}"}}"#))
-    );
+    assert_eq!(item.payload, DurablePayload::Json(record));
     assert!(page.next.is_none());
 
     scratch.cleanup().await;
@@ -182,7 +185,11 @@ async fn paging_a_surface_one_item_at_a_time_is_exact() {
     let ids: Vec<ProcessId> = (1..=3)
         .map(ProcessIdMint::sequential_id_for_testing)
         .collect();
-    for (id, status) in ids.iter().zip(["waiting", "running", "waiting"]) {
+    for (id, status) in ids.iter().zip([
+        ProcessStatus::Waiting,
+        ProcessStatus::Running,
+        ProcessStatus::Waiting,
+    ]) {
         seed_process(&scratch, id, status).await;
     }
 
@@ -360,22 +367,39 @@ fn encode_manifest(
     bytes
 }
 
-async fn seed_process(scratch: &ScratchSchema, process_id: &ProcessId, status: &str) {
+/// Seed a process row and answer the record it stores. The row's status is
+/// the database's projection of its record's lifecycle, so the fixture
+/// states the lifecycle.
+async fn seed_process(
+    scratch: &ScratchSchema,
+    process_id: &ProcessId,
+    status: ProcessStatus,
+) -> String {
+    let lifecycle =
+        serde_json::to_value(lash_core_execution::ProcessLifecycleState::fixture(status))
+            .expect("encode the fixture lifecycle");
+    let record = serde_json::json!({
+        "process": process_id.as_str(),
+        "last_event_sequence": 0,
+        "lifecycle": lifecycle,
+    })
+    .to_string();
     scratch
         .apply(&format!(
             "INSERT INTO lash_processes (
                  process_id, start_key, originator_id,
                  identity_kind, identity_label, created_at_ms, updated_at_ms,
-                 last_event_sequence, change_seq, status, lifetime_scope_kind, lifetime_scope_id,
+                 change_seq, lifetime_scope_kind, lifetime_scope_id,
                  lifetime,
                  record_json
              ) VALUES (
                  '{process_id}', NULL, 'originator',
-                 'program', NULL, 0, 0, 0, 1, '{status}', NULL, NULL, 'detached',
-                 '{{\"process\":\"{process_id}\"}}'
+                 'program', NULL, 0, 0, 1, NULL, NULL, 'detached',
+                 '{record}'
              )",
         ))
         .await;
+    record
 }
 
 async fn seed_session(scratch: &ScratchSchema, session_id: &SessionId, checkpoint_ref: &str) {

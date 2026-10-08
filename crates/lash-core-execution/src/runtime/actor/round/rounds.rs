@@ -16,11 +16,12 @@ use super::{
 use crate::runtime::actor::waits::{self, WaitDeadline, WaitPurpose, WaitSpec};
 
 /// Admit a tool round inside the `model.done` transaction: its membership,
-/// pinned policies, limits and wait deadlines, and an `x_start` for every
-/// member. A member that may park gets its tool completion wait pinned in
-/// the same transaction, revoked with `scope`, so its
-/// key exists before its body can hand it out, and a rerun of the body is
-/// handed the same key. No member's body starts before that transaction
+/// pinned policies and limits, and an `x_start` for every member. A member
+/// that may park gets its tool completion wait pinned in the same
+/// transaction, revoked with `scope`, so its key exists before its body can
+/// hand it out, and a rerun of the body is handed the same key. That wait's
+/// row holds the park's deadline; the admission record names the wait and
+/// repeats nothing of it. No member's body starts before that transaction
 /// commits.
 ///
 /// # Errors

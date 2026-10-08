@@ -115,8 +115,9 @@ impl WaitDeadline {
 
 /// What a call's admission pinned for its park: the deadline its
 /// [`ParkBound`](crate::ParkBound) set, or none for a park that lasts until
-/// its scope ends. Computed once, at admission, and recorded with the call's
-/// run: a crash or takeover reads it back, never computes it again.
+/// its scope ends. Computed once, at admission, and recorded once, as the
+/// deadline of the completion wait the admission pins: a crash or takeover
+/// reads it back from that wait's row, never computes it again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ParkDeadline {
     /// The park times out at this deadline.

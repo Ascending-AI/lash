@@ -264,7 +264,7 @@ table lash_process_tombstones
   column terminal_label text not-null
   primary-key (process_id)
 table lash_processes
-  column cancel_requested_at_ms bigint nullable
+  column cancel_requested_at_ms bigint nullable generated
   column cascade_cursor text nullable
   column change_seq bigint nullable
   column consumer_hold_cancels boolean nullable
@@ -275,7 +275,7 @@ table lash_processes
   column driver_json text nullable
   column identity_kind text not-null
   column identity_label text nullable
-  column last_event_sequence bigint not-null
+  column last_event_sequence bigint not-null generated
   column lifetime text not-null
   column lifetime_scope_id text nullable
   column lifetime_scope_kind text nullable
@@ -286,7 +286,7 @@ table lash_processes
   column staged_seq bigint not-null default
   column start_key text nullable
   column state_rev bigint not-null default
-  column status text not-null
+  column status text not-null generated
   column unsequenced_saves integer not-null default
   column updated_at_ms bigint not-null
   column written_epoch bigint nullable

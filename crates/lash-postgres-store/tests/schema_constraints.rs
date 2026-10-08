@@ -244,19 +244,9 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     )
     .await;
 
-    let process_columns = "process_id, originator_id,
-        identity_kind, created_at_ms, updated_at_ms, last_event_sequence, change_seq,
-        status, lifetime_scope_kind, lifetime_scope_id, lifetime, record_json";
-    assert_check_rejects(
-        &mut connection,
-        &format!(
-            "INSERT INTO lash_processes ({process_columns}) VALUES
-             ('bad-status', 'originator', 'standard', 0, 0, 0, 0,
-              'paused', NULL, NULL, 'detached', '{{}}')"
-        ),
-        "ck_processes_status",
-    )
-    .await;
+    // A process's status is its record's alone:
+    // `a_process_row_takes_its_lifecycle_columns_from_its_record_alone`.
+    let process_columns = PROCESS_FIXTURE_COLUMNS;
     for (process_id, scope_kind, scope_id, lifetime, constraint) in [
         (
             "bad-lifetime",
@@ -291,8 +281,8 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
             &mut connection,
             &format!(
                 "INSERT INTO lash_processes ({process_columns}) VALUES
-                 ('{process_id}', 'originator', 'standard', 0, 0, 0, 0,
-                  'running', {scope_kind}, {scope_id}, {lifetime}, '{{}}')"
+                 ('{process_id}', 'originator', 'standard', 0, 0, 0,
+                  {scope_kind}, {scope_id}, {lifetime}, '{{\"last_event_sequence\":0,\"lifecycle\":{{\"state\":\"running\"}}}}')"
             ),
             constraint,
         )
@@ -307,8 +297,8 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     .await;
     sqlx::query(&format!(
         "INSERT INTO lash_processes ({process_columns}) VALUES
-         ('wake-parent', 'originator', 'standard', 0, 0, 0, 0,
-          'running', NULL, NULL, 'detached', '{{}}')"
+         ('wake-parent', 'originator', 'standard', 0, 0, 0,
+          NULL, NULL, 'detached', '{{\"last_event_sequence\":0,\"lifecycle\":{{\"state\":\"running\"}}}}')"
     ))
     .execute(&mut connection)
     .await
@@ -350,6 +340,257 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
 
 #[path = "support/obligation_constraint_cases.rs"]
 mod obligation_constraint_cases;
+
+/// The columns a statement may write on a process row.
+const PROCESS_FIXTURE_COLUMNS: &str = "process_id, originator_id,
+        identity_kind, created_at_ms, updated_at_ms, change_seq,
+        lifetime_scope_kind, lifetime_scope_id, lifetime, record_json";
+
+/// A process record's JSON, as far as its row's columns read it: the event
+/// sequence, the lifecycle and the cancel request, each in its own codec.
+fn process_record_json(
+    status: lash_core_execution::ProcessStatus,
+    last_event_sequence: u64,
+    cancel_requested_at_ms: Option<u64>,
+) -> String {
+    let mut record = serde_json::json!({
+        "last_event_sequence": last_event_sequence,
+        "lifecycle": lash_core_execution::ProcessLifecycleState::fixture(status),
+    });
+    if let Some(at) = cancel_requested_at_ms {
+        record["cancel_request"] = serde_json::json!(lash_core_execution::CancelRequest::new(
+            lash_core_execution::CancelOrigin::OperatorRequested,
+            "operator",
+            at,
+        ));
+    }
+    record.to_string()
+}
+
+/// The SQLSTATE `statement`, bound to `binds`, is refused with, if it is
+/// refused; the transaction carries on either way.
+async fn refused(connection: &mut PgConnection, statement: &str, binds: &[&str]) -> Option<String> {
+    sqlx::query("SAVEPOINT projection")
+        .execute(&mut *connection)
+        .await
+        .expect("create projection savepoint");
+    let mut query = sqlx::query(statement);
+    for bind in binds {
+        query = query.bind(*bind);
+    }
+    let error = query.execute(&mut *connection).await.err();
+    sqlx::query("ROLLBACK TO SAVEPOINT projection")
+        .execute(&mut *connection)
+        .await
+        .expect("return to the projection savepoint");
+    error.map(|error| {
+        error
+            .as_database_error()
+            .and_then(sqlx::error::DatabaseError::code)
+            .map_or_else(|| error.to_string(), |code| code.into_owned())
+    })
+}
+
+/// F1 (FIG-5557): `status`, `last_event_sequence` and
+/// `cancel_requested_at_ms` are the database's projections of `record_json`.
+/// No statement can write one, so a row whose columns disagree with its
+/// record cannot be written; a write of the record moves all three; and a
+/// record whose lifecycle names no status, or that lacks its sequence or
+/// its cancel's time, is refused. A record whose strings hold a NUL is
+/// still written, byte for byte.
+#[tokio::test]
+async fn a_process_row_takes_its_lifecycle_columns_from_its_record_alone() {
+    use lash_core_execution::ProcessStatus;
+    use sqlx::Row;
+
+    const SCHEMA: &str = "lash_fig5557_projection";
+    let Some(url) = database_url() else {
+        eprintln!("skipping the process projection law: database URL is not set");
+        return;
+    };
+    let _database_lock = SharedDatabaseLock::acquire(&url).await;
+    let mut connection = PgConnection::connect(&url)
+        .await
+        .expect("connect the projection fixture");
+    sqlx::raw_sql(&format!(
+        "DROP SCHEMA IF EXISTS {SCHEMA} CASCADE;
+         CREATE SCHEMA {SCHEMA};
+         SET search_path TO {SCHEMA};"
+    ))
+    .execute(&mut connection)
+    .await
+    .expect("create the projection fixture schema");
+    sqlx::raw_sql(PostgresStorage::schema_ddl())
+        .execute(&mut connection)
+        .await
+        .expect("apply the schema to the projection fixture");
+    sqlx::query("BEGIN")
+        .execute(&mut connection)
+        .await
+        .expect("begin the projection transaction");
+
+    let insert = format!(
+        "INSERT INTO lash_processes ({PROCESS_FIXTURE_COLUMNS}) VALUES
+         ($1, 'originator', 'standard', 0, 0, 0, NULL, NULL, 'detached', $2)"
+    );
+    let save = "UPDATE lash_processes SET record_json = $2 WHERE process_id = $1";
+    async fn columns(connection: &mut PgConnection, id: &str) -> (String, i64, Option<i64>) {
+        let row = sqlx::query(
+            "SELECT status, last_event_sequence, cancel_requested_at_ms
+               FROM lash_processes WHERE process_id = $1",
+        )
+        .bind(id)
+        .fetch_one(&mut *connection)
+        .await
+        .expect("read the projected columns");
+        (row.get(0), row.get(1), row.get(2))
+    }
+
+    // Every status the record's lifecycle can be is the row's status.
+    let statuses = [
+        ProcessStatus::Running,
+        ProcessStatus::Waiting,
+        ProcessStatus::Completed,
+        ProcessStatus::Failed,
+        ProcessStatus::Cancelled,
+        ProcessStatus::Abandoned,
+    ];
+    for (sequence, status) in (0_u64..).zip(statuses) {
+        let id = format!("is-{}", status.label());
+        let record = process_record_json(status, sequence, None);
+        sqlx::query(&insert)
+            .bind(&id)
+            .bind(&record)
+            .execute(&mut connection)
+            .await
+            .expect("insert the record");
+        assert_eq!(
+            columns(&mut connection, &id).await,
+            (status.label().to_owned(), sequence as i64, None),
+            "{id}"
+        );
+    }
+
+    // A write of the record alone moves every projection with it.
+    sqlx::query(&insert)
+        .bind("moves")
+        .bind(process_record_json(ProcessStatus::Running, 1, None))
+        .execute(&mut connection)
+        .await
+        .expect("insert a running record");
+    sqlx::query(save)
+        .bind("moves")
+        .bind(process_record_json(ProcessStatus::Cancelled, 7, Some(42)))
+        .execute(&mut connection)
+        .await
+        .expect("save the cancelled record");
+    let moved = ("cancelled".to_owned(), 7, Some(42));
+    assert_eq!(columns(&mut connection, "moves").await, moved);
+
+    // No statement writes a projection, with the record or without it.
+    let running = process_record_json(ProcessStatus::Running, 0, None);
+    for column in ["status", "last_event_sequence", "cancel_requested_at_ms"] {
+        let value = if column == "status" {
+            "'completed'"
+        } else {
+            "9"
+        };
+        for statement in [
+            format!(
+                "INSERT INTO lash_processes ({PROCESS_FIXTURE_COLUMNS}, {column}) VALUES
+                 ('disagrees', 'originator', 'standard', 0, 0, 0, NULL, NULL, 'detached',
+                  $1, {value})"
+            ),
+            format!("UPDATE lash_processes SET {column} = {value} WHERE $1 <> ''"),
+        ] {
+            // 428C9: a value was given for a generated column.
+            assert_eq!(
+                refused(&mut connection, &statement, &[&running]).await,
+                Some("428C9".to_owned()),
+                "{column} was written by: {statement}"
+            );
+        }
+    }
+    assert_eq!(columns(&mut connection, "moves").await, moved);
+
+    // A record that names no status, or lacks what a column reads, is
+    // refused whole.
+    for (what, record) in [
+        ("no lifecycle", "{\"last_event_sequence\":0}".to_owned()),
+        (
+            "an unknown state",
+            running.replace("\"running\"", "\"paused\""),
+        ),
+        (
+            "an unknown outcome",
+            process_record_json(ProcessStatus::Abandoned, 0, None)
+                .replace("\"abandoned\"", "\"vanished\""),
+        ),
+        (
+            "an unknown settlement",
+            process_record_json(ProcessStatus::Completed, 0, None)
+                .replace("\"success\"", "\"shrugged\""),
+        ),
+        (
+            "no event sequence",
+            running.replace("\"last_event_sequence\"", "\"sequence\""),
+        ),
+        (
+            "a cancel without its time",
+            process_record_json(ProcessStatus::Running, 0, Some(42))
+                .replace("\"requested_at_ms\"", "\"at\""),
+        ),
+        ("text that is not a record", "not json".to_owned()),
+    ] {
+        assert!(
+            refused(&mut connection, &insert, &["refused", &record])
+                .await
+                .is_some(),
+            "a record with {what} was written: {record}"
+        );
+        assert!(
+            refused(&mut connection, save, &["moves", &record])
+                .await
+                .is_some(),
+            "a record with {what} was saved: {record}"
+        );
+    }
+    assert_eq!(columns(&mut connection, "moves").await, moved);
+
+    // A record whose strings hold a NUL character, or the text of its
+    // escape, is written and projected like any other: PostgreSQL's JSON
+    // functions refuse the escape, so the projections read around it.
+    let mut with_nul: serde_json::Value =
+        serde_json::from_str(&running).expect("decode the fixture record");
+    with_nul["input"] = serde_json::json!("a\u{0}b\\u0000");
+    let with_nul = with_nul.to_string();
+    sqlx::query(&insert)
+        .bind("holds-a-nul")
+        .bind(&with_nul)
+        .execute(&mut connection)
+        .await
+        .expect("a record holding an escaped NUL is written");
+    assert_eq!(
+        columns(&mut connection, "holds-a-nul").await,
+        ("running".to_owned(), 0, None)
+    );
+    let stored: String =
+        sqlx::query_scalar("SELECT record_json FROM lash_processes WHERE process_id = $1")
+            .bind("holds-a-nul")
+            .fetch_one(&mut connection)
+            .await
+            .expect("read the record back");
+    assert_eq!(stored, with_nul, "the record is stored as it was written");
+
+    sqlx::query("ROLLBACK")
+        .execute(&mut connection)
+        .await
+        .expect("end the projection transaction");
+    sqlx::raw_sql(&format!("DROP SCHEMA IF EXISTS {SCHEMA} CASCADE"))
+        .execute(&mut connection)
+        .await
+        .expect("drop the projection fixture schema");
+}
 
 #[tokio::test]
 async fn postgres_obligation_checks_reject_incomplete_variants() {

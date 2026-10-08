@@ -439,11 +439,12 @@ pub async fn read_process_tool_call(
             message,
         })
     };
-    let rows = host
-        .durable_reads()?
+    let reads = host.durable_reads()?;
+    let rows = reads
         .run_records(&OwnerKey::Process(process_id.clone()))
         .await?;
-    let fold = round::fold(&rows, &PolicyView::new([]))
+    let waits = round::PinnedWaits::read(reads, &rows).await?;
+    let fold = round::fold(&rows, &PolicyView::new([]), &waits)
         .map_err(|error| corrupt(format!("the process's tool records: {error}")))?;
     for member in fold.rounds().flat_map(|round| round.members()) {
         if member.call() != call_id {

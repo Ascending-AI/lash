@@ -362,7 +362,7 @@ async fn the_ddl_artifact_is_idempotent() {
 async fn retention_keeps_terminal_process_until_cascade_drains() {
     let url = crate::testing::required_database_url();
     let (mut conn, scratch, _) = provision_scratch_schema(&url).await;
-    sqlx::query("INSERT INTO lash_processes (process_id, originator_id, identity_kind, created_at_ms, updated_at_ms, last_event_sequence, change_seq, status, lifetime, record_json, cascade_cursor) VALUES ('parent', 'origin', 'standard', 0, 0, 0, 1, 'completed', 'detached', '{}', 'child')").execute(&mut conn).await.expect("terminal with unfinished cascade");
+    sqlx::query("INSERT INTO lash_processes (process_id, originator_id, identity_kind, created_at_ms, updated_at_ms, change_seq, lifetime, record_json, cascade_cursor) VALUES ('parent', 'origin', 'standard', 0, 0, 1, 'detached', '{\"last_event_sequence\":0,\"lifecycle\":{\"state\":\"terminal\",\"outcome\":{\"type\":\"settled\",\"output\":{\"outcome\":{\"status\":\"success\"}}}}}', 'child')").execute(&mut conn).await.expect("terminal with unfinished cascade");
     let statements = crate::process_sql::process_sql();
     for sql in [
         statements.process_postgres.list_prunable_terminal.sql(),

@@ -30,7 +30,7 @@
 use std::collections::BTreeSet;
 
 use lash_core_execution::runtime::actor::round::SettledOutput;
-use lash_core_execution::runtime::actor::round::{PolicyView, Recovery, fold};
+use lash_core_execution::runtime::actor::round::{PinnedWaits, PolicyView, Recovery, fold};
 use lash_durable::domain::{AdmittedId, OwnerKey};
 use lash_durable::{ActorState, CommitLabel};
 use lash_durable_test::{Cut, Fault, SimNodes, Stored, Write, WriteKind};
@@ -150,7 +150,16 @@ async fn once(
                 continue;
             }
         };
-        let folded = match fold(&rows, &PolicyView::new([])) {
+        let waits = match PinnedWaits::read(nodes.database().as_ref(), &rows).await {
+            Ok(waits) => waits,
+            Err(error) => {
+                violations.push(format!(
+                    "fold: {owner:?}'s pinned waits do not read: {error}"
+                ));
+                continue;
+            }
+        };
+        let folded = match fold(&rows, &PolicyView::new([]), &waits) {
             Ok(folded) => folded,
             Err(refusal) => {
                 violations.push(format!(

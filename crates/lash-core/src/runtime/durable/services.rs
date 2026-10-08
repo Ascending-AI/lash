@@ -101,10 +101,12 @@ impl RuntimeTurnServices {
             })
         };
         let owner = OwnerKey::Turn(session.clone(), run.clone());
-        let rows = cx.durable_reads()?.run_records(&owner).await?;
+        let reads = cx.durable_reads()?;
+        let rows = reads.run_records(&owner).await?;
+        let waits = round::PinnedWaits::read(reads, &rows).await?;
         // Reporting folds only settled facts and never consults live policies
         // to run a recovery. The empty policy view executes nothing.
-        let fold = round::fold(&rows, &PolicyView::new([]))
+        let fold = round::fold(&rows, &PolicyView::new([]), &waits)
             .map_err(|error| corrupt(format!("the turn's tool records: {error}")))?;
         let mut calls = Vec::new();
         let mut omitted = None;

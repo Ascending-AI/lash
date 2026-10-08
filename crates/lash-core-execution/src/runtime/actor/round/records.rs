@@ -4,13 +4,13 @@
 use std::time::Duration;
 
 use lash_core_store::tool_run::MaterialRef;
+use lash_durable::DomainWrite;
 use lash_durable::domain::{Ordinal, OwnerKey, RunRecordKind, RunRecordWrite, RunSeq};
-use lash_durable::{DomainWrite, DurableInstant};
 use lash_sansio::{ExecutionLimit, ExecutionPolicy};
 use serde::{Deserialize, Serialize};
 
-use super::{ExecutionDraft, PinnedWait, SettledOutput};
-use crate::runtime::actor::waits::{ParkDeadline, WaitDeadline, WaitId};
+use super::{ExecutionDraft, PinnedWait, PinnedWaits, SettledOutput};
+use crate::runtime::actor::waits::WaitId;
 use crate::{ToolCallId, ToolId};
 
 /// The format of a run record's body: the admission, start, outcome, retry
@@ -47,7 +47,9 @@ pub(super) struct AdmitBody {
     pub(super) members: Vec<AdmittedMember>,
 }
 
-/// One member as its admission pinned it.
+/// One member as its admission pinned it. A member that may park names the
+/// completion wait its round pinned and nothing of that wait's: the park's
+/// deadline is the wait row's alone ([`PinnedWaits`]).
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct AdmittedMember {
@@ -57,7 +59,6 @@ pub(super) struct AdmittedMember {
     policy: ExecutionPolicy,
     limit_expires_at_ms: u64,
     limit_max_slice_ms: u64,
-    wait_deadline_ms: Option<i64>,
     /// The completion wait pinned with the admission, by its id's hex.
     wait_id: Option<String>,
     /// The call's trace scope the admission retained (FIG-5382).
@@ -74,23 +75,31 @@ impl AdmittedMember {
             policy: draft.policy(),
             limit_expires_at_ms: draft.limit().expires_at,
             limit_max_slice_ms: millis(draft.limit().max_slice),
-            wait_deadline_ms: draft
-                .park()
-                .and_then(ParkDeadline::deadline)
-                .map(|deadline| deadline.at().0),
             wait_id: draft.pinned_wait().map(|pinned| pinned.id.to_hex()),
             trace: draft.trace().cloned(),
         }
     }
 
-    /// The draft the admission pinned, exactly: never refreshed. A member
-    /// with a pinned wait and no deadline parks until its scope ends.
+    /// The completion wait the admission pinned, when it names one that
+    /// decodes: what a fold reads the member's park from.
+    pub(super) fn pinned_wait(&self) -> Option<WaitId> {
+        self.wait_id.as_deref().and_then(WaitId::parse_hex)
+    }
+
+    /// The draft `owner`'s admission pinned, exactly: never refreshed. A
+    /// member with a pinned wait parks as that wait's row in `waits` says:
+    /// until its deadline, or until its scope ends when it has none.
     ///
     /// # Errors
     ///
-    /// A pinned wait whose id does not decode, or a park deadline without a
-    /// pinned wait.
-    pub(super) fn draft(&self) -> Result<ExecutionDraft, &'static str> {
+    /// A pinned wait whose id does not decode, or one `waits` does not bind
+    /// to this owner, call and tool.
+    pub(super) fn draft(
+        &self,
+        owner: &OwnerKey,
+        waits: &PinnedWaits,
+    ) -> Result<ExecutionDraft, &'static str> {
+        let tool = ToolId::new(self.tool.clone());
         let pinned = self
             .wait_id
             .as_deref()
@@ -100,18 +109,12 @@ impl AdmittedMember {
                     .ok_or("a pinned wait id is not a wait id")
             })
             .transpose()?;
-        let deadline = self
-            .wait_deadline_ms
-            .map(|at| WaitDeadline::at_instant(DurableInstant(at)));
-        let park = match (pinned, deadline) {
-            (Some(_), Some(deadline)) => Some(ParkDeadline::At(deadline)),
-            (Some(_), None) => Some(ParkDeadline::UntilScopeEnd),
-            (None, None) => None,
-            (None, Some(_)) => return Err("a park deadline has no pinned wait"),
-        };
+        let park = pinned
+            .map(|pinned| waits.park(owner, &self.call, &tool, pinned))
+            .transpose()?;
         Ok(ExecutionDraft::new(
             self.call.clone(),
-            ToolId::new(self.tool.clone()),
+            tool,
             self.request.clone(),
             self.policy,
             ExecutionLimit {

@@ -528,7 +528,8 @@ impl TurnDrive for RuntimeDrive {
         let rows = reads
             .run_records(&OwnerKey::Cell(session, run, cell))
             .await?;
-        let fold = round::fold(&rows, &PolicyView::new([]))
+        let waits = round::PinnedWaits::read(reads, &rows).await?;
+        let fold = round::fold(&rows, &PolicyView::new([]), &waits)
             .map_err(|error| TurnError::Exec(format!("the stopped cell's records: {error}")))?;
         for member in fold.rounds().flat_map(|round| round.members()) {
             if member.draft().tool().as_str().starts_with("cell-host:") {

@@ -1045,7 +1045,11 @@ impl Scenario for L4 {
             Ok(rows) => rows,
             Err(error) => return vec![format!("the run records do not read: {error}")],
         };
-        let fold = match round::fold(&rows, &PolicyView::default()) {
+        let waits = match round::PinnedWaits::read(database.as_ref(), &rows).await {
+            Ok(waits) => waits,
+            Err(error) => return vec![format!("the pinned waits do not read: {error}")],
+        };
+        let fold = match round::fold(&rows, &PolicyView::default(), &waits) {
             Ok(fold) => fold,
             Err(refusal) => return vec![format!("the run records do not fold: {refusal}")],
         };
@@ -1754,7 +1758,10 @@ fn approval(scenario: &L4) -> (ToolCallId, String) {
 /// The run records' one round's only member, folded.
 async fn only_member(nodes: &SimNodes) -> round::RoundMember {
     let rows = nodes.database().run_records(&owner()).await.unwrap();
-    let fold = round::fold(&rows, &PolicyView::default()).unwrap();
+    let waits = round::PinnedWaits::read(nodes.database().as_ref(), &rows)
+        .await
+        .unwrap();
+    let fold = round::fold(&rows, &PolicyView::default(), &waits).unwrap();
     let (run, _) = declared(&fold).expect("the round was admitted");
     let mut members = fold.round(run).unwrap().members().to_vec();
     assert_eq!(members.len(), 1, "the round has one member");

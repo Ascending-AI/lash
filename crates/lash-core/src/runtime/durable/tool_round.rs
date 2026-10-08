@@ -147,14 +147,15 @@ pub(super) async fn run(
         });
         return Ok(RoundExit::Answered(None));
     }
-    let rows: Vec<_> = cx
-        .durable_reads()?
+    let reads = cx.durable_reads()?;
+    let rows: Vec<_> = reads
         .run_records(&owner)
         .await?
         .into_iter()
         .filter(|stored| stored.run == run)
         .collect();
-    let folded = round::fold(&rows, &policies).map_err(exec)?;
+    let waits = round::PinnedWaits::read(reads, &rows).await?;
+    let folded = round::fold(&rows, &policies, &waits).map_err(exec)?;
     let bodies = Arc::new(RoundCalls::new(Arc::clone(&tools), &calls));
     let runner = match folded.round(run) {
         Some(view) => {

@@ -169,13 +169,15 @@ mod tests {
                      INSERT INTO processes (
                          process_id, originator_id,
                          identity_kind, created_at_ms, updated_at_ms,
-                         last_event_sequence, change_seq, status,
+                         change_seq,
                          lifetime_scope_kind, lifetime_scope_id, lifetime, record_json
                      )
-                     SELECT printf('plan-%05d', i), 'host', 'test', 0, 0, 0, i,
-                            CASE WHEN i <= 100 THEN 'running' ELSE 'completed' END,
+                     SELECT printf('plan-%05d', i), 'host', 'test', 0, 0, i,
                             NULL, NULL, 'detached',
-                            '{}'
+                            CASE WHEN i <= 100
+                                THEN '{\"last_event_sequence\":0,\"lifecycle\":{\"state\":\"running\"}}'
+                                ELSE '{\"last_event_sequence\":0,\"lifecycle\":{\"state\":\"terminal\",\"outcome\":{\"type\":\"settled\",\"output\":{\"outcome\":{\"status\":\"success\"}}}}}'
+                            END
                      FROM n;
                      ANALYZE;",
                 )?;

@@ -22,7 +22,7 @@ use std::time::Duration;
 use lash_core_execution::ActorContext;
 use lash_core_execution::runtime::actor::round::lifecycle::{Act, Lifecycle, MemberBodies};
 use lash_core_execution::runtime::actor::round::{
-    self, AdmittedExecution, PolicyView, RoundError, RunFold, SettledOutput, fold,
+    self, AdmittedExecution, PinnedWaits, PolicyView, RoundError, RunFold, SettledOutput, fold,
 };
 use lash_durable::domain::{OwnerKey, RunRecordKind, RunRecordRow, RunSeq};
 use lash_durable::{CommitLabel, DueSource, DurableError, DurableInstant};
@@ -88,6 +88,9 @@ pub(crate) struct Members {
     /// The owner's records as last read and appended; `None` once a commit
     /// this cache does not see may have changed them.
     rows: Option<Vec<RunRecordRow>>,
+    /// The completion waits the admissions among `rows` pinned, read with
+    /// them: a row a commit appends is never an admission.
+    waits: PinnedWaits,
 }
 
 fn refused(message: impl Into<String>) -> RoundError {
@@ -108,6 +111,7 @@ impl Members {
             bodies: None,
             lifecycle: None,
             rows: None,
+            waits: PinnedWaits::default(),
         }
     }
 
@@ -171,7 +175,9 @@ impl Members {
         if let Some(rows) = &self.rows {
             return Ok(rows.clone());
         }
-        let rows = self.cx.durable_reads()?.run_records(&self.owner).await?;
+        let reads = self.cx.durable_reads()?;
+        let rows = reads.run_records(&self.owner).await?;
+        self.waits = PinnedWaits::read(reads, &rows).await?;
         self.rows = Some(rows.clone());
         Ok(rows)
     }
@@ -179,7 +185,7 @@ impl Members {
     /// The owner's records, folded under the declared policies.
     pub(crate) async fn fold(&mut self) -> Result<RunFold, RoundError> {
         let rows = self.rows().await?;
-        Ok(fold(&rows, &self.policies)?)
+        Ok(fold(&rows, &self.policies, &self.waits)?)
     }
 
     /// Discharge the trace admissions an admission of `folded` still owes

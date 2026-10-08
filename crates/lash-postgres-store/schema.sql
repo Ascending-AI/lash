@@ -511,6 +511,21 @@ CREATE TABLE IF NOT EXISTS lash_process_change_clock (
 );
 -- Opaque process identifiers use byte order on every host locale. The primary
 -- key, live-worklist index, MAX, and keyset bounds inherit this collation.
+--
+-- `record_json` is the process record and the row's one authority for the
+-- process's lifecycle. `status`, `last_event_sequence` and
+-- `cancel_requested_at_ms` are the database's own projections of it, kept
+-- for the indexes below: no statement can write them, so none can make them
+-- disagree with the record. A record whose lifecycle does not name a status
+-- generates NULL and is refused by the column's NOT NULL.
+--
+-- PostgreSQL's JSON functions refuse a document holding the escape of a NUL
+-- character, which a record's strings may hold. Each projection therefore
+-- reads the record with that escape (a backslash, chr(92), then `u0000`)
+-- respelled as the escape of U+0001. The sequence occurs only inside a
+-- string and the respelling has its length, so the document's structure and
+-- every key and label a projection reads are unchanged; the stored
+-- `record_json` is never rewritten.
 CREATE TABLE IF NOT EXISTS lash_processes (
     process_id TEXT COLLATE "C" PRIMARY KEY,
     start_key TEXT COLLATE "C",
@@ -519,17 +534,30 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     identity_label TEXT,
     created_at_ms BIGINT NOT NULL,
     updated_at_ms BIGINT NOT NULL,
-    last_event_sequence BIGINT NOT NULL,
+    last_event_sequence BIGINT NOT NULL GENERATED ALWAYS AS ((replace(record_json, chr(92) || 'u0000', chr(92) || 'u0001')::json ->> 'last_event_sequence')::bigint) STORED,
     change_seq BIGINT,
     staged_seq BIGINT NOT NULL DEFAULT nextval('lash_process_change_staging'),
     -- Saves since the row was last sequenced: the feed's clock moves once
     -- per save, and the row takes the position of its last.
     unsequenced_saves INTEGER NOT NULL DEFAULT 1 CONSTRAINT ck_processes_unsequenced_saves CHECK (unsequenced_saves >= 1),
-    status TEXT NOT NULL,
+    status TEXT NOT NULL GENERATED ALWAYS AS (
+        CASE replace(record_json, chr(92) || 'u0000', chr(92) || 'u0001')::json #>> '{lifecycle,state}'
+            WHEN 'running' THEN 'running'
+            WHEN 'waiting' THEN 'waiting'
+            WHEN 'terminal' THEN CASE replace(record_json, chr(92) || 'u0000', chr(92) || 'u0001')::json #>> '{lifecycle,outcome,type}'
+                WHEN 'abandoned' THEN 'abandoned'
+                WHEN 'settled' THEN CASE replace(record_json, chr(92) || 'u0000', chr(92) || 'u0001')::json #>> '{lifecycle,outcome,output,outcome,status}'
+                    WHEN 'success' THEN 'completed'
+                    WHEN 'failure' THEN 'failed'
+                    WHEN 'cancelled' THEN 'cancelled'
+                END
+            END
+        END
+    ) STORED,
     lifetime TEXT NOT NULL,
     lifetime_scope_kind TEXT,
     lifetime_scope_id TEXT COLLATE "C",
-    cancel_requested_at_ms BIGINT,
+    cancel_requested_at_ms BIGINT GENERATED ALWAYS AS ((replace(record_json, chr(92) || 'u0000', chr(92) || 'u0001')::json #>> '{cancel_request,requested_at_ms}')::bigint) STORED,
     state_rev BIGINT NOT NULL DEFAULT 0,
     driver_json TEXT,
     cascade_cursor TEXT,
@@ -542,6 +570,7 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     consumer_hold_cancels BOOLEAN,
     CONSTRAINT ck_processes_consumer_hold CHECK ((consumer_hold_key IS NULL) = (consumer_hold_scope_kind IS NULL) AND (consumer_hold_key IS NULL) = (consumer_hold_scope_id IS NULL)),
     CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned')),
+    CONSTRAINT ck_processes_cancel_requested_at CHECK ((cancel_requested_at_ms IS NULL) = ((replace(record_json, chr(92) || 'u0000', chr(92) || 'u0001')::json -> 'cancel_request') IS NULL)),
     CONSTRAINT ck_processes_lifetime CHECK (lifetime IN ('until', 'detached')),
     CONSTRAINT ck_processes_lifetime_scope CHECK ((lifetime = 'detached' AND lifetime_scope_kind IS NULL AND lifetime_scope_id IS NULL) OR (lifetime = 'until' AND lifetime_scope_kind IN ('turn', 'session_operation', 'process', 'session') AND lifetime_scope_id IS NOT NULL))
 );

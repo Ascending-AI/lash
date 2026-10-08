@@ -51,6 +51,7 @@ law!(
     a_step_parked_on_its_wait_settles_when_the_wait_resolves,
     an_awaited_engine_key_records_a_waiting_fact,
     a_pinned_engine_key_is_listed_from_its_wait_after_a_restart_and_a_handover,
+    a_parked_call_is_reopened_from_its_completion_wait_after_a_restart_and_a_handover,
 );
 
 /// FIG-5235: a deterministic 40P01 inside the terminal is retried, not refused.
@@ -72,7 +73,7 @@ async fn a_deadlock_inside_a_process_terminal_is_retried() {
             END IF;
             RETURN NEW;
         END $$;
-        CREATE TRIGGER terminal_contention BEFORE UPDATE OF status ON lash_processes
+        CREATE TRIGGER terminal_contention AFTER UPDATE OF record_json ON lash_processes
             FOR EACH ROW EXECUTE FUNCTION fail_first_terminal();
     "#,
     )

@@ -504,7 +504,8 @@ impl ProcessActivation {
             }
         }
         let policies = PolicyView::new(policies);
-        let fold = round::fold(&rows, &policies)
+        let waits = round::PinnedWaits::read(reads, &rows).await?;
+        let fold = round::fold(&rows, &policies, &waits)
             .map_err(|error| corrupt("a process's run records", error))?;
         live.lifecycle.declare(policies);
         live.bodies.saw(&record, &driver);

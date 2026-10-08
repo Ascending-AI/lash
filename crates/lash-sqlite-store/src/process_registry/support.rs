@@ -120,21 +120,6 @@ pub(super) async fn recent_events(
         .map_err(process_sqlite_error)?
 }
 
-pub(super) fn process_status_label(record: &ProcessRecord) -> &'static str {
-    record.status().label()
-}
-
-/// The `cancel_requested_at_ms` column: the first accepted cancellation's
-/// timestamp, or `NULL` when no cancel has been requested. One column carries
-/// the fact and its age, so "a cancel is pending" and "it was requested at T"
-/// cannot disagree.
-pub(super) fn cancel_requested_at_ms(record: &ProcessRecord) -> Option<i64> {
-    record
-        .cancel_request
-        .as_ref()
-        .map(|request| request.requested_at_ms as i64)
-}
-
 impl SqliteProcessRegistry {
     pub(crate) fn require_process_conn(
         conn: &rusqlite::Connection,
@@ -337,9 +322,6 @@ impl SqliteProcessRegistry {
                 record.id.as_str(),
                 record.updated_at_ms as i64,
                 change_seq as i64,
-                process_status_label(record),
-                record.last_event_sequence as i64,
-                cancel_requested_at_ms(record),
                 process_encode_json(record)?,
             ],
         )

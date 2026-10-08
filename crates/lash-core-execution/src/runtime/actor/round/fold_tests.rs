@@ -15,8 +15,8 @@ use lash_durable::{
 use lash_sansio::{ExecutionLimit, ExecutionPolicy, SessionId, TurnId};
 
 use super::{
-    AdmittedExecution, ExecutionDraft, FoldRefusal, Material, PolicyView, Recovery, RunFold,
-    SettledOutput, admit, fold, settle, settle_retry, start_retry,
+    AdmittedExecution, ExecutionDraft, FoldRefusal, Material, PinnedWaits, PolicyView, Recovery,
+    RunFold, SettledOutput, admit, fold, settle, settle_retry, start_retry,
 };
 use crate::{ToolCallId, ToolId};
 
@@ -147,7 +147,7 @@ fn a_current_once_vetoes_a_stored_repeat_and_never_upgrades_a_stored_once() {
         (ToolId::new("once"), ExecutionPolicy::Once),
     ]);
     assert_eq!(
-        recoveries(&fold(&rows, &as_pinned).unwrap()),
+        recoveries(&fold(&rows, &as_pinned, &PinnedWaits::default()).unwrap()),
         vec![Recovery::RerunAtOrdinal(Ordinal(1)), Recovery::Interrupt]
     );
 
@@ -156,7 +156,7 @@ fn a_current_once_vetoes_a_stored_repeat_and_never_upgrades_a_stored_once() {
         (ToolId::new("once"), repeatable()),
     ]);
     assert_eq!(
-        recoveries(&fold(&rows, &flipped).unwrap()),
+        recoveries(&fold(&rows, &flipped, &PinnedWaits::default()).unwrap()),
         vec![Recovery::Interrupt, Recovery::Interrupt]
     );
 }
@@ -170,7 +170,7 @@ fn a_current_once_vetoes_a_due_retry() {
     settle_retry(&mut tx, &members[0], failed(), DurableInstant(50)).unwrap();
     let rows = rows(&tx);
     assert_eq!(
-        recoveries(&fold(&rows, &PolicyView::default()).unwrap()),
+        recoveries(&fold(&rows, &PolicyView::default(), &PinnedWaits::default()).unwrap()),
         vec![Recovery::RetryDue {
             at: DurableInstant(50),
             attempt: 2
@@ -178,7 +178,7 @@ fn a_current_once_vetoes_a_due_retry() {
     );
     let vetoed = PolicyView::new([(ToolId::new("repeats"), ExecutionPolicy::Once)]);
     assert_eq!(
-        recoveries(&fold(&rows, &vetoed).unwrap()),
+        recoveries(&fold(&rows, &vetoed, &PinnedWaits::default()).unwrap()),
         vec![Recovery::Vetoed(failed())]
     );
 }
@@ -197,7 +197,7 @@ fn a_gap_in_a_runs_ordinals_is_refused() {
     let mut rows = rows(&tx);
     rows.remove(1);
     assert_eq!(
-        fold(&rows, &PolicyView::default()),
+        fold(&rows, &PolicyView::default(), &PinnedWaits::default()),
         Err(FoldRefusal::OrdinalGap {
             run: RUN,
             missing: Ordinal(1)
@@ -213,7 +213,7 @@ fn a_second_final_of_a_call_is_refused() {
     settle(&mut tx, &members[0], SettledOutput::Interrupted, Vec::new()).unwrap();
     settle(&mut tx, &members[0], SettledOutput::Interrupted, Vec::new()).unwrap();
     assert_eq!(
-        fold(&rows(&tx), &PolicyView::default()),
+        fold(&rows(&tx), &PolicyView::default(), &PinnedWaits::default()),
         Err(FoldRefusal::SecondFinal(ToolCallId::fixture("a")))
     );
 }
@@ -229,20 +229,20 @@ fn a_retried_attempt_takes_the_next_ordinal_only_after_its_retry() {
     let next = start_retry(&mut tx, &members[0]);
     assert_eq!(next.ordinal(), Ordinal(3));
     assert_eq!(next.attempt(), 2);
-    let folded = fold(&rows(&tx), &PolicyView::default()).unwrap();
+    let folded = fold(&rows(&tx), &PolicyView::default(), &PinnedWaits::default()).unwrap();
     assert_eq!(
         recoveries(&folded),
         vec![Recovery::RerunAtOrdinal(Ordinal(3))]
     );
 
     // An x_start that follows no retry is out of its call's order.
-    let resumed = fold(&early, &PolicyView::default()).unwrap();
+    let resumed = fold(&early, &PolicyView::default(), &PinnedWaits::default()).unwrap();
     let mut stray = opened();
     start_retry(&mut stray, &resumed.admitted(members[0].id()).unwrap());
     let mut rows = early;
     rows.extend(super::fold_tests::rows(&stray));
     assert_eq!(
-        fold(&rows, &PolicyView::default()),
+        fold(&rows, &PolicyView::default(), &PinnedWaits::default()),
         Err(FoldRefusal::OutOfOrder {
             run: RUN,
             ordinal: Ordinal(2)
@@ -258,12 +258,12 @@ fn a_call_whose_retry_is_due_ends_at_its_failed_attempt() {
     let mut tx = opened();
     let members = admitted(&mut tx, vec![draft("a", "repeats", repeatable())]);
     settle_retry(&mut tx, &members[0], failed(), DurableInstant(50)).unwrap();
-    let due = fold(&rows(&tx), &PolicyView::default()).unwrap();
+    let due = fold(&rows(&tx), &PolicyView::default(), &PinnedWaits::default()).unwrap();
     let view = due.round(RUN).unwrap();
     let execution = view.execution(&view.members()[0]);
     settle(&mut tx, &execution, failed(), Vec::new()).unwrap();
     assert_eq!(
-        recoveries(&fold(&rows(&tx), &PolicyView::default()).unwrap()),
+        recoveries(&fold(&rows(&tx), &PolicyView::default(), &PinnedWaits::default()).unwrap()),
         vec![Recovery::Settled(failed())]
     );
 }
@@ -305,7 +305,7 @@ fn an_outcome_record_without_its_payload_or_with_other_bytes_is_refused_at_decod
     )
     .unwrap();
     let rows = rows(&tx);
-    assert!(fold(&rows, &PolicyView::default()).is_ok());
+    assert!(fold(&rows, &PolicyView::default(), &PinnedWaits::default()).is_ok());
     for payload in ["alpha-out", "alpha-fail", "alpha-park"] {
         for forged in ["\"omega\"", "null"] {
             let tampered: Vec<RunRecordRow> = rows
@@ -318,7 +318,7 @@ fn an_outcome_record_without_its_payload_or_with_other_bytes_is_refused_at_decod
                 .collect();
             assert!(
                 matches!(
-                    fold(&tampered, &PolicyView::default()),
+                    fold(&tampered, &PolicyView::default(), &PinnedWaits::default()),
                     Err(FoldRefusal::Undecodable { .. })
                 ),
                 "{payload} as {forged} is refused at decode"

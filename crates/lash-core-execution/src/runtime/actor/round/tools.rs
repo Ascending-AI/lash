@@ -24,8 +24,8 @@ use lash_sansio::{ExecutionLimit, ExecutionPolicy};
 use super::super::ActorContext;
 use super::super::waits::{ParkDeadline, Resolution};
 use super::{
-    AdmittedExecution, ExecutionDraft, Material, MemberBodies, MemberBody, PolicyView, RoundError,
-    SettledOutput, fold, settle,
+    AdmittedExecution, ExecutionDraft, Material, MemberBodies, MemberBody, PinnedWaits, PolicyView,
+    RoundError, SettledOutput, fold, settle,
 };
 use crate::{ToolCallId, ToolId};
 
@@ -404,14 +404,15 @@ pub async fn settle_cancelled(
     owner: &OwnerKey,
     run: RunSeq,
 ) -> Result<(), RoundError> {
-    let rows: Vec<_> = cx
-        .durable_reads()?
+    let reads = cx.durable_reads()?;
+    let rows: Vec<_> = reads
         .run_records(owner)
         .await?
         .into_iter()
         .filter(|row| row.run == run)
         .collect();
-    let folded = fold(&rows, &PolicyView::default())?;
+    let waits = PinnedWaits::read(reads, &rows).await?;
+    let folded = fold(&rows, &PolicyView::default(), &waits)?;
     let Some(view) = folded.round(run) else {
         return Ok(());
     };

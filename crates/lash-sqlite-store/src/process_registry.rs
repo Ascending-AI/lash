@@ -20,8 +20,6 @@ mod support;
 mod tool_intent_submission;
 
 use sql::process_sql;
-use support::cancel_requested_at_ms;
-use support::process_status_label;
 pub(crate) use support::{ProcessEventAppendArm, ProcessEventBatch, tx_outcome};
 
 #[async_trait::async_trait]

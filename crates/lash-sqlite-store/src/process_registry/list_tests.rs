@@ -160,7 +160,7 @@ fn retention_keeps_terminal_process_until_cascade_drains() {
     let conn = rusqlite::Connection::open_in_memory().expect("open retention fixture");
     conn.execute_batch(crate::schema::PROCESS_SCHEMA)
         .expect("create schema");
-    conn.execute_batch("INSERT INTO processes (process_id, originator_id, identity_kind, created_at_ms, updated_at_ms, last_event_sequence, change_seq, status, lifetime, record_json, cascade_cursor) VALUES ('parent', 'origin', 'standard', 0, 0, 0, 1, 'completed', 'detached', '{}', 'child')").expect("terminal with unfinished cascade");
+    conn.execute_batch("INSERT INTO processes (process_id, originator_id, identity_kind, created_at_ms, updated_at_ms, change_seq, lifetime, record_json, cascade_cursor) VALUES ('parent', 'origin', 'standard', 0, 0, 1, 'detached', '{\"last_event_sequence\":0,\"lifecycle\":{\"state\":\"terminal\",\"outcome\":{\"type\":\"settled\",\"output\":{\"outcome\":{\"status\":\"success\"}}}}}', 'child')").expect("terminal with unfinished cascade");
     let sql = process_sql().process_sqlite.list_prunable_terminal.sql();
     let count = |conn: &rusqlite::Connection| {
         conn.prepare(sql)

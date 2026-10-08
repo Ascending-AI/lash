@@ -620,7 +620,11 @@ impl Scenario for RoundScenario {
             .filter(|row| row.kind == RunRecordKind::XOutcome)
             .filter_map(|row| row.call.clone())
             .collect();
-        let fold = match round::fold(&rows, &PolicyView::default()) {
+        let waits = match round::PinnedWaits::read(nodes.database().as_ref(), &rows).await {
+            Ok(waits) => waits,
+            Err(error) => return vec![format!("the pinned waits do not read: {error}")],
+        };
+        let fold = match round::fold(&rows, &PolicyView::default(), &waits) {
             Ok(fold) => fold,
             Err(refusal) => return vec![format!("the run records do not fold: {refusal}")],
         };
