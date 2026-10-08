@@ -39,6 +39,7 @@ pub struct RecoveryLease {
     clock: Arc<dyn Clock>,
     observer: crate::operational_metrics::StoreObserver,
     standing: Mutex<Standing>,
+    failed_attempts: Mutex<u64>,
     /// Serializes attempts, so the background cadence and an inline step
     /// never race each other's term.
     attempt: tokio::sync::Mutex<()>,
@@ -80,6 +81,7 @@ impl RecoveryLease {
             clock,
             observer,
             standing: Mutex::new(Standing::Follower),
+            failed_attempts: Mutex::new(0),
             attempt: tokio::sync::Mutex::new(()),
         }
     }
@@ -145,6 +147,21 @@ impl RecoveryLease {
             }
         };
         let answer = tokio::time::timeout(self.timings.renew_timeout, request).await;
+        if matches!(&answer, Ok(Ok(_))) {
+            let mut count = self
+                .failed_attempts
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if *count > 0 {
+                tracing::info!(
+                    event = "recovery_lease.recovered",
+                    lease = self.claim.name.as_str(),
+                    failure_count = *count,
+                    "recovery lease store attempts recovered"
+                );
+                *count = 0;
+            }
+        }
         let standing = match answer {
             Ok(Ok(answer)) if answer.leader => match answer.row {
                 Some(row) => Standing::Leader {
@@ -157,14 +174,11 @@ impl RecoveryLease {
             },
             Ok(Ok(_)) => Standing::Follower,
             Ok(Err(error)) => {
-                tracing::warn!(lease = self.claim.name.as_str(), %error, "recovery lease attempt failed; this process follows until one succeeds");
+                self.attempt_failed("store", Some(error.runtime_code().as_str()), &error);
                 Standing::Follower
             }
             Err(_) => {
-                tracing::warn!(
-                    lease = self.claim.name.as_str(),
-                    "recovery lease attempt timed out; this process follows until one succeeds"
-                );
+                self.attempt_failed("timeout", None, &"recovery lease attempt timed out");
                 Standing::Follower
             }
         };
@@ -176,6 +190,24 @@ impl RecoveryLease {
         }
         self.set_standing(standing);
         standing
+    }
+
+    fn attempt_failed(
+        &self,
+        error_type: &str,
+        error_code: Option<&str>,
+        error: &dyn std::fmt::Display,
+    ) {
+        let mut count = self
+            .failed_attempts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *count = count.saturating_add(1);
+        if *count == 1 {
+            tracing::warn!(event = "recovery_lease.degraded", lease = self.claim.name.as_str(),
+                error_type, error_code, %error, failure_count = *count,
+                "recovery lease attempt failed; this process follows until one succeeds");
+        }
     }
 
     /// Give up the lease if this process holds it, so a follower takes over
@@ -216,4 +248,65 @@ impl RecoveryLease {
 
 fn duration_ms(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+    use crate::store::{LeaseAnswer, StoreError};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Faults(AtomicUsize);
+    #[async_trait::async_trait]
+    impl RecoveryLeaderStore for Faults {
+        async fn acquire(&self, _: &LeaseClaim) -> Result<LeaseAnswer, StoreError> {
+            match self.0.fetch_add(1, Ordering::SeqCst) {
+                0 | 1 => Err(StoreError::Contended),
+                2 => std::future::pending().await,
+                _ => Ok(LeaseAnswer {
+                    leader: false,
+                    row: None,
+                    db_now_ms: 0,
+                }),
+            }
+        }
+        async fn renew(&self, claim: &LeaseClaim, _: i64) -> Result<LeaseAnswer, StoreError> {
+            self.acquire(claim).await
+        }
+        async fn resign(&self, _: &LeaseName, _: &HolderId, _: i64) -> Result<bool, StoreError> {
+            Ok(false)
+        }
+    }
+
+    /// FIG-5531: errors and timeouts are one degraded episode; a successful
+    /// follower read recovers it without claiming leadership.
+    #[tokio::test(start_paused = true)]
+    async fn repeated_acquisition_failures_report_transitions_and_count() {
+        let faults = Arc::new(Faults(AtomicUsize::new(0)));
+        let lease = RecoveryLease::new(
+            faults.clone(),
+            LeaseName::new("diagnostic-law"),
+            1,
+            RecoveryLeaseTimings::default(),
+            Arc::new(crate::SystemClock),
+            Default::default(),
+        );
+        let (_, capture) = crate::testing::trace_capture::capturing(|| async {
+            for _ in 0..4 {
+                assert_eq!(lease.step().await, Standing::Follower);
+            }
+        })
+        .await;
+        assert_eq!(capture.exactly_one("recovery_lease.degraded").level, "WARN");
+        assert_eq!(
+            capture
+                .exactly_one("recovery_lease.recovered")
+                .field("failure_count"),
+            "3"
+        );
+        faults.0.store(0, Ordering::SeqCst);
+        let (_, next) =
+            crate::testing::trace_capture::capturing(|| async { lease.step().await }).await;
+        next.exactly_one("recovery_lease.degraded");
+    }
 }

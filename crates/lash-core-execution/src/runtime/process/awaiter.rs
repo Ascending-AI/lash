@@ -45,6 +45,8 @@ struct Publication {
     /// marks, once one does: where a path with no mark here starts, so a
     /// mark is always contiguous with what the durable one covers.
     durable: std::sync::OnceLock<Arc<dyn lash_durable::DurableReads>>,
+    /// Only degraded reads occupy this map; successful absence is healthy.
+    read_failures: Mutex<HashMap<(ProcessId, &'static str), u64>>,
 }
 
 /// A process registry paired with the change hub published by its decorator.

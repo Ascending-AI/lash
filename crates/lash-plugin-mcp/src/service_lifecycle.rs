@@ -571,13 +571,13 @@ impl Drop for StdioChildGuard {
                 || self.shutdown_requested.read_recover().is_shutting_down()
             {
                 tracing::error!(
-                    pid = self.pid,
+                    os_process_id = self.pid,
                     server = %self.server_name,
                     "MCP stdio child abandoned unreaped after bounded lifecycle cleanup"
                 );
             } else {
                 tracing::error!(
-                    pid = self.pid,
+                    os_process_id = self.pid,
                     server = %self.server_name,
                     "MCP stdio child killed without explicit pool shutdown; call shutdown_all() to reap it"
                 );

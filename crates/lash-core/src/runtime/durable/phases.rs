@@ -146,7 +146,7 @@ pub async fn run_phases(
         .agent_frame_switch_limit
         .get();
     if switches >= limit {
-        tracing::warn!(session = %session, run = %run, switches, limit,
+        tracing::debug!(session_id = %session, run_id = %run, switches, limit,
             "the agent frame switch chain reached its bound");
         pending = None;
         drive
@@ -536,12 +536,20 @@ pub(super) async fn refuse(
     row: &TurnRow,
     refusal: crate::RuntimeError,
 ) -> Result<(), TurnError> {
-    tracing::warn!(
-        session = %row.session,
-        run = %row.run,
-        error = %refusal,
-        "the turn was refused; the turn ends with the refusal"
-    );
+    // Budget validation owns the routine decision at DEBUG; this boundary
+    // reports the other refusals that unexpectedly ended a turn.
+    if !matches!(
+        refusal.code,
+        crate::RuntimeErrorCode::StoreCommitNodeBudgetExceeded
+            | crate::RuntimeErrorCode::StoreCommitByteBudgetExceeded
+    ) {
+        tracing::warn!(
+            session_id = %row.session,
+            run_id = %row.run,
+            error = %refusal,
+            "the turn was refused; the turn ends with the refusal"
+        );
+    }
     let mut tx = cx.begin().await?;
     tool_round::cancel_open_round(cx, &mut tx, row).await?;
     tx.write(DomainWrite::Turn(TurnWrite::Terminal {

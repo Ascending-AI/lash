@@ -13,6 +13,9 @@ adapter can project, rather than proving that every engine producer emits
 those observations. Arbitrary metadata and payload export are off by default.
 An explicit payload option bounds exported bytes and events.
 
+The [logging and event practice](../agents/logging-and-events.md) defines diagnostic
+fields, failure ownership, levels and correlation with domain observations.
+
 ## Required durability contract
 
 Admission retains a typed cause, its selected SDK-created anchor and the

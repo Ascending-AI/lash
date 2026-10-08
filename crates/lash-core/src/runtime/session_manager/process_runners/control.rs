@@ -856,8 +856,8 @@ impl ProcessCapability {
             target: "lash::process_tool_visibility",
             %session_id,
             operation = "list",
-            candidates = ?candidates,
-            returned = ?returned_candidates,
+            candidate_count = candidates.len(),
+            returned_count = returned_candidates.len(),
             policy = "host_filter",
             %outcome,
             "model process-tool visibility decision"
@@ -886,20 +886,26 @@ impl ProcessCapability {
         for process_id in process_ids {
             let returned = filter.narrow(session_id, std::slice::from_ref(process_id));
             let allowed = returned.iter().any(|returned| returned == process_id);
-            tracing::info!(
+            tracing::debug!(
                 target: "lash::process_tool_visibility",
                 %session_id,
                 operation = "target",
-                candidate = %process_id,
-                returned = ?returned,
+                %process_id,
+                returned_count = returned.len(),
                 policy = "host_filter",
                 outcome = if allowed { "allowed" } else { "denied" },
                 "model process-tool visibility decision"
             );
             if !allowed {
+                tracing::info!(target: "lash::process_tool_visibility", %session_id,
+                    target_count = process_ids.len(), outcome = "denied",
+                    "model process-tool visibility batch completed");
                 return Err(process_visibility_miss(process_id));
             }
         }
+        tracing::info!(target: "lash::process_tool_visibility", %session_id,
+            target_count = process_ids.len(), outcome = "allowed",
+            "model process-tool visibility batch completed");
         Ok(())
     }
 }

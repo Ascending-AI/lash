@@ -638,18 +638,6 @@ impl RuntimeTurnDriver<'_> {
             .finish_assistant_stream_hooks(assistant_stream_finish_reason(&result, abort_requested))
             .await;
 
-        if let Err(err) = &result {
-            tracing::error!(
-                session_id = %self.session_id,
-                turn = protocol_iteration,
-                retryable = err.retryable,
-                code = ?err.code,
-                raw_present = err.raw.is_some(),
-                request_body_present = err.request_body.is_some(),
-                message = %err.message,
-                "llm call failed"
-            );
-        }
         if let Some(llm_call_id) = llm_call_id {
             let stream_summary = debug.summary.to_json();
             match &result {

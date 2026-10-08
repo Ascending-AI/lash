@@ -113,7 +113,7 @@ impl CommitBase {
             Ok(Some(loaded)) => loaded,
             Ok(None) => return,
             Err(error) => {
-                tracing::warn!(session = %self.session, %error, "a commit's head was not read for its publication");
+                tracing::warn!(session_id = %self.session, %error, "a commit's head was not read for its publication");
                 return;
             }
         };
@@ -171,7 +171,7 @@ pub(in crate::runtime) async fn announce_head(
         Ok(Some(head)) => head,
         Ok(None) => return,
         Err(error) => {
-            tracing::warn!(%session, %error, "a session's head was not read for its announcement");
+            tracing::warn!(session_id = %session, %error, "a session's head was not read for its announcement");
             return;
         }
     };
@@ -201,7 +201,7 @@ async fn publish(
         // The live stream is best effort: the next pass announces the head
         // again.
         Err(error) => {
-            tracing::warn!(%session, %error, "a commit's observation was not published");
+            tracing::warn!(session_id = %session, %error, "a commit's observation was not published");
         }
     }
 }

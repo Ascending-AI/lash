@@ -169,7 +169,7 @@ impl RuntimeCommit {
         let row_count = graph_rows.saturating_add(adopted_intent_rows);
         match self.commit_budget.nodes {
             CommitBudgetLimit::Bounded(max_nodes) if row_count > max_nodes.get() => {
-                tracing::warn!(
+                tracing::debug!(
                     target: "lash.runtime_commit.budget",
                     session_id = %self.session_id,
                     dimension = "nodes",
@@ -230,7 +230,7 @@ impl RuntimeCommit {
         max_bytes: usize,
     ) -> Result<(), StoreError> {
         if measurement.total_bytes > max_bytes {
-            tracing::warn!(
+            tracing::debug!(
                 target: "lash.runtime_commit.budget",
                 session_id = %self.session_id,
                 dimension = "bytes",

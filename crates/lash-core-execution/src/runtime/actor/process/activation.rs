@@ -217,7 +217,7 @@ impl ProcessActivation {
                 Ok(None) => return Exit::Released,
                 Err(_) if owned.draining() => return Exit::Abandoned,
                 Err(error) => {
-                    tracing::debug!(%error, %process, "process actor read failed; reading again");
+                    tracing::debug!(%error, process_id = %process, "process actor read failed; reading again");
                     owned.wait_for_mail().await;
                 }
             }
@@ -273,7 +273,7 @@ impl ProcessActivation {
                 // answer lost: the next pass reloads the rows and carries on
                 // from them.
                 Err(error) => {
-                    tracing::debug!(%error, %process, "process activation pass failed; reloading");
+                    tracing::debug!(%error, process_id = %process, "process activation pass failed; reloading");
                     owned.wait_for_mail().await;
                 }
             }
@@ -691,7 +691,7 @@ impl ProcessActivation {
         live: &mut Live,
         message: String,
     ) -> Result<Pass, DurableError> {
-        tracing::warn!(%process, %message, "process commit refused as corrupt; ending it");
+        tracing::warn!(process_id = %process, %message, "process commit refused as corrupt; ending it");
         if !live.ended_refused {
             live.ended_refused = true;
             let mut tx = owned.begin().await?;

@@ -77,7 +77,7 @@ pub(super) fn completed(process: &ProcessId, text: String) -> SettledOutput {
 }
 
 pub(super) fn failed(process: &ProcessId, fault: &VmRunFault) -> SettledOutput {
-    tracing::warn!(process = %process, error = %fault, "vm_run reached no quiet point");
+    tracing::warn!(process_id = %process, error = %fault, "vm_run reached no quiet point");
     let output = lash_core::ToolCallOutput::failure(lash_core::ToolFailure::runtime(
         lash_core::ToolFailureClass::Internal,
         "vm_run_fault",

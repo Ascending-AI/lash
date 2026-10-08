@@ -13,8 +13,9 @@
 //! Nothing here asks a substrate whether it is replaying. The frontier moves
 //! only when a step body the engine handed over runs.
 
-use std::sync::Arc;
+use lash_sansio::sync::MutexExt;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use lash_trace::{
     AttemptObservation, DurableTraceScope, EmissionPermit, TraceAnchor, TraceAttemptId, TraceCause,
@@ -112,6 +113,13 @@ impl TraceRuntime {
             .cloned()
             .chain(std::iter::once(sink))
             .collect();
+        parts.emitter.sink_failures = parts
+            .emitter
+            .sink_failures
+            .iter()
+            .cloned()
+            .chain(std::iter::once(Arc::default()))
+            .collect();
         self
     }
 
@@ -120,6 +128,7 @@ impl TraceRuntime {
     pub fn with_trace_sinks(mut self, sinks: impl IntoIterator<Item = Arc<dyn TraceSink>>) -> Self {
         let parts = Arc::make_mut(&mut self.parts);
         parts.emitter.sinks = sinks.into_iter().collect();
+        parts.emitter.sink_failures = parts.emitter.sinks.iter().map(|_| Arc::default()).collect();
         self
     }
 
@@ -265,6 +274,7 @@ impl std::fmt::Debug for TraceRuntime {
 #[derive(Clone, Default)]
 pub struct TraceEmitter {
     sinks: Arc<[Arc<dyn TraceSink>]>,
+    sink_failures: Arc<[Arc<Mutex<u64>>]>,
     projector: Option<Arc<dyn TraceDomainProjector>>,
     product: Option<Arc<dyn TraceSink>>,
 }
@@ -359,9 +369,37 @@ impl TraceEmitter {
     }
 
     fn append(&self, record: &TraceRecord) {
-        for sink in self.sinks.iter() {
-            if let Err(error) = sink.append(record) {
-                tracing::warn!(%error, "failed to append trace record");
+        for (sink_index, (sink, failures)) in
+            self.sinks.iter().zip(self.sink_failures.iter()).enumerate()
+        {
+            let result = sink.append(record);
+            let mut count = failures.lock_recover();
+            match result {
+                Err(error) => {
+                    *count = count.saturating_add(1);
+                    if *count == 1 {
+                        // A host subscriber can forward this diagnostic to a
+                        // sink; release the counter before invoking its layer.
+                        drop(count);
+                        tracing::warn!(event = "trace_sink.degraded", sink_index, %error,
+                            failure_count = 1_u64,
+                            session_id = record.context.session_id.as_ref().map(|id| id.as_str()),
+                            host_run_id = record.context.run_id.as_deref(),
+                            turn_id = record.context.turn_id.as_ref().map(|id| id.as_str()),
+                            "trace sink append failed; records may be lost");
+                    }
+                }
+                Ok(()) if *count > 0 => {
+                    let failure_count = std::mem::take(&mut *count);
+                    drop(count);
+                    tracing::info!(
+                        event = "trace_sink.recovered",
+                        sink_index,
+                        failure_count,
+                        "trace sink append recovered"
+                    );
+                }
+                Ok(()) => {}
             }
         }
     }
@@ -938,5 +976,58 @@ pub fn tool_trace_scope(
         cause: parent.map_or(TraceCause::Root, DurableTraceScope::parent_cause),
         anchor: TraceAnchor::Untraced,
         started_at_ms,
+    }
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    struct FailingSink(AtomicBool);
+    impl TraceSink for FailingSink {
+        fn append(&self, _: &TraceRecord) -> Result<(), lash_trace::TraceSinkError> {
+            if self.0.load(Ordering::SeqCst) {
+                Err(lash_trace::TraceSinkError::Write {
+                    path: "injected-sink".into(),
+                    source: std::io::Error::other("injected append failure"),
+                })
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    /// FIG-5531: a sink failure episode has one warning and a counted recovery;
+    /// another sink and cloned runtime keep their own delivery contracts.
+    #[test]
+    fn repeated_sink_failures_report_transitions_and_count() {
+        let failed = Arc::new(FailingSink(AtomicBool::new(true)));
+        let healthy = Arc::new(FailingSink(AtomicBool::new(false)));
+        let runtime = TraceRuntime::default().with_trace_sink(failed.clone());
+        let other = runtime.clone().with_trace_sink(healthy);
+        let record = TraceRecord {
+            schema_version: lash_trace::TRACE_SCHEMA_VERSION,
+            id: "sink-law".into(),
+            timestamp: Default::default(),
+            context: TraceContext::default(),
+            event: TraceEvent::TurnStarted {
+                metadata: Default::default(),
+            },
+        };
+        let (_, capture) = crate::testing::trace_capture::capturing_sync(|| {
+            runtime.emitter().append(&record);
+            other.emitter().append(&record);
+            runtime.emitter().append(&record);
+            failed.0.store(false, Ordering::SeqCst);
+            other.emitter().append(&record);
+        });
+        assert_eq!(capture.exactly_one("trace_sink.degraded").level, "WARN");
+        assert_eq!(
+            capture
+                .exactly_one("trace_sink.recovered")
+                .field("failure_count"),
+            "3"
+        );
     }
 }

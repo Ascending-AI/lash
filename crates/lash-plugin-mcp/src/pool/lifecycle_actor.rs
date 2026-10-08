@@ -209,7 +209,7 @@ impl Connection {
                 // two shutdown responsibilities advance concurrently.
                 let (_, ()) = tokio::join!(
                     self.request_tasks.shutdown(),
-                    reap_child(entry, active_pid, server_name, self.child, shutdown_policy,),
+                    reap_child(entry, active_pid, self.child, shutdown_policy,),
                 );
             } else {
                 // HTTP has no child to reap, but still gets the configured
@@ -493,7 +493,7 @@ impl LifecycleActor {
                                 "MCP stdio child PID {pid} handshake interrupted by pool shutdown"
                             ));
                         }
-                        self.reap_child(&server_name, stdio_child.take()).await;
+                        self.reap_child(stdio_child.take()).await;
                         send_shutdown(initial_reply);
                         return ConnectionExit::Shutdown;
                     }
@@ -506,7 +506,7 @@ impl LifecycleActor {
             Ok(Ok(running)) => running,
             Ok(Err(error)) => {
                 self.record_mcp_error(&error);
-                self.reap_child(&server_name, stdio_child.take()).await;
+                self.reap_child(stdio_child.take()).await;
                 send_result(initial_reply, Err(error));
                 return ConnectionExit::Failed;
             }
@@ -517,7 +517,7 @@ impl LifecycleActor {
                     timeout_ms: startup_timeout.as_millis() as u64,
                 };
                 self.record_mcp_error(&error);
-                self.reap_child(&server_name, stdio_child.take()).await;
+                self.reap_child(stdio_child.take()).await;
                 send_result(initial_reply, Err(error));
                 return ConnectionExit::Failed;
             }
@@ -904,11 +904,10 @@ impl LifecycleActor {
         }
     }
 
-    async fn reap_child(&self, server_name: &str, child: Option<StdioChildGuard>) {
+    async fn reap_child(&self, child: Option<StdioChildGuard>) {
         reap_child(
             self.entry.clone(),
             Arc::clone(&self.active_pid),
-            server_name,
             child,
             self.shutdown_policy,
         )
@@ -1181,7 +1180,6 @@ impl Drop for LifecycleActor {
 async fn reap_child(
     entry: Weak<McpEntry>,
     active_pid: Arc<AtomicU32>,
-    server_name: &str,
     child: Option<StdioChildGuard>,
     shutdown_policy: McpShutdownPolicy,
 ) {
@@ -1209,10 +1207,10 @@ async fn reap_child(
         );
         if let Some(entry) = entry.upgrade() {
             *entry.health.write_recover() = McpServerHealth::ShuttingDown {
-                reason: Some(McpServerFault::Connection(reason.clone())),
+                reason: Some(McpServerFault::Connection(reason)),
             };
         }
-        tracing::error!(server = %server_name, pid, reason = %reason, "MCP lifecycle actor abandoned a stdio child");
+        // StdioChildGuard reports the unreaped child when it drops.
     }
     active_pid.store(0, Ordering::SeqCst);
 }

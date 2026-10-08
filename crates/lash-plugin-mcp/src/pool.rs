@@ -1135,12 +1135,14 @@ impl McpEntry {
                         "MCP stdio child PID {pid} abandoned: lifecycle actor did not finish within the {shutdown_bound:?} per-entry total shutdown deadline"
                     )
                 };
-                tracing::error!(
-                    server = %self.server_name,
-                    pid = (pid != 0).then_some(pid),
-                    reason = %reason,
-                    "MCP explicit shutdown abandoned a wedged lifecycle actor"
-                );
+                if pid == 0 {
+                    tracing::error!(server = %self.server_name, %reason,
+                        "MCP explicit shutdown abandoned a wedged lifecycle actor");
+                } else {
+                    // The child guard reports the abandoned child at ERROR.
+                    tracing::debug!(server = %self.server_name, os_process_id = pid, %reason,
+                        "MCP lifecycle actor exceeded its shutdown deadline");
+                }
             }
         }
         abort_on_drop.disarm();
@@ -1515,14 +1517,7 @@ impl Drop for McpEntry {
         if let Some(handle) = self.actor_handle.get_mut().recover().take() {
             handle.abort();
         }
-        let pid = self.active_pid.load(Ordering::SeqCst);
-        if pid != 0 {
-            tracing::error!(
-                pid,
-                server = %self.server_name,
-                "MCP stdio child killed without explicit pool shutdown; call shutdown_all() to reap it"
-            );
-        }
+        // The actor-owned StdioChildGuard kills and reports its own child.
     }
 }
 

@@ -946,13 +946,19 @@ fn dropping_connected_pool_kills_misbehaving_stdio_child_and_logs() {
     );
     let trace = String::from_utf8(traces.0.lock_recover().clone()).unwrap();
     assert!(
-        trace.contains(&format!("pid={pid}")),
+        trace.contains(&format!("os_process_id={pid}")),
         "captured trace: {trace}"
     );
     assert!(trace.contains("server=mock"), "captured trace: {trace}");
     assert!(
         trace.contains("killed without explicit pool shutdown"),
         "captured trace: {trace}"
+    );
+
+    assert_eq!(
+        trace.matches("ERROR").count(),
+        1,
+        "one abandoned child has one diagnostic owner: {trace}"
     );
 
     drop(runtime);

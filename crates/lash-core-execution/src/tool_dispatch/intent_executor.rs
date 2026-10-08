@@ -98,7 +98,7 @@ pub async fn execute_final_tool_intents(
             ));
             continue;
         }
-        let span = tracing::info_span!(
+        let span = tracing::debug_span!(
             target: "lash::tool_intent",
             "tool_intent.execute",
             owner = %identity.owner,
@@ -142,7 +142,7 @@ pub async fn execute_final_tool_intents(
                 },
             ),
         };
-        tracing::info!(
+        tracing::debug!(
             target: "lash::tool_intent",
             outcome = match &outcome {
                 crate::ToolIntentExecutionOutcome::Executed { .. } => "executed",
@@ -153,6 +153,18 @@ pub async fn execute_final_tool_intents(
         );
         outcomes.push(outcome);
     }
+    let executed_count = outcomes
+        .iter()
+        .filter(|outcome| matches!(outcome, crate::ToolIntentExecutionOutcome::Executed { .. }))
+        .count();
+    tracing::info!(
+        target: "lash::tool_intent",
+        %tool_call_id,
+        intent_count = outcomes.len(),
+        executed_count,
+        refused_count = outcomes.len() - executed_count,
+        "tool intent batch completed"
+    );
     Ok(super::Realization {
         receipt: super::RealizationReceipt { outcomes },
         store_local,
@@ -330,7 +342,7 @@ fn refuse_all(
     refusal: crate::ToolIntentRefusalReason,
 ) -> Vec<crate::ToolIntentExecutionOutcome> {
     if intents.intents.is_empty() {
-        let span = tracing::info_span!(
+        let span = tracing::debug_span!(
             target: "lash::tool_intent",
             "tool_intent.execute",
             owner = %context.owner.runtime_owner(),
@@ -355,7 +367,7 @@ fn refuse_all(
         .map(|(index, intent)| {
             let identity =
                 derive_identity(context, execution_scope_id, tool_call_id, index).ok();
-            let span = tracing::info_span!(
+            let span = tracing::debug_span!(
                 target: "lash::tool_intent",
                 "tool_intent.execute",
                 owner = %context.owner.runtime_owner(),

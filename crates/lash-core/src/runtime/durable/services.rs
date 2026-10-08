@@ -435,7 +435,7 @@ impl LiveActivity {
         {
             // The live stream is best effort: a reader that misses it sees a
             // gap and reads the store.
-            tracing::warn!(session = %self.session, %error, "a turn's live activity was not published");
+            tracing::warn!(session_id = %self.session, %error, "a turn's live activity was not published");
         }
     }
 }

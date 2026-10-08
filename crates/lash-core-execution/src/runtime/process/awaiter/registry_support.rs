@@ -26,15 +26,42 @@ impl WatchedProcessRegistry {
         }
         if let Some(durable) = self.publication.durable.get() {
             return match durable.process(process_id).await {
-                Ok(Some(row)) => Some(row.published_event_sequence),
-                Ok(None) | Err(_) => None,
+                Ok(row) => {
+                    self.feed_read_recovered(process_id, "durable_cursor");
+                    row.map(|row| row.published_event_sequence)
+                }
+                Err(error) => {
+                    match &error {
+                        lash_durable::DurableError::Store(failure) => self.feed_read_failed(
+                            process_id,
+                            "durable_cursor",
+                            failure.kind,
+                            None,
+                            &error,
+                        ),
+                        _ => self.feed_read_failed(
+                            process_id,
+                            "durable_cursor",
+                            "DurableError",
+                            None,
+                            &error,
+                        ),
+                    }
+                    None
+                }
             };
         }
         // The record's high-water mark, not the newest retained event: a
         // host release can leave no event to read the position from.
         match self.inner.get_process(process_id).await {
-            Ok(Some(record)) => Some(record.last_event_sequence),
-            Ok(None) | Err(_) => None,
+            Ok(record) => {
+                self.feed_read_recovered(process_id, "process_cursor");
+                record.map(|record| record.last_event_sequence)
+            }
+            Err(error) => {
+                self.feed_plugin_read_failed(process_id, "process_cursor", &error);
+                None
+            }
         }
     }
 
@@ -68,7 +95,7 @@ impl WatchedProcessRegistry {
         let mut after_sequence = start;
         let limit = std::num::NonZeroUsize::new(128).unwrap_or(std::num::NonZeroUsize::MIN);
         loop {
-            let Ok(crate::ProcessEventReadOutcome::Retained(page)) = self
+            let read = self
                 .inner
                 .event_page_after(
                     process_id,
@@ -76,9 +103,19 @@ impl WatchedProcessRegistry {
                     limit,
                     crate::ProcessEventQueryMode::Full,
                 )
-                .await
-            else {
-                break;
+                .await;
+            let page = match read {
+                Ok(outcome) => {
+                    self.feed_read_recovered(process_id, "event_page");
+                    match outcome {
+                        crate::ProcessEventReadOutcome::Retained(page) => page,
+                        _ => break,
+                    }
+                }
+                Err(error) => {
+                    self.feed_plugin_read_failed(process_id, "event_page", &error);
+                    break;
+                }
             };
             let crate::ProcessEventPageEvents::Full(events) = page.events else {
                 break;
@@ -102,5 +139,51 @@ impl WatchedProcessRegistry {
             *mark = (*mark).max(after_sequence);
         }
         Some(after_sequence)
+    }
+
+    fn feed_plugin_read_failed(
+        &self,
+        process_id: &ProcessId,
+        operation: &'static str,
+        error: &crate::PluginError,
+    ) {
+        let failure = crate::ToolIntentCommandFailure::from(error);
+        self.feed_read_failed(
+            process_id,
+            operation,
+            failure.failure_class(),
+            Some(&failure.code()),
+            error,
+        );
+    }
+
+    fn feed_read_failed(
+        &self,
+        process_id: &ProcessId,
+        operation: &'static str,
+        error_type: impl std::fmt::Debug,
+        error_code: Option<&str>,
+        error: &dyn std::fmt::Display,
+    ) {
+        let mut failures = self.publication.read_failures.lock_recover();
+        let count = failures.entry((process_id.clone(), operation)).or_default();
+        *count = count.saturating_add(1);
+        if *count == 1 {
+            tracing::warn!(event = "process_feed.degraded", %process_id, operation,
+                ?error_type, error_code, %error, failure_count = *count,
+                "process event feed read failed; publication remains best effort");
+        }
+    }
+
+    fn feed_read_recovered(&self, process_id: &ProcessId, operation: &'static str) {
+        if let Some(failure_count) = self
+            .publication
+            .read_failures
+            .lock_recover()
+            .remove(&(process_id.clone(), operation))
+        {
+            tracing::info!(event = "process_feed.recovered", %process_id, operation,
+                failure_count, "process event feed read recovered");
+        }
     }
 }

@@ -621,8 +621,8 @@ impl SessionActivation {
             .await?;
             if !stop.may_still_be_running.is_empty() {
                 tracing::warn!(
-                    %session,
-                    run = %row.run,
+                    session_id = %session,
+                    run_id = %row.run,
                     children = ?stop.may_still_be_running,
                     "the cancelled turn's children may still be running past its stop grace"
                 );
@@ -796,7 +796,7 @@ impl Activation for SessionActivation {
                         match park(&cx, &reason).await {
                             Ok(()) | Err(DurableError::OwnershipLost(_)) => return Exit::Released,
                             Err(park_error) => tracing::warn!(
-                                %session,
+                                session_id = %session,
                                 %error,
                                 %park_error,
                                 "the session's park failed; retrying"

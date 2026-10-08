@@ -74,7 +74,7 @@ impl DurableProcessWorker {
             // admission stands, so the step is answered as one that may
             // have taken effect, never run again under `Once`.
             Err(error) => {
-                tracing::warn!(process = %process.id, %error, "a process tool step could not reach its tools");
+                tracing::warn!(process_id = %process.id, %error, "a process tool step could not reach its tools");
                 return SettledOutput::Interrupted.into();
             }
         };
@@ -331,14 +331,14 @@ impl DurableProcessWorker {
             // Admitted under a registration this deployment no longer
             // holds: the body cannot run here.
             Err(refusal) => {
-                tracing::warn!(process = %process.id, %refusal, "an admitted engine step has no body here");
+                tracing::warn!(process_id = %process.id, %refusal, "an admitted engine step has no body here");
                 return SettledOutput::Interrupted.into();
             }
         };
         let tool_catalog = match self.step_catalog(&process).await {
             Ok(catalog) => catalog,
             Err(error) => {
-                tracing::warn!(process = %process.id, %error, "an engine step could not read its catalog");
+                tracing::warn!(process_id = %process.id, %error, "an engine step could not read its catalog");
                 return SettledOutput::Interrupted.into();
             }
         };

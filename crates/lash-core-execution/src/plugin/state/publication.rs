@@ -851,7 +851,7 @@ fn session_budget(
         bytes = bytes.saturating_add(measured);
     }
     if bytes > PLUGIN_STATE_SESSION_LIMIT {
-        tracing::warn!(
+        tracing::debug!(
             event = "plugin_state.session_budget_refused",
             plugin_id = %plugin,
             bytes,
@@ -866,7 +866,7 @@ fn session_budget(
         );
     }
     if bytes > PLUGIN_STATE_SESSION_WARN {
-        tracing::warn!(
+        tracing::debug!(
             event = "plugin_state.session_budget_warn",
             plugin_id = %plugin,
             bytes,

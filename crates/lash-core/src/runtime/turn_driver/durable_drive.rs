@@ -419,7 +419,7 @@ impl TurnDrive for RuntimeDrive {
             ),
             Ok(crate::LiveReplayOutcome::Gap(_)) => None,
             Err(error) => {
-                tracing::warn!(%session, %error, "the live replay of a re-sent call's earlier attempts did not read");
+                tracing::warn!(session_id = %session, %error, "the live replay of a re-sent call's earlier attempts did not read");
                 None
             }
         };
