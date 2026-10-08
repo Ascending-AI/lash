@@ -347,6 +347,16 @@ impl TurnCancelRequest {
     pub fn escalates(&self, accepted: &Self) -> bool {
         self.undelivered == accepted.undelivered && self.mode.is_stronger_than(accepted.mode)
     }
+
+    /// This accepted request as `escalating` leaves it: the escalating
+    /// request's identity, origin, reason and mode, over the accepted
+    /// undelivered-input policy (ADR 0039).
+    pub fn escalate_to(&mut self, escalating: &Self) {
+        self.request_id.clone_from(&escalating.request_id);
+        self.origin.clone_from(&escalating.origin);
+        self.reason.clone_from(&escalating.reason);
+        self.mode = escalating.mode;
+    }
 }
 
 /// The answer to a [`TurnCancelRequest`].

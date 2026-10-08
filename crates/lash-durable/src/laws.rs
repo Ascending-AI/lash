@@ -698,9 +698,16 @@ pub async fn a_turn_cancel_is_a_first_winner_row_with_a_wake(
             && receipt.woken.is_empty(),
         "a repeat answered {receipt:?}"
     );
+    // The escalating request's identity, origin, reason and mode, over the
+    // first request's policy (ADR 0039).
+    let stronger = TurnCancelRequest {
+        origin: Some("escalation".to_owned()),
+        reason: Some("now".to_owned()),
+        ..request("stronger", &run, defer, TurnCancelMode::Immediate)
+    };
     let mut escalated = first.clone();
-    escalated.mode = TurnCancelMode::Immediate;
-    let receipt = ask(request("stronger", &run, defer, TurnCancelMode::Immediate)).await?;
+    escalated.escalate_to(&stronger);
+    let receipt = ask(stronger).await?;
     ensure!(
         receipt.answers
             == [MailAnswer::RequestTurnCancel(TurnCancelAnswer::Escalated {

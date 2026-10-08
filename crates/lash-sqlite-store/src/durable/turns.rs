@@ -361,9 +361,16 @@ pub(super) fn request_cancel(
             cached_execute(
                 tx,
                 SQL.escalate_cancel.sql(),
-                rusqlite::params![session, run, turn_cancel_mode_wire(request.mode)],
+                rusqlite::params![
+                    session,
+                    run,
+                    request.request_id,
+                    request.origin,
+                    request.reason,
+                    turn_cancel_mode_wire(request.mode),
+                ],
             )?;
-            accepted.mode = request.mode;
+            accepted.escalate_to(request);
             TurnCancelAnswer::Escalated { accepted }
         }
         Some(accepted) if accepted.undelivered != request.undelivered => {

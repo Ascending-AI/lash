@@ -113,10 +113,12 @@ crate::statements! {
                   intent_revision)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)";
 
-        /// Escalate run `?2` of session `?1`'s accepted cancel request to mode
-        /// `?3`.
+        /// Escalate run `?2` of session `?1`'s accepted cancel request to the
+        /// escalating request: its id `?3`, origin `?4`, reason `?5` and mode
+        /// `?6`. The accepted disposition stays (ADR 0039).
         escalate_cancel = "UPDATE turn_cancel_requests
-             SET mode = ?3, intent_revision = intent_revision + 1
+             SET request_id = ?3, origin = ?4, reason = ?5, mode = ?6,
+                 intent_revision = intent_revision + 1
              WHERE session_id = ?1 AND turn_id = ?2";
     }
 }

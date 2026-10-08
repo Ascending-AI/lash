@@ -281,11 +281,14 @@ pub(super) async fn request_cancel(
             sqlx::query(SQL.escalate_cancel.sql())
                 .bind(session)
                 .bind(run)
+                .bind(&request.request_id)
+                .bind(&request.origin)
+                .bind(&request.reason)
                 .bind(turn_cancel_mode_wire(request.mode))
                 .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
-            accepted.mode = request.mode;
+            accepted.escalate_to(request);
             TurnCancelAnswer::Escalated { accepted }
         }
         Some(accepted) if accepted.undelivered != request.undelivered => {
