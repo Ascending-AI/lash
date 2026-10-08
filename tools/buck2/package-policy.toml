@@ -55,14 +55,15 @@ tags = ["hermetic-postgres"]
 # and PostgreSQL; the tool-semantics laws (FIG-5210), the core node's
 # process laws (FIG-5216), the cell restore laws (FIG-5224) and the tool
 # activity laws (FIG-5251), the after-turn laws (FIG-5283), the checkpoint
-# mail laws (FIG-5293, FIG-5294), the committed-turn read laws (FIG-5297) and
-# the plugin state storage laws (FIG-5301) run on all three tiers, and the
-# pool-width laws (FIG-5237) on PostgreSQL. Each PostgreSQL leg gets a server
+# mail laws (FIG-5293, FIG-5294), the committed-turn read laws (FIG-5297),
+# the plugin state storage laws (FIG-5301) and the config-change observer
+# laws (FIG-5333) run on all three tiers, and the pool-width laws (FIG-5237)
+# on PostgreSQL. Each PostgreSQL leg gets a server
 # of its own.
 [[rule]]
 packages = ["lash-internal-durable-test"]
 kinds = ["test"]
-targets = ["vertical_crash_proof", "turn_phases", "trigger_start_proof", "drain_by_release", "tool_batches", "tool_call_identity", "tool_crash_laws", "tool_group_pool_width", "cell_restore_laws", "core_node_processes", "declared_start", "declared_start_crash_laws", "process_tool_calls", "process_tool_call_crash_laws", "tool_activity", "session_send", "after_turn_crash_laws", "steering_crash_laws", "committed_turns", "plugin_state_storage_laws"]
+targets = ["vertical_crash_proof", "turn_phases", "trigger_start_proof", "drain_by_release", "tool_batches", "tool_call_identity", "tool_crash_laws", "tool_group_pool_width", "cell_restore_laws", "core_node_processes", "declared_start", "declared_start_crash_laws", "process_tool_calls", "process_tool_call_crash_laws", "tool_activity", "session_send", "after_turn_crash_laws", "steering_crash_laws", "committed_turns", "plugin_state_storage_laws", "config_change_observer_laws"]
 tags = ["hermetic-postgres"]
 
 # The declared-start crash laws (FIG-5216) are five matrices and two single

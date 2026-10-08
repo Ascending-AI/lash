@@ -152,7 +152,7 @@ impl SessionConfigAdmin {
         &self,
         receipt: lash_core::runtime::SessionCommandReceipt,
     ) -> Result<ConfigSettlement> {
-        match Box::pin(self.control.await_command_settlement(receipt, None)).await? {
+        match Box::pin(self.control.await_command_settlement(receipt)).await? {
             lash_core::runtime::SessionCommandSettlement::Applied {
                 outcome: lash_core::runtime::SessionCommandOutcome::ConfigTransaction { outcome },
                 ..

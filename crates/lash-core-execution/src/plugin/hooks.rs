@@ -208,6 +208,16 @@ pub struct SessionConfigChangedContext {
 pub enum PluginLifecycleEvent {
     TurnFinalized(Arc<AssembledTurn>),
     SessionRestored(SessionReadView),
+    /// A config transaction changed the session's policy. Observers see it
+    /// once its change is committed, never for a transaction that was stale
+    /// or refused, and from one place: the run that applied it. On a durable
+    /// session that is the command run whose commit landed; it builds the
+    /// session's plugins past its commit to deliver, best effort, as a turn
+    /// delivers [`Self::TurnFinalized`] after its own. A build that fails
+    /// leaves the change applied and undelivered (the run logs a warning),
+    /// and a replay of the settled command, or a host settling it, delivers
+    /// nothing. Delivery is therefore at most once: a crash between the
+    /// commit and the observers loses it, as it loses a finalized turn's.
     SessionConfigChanged(Box<SessionConfigChangedContext>),
 }
 

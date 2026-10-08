@@ -40,7 +40,7 @@ impl SessionAdmin {
         match submitted {
             SubmittedCommand::Applied(outcome) => Ok(outcome),
             SubmittedCommand::Queued(receipt) => {
-                match Box::pin(self.await_command_settlement(receipt, None)).await? {
+                match Box::pin(self.await_command_settlement(receipt)).await? {
                     lash_core::runtime::SessionCommandSettlement::Applied {
                         outcome:
                             lash_core::runtime::SessionCommandOutcome::AppendSessionNodes { outcome },
@@ -83,7 +83,7 @@ impl SessionAdmin {
         match submitted {
             SubmittedCommand::Applied(outcome) => Ok(outcome),
             SubmittedCommand::Queued(receipt) => {
-                match Box::pin(self.await_command_settlement(receipt, None)).await? {
+                match Box::pin(self.await_command_settlement(receipt)).await? {
                     lash_core::runtime::SessionCommandSettlement::Applied {
                         outcome:
                             lash_core::runtime::SessionCommandOutcome::OpenAgentFrame {
@@ -245,14 +245,14 @@ impl SessionAdmin {
         cancellation: CancellationToken,
     ) -> Result<lash_core::runtime::SessionCommandSettlement> {
         tokio::select! {
-            settled = Box::pin(self.await_command_settlement(receipt.clone(), None)) => settled,
+            settled = Box::pin(self.await_command_settlement(receipt.clone())) => settled,
             () = cancellation.cancelled() => {
                 match self.withdraw_session_command(&receipt).await? {
                     SessionCommandWithdrawal::Withdrawn => {
                         Ok(lash_core::runtime::SessionCommandSettlement::Cancelled(receipt))
                     }
                     SessionCommandWithdrawal::AlreadyAdmitted => {
-                        Box::pin(self.await_command_settlement(receipt, None)).await
+                        Box::pin(self.await_command_settlement(receipt)).await
                     }
                 }
             }

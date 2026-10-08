@@ -281,12 +281,36 @@ impl LashRuntime {
             )
             .await?;
         if applied && matches!(committed, super::host_commands::CommandCommit::Landed) {
-            self.notify_session_config_changed(previous).await;
+            Box::pin(self.deliver_committed_config_change(run_controller, previous)).await;
         }
         Ok(!matches!(
             committed,
             super::host_commands::CommandCommit::Withdrawn
         ))
+    }
+
+    /// Deliver the config change this command run just committed to the
+    /// session's config-change observers (FIG-5333). The run opened from the
+    /// committed head with no plugins built, and applied without them so a
+    /// config change applies to a session whose plugins cannot build
+    /// (FIG-5245): it builds them now, best effort, past the commit. A build
+    /// that fails leaves the change applied and undelivered, and says so.
+    /// Only the run whose commit landed delivers, and a replay of a settled
+    /// run returns before it.
+    async fn deliver_committed_config_change(
+        &mut self,
+        run_controller: &crate::ActorContext,
+        previous: SessionPolicy,
+    ) {
+        if let Err(error) = Box::pin(self.materialize_command_session(run_controller)).await {
+            tracing::warn!(
+                session_id = %self.state.session_id,
+                %error,
+                "a committed config change was not delivered: the session's plugins did not build"
+            );
+            return;
+        }
+        self.notify_session_config_changed(previous).await;
     }
 
     /// Resolve `transaction` over the resident config as one recorded step

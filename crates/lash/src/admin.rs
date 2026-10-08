@@ -290,7 +290,6 @@ impl SessionAdmin {
     async fn await_command_settlement(
         &self,
         receipt: lash_core::runtime::SessionCommandReceipt,
-        previous_policy: Option<lash_core::SessionPolicy>,
     ) -> Result<lash_core::runtime::SessionCommandSettlement> {
         let deadline = tokio::time::Instant::now() + COMMAND_SETTLEMENT_WAIT;
         let mut pause = COMMAND_SETTLEMENT_POLL_FLOOR;
@@ -298,15 +297,10 @@ impl SessionAdmin {
             let settlement = {
                 let writer = self.runtime.writer();
                 let mut runtime = writer.lock().await;
-                let settlement = match previous_policy.clone() {
-                    Some(previous_policy) => {
-                        runtime
-                            .settle_session_command_from_policy(receipt.clone(), previous_policy)
-                            .await
-                    }
-                    None => runtime.settle_session_command(receipt.clone()).await,
-                }
-                .map_err(EmbedError::from)?;
+                let settlement = runtime
+                    .settle_session_command(receipt.clone())
+                    .await
+                    .map_err(EmbedError::from)?;
                 self.runtime.publish_from(&runtime).await;
                 settlement
             };
@@ -622,7 +616,7 @@ impl SessionAdmin {
         let outcome = match submitted {
             SubmittedCommand::Applied(outcome) => outcome,
             SubmittedCommand::Queued(receipt) => {
-                match Box::pin(self.await_command_settlement(receipt, None)).await? {
+                match Box::pin(self.await_command_settlement(receipt)).await? {
                     lash_core::runtime::SessionCommandSettlement::Applied {
                         outcome:
                             lash_core::runtime::SessionCommandOutcome::CompactContext { outcome },
@@ -948,7 +942,7 @@ impl SessionCommandAdmin {
         &self,
         receipt: lash_core::facade_support::SessionCommandReceipt,
     ) -> Result<lash_core::runtime::SessionCommandSettlement> {
-        Box::pin(self.control.await_command_settlement(receipt, None)).await
+        Box::pin(self.control.await_command_settlement(receipt)).await
     }
 
     /// Withdraw the command `receipt` names (FIG-4202). A command no shift

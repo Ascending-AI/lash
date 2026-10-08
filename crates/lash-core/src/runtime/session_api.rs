@@ -669,7 +669,6 @@ impl LashRuntime {
     async fn await_session_command_settlement(
         &mut self,
         handle: crate::runtime::SessionCommandSettlementHandle,
-        previous_policy: Option<SessionPolicy>,
     ) -> Result<crate::runtime::SessionCommandSettlement, RuntimeError> {
         let store = self.services.store.clone().ok_or_else(|| {
             RuntimeError::new(
@@ -693,11 +692,11 @@ impl LashRuntime {
                     handle.receipt,
                 ));
             };
-            let previous_policy = previous_policy.unwrap_or_else(|| self.session_policy());
+            // Settling only reads: the command run that committed a config
+            // change delivered it to the session's observers (FIG-5333).
             self.refresh_session_graph_from_store()
                 .await
                 .map_err(runtime_error_from_session_command_refresh)?;
-            self.notify_session_config_changed(previous_policy).await;
             // The refresh adopts the durable head, which already carries
             // this command's committed values — or newer ones from a
             // later writer (head-authoritative adoption, FIG-1875). Every
@@ -762,24 +761,9 @@ impl LashRuntime {
         &mut self,
         receipt: crate::SessionCommandReceipt,
     ) -> Result<crate::runtime::SessionCommandSettlement, RuntimeError> {
-        self.await_session_command_settlement(
-            crate::runtime::SessionCommandSettlementHandle { receipt },
-            None,
-        )
-        .await
-    }
-
-    /// Settle an engine-driven command and report its policy transition from
-    /// the state observed before the command was enqueued.
-    pub async fn settle_session_command_from_policy(
-        &mut self,
-        receipt: crate::SessionCommandReceipt,
-        previous_policy: SessionPolicy,
-    ) -> Result<crate::runtime::SessionCommandSettlement, RuntimeError> {
-        self.await_session_command_settlement(
-            crate::runtime::SessionCommandSettlementHandle { receipt },
-            Some(previous_policy),
-        )
+        self.await_session_command_settlement(crate::runtime::SessionCommandSettlementHandle {
+            receipt,
+        })
         .await
     }
 

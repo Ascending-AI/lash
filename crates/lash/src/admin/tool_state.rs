@@ -115,7 +115,7 @@ impl SessionAdmin {
                 format!("tool-state:{}", uuid::Uuid::new_v4()),
             )
             .await?;
-        match Box::pin(self.await_command_settlement(receipt, None)).await? {
+        match Box::pin(self.await_command_settlement(receipt)).await? {
             lash_core::runtime::SessionCommandSettlement::Applied {
                 outcome: lash_core::runtime::SessionCommandOutcome::ToolState { outcome },
                 ..
