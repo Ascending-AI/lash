@@ -550,6 +550,27 @@ pub struct PersistedSessionConfig {
     /// against, and it is required on the wire: a head written before
     /// the contract existed is refused at load, not defaulted.
     pub config_revision: u64,
+    /// The applied change the session's config-change observers are still
+    /// owed (FIG-5397): recorded by the commit that applies it, and retired
+    /// by the session's next head commit once a plugin build delivered it.
+    /// Only the head carries it: it is not config, and no config view of a
+    /// session's state, a run's recorded config among them, holds it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub undelivered_change: Option<Box<UndeliveredConfigChange>>,
+}
+
+/// A committed change of a session's policy its config-change observers
+/// have not been delivered (FIG-5397). It is delivered at least once: a
+/// delivery the session's head did not retire before its node was lost is
+/// delivered again, under the same [`revision`](Self::revision).
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct UndeliveredConfigChange {
+    /// The config revision the change reached: its stable identity.
+    pub revision: u64,
+    /// The session's policy before the change.
+    pub previous: crate::SessionPolicy,
+    /// The session's policy the change committed.
+    pub current: crate::SessionPolicy,
 }
 
 impl PersistedSessionConfig {
@@ -600,6 +621,7 @@ impl PersistedSessionConfig {
             prompt_plan: crate::prompt_sections::PromptPlan::default(),
             plugin_config: crate::PluginConfig::default(),
             config_revision: 0,
+            undelivered_change: None,
         }
     }
 }
@@ -630,6 +652,7 @@ impl From<&crate::SessionPolicy> for PersistedSessionConfig {
             // knows the durable value assigns it
             // (`persisted_session_config_from_state`).
             config_revision: 0,
+            undelivered_change: None,
         }
     }
 }

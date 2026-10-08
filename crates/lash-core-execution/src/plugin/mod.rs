@@ -262,6 +262,7 @@ mod tests {
             .emit_runtime_event(PluginLifecycleEvent::SessionConfigChanged(Box::new(
                 SessionConfigChangedContext {
                     session_id: "typed-causes".into(),
+                    revision: 1,
                     previous: SessionPolicy::new(
                         crate::TurnBudget::Unbounded,
                         crate::MaxToolCalls::new(1024),

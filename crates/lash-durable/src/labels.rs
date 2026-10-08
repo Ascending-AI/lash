@@ -50,7 +50,9 @@ impl CommitLabel {
     /// nothing left to run.
     pub const SESSION_RELEASE: Self = Self::new("session.release");
     /// `session.command`: A session command applied: the head commit that
-    /// settles it, on the session actor's fenced transaction (FIG-5230).
+    /// settles it, on the session actor's fenced transaction (FIG-5230);
+    /// and, after a config command's run delivered the change the head owed
+    /// its observers, the head commit that retires it (FIG-5397).
     pub const SESSION_COMMAND: Self = Self::new("session.command");
 
     // Tool rounds (V0, then L4).

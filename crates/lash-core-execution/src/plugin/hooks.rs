@@ -199,6 +199,10 @@ pub struct TurnHookContext {
 #[derive(Clone)]
 pub struct SessionConfigChangedContext {
     pub session_id: SessionId,
+    /// The config revision the change reached: the change's identity. A
+    /// change delivered again carries the same revision, so an observer that
+    /// must act on a change once dedupes on it (FIG-5397).
+    pub revision: u64,
     pub previous: SessionPolicy,
     pub current: SessionPolicy,
     pub sessions: Arc<dyn SessionReadService>,
@@ -210,14 +214,17 @@ pub enum PluginLifecycleEvent {
     SessionRestored(SessionReadView),
     /// A config transaction changed the session's policy. Observers see it
     /// once its change is committed, never for a transaction that was stale
-    /// or refused, and from one place: the run that applied it. On a durable
-    /// session that is the command run whose commit landed; it builds the
-    /// session's plugins past its commit to deliver, best effort, as a turn
-    /// delivers [`Self::TurnFinalized`] after its own. A build that fails
-    /// leaves the change applied and undelivered (the run logs a warning),
-    /// and a replay of the settled command, or a host settling it, delivers
-    /// nothing. Delivery is therefore at most once: a crash between the
-    /// commit and the observers loses it, as it loses a finalized turn's.
+    /// or refused. On a durable session the commit that applies the change
+    /// records it as owed in the session's head (FIG-5397), and a build of
+    /// the session's plugins delivers it: the command run's own, past its
+    /// commit, then the next one wherever the session runs (a turn's, a
+    /// command's, a replay of the settled command) while the change is
+    /// still owed. A build that fails leaves the change applied and owed
+    /// (the run logs a warning). The head commit after a delivery retires
+    /// it, so delivery is at least once: a node lost between a delivery and
+    /// that commit delivers it again, with the same
+    /// [`revision`](SessionConfigChangedContext::revision). A change a later
+    /// one supersedes before it is delivered is delivered as the later one.
     SessionConfigChanged(Box<SessionConfigChangedContext>),
 }
 

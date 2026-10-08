@@ -192,10 +192,13 @@ pub struct ForkSessionRequest {
 impl RetainedRevision {
     /// The config a fork of this revision records: everything the revision's
     /// head recorded, at the new session's first config revision. Nothing
-    /// of the deployment that forks stands in for any of it (FIG-4594).
+    /// of the deployment that forks stands in for any of it (FIG-4594). A
+    /// change the source's observers are owed stays the source's: the fork
+    /// owes its own observers nothing (FIG-5397).
     pub fn fork_config(&self) -> crate::PersistedSessionConfig {
         crate::PersistedSessionConfig {
             config_revision: 0,
+            undelivered_change: None,
             ..self.config.clone()
         }
     }

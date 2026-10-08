@@ -536,23 +536,28 @@ impl LashRuntime {
         self.state.effective_policy().clone()
     }
 
-    pub(super) async fn notify_session_config_changed(&self, previous: SessionPolicy) {
+    pub(super) async fn notify_session_config_changed(
+        &self,
+        change: crate::UndeliveredConfigChange,
+    ) {
         let Some(session) = self.session.as_ref() else {
             return;
         };
-        let current = self.session_policy();
-        if current == previous {
-            return;
-        }
         let Ok(services) = self.runtime_session_services() else {
             return;
         };
+        let crate::UndeliveredConfigChange {
+            revision,
+            previous,
+            current,
+        } = change;
         if let Err(error) = session
             .plugins()
             .dispatch(None)
             .emit_runtime_event(crate::PluginLifecycleEvent::SessionConfigChanged(Box::new(
                 SessionConfigChangedContext {
                     session_id: self.state.session_id.clone(),
+                    revision,
                     previous,
                     current,
                     sessions: services.read_service(),
@@ -562,6 +567,20 @@ impl LashRuntime {
         {
             tracing::warn!(?error, "session config observer failed");
         }
+    }
+
+    /// Deliver the config change the session's head still owes its
+    /// observers (FIG-5397) to the plugins this runtime has built, and take
+    /// it from resident state, so the session's next head commit retires
+    /// it. A runtime whose plugins are not built delivers nothing.
+    pub(super) async fn deliver_undelivered_config_change(&mut self) {
+        if self.session.is_none() {
+            return;
+        }
+        let Some(change) = self.state.undelivered_config_change.take() else {
+            return;
+        };
+        self.notify_session_config_changed(*change).await;
     }
 }
 

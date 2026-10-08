@@ -200,7 +200,15 @@ impl LashRuntime {
         if matches!(outcome, crate::ConfigTransactionOutcome::Applied { .. }) {
             self.install_resident_state(next)
                 .map_err(RuntimeError::from)?;
-            self.notify_session_config_changed(previous).await;
+            let current = self.session_policy();
+            if current != previous {
+                self.notify_session_config_changed(crate::UndeliveredConfigChange {
+                    revision: self.state.config_revision,
+                    previous,
+                    current,
+                })
+                .await;
+            }
         }
         Ok(outcome)
     }
@@ -214,6 +222,11 @@ impl LashRuntime {
     /// redrive of the unsettled command publishes the resolution its first
     /// execution recorded, and a replay of a settled one adopts the head its
     /// commit published without committing again.
+    ///
+    /// The commit of a change to the session's policy records it as owed to
+    /// the session's config-change observers (FIG-5397). Past the commit, and
+    /// on a replay of the settled command, the run delivers whatever change
+    /// the head still owes.
     pub(super) async fn apply_config_transaction_command(
         &mut self,
         transaction: crate::ConfigTransactionRecord,
@@ -265,13 +278,24 @@ impl LashRuntime {
             // head, which the resident session adopts.
             self.invalidate_resident_session_state();
             self.reload_invalidated_resident_session_state().await?;
+            Box::pin(self.deliver_committed_config_change(run_controller, batch_id)).await;
             return Ok(true);
         }
         let previous = self.session_policy();
         let outcome = publish_config_resolution(&resolution, &mut self.state);
-        let applied = matches!(outcome, crate::ConfigTransactionOutcome::Applied { .. });
-        if applied {
+        if matches!(outcome, crate::ConfigTransactionOutcome::Applied { .. }) {
             self.publish_resident_authority()?;
+            let current = self.session_policy();
+            // A change still owed is superseded: its observers are owed the
+            // policy this one commits, under this one's revision.
+            if current != previous {
+                self.state.undelivered_config_change =
+                    Some(Box::new(crate::UndeliveredConfigChange {
+                        revision: self.state.config_revision,
+                        previous,
+                        current,
+                    }));
+            }
         }
         let committed =
             Box::pin(
@@ -280,8 +304,12 @@ impl LashRuntime {
                 }),
             )
             .await?;
-        if applied && matches!(committed, super::host_commands::CommandCommit::Landed) {
-            Box::pin(self.deliver_committed_config_change(run_controller, previous)).await;
+        if matches!(
+            committed,
+            super::host_commands::CommandCommit::Landed
+                | super::host_commands::CommandCommit::Refused
+        ) {
+            Box::pin(self.deliver_committed_config_change(run_controller, batch_id)).await;
         }
         Ok(!matches!(
             committed,
@@ -289,19 +317,22 @@ impl LashRuntime {
         ))
     }
 
-    /// Deliver the config change this command run just committed to the
-    /// session's config-change observers (FIG-5333). The run opened from the
-    /// committed head with no plugins built, and applied without them so a
-    /// config change applies to a session whose plugins cannot build
-    /// (FIG-5245): it builds them now, best effort, past the commit. A build
-    /// that fails leaves the change applied and undelivered, and says so.
-    /// Only the run whose commit landed delivers, and a replay of a settled
-    /// run returns before it.
+    /// Deliver the config change the session's head owes its observers past
+    /// this command run's commit (FIG-5333, FIG-5397). The run opened from
+    /// the committed head with no plugins built, and applied without them so
+    /// a config change applies to a session whose plugins cannot build
+    /// (FIG-5245): it builds them now, best effort, which delivers the
+    /// change, and retires it with a head commit of its own. A build that
+    /// fails leaves the change applied and owed, and says so: the session's
+    /// next plugin build delivers it.
     async fn deliver_committed_config_change(
         &mut self,
         run_controller: &crate::ActorContext,
-        previous: SessionPolicy,
+        batch_id: &crate::BatchId,
     ) {
+        if self.state.undelivered_config_change.is_none() {
+            return;
+        }
         if let Err(error) = Box::pin(self.materialize_command_session(run_controller)).await {
             tracing::warn!(
                 session_id = %self.state.session_id,
@@ -310,7 +341,61 @@ impl LashRuntime {
             );
             return;
         }
-        self.notify_session_config_changed(previous).await;
+        if self.state.undelivered_config_change.is_none() {
+            Box::pin(self.retire_delivered_config_change(run_controller, batch_id)).await;
+        }
+    }
+
+    /// Commit the head without the config change this command run delivered
+    /// (FIG-5397), under `session.command` on the session actor's fenced
+    /// transaction. A commit that does not land leaves the change owed, and
+    /// the session's next plugin build delivers it again.
+    async fn retire_delivered_config_change(
+        &mut self,
+        owner: &crate::ActorContext,
+        batch_id: &crate::BatchId,
+    ) {
+        let operation = crate::OperationId::new(
+            crate::facade_support::RuntimeSessionStateFacadeOps::session_operation_scope(
+                &self.state,
+                batch_id,
+            ),
+            "config-change-delivered",
+        );
+        let fleet_format = self.fleet_format();
+        let committed = match crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
+            &mut self.state,
+            operation,
+            self.host.core.durability.commit_budget,
+            fleet_format,
+        ) {
+            Ok((commit, _)) => super::durable::head_commit::commit(
+                owner,
+                commit,
+                lash_durable::CommitLabel::SESSION_COMMAND,
+                self.host.core.tracing.metrics(),
+            )
+            .await
+            .map_err(super::durable::head_commit::HeadCommitError::into_runtime_error),
+            Err(error) => Err(super::runtime_error_from_store_commit(error)),
+        };
+        self.invalidate_resident_session_state();
+        if let Err(error) = committed {
+            tracing::warn!(
+                session_id = %self.state.session_id,
+                %error,
+                "a delivered config change was not retired: the session's next plugin build \
+                 delivers it again"
+            );
+            return;
+        }
+        if let Err(error) = self.reload_invalidated_resident_session_state().await {
+            tracing::warn!(
+                session_id = %self.state.session_id,
+                %error,
+                "the head that retired a delivered config change did not reload"
+            );
+        }
     }
 
     /// Resolve `transaction` over the resident config as one recorded step

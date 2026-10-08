@@ -103,18 +103,25 @@ impl crate::runtime::LashRuntime {
     ) -> Result<(), crate::RuntimeError> {
         let policy = self.host.core.control.tool_source_policy;
         self.materialize_run_session(scoped_effect_controller, policy)
-            .await
+            .await?;
+        self.deliver_undelivered_config_change().await;
+        Ok(())
     }
 
     /// Build the session a command run applies against. A command run
     /// tolerates tool loss whatever the host's policy: a host's restore
     /// answers its report instead of being refused (ADR 0119).
+    ///
+    /// Either build delivers the config change the session's head still
+    /// owes its observers (FIG-5397), and the run's head commit retires it.
     pub(in crate::runtime) async fn materialize_command_session(
         &mut self,
         scoped_effect_controller: &crate::ActorContext,
     ) -> Result<(), crate::RuntimeError> {
         self.materialize_run_session(scoped_effect_controller, crate::ToolSourcePolicy::Tolerate)
-            .await
+            .await?;
+        self.deliver_undelivered_config_change().await;
+        Ok(())
     }
 
     /// Publish the native plugin view before resolving a run's protocol config.

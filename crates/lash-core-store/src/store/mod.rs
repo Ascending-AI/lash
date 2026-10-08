@@ -466,7 +466,7 @@ impl RuntimeCommit {
         commit_budget: CommitBudget,
         fleet_format: FleetFormat,
     ) -> Result<Self, StoreError> {
-        let config = persisted_session_config_from_state(state);
+        let mut config = persisted_session_config_from_state(state);
         let execution_config = state
             .authority
             .run_view()
@@ -474,6 +474,11 @@ impl RuntimeCommit {
             .then(|| execution_session_config_from_state(state))
             .filter(|execution| *execution != config)
             .map(Box::new);
+        // The head carries the change its observers are still owed until a
+        // commit after its delivery retires it (FIG-5397).
+        config
+            .undelivered_change
+            .clone_from(&state.undelivered_config_change);
         Ok(Self {
             commit_budget,
             session_id: state.session_id.clone(),

@@ -135,6 +135,7 @@ impl SessionHeadMeta {
         fleet_format: FleetFormat,
     ) -> Self {
         config.config_revision = 0;
+        config.undelivered_change = None;
         Self {
             schema_version: fleet_format
                 .writer_version(crate::surface_format!(SESSION_HEAD_META_SCHEMA_VERSION)),

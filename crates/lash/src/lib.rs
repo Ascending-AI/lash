@@ -737,7 +737,8 @@ pub mod persistence {
         SessionRelation, SessionStateAdmission, StoreBackend, StoreComponentVersion, StoreError,
         StoreMaintenance, StorePreflight, StoreReleaseStamp, StoreReleaseState,
         StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict,
-        TurnInputAdmission, VacuumReport, facade_support::SessionNodeProjection,
+        TurnInputAdmission, UndeliveredConfigChange, VacuumReport,
+        facade_support::SessionNodeProjection,
     };
     pub use lash_core::{
         facade_support::ChronologicalEntry, facade_support::ChronologicalPayload,

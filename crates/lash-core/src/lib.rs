@@ -768,7 +768,7 @@ pub use session::{
 };
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,
-    SessionNodePayload, SessionNodeRecord,
+    SessionNodePayload, SessionNodeRecord, UndeliveredConfigChange,
 };
 
 pub use session_model::LlmProfileBinding;

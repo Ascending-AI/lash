@@ -829,6 +829,14 @@ pub struct RuntimeSessionState {
     /// the durable copy lives in the session head's `PersistedSessionConfig`.
     #[serde(skip)]
     pub config_revision: u64,
+    /// The resident mirror of the head's undelivered config change
+    /// (FIG-5397): restored with the head by [`adopt_durable_head`], set by
+    /// the commit that applies a change, and taken by the plugin build that
+    /// delivers it, so the session's next head commit retires it. Skipped on
+    /// serialize: the durable copy lives in the session head's
+    /// `PersistedSessionConfig`.
+    #[serde(skip)]
+    pub undelivered_config_change: Option<Box<crate::UndeliveredConfigChange>>,
     /// Node ids known to exist durably. This is deliberately independent of
     /// the resident graph: partial residency omits durable off-path nodes,
     /// while host-side edits can add resident nodes before they commit.
@@ -852,6 +860,7 @@ impl RuntimeSessionState {
             checkpoint_ref: None,
             head_revision: 0,
             config_revision: 0,
+            undelivered_config_change: None,
             persisted_node_ids: crate::PersistedNodeIds::default(),
         }
     }
@@ -890,6 +899,7 @@ impl RuntimeSessionState {
             checkpoint_ref: snapshot.checkpoint_ref,
             head_revision: 0,
             config_revision: 0,
+            undelivered_config_change: None,
             persisted_node_ids: crate::PersistedNodeIds::default(),
         };
         state.ensure_agent_frame_initialized();
@@ -1435,6 +1445,7 @@ pub fn adopt_durable_head(
     // The head wins for every fact it carries: a run view's sticky config
     // is superseded with the view.
     state.authority.run_view = None;
+    state.undelivered_config_change = config.undelivered_change.clone();
     adopt_session_config(state, &config);
     // The config is adopted before the checkpoint restore, so a
     // checkpointless graph's initial frame captures it.
