@@ -85,6 +85,7 @@ async fn fork_inherits_history_without_execution_queues_waits_or_journals() {
 
 lash_conformance::process_prune_session_store_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
+    lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
     let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
     let factory = backend.store().await as Arc<dyn DeploymentStore>;
     let host = durable_host(&backend);

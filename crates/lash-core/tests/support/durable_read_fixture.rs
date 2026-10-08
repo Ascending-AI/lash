@@ -474,6 +474,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .await
         .expect("persist fixture effect omissions");
 
+    lash_core::testing::process_execution_env_fixture(handles.process_envs.as_ref()).await;
     let wake_process_id = handles
         .processes
         .register_process(

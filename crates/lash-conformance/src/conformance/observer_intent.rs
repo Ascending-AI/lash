@@ -20,6 +20,7 @@ pub async fn fork_observer_transient_failure_retains_intent_until_publication(
 ) {
     const SESSION_ID: &str = "fork-observer-transient-session";
 
+    lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
     let factory = backend.session_store_factory();
     let registry = crate::testing::ProcessRegistryFaults::new(backend.process_registry());
     let session_id = SessionId::from(SESSION_ID);

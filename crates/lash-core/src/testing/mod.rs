@@ -129,6 +129,10 @@ pub(crate) async fn sqlite_memory_store_set() -> std::sync::Arc<lash_sqlite_stor
             .expect("open a SQLite memory store set"),
     );
     TEST_STORE_SETS.with(|held| held.borrow_mut().push(std::sync::Arc::clone(&stores)));
+    lash_core_execution::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
     stores
 }
 

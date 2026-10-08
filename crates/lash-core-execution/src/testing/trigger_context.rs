@@ -68,10 +68,12 @@ pub async fn record_trigger_occurrence(
         crate::triggers::sort_trigger_subscriptions(&mut subscriptions);
         let mut deliveries = Vec::with_capacity(subscriptions.len());
         for subscription in &subscriptions {
-            let registration =
-                crate::runtime::accepted_process_registration().with_start_key(Some(
-                    crate::triggers::delivery_start_key(&occurrence, subscription),
-                ));
+            let registration = crate::runtime::accepted_process_registration()
+                .with_start_key(Some(crate::triggers::delivery_start_key(
+                    &occurrence,
+                    subscription,
+                )))
+                .with_execution_env_ref(Some(subscription.env_ref.clone()));
             let prepared = registry
                 .prepare_process_registration(registration, &[])
                 .await?;

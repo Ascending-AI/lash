@@ -12,6 +12,7 @@ fn durable_process_registry_preserves_identity_lifecycle_and_execution_authority
 }
 
 async fn durable_process_registry_preserves_identity_lifecycle_and_execution_authority_inner() {
+    use lash::persistence::ProcessExecutionEnvStore as _;
     use lash::process::{
         CausalRef, ProcessAwaitOutput, ProcessChangeCursor, ProcessCompletionAuthority,
         ProcessEventAppendRequest, ProcessEventType, ProcessExecutionEnvRef,
@@ -82,15 +83,31 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
     assert_eq!(identity.kind, "report-export");
     assert_eq!(identity.label.as_deref(), Some("Nightly invoice export"));
     assert_eq!(identity.definition_id.as_ref(), Some(&definition_id));
-    let execution_env_ref = ProcessExecutionEnvSpec::new(
+    let execution_env = ProcessExecutionEnvSpec::new(
         Default::default(),
         lash::runtime::SessionPolicy::new(
             lash::TurnBudget::Unbounded,
             lash::MaxToolCalls::new(1024),
         ),
+    );
+    let execution_env_ref = execution_env
+        .stable_ref()
+        .expect("derive process execution environment identity");
+    let pin = lash::persistence::ReferrerClaim::unguarded(
+        lash::persistence::ArtifactReferrer::HostPin(lash::process::HostArtifactPin::mint()),
     )
-    .stable_ref()
-    .expect("derive process execution environment identity");
+    .expect("fixture host pin");
+    stores
+        .process_env_store()
+        .publish_process_execution_env(
+            &pin,
+            &execution_env_ref,
+            &execution_env
+                .to_store_bytes()
+                .expect("encode fixture environment"),
+        )
+        .await
+        .expect("publish fixture environment");
     let execution_env_digest = execution_env_ref
         .as_str()
         .strip_prefix("process-env:v6:blake3:")
@@ -507,11 +524,14 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
     );
 
     let external_id = registry
-        .register_process(lash::testing::held_engine_registration(
-            json!({ "backend": "batch-service" }),
-            ProcessProvenance::new(ProcessOriginator::host_scoped("batch-service")),
-            lash::process::Lifetime::Detached,
-        ))
+        .register_process(
+            lash::testing::held_engine_registration(
+                json!({ "backend": "batch-service" }),
+                ProcessProvenance::new(ProcessOriginator::host_scoped("batch-service")),
+                lash::process::Lifetime::Detached,
+            )
+            .with_execution_env_ref(Some(execution_env_ref.clone())),
+        )
         .await
         .expect("register held work")
         .id;

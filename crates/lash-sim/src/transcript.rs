@@ -503,6 +503,8 @@ mod tests {
         let backend = lash_sqlite_store::SqliteStoreSet::memory()
             .await
             .expect("SQLite memory store set");
+        lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref())
+            .await;
         let registry = backend.process_registry();
         let process_id = registry
             .register_process(

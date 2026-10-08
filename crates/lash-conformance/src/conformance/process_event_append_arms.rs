@@ -264,9 +264,7 @@ async fn durable_effect_outcome_event_crash_windows(
                 ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
-            .with_execution_env_ref(Some(crate::ProcessExecutionEnvRef::new(
-                "conformance-effect-env",
-            )))
+            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref()))
             .with_admitted_identity(crate::AdmittedProcessIdentity::for_testing(
                 ProcessIdentity::for_definition(
                     crate::ProcessDefinitionRef::unclaimed(

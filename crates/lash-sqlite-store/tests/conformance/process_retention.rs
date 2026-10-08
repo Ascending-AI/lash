@@ -14,9 +14,7 @@ async fn assert_waiting_process_is_live_not_prunable(registry: &dyn ProcessRegis
                 lash_core_execution::ProcessProvenance::host(),
                 lash_core_execution::Lifetime::Detached,
             )
-            .with_execution_env_ref(Some(
-                lash_core_execution::ProcessExecutionEnvRef::new("process-env:retention-test"),
-            )),
+            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref())),
         )
         .await
         .expect("register waiting retention process")
@@ -103,6 +101,7 @@ async fn assert_waiting_process_is_live_not_prunable(registry: &dyn ProcessRegis
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_waiting_processes_are_live_not_prunable() {
     let backend = TestBackend::open(SUBSTRATE).await;
+    lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
     let registry = backend.process_registry();
     assert_waiting_process_is_live_not_prunable(registry.as_ref()).await;
 }
@@ -110,6 +109,7 @@ async fn sqlite_waiting_processes_are_live_not_prunable() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_prune_cleanup_obligation_survives_reopen() {
     let backend = TestBackend::open(SUBSTRATE).await;
+    lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
     let registry = backend.process_registry();
     let registered = registry
         .register_process(
@@ -121,9 +121,7 @@ async fn sqlite_prune_cleanup_obligation_survives_reopen() {
                 lash_core_execution::ProcessProvenance::host(),
                 lash_core_execution::Lifetime::Detached,
             )
-            .with_execution_env_ref(Some(
-                lash_core_execution::ProcessExecutionEnvRef::new("process-env:sqlite-cleanup"),
-            )),
+            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref())),
         )
         .await
         .expect("register cleanup process");

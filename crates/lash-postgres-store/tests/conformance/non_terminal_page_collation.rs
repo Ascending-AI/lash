@@ -43,10 +43,12 @@ async fn non_terminal_page_order_is_byte_ordered_on_both_backends() {
         return;
     };
     reset(storage.pool()).await;
-    let sqlite = lash_sqlite_store::SqliteStoreSet::memory()
+    lash_core::testing::process_execution_env_fixture(&storage.process_env_store()).await;
+    let stores = lash_sqlite_store::SqliteStoreSet::memory()
         .await
-        .expect("SQLite registry")
-        .process_registry();
+        .expect("SQLite registry");
+    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    let sqlite = stores.process_registry();
     for (name, registry) in [
         ("sqlite", sqlite.as_ref() as &dyn ProcessRegistry),
         (

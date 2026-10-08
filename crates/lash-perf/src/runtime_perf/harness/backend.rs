@@ -50,7 +50,9 @@ pub(crate) fn durable_backend(stores: Arc<dyn lash_core::StoreSet>) -> anyhow::R
 /// A fresh SQLite memory store set: storage only, for the store-level
 /// scenarios that execute no engine.
 pub(crate) async fn sqlite_memory_stores() -> anyhow::Result<lash_sqlite_store::SqliteStoreSet> {
-    lash_sqlite_store::SqliteStoreSet::memory()
+    let stores = lash_sqlite_store::SqliteStoreSet::memory()
         .await
-        .map_err(|err| anyhow::anyhow!(err.to_string()))
+        .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    Ok(stores)
 }

@@ -1877,6 +1877,7 @@ async fn open_postgres_differential()
         .execute(&mut database_lock)
         .await?;
     let postgres = lash_postgres_store::testing::connect(&database_url).await?;
+    lash_core::testing::process_execution_env_fixture(&postgres.process_env_store()).await;
     Ok((database_lock, postgres, database_url))
 }
 

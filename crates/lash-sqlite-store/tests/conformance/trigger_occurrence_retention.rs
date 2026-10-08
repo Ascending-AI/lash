@@ -50,6 +50,8 @@ lash_conformance::process_trigger_retention_tests!({
         let retained = retained.clone();
         async move {
             let backend = TestBackend::open(SUBSTRATE).await;
+            lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref())
+                .await;
             retained.keep(&backend);
             lash_conformance::ProcessTriggerRetentionHandles {
                 stores: Arc::new((*backend).clone()) as Arc<dyn lash_core_execution::StoreSet>,

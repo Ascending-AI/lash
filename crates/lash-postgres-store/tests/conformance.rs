@@ -677,6 +677,10 @@ lash_conformance::process_registry_reopenable_tests!({
         let storage = Arc::clone(&storage);
         sync_await(async move {
             reset(storage.pool()).await;
+            lash_conformance::publish_process_registry_fixture_environments(
+                &storage.process_env_store(),
+            )
+            .await;
             let open = Arc::new(storage.process_registry())
                 as Arc<dyn lash_core_execution::ConformanceProcessRegistry>;
             let reopen = Arc::new(storage.process_registry())
@@ -692,6 +696,7 @@ lash_conformance::process_change_horizon_tests!({
         return;
     };
     reset(storage.pool()).await;
+    lash_core::testing::process_execution_env_fixture(&storage.process_env_store()).await;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
     (database_fixture, registry)
 });
@@ -703,6 +708,7 @@ lash_conformance::process_projection_repair_tests!({
     };
     reset(storage.pool()).await;
     let pool = storage.pool().clone();
+    lash_core::testing::process_execution_env_fixture(&storage.process_env_store()).await;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
     (
         database_fixture,
@@ -733,6 +739,7 @@ lash_conformance::process_trigger_retention_tests!({
         let storage = Arc::clone(&storage);
         async move {
             reset(storage.pool()).await;
+            lash_core::testing::process_execution_env_fixture(&storage.process_env_store()).await;
             lash_conformance::ProcessTriggerRetentionHandles {
                 stores: Arc::new(lash_postgres_store::PostgresStoreSet::new(
                     &storage,
@@ -795,6 +802,7 @@ lash_conformance::trigger_occurrence_tombstone_retention_tests!({
                     triggers: Arc::new(storage.trigger_store().with_clock(clock)),
                     registry: Arc::new(storage.process_registry()),
                     durable: Arc::new(storage.durable_store()),
+                    process_envs: Arc::new(storage.process_env_store()),
                 }
             }
         },
@@ -813,6 +821,7 @@ lash_conformance::store_contract_state_machine_tests!({
         let storage = Arc::clone(&storage);
         async move {
             reset(storage.pool()).await;
+            lash_core::testing::process_execution_env_fixture(&storage.process_env_store()).await;
             lash_conformance::StoreContractHandles {
                 registry: Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>,
                 runtime: Arc::new(storage.store()) as Arc<dyn RuntimeStore>,
@@ -854,6 +863,7 @@ fn trigger_stores(storage: &PostgresStorage) -> lash_conformance::TriggerStores 
         triggers: Arc::new(storage.trigger_store()),
         registry: Arc::new(storage.process_registry()),
         durable: Arc::new(storage.durable_store()),
+        process_envs: Arc::new(storage.process_env_store()),
     }
 }
 
