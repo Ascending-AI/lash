@@ -337,7 +337,7 @@ impl HostBridge<'_> {
     /// Drive operation `ordinal`'s members until `decide` answers it from
     /// their committed outcomes. `None` once nothing runs and only rows are
     /// left to wait on: the cell suspends on its committed quiet point.
-    async fn drive_members<T>(
+    pub(super) async fn drive_members<T>(
         &self,
         commands: &lash_lashlang_runtime::ReplayCommands<'_, '_>,
         ordinal: u64,

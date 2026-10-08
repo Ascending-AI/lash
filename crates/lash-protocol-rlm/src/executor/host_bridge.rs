@@ -565,8 +565,12 @@ impl HostBridge<'_> {
     }
 
     /// Sleeps until the deadline the sleep was admitted with: its quiet
-    /// point pinned the timer, and a restored cell races that same timer, so
-    /// a crash never restarts the sleep's whole duration (ADR 0132 §6).
+    /// point pinned the timer, and a restored cell waits on that same timer,
+    /// so a crash never restarts the sleep's whole duration. Nothing runs
+    /// while it sleeps, so once the cell stayed hot for `idle_evict` the
+    /// sleep is handed over: the cell suspends on its quiet point, its
+    /// session releases as `waiting` until the deadline, and the activation
+    /// that claims it then performs the sleep again (ADR 0132 §6).
     async fn sleep(&self, sleep: Sleep) -> Result<AbilityOutcome, ExecutionHostError> {
         let commands = self.commands()?;
         let performing = self.performing()?;
@@ -592,6 +596,31 @@ impl HostBridge<'_> {
                 },
             );
         }
+        let deadline = lash_core::waits::deadline(self.ctx.actor_context(), timer)
+            .await
+            .map_err(|error| {
+                commands.abort(lash_core::RuntimeEffectControllerError::new(
+                    lash_core::RuntimeErrorCode::EngineAwaitEventAwait,
+                    error.to_string(),
+                ))
+            })?;
+        let due = self
+            .drive_members(
+                &commands,
+                performing.ordinal,
+                &mut |_, now| match deadline {
+                    Some(deadline) if deadline > now => lash_vm_broker::Decide::Wait {
+                        until: Some(deadline),
+                    },
+                    _ => lash_vm_broker::Decide::Answer(()),
+                },
+            )
+            .await?;
+        if due.is_none() {
+            commands.hand_over(&in_flight)?;
+            return Ok(AbilityOutcome::HandedOver);
+        }
+        // The timer is due: settle its row, or read how it ended.
         let slept = lash_core::waits::sleep_until_timer(&in_flight.ctx, *timer).await;
         commands.finish(&in_flight)?;
         slept.map_err(|error| {

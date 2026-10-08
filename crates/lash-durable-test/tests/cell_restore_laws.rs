@@ -13,10 +13,11 @@
 //!   deduplicates on it (ADR 0132 §7) never suppresses B as A's repeat. A
 //!   cut after A settled and before B's quiet point restores the cell onto
 //!   A's outcome, and B is the next admitted operation, not A again.
-//! - **Sleep:** the cell sleeps for `N`, node A is killed at `N / 2`, and
-//!   B restores the cell onto its sleep. The sleep keeps the deadline it
-//!   was admitted with: the cell wakes at the original deadline, not at
-//!   recovery + `N`.
+//! - **Sleep:** the cell sleeps for `N`. Its idle session releases as
+//!   `waiting` once its idle eviction passes, and its timer row persists.
+//!   Node A is killed at `N / 2` and B started: nobody claims the session
+//!   before the deadline, and B wakes the cell once at the deadline it was
+//!   admitted with, not at recovery + `N`.
 //! - **Repeatable:** the cell calls `ext_retry`, declared `Repeatable`.
 //!   The call is its own admitted execution under its declared policy, so
 //!   a cut at its admission, or at its lost outcome commit, re-runs it at
@@ -902,8 +903,12 @@ async fn simulated(turn: &CellTurn) -> (Arc<SimClock>, Arc<dyn DurableStore>, Si
     (clock, database, nodes)
 }
 
-/// Sleep: the cell sleeps for `SLEEP_MS`, node A is killed at its half, and
-/// node B, recovering it, wakes it at the deadline it was admitted with.
+/// Sleep: the cell sleeps for `SLEEP_MS`. Its session stays hot for the
+/// idle eviction, then releases as `waiting` with the sleep's deadline as
+/// its next due, holding nothing while its timer row persists (ADR 0132
+/// §6). Node A is killed during the sleep and node B started; nothing
+/// claims the session before the deadline, and B wakes the cell at the
+/// deadline it was admitted with, once.
 async fn sleep_across_a_crash(dialect: Dialect, postgres_url: Option<String>) {
     let turn = CellTurn::new(Cell::Sleep, dialect, postgres_url);
     let (clock, database, nodes) = simulated(&turn).await;
@@ -927,15 +932,47 @@ async fn sleep_across_a_crash(dialect: Dialect, postgres_url: Option<String>) {
             nodes.script().rendered_trace()
         );
     };
-    let deadline = timer.purpose.deadline().expect("a timer has a deadline").0;
-    let deadline = u64::try_from(deadline).unwrap() - SimClock::timestamp_ms_at(0);
+    let due = timer.purpose.deadline().expect("a timer has a deadline");
+    let deadline = u64::try_from(due.0).unwrap() - SimClock::timestamp_ms_at(0);
     let slept_at = clock.logical_ms();
     assert!(
         deadline >= slept_at + SLEEP_MS - 1_000 && deadline <= slept_at + SLEEP_MS,
         "the timer is due at {deadline}, not {SLEEP_MS} ms after the cell slept at {slept_at}"
     );
-    // Kill A halfway through the sleep, and let B take the cell over.
+    // The idle session releases as `waiting` until the sleep's deadline,
+    // owned by nobody, while its timer stays pending.
     let half = slept_at + SLEEP_MS / 2;
+    let evicted = loop {
+        let session = database.actor(&actor()).await.expect("read the session");
+        if let Some(session) = &session
+            && session.state == ActorState::Waiting
+        {
+            break session.clone();
+        }
+        assert!(
+            nodes.step().await.is_some() && clock.logical_ms() < half,
+            "the sleeping cell's session never released as `waiting` by {half} ms: {session:?}\n{}",
+            nodes.script().rendered_trace()
+        );
+    };
+    let mut violations = Vec::new();
+    if evicted.owner.is_some() || evicted.next_due != Some(due) {
+        violations.push(format!(
+            "the evicted session holds {:?} and is next due at {:?}, not nobody at {due:?}",
+            evicted.owner, evicted.next_due
+        ));
+    }
+    let pending = database
+        .pending_waits(&actor())
+        .await
+        .expect("the session's waits read");
+    if !pending.iter().any(|wait| wait.id == timer.id) {
+        violations.push(format!(
+            "the evicted session's timer does not persist: {pending:?}"
+        ));
+    }
+    let released_at = clock.logical_ms();
+    // Kill A during the sleep, and let B take the cell over.
     while clock.logical_ms() < half {
         assert!(nodes.step().await.is_some(), "A stalled while sleeping");
     }
@@ -957,13 +994,29 @@ async fn sleep_across_a_crash(dialect: Dialect, postgres_url: Option<String>) {
         );
     }
     nodes.quiesce().await;
-    let mut violations = turn_ended(&nodes).await;
+    violations.extend(turn_ended(&nodes).await);
+    let trace = nodes.script().trace();
+    // Nobody claims the released session before its deadline.
+    let early: Vec<_> = trace
+        .iter()
+        .filter(|write| {
+            write.point.label == CommitLabel::CLAIM
+                && matches!(write.stored, Stored::Committed { effective: true })
+                && write.at_ms > released_at
+                && write.at_ms < deadline
+        })
+        .map(|write| (write.node.to_string(), write.at_ms))
+        .collect();
+    if !early.is_empty() {
+        violations.push(format!(
+            "the session released at {released_at} was claimed before its deadline \
+             {deadline}: {early:?}"
+        ));
+    }
     // The cell woke when B committed its end: at its admitted deadline,
-    // within a claim poll of the timer's resolution. A sleep run again from
-    // its recovery would end `SLEEP_MS` after B took the cell over.
-    let woke = nodes
-        .script()
-        .trace()
+    // within a claim poll of it. A sleep run again from its recovery would
+    // end `SLEEP_MS` after B took the cell over.
+    let woke = trace
         .iter()
         .find(|write| {
             &*write.node == "b"
@@ -971,24 +1024,20 @@ async fn sleep_across_a_crash(dialect: Dialect, postgres_url: Option<String>) {
                 && write.committed()
         })
         .map(|write| write.at_ms);
-    let recovered = nodes
-        .script()
-        .trace()
-        .iter()
-        .find(|write| {
-            &*write.node == "b"
-                && write.point.label == CommitLabel::CLAIM
-                && matches!(write.stored, Stored::Committed { effective: true })
-        })
-        .map(|write| write.at_ms);
     let poll = Matrix::test_lease().settings().claim_poll.as_millis() as u64;
-    match (woke, recovered) {
-        (Some(woke), Some(recovered))
-            if recovered < deadline && woke >= deadline && woke <= deadline + poll + 5_000 => {}
-        _ => violations.push(format!(
-            "the cell slept at {slept_at}, due at {deadline}, was killed at {half}, \
-             recovered at {recovered:?} and woke at {woke:?}"
-        )),
+    if !woke.is_some_and(|woke| woke >= deadline && woke <= deadline + poll + 5_000) {
+        violations.push(format!(
+            "the cell slept at {slept_at}, due at {deadline}, was released at {released_at}, \
+             A was killed at {half}, and the cell woke at {woke:?}"
+        ));
+    }
+    // The cell resumed once: the model was asked for the cell, then once
+    // more with its answer.
+    let requests = turn.requests.lock_recover().len();
+    if requests != 2 {
+        violations.push(format!(
+            "the model was asked {requests} times, not once for the cell and once after it woke"
+        ));
     }
     assert!(
         violations.is_empty(),
@@ -1309,22 +1358,23 @@ async fn a_restored_cell_never_reuses_a_tool_call_id_on_postgres() {
     identity(Dialect::Postgres, Some(url)).await;
 }
 
-/// A cell's sleep keeps its admitted deadline across a crash, on SQLite in
-/// memory.
+/// A sleeping cell's session suspends on idle eviction, and the cell wakes
+/// once at its admitted deadline across a crash, on SQLite in memory.
 #[tokio::test]
-async fn a_cells_sleep_keeps_its_deadline_across_a_crash_on_sqlite_memory() {
+async fn a_sleeping_cell_suspends_on_idle_eviction_and_wakes_once_at_its_deadline_on_sqlite_memory()
+{
     sleep_across_a_crash(Dialect::SqliteMemory, None).await;
 }
 
 /// The same law on a SQLite file.
 #[tokio::test]
-async fn a_cells_sleep_keeps_its_deadline_across_a_crash_on_sqlite_file() {
+async fn a_sleeping_cell_suspends_on_idle_eviction_and_wakes_once_at_its_deadline_on_sqlite_file() {
     sleep_across_a_crash(Dialect::SqliteFile, None).await;
 }
 
 /// The same law on PostgreSQL.
 #[tokio::test]
-async fn a_cells_sleep_keeps_its_deadline_across_a_crash_on_postgres() {
+async fn a_sleeping_cell_suspends_on_idle_eviction_and_wakes_once_at_its_deadline_on_postgres() {
     let Some(url) = dialect::postgres_url() else {
         eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
         return;
