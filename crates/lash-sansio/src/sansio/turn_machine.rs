@@ -2,10 +2,7 @@ use super::*;
 
 impl<M: TurnProtocol> TurnMachine<M> {
     /// Restore only the Prompt View retained by the environment prelude.
-    pub fn adopt_prepared_messages(&mut self, messages: crate::MessageSequence, first_sync: bool) {
-        if first_sync {
-            self.next_synthetic_message_id = self.messages.len() as u64;
-        }
+    pub fn adopt_prepared_messages(&mut self, messages: crate::MessageSequence) {
         self.prompt_messages = messages;
     }
 
@@ -55,13 +52,11 @@ impl<M: TurnProtocol> TurnMachine<M> {
         protocol_run_offset: usize,
         turn_causes: Vec<TurnCause>,
     ) -> Self {
-        let next_synthetic_message_id = messages.len() as u64;
         Self {
             config,
             state: MachineState::PreparingProtocol,
             side_effect_outbox: VecDeque::new(),
             next_effect_id: 1,
-            next_synthetic_message_id,
             window: None,
             prompt_messages: messages.clone(),
             messages,
@@ -295,7 +290,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 })
                 .collect(),
             next_effect_id: self.next_effect_id,
-            next_synthetic_message_id: self.next_synthetic_message_id,
             window: window.map(CheckpointWindow::of),
             messages: CheckpointMessages::record(&self.messages, &mut content, window),
             prompt_messages: CheckpointMessages::record(
@@ -373,7 +367,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
             state: checkpoint.state.restore(&content, window.as_ref())?,
             side_effect_outbox,
             next_effect_id: checkpoint.next_effect_id,
-            next_synthetic_message_id: checkpoint.next_synthetic_message_id,
             window,
             messages,
             prompt_messages,

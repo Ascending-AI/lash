@@ -1,8 +1,7 @@
 use super::*;
-use lash::plugins::{
-    OfferedTools, ProjectedHistoryStats, PromptCall, PromptCut, PromptCutParts, SectionText,
-};
+use lash::plugins::{OfferedTools, ProjectedHistoryStats, PromptCall, SectionText};
 use lash::prompt::{PlacementSource, PromptPlacement, PromptPlan, PromptPurpose};
+use lash::testing::prompt::{PromptCut, PromptCutParts, compose_sections};
 
 fn workbench_plugin(factory: &WorkbenchPluginFactory) -> Arc<dyn SessionPlugin> {
     Arc::new(WorkbenchSessionPlugin {
@@ -14,7 +13,7 @@ fn workbench_plugin(factory: &WorkbenchPluginFactory) -> Arc<dyn SessionPlugin> 
 }
 
 fn cut(prompt: &WorkbenchPrompt, history_messages: u32) -> PromptCut {
-    PromptCut::new(PromptCutParts {
+    lash::testing::prompt::cut(PromptCutParts {
         call: PromptCall {
             session_id: lash::SessionId::from("workbench-prompt"),
             frame: None,
@@ -57,7 +56,7 @@ fn workbench_prompt_sections_render_its_recorded_host_text_and_the_context_budge
     let catalog =
         lash::plugins::PromptCatalog::of_plugins(&[workbench_plugin(&factory)]).expect("catalog");
     let resolved = catalog
-        .resolve(
+        .preview(
             &PromptPlan::default(),
             &PromptPurpose::Turn,
             &OfferedTools::default(),
@@ -65,7 +64,6 @@ fn workbench_prompt_sections_render_its_recorded_host_text_and_the_context_budge
         .expect("the empty plan resolves");
     assert_eq!(
         resolved
-            .record()
             .sections
             .iter()
             .map(|section| (
@@ -98,15 +96,16 @@ fn workbench_prompt_sections_render_its_recorded_host_text_and_the_context_budge
         &factory.mail_world,
     );
     let rendered = |prompt: &WorkbenchPrompt| {
-        let cut = cut(prompt, 3);
-        (0..3)
-            .map(|index| {
-                resolved
-                    .compose_section(index, &cut)
-                    .expect("the section renders")
-                    .value
-            })
-            .collect::<Vec<_>>()
+        compose_sections(
+            &catalog,
+            &PromptPlan::default(),
+            &PromptPurpose::Turn,
+            &cut(prompt, 3),
+        )
+        .expect("the sections render")
+        .into_iter()
+        .map(|section| section.value)
+        .collect::<Vec<_>>()
     };
     assert_eq!(
         rendered(&recorded),
@@ -125,4 +124,143 @@ fn workbench_prompt_sections_render_its_recorded_host_text_and_the_context_budge
         ..recorded
     };
     assert_eq!(rendered(&without_context)[1], SectionText::Omit);
+}
+
+/// The workbench's sections shape the prompt the provider receives (ADR
+/// 0133): a Standard session's first call records each workbench section in
+/// its snapshot: its standing instructions omitted (they are RLM's), the
+/// connected accounts in the request's instructions and the context budget
+/// late, after the conversation and outside the instructions. What the
+/// snapshot records is what the provider was sent.
+#[tokio::test]
+async fn workbench_prompt_sections_shape_the_prompt_the_provider_receives() {
+    const MODEL: &str = "workbench-prompt-model";
+    let stores = lash::sqlite::SqliteStoreSet::memory()
+        .await
+        .expect("an in-memory store set opens");
+    let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
+        .build()
+        .expect("the durable backend builds");
+    let received = Arc::new(std::sync::Mutex::new(Vec::<(String, String)>::new()));
+    let provider = {
+        let received = Arc::clone(&received);
+        lash::testing::TestProvider::builder()
+            .kind("workbench-prompt")
+            .complete(move |request| {
+                let received = Arc::clone(&received);
+                async move {
+                    received.lock().expect("the request log").push((
+                        request
+                            .instructions
+                            .as_deref()
+                            .unwrap_or_default()
+                            .to_owned(),
+                        serde_json::to_string(&request.messages).expect("the messages encode"),
+                    ));
+                    Ok(lash::provider::LlmResponse {
+                        parts: vec![lash::direct::LlmOutputPart::Text {
+                            text: "done".to_owned(),
+                            response_meta: None,
+                        }],
+                        ..Default::default()
+                    })
+                }
+            })
+            .build()
+            .into_handle()
+    };
+    let factory = WorkbenchPluginFactory::new();
+    let mail_world = factory.mail_world.clone();
+    let core = lash::LashCore::standard_builder(backend)
+        .serve_test_llm_profile(
+            provider,
+            lash::LlmProfileMetadata::builder(MODEL)
+                .context_window_tokens(200_000)
+                .build()
+                .expect("the model's metadata"),
+        )
+        .plugin(Arc::new(factory))
+        .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "workbench-prompt",
+            "workbench-prompt-boot",
+        ))
+        .expect("the core builds");
+    let spec = lash::SessionSpec::new(
+        MODEL,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(8),
+    )
+    .plugin(
+        "agent_workbench",
+        workbench_session_prompt(
+            crate::session_protocol::SessionProtocol::Standard,
+            &mail_world,
+        ),
+    )
+    .expect("the workbench prompt records");
+    core.session(lash::SessionId::from("workbench-prompt"))
+        .create(lash::SessionCreation::root(spec))
+        .await
+        .expect("the session is created");
+    let session = core
+        .session(lash::SessionId::from("workbench-prompt"))
+        .open()
+        .await
+        .expect("the session opens");
+    let run = lash::TurnId::parse("workbench-prompt-turn").expect("run id");
+    let turn = session
+        .send(lash::TurnInput::text("hello"))
+        .id(run.clone())
+        .output()
+        .await
+        .expect("the turn answers");
+    assert!(turn.is_success(), "{turn:?}");
+
+    let loaded = session
+        .admin()
+        .prompt()
+        .snapshot(&run, 1)
+        .await
+        .expect("the recorded snapshot reads through the facade")
+        .expect("the call retains a snapshot");
+    let recorded = |key: &str| {
+        let section = loaded
+            .snapshot
+            .sections
+            .iter()
+            .find(|section| section.section.to_string() == format!("agent_workbench/{key}"))
+            .unwrap_or_else(|| panic!("the call recorded agent_workbench/{key}"));
+        (
+            section.placement,
+            loaded.text(&section.value).map(str::to_owned),
+        )
+    };
+    let received = received.lock().expect("the request log").clone();
+    let [(instructions, messages)] = received.as_slice() else {
+        panic!("one model call: {received:?}");
+    };
+    assert_eq!(
+        recorded(WORKBENCH_INSTRUCTIONS_SECTION),
+        (PromptPlacement::InitialInstructions, None),
+        "a Standard session's workbench instructions are an omission"
+    );
+    let (placement, accounts) = recorded(WORKBENCH_ACCOUNTS_SECTION);
+    assert_eq!(placement, PromptPlacement::InitialInstructions);
+    let accounts = accounts.expect("the accounts section recorded text");
+    assert!(
+        instructions.contains(&accounts),
+        "the provider's instructions carry the recorded accounts text"
+    );
+    let (placement, budget) = recorded(WORKBENCH_CONTEXT_BUDGET_SECTION);
+    let budget = budget.expect("the context budget recorded text");
+    assert_eq!(placement, PromptPlacement::CurrentContext);
+    assert!(budget.starts_with("Context budget:"), "{budget}");
+    let encoded = serde_json::to_string(&budget).expect("the text encodes");
+    assert!(
+        messages.contains(encoded.trim_matches('"')) && !instructions.contains(&budget),
+        "the provider receives the recorded context budget late, outside its instructions"
+    );
+    core.shutdown().await.expect("the core shuts down");
 }

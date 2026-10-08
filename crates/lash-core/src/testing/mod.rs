@@ -55,6 +55,9 @@ pub use lash_core_execution::testing::{
     test_trigger_router, tool_hook_context, tool_registry_with_live_provider, trace_capture,
 };
 
+/// Prompt composition over a cut a test states (ADR 0133).
+pub use lash_core_execution::testing::prompt;
+
 // Each submodule documents itself in its own file. Adding an outer doc comment
 // here as well would merge two fragments written in different scopes, and a
 // reader or editor following the merged doc comment — including the

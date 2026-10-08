@@ -249,14 +249,13 @@ async fn http_catalog_refuses_cycles_and_each_limit_plus_one() {
 /// The `mcp/server.*` sections a call offered `tools` renders, as
 /// (section key, text).
 fn guidance_sections(tools: Vec<lash_core::ToolDefinition>) -> Vec<(String, String)> {
-    use lash_core::plugin::prompt::{
-        OfferedTools, PromptCall, PromptCut, PromptCutParts, PromptPurpose, PromptSectionSource,
-    };
+    use lash_core::plugin::prompt::{OfferedTools, PromptCall, PromptPurpose, PromptSectionSource};
+    use lash_core::testing::prompt::PromptCutParts;
     let offered = OfferedTools::new(
         Arc::new(lash_core::ToolCatalog::from_tool_definitions(tools)),
         false,
     );
-    let cut = PromptCut::new(PromptCutParts {
+    let cut = lash_core::testing::prompt::cut(PromptCutParts {
         call: PromptCall {
             session_id: lash_core::SessionId::from("mcp-cut"),
             frame: None,

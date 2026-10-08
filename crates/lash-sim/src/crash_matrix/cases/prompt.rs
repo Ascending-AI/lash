@@ -11,8 +11,13 @@
 //! - NO-SPECULATION: the denied T is never rendered and never committed.
 //! - Decisions at admission: the checkpoint counts `model.start` commits
 //!   with each call survive every cut after it.
-//! - Identity: every attempt of a call carries the one prompt its admission
-//!   committed.
+//! - Identity (CRASH-CUTS): every attempt of a call carries the one prompt
+//!   its admission committed, in the exact body it admitted: one body per
+//!   call at every cut.
+//! - NO-PRODUCER-RESUME: once a call is admitted, nothing produces it
+//!   again. No render or wrapping of a call follows its first send, and no
+//!   before-turn callback follows the turn's first send: a resume serves the
+//!   turn's recorded before-turn decisions and the admitted body.
 //! - Snapshot: every call's snapshot commits with its admission and reads
 //!   back, with no renderer, as the base text, the wrapping and the final
 //!   text the model received.
@@ -37,7 +42,7 @@ use lash_sansio::SessionId;
 use super::{admit_turn, turn_end, turn_settled};
 use crate::crash_matrix::deployment::Workload;
 use crate::crash_matrix::prompts::{
-    NEXT_T, RENDERED, SENT, committed_memo, memo_prompt, memo_section,
+    BEFORE_TURN, NEXT_T, RENDERED, SENT, WRAPPED, committed_memo, memo_prompt, memo_section,
 };
 use crate::crash_matrix::services::TurnScript;
 use crate::crash_matrix::world::World;
@@ -142,6 +147,14 @@ impl Workload for PromptCase {
         let notes = world.notes();
         let sent_prefix = format!("{SENT} {session} call=");
         let rendered_prefix = format!("{RENDERED} {session} call=");
+        let wrapped_prefix = format!("{WRAPPED} {session} call=");
+        let before_turn = format!("{BEFORE_TURN} {session}");
+        violations.extend(no_producer_resume(
+            &notes,
+            &sent_prefix,
+            &[&rendered_prefix, &wrapped_prefix],
+            &before_turn,
+        ));
         // T-NEXT, NO-SPECULATION, decisions at admission and identity: every
         // attempt of call k carries call k's one prompt.
         let mut sent: [Vec<LlmRequest>; CALLS as usize] = std::array::from_fn(|_| Vec::new());
@@ -173,16 +186,51 @@ impl Workload for PromptCase {
         if counts.contains(&0) {
             violations.push(format!("prompt: the model saw calls {counts:?} times"));
         }
+        // Identity: every attempt of a call sends the body its admission
+        // committed.
+        for call in 1..=CALLS {
+            let mut bodies = notes
+                .iter()
+                .filter_map(|note| note.strip_prefix(&sent_prefix))
+                .filter(|rest| {
+                    rest.split_whitespace()
+                        .next()
+                        .is_some_and(|head| head == call.to_string())
+                })
+                .filter_map(|rest| {
+                    rest.split_whitespace()
+                        .find_map(|field| field.strip_prefix("body="))
+                })
+                .collect::<Vec<_>>();
+            bodies.sort_unstable();
+            bodies.dedup();
+            if bodies.len() > 1 {
+                violations.push(format!(
+                    "prompt identity: call {call} was sent {} distinct bodies",
+                    bodies.len()
+                ));
+            }
+        }
         // Composition: once per call, and again only for a call cut before
         // its admission landed.
         for call in 1..=CALLS {
-            let composed = notes
-                .iter()
-                .filter(|note| {
-                    note.strip_prefix(&rendered_prefix)
-                        .is_some_and(|rest| rest == call.to_string())
-                })
-                .count();
+            let of_call = |prefix: &str| {
+                notes
+                    .iter()
+                    .filter(|note| {
+                        note.strip_prefix(prefix)
+                            .is_some_and(|rest| rest == call.to_string())
+                    })
+                    .count()
+            };
+            let composed = of_call(&rendered_prefix);
+            let wrapped = of_call(&wrapped_prefix);
+            if wrapped != composed {
+                violations.push(format!(
+                    "prompt composition: call {call} rendered {composed} times and was wrapped \
+                     {wrapped} times"
+                ));
+            }
             // One cut wastes at most one composition of a call, and only one
             // made before the call's admission landed: an owner fenced or
             // killed before its `model.start` committed.
@@ -284,4 +332,51 @@ impl Workload for PromptCase {
         }
         violations
     }
+}
+
+/// NO-PRODUCER-RESUME over the notes in the order they happened: after a
+/// call's first send no producer of that call runs (a note under any of
+/// `producers` naming it), and after the turn's first send no before-turn
+/// callback runs (`before_turn`). The turn's before-turn callback ran at
+/// least once.
+fn no_producer_resume(
+    notes: &[String],
+    sent_prefix: &str,
+    producers: &[&str],
+    before_turn: &str,
+) -> Vec<String> {
+    let mut violations = Vec::new();
+    let mut sent = std::collections::BTreeSet::new();
+    let mut before_turns = 0;
+    for note in notes {
+        if let Some(rest) = note.strip_prefix(sent_prefix) {
+            if let Some(call) = rest.split_whitespace().next() {
+                sent.insert(call.to_owned());
+            }
+            continue;
+        }
+        if note == before_turn {
+            before_turns += 1;
+            if !sent.is_empty() {
+                violations.push(
+                    "no producer resume: a before-turn callback ran after the turn's first send"
+                        .to_owned(),
+                );
+            }
+            continue;
+        }
+        for prefix in producers {
+            if let Some(call) = note.strip_prefix(prefix)
+                && sent.contains(call)
+            {
+                violations.push(format!(
+                    "no producer resume: {note} ran after call {call} was sent"
+                ));
+            }
+        }
+    }
+    if before_turns == 0 {
+        violations.push("no producer resume: the before-turn callback never ran".to_owned());
+    }
+    violations
 }

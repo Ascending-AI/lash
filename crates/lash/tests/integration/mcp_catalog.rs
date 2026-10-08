@@ -17,9 +17,10 @@ async fn turn_prompt(
     session: &lash_core::plugin::PluginSession,
     catalog: &lash_core::ToolCatalog,
 ) -> String {
-    use lash::plugins::{OfferedTools, PromptCall, PromptCut, PromptCutParts, PromptRenderPool};
+    use lash::plugins::{OfferedTools, PromptCall};
     use lash::prompt::{PromptPlan, PromptPurpose};
-    let cut = PromptCut::new(PromptCutParts {
+    use lash_core::testing::prompt::{PromptCutParts, compose};
+    let cut = lash_core::testing::prompt::cut(PromptCutParts {
         call: PromptCall {
             session_id: lash::SessionId::from("advertised-surface"),
             frame: None,
@@ -36,18 +37,16 @@ async fn turn_prompt(
         history: Default::default(),
         namespaces: Default::default(),
     });
-    session
-        .prompt_catalog()
-        .compose(
-            &PromptPlan::default(),
-            &PromptPurpose::Turn,
-            Arc::new(cut),
-            PromptRenderPool::shared(),
-        )
-        .await
-        .expect("the prompt composes")
-        .initial_instructions
-        .unwrap_or_default()
+    compose(
+        &session.prompt_catalog(),
+        &PromptPlan::default(),
+        &PromptPurpose::Turn,
+        cut,
+    )
+    .await
+    .expect("the prompt composes")
+    .initial_instructions
+    .unwrap_or_default()
 }
 
 /// L3 (FIG-4859): a reopened session's recorded tool surface is not rewritten

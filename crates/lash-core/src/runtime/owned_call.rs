@@ -22,13 +22,14 @@ use lash_durable::domain::{ModelCallId, PromptCallKey};
 
 use crate::plugin::prompt::{
     AdmittedCallLoadError, OfferedTools, ProjectedHistoryStats, PromptCall, PromptCompositionError,
-    PromptCut, PromptCutParts, PromptModel, PromptRenderPool, admission_record, load_admitted_call,
+    PromptCutParts, PromptModel, PromptRenderPool, admission_record, load_admitted_call,
 };
 use crate::prompt_sections::{PromptPlan, PromptPurpose};
 use crate::{
     ActorContext, ExecutionBudgets, ExecutionLimit, FailureCode, LlmCallError, LlmRequest,
     PluginError, TurnFailureCode,
 };
+use lash_core_execution::core_internal::{compose_prompt, prompt_cut};
 use lash_core_execution::{AdmittedDirectSend, ProviderRequestBody};
 
 /// What an owned call composes its prompt from: the owner's recorded plan,
@@ -232,34 +233,42 @@ async fn compose(
         return Ok(Ok(None));
     }
     let profile = &request.model;
-    let cut = PromptCut::new(PromptCutParts {
-        call: PromptCall {
-            session_id: key.session.clone(),
-            frame,
-            run: request.scope.turn.as_ref().map(|turn| turn.run.clone()),
-            turn: request.scope.turn.as_ref().map(|turn| turn.turn_id.clone()),
-            iteration: 0,
-            call: 0,
-            purpose: purpose.clone(),
+    let cut = prompt_cut(
+        PromptCutParts {
+            call: PromptCall {
+                session_id: key.session.clone(),
+                frame,
+                run: request.scope.turn.as_ref().map(|turn| turn.run.clone()),
+                turn: request.scope.turn.as_ref().map(|turn| turn.turn_id.clone()),
+                iteration: 0,
+                call: 0,
+                purpose: purpose.clone(),
+            },
+            config,
+            session,
+            offered: OfferedTools::default(),
+            model: PromptModel {
+                profile: Some(profile.key().clone()),
+                context_window_tokens: Some(profile.context_window_tokens() as u64),
+                committed_usage: None,
+            },
+            history: ProjectedHistoryStats {
+                messages: u32::try_from(request.messages.len()).unwrap_or(u32::MAX),
+                estimated_tokens: u64::from(request.estimated_tokens()),
+            },
+            namespaces: plugins.committed_namespaces(),
         },
-        config,
-        session,
-        offered: OfferedTools::default(),
-        model: PromptModel {
-            profile: Some(profile.key().clone()),
-            context_window_tokens: Some(profile.context_window_tokens() as u64),
-            committed_usage: None,
-        },
-        history: ProjectedHistoryStats {
-            messages: u32::try_from(request.messages.len()).unwrap_or(u32::MAX),
-            estimated_tokens: u64::from(request.estimated_tokens()),
-        },
-        namespaces: plugins.committed_namespaces(),
-    })
-    .with_subagent(subagent);
-    match catalog
-        .compose(&plan, purpose, Arc::new(cut), PromptRenderPool::shared())
-        .await
+        subagent,
+        None,
+    );
+    match compose_prompt(
+        &catalog,
+        &plan,
+        purpose,
+        Arc::new(cut),
+        PromptRenderPool::shared(),
+    )
+    .await
     {
         Ok(composed) => Ok(Ok(Some(composed))),
         // A full shared queue is this process's load, not the call's

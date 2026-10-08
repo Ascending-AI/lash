@@ -853,14 +853,13 @@ pub mod plugins {
         PromptSection, PromptSectionFamilySpec, PromptSectionSource, PromptSectionSpec,
         PromptSectionWrap, PromptWrapSpec, PromptWrapTarget, SectionText,
     };
-    /// A session's registered sections and the one-call composition the
-    /// runtime resolves from them: the cut it builds from committed state,
-    /// the resolved plan, each section's composed chain, the bounded pool
-    /// renders run on and the composed prompt with its snapshot.
+    /// A session's registered sections, families and wrappers, read back
+    /// and previewed against a plan, and the facts a protocol states for its
+    /// own sections. Only the runtime builds a call's cut and composes it, at
+    /// the call's admission; a test composes through
+    /// `lash::testing::prompt`.
     pub use lash_core::plugin::prompt::{
-        ComposedPrompt, ComposedSection, PromptCatalog, PromptCut, PromptCutParts,
-        PromptRenderPool, PromptSectionFamilyInfo, PromptSectionInfo, ProtocolPromptFacts,
-        ResolvedPromptComposition,
+        PromptCatalog, PromptSectionFamilyInfo, PromptSectionInfo, ProtocolPromptFacts,
     };
     /// The tool hook phases (ADR 0128): argument transforms, before-checks
     /// over the prepared call, result transforms, and after-checks over the

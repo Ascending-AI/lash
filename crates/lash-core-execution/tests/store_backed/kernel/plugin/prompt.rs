@@ -11,12 +11,12 @@ use lash_durable::domain::{ModelCallId, PromptCallKey};
 use lash_durable::{ActorKey, CommitLabel, FormatSet, MailTx, NodeId, NodeSpec};
 
 use crate::plugin::prompt::{
-    CommittedPluginNamespace, ComposedPrompt, OfferedTools, ProjectedHistoryStats, PromptCall,
-    PromptCatalog, PromptCut, PromptCutParts, PromptInput, PromptModel, PromptPlacement,
-    PromptPlan, PromptPurpose, PromptRenderError, PromptRenderPool, PromptSectionId,
+    OfferedTools, ProjectedHistoryStats, PromptCall, PromptCatalog, PromptInput, PromptModel,
+    PromptPlacement, PromptPlan, PromptPurpose, PromptRenderError, PromptSectionId,
     PromptSectionKey, PromptSectionSpec, PromptTextRef, PromptWrapKey, PromptWrapSpec,
     PromptWrapTarget, SectionText, admission_record, load_admitted_call,
 };
+use crate::testing::prompt::{ComposedPrompt, PromptCut, PromptCutParts, compose, namespace};
 use crate::{PromptRegistration, SessionId};
 
 const SESSION: &str = "prompt-snapshot";
@@ -25,8 +25,8 @@ fn key(local: &str) -> PromptSectionKey {
     PromptSectionKey::new(local).expect("valid section key")
 }
 
-fn cut(call: u32, note: &str) -> Arc<PromptCut> {
-    Arc::new(PromptCut::new(PromptCutParts {
+fn cut(call: u32, note: &str) -> PromptCut {
+    crate::testing::prompt::cut(PromptCutParts {
         call: PromptCall {
             session_id: SessionId::from(SESSION),
             frame: None,
@@ -43,12 +43,12 @@ fn cut(call: u32, note: &str) -> Arc<PromptCut> {
         history: ProjectedHistoryStats::default(),
         namespaces: BTreeMap::from([(
             "memory".to_string(),
-            CommittedPluginNamespace::new(
+            namespace(
                 u64::from(call),
                 BTreeMap::from([("note".to_string(), serde_json::json!(note))]),
             ),
         )]),
-    }))
+    })
 }
 
 /// A protocol intro, a memory note and a memory wrapper over the intro,
@@ -146,19 +146,17 @@ fn body(call: u32) -> lash_sansio::llm::types::ProviderRequestBody {
 async fn an_admitted_calls_snapshot_reads_back_byte_for_byte_without_any_renderer() {
     let runs = Arc::new(AtomicUsize::new(0));
     let catalog = catalog(&runs);
-    let pool = PromptRenderPool::shared();
     let mut composed = Vec::<ComposedPrompt>::new();
     for (call, note) in [(1, "first"), (2, "second")] {
         composed.push(
-            catalog
-                .compose(
-                    &PromptPlan::default(),
-                    &PromptPurpose::Turn,
-                    cut(call, note),
-                    pool,
-                )
-                .await
-                .expect("the call composes"),
+            compose(
+                &catalog,
+                &PromptPlan::default(),
+                &PromptPurpose::Turn,
+                cut(call, note),
+            )
+            .await
+            .expect("the call composes"),
         );
     }
     assert_eq!(runs.load(Ordering::SeqCst), 6, "three renders per call");

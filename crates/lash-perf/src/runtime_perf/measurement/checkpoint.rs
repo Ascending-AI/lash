@@ -1062,7 +1062,6 @@ pub(crate) fn sum_optional_i64(left: Option<i64>, right: Option<i64>) -> Option<
 }
 pub(crate) fn phase_name(phase: RuntimeTurnPhase) -> &'static str {
     match phase {
-        RuntimeTurnPhase::ContextTransform => "context_transform",
         RuntimeTurnPhase::BeforeTurnHooks => "before_turn_hooks",
         RuntimeTurnPhase::PromptBuild => "prompt_build",
         RuntimeTurnPhase::EffectLoop => "effect_loop",

@@ -131,12 +131,7 @@ fn checkpoint_body_size_is_independent_of_message_count() {
                 content.len(),
                 saved.content.len(),
             ));
-            // The synthetic-message counter starts at the history length:
-            // a counter, not transcript, so the law compares bodies with it
-            // fixed.
-            let mut fixed = saved.checkpoint.clone();
-            fixed.next_synthetic_message_id = 0;
-            body_sizes.push(serde_json::to_vec(&fixed).expect("checkpoint body").len());
+            body_sizes.push(body.len());
         }
         assert!(
             body_sizes.windows(2).all(|pair| pair[0] == pair[1]),

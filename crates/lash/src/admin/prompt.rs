@@ -79,8 +79,6 @@ impl SessionPromptAdmin {
     ) -> Result<std::result::Result<ResolvedPromptPlan, PromptPlanError>> {
         let plan = self.plan().await?;
         let catalog = self.catalog().await?;
-        Ok(catalog
-            .resolve(&plan, purpose, offered)
-            .map(|composition| composition.record().clone()))
+        Ok(catalog.preview(&plan, purpose, offered))
     }
 }

@@ -261,8 +261,6 @@ pub struct TurnCheckpoint<M: TurnProtocol = UnitTurnProtocol> {
     pub(super) state: CheckpointState<M>,
     pub(super) pending_effects: Vec<Effect<M>>,
     pub(super) next_effect_id: u64,
-    #[serde(default)]
-    pub(super) next_synthetic_message_id: u64,
     /// The committed window the turn started from, which a restore is
     /// handed again; `None` for a machine started without one.
     pub(super) window: Option<CheckpointWindow>,
@@ -582,7 +580,6 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     pub(super) state: MachineState<M>,
     pub(super) side_effect_outbox: VecDeque<Effect<M>>,
     pub(super) next_effect_id: u64,
-    pub(super) next_synthetic_message_id: u64,
     /// The committed window the turn started from: its messages lead
     /// `messages`, its records lead `events`, and the checkpoint names it
     /// instead of holding it.

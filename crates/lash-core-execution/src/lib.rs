@@ -929,6 +929,36 @@ pub mod core_internal {
         crate::session::clear_process_invocation_correlation(turn_context);
     }
 
+    /// The cut a model call's renderers read (ADR 0133 §4): built only by
+    /// the runtime, from committed state, at the call's admission.
+    pub fn prompt_cut(
+        parts: crate::plugin::prompt::PromptCutParts,
+        subagent: Option<crate::SubagentSessionContext>,
+        protocol: Option<crate::plugin::prompt::ProtocolPromptFacts>,
+    ) -> crate::plugin::prompt::PromptCut {
+        crate::plugin::prompt::PromptCut::new(parts)
+            .with_subagent(subagent)
+            .with_protocol_facts(protocol)
+    }
+
+    /// Compose a model call's prompt (ADR 0133 §5 to §7): the one route from
+    /// a session's sections to a call's text and snapshot, run only at the
+    /// call's admission.
+    ///
+    /// # Errors
+    ///
+    /// The typed [`PromptCompositionError`](crate::plugin::prompt::PromptCompositionError).
+    pub async fn compose_prompt(
+        catalog: &crate::plugin::prompt::PromptCatalog,
+        plan: &crate::prompt_sections::PromptPlan,
+        purpose: &crate::prompt_sections::PromptPurpose,
+        cut: std::sync::Arc<crate::plugin::prompt::PromptCut>,
+        pool: &crate::plugin::prompt::PromptRenderPool,
+    ) -> Result<crate::plugin::prompt::ComposedPrompt, crate::plugin::prompt::PromptCompositionError>
+    {
+        catalog.compose(plan, purpose, cut, pool).await
+    }
+
     /// Carries the lineage of the process a live child turn runs inside, so
     /// every start made in that turn records it (FIG-3607 R1).
     pub fn attach_process_lineage(

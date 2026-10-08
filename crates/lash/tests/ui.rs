@@ -64,6 +64,8 @@ fn facade_compile_time_contracts() {
 fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/turn_hooks_hold_only_session_reads.rs");
     t.compile_fail("tests/ui/turn_context_has_no_prompt_or_drain_state.rs");
+    // FIG-5260: one prompt route; only the runtime composes a call's prompt.
+    t.compile_fail("tests/ui/prompt_composition_is_runtime_only.rs");
     t.compile_fail("tests/ui/core_builder_requires_a_backend.rs");
     t.compile_fail("tests/ui/core_builder_plugin_host_is_removed.rs");
     t.compile_fail("tests/ui/process_execution_requires_admission.rs");

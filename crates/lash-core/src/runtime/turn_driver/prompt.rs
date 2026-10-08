@@ -21,13 +21,14 @@ use super::RuntimeTurnDriver;
 use super::tool_catalog::SyncFailure;
 use crate::plugin::prompt::{
     ComposedPrompt, OfferedTools, ProjectedHistoryStats, PromptCall, PromptCatalog,
-    PromptCompositionError, PromptCut, PromptCutParts, PromptModel, PromptRenderPool,
+    PromptCompositionError, PromptCutParts, PromptModel, PromptRenderPool,
 };
 use crate::prompt_sections::{PromptPlan, PromptPurpose};
 use crate::sansio::ExecutionEnvironmentSyncFailureKind as SyncFailureKind;
 use crate::{
     FailureCode, LlmCallError, LlmRequest, RuntimeError, RuntimeErrorCode, TurnFailureCode,
 };
+use lash_core_execution::core_internal::{compose_prompt, prompt_cut};
 
 impl RuntimeTurnDriver<'static> {
     /// Compose turn call `call`'s prompt over the turn's committed cut and
@@ -79,42 +80,44 @@ impl RuntimeTurnDriver<'static> {
         let state = self.turn_pipeline.state();
         let offered = plugins.protocol_driver().prompt_tools(offered_catalog);
         let profile = self.policy.llm_profile_config();
-        let cut = PromptCut::new(PromptCutParts {
-            call: PromptCall {
-                session_id: self.session_id.clone(),
-                frame: state.current_frame_node_id.clone(),
-                run: request.scope.turn.as_ref().map(|turn| turn.run.clone()),
-                turn: Some(self.turn_id.clone()),
-                iteration: u32::try_from(iteration).unwrap_or(u32::MAX),
-                call,
-                purpose: PromptPurpose::Turn,
+        let cut = prompt_cut(
+            PromptCutParts {
+                call: PromptCall {
+                    session_id: self.session_id.clone(),
+                    frame: state.current_frame_node_id.clone(),
+                    run: request.scope.turn.as_ref().map(|turn| turn.run.clone()),
+                    turn: Some(self.turn_id.clone()),
+                    iteration: u32::try_from(iteration).unwrap_or(u32::MAX),
+                    call,
+                    purpose: PromptPurpose::Turn,
+                },
+                config: plugins.admitted_plugin_config(),
+                session: Some(view),
+                offered: offered.clone(),
+                model: PromptModel {
+                    profile: Some(profile.key().clone()),
+                    context_window_tokens: Some(profile.context_window_tokens() as u64),
+                    committed_usage: state.last_prompt_usage.clone(),
+                },
+                history: ProjectedHistoryStats {
+                    messages: history,
+                    estimated_tokens: u64::from(request.estimated_tokens()),
+                },
+                namespaces: plugins.committed_namespaces(),
             },
-            config: plugins.admitted_plugin_config(),
-            session: Some(view),
-            offered: offered.clone(),
-            model: PromptModel {
-                profile: Some(profile.key().clone()),
-                context_window_tokens: Some(profile.context_window_tokens() as u64),
-                committed_usage: state.last_prompt_usage.clone(),
-            },
-            history: ProjectedHistoryStats {
-                messages: history,
-                estimated_tokens: u64::from(request.estimated_tokens()),
-            },
-            namespaces: plugins.committed_namespaces(),
-        })
-        .with_subagent(state.authority.subagent.clone())
-        .with_protocol_facts(protocol_facts);
+            state.authority.subagent.clone(),
+            protocol_facts,
+        );
         let plan = &state.authority.prompt_plan;
         let started = std::time::Instant::now();
-        let composed = match catalog
-            .compose(
-                plan,
-                &PromptPurpose::Turn,
-                Arc::new(cut),
-                PromptRenderPool::shared(),
-            )
-            .await
+        let composed = match compose_prompt(
+            &catalog,
+            plan,
+            &PromptPurpose::Turn,
+            Arc::new(cut),
+            PromptRenderPool::shared(),
+        )
+        .await
         {
             Ok(composed) => composed,
             // A full shared queue is this process's load, not the call's
@@ -183,9 +186,9 @@ impl RuntimeTurnDriver<'static> {
         }
         let resolved = failed
             .catalog
-            .resolve(failed.plan, &PromptPurpose::Turn, failed.offered)
+            .preview(failed.plan, &PromptPurpose::Turn, failed.offered)
             .ok()
-            .and_then(|resolved| serde_json::to_value(resolved.record()).ok());
+            .and_then(|resolved| serde_json::to_value(resolved).ok());
         let limits = serde_json::to_value(failed.plan.limits).unwrap_or_default();
         let error = serde_json::to_value(failed.error).unwrap_or_default();
         let elapsed_ms = u64::try_from(failed.elapsed.as_millis()).unwrap_or(u64::MAX);

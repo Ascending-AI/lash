@@ -6,6 +6,9 @@
 //! graph, out of the next turn's history and out of a compaction's seed.
 //! Before-turn, checkpoint, after-tool and after-turn observers all publish
 //! their model-facing text as namespace state rendered by the same section.
+//! End to end (FIG-5260): every channel's text reaches the model request
+//! outside its history, and the call's recorded snapshot holds exactly the
+//! text the model received.
 
 #![expect(
     clippy::expect_used,
@@ -238,9 +241,16 @@ async fn section_text_never_enters_history_or_a_compaction_seed() {
         .await
         .expect("the session opens");
 
-    for text in ["hello", "again"] {
+    let runs = ["hello", "again"].map(|text| {
+        (
+            text,
+            lash::TurnId::parse(format!("section-leak-{text}")).expect("run id"),
+        )
+    });
+    for (text, run) in &runs {
         let turn = session
-            .send(lash::TurnInput::text(text))
+            .send(lash::TurnInput::text(*text))
+            .id(run.clone())
             .output()
             .await
             .expect("the turn answers");
@@ -318,5 +328,35 @@ async fn section_text_never_enters_history_or_a_compaction_seed() {
             "{channel}'s published section text reached a model call, outside history"
         );
     }
+    // The second turn's first call renders every channel's text: its
+    // recorded snapshot holds it, and it is the text the model received.
+    let loaded = session
+        .admin()
+        .prompt()
+        .snapshot(&runs[1].1, 1)
+        .await
+        .expect("the recorded snapshot reads through the facade")
+        .expect("the call retains a snapshot");
+    let section = loaded
+        .snapshot
+        .sections
+        .iter()
+        .find(|section| section.section.owner == PLUGIN)
+        .expect("the section was recorded");
+    let recorded = loaded
+        .text(&section.value)
+        .expect("the section recorded text");
+    for channel in CHANNELS {
+        assert!(
+            recorded.contains(&format!("{LEAK_MARKER} {channel}")),
+            "the recorded snapshot holds {channel}'s text: {recorded:?}"
+        );
+    }
+    assert!(
+        requests
+            .iter()
+            .any(|(instructions, _)| instructions.contains(recorded)),
+        "the recorded section text is the text a model call received"
+    );
     core.shutdown().await.expect("shutdown");
 }

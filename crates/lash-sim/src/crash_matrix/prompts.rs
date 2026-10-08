@@ -10,11 +10,12 @@
 //! `speculate` proposes another T that the plugin's own result check denies,
 //! so it never publishes. Its `AfterWork` checkpoint callback counts the
 //! checkpoints through a reducer: a decision `model.start` commits with the
-//! call after it. The `prompt-frame` plugin wraps the memo section.
+//! call after it. Its before-turn callback notes each run. The
+//! `prompt-frame` plugin wraps the memo section.
 //!
 //! The scripted model calls `set_t` first, then `speculate`, then answers
-//! [`FINAL`]. Each render and each request the model receives is noted in
-//! the world.
+//! [`FINAL`]. Each render, each wrapping, each before-turn callback and each
+//! request the model receives, with its exact body, is noted in the world.
 
 use std::sync::{Arc, Weak};
 
@@ -48,8 +49,13 @@ pub const SPECULATE: &str = "speculate";
 pub const NEXT_T: &str = "two";
 /// What a render notes: `{RENDERED} {session} call={call}`.
 pub const RENDERED: &str = "prompt.render";
+/// What the frame's wrapping notes: `{WRAPPED} {session} call={call}`.
+pub const WRAPPED: &str = "prompt.wrap";
+/// What the memo's before-turn callback notes: `{BEFORE_TURN} {session}`.
+pub const BEFORE_TURN: &str = "prompt.before-turn";
 /// What a model request notes: `{SENT} {session} call={call}
-/// attempt={attempt} :: {request_json}`.
+/// attempt={attempt} body={digest} :: {request_json}`, the digest that of
+/// the exact body the call sends.
 pub const SENT: &str = "prompt.sent";
 
 /// The memo section, as the session's calls render it.
@@ -92,7 +98,9 @@ pub fn prompt_core(world: &Arc<World>) -> Result<lash::LashCore, String> {
         .plugin(Arc::new(Memo {
             world: Arc::downgrade(world),
         }))
-        .plugin(Arc::new(Frame))
+        .plugin(Arc::new(Frame {
+            world: Arc::downgrade(world),
+        }))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "lash-sim-deployment",
             "lash-sim-boot",
@@ -140,8 +148,17 @@ fn call_of(request: &LlmRequest) -> usize {
         .count()
 }
 
+/// The digest of the exact body a call sends.
+fn body_digest(body: &lash_core::ProviderRequestBody) -> u64 {
+    use std::hash::{Hash as _, Hasher as _};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    body.body.hash(&mut hasher);
+    hasher.finish()
+}
+
 /// The scripted model: `set_t` on the first call, `speculate` on the
-/// second, [`FINAL`] after. It notes every request it receives.
+/// second, [`FINAL`] after. It notes every request it receives with the
+/// digest of the body it was sent.
 #[expect(
     clippy::expect_used,
     reason = "the simulator's model requests must serialize for its oracle"
@@ -149,15 +166,16 @@ fn call_of(request: &LlmRequest) -> usize {
 fn model(world: Weak<World>) -> ProviderHandle {
     lash_core::testing::TestProvider::builder()
         .kind("lash-sim-prompt")
-        .complete(move |request: LlmRequest| {
+        .send(move |request: LlmRequest, body| {
             let world = world.clone();
             async move {
                 let call = call_of(&request);
                 if let Some(world) = world.upgrade() {
                     world.note(format!(
-                        "{SENT} {} call={call} attempt={} :: {}",
+                        "{SENT} {} call={call} attempt={} body={:016x} :: {}",
                         request.scope.session_id,
                         request.scope.attempt.unwrap_or(0),
+                        body_digest(&body),
                         serde_json::to_string(&request).expect("record the received request")
                     ));
                 }
@@ -222,6 +240,16 @@ impl lash_core::plugin::SessionPlugin for Memo {
         reg: &mut lash_core::plugin::PluginRegistrar,
     ) -> Result<(), lash_core::PluginError> {
         let world = self.world.clone();
+        let before = self.world.clone();
+        reg.turn().before(
+            lash_core::hook_key!("note-turn"),
+            Arc::new(move |context| {
+                if let Some(world) = before.upgrade() {
+                    world.note(format!("{BEFORE_TURN} {}", context.session_id));
+                }
+                Box::pin(async { Ok(lash_core::plugin::TurnContributions::default()) })
+            }),
+        )?;
         reg.prompt().section(
             PromptSectionSpec::new(key("current"), PromptPlacement::CurrentContext),
             Arc::new(move |input: &PromptInput<'_>| {
@@ -347,7 +375,10 @@ impl StaticToolExecute for MemoTools {
 
 /// The frame plugin: a trusted wrapper over another plugin's section.
 #[derive(Clone)]
-struct Frame;
+struct Frame {
+    /// Weak: the world holds the core that holds this plugin.
+    world: Weak<World>,
+}
 
 impl lash_core::plugin::PluginDefinition for Frame {
     fn declaration() -> lash_core::plugin::PluginDeclaration {
@@ -382,10 +413,18 @@ impl lash_core::plugin::SessionPlugin for Frame {
             reason = "the simulator's prompt keys are valid literals"
         )]
         let wrap = PromptWrapKey::new("frame").expect("a valid prompt key");
+        let world = self.world.clone();
         reg.prompt().wrap(
             PromptWrapSpec::new(wrap, memo_section()),
             Arc::new(
-                |_: &PromptInput<'_>, _: PromptWrapTarget<'_>, previous: SectionText| {
+                move |input: &PromptInput<'_>, _: PromptWrapTarget<'_>, previous: SectionText| {
+                    if let Some(world) = world.upgrade() {
+                        world.note(format!(
+                            "{WRAPPED} {} call={}",
+                            input.call().session_id,
+                            input.call().call
+                        ));
+                    }
                     Ok(match previous {
                         SectionText::Text(text) => SectionText::Text(format!("{text} (framed)")),
                         SectionText::Omit => SectionText::Omit,

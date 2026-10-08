@@ -71,17 +71,9 @@
               "budget_ms": 13.294,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 3.889,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 603.338,
               "required": true
-            },
-            "plugin_hook.context_transform.rlm_protocol": {
-              "budget_ms": 1.68,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 29.243,
@@ -219,16 +211,8 @@
               "budget_ms": 1.09,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 1.696,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 888.726,
-              "required": true
-            },
-            "plugin_hook.context_transform.rlm_protocol": {
-              "budget_ms": 0.71,
               "required": true
             },
             "post_commit_delivery": {
@@ -443,16 +427,8 @@
               "budget_ms": 1.084,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 1.638,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 151.806,
-              "required": true
-            },
-            "plugin_hook.context_transform.rlm_protocol": {
-              "budget_ms": 0.73,
               "required": true
             },
             "post_commit_delivery": {
@@ -523,20 +499,12 @@
               "budget_ms": 0.998,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 1.642,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 60.778,
               "required": true
             },
             "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.76,
-              "required": true
-            },
-            "plugin_hook.context_transform.standard_compaction": {
-              "budget_ms": 0.766,
               "required": true
             },
             "post_commit_delivery": {
@@ -597,16 +565,8 @@
               "budget_ms": 13.61,
               "required": false
             },
-            "context_transform": {
-              "budget_ms": 10.493,
-              "required": false
-            },
             "effect_loop": {
               "budget_ms": 272.849,
-              "required": false
-            },
-            "plugin_hook.context_transform.rlm_protocol": {
-              "budget_ms": 7.646,
               "required": false
             },
             "post_commit_delivery": {
@@ -709,10 +669,6 @@
               "budget_ms": 5.497,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 3.871,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 201.24,
               "required": true
@@ -720,10 +676,6 @@
             "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.79,
               "required": true
-            },
-            "plugin_hook.context_transform.standard_compaction": {
-              "budget_ms": 1.748,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 12.375,
@@ -969,10 +921,6 @@
               "budget_ms": 9.233,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 9.332,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 203.716,
               "required": true
@@ -1033,17 +981,9 @@
               "budget_ms": 3.36,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 6.808,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 182.377,
               "required": true
-            },
-            "plugin_hook.context_transform.rlm_protocol": {
-              "budget_ms": 3.18,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 8.907,
@@ -1117,17 +1057,9 @@
               "budget_ms": 8.037,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 4.737,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 239.59,
               "required": true
-            },
-            "plugin_hook.context_transform.rlm_protocol": {
-              "budget_ms": 1.696,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 22.122,
@@ -1185,17 +1117,9 @@
               "budget_ms": 8.705,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 7.228,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 313.112,
               "required": true
-            },
-            "plugin_hook.context_transform.rlm_protocol": {
-              "budget_ms": 4.986,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 13.841,
@@ -1273,17 +1197,9 @@
               "budget_ms": 13.674,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 4.23,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 1400.912,
               "required": true
-            },
-            "plugin_hook.context_transform.rlm_protocol": {
-              "budget_ms": 1.682,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 9.101,
@@ -1341,17 +1257,9 @@
               "budget_ms": 7.606,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 4.842,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 227.723,
               "required": true
-            },
-            "plugin_hook.context_transform.rlm_protocol": {
-              "budget_ms": 2.406,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 8.885,
@@ -1425,17 +1333,9 @@
               "budget_ms": 25.155,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 4.267,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 4184.845,
               "required": true
-            },
-            "plugin_hook.context_transform.rlm_protocol": {
-              "budget_ms": 1.678,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 27.134,
@@ -1553,17 +1453,9 @@
               "budget_ms": 14.934,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 5.345,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 796.251,
               "required": true
-            },
-            "plugin_hook.context_transform.rlm_protocol": {
-              "budget_ms": 1.708,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 18.691,
@@ -1677,17 +1569,9 @@
               "budget_ms": 10.852,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 7.914,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 802.787,
               "required": true
-            },
-            "plugin_hook.context_transform.rlm_protocol": {
-              "budget_ms": 1.656,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 13.869,
@@ -1801,17 +1685,9 @@
               "budget_ms": 32.353,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 9.529,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 143.074,
               "required": true
-            },
-            "plugin_hook.context_transform.rlm_protocol": {
-              "budget_ms": 5.882,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 13.186,
@@ -1869,17 +1745,9 @@
               "budget_ms": 20.436,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 4.407,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 2440.397,
               "required": true
-            },
-            "plugin_hook.context_transform.rlm_protocol": {
-              "budget_ms": 1.636,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 27.904,
@@ -1993,17 +1861,9 @@
               "budget_ms": 13.822,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 4.615,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 205.502,
               "required": true
-            },
-            "plugin_hook.context_transform.rlm_protocol": {
-              "budget_ms": 1.626,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 19.423,
@@ -2077,17 +1937,9 @@
               "budget_ms": 12.694,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 3.867,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 1205.418,
               "required": true
-            },
-            "plugin_hook.context_transform.rlm_protocol": {
-              "budget_ms": 1.682,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 8.984,
@@ -2145,17 +1997,9 @@
               "budget_ms": 13.938,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 4.103,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 1398.803,
               "required": true
-            },
-            "plugin_hook.context_transform.rlm_protocol": {
-              "budget_ms": 1.682,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 9.447,
@@ -2213,17 +2057,9 @@
               "budget_ms": 17.593,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 5.321,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 363.777,
               "required": true
-            },
-            "plugin_hook.context_transform.rlm_protocol": {
-              "budget_ms": 2.086,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 33.829,
@@ -2333,10 +2169,6 @@
               "budget_ms": 9.514,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 3.952,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 197.424,
               "required": true
@@ -2344,10 +2176,6 @@
             "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.743,
               "required": true
-            },
-            "plugin_hook.context_transform.standard_compaction": {
-              "budget_ms": 1.679,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 8.56,
@@ -2393,10 +2221,6 @@
               "budget_ms": 3.046,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 5.306,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 702.116,
               "required": true
@@ -2404,10 +2228,6 @@
             "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.813,
               "required": true
-            },
-            "plugin_hook.context_transform.standard_compaction": {
-              "budget_ms": 1.924,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 45.848,
@@ -2453,20 +2273,12 @@
               "budget_ms": 37.158,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 14.147,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 168.341,
               "required": true
             },
             "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.747,
-              "required": true
-            },
-            "plugin_hook.context_transform.standard_compaction": {
-              "budget_ms": 11.102,
               "required": true
             },
             "post_commit_delivery": {
@@ -2509,10 +2321,6 @@
               "budget_ms": 18.091,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 4.698,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 138.992,
               "required": true
@@ -2520,10 +2328,6 @@
             "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.899,
               "required": true
-            },
-            "plugin_hook.context_transform.standard_compaction": {
-              "budget_ms": 2.241,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 9.297,
@@ -2565,10 +2369,6 @@
               "budget_ms": 4.615,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 4.251,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 67.178,
               "required": true
@@ -2576,10 +2376,6 @@
             "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.764,
               "required": true
-            },
-            "plugin_hook.context_transform.standard_compaction": {
-              "budget_ms": 1.797,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 7.029,
@@ -2757,10 +2553,6 @@
               "budget_ms": 14.261,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 7.077,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 132.438,
               "required": true
@@ -2768,10 +2560,6 @@
             "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.718,
               "required": true
-            },
-            "plugin_hook.context_transform.standard_compaction": {
-              "budget_ms": 4.618,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 13.515,
@@ -2825,10 +2613,6 @@
               "budget_ms": 9.242,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 26.502,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 1645.094,
               "required": true
@@ -2836,10 +2620,6 @@
             "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.844,
               "required": true
-            },
-            "plugin_hook.context_transform.standard_compaction": {
-              "budget_ms": 5.743,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 8.879,
@@ -2881,17 +2661,9 @@
               "budget_ms": 5.896,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 4.276,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 220.507,
               "required": true
-            },
-            "plugin_hook.context_transform.rlm_protocol": {
-              "budget_ms": 1.684,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 20.004,
@@ -2953,10 +2725,6 @@
               "budget_ms": 23.805,
               "required": true
             },
-            "context_transform": {
-              "budget_ms": 4.538,
-              "required": true
-            },
             "effect_loop": {
               "budget_ms": 182.125,
               "required": true
@@ -2964,10 +2732,6 @@
             "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.686,
               "required": true
-            },
-            "plugin_hook.context_transform.standard_compaction": {
-              "budget_ms": 2.044,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 8.842,
@@ -3013,10 +2777,6 @@
               "budget_ms": 10.793,
               "required": false
             },
-            "context_transform": {
-              "budget_ms": 6.439,
-              "required": false
-            },
             "effect_loop": {
               "budget_ms": 120.891,
               "required": false
@@ -3024,10 +2784,6 @@
             "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.649,
               "required": true
-            },
-            "plugin_hook.context_transform.standard_compaction": {
-              "budget_ms": 1.477,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 5.605,
@@ -3097,10 +2853,6 @@
               "budget_ms": 21.539,
               "required": false
             },
-            "context_transform": {
-              "budget_ms": 4.528,
-              "required": false
-            },
             "effect_loop": {
               "budget_ms": 141.054,
               "required": false
@@ -3108,10 +2860,6 @@
             "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.712,
               "required": true
-            },
-            "plugin_hook.context_transform.standard_compaction": {
-              "budget_ms": 1.888,
-              "required": false
             },
             "post_commit_delivery": {
               "budget_ms": 15.775,

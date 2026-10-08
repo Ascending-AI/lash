@@ -3,12 +3,10 @@
 
 use std::sync::Arc;
 
-use lash_core::plugin::prompt::{
-    ComposedPrompt, OfferedTools, PromptCall, PromptCatalog, PromptCut, PromptCutParts,
-    PromptModel, PromptRenderPool,
-};
+use lash_core::plugin::prompt::{OfferedTools, PromptCall, PromptCatalog, PromptModel};
 use lash_core::plugin::{PluginError, PluginRegistrar, SessionPlugin};
 use lash_core::prompt_sections::{PromptPlan, PromptPurpose};
+use lash_core::testing::prompt::{ComposedPrompt, PromptCutParts};
 use lash_rlm_types::RlmTurnOptions;
 
 use super::{RlmPromptFacts, RlmSectionBehaviour, register_sections};
@@ -103,39 +101,41 @@ pub(crate) fn compose(plugins: &[Arc<dyn SessionPlugin>], call: Call) -> Compose
         RLM_PROTOCOL_PLUGIN_ID,
         serde_json::to_value(recorded).expect("the recorded namespace encodes"),
     );
-    let cut = PromptCut::new(PromptCutParts {
-        call: PromptCall {
-            session_id: lash_core::SessionId::from("rlm-prompt-laws"),
-            frame: None,
-            run: None,
-            turn: None,
-            iteration: call.iteration,
-            call: call.iteration,
-            purpose: call.purpose.clone(),
+    let cut = lash_core::testing::prompt::cut_with(
+        PromptCutParts {
+            call: PromptCall {
+                session_id: lash_core::SessionId::from("rlm-prompt-laws"),
+                frame: None,
+                run: None,
+                turn: None,
+                iteration: call.iteration,
+                call: call.iteration,
+                purpose: call.purpose.clone(),
+            },
+            config: lash_core::AdmittedPluginConfig::new(config, 0),
+            session: None,
+            offered: OfferedTools::new(Arc::new(call.catalog), false),
+            model: PromptModel {
+                profile: None,
+                context_window_tokens: call.context_window_tokens,
+                committed_usage: call.committed_usage,
+            },
+            history: Default::default(),
+            namespaces: Default::default(),
         },
-        config: lash_core::AdmittedPluginConfig::new(config, 0),
-        session: None,
-        offered: OfferedTools::new(Arc::new(call.catalog), false),
-        model: PromptModel {
-            profile: None,
-            context_window_tokens: call.context_window_tokens,
-            committed_usage: call.committed_usage,
-        },
-        history: Default::default(),
-        namespaces: Default::default(),
-    })
-    .with_subagent(call.subagent)
-    .with_protocol_facts(call.facts.map(|facts| Arc::new(facts) as _));
+        call.subagent,
+        call.facts.map(|facts| Arc::new(facts) as _),
+    );
     let catalog = PromptCatalog::of_plugins(plugins).expect("the sections register");
     tokio::runtime::Builder::new_current_thread()
         .enable_time()
         .build()
         .expect("a composition runtime")
-        .block_on(catalog.compose(
+        .block_on(lash_core::testing::prompt::compose(
+            &catalog,
             &call.plan,
             &call.purpose,
-            Arc::new(cut),
-            PromptRenderPool::shared(),
+            cut,
         ))
         .expect("the prompt composes")
 }

@@ -1,5 +1,7 @@
-//! The before-turn hooks of a turn's preparation (ADR 0132 §4): run as one
-//! recorded step whose decisions are the turn's input.
+//! The before-turn hooks of a fresh turn's preparation (ADR 0132 §4): run
+//! as one step whose decisions are the turn's input. Every phase of the
+//! turn commits the decisions with its checkpoint, and a resumed turn is
+//! prepared from them: no callback runs again (ADR 0133 §6).
 
 use super::*;
 use crate::ActorContext;
@@ -18,13 +20,12 @@ pub(super) struct TurnPreambleContext<'preamble, 'run> {
 }
 
 impl LashRuntime {
-    /// Run the turn's before-turn callbacks as one recorded step: their
-    /// decisions and the resolutions of their state commands are served from
-    /// the journal on replay, and no callback runs again (K10).
+    /// Run the fresh turn's before-turn callbacks as one step and answer
+    /// their decisions, their state commands published.
     pub(super) async fn prepare_turn_preamble(
         &mut self,
         context: TurnPreambleContext<'_, '_>,
-    ) -> Result<crate::plugin::TurnPreparation, RuntimeError> {
+    ) -> Result<Vec<crate::plugin::RecordedTurnContribution>, RuntimeError> {
         let TurnPreambleContext {
             run: std::marker::PhantomData,
             plugins,
@@ -70,8 +71,7 @@ impl LashRuntime {
         } else {
             Vec::new()
         };
-        let prepared = crate::PluginSession::apply_before_turn(recorded);
         self.mark_phase_end(RuntimeTurnPhase::BeforeTurnHooks);
-        Ok(prepared)
+        Ok(recorded)
     }
 }

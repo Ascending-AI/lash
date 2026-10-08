@@ -774,7 +774,11 @@ impl CompactToolContract {
         sections.join("\n")
     }
 
-    pub fn render_markdown(&self) -> String {
+    /// The contract as one markdown block: the oracle the contract's
+    /// rendering laws read. No model-facing text is built from it; a tool's
+    /// guidance is a prompt section (ADR 0133).
+    #[cfg(test)]
+    pub(crate) fn render_markdown(&self) -> String {
         let mut sections = vec![format!("### {}", self.render_signature_head())];
         if !self.description.trim().is_empty() {
             sections.push(self.description.trim().to_string());
@@ -1025,20 +1029,6 @@ impl ToolDefinition {
             name: manifest.name.clone(),
         });
         Self { manifest, contract }
-    }
-
-    pub fn format_tool_docs(tools: &[ToolDefinition]) -> String {
-        Self::format_tool_docs_iter(tools.iter())
-    }
-
-    pub fn format_tool_docs_iter<'a>(
-        tools: impl IntoIterator<Item = &'a ToolDefinition>,
-    ) -> String {
-        tools
-            .into_iter()
-            .map(|tool| tool.compact_contract().render_markdown())
-            .collect::<Vec<_>>()
-            .join("\n\n")
     }
 
     pub fn parameter_metadata(&self) -> Vec<serde_json::Value> {

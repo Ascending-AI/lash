@@ -14,6 +14,10 @@
 /// Derives a durable frame-node identity through the runtime's canonical
 /// producer for integration fixtures that need to enqueue frame-scoped work.
 pub use lash_core::facade_support::frame_node_id;
+/// Prompt composition over a cut a test states, outside any model call: the
+/// runtime builds a call's cut and composes it only at the call's admission
+/// (ADR 0133).
+pub use lash_core::testing::prompt;
 pub use lash_core::testing::run_tool;
 /// Runs one granted tool call with mock contexts, so a provider's granted
 /// branch is exercisable outside a live turn.

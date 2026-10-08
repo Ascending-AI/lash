@@ -2,10 +2,11 @@
 //! session's registered sections to a call's instruction text and its
 //! snapshot.
 //!
-//! [`PromptCatalog::compose`] resolves the host's plan, renders every
-//! section's base text and then its wrapper chain on a bounded
-//! [`PromptRenderPool`], and assembles the result in plan order, never in
-//! completion order. It fails closed: a refusal, panic, oversize text or a
+//! [`PromptCatalog::compose`], which the runtime reaches only through
+//! [`core_internal::compose_prompt`](crate::core_internal::compose_prompt),
+//! resolves the host's plan, renders every section's base text and then its
+//! wrapper chain on a bounded [`PromptRenderPool`], and assembles the result
+//! in plan order, never in completion order. It fails closed: a refusal, panic, oversize text or a
 //! render that outlasts the plan's budget composes nothing, and no earlier
 //! text stands in. A late render's result is dropped.
 //!
@@ -223,7 +224,7 @@ impl PromptCatalog {
     /// [`PromptCompositionError`], attributed to the renderer or wrapper at
     /// fault where there is one. Nothing is composed: no partial text and no
     /// earlier text.
-    pub async fn compose(
+    pub(crate) async fn compose(
         &self,
         plan: &PromptPlan,
         purpose: &PromptPurpose,

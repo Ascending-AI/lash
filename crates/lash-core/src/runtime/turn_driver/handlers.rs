@@ -291,7 +291,7 @@ impl RuntimeTurnDriver<'_> {
             .await
             .map_err(RuntimeEffectControllerError::into_runtime_error)?;
         machine.adopt_committed_messages(prelude.history.clone());
-        machine.adopt_prepared_messages(prelude.context.messages.clone(), id.0 == 1);
+        machine.adopt_prepared_messages(prelude.context.messages.clone());
         self.prelude = prelude;
         // The surface the sync recorded is the one the iteration's tool calls
         // resolve against, whether the sync ran here or was served from the

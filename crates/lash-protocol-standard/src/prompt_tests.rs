@@ -4,13 +4,13 @@
 
 use super::*;
 use lash_core::plugin::prompt::{
-    ComposedPrompt, OfferedTools, PromptCall, PromptCatalog, PromptCut, PromptCutParts,
-    PromptInput, PromptRenderPool, PromptSectionSpec, PromptWrapSpec, PromptWrapTarget,
-    SectionText,
+    OfferedTools, PromptCall, PromptCatalog, PromptInput, PromptSectionSpec, PromptWrapSpec,
+    PromptWrapTarget, SectionText,
 };
 use lash_core::prompt_sections::{
     PromptPlacement, PromptPlan, PromptPurpose, PromptSectionId, PromptSectionKey, PromptWrapKey,
 };
+use lash_core::testing::prompt::{ComposedPrompt, PromptCutParts};
 
 fn standard(config: StandardProtocolConfig) -> Arc<dyn SessionPlugin> {
     Arc::new(StandardProtocolPlugin { config })
@@ -29,7 +29,7 @@ async fn compose(
     purpose: PromptPurpose,
     catalog: lash_core::ToolCatalog,
 ) -> ComposedPrompt {
-    let cut = PromptCut::new(PromptCutParts {
+    let cut = lash_core::testing::prompt::cut(PromptCutParts {
         call: PromptCall {
             session_id: lash_core::SessionId::from("standard-prompt"),
             frame: None,
@@ -46,16 +46,14 @@ async fn compose(
         history: Default::default(),
         namespaces: Default::default(),
     });
-    PromptCatalog::of_plugins(plugins)
-        .expect("the plugins register")
-        .compose(
-            &PromptPlan::default(),
-            &purpose,
-            Arc::new(cut),
-            PromptRenderPool::shared(),
-        )
-        .await
-        .expect("the prompt composes")
+    lash_core::testing::prompt::compose(
+        &PromptCatalog::of_plugins(plugins).expect("the plugins register"),
+        &PromptPlan::default(),
+        &purpose,
+        cut,
+    )
+    .await
+    .expect("the prompt composes")
 }
 
 fn instructions(composed: &ComposedPrompt) -> &str {

@@ -6,11 +6,14 @@
 
 use super::*;
 
-/// A turn prepared from committed state: its driver, and the messages its
-/// machine starts from.
+/// A turn prepared from committed state: its driver, the messages its
+/// machine starts from, and its before-turn callbacks' decisions.
 pub(in crate::runtime) struct DurableTurn {
     pub(in crate::runtime) driver: Box<RuntimeTurnDriver<'static>>,
     pub(in crate::runtime) messages: crate::MessageSequence,
+    /// What the before-turn callbacks decided: run for a fresh turn, served
+    /// from the checkpoint for a resumed one. Every phase commits them.
+    pub(in crate::runtime) before_turn: Vec<crate::plugin::RecordedTurnContribution>,
     /// Why the admitted input did not normalize: the turn ends at once,
     /// `InvalidInput`, without calling the model.
     pub(in crate::runtime) invalid_input: Option<String>,
@@ -19,9 +22,12 @@ pub(in crate::runtime) struct DurableTurn {
 impl LashRuntime {
     /// Prepare run `run` of this session for the session actor: install the
     /// run's recorded configuration, materialize its admitted input over the
-    /// head, run the before-turn hooks and the context transform, and build
-    /// the driver that answers the turn's effects under `controller`, the
-    /// turn's own claimed context. `admissions` are the rows the run took.
+    /// head, apply the before-turn decisions and the attachment-omission
+    /// policies, and build the driver that answers the turn's effects under
+    /// `controller`, the turn's own claimed context. `admissions` are the
+    /// rows the run took. A fresh turn runs its before-turn callbacks; a
+    /// resumed one passes the decisions its checkpoint recorded as
+    /// `recorded_before_turn`, and no callback runs.
     #[expect(
         clippy::expect_used,
         reason = "the runtime session is installed for the whole preparation"
@@ -31,6 +37,7 @@ impl LashRuntime {
         controller: &ActorContext,
         run: &TurnId,
         mut admissions: LogicalTurnAdmissions,
+        recorded_before_turn: Option<Vec<crate::plugin::RecordedTurnContribution>>,
         observer: &TurnObserver,
     ) -> Result<DurableTurn, RuntimeError> {
         // An admission never mixes run specs, so the head input's spec is the
@@ -241,18 +248,23 @@ impl LashRuntime {
         // The before-turn hooks: their session changes and events.
         let turn_policy = self.state.effective_policy().clone();
         let effective_protocol_turn_options = self.state.effective_protocol_turn_options();
-        let mut prepared = self
-            .prepare_turn_preamble(execute::TurnPreambleContext {
-                run: std::marker::PhantomData,
-                plugins: &plugins,
-                scoped_effect_controller: &controller,
-                manager: &manager,
-                turn_policy: &turn_policy,
-                effective_protocol_turn_options: &effective_protocol_turn_options,
-                turn_context: &turn_context,
-                turn_scope_id: run,
-            })
-            .await?;
+        let before_turn = match recorded_before_turn {
+            Some(recorded) => recorded,
+            None => {
+                self.prepare_turn_preamble(execute::TurnPreambleContext {
+                    run: std::marker::PhantomData,
+                    plugins: &plugins,
+                    scoped_effect_controller: &controller,
+                    manager: &manager,
+                    turn_policy: &turn_policy,
+                    effective_protocol_turn_options: &effective_protocol_turn_options,
+                    turn_context: &turn_context,
+                    turn_scope_id: run,
+                })
+                .await?
+            }
+        };
+        let mut prepared = crate::PluginSession::apply_before_turn(before_turn.clone());
         turn_graph_appends
             .apply_session_contributions(&self.state.session_id, &plugins, &prepared.session)
             .map_err(|err| err.into_turn_failure(RuntimeErrorCode::PluginPrepareTurn))?;
@@ -347,6 +359,7 @@ impl LashRuntime {
         Ok(DurableTurn {
             driver,
             messages,
+            before_turn,
             invalid_input,
         })
     }

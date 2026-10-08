@@ -36,6 +36,8 @@ pub mod execution_context_builder;
 pub mod kernel_internals;
 #[cfg(any(test, feature = "testing"))]
 pub mod observation_sink;
+#[cfg(feature = "testing")]
+pub mod prompt;
 pub mod sansio_transcript;
 pub mod tool_fixtures;
 mod trigger_context;

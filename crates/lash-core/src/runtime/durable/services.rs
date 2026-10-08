@@ -138,11 +138,14 @@ impl RuntimeTurnServices {
     }
 
     /// Open `row`'s session and prepare its turn under the turn's own scope
-    /// of `cx`.
+    /// of `cx`. A resumed turn passes the before-turn decisions its
+    /// checkpoint recorded, which preparation serves instead of running the
+    /// callbacks again.
     async fn prepare(
         &self,
         cx: &ActorContext,
         row: &TurnRow,
+        recorded_before_turn: Option<Vec<crate::plugin::RecordedTurnContribution>>,
     ) -> Result<(DurableTurn, DriveParts), TurnError> {
         let mut runtime = self.runtimes.open(&row.session).await?;
         let admissions = admitted_rows(&runtime, row).await?;
@@ -151,7 +154,13 @@ impl RuntimeTurnServices {
         let commit = CommitBase::of(&runtime);
         let (observer, publisher) = live_observer(&runtime, &live, &row.run);
         let turn = runtime
-            .prepare_durable_turn(&controller, &row.run, admissions, &observer)
+            .prepare_durable_turn(
+                &controller,
+                &row.run,
+                admissions,
+                recorded_before_turn,
+                &observer,
+            )
             .await?;
         // The turn's commit settles its inputs and queued work from the
         // driver once it finishes: those its run took, the inputs with the
@@ -187,7 +196,7 @@ impl TurnServices for RuntimeTurnServices {
         row: &TurnRow,
         _head: &SessionHead,
     ) -> Result<Box<dyn TurnDrive>, TurnError> {
-        let (turn, parts) = self.prepare(cx, row).await?;
+        let (turn, parts) = self.prepare(cx, row, None).await?;
         Ok(Box::new(RuntimeDrive::start(turn, parts)?))
     }
 
@@ -196,7 +205,8 @@ impl TurnServices for RuntimeTurnServices {
         cx: &ActorContext,
         restore: TurnRestore<'_>,
     ) -> Result<OpenTurn, TurnError> {
-        let (turn, parts) = self.prepare(cx, restore.row()).await?;
+        let recorded = restore.recorded_before_turn()?;
+        let (turn, parts) = self.prepare(cx, restore.row(), Some(recorded)).await?;
         RuntimeDrive::resume(turn, parts, restore).await
     }
 

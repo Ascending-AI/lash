@@ -29,6 +29,8 @@ pub(in crate::runtime) struct RuntimeDrive {
     /// How many of the driver's queued-work sets the run's own admission
     /// took: those after them are what the turn's checkpoints delivered.
     opening_work: usize,
+    /// The turn's before-turn decisions, which every phase commits.
+    before_turn: Vec<crate::plugin::RecordedTurnContribution>,
     tools: Option<Arc<dyn RoundTools>>,
     live: Arc<dyn crate::LiveReplayStore>,
     /// Publishes the turn's activity to the live stream: drained once the
@@ -75,11 +77,18 @@ impl RuntimeDrive {
         let DurableTurn {
             mut driver,
             messages,
+            before_turn,
             invalid_input,
         } = turn;
         let machine = fresh_machine(&mut driver, messages, &parts.observer, invalid_input)?;
         let opening_work = driver.pending_queued.len();
-        Ok(Self::assemble(driver, machine, opening_work, parts))
+        Ok(Self::assemble(
+            driver,
+            machine,
+            opening_work,
+            before_turn,
+            parts,
+        ))
     }
 
     /// A turn taken over from its checkpoint: the machine restored under the
@@ -92,6 +101,7 @@ impl RuntimeDrive {
         let DurableTurn {
             mut driver,
             messages,
+            before_turn,
             invalid_input,
         } = turn;
         let config =
@@ -111,8 +121,9 @@ impl RuntimeDrive {
         let opening_work = driver.pending_queued.len();
         driver.pending_queued.extend(delivered_work);
         // The plugin state the turn's last phase committed, the pending
-        // checkpoint-callback decisions of an admitted call among it,
-        // replaces what preparing the turn again published: nothing that
+        // checkpoint-callback decisions of an admitted call among it, is
+        // reinstalled: preparing the turn again served its recorded
+        // before-turn decisions and ran no callback, so nothing that
         // committed runs again.
         if let Some(state) = &plugin_state {
             driver
@@ -142,7 +153,13 @@ impl RuntimeDrive {
         // again from the session's live registry.
         driver.reinstall_tool_surface()?;
         Ok(OpenTurn {
-            drive: Box::new(Self::assemble(driver, machine, opening_work, parts)),
+            drive: Box::new(Self::assemble(
+                driver,
+                machine,
+                opening_work,
+                before_turn,
+                parts,
+            )),
             pending,
             row,
         })
@@ -152,6 +169,7 @@ impl RuntimeDrive {
         driver: Box<RuntimeTurnDriver<'static>>,
         machine: TurnMachine,
         opening_work: usize,
+        before_turn: Vec<crate::plugin::RecordedTurnContribution>,
         parts: DriveParts,
     ) -> Self {
         let DriveParts {
@@ -168,6 +186,7 @@ impl RuntimeDrive {
             observer,
             settlement,
             opening_work,
+            before_turn,
             tools: None,
             live,
             publisher,
@@ -333,6 +352,10 @@ impl TurnDrive for RuntimeDrive {
             .get(self.opening_work..)
             .unwrap_or_default()
             .to_vec()
+    }
+
+    fn before_turn(&self) -> Vec<crate::plugin::RecordedTurnContribution> {
+        self.before_turn.clone()
     }
 
     fn plugin_state(&self) -> Result<Option<crate::PluginState>, TurnError> {

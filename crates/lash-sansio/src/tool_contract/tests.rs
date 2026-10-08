@@ -61,7 +61,7 @@ fn compact_tool_contract_renders_prompt_and_search_shape_from_schemas() {
     );
     assert_eq!(contract.examples.len(), 2);
 
-    let docs = ToolDefinition::format_tool_docs(&[tool]);
+    let docs = tool.compact_contract().render_markdown();
     assert!(docs.contains(
         "### search_docs({ query: str, limit?: int <= 10 = 5 }) -> record{matches: list[str], next_page?: str | null}"
     ));
@@ -145,7 +145,7 @@ fn dynamic_output_contract_renders_schema_from_input_without_return_fields() {
     assert!(contract.return_fields.is_empty());
     assert_eq!(contract.render_returns(), "");
     assert_eq!(
-        ToolDefinition::format_tool_docs(&[tool]),
+        tool.compact_contract().render_markdown(),
         "### spawn_agent<T = any>({ output?: TypeSpec<T> }) -> T\nRun a subagent\nParameters:\n- `output?: TypeSpec<T>`"
     );
 }

@@ -198,6 +198,13 @@ pub trait TurnDrive: Send {
         Vec::new()
     }
 
+    /// The decisions the turn's before-turn callbacks made when it was
+    /// prepared. Every phase commits them with its checkpoint, and a resume
+    /// serves them: no before-turn callback runs once a phase has committed.
+    fn before_turn(&self) -> Vec<crate::plugin::RecordedTurnContribution> {
+        Vec::new()
+    }
+
     /// The plugin state the turn has published: every namespace with its
     /// frontier, as a commit records it. Each phase commits it with its
     /// checkpoint, the pending checkpoint-callback decisions among it, and
@@ -761,9 +768,9 @@ pub struct ComposedCall {
 
 /// What a phase row's checkpoint holds: the machine's saved turn, the
 /// plugin state the turn had published when the phase committed, which a
-/// resume reinstalls before it restores the machine, and the steering input
+/// resume reinstalls before it restores the machine, the steering input
 /// and queued turn work its checkpoints delivered, which the phase bound to
-/// the run. Encoded by the phase runner, its owner.
+/// the run, and the turn's before-turn decisions, which a resume serves. Encoded by the phase runner, its owner.
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PhaseCheckpoint {
@@ -781,6 +788,11 @@ pub struct PhaseCheckpoint {
     /// ([`TurnDrive::delivered_work`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub delivered_work: Vec<crate::AdmittedQueuedWork>,
+    /// The turn's before-turn callback decisions
+    /// ([`TurnDrive::before_turn`]), which a resume serves instead of
+    /// running the callbacks again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub before_turn: Vec<crate::plugin::RecordedTurnContribution>,
 }
 
 /// A turn restored from its rows: the machine, the effect it re-delivers,
@@ -980,6 +992,36 @@ impl<'a> TurnRestore<'a> {
         self.row
     }
 
+    /// The before-turn callback decisions the turn's checkpoint records:
+    /// what preparing the resumed turn serves, so no before-turn callback
+    /// runs once a phase has committed (ADR 0133 §6).
+    ///
+    /// # Errors
+    ///
+    /// [`TurnRestoreError`] when the row holds no checkpoint or it does not
+    /// decode.
+    pub fn recorded_before_turn(
+        &self,
+    ) -> Result<Vec<crate::plugin::RecordedTurnContribution>, TurnRestoreError> {
+        /// The checkpoint's before-turn decisions, the rest left undecoded.
+        #[derive(serde::Deserialize)]
+        struct BeforeTurn {
+            #[serde(default)]
+            before_turn: Vec<crate::plugin::RecordedTurnContribution>,
+        }
+        let row = self.row;
+        let stored = row
+            .phase
+            .checkpoint()
+            .ok_or_else(|| TurnRestoreError::NoCheckpoint(row.run.clone()))?;
+        serde_json::from_str::<BeforeTurn>(stored)
+            .map(|checkpoint| checkpoint.before_turn)
+            .map_err(|error| TurnRestoreError::Undecodable {
+                run: row.run.clone(),
+                reason: error.to_string(),
+            })
+    }
+
     /// Restore the turn's machine under `config`, the configuration it was
     /// built with, over the committed window its checkpoint pins, and the
     /// effect its checkpoint re-delivers. The window is the head the owner
@@ -1003,6 +1045,7 @@ impl<'a> TurnRestore<'a> {
             plugin_state,
             delivered,
             delivered_work,
+            before_turn: _,
         } = serde_json::from_str(stored).map_err(|error| TurnRestoreError::Undecodable {
             run: row.run.clone(),
             reason: error.to_string(),

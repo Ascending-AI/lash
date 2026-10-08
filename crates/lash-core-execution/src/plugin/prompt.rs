@@ -323,7 +323,9 @@ pub struct CommittedPluginNamespace {
 }
 
 impl CommittedPluginNamespace {
-    pub fn new(generation: u64, values: BTreeMap<String, serde_json::Value>) -> Self {
+    /// Only the runtime freezes a namespace, at the cut it builds from
+    /// committed state.
+    pub(crate) fn new(generation: u64, values: BTreeMap<String, serde_json::Value>) -> Self {
         Self { generation, values }
     }
 
@@ -479,7 +481,9 @@ pub struct PromptCutParts {
 }
 
 impl PromptCut {
-    pub fn new(parts: PromptCutParts) -> Self {
+    /// Only the runtime builds a cut, from committed state
+    /// ([`core_internal::prompt_cut`](crate::core_internal::prompt_cut)).
+    pub(crate) fn new(parts: PromptCutParts) -> Self {
         let PromptCutParts {
             call,
             config,
@@ -504,14 +508,14 @@ impl PromptCut {
 
     /// The session's recorded subagent authority, when it is a subagent.
     #[must_use]
-    pub fn with_subagent(mut self, subagent: Option<crate::SubagentSessionContext>) -> Self {
+    pub(crate) fn with_subagent(mut self, subagent: Option<crate::SubagentSessionContext>) -> Self {
         self.subagent = subagent;
         self
     }
 
     /// The protocol's committed facts for this call.
     #[must_use]
-    pub fn with_protocol_facts(mut self, facts: Option<ProtocolPromptFacts>) -> Self {
+    pub(crate) fn with_protocol_facts(mut self, facts: Option<ProtocolPromptFacts>) -> Self {
         self.protocol = facts;
         self
     }
@@ -949,6 +953,23 @@ impl PromptCatalog {
         Ok(())
     }
 
+    /// How `plan` resolves for a `purpose` call offered `offered`: the
+    /// record [`resolve`](Self::resolve) would admit, with no renderer run.
+    /// A host previews its plan with it; nothing composes or records.
+    ///
+    /// # Errors
+    ///
+    /// [`PromptPlanError`], as [`resolve`](Self::resolve) refuses.
+    pub fn preview(
+        &self,
+        plan: &PromptPlan,
+        purpose: &PromptPurpose,
+        offered: &OfferedTools,
+    ) -> Result<ResolvedPromptPlan, PromptPlanError> {
+        self.resolve(plan, purpose, offered)
+            .map(|composition| composition.record)
+    }
+
     /// Resolve `plan` for a `purpose` call offered `offered`: the sections
     /// that render for it (each family contributing the sections its source
     /// derives from `offered`), the plan's order first and the rest in
@@ -963,7 +984,7 @@ impl PromptCatalog {
     /// [`PromptPlanError`] when the plan breaks its own rules, a source contributes
     /// an invalid section, or the call would exceed its section or wrapper
     /// count.
-    pub fn resolve(
+    pub(crate) fn resolve(
         &self,
         plan: &PromptPlan,
         purpose: &PromptPurpose,
@@ -1071,7 +1092,7 @@ struct ResolvedSectionRenderers {
 
 /// A resolved plan and the renderers it runs. Its [`record`](Self::record)
 /// is what a call admits.
-pub struct ResolvedPromptComposition {
+pub(crate) struct ResolvedPromptComposition {
     record: ResolvedPromptPlan,
     sections: Vec<ResolvedSectionRenderers>,
 }
@@ -1122,7 +1143,7 @@ fn run_site(
 }
 
 impl ResolvedPromptComposition {
-    pub fn record(&self) -> &ResolvedPromptPlan {
+    pub(crate) fn record(&self) -> &ResolvedPromptPlan {
         &self.record
     }
 
@@ -1142,7 +1163,7 @@ impl ResolvedPromptComposition {
     /// # Panics
     ///
     /// When `index` is not a section of the plan.
-    pub fn compose_section(
+    pub(crate) fn compose_section(
         &self,
         index: usize,
         cut: &PromptCut,

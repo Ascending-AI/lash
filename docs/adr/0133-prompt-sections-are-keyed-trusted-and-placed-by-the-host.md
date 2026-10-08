@@ -17,10 +17,12 @@ admits each call and `lash-core/src/runtime/turn_driver/prompt.rs` composes
 it. Exact provider bodies for every call kind, and the admission of
 compaction and direct calls under their owners (§6, §8), are on main
 (FIG-5259): `lash-core/src/runtime/turn_driver/prepare.rs` prepares a turn's
-call and `lash-core/src/runtime/owned_call.rs` admits an owned one. The rest
-is open work this decision depends on:
-
-- FIG-5260: deleting every other prompt route (§9).
+call and `lash-core/src/runtime/owned_call.rs` admits an owned one. Every
+other prompt route is deleted (§9, FIG-5260): only the runtime builds a
+call's cut and composes it, through `lash_core_execution::core_internal`
+(`prompt_cut`, `compose_prompt`); the facade exports neither, and a test
+composes through `lash::testing::prompt`. A resumed turn serves its recorded
+before-turn decisions (§6).
 
 ## Context
 
@@ -254,7 +256,9 @@ sent: renderers, wrappers and checkpoint callbacks must be repeat-safe until
 the call is admitted. After admission, a resend is the same call: it sends
 the admitted body, records nothing, and calls no renderer, wrapper,
 projector or hook, and a resume reinstalls the plugin state the admission
-committed before the turn continues. A composition that fails settles the
+committed before the turn continues. The turn's before-turn callback
+decisions commit with every phase's checkpoint, and a resumed turn is
+prepared from them: no before-turn callback runs once a phase has committed. A composition that fails settles the
 call unsent with `TurnFailureCode::PromptCompositionFailed`, and protocol
 facts that cannot be derived settle it with their own code. A live store
 fault aborts the activation instead; it admitted nothing, so the resume
@@ -322,8 +326,9 @@ tool's `round.outcome`), as a turn's call is through `model.done`.
 
 ### 9. One route
 
-Once the open work lands, no other route carries instruction text. The
-following are deleted:
+No other route carries instruction text. A host reads its catalog and
+previews its plan (`PromptCatalog::preview`); it cannot build a cut or
+compose. The following are deleted:
 
 - protocol system-prompt renderers;
 - `StandardPrompt` and the protocol prompt commands;
@@ -332,7 +337,10 @@ following are deleted:
   (deleted, FIG-5258);
 - `TurnContextTransform` (deleted, FIG-5258);
 - `RenderCompactionPrompt` (deleted, FIG-5259);
-- the direct-call instruction fields (deleted, FIG-5259).
+- the direct-call instruction fields (deleted, FIG-5259);
+- the public cut constructors and composition entry points, the
+  tool-contract markdown renderer, the turn checkpoint's synthetic-message
+  counter and the context-transform turn phase (deleted, FIG-5260).
 
 Formats change in place at version 1, with no flag, shim or legacy decoder.
 

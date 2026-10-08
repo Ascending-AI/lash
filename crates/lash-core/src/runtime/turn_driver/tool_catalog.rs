@@ -63,7 +63,7 @@ impl RuntimeTurnDriver<'_> {
         });
         self.mark_phase_end(RuntimeTurnPhase::PromptBuild);
         let mut machine = prepared.machine;
-        machine.adopt_prepared_messages(self.prelude.context.messages.clone(), true);
+        machine.adopt_prepared_messages(self.prelude.context.messages.clone());
         machine
     }
 

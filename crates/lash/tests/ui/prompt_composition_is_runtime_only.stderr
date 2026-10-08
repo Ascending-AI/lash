@@ -1,0 +1,53 @@
+error[E0432]: unresolved imports `lash::plugins::ComposedPrompt`, `lash::plugins::PromptCut`, `lash::plugins::PromptCutParts`, `lash::plugins::PromptRenderPool`
+ --> tests/ui/prompt_composition_is_runtime_only.rs:5:21
+  |
+5 | use lash::plugins::{ComposedPrompt, PromptCut, PromptCutParts, PromptRenderPool};
+  |                     ^^^^^^^^^^^^^^  ^^^^^^^^^  ^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^ no `PromptRenderPool` in `plugins`
+  |                     |               |          |
+  |                     |               |          no `PromptCutParts` in `plugins`
+  |                     |               no `PromptCut` in `plugins`
+  |                     no `ComposedPrompt` in `plugins`
+  |
+help: a similar name exists in the module
+  |
+5 - use lash::plugins::{ComposedPrompt, PromptCut, PromptCutParts, PromptRenderPool};
+5 + use lash::plugins::{ComposedPrompt, PromptCall, PromptCutParts, PromptRenderPool};
+  |
+help: a similar name exists in the module
+  |
+5 - use lash::plugins::{ComposedPrompt, PromptCut, PromptCutParts, PromptRenderPool};
+5 + use lash::plugins::{ComposedPrompt, PromptCut, PromptCutParts, PromptRenderError};
+  |
+
+error[E0624]: method `compose` is private
+ --> tests/ui/prompt_composition_is_runtime_only.rs:8:43
+  |
+8 |       let _ = lash::plugins::PromptCatalog::compose;
+  |                                             ^^^^^^^ private method
+  |
+ ::: $WORKSPACE/crates/lash-core-execution/src/plugin/prompt/composer.rs
+  |
+  | /     pub(crate) async fn compose(
+  | |         &self,
+  | |         plan: &PromptPlan,
+  | |         purpose: &PromptPurpose,
+  | |         cut: Arc<PromptCut>,
+  | |         pool: &PromptRenderPool,
+  | |     ) -> Result<ComposedPrompt, PromptCompositionError> {
+  | |_______________________________________________________- private method defined here
+
+error[E0624]: method `resolve` is private
+ --> tests/ui/prompt_composition_is_runtime_only.rs:9:43
+  |
+9 |       let _ = lash::plugins::PromptCatalog::resolve;
+  |                                             ^^^^^^^ private method
+  |
+ ::: $WORKSPACE/crates/lash-core-execution/src/plugin/prompt.rs
+  |
+  | /     pub(crate) fn resolve(
+  | |         &self,
+  | |         plan: &PromptPlan,
+  | |         purpose: &PromptPurpose,
+  | |         offered: &OfferedTools,
+  | |     ) -> Result<ResolvedPromptComposition, PromptPlanError> {
+  | |___________________________________________________________- private method defined here

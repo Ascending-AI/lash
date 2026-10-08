@@ -4,7 +4,7 @@
 # 1595 rows over 866 files, 3963 laws.
 # By class: mechanical 164, semantic 111, delete 866, replace 454.
 # By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 73, L9c 342, L9d 79, L9e 131, L9f 125, L9g 98, L9h 106, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 7, P5 2.
-# By status: todo 404, ported 91, deleted 1100.
+# By status: todo 403, ported 91, deleted 1101.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -427,8 +427,6 @@
 #   deferred search observation enables next block call; and 1 more law(s) of the file, by test name
 # - L9h: examples/agent-workbench/src/main_sections/tests/done_stream_items.rs
 #   done stream items are transient and not snapshotted; and 1 more law(s) of the file, by test name
-# - L9h: examples/agent-workbench/src/main_sections/tests/facade_homes.rs::workbench_context_transform_shapes_the_prompt_the_provider_receives
-#   workbench prompt sections shape the prompt the provider receives
 # - L9h: examples/agent-workbench/src/main_sections/tests/facade_homes.rs::workbench_plugin_observes_session_config_policy_transition
 #   workbench plugin observes session config policy transition
 # - L9h: examples/agent-workbench/src/main_sections/tests/mail_payload.rs::inject_message_scopes_emission_to_requested_session
@@ -16060,10 +16058,10 @@ lane = "L9h"
 laws = [
   "workbench_context_transform_shapes_the_prompt_the_provider_receives",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/prompt_sections.rs::workbench_prompt_sections_shape_the_prompt_the_provider_receives"
+status = "deleted"
 owed = "workbench prompt sections shape the prompt the provider receives"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. FIG-5258 replaced the workbench context transform with the agent_workbench sections; agent-workbench tests/prompt_sections.rs::workbench_prompt_sections_render_its_recorded_host_text_and_the_context_budget pins their rendered text, and the provider-request half is owed by FIG-5260"
+note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. FIG-5258 replaced the workbench context transform with the agent_workbench sections; agent-workbench tests/prompt_sections.rs::workbench_prompt_sections_render_its_recorded_host_text_and_the_context_budget pins their rendered text, and FIG-5260's law runs a turn and reads the call's recorded snapshot against the request the provider received"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/mail_payload.rs"

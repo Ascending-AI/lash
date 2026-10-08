@@ -23,9 +23,8 @@ cannot settle work, change admission or grant a host turn-executing authority.
 
 ## Fixed phases
 
-The current typed vocabulary is `ContextTransform`, `BeforeTurnHooks`,
-`PromptBuild`, `EffectLoop`, `PreparedTurn`, `CommittedTurn` and
-`PostCommitDelivery`. The definition is in
+The current typed vocabulary is `BeforeTurnHooks`, `PromptBuild`,
+`EffectLoop`, `PreparedTurn`, `CommittedTurn` and `PostCommitDelivery`. The definition is in
 `crates/lash-core-llm/src/turn_vocabulary.rs`. These are observation points in
 physical turn execution, not a persisted state machine. Cancellation, early
 returns and failure may skip phases or leave a begun phase without an end.
@@ -43,9 +42,8 @@ current naming forms:
   static string; dropping its guard emits the corresponding end, including
   when an async future is cancelled or unwinds.
 - Plugin dispatch uses `plugin_hook.{hook_kind}.{plugin_id}`. The current
-  kinds are `before_turn`, `after_turn`, `checkpoint`, `context_transform`,
-  `context_pressure`, `turn_finalized`, `session_restored`
-  and `session_config_changed`. The plugin id is appended verbatim, without
+  kinds are `before_turn`, `after_turn`, `checkpoint`, `context_pressure`,
+  `turn_finalized`, `session_restored` and `session_config_changed`. The plugin id is appended verbatim, without
   escaping, case conversion or normalization. It may contain dots; parsers
   must treat everything after the hook-kind separator as the id. For example,
   plugin `probe.fixture` produces `plugin_hook.before_turn.probe.fixture`.

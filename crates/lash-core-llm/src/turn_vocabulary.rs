@@ -26,7 +26,6 @@ macro_rules! define_runtime_turn_phases {
 }
 
 define_runtime_turn_phases!(
-    ContextTransform,
     BeforeTurnHooks,
     PromptBuild,
     EffectLoop,
