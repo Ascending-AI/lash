@@ -93,44 +93,83 @@ async fn valid_empty_terminal_completions_succeed_across_chat_and_responses() {
 
 #[tokio::test]
 async fn eof_tolerance_does_not_turn_empty_unterminated_streams_into_success() {
-    let compat = OpenAiCompat {
-        stream_termination: Some(StreamTermination::EofTolerated),
-        ..OpenAiCompat::openrouter()
-    };
-    let chat_transport = single_stream_transport(
-        "data: {\"choices\":[{\"delta\":{}}],\"usage\":{\"prompt_tokens\":3}}\n\n",
-    );
-    let mut chat = OpenAiCompatibleProvider::new("key", OPENROUTER_BASE_URL)
-        .with_compat(compat.clone())
-        .with_transport(Arc::clone(&chat_transport) as _);
-    let chat_error = chat
-        .complete(streamed_request(Arc::new(
-            std::sync::Mutex::new(Vec::new()),
-        )))
-        .await
-        .expect_err("empty Chat EOF without a finish reason remains malformed");
-    assert_eq!(
-        chat_error.code.as_ref().map(|code| code.to_string()),
-        Some("lash:empty_response".to_string())
-    );
-    assert_eq!(chat_transport.calls(), 1);
-
-    let responses_transport = single_stream_transport(
-        "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-empty-eof\",\"status\":\"in_progress\",\"output\":[],\"usage\":{\"input_tokens\":4}}}\n\n",
-    );
-    let mut responses =
-        OpenAiProvider::new("key").with_transport(Arc::clone(&responses_transport) as _);
-    let mut req = streamed_request(Arc::new(std::sync::Mutex::new(Vec::new())));
-    req.model.metadata_mut().capability.stream_termination = Some(StreamTermination::EofTolerated);
-    let responses_error = responses
-        .complete(req)
-        .await
-        .expect_err("empty Responses EOF without a terminal event remains malformed");
-    assert_eq!(
-        responses_error.code.as_ref().map(|code| code.to_string()),
-        Some("lash:empty_response".to_string())
-    );
-    assert_eq!(responses_transport.calls(), 1);
+    for streamed in [false, true] {
+        for (endpoint, body, code) in [
+            (
+                CompletionEndpoint::ChatCompletions,
+                "data: {\"choices\":[{\"delta\":{}}],\"usage\":{\"prompt_tokens\":3}}\n\n",
+                TurnFailureCode::StreamEndedBeforeFinishReason,
+            ),
+            (
+                CompletionEndpoint::Responses,
+                "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-empty-eof\",\"status\":\"in_progress\",\"output\":[],\"usage\":{\"input_tokens\":4}}}\n\n",
+                TurnFailureCode::StreamEndedBeforeTerminalResponse,
+            ),
+        ] {
+            let transport = Arc::new(ScriptedHttpTransport {
+                responses: std::sync::Mutex::new(VecDeque::from([(
+                    200,
+                    vec![(
+                        "content-type".into(),
+                        if streamed {
+                            "text/event-stream"
+                        } else {
+                            "application/json"
+                        }
+                        .into(),
+                    )],
+                    body,
+                )])),
+                calls: std::sync::atomic::AtomicUsize::new(0),
+            });
+            let mut provider: Box<dyn Provider> = match endpoint {
+                CompletionEndpoint::ChatCompletions => Box::new(
+                    OpenAiCompatibleProvider::new("key", OPENROUTER_BASE_URL)
+                        .with_compat(OpenAiCompat::openrouter())
+                        .with_transport(transport.clone()),
+                ),
+                CompletionEndpoint::Responses => {
+                    Box::new(OpenAiProvider::new("key").with_transport(transport.clone()))
+                }
+            };
+            let mut req = streamed_request(Arc::new(std::sync::Mutex::new(Vec::new())));
+            req.model.metadata_mut().capability.stream_termination =
+                Some(StreamTermination::EofTolerated);
+            let error = provider
+                .complete(req)
+                .await
+                .expect_err("empty EOF without terminal evidence must be retryable truncation");
+            assert_eq!(
+                error.code,
+                Some(code.into()),
+                "{endpoint:?} streamed={streamed}"
+            );
+            assert_eq!(error.kind, ProviderFailureKind::Stream);
+            assert_eq!(
+                error.retry_verdict,
+                TransportRetryVerdict::RetryableTransient
+            );
+            // Usage remains charge evidence even without generated content.
+            assert_eq!(
+                error.output_started,
+                endpoint == CompletionEndpoint::Responses
+            );
+            let partial = error
+                .partial_response
+                .expect("empty truncation keeps its evidence");
+            assert!(partial.parts.is_empty());
+            assert_eq!(partial.terminal_reason, LlmTerminalReason::Unknown);
+            assert_eq!(
+                partial.usage.input_tokens,
+                if endpoint == CompletionEndpoint::ChatCompletions {
+                    3
+                } else {
+                    4
+                }
+            );
+            assert_eq!(transport.calls(), 1);
+        }
+    }
 }
 
 async fn assert_empty_responses_stream_is_rejected(body: &'static str, description: &str) {

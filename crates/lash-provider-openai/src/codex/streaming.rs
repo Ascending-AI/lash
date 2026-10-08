@@ -445,7 +445,7 @@ impl CodexProvider {
         // tolerates.
         if !terminal_response_seen
             && (stream_termination == StreamTermination::RequireTerminalEvidence
-                || !state.output_started())
+                || !state.has_output())
         {
             let mut partial = shared::response_from_stream_state(
                 state.clone(),
@@ -931,7 +931,7 @@ impl CodexProvider {
 
         if !state.terminal_event_seen
             && (stream_termination == StreamTermination::RequireTerminalEvidence
-                || !state.output_started())
+                || !state.has_output())
         {
             seal_open_blocks(&mut state);
             let output_started = state.output_started();

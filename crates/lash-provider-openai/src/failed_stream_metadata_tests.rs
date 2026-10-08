@@ -44,11 +44,11 @@ async fn native_adapters_preserve_allowlisted_metadata_on_failed_streams() {
                 ),
             };
             let failure = provider
-                .complete(capturing(
+                .complete(requiring_terminal_evidence(capturing(
                     streamed_request(Arc::new(std::sync::Mutex::new(vec![]))),
                     &["X-Request-Cost"],
                     &["/cost", "/missing"],
-                ))
+                )))
                 .await
                 .expect_err("truncated and error streams fail");
             if explicit_error {

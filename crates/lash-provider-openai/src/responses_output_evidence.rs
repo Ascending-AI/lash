@@ -213,9 +213,9 @@ fn response_value_has_output_evidence(response: &Value) -> bool {
 }
 
 impl ResponsesStreamState {
-    /// Whether the provider generated billable output, even when the
-    /// accumulator cannot yet project it into a complete response part.
-    pub fn output_started(&self) -> bool {
+    /// Generated content, including output not yet projectable into a part.
+    /// Usage alone cannot make an unterminated stream a completion.
+    pub(crate) fn has_output(&self) -> bool {
         self.unrecognized_event_observed
             || self.streamed_item_content_received
             || self
@@ -229,12 +229,18 @@ impl ResponsesStreamState {
                 | LlmStreamEvent::ReasoningBlockEnd { text, .. } => !text.is_empty(),
                 _ => false,
             })
+            || self.parts.iter().any(part_has_output_evidence)
+            || self.pending_tool_call_has_output_evidence()
+    }
+
+    /// Whether the provider generated billable output, even when the
+    /// accumulator cannot yet project it into a complete response part.
+    pub fn output_started(&self) -> bool {
+        self.has_output()
             || self
                 .provider_usage
                 .as_ref()
                 .is_some_and(lash_core::llm::types::provider_usage_has_quantities)
             || self.usage != LlmUsage::default()
-            || self.parts.iter().any(part_has_output_evidence)
-            || self.pending_tool_call_has_output_evidence()
     }
 }

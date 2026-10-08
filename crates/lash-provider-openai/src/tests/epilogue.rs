@@ -52,9 +52,9 @@ async fn responses_completion_epilogue_conformance() {
                 EpilogueTransport::new(responses_epilogue_wire(scenario), streamed, scenario),
             ));
             provider
-                .complete(streamed_request(Arc::new(
+                .complete(requiring_terminal_evidence(streamed_request(Arc::new(
                     std::sync::Mutex::new(Vec::new()),
-                )))
+                ))))
                 .await
         })
         .await;
@@ -74,9 +74,9 @@ async fn codex_completion_epilogue_conformance() {
             scenario,
         )));
         provider
-            .complete(streamed_request(Arc::new(
+            .complete(requiring_terminal_evidence(streamed_request(Arc::new(
                 std::sync::Mutex::new(Vec::new()),
-            )))
+            ))))
             .await
     })
     .await;

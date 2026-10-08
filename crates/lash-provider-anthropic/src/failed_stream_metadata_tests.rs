@@ -12,6 +12,7 @@ async fn native_adapters_preserve_allowlisted_metadata_on_failed_streams() {
         ),
     ].into_iter().enumerate() {
         let mut provider = AnthropicProvider::new("key")
+            .with_stream_termination(StreamTermination::RequireTerminalEvidence)
             .with_transport(Arc::new(OwnedMetadataSseTransport(body)));
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
         req.stream_events = Some(LlmEventSender::new(|_| {}));

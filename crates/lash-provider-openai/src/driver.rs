@@ -797,8 +797,9 @@ fn complete_buffered_responses(
             .as_ref()
             .and_then(|response| response.get("status").and_then(Value::as_str))
             .is_some_and(|status| matches!(status, "completed" | "incomplete" | "failed"));
-    if stream_termination == Some(StreamTermination::RequireTerminalEvidence)
-        && !terminal_event_seen
+    if !terminal_event_seen
+        && (stream_termination == Some(StreamTermination::RequireTerminalEvidence)
+            || (body_was_sse && !state.has_output()))
     {
         let output_started = state.output_started();
         let mut partial = shared_response_from_state(state, http_summary);
@@ -952,12 +953,13 @@ fn complete_buffered_chat(
     }
     let body_was_sse = parsed_parts.is_none();
     let parts = parsed_parts.unwrap_or_else(|| state.parts());
-    if stream_termination == Some(StreamTermination::RequireTerminalEvidence)
-        && state
-            .execution_evidence
-            .as_ref()
-            .and_then(|evidence| evidence.provider_finish_reason.as_ref())
-            .is_none()
+    if state
+        .execution_evidence
+        .as_ref()
+        .and_then(|evidence| evidence.provider_finish_reason.as_ref())
+        .is_none()
+        && (stream_termination == Some(StreamTermination::RequireTerminalEvidence)
+            || (body_was_sse && parts.is_empty()))
     {
         state.final_response_raw = Some(text);
         return Err(LlmTransportError::new("Stream ended without finish_reason")
@@ -1212,8 +1214,7 @@ async fn drive_streaming_responses(
     // route tolerates EOF and it produced output; one that produced none
     // failed before it began, whatever the route tolerates.
     if !state.terminal_event_seen
-        && (stream_termination == StreamTermination::RequireTerminalEvidence
-            || !state.output_started())
+        && (stream_termination == StreamTermination::RequireTerminalEvidence || !state.has_output())
     {
         seal_open_blocks(&mut state);
         return Err(responses_stream_failure(
