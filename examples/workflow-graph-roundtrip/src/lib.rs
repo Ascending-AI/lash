@@ -120,8 +120,8 @@ impl AppState {
                     graph,
                 }],
             })),
+            commands: runtime::CommandClient::new(core.clone()),
             core,
-            commands: runtime::CommandClient,
         })
     }
 
@@ -315,7 +315,7 @@ async fn run_workflow(
         .publish(&state.core, &key)
         .await
         .map_err(RenderErrorResponse::run_preparation)?;
-    let started = state.commands.start(&key, request).await;
+    let started = state.commands.start(request).await;
     state
         .core
         .host_artifacts()
@@ -358,7 +358,7 @@ async fn signal_process(
         .map_err(RenderErrorResponse::run_preparation)?;
     state
         .commands
-        .signal(&id, lash::process::ProcessSignal::new(identity, payload))
+        .signal(lash::process::ProcessSignal::new(identity, payload))
         .await
         .map_err(RenderErrorResponse::run_preparation)?;
     Ok(Json(serde_json::json!({"accepted": true})))

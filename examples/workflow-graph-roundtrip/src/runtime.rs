@@ -529,27 +529,33 @@ pub fn core(backend: lash::Backend) -> lash::Result<LashCore> {
         ))
 }
 
-/// The host's process commands. A start or signal issues its effects in a
-/// journaled handler of the engine's deployment, and the durable engine
-/// lends one from L3 (FIG-5172); until then every command is refused.
+/// The host's process commands. A start or signal runs through the core's
+/// process API in the deployment's effect host.
 #[derive(Clone)]
-pub(crate) struct CommandClient;
+pub(crate) struct CommandClient(lash::LashCore);
 
 impl CommandClient {
-    pub(crate) async fn start(
-        &self,
-        key: &str,
-        _request: ProcessStartRequest,
-    ) -> Result<ProcessStartReceipt, RunError> {
-        Err(RunError::Invalid(format!(
-            "process start `{key}` has no engine handler to run in until L3 (FIG-5172)"
-        )))
+    pub(crate) fn new(core: lash::LashCore) -> Self {
+        Self(core)
     }
 
-    pub(crate) async fn signal(&self, key: &str, _signal: ProcessSignal) -> Result<(), RunError> {
-        Err(RunError::Invalid(format!(
-            "process signal `{key}` has no engine handler to run in until L3 (FIG-5172)"
-        )))
+    pub(crate) async fn start(
+        &self,
+        request: ProcessStartRequest,
+    ) -> Result<ProcessStartReceipt, RunError> {
+        Ok(self
+            .0
+            .processes()
+            .start(request, self.0.effect_host())
+            .await?)
+    }
+
+    pub(crate) async fn signal(&self, signal: ProcessSignal) -> Result<(), RunError> {
+        self.0
+            .processes()
+            .signal(signal, self.0.effect_host())
+            .await?;
+        Ok(())
     }
 }
 
