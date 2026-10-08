@@ -420,7 +420,9 @@ mod facade_construction;
 mod facade_turn;
 mod generation_policy;
 mod fixtures;
-use fixtures::AppTools;
+use fixtures::{AppTools, LongTextTools, RecordingEvents, SurfacePluginFactory};
+#[cfg(feature = "rlm")]
+use fixtures::{queued_text_provider, typescript_block};
 pub(crate) mod harness;
 mod node_drain;
 mod output_retention;
@@ -448,6 +450,7 @@ mod plugin_operations;
 mod plugin_reopen;
 mod provider_attempts;
 mod replay_origin;
+mod plugin_stack;
 mod recorded_execution_controls;
 mod recorded_protocol_prompt;
 mod recorded_request_defaults;
