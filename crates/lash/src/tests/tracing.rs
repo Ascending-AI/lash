@@ -47,7 +47,8 @@ impl Traced {
         let core = configure(
             explicit_ephemeral_facets(LashCore::standard_builder(backend))
                 .serve_test_llm_profile(provider, mock_llm_profile_spec())
-                .trace_jsonl_path(path.clone()),
+                .trace_jsonl_path(path.clone())
+                .telemetry_content(lash_trace::TelemetryContent::Captured),
         )
         .build(owner)?;
         Ok(Self {

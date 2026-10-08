@@ -74,6 +74,9 @@ impl LashCoreBuilder {
         if let Some(level) = self.trace_level.take() {
             core.tracing = core.tracing.clone().with_level(level);
         }
+        if let Some(content) = self.telemetry_content.take() {
+            core.tracing = core.tracing.clone().with_content(content);
+        }
         if let Some(context) = self.trace_context.take() {
             core.tracing = core.tracing.clone().with_base_context(context);
         }

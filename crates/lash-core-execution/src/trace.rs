@@ -332,7 +332,12 @@ pub(crate) fn trace_context_with_causal_ref(
     context
 }
 
-pub(crate) fn trace_llm_request(req: &LlmRequest) -> TraceLlmRequest {
+/// The request's identity under an omitted content policy, and its messages,
+/// tool contracts and output contract as well when content is captured.
+pub(crate) fn trace_llm_request(
+    req: &LlmRequest,
+    content: lash_trace::TelemetryContent,
+) -> TraceLlmRequest {
     TraceLlmRequest {
         model: req.model.wire_model().to_string(),
         model_variant: match &req.model.reasoning {
@@ -340,15 +345,15 @@ pub(crate) fn trace_llm_request(req: &LlmRequest) -> TraceLlmRequest {
             crate::ReasoningSelection::Disabled => Some("disabled".to_string()),
             crate::ReasoningSelection::Effort(effort) => Some(effort.clone()),
         },
-        messages: req.messages.iter().map(trace_llm_message).collect(),
-        tools: req.tools.iter().map(trace_tool_spec).collect(),
+        messages: content.capture(|| req.messages.iter().map(trace_llm_message).collect()),
+        tools: trace_tool_specs(&req.tools, content),
         tool_choice: match req.tool_choice {
             LlmToolChoice::Auto => "auto",
             LlmToolChoice::None => "none",
             LlmToolChoice::Required => "required",
         }
         .to_string(),
-        output_spec: req.output_spec.as_ref().map(trace_output_spec),
+        output_spec: content.capture(|| req.output_spec.as_ref().map(trace_output_spec)),
         stream: req.stream_events.is_some(),
     }
 }
@@ -366,6 +371,25 @@ fn trace_tool_spec(tool: &LlmToolSpec) -> TraceToolSpec {
         output_schema: serde_json::to_value(&tool.output_schema)
             .expect("SchemaContract serialization is infallible"),
     }
+}
+
+/// The offered tools by name, with their contracts when content is captured.
+fn trace_tool_specs(
+    tools: &[LlmToolSpec],
+    content: lash_trace::TelemetryContent,
+) -> Vec<TraceToolSpec> {
+    if content.is_captured() {
+        return tools.iter().map(trace_tool_spec).collect();
+    }
+    tools
+        .iter()
+        .map(|tool| TraceToolSpec {
+            name: tool.name.clone(),
+            description: String::new(),
+            input_schema: serde_json::Value::Null,
+            output_schema: serde_json::Value::Null,
+        })
+        .collect()
 }
 
 struct CompositionHashWriter(Blake3DomainHasher);
@@ -428,11 +452,15 @@ pub struct CompositionTraceSnapshot {
 pub fn trace_composition_snapshot(
     req: &LlmRequest,
     fingerprint: [u8; 32],
+    content: lash_trace::TelemetryContent,
 ) -> CompositionTraceSnapshot {
     #[cfg(any(test, feature = "testing"))]
-    COMPOSITION_SCHEMA_SERIALIZATIONS.with(|count| count.set(count.get() + 1));
-    let rendered_system_prompt = req.instructions.as_deref().unwrap_or_default().to_owned();
-    let tool_schemas = req.tools.iter().map(trace_tool_spec).collect::<Vec<_>>();
+    if content.is_captured() {
+        COMPOSITION_SCHEMA_SERIALIZATIONS.with(|count| count.set(count.get() + 1));
+    }
+    let rendered_system_prompt =
+        content.capture(|| req.instructions.as_deref().unwrap_or_default().to_owned());
+    let tool_schemas = trace_tool_specs(&req.tools, content);
     let fingerprint = fingerprint
         .iter()
         .map(|byte| format!("{byte:02x}"))
@@ -444,10 +472,17 @@ pub fn trace_composition_snapshot(
     }
 }
 
-pub(crate) fn trace_tool_call_output(output: &ToolCallOutput) -> lash_trace::TraceToolCallOutput {
+/// The call's result under the content policy. A success payload and the
+/// control are built only when content is captured; a failure or cancellation
+/// is reported whole, and the record's governing pass keeps its typed
+/// classification.
+pub(crate) fn trace_tool_call_output(
+    output: &ToolCallOutput,
+    content: lash_trace::TelemetryContent,
+) -> lash_trace::TraceToolCallOutput {
     let outcome = match &output.outcome {
         ToolCallOutcome::Success(value) => {
-            lash_trace::TraceToolCallOutcome::Success(value.to_json_value())
+            lash_trace::TraceToolCallOutcome::Success(content.capture(|| value.to_json_value()))
         }
         ToolCallOutcome::Failure(failure) => {
             lash_trace::TraceToolCallOutcome::Failure(failure.to_json_value())
@@ -458,10 +493,12 @@ pub(crate) fn trace_tool_call_output(output: &ToolCallOutput) -> lash_trace::Tra
     };
     lash_trace::TraceToolCallOutput {
         outcome,
-        control: output
-            .control
-            .as_ref()
-            .and_then(|control| serde_json::to_value(control).ok()),
+        control: content.capture(|| {
+            output
+                .control
+                .as_ref()
+                .and_then(|control| serde_json::to_value(control).ok())
+        }),
     }
 }
 

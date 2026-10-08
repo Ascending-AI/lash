@@ -398,6 +398,7 @@ fn fixture_record(context: crate::TraceContext, event: crate::TraceEvent) -> cra
         schema_version: crate::TRACE_SCHEMA_VERSION,
         id: "fixture-record".into(),
         timestamp: Default::default(),
+        content: crate::TelemetryContent::Captured,
         context,
         event,
     }

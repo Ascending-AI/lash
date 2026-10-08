@@ -80,12 +80,18 @@ Wake hints and diagnostics are not durable reliable event feeds. The
 process facts from node execution traces and shows how a host keeps a path
 for replay.
 
-Treat content capture consent, detail level, sampling and byte bounds as separate
-controls. Retain identities, outcomes, counts and omission evidence when content
-is disabled. With explicit content capture, retain original provider text within
-documented bounds. Correctness-required durable requests/results and app responses
-keep their existing contracts. Consult the selected sink's content contract rather
-than assuming the OpenTelemetry payload option governs passive sinks.
+One host telemetry content policy (`TelemetryContent`, default omitted) governs
+prompts, responses, instructions, tool arguments and results, and diagnostic or
+provider text on every built-in telemetry path: passive record sinks and the
+OpenTelemetry adapter alike. Consent, detail level, sampling and byte bounds are
+separate controls. With content omitted, records retain identities, outcomes,
+counts and an omission marker, and the content is never built. With explicit
+content capture, retain original provider text within documented bounds.
+Correctness-required durable requests/results and app responses keep their
+existing contracts. A new content-bearing trace field is emptied in
+`TraceEvent::omit_content`, and a site that would clone or serialize content
+builds it through `TelemetryContent::capture`. See
+[durable tracing](../architecture/tracing.md#telemetry-content).
 
 Tests pin a named rule or a demonstrated bug, not vocabulary snapshots or coverage
 counts.

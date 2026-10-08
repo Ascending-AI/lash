@@ -2,9 +2,7 @@
 #![cfg(feature = "otel-trace")]
 #![allow(dead_code)]
 
-use lash::tracing::{
-    OtelOptions, OtelPayloadExport, OtelSpanEnricher, OtelTelemetry, contract_markdown, otel,
-};
+use lash::tracing::{OtelOptions, OtelSpanEnricher, OtelTelemetry, contract_markdown, otel};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -29,10 +27,7 @@ where
         meter,
         OtelOptions {
             include_context_metadata: false,
-            payloads: OtelPayloadExport::Bounded {
-                max_record_bytes: 256,
-                max_events: 2,
-            },
+            max_payload_bytes: 256,
             enrich: Some(Arc::new(Enricher)),
             ..OtelOptions::standard()
         },

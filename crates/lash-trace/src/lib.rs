@@ -36,6 +36,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+mod content;
 mod content_block;
 mod domain;
 mod event;
@@ -47,6 +48,7 @@ mod lashlang_graph;
 pub mod otel;
 pub mod telemetry;
 
+pub use content::{CONTENT_POLICY_OMISSION, TelemetryContent};
 pub use content_block::{TraceContentBlock, TraceToolResultBlock};
 pub use domain::{
     TraceAttemptObservation, TraceDomainCompletion, TraceDomainOperation, TraceDomainStatus,
@@ -383,6 +385,9 @@ pub struct TraceRecord {
     pub id: String,
     #[serde(with = "trace_timestamp_serde")]
     pub timestamp: chrono::DateTime<chrono::Utc>,
+    /// Whether this record carries content or had it omitted under the
+    /// host's [`TelemetryContent`] policy: how to read an empty content field.
+    pub content: TelemetryContent,
     pub context: TraceContext,
     #[serde(flatten)]
     pub event: TraceEvent,
@@ -407,6 +412,7 @@ impl schemars::JsonSchema for TraceRecord {
             id: String,
             #[schemars(schema_with = "rfc3339_timestamp_schema")]
             timestamp: String,
+            content: TelemetryContent,
             context: TraceContext,
             #[serde(flatten)]
             event: TraceEvent,
@@ -426,6 +432,7 @@ struct TraceRecordWire {
     id: String,
     #[serde(with = "trace_timestamp_serde")]
     timestamp: chrono::DateTime<chrono::Utc>,
+    content: TelemetryContent,
     context: TraceContext,
     #[serde(flatten)]
     event: TraceEvent,
@@ -476,6 +483,7 @@ impl<'de> Deserialize<'de> for TraceRecord {
             schema_version: wire.schema_version,
             id: wire.id,
             timestamp: wire.timestamp,
+            content: wire.content,
             context: wire.context,
             event: wire.event,
         })
@@ -706,6 +714,8 @@ pub struct TraceLlmResponse {
 pub enum TraceProviderBodyOmission {
     SizeLimit,
     InvalidJson,
+    /// The host's [`TelemetryContent`] policy withheld it.
+    ContentPolicy,
 }
 
 /// One raw provider observation of a model call: the request Lash sent or

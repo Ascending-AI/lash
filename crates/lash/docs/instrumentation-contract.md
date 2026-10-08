@@ -59,7 +59,7 @@ Scope `lash`, version `1.0`. GenAI snapshot `b31e9e8ea26ac1c086d3313d474e31d7c3f
 | `lash.payload.json` | String |
 | `lash.payload.truncated` | Boolean |
 | `lash.payload.truncated_fields` | Integer |
-| `lash.events.omitted` | Integer |
+| `lash.content.omitted` | Boolean |
 | `lash.tool_intent.kind` | String |
 | `lash.tool_intent.refusal_reason` | String |
 | `lash.provider` | String |

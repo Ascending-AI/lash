@@ -1417,6 +1417,21 @@
         }
       ]
     },
+    "TelemetryContent": {
+      "description": "Whether built-in telemetry carries content.\n\nContent is what a session says, as opposed to what it did: prompts and\nmodel responses, rendered instructions and tool contracts, tool arguments\nand results, executed code and its output, raw provider payloads, and\ndiagnostic or provider text. One host choice governs all of it on every\nbuilt-in telemetry path: the records every [`TraceSink`](crate::TraceSink)\nreceives (JSONL, stderr, a tee, a host's own sink) and the adapter's\nprojection of them.\n\nThe policy is consent, not detail: [`TraceLevel`](crate::TraceLevel) still\nchooses which records exist, and byte bounds still cut what is captured.\nIt governs telemetry only. Durable requests and results, session history,\nproduct observations and the app's own responses keep their contracts.\n\nOpaque [`TraceEvent::Custom`] payloads are the emitting host's or plugin's\nown structured evidence and pass through unread; a producer that would put\ncontent in one consults the policy first.",
+      "oneOf": [
+        {
+          "const": "omitted",
+          "description": "Records keep identities, statuses, counts, hashes and durations.\nContent fields are empty, and [`TraceRecord::content`] says so.\n\n[`TraceRecord::content`]: crate::TraceRecord::content",
+          "type": "string"
+        },
+        {
+          "const": "captured",
+          "description": "Records carry the original text within the documented bounds. Nothing\nis scrubbed.",
+          "type": "string"
+        }
+      ]
+    },
     "TextProjectionMetadata": {
       "properties": {
         "limit_chars": {
@@ -3086,11 +3101,20 @@
     },
     "TraceProviderBodyOmission": {
       "description": "Why a provider observation's parsed `raw_json` view is absent although the\nraw bytes were observed.",
-      "enum": [
-        "size_limit",
-        "invalid_json"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "size_limit",
+            "invalid_json"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "content_policy",
+          "description": "The host's [`TelemetryContent`] policy withheld it.",
+          "type": "string"
+        }
+      ]
     },
     "TraceProviderEvent": {
       "description": "One raw provider observation of a model call: the request Lash sent or\none event of the provider's response.",
@@ -4985,6 +5009,9 @@
     }
   ],
   "properties": {
+    "content": {
+      "$ref": "#/$defs/TelemetryContent"
+    },
     "context": {
       "$ref": "#/$defs/TraceContext"
     },
@@ -5008,6 +5035,7 @@
     "schema_version",
     "id",
     "timestamp",
+    "content",
     "context"
   ],
   "title": "TraceRecord",

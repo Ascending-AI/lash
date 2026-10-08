@@ -520,6 +520,7 @@ async fn main() -> Result<()> {
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024)).tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate).execution_budgets(lash::ExecutionBudgets::recommended()).delta_coalescing(lash::DeltaCoalescing::recommended())
         .trace_jsonl_path(&trace_path)
         .trace_level(lash::tracing::TraceLevel::Extended)
+        .telemetry_content(lash::tracing::TelemetryContent::Captured)
         .trace_context(trace_context)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "rlm-smoke",

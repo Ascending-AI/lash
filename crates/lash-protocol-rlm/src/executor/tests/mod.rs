@@ -111,6 +111,7 @@ fn test_trace_with_clock(
     }
     let runtime = lash_core::trace::TraceRuntime::new(clock)
         .with_trace_sink(Arc::new(External(sink.clone())))
+        .with_content(lash_trace::TelemetryContent::Captured)
         .with_product_observer(sink);
     lash_core::plugin::PluginExecutionTrace::new(runtime.unreplayed(None))
 }

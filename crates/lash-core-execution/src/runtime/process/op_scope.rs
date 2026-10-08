@@ -119,6 +119,7 @@ impl<'scope> ProcessOpScope<'scope> {
                 schema_version: lash_trace::TRACE_SCHEMA_VERSION,
                 id: language_event.event_key.clone(),
                 timestamp: tracing.clock().timestamp_datetime(),
+                content: lash_trace::TelemetryContent::Captured,
                 context,
                 event,
             }

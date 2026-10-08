@@ -836,7 +836,13 @@ impl RuntimeTurnDriver<'_> {
                 // provider frame.
                 let oversized = matches!(direction, LlmProviderTraceDirection::Request { .. })
                     && raw.len() > trace.runtime().limits().provider_request_body_json_bytes;
-                let (raw_json, raw_json_omitted_reason) = if oversized {
+                // An omitted request body is never parsed; a response event
+                // is parsed for its item identity whatever the policy.
+                let omitted_request = !trace.content().is_captured()
+                    && matches!(direction, LlmProviderTraceDirection::Request { .. });
+                let (raw_json, raw_json_omitted_reason) = if omitted_request {
+                    (None, Some(TraceProviderBodyOmission::ContentPolicy))
+                } else if oversized {
                     (None, Some(TraceProviderBodyOmission::SizeLimit))
                 } else {
                     match serde_json::from_str::<serde_json::Value>(&raw) {

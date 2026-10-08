@@ -106,6 +106,7 @@ pub fn emit_tool_call_completed(
     duration_ms: u64,
 ) {
     let _ = tracing;
+    let content = standing.content();
     standing.observe(|| {
         (
             lash_trace::TraceContext::default(),
@@ -113,8 +114,8 @@ pub fn emit_tool_call_completed(
                 call_id: record.call_id.clone(),
                 provider_call_id: record.provider_call_id.clone(),
                 name: record.tool.clone(),
-                args: record.args.clone(),
-                output: crate::trace::trace_tool_call_output(&record.output),
+                args: content.capture(|| record.args.clone()),
+                output: crate::trace::trace_tool_call_output(&record.output, content),
                 duration_ms,
                 issuing_node_id: issuing_node_id.map(str::to_string),
                 attempts: (!attempts.is_empty()).then(|| attempts.to_vec()),

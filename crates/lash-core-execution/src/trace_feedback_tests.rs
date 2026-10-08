@@ -29,7 +29,8 @@ fn runtime_feedback_is_not_part_of_initial_composition_identity() {
     ));
     assert_eq!(trace_composition_key(&request, &[]), before);
     assert_eq!(
-        trace_composition_snapshot(&request, before).rendered_system_prompt,
+        trace_composition_snapshot(&request, before, lash_trace::TelemetryContent::Captured)
+            .rendered_system_prompt,
         "I"
     );
     request.instructions = Some(Arc::from("changed"));

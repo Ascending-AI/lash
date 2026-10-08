@@ -116,7 +116,11 @@ impl RuntimeTurnDriver<'_> {
                 .session
                 .record_composition_trace_fingerprint(fingerprint)
             {
-                let snapshot = crate::trace::trace_composition_snapshot(request, fingerprint);
+                let snapshot = crate::trace::trace_composition_snapshot(
+                    request,
+                    fingerprint,
+                    self.trace.content(),
+                );
                 self.emit_trace(machine.protocol_iteration(), || {
                     lash_trace::TraceEvent::CompositionChanged {
                         fingerprint: snapshot.fingerprint,

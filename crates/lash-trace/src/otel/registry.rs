@@ -81,7 +81,7 @@ attributes! {
     Payload => ("lash.payload.json", String),
     PayloadTruncated => ("lash.payload.truncated", Boolean),
     PayloadsTruncated => ("lash.payload.truncated_fields", Integer),
-    EventsOmitted => ("lash.events.omitted", Integer),
+    ContentOmitted => ("lash.content.omitted", Boolean),
     ToolIntentKind => ("lash.tool_intent.kind", String),
     ToolIntentRefusal => ("lash.tool_intent.refusal_reason", String),
     Provider => ("lash.provider", String),

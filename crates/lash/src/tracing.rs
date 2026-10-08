@@ -45,8 +45,11 @@ pub use lash_trace::otel::registry::{
     contract_markdown,
 };
 #[cfg(feature = "otel-trace")]
-pub use lash_trace::otel::{
-    OtelAdmissionLimits, OtelOptions, OtelPayloadExport, OtelSpanEnricher, OtelTelemetry,
+pub use lash_trace::otel::{OtelAdmissionLimits, OtelOptions, OtelSpanEnricher, OtelTelemetry};
+pub use lash_trace::{
+    CONTENT_POLICY_OMISSION, ObservationWorkLimits, StderrTraceSink, TeeTraceSink,
+    TelemetryContent, TraceContext, TraceLevel, TraceLimits, TraceSink, TraceToolCallOutcome,
+    TraceToolCallOutput,
 };
 /// Every type reachable from a [`TraceEvent`] payload, so a facade consumer
 /// can name — match on, take in a signature, or build in a test — what a
@@ -72,8 +75,4 @@ pub use lash_trace::{
     TraceRetryDeclineCause, TraceRetryWait, TraceStoreErrorClass, TraceToolAttemptOutcome,
     TraceToolCallStatus, TraceTurnCancellationEvidence, TraceTurnCompletionReason,
     TraceTurnFailureReason, TraceTurnOutcome, fold_lashlang_graph,
-};
-pub use lash_trace::{
-    ObservationWorkLimits, StderrTraceSink, TeeTraceSink, TraceContext, TraceLevel, TraceLimits,
-    TraceSink, TraceToolCallOutcome, TraceToolCallOutput,
 };

@@ -606,13 +606,13 @@ pub use lash_sansio::{
 };
 
 #[cfg(feature = "otel-trace")]
-pub use lash_trace::otel::{OtelOptions, OtelPayloadExport, OtelSpanEnricher, OtelTelemetry};
+pub use lash_trace::otel::{OtelOptions, OtelSpanEnricher, OtelTelemetry};
 pub use lash_trace::{
     DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier, InvalidTraceLinks,
-    TraceAdmissionCandidate, TraceAnchor, TraceAttemptId, TraceCandidateOutcome, TraceCarrier,
-    TraceCause, TraceHostOperation, TraceLinks, TraceScopeAdmission, TraceScopeFactory,
-    TraceScopeId, TraceScopeKind, TraceScopeOffer, TraceScopeOwner, UntracedScopes, W3cSpanId,
-    W3cTraceFlags, W3cTraceId, W3cTraceState,
+    TelemetryContent, TraceAdmissionCandidate, TraceAnchor, TraceAttemptId, TraceCandidateOutcome,
+    TraceCarrier, TraceCause, TraceHostOperation, TraceLinks, TraceScopeAdmission,
+    TraceScopeFactory, TraceScopeId, TraceScopeKind, TraceScopeOffer, TraceScopeOwner,
+    UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
 };
 pub use lash_trace::{
     TraceAttachment, TraceContentBlock, TraceContext, TraceEffectEnvelopeDiffEntry,

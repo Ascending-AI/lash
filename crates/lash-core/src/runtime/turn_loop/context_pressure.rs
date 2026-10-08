@@ -264,6 +264,8 @@ impl LashRuntime {
         // redrive finds the head in the new frame and opens nothing.
         let tracing = &self.host.core.tracing;
         if tracing.is_observed() {
+            // The task is model-facing text; the rest is the frame's identity.
+            let task = tracing.content().capture(|| Some(task));
             tracing
                 .unreplayed(committing.trace_scope().cloned())
                 .observe(|| {

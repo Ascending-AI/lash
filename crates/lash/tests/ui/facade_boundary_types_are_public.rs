@@ -388,12 +388,11 @@ fn telemetry_types_are_nameable(
 ) -> lash::LashCoreBuilder {
     use lash::tracing::{
         GEN_AI_SEMCONV_SNAPSHOT, LASH_INSTRUMENTATION_CONTRACT, LASH_INSTRUMENTATION_NAME,
-        OtelOptions, OtelPayloadExport, OtelSpanEnricher, TelemetryMetrics, contract_markdown,
-        otel,
+        OtelOptions, OtelSpanEnricher, TelemetryMetrics, contract_markdown, otel,
     };
     let _: &OtelOptions = telemetry.options();
     let _: &TelemetryMetrics = telemetry.metrics();
-    let _: OtelPayloadExport = OtelPayloadExport::Off;
+    let _: usize = telemetry.options().max_payload_bytes;
     let _: Option<Arc<dyn OtelSpanEnricher>> = None;
     let _: Option<otel::trace::SpanContext> = None;
     let _: fn() -> String = contract_markdown;

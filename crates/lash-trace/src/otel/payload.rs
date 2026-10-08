@@ -1,4 +1,4 @@
-use super::{OtelOptions, OtelPayloadExport, registry::AttributeKey as A};
+use super::{OtelOptions, registry::AttributeKey as A};
 use crate::TraceRecord;
 use opentelemetry::KeyValue;
 use std::io::{self, Write};
@@ -43,14 +43,10 @@ impl Write for BoundedWriter {
     }
 }
 
+/// Context metadata is the host's own opt-in; the event payload follows the
+/// record's content marker, and an omitted one is never serialized.
 pub(super) fn attributes(record: &TraceRecord, options: &OtelOptions, out: &mut Vec<KeyValue>) {
-    let (mut remaining, events) = match options.payloads {
-        OtelPayloadExport::Off => (4096, 0),
-        OtelPayloadExport::Bounded {
-            max_record_bytes,
-            max_events,
-        } => (max_record_bytes, max_events),
-    };
+    let mut remaining = options.max_payload_bytes;
     let mut truncated = 0_i64;
     if options.include_context_metadata {
         let mut writer = BoundedWriter::new(remaining);
@@ -59,15 +55,13 @@ pub(super) fn attributes(record: &TraceRecord, options: &OtelOptions, out: &mut 
         truncated += i64::from(writer.truncated);
         out.push(A::ContextMetadata.value(writer.finish()));
     }
-    if let OtelPayloadExport::Bounded { .. } = options.payloads {
-        if events == 0 {
-            out.push(A::EventsOmitted.value(1_i64));
-        } else {
-            let mut writer = BoundedWriter::new(remaining);
-            let _ = serde_json::to_writer(&mut writer, &record.event);
-            truncated += i64::from(writer.truncated);
-            out.push(A::Payload.value(writer.finish()));
-        }
+    if record.content.is_captured() {
+        let mut writer = BoundedWriter::new(remaining);
+        let _ = serde_json::to_writer(&mut writer, &record.event);
+        truncated += i64::from(writer.truncated);
+        out.push(A::Payload.value(writer.finish()));
+    } else {
+        out.push(A::ContentOmitted.value(true));
     }
     if truncated != 0 {
         out.push(A::PayloadTruncated.value(true));

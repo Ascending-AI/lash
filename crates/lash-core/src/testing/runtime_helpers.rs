@@ -406,7 +406,8 @@ pub fn test_host_config_with_trace_path(
     config.tracing = config
         .tracing
         .clone()
-        .with_trace_sink(Arc::new(lash_trace::JsonlTraceSink::new(path)));
+        .with_trace_sink(Arc::new(lash_trace::JsonlTraceSink::new(path)))
+        .with_content(lash_trace::TelemetryContent::Captured);
     EmbeddedRuntimeHost::new(config)
 }
 
@@ -418,7 +419,8 @@ pub fn test_host_config_with_trace_path_and_stream_events(
     config.tracing = config
         .tracing
         .clone()
-        .with_trace_sink(Arc::new(lash_trace::JsonlTraceSink::new(path)));
+        .with_trace_sink(Arc::new(lash_trace::JsonlTraceSink::new(path)))
+        .with_content(lash_trace::TelemetryContent::Captured);
     config.tracing = config
         .tracing
         .clone()

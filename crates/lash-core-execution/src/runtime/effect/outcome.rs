@@ -14,11 +14,12 @@ pub fn emit_llm_trace_started(
     context: lash_trace::TraceContext,
     request: &CoreLlmRequest,
 ) {
+    let content = standing.content();
     standing.observe(|| {
         (
             context,
             lash_trace::TraceEvent::LlmCallStarted {
-                request: crate::trace::trace_llm_request(request),
+                request: crate::trace::trace_llm_request(request, content),
             },
         )
     });
@@ -34,16 +35,17 @@ pub fn emit_llm_trace_completed(
     call_record: Option<&crate::LlmCallRecord>,
 ) {
     super::emit_provider_replay_drops(standing, &context, call_record);
+    let content = standing.content();
     standing.observe(|| {
         (
             context,
             lash_trace::TraceEvent::LlmCallCompleted {
                 response: crate::trace::trace_llm_response(
-                    response.full_text(),
+                    content.capture(|| response.full_text()),
                     duration_ms,
                     request_model.to_string(),
                     Some(response.terminal_reason),
-                    &response.parts,
+                    content.capture(|| response.parts.as_slice()),
                     response.generation_disposition,
                 ),
                 usage: Some(response.usage.clone()),

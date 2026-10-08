@@ -102,6 +102,7 @@ impl RuntimeExecutionContext<'_> {
         };
         let context = tracing.scope_context.clone();
         let issuing_node = self.issuing_language_node_id.as_deref().map(str::to_string);
+        let content = tracing.runtime.content();
         self.coordination_standing(tracing)
             .under(scope.clone())
             .observe(|| {
@@ -111,7 +112,7 @@ impl RuntimeExecutionContext<'_> {
                         call_id: start.call_id.clone(),
                         provider_call_id: start.provider_call_id.map(str::to_owned),
                         name: start.tool.to_owned(),
-                        args: start.args.clone(),
+                        args: content.capture(|| start.args.clone()),
                         issuing_node_id: issuing_node,
                     },
                 )
@@ -141,6 +142,7 @@ impl RuntimeExecutionContext<'_> {
             .timestamp_ms()
             .saturating_sub(scope.started_at_ms);
         let issuing_node = self.issuing_language_node_id.as_deref().map(str::to_string);
+        let content = tracing.runtime.content();
         self.coordination_standing(tracing)
             .under(scope)
             .observe(|| {
@@ -150,8 +152,8 @@ impl RuntimeExecutionContext<'_> {
                         call_id: record.call_id.clone(),
                         provider_call_id: record.provider_call_id.clone(),
                         name: record.tool.clone(),
-                        args: record.args.clone(),
-                        output: crate::trace::trace_tool_call_output(&record.output),
+                        args: content.capture(|| record.args.clone()),
+                        output: crate::trace::trace_tool_call_output(&record.output, content),
                         duration_ms,
                         issuing_node_id: issuing_node,
                         attempts: (!attempts.is_empty()).then(|| attempts.to_vec()),

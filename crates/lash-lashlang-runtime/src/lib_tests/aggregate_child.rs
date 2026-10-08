@@ -11,6 +11,7 @@ fn product_record(event: lash_trace::TraceEvent) -> lash_trace::TraceRecord {
         schema_version: lash_trace::TRACE_SCHEMA_VERSION,
         id: language.event_key.clone(),
         timestamp: lash_core::Clock::timestamp_datetime(&lash_core::testing::TestClock::new(0)),
+        content: lash_trace::TelemetryContent::Captured,
         context: lash_trace::TraceContext::default(),
         event,
     }

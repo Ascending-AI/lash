@@ -35,17 +35,6 @@ pub use crate::telemetry::metrics::{
 use registry::{AttributeKey as A, DomainSpan, Ownership};
 pub use registry::{GEN_AI_SEMCONV_SNAPSHOT, LASH_INSTRUMENTATION_CONTRACT};
 
-/// Payload and extended-event export is explicit and bounded per record.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum OtelPayloadExport {
-    #[default]
-    Off,
-    Bounded {
-        max_record_bytes: usize,
-        max_events: usize,
-    },
-}
-
 /// Host naming and attribute customization over the typed domain record.
 pub trait OtelSpanEnricher: Send + Sync {
     fn span_name(&self, _default: &'static str, _record: &TraceRecord) -> Option<String> {
@@ -58,7 +47,11 @@ pub trait OtelSpanEnricher: Send + Sync {
 pub struct OtelOptions {
     pub admission_limits: OtelAdmissionLimits,
     pub include_context_metadata: bool,
-    pub payloads: OtelPayloadExport,
+    /// Bytes of one record's exported JSON: its context metadata, when
+    /// included, and its event payload. Whether a payload is exported at all
+    /// follows the host's [`TelemetryContent`](crate::TelemetryContent)
+    /// policy, read from [`TraceRecord::content`].
+    pub max_payload_bytes: usize,
     pub enrich: Option<Arc<dyn OtelSpanEnricher>>,
 }
 
@@ -95,14 +88,15 @@ impl Default for OtelAdmissionLimits {
     }
 }
 impl OtelOptions {
-    /// Standard preset: payloads off, metadata excluded, no enrichment and
-    /// [`OtelAdmissionLimits::standard`] working capacities. Export remains opt-in
-    /// through installing this adapter; its capacities lack workload measurements.
+    /// Standard preset: metadata excluded, 4096 payload bytes per record, no
+    /// enrichment and [`OtelAdmissionLimits::standard`] working capacities.
+    /// Export remains opt-in through installing this adapter; its capacities
+    /// lack workload measurements.
     pub fn standard() -> Self {
         Self {
             admission_limits: OtelAdmissionLimits::standard(),
             include_context_metadata: false,
-            payloads: OtelPayloadExport::Off,
+            max_payload_bytes: 4096,
             enrich: None,
         }
     }

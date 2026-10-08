@@ -460,6 +460,7 @@ impl PluginExecutionTrace {
                 schema_version: lash_trace::TRACE_SCHEMA_VERSION,
                 id: event_key.to_string(),
                 timestamp: self.trace_runtime().clock().timestamp_datetime(),
+                content: lash_trace::TelemetryContent::Captured,
                 context,
                 event,
             }

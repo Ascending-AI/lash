@@ -363,8 +363,9 @@ impl RuntimeTurnDriver<'_> {
         let code_correlation_id = TurnActivityId::new(format!("code:{id:?}"));
         let iteration = machine.protocol_iteration();
         if self.trace.is_observed() {
+            let content = self.trace.content();
             self.emit_trace(iteration, || lash_trace::TraceEvent::ExecCodeStarted {
-                code: code.clone(),
+                code: content.capture(|| code.clone()),
                 code_chars: code.chars().count(),
             });
         }
@@ -574,14 +575,15 @@ impl RuntimeTurnDriver<'_> {
                         },
                     })
                     .collect::<Vec<_>>();
+                let content = self.trace.content();
                 self.emit_trace(iteration, || lash_trace::TraceEvent::ExecCodeCompleted {
                     duration_ms: cell_duration_ms,
-                    output: observations_text.clone(),
+                    output: content.capture(|| observations_text.clone()),
                     output_chars: observations_text.chars().count(),
                     observation_count: output.observations.len(),
                     observation_projections: observation_projections.clone(),
                     error: output.error.clone(),
-                    terminal_finish: output.terminal_finish.clone(),
+                    terminal_finish: content.capture(|| output.terminal_finish.clone()),
                     tool_calls,
                 });
                 if !observation_projections.is_empty() {

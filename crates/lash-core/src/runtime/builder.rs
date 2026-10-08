@@ -102,6 +102,11 @@ impl EmbeddedRuntimeBuilder {
         self
     }
 
+    pub fn with_telemetry_content(mut self, content: lash_trace::TelemetryContent) -> Self {
+        self.core.tracing = self.core.tracing.clone().with_content(content);
+        self
+    }
+
     pub fn with_trace_context(mut self, context: lash_trace::TraceContext) -> Self {
         self.core.tracing = self.core.tracing.clone().with_base_context(context);
         self

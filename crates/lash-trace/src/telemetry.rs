@@ -1131,7 +1131,8 @@ impl crate::TraceRecord {
 
     /// A record whose id is its [`TraceRecordIdentity`] and whose timestamp is
     /// the retained time of the fact it reports, so reconstructing the fact
-    /// rebuilds the same record.
+    /// rebuilds the same record. It carries `event` as built
+    /// ([`Self::governed`] applies a content policy).
     pub fn identified(
         identity: &TraceRecordIdentity,
         context: crate::TraceContext,
@@ -1142,9 +1143,24 @@ impl crate::TraceRecord {
             schema_version: crate::TRACE_SCHEMA_VERSION,
             id: identity.record_id()?,
             timestamp,
+            content: crate::TelemetryContent::Captured,
             context,
             event,
         })
+    }
+
+    /// This record under the host's content policy: as built when content is
+    /// captured, and with every content field emptied
+    /// ([`TraceEvent::omit_content`](crate::TraceEvent::omit_content)) and
+    /// the record marked when it is omitted. Every record the runtime hands a
+    /// sink or the adapter passes through here.
+    #[must_use]
+    pub fn governed(mut self, content: crate::TelemetryContent) -> Self {
+        if !content.is_captured() {
+            self.event.omit_content();
+            self.content = crate::TelemetryContent::Omitted;
+        }
+        self
     }
 }
 

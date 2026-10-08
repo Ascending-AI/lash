@@ -46,7 +46,12 @@ fn admit(adapter: &OtelTelemetry, cause: TraceCause) -> DurableTraceScope {
         started_at_ms: 1000,
     }
 }
+/// A record as the runtime hands it over under the standard content policy.
 fn record(scope: &DurableTraceScope, event: TraceEvent, terminal_ms: u64) -> TraceRecord {
+    captured_record(scope, event, terminal_ms).governed(crate::TelemetryContent::standard())
+}
+/// A record as built: what a host that captures content hands over.
+fn captured_record(scope: &DurableTraceScope, event: TraceEvent, terminal_ms: u64) -> TraceRecord {
     let identity = TraceRecordIdentity::Transition {
         scope: scope.scope.clone(),
         transition: TraceTransitionKind::Terminal,
@@ -520,10 +525,7 @@ fn disabled_replay_and_unsampled_paths_do_not_serialize_payloads() {
         &meter,
         OtelOptions {
             include_context_metadata: true,
-            payloads: OtelPayloadExport::Bounded {
-                max_record_bytes: 32,
-                max_events: 1,
-            },
+            max_payload_bytes: 32,
             enrich: Some(Arc::new(EnrichmentSpy(count.clone()))),
             ..OtelOptions::standard()
         },
@@ -613,16 +615,14 @@ fn payload_limits_and_permit_classes_are_enforced() {
         &meter,
         OtelOptions {
             include_context_metadata: true,
-            payloads: OtelPayloadExport::Bounded {
-                max_record_bytes: 13,
-                max_events: 1,
-            },
+            max_payload_bytes: 13,
             enrich: None,
             ..OtelOptions::standard()
         },
     );
     let scope = admit(&adapter, TraceCause::Root);
     let mut event = completed(&scope);
+    event.content = crate::TelemetryContent::Captured;
     event
         .context
         .metadata
@@ -868,8 +868,23 @@ fn tool_wait_and_code_completions_use_explicit_scope_and_local_leaf_durations() 
             8700,
         ),
     ];
+    // FIG-5530: the adapter exports what the host's content policy left in the
+    // record. An omitted record keeps its name, times and status, says its
+    // content was omitted, and exports no payload and no content text.
+    let text = |span: &opentelemetry_sdk::trace::SpanData| {
+        span.attributes
+            .iter()
+            .map(|a| format!("{}={}", a.key, a.value))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let mut captured_tool = None;
     for (event, source, name, start) in events {
-        let event = record(&scope, event, 9000);
+        let built = captured_record(&scope, event, 9000);
+        if matches!(built.event, TraceEvent::ToolCallCompleted { .. }) {
+            captured_tool = Some((built.clone(), source.clone()));
+        }
+        let event = built.governed(crate::TelemetryContent::Omitted);
         adapter.project(&scope, None, &source, &event);
         let spans = exporter.get_finished_spans().unwrap();
         let span = spans.last().unwrap();
@@ -886,8 +901,28 @@ fn tool_wait_and_code_completions_use_explicit_scope_and_local_leaf_durations() 
                 .iter()
                 .any(|a| a.key.as_str() == A::Payload.definition().key)
         );
+        assert!(span.attributes.contains(&A::ContentOmitted.value(true)));
+        assert!(
+            !text(span).contains("hidden") && !text(span).contains("secret"),
+            "{}",
+            text(span)
+        );
     }
     assert_eq!(exporter.get_finished_spans().unwrap().len(), 5);
+
+    // The same tool completion under a captured policy exports its payload.
+    let (captured, source) = captured_tool.expect("tool completion");
+    adapter.project(
+        &scope,
+        None,
+        &source,
+        &captured.governed(crate::TelemetryContent::Captured),
+    );
+    let spans = exporter.get_finished_spans().unwrap();
+    let span = spans.last().unwrap();
+    assert_eq!(span.name, "execute_tool unfamiliar-tool");
+    assert!(!span.attributes.contains(&A::ContentOmitted.value(true)));
+    assert!(text(span).contains("hidden"), "{}", text(span));
 }
 
 #[test]

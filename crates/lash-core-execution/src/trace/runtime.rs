@@ -18,10 +18,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use lash_trace::{
-    AttemptObservation, DurableTraceScope, EmissionPermit, TraceAnchor, TraceAttemptId, TraceCause,
-    TraceContext, TraceDomainProjector, TraceEvent, TraceLevel, TraceRecord, TraceRecordIdentity,
-    TraceScopeFactory, TraceScopeId, TraceScopeOwner, TraceSink, TraceTransitionKind,
-    UntracedScopes, telemetry::metrics::TelemetryMetrics,
+    AttemptObservation, DurableTraceScope, EmissionPermit, TelemetryContent, TraceAnchor,
+    TraceAttemptId, TraceCause, TraceContext, TraceDomainProjector, TraceEvent, TraceLevel,
+    TraceRecord, TraceRecordIdentity, TraceScopeFactory, TraceScopeId, TraceScopeOwner, TraceSink,
+    TraceTransitionKind, UntracedScopes, telemetry::metrics::TelemetryMetrics,
 };
 
 /// The runtime's shared trace handle: the scope factory, the clock, the
@@ -103,6 +103,19 @@ impl TraceRuntime {
 
     pub fn level(&self) -> TraceLevel {
         self.parts.level
+    }
+
+    /// The host's telemetry content policy: [`TelemetryContent::standard`]
+    /// (omitted) unless the host opted in.
+    pub fn content(&self) -> TelemetryContent {
+        self.parts.emitter.content
+    }
+
+    /// States whether records to the sinks and the adapter carry content.
+    #[must_use]
+    pub fn with_content(mut self, content: TelemetryContent) -> Self {
+        Arc::make_mut(&mut self.parts).emitter.content = content;
+        self
     }
 
     /// The host's run metadata, merged under every record's own context.
@@ -278,6 +291,7 @@ impl std::fmt::Debug for TraceRuntime {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TraceRuntime")
             .field("level", &self.parts.level)
+            .field("content", &self.content())
             .field("observed", &self.is_observed())
             .finish_non_exhaustive()
     }
@@ -291,6 +305,8 @@ pub struct TraceEmitter {
     sink_failures: Arc<[Arc<Mutex<u64>>]>,
     projector: Option<Arc<dyn TraceDomainProjector>>,
     product: Option<Arc<dyn TraceSink>>,
+    /// Applied to every record before a sink or the projector sees it.
+    content: TelemetryContent,
 }
 
 impl TraceEmitter {
@@ -338,7 +354,7 @@ impl TraceEmitter {
         }
         let (context, event) = record();
         let record = match TraceRecord::identified(&identity(), context, event, datetime(at_ms)) {
-            Ok(record) => record,
+            Ok(record) => record.governed(self.content),
             Err(error) => {
                 tracing::warn!(%error, "failed to derive a trace record identity");
                 return;
@@ -365,7 +381,7 @@ impl TraceEmitter {
         }
         let (context, event) = record();
         match TraceRecord::identified(&identity(), context, event, datetime(at_ms)) {
-            Ok(record) => self.append(&record),
+            Ok(record) => self.append(&record.governed(self.content)),
             Err(error) => tracing::warn!(%error, "failed to derive unscoped observation identity"),
         }
     }
@@ -759,6 +775,13 @@ impl TraceStanding {
         self.runtime.parts.level
     }
 
+    /// The host's telemetry content policy. A site that would clone, render
+    /// or serialize content for a record builds it through
+    /// [`TelemetryContent::capture`], so omitted content costs nothing.
+    pub fn content(&self) -> TelemetryContent {
+        self.runtime.content()
+    }
+
     pub fn scope(&self) -> Option<&DurableTraceScope> {
         self.scope.as_deref()
     }
@@ -1033,6 +1056,7 @@ mod diagnostic_tests {
             schema_version: lash_trace::TRACE_SCHEMA_VERSION,
             id: "sink-law".into(),
             timestamp: Default::default(),
+            content: TelemetryContent::Captured,
             context: TraceContext::default(),
             event: TraceEvent::TurnStarted {
                 metadata: Default::default(),

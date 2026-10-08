@@ -647,6 +647,7 @@ pub struct LashCoreBuilder {
     #[cfg(feature = "otel-trace")]
     telemetry: Option<lash_trace::otel::OtelTelemetry>,
     trace_level: Option<lash_trace::TraceLevel>,
+    telemetry_content: Option<lash_trace::TelemetryContent>,
     trace_limits: Option<crate::tracing::TraceLimits>,
     observation_work_limits: crate::tracing::ObservationWorkLimits,
     trace_context: Option<lash_trace::TraceContext>,
@@ -712,6 +713,7 @@ impl LashCoreBuilder {
             #[cfg(feature = "otel-trace")]
             telemetry: None,
             trace_level: None,
+            telemetry_content: None,
             trace_limits: None,
             observation_work_limits: Default::default(),
             trace_context: None,
@@ -913,6 +915,18 @@ impl LashCoreBuilder {
 
     pub fn trace_level(mut self, trace_level: lash_trace::TraceLevel) -> Self {
         self.trace_level = Some(trace_level);
+        self
+    }
+
+    /// State whether built-in telemetry carries content: prompts, responses,
+    /// rendered instructions, tool arguments and results, executed code and
+    /// diagnostic or provider text. One choice governs every record sink and
+    /// the telemetry adapter. Defaults to
+    /// [`crate::tracing::TelemetryContent::standard`] (omitted): records keep
+    /// identities, statuses and counts. It never changes what a session
+    /// stores or returns.
+    pub fn telemetry_content(mut self, content: crate::tracing::TelemetryContent) -> Self {
+        self.telemetry_content = Some(content);
         self
     }
 

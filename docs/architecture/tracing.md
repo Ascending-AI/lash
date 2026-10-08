@@ -10,8 +10,42 @@ every plugin with its clock, scope, emitter and metric instruments.
 The [instrumentation contract](../../crates/lash/docs/instrumentation-contract.md)
 lists the registered spans, attributes and metrics. It describes what the
 adapter can project, rather than proving that every engine producer emits
-those observations. Arbitrary metadata and payload export are off by default.
-An explicit payload option bounds exported bytes and events.
+those observations. Arbitrary context metadata is off by default.
+
+## Telemetry content
+
+One host setting, `LashCoreBuilder::telemetry_content`, states whether built-in
+telemetry carries content: prompts and model responses, rendered instructions
+and tool contracts, tool arguments and results, executed code and its output,
+raw provider and protocol-step payloads, and diagnostic or provider text. It
+defaults to
+`TelemetryContent::Omitted`. The runtime applies it to every record before a
+`TraceSink` (JSONL, stderr, a tee, a host's own sink) or the adapter sees it,
+so every path shares the choice.
+
+| | `Omitted` (default) | `Captured` |
+| --- | --- | --- |
+| Record marker | `"content": "omitted"` | `"content": "captured"` |
+| Identities, statuses, counts, hashes, durations, usage | kept | kept |
+| Content fields | empty (`""`, `null`, `[]`); offered tools keep their names | original text within the trace limits, never scrubbed |
+| Raw provider bodies and envelope diff values | absent, with the omission reason `content_policy` | present, or their size or parse reason |
+| A failed or cancelled tool outcome | its class, code, source and origin | the whole failure record |
+| Adapter span | `lash.content.omitted = true`, no `lash.payload.json` | `lash.payload.json`, cut at `OtelOptions::max_payload_bytes` |
+
+Omitted request, response, instruction, tool and code payloads are not built:
+the runtime does not clone, render or serialize them. The setting is consent
+and nothing else. `TraceLevel` still
+chooses which records exist, sampling stays with the host's provider, and
+`TraceLimits` and `OtelOptions::max_payload_bytes` still bound what is
+captured. The same records exist under either value.
+
+The setting governs telemetry only. Durable requests and results, session
+history, product observations (the process and language graph) and the
+responses a host's own calls return keep their contracts. An opaque `custom`
+payload is its producer's own structured evidence and passes through unread; a
+producer that would put content in one reads `TraceStanding::content` first.
+`DirectLlmClient` is its own telemetry path with the same default
+(`with_telemetry_content`).
 
 The [logging and event practice](../agents/logging-and-events.md) defines diagnostic
 fields, failure ownership, levels and correlation with domain observations.

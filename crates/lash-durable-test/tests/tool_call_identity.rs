@@ -672,6 +672,7 @@ async fn retry_into_a_park(tier: Tier, records: &Arc<Records>) -> Option<(World,
         lash::LashCore::standard_builder(backend.clone())
             .trace_sink(sink)
             .trace_level(lash::tracing::TraceLevel::Extended)
+            .telemetry_content(lash::tracing::TelemetryContent::Captured)
             .tools(Arc::new(Probes {
                 witness: probes,
                 backend: backend.clone(),
@@ -880,6 +881,7 @@ mod sqlite_memory_traced {
             lash::LashCore::standard_builder(backend.clone())
                 .trace_sink(sink)
                 .trace_level(lash::tracing::TraceLevel::Extended)
+                .telemetry_content(lash::tracing::TelemetryContent::Captured)
                 .tools(std::sync::Arc::new(super::Probes {
                     witness: probes,
                     backend: backend.clone(),
