@@ -461,13 +461,15 @@ async fn process_map_fixture(tier: Tier, workers: lash::rlm::WorkerService) {
         if artifact.ir().declarations.iter().any(|declaration| {
             matches!(declaration, lashlang::Declaration::Process(process)
                 if process.name == started.identity.entry_name
-                    && matches!(&process.origin, lashlang::ProcessOrigin::Lifted { site, .. }
-                        if site.root == lashlang::AstRoot::Main && site.steps.len() == 2))
+                    && process.params.iter().any(|param| param.name.as_str() == "limit"))
         }) {
             worker_name = Some(started.identity.entry_name.clone());
         }
     }
-    let worker_name = worker_name.expect("the worker is lifted from main");
+    // Both separately compiled modules lift their process at the same
+    // main path. The worker's parameter identifies it independently of
+    // trace arrival order; the nested process has no parameters.
+    let worker_name = worker_name.expect("the worker takes the limit parameter");
     for (started, map) in processes {
         let artifact = stored_artifact(&world, &started.identity.module_ref).await;
         let process_ref = artifact
@@ -588,7 +590,6 @@ macro_rules! map_laws_on {
                 }
 
                 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-                #[ignore = "FIG-5338: both processes run and their maps hold, but no node of the worker's stored artifact names `worker-never` for assert_skipped"]
                 async fn production_process_map_is_the_compiled_inventory_after_a_store_round_trip() {
                     super::production_process_map_is_the_compiled_inventory_after_a_store_round_trip(
                         super::served::Tier::$tier,
@@ -621,7 +622,7 @@ async fn durable_language_trace_continues_once_across_quiet_points() {
             vec![served::cell(
                 r#"
 const definition = await processes.create({ dialect: "typescript",
-  source: 'const worker = async () => { await sleep(100); await sleep(100); return 42; };'
+  source: 'const worker = async () => { for (const value of [1, 2]) { await processes.emit({ value }); await sleep(100); } return 42; };'
 });
 const handle = await processes.start({ definition });
 const result = await handle;
@@ -673,6 +674,32 @@ finish(result);
             "a resumed node never starts twice"
         );
         if started.identity.entry_kind == "process" {
+            let bound = own
+                .iter()
+                .filter_map(|event| match &event.payload {
+                    TraceLanguageExecutionPayload::NodeStarted {
+                        node_id,
+                        occurrence,
+                        call_id: Some(call),
+                        ..
+                    } => Some((node_id, *occurrence, call)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                bound.len(),
+                2,
+                "both resumed tool calls bind their admitted identities"
+            );
+            assert_eq!(bound[0].0, bound[1].0, "one static call site runs twice");
+            assert_ne!(
+                bound[0].1, bound[1].1,
+                "the continuation retains occurrence numbering"
+            );
+            assert_ne!(
+                bound[0].2, bound[1].2,
+                "distinct calls retain distinct admitted identities"
+            );
             let artifact = stored_artifact(&world, &started.identity.module_ref).await;
             let process_ref = artifact
                 .process_ref(&started.identity.entry_name)

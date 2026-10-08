@@ -56,7 +56,7 @@ fn record(process_id: &ProcessId, attempt: u32, occurrence: u64) -> TraceRecord 
     fixture_record(
         TraceContext::default(),
         TraceEvent::LanguageExecution {
-            language: "lashlang".to_string(),
+            language: "typescript".to_string(),
             event: TraceLanguageExecution {
                 event_key: format!("{process_id}:{attempt}:{occurrence}"),
                 identity: TraceLanguageExecutionIdentity {
@@ -1168,4 +1168,50 @@ fn fixture_record(
         context,
         event,
     }
+}
+
+/// FIG-5378: the durable engine's process lifetime needs no attempt number
+/// to publish its node-to-call binding into the host's live graph.
+#[tokio::test]
+async fn durable_process_trace_with_no_attempt_reaches_the_live_graph() {
+    let fixture = Fixture::new("durable-language-trace", false).await;
+    let bound_call = lash_core::ToolCallId::fixture("durable-call");
+    for occurrence in [0, 1] {
+        let mut traced = record(&fixture.process_id, 1, occurrence);
+        let TraceEvent::LanguageExecution { event, .. } = &mut traced.event else {
+            unreachable!()
+        };
+        event.identity.generation = None;
+        event.identity.engine_execution_id = Some(fixture.process_id.to_string());
+        if let TraceLanguageExecutionPayload::NodeStarted { call_id, .. } = &mut event.payload {
+            *call_id = Some(bound_call.clone());
+        }
+        fixture
+            .hub
+            .append(&traced)
+            .expect("durable trace publishes");
+    }
+    let mut subscription = fixture.subscribe(None).await;
+    let ProcessObservationItem::Snapshot { snapshot, .. } = next(&mut subscription).await else {
+        panic!("a subscription starts with its snapshot")
+    };
+    let graph = snapshot
+        .live
+        .graph
+        .expect("the durable process has a live graph");
+    assert_eq!(
+        graph.history.len(),
+        2,
+        "the execution map and bound call survive capture"
+    );
+    assert!(
+        graph
+            .history
+            .iter()
+            .any(|record| matches!(&record.event.payload,
+                TraceLanguageExecutionPayload::NodeStarted { call_id: Some(call), .. }
+                    if call == &bound_call
+            )),
+        "the host reads the call-to-node binding"
+    );
 }

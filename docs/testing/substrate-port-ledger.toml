@@ -3187,7 +3187,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5338: covered-by:crates/lash-durable-test/tests/rlm_execution_maps.rs::production_rlm_map_is_the_compiled_inventory_for_every_loop_kind; covered-by:crates/lash-durable-test/tests/rlm_execution_maps.rs::durable_language_trace_continues_once_across_quiet_points; covered-by:crates/lash-durable-test/tests/rlm_execution_maps.rs::every_model_code_path_runs_in_a_worker. The shared production_process_map_is_the_compiled_inventory_after_a_store_round_trip law: since FIG-5337/FIG-5339 the worker's emit and nested start run and both maps hold; it stays ignored on FIG-5338 because assert_skipped finds no node of the worker's stored artifact naming `worker-never`."
+note = "FIG-5378: covered-by:crates/lash-durable-test/tests/rlm_execution_maps.rs::production_rlm_map_is_the_compiled_inventory_for_every_loop_kind; covered-by:crates/lash-durable-test/tests/rlm_execution_maps.rs::production_process_map_is_the_compiled_inventory_after_a_store_round_trip; covered-by:crates/lash-durable-test/tests/rlm_execution_maps.rs::durable_language_trace_continues_once_across_quiet_points; covered-by:crates/lash-durable-test/tests/rlm_execution_maps.rs::every_model_code_path_runs_in_a_worker. The stored process-map law is enabled and passes on SQLite memory: the worker is identified by its limit parameter, rather than the lifted main path it shares with the nested process. assert_skipped retains its worker-never marker check. The continuation law also checks distinct admitted call bindings at repeated occurrences of one node."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/projections_and_snapshots.rs"
@@ -17921,7 +17921,7 @@ laws = [
 disposition = "replaced-by:examples/workflow-graph-roundtrip/tests/roundtrip.rs::operation_catalog_and_fragment_validation_match_the_editor_contract"
 status = "deleted"
 owed = "operation catalog and fragment validation match the editor contract; and 20 more law(s) of the file, by test name"
-note = "FIG-5308: restored from 5ad9641f9e^ onto a durable SQLite core; the example's process commands now start and signal through the core's process API. Since FIG-5337/FIG-5339 a process step's tools run with their process execution: fifteen pass; the five that wait on a signal are ignored on FIG-5372 (the host learns a wait only from process.waiting or the language-execution trace), and new_call_node_saves_reprojects_and_runs_with_canonical_correlation on FIG-5338 (call-to-node trace binding)."
+note = "FIG-5308 restored these laws onto a durable SQLite core. FIG-5372 restored committed lifecycle and effect outcomes. FIG-5378 enables project_mutate_save_and_run_streams_correlated_events and new_call_node_saves_reprojects_and_runs_with_canonical_correlation; both pass with admitted call-to-node language bindings accepted by the process observation hub. lists_selects_projects_and_runs_built_in_workflows remains ignored because preparing a workflow after another is refused with artifact_referrer_ended for the detached execution referrer, as found by FIG-5372."
 
 [[row]]
 path = "examples/workflow-graph-roundtrip/tests/type_facets.rs"

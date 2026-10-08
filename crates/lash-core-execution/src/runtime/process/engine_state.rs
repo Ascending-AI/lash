@@ -99,6 +99,10 @@ pub enum StepRequest {
         /// `process.effect_outcome`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         site: Option<StepEffectSite>,
+        /// The language node that issued this call. The admitted execution
+        /// supplies its call id when the body starts, after admission commits.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        language_execution: Option<Box<lash_trace::TraceLanguageExecution>>,
     },
     /// A body of the process's own engine, run through the [`EngineSteps`]
     /// its registration declares, under a pinned `Repeatable` policy. It is
@@ -128,6 +132,10 @@ pub enum StepRequest {
         /// The effect node it runs for, as for a tool step.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         site: Option<StepEffectSite>,
+        /// The language node that issued this call, bound by its admitted
+        /// execution when the host step's body starts.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        language_execution: Option<Box<lash_trace::TraceLanguageExecution>>,
     },
 }
 

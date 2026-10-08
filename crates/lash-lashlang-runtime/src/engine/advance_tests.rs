@@ -93,6 +93,7 @@ fn fault() -> SettledOutput {
 
 fn tool(name: &str) -> IssuedLeaf {
     IssuedLeaf::Tool {
+        language_execution: None,
         tool: lash_core::ToolId::from(name),
         input: serde_json::json!({"leaf": name}),
         site: None,

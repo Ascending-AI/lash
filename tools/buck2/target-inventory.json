@@ -43925,6 +43925,7 @@
         "lash-internal-core",
         "lash-internal-core-execution",
         "lash-internal-core-ids",
+        "lash-internal-trace",
         "tokio-util",
         "tracing"
       ],

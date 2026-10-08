@@ -1,7 +1,11 @@
 //! Language observation of a process's actual VM steps. A settled step is
 //! never run again; a continuation keeps the VM's occurrence numbering.
 
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
+
 use lash_core::plugin::PluginExecutionTrace;
+use lash_sansio::sync::MutexExt as _;
 use lash_trace::{
     TraceEvent, TraceLanguageExecution, TraceLanguageExecutionIdentity,
     TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceRuntimeScope,
@@ -12,6 +16,7 @@ use lash_trace::{
 pub(super) struct ProcessTrace {
     tracing: PluginExecutionTrace,
     identity: TraceLanguageExecutionIdentity,
+    pending_resource_starts: Arc<Mutex<BTreeMap<(String, u64), TraceLanguageExecutionPayload>>>,
 }
 
 impl ProcessTrace {
@@ -28,6 +33,7 @@ impl ProcessTrace {
         }
         Some(Self {
             tracing,
+            pending_resource_starts: Arc::default(),
             identity: TraceLanguageExecutionIdentity {
                 scope: TraceRuntimeScope::none(),
                 subject: TraceRuntimeSubject::Process {
@@ -71,6 +77,75 @@ impl ProcessTrace {
     }
 
     pub(super) fn emit(&self, payload: TraceLanguageExecutionPayload) {
+        use TraceLanguageExecutionPayload as Payload;
+        match &payload {
+            Payload::NodeStarted {
+                node_id,
+                node_kind,
+                occurrence,
+                ..
+            } if *node_kind == lashlang::RESOURCE_OPERATION_EXECUTION_SITE_KIND => {
+                self.pending_resource_starts
+                    .lock_recover()
+                    .insert((node_id.clone(), *occurrence), payload);
+                return;
+            }
+            Payload::NodeCompleted {
+                node_id,
+                occurrence,
+                ..
+            }
+            | Payload::NodeFailed {
+                node_id,
+                occurrence,
+                ..
+            }
+            | Payload::NodeCancelled {
+                node_id,
+                occurrence,
+                ..
+            } => {
+                let pending = self
+                    .pending_resource_starts
+                    .lock_recover()
+                    .remove(&(node_id.clone(), *occurrence));
+                if let Some(started) = pending {
+                    self.emit_payload(started);
+                }
+            }
+            _ => {}
+        }
+        self.emit_payload(payload);
+    }
+
+    /// Hand the observed start to the tool step. Its actor owns the call id;
+    /// emitting here would publish an unbound start before admission.
+    pub(super) fn resource_started(
+        &self,
+        call_site: &lashlang::LashlangExecutionCallSite,
+    ) -> TraceLanguageExecution {
+        self.pending_resource_starts
+            .lock_recover()
+            .remove(&(call_site.site.node_id.clone(), call_site.occurrence));
+        TraceLanguageExecution {
+            event_key: format!(
+                "lashlang_execution:{}:node:{}:{}:started",
+                self.identity.graph_key(),
+                call_site.site.node_id,
+                call_site.occurrence
+            ),
+            identity: self.identity.clone(),
+            payload: TraceLanguageExecutionPayload::NodeStarted {
+                node_id: call_site.site.node_id.clone(),
+                node_kind: call_site.site.node_kind,
+                label: call_site.site.label.clone(),
+                occurrence: call_site.occurrence,
+                call_id: None,
+            },
+        }
+    }
+
+    fn emit_payload(&self, payload: TraceLanguageExecutionPayload) {
         use TraceLanguageExecutionPayload as Payload;
         let (suffix, node) = match &payload {
             Payload::ExecutionStarted { .. } => ("started".to_owned(), None),

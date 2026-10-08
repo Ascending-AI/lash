@@ -216,6 +216,7 @@ const LAW_PARK: &str = "law_park";
 
 fn law_step(step: &str, tool: &str) -> EngineAction {
     EngineAction::Steps(vec![StepRequest::Tool {
+        language_execution: None,
         step: StepName(step.to_owned()),
         tool: lash_sansio::ToolId::new(tool),
         input: json!({}),
@@ -282,6 +283,7 @@ impl ProcessEngine for LawEngine {
         let action = match event {
             EngineEvent::Started { .. } => match act.as_str() {
                 "stuck" => EngineAction::Steps(vec![StepRequest::Tool {
+                    language_execution: None,
                     step: StepName("stuck".to_owned()),
                     tool: lash_sansio::ToolId::new("law_stuck"),
                     input: json!({}),

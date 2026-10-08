@@ -1281,6 +1281,7 @@ struct StateEngine {
 
 fn tool_step(step: &str, tool: &str, label: &str) -> lash_core_execution::StepRequest {
     lash_core_execution::StepRequest::Tool {
+        language_execution: None,
         step: lash_core_execution::StepName(step.to_owned()),
         tool: lash_sansio::ToolId::new(format!("tool:{tool}")),
         input: serde_json::json!({ "label": label }),

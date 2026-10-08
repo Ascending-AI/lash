@@ -923,15 +923,12 @@ impl TraceSink for ProcessObservationHub {
         let TraceEvent::LanguageExecution { language, event } = &record.event else {
             return Ok(());
         };
-        if language != "lashlang" {
+        if language != "typescript" {
             return Ok(());
         }
         let TraceRuntimeSubject::Process { process_id } = &event.identity.subject else {
             return Ok(());
         };
-        if event.identity.attempt().is_none() {
-            return Ok(());
-        }
         let graph_key = event.identity.graph_key();
         let (state, _) = self.state_for(process_id);
         let mut publisher = state.lock_recover();

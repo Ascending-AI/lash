@@ -106,6 +106,44 @@ impl DurableProcessWorker {
         tool_step_output(&process.id, result)
     }
 
+    /// Bind only an admitted body to the node that issued its call. The
+    /// stored step keeps the node and occurrence stable across a retry.
+    fn observe_language_call(&self, step: &StepRequest, execution: &AdmittedExecution) {
+        let language_execution = match step {
+            StepRequest::Tool {
+                language_execution, ..
+            }
+            | StepRequest::Host {
+                language_execution, ..
+            } => language_execution,
+            StepRequest::Engine { .. } => return,
+        };
+        let Some(mut event) = language_execution.clone() else {
+            return;
+        };
+        let lash_trace::TraceLanguageExecutionPayload::NodeStarted {
+            node_id, call_id, ..
+        } = &mut event.payload
+        else {
+            return;
+        };
+        *call_id = Some(execution.call().clone());
+        let tracing = crate::plugin::PluginExecutionTrace::new(
+            self.config.runtime_host.tracing.unreplayed(None),
+        );
+        let mut context = tracing.trace_runtime().base_context().clone();
+        context.graph_node_id = Some(node_id.clone());
+        tracing.observe_language(&event.event_key, || {
+            (
+                context.clone(),
+                crate::TraceEvent::LanguageExecution {
+                    language: "typescript".to_owned(),
+                    event: (*event).clone(),
+                },
+            )
+        });
+    }
+
     /// The activation's step tools, built on its first step that needs them.
     async fn built_step_tools(
         &self,
@@ -306,6 +344,7 @@ impl ProcessSteps for WorkerSteps {
         let execution = execution.clone();
         Box::new(move |token| {
             Box::pin(async move {
+                worker.observe_language_call(&step, &execution);
                 match step {
                     StepRequest::Tool { .. } => {
                         worker

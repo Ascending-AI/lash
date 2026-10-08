@@ -624,10 +624,12 @@ impl QuietPointHost {
             args,
             call_site,
         } = operation;
-        let site = call_site.map(|call_site| lash_core::StepEffectSite {
-            node_id: call_site.site.node_id,
-            occurrence: call_site.occurrence,
-        });
+        let site = call_site
+            .as_ref()
+            .map(|call_site| lash_core::StepEffectSite {
+                node_id: call_site.site.node_id.clone(),
+                occurrence: call_site.occurrence,
+            });
         let Value::Resource(receiver) = &receiver else {
             return Err(LashlangHostError::ModuleAuthorityRequired { operation }.into());
         };
@@ -640,6 +642,7 @@ impl QuietPointHost {
                 operation: host_operation,
                 input: resource_payload(&args)?,
                 site,
+                language_execution: self.language_execution(call_site.as_ref()),
             });
         }
         let tool = lash_core::ToolId::from(host_operation.as_str());
@@ -659,7 +662,16 @@ impl QuietPointHost {
             tool,
             input: resource_payload(&args)?,
             site,
+            language_execution: self.language_execution(call_site.as_ref()),
         })
+    }
+
+    fn language_execution(
+        &self,
+        call_site: Option<&lashlang::LashlangExecutionCallSite>,
+    ) -> Option<Box<lash_trace::TraceLanguageExecution>> {
+        let trace = self.trace.as_ref()?;
+        Some(Box::new(trace.resource_started(call_site?)))
     }
 
     /// A language runtime value, sampled in place: it reaches nothing outside

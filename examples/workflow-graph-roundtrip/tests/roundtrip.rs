@@ -1115,7 +1115,6 @@ async fn lists_selects_projects_and_runs_built_in_workflows() {
     server.abort();
 }
 
-#[ignore = "FIG-5338: the host correlates a call node with its display only through the durable language-execution trace's call binding"]
 #[tokio::test]
 async fn project_mutate_save_and_run_streams_correlated_events() {
     let state = runtime::state().await;
@@ -1620,7 +1619,6 @@ async fn delete_node_edit_round_trips_and_runs_the_saved_graph() {
 }
 
 #[tokio::test]
-#[ignore = "FIG-5338: the host correlates a call node with its display only through the durable language-execution trace's call binding"]
 async fn new_call_node_saves_reprojects_and_runs_with_canonical_correlation() {
     let state = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

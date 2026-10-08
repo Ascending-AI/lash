@@ -299,12 +299,14 @@ impl ProcessEngine for WriteEngine {
                 let step = lash_core_execution::StepName("write".to_owned());
                 EngineAction::Steps(vec![match self.step {
                     StepKind::Tool => lash_core_execution::StepRequest::Tool {
+                        language_execution: None,
                         step,
                         tool: lash_sansio::ToolId::new(TOOL),
                         input: payload,
                         site: None,
                     },
                     StepKind::Host => lash_core_execution::StepRequest::Host {
+                        language_execution: None,
                         step,
                         operation: HOST_WRITE.to_owned(),
                         input: payload,

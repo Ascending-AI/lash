@@ -317,8 +317,14 @@ fn park(
                 .map(|(index, leaf)| {
                     let step = StepName(format!("op.{operation}.{index}"));
                     match leaf {
-                        IssuedLeaf::Tool { tool, input, site } => {
+                        IssuedLeaf::Tool {
+                            tool,
+                            input,
+                            site,
+                            language_execution,
+                        } => {
                             steps.push(StepRequest::Tool {
+                                language_execution,
                                 step: step.clone(),
                                 tool,
                                 input,
@@ -334,8 +340,10 @@ fn park(
                             operation,
                             input,
                             site,
+                            language_execution,
                         } => {
                             steps.push(StepRequest::Host {
+                                language_execution,
                                 step: step.clone(),
                                 operation,
                                 input,

@@ -263,6 +263,7 @@ PACKAGE_DEPS = {
             "lash_core": "//crates/lash-core:lash-core",
             "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
             "lash_core_ids": "//crates/lash-core-ids:lash-core-ids",
+            "lash_trace": "//crates/lash-trace:lash-trace",
             "tokio_util": "//third-party/rust:p0377",
             "tracing": "//third-party/rust:p0386"
         }
