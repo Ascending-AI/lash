@@ -399,7 +399,7 @@ impl ModelStore {
                     .get("text")
                     .and_then(Value::as_str)
                     .unwrap_or("");
-                let text = crate::runtime_contracts::host_assistant_message(streamed);
+                let text = streamed.to_string();
                 let provider_exchange_count = event
                     .payload
                     .get("expected_provider_exchange_count")

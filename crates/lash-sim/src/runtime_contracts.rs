@@ -305,21 +305,6 @@ impl Serialize for RuntimeFinalValueInvariantFacts {
     }
 }
 
-/// The documented projection from the text a provider streamed to the
-/// host-facing assistant message (`TurnReport::assistant_message`): every line
-/// loses its trailing whitespace and carriage return, lines rejoin with `\n`,
-/// and the whole is trimmed. Written out here rather than borrowed so the
-/// contract states the projection instead of trusting lash's copy of it.
-pub fn host_assistant_message(streamed: &str) -> String {
-    streamed
-        .lines()
-        .map(str::trim_end)
-        .collect::<Vec<_>>()
-        .join("\n")
-        .trim()
-        .to_string()
-}
-
 pub fn runtime_turn_contract(
     observation: &RuntimeTurnObservation,
     expected_session_id: &SessionId,
@@ -345,7 +330,6 @@ pub fn runtime_turn_contract(
             ),
         );
     }
-    let expected_assistant_message = host_assistant_message(expected_assistant_message);
     if observation.assistant_message != expected_assistant_message {
         return OracleVerdict::failed(
             RUNTIME_TURN_CONTRACT_ORACLE,
@@ -715,6 +699,30 @@ mod tests {
             2,
         );
         assert_eq!(verdict.status, OracleStatus::Passed);
+    }
+
+    /// ADR 0033: assistant text is a fact, including whitespace and line endings.
+    #[test]
+    fn runtime_turn_contract_requires_unmodified_provider_text() {
+        let text = " \tanswer  \r\nnext\t\n\u{85} ";
+        let mut observed = observation();
+        observed.assistant_message = text.to_string();
+        assert_eq!(
+            runtime_turn_contract(&observed, &observed.session_id, 2, text, 2).status,
+            OracleStatus::Passed
+        );
+        for changed in [
+            text.trim().to_string(),
+            text.replace("\r\n", "\n"),
+            "answer\nnext".to_string(),
+        ] {
+            observed.assistant_message = changed;
+            assert_eq!(
+                runtime_turn_contract(&observed, &observed.session_id, 2, text, 2).status,
+                OracleStatus::Failed,
+                "a host's presentation cannot stand in for the provider's text"
+            );
+        }
     }
 
     #[test]

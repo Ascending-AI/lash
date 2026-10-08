@@ -233,7 +233,7 @@ the body or process.
 
 `ProcessInput::SessionTurn` carries `result: SessionTurnOutcome`. `Turn` returns
 process id, child session id and the assembled turn. `FinalValue { schema }`
-returns the final value, terminal tool value or trimmed assistant text,
+returns the final value, terminal tool value or unmodified assistant text,
 validated against the optional schema. A frame switch or stopped child has a
 typed failure; process cancellation and child failure retain their typed
 outputs. The process definition carries its result projection.
