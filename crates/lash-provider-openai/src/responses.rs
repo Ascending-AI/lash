@@ -11,7 +11,7 @@ impl OpenAiCompatibleProvider {
         stream: bool,
     ) -> Result<Value, LlmTransportError> {
         self.build_responses_request(req, stream)
-            .map(|built| built.body)
+            .map(|built| built.body.redacted())
     }
 
     #[cfg(any(test, feature = "testing"))]
@@ -19,7 +19,7 @@ impl OpenAiCompatibleProvider {
         &self,
         req: &LlmRequest,
         stream: bool,
-    ) -> Result<BuiltRequest, LlmTransportError> {
+    ) -> Result<BuiltRequest<TemplateJson>, LlmTransportError> {
         let serving_route = self.route_identity(req.model.wire_model());
         self.build_responses_request_for_route(req, stream, &serving_route)
     }
@@ -43,7 +43,7 @@ impl OpenAiCompatibleProvider {
         req: &LlmRequest,
         stream: bool,
         serving_route: &ProviderRouteIdentity,
-    ) -> Result<BuiltRequest, LlmTransportError> {
+    ) -> Result<BuiltRequest<TemplateJson>, LlmTransportError> {
         let safe_request = req
             .reasoning_retention_safe_for(
                 serving_route,
@@ -71,11 +71,11 @@ impl OpenAiCompatibleProvider {
         let input = shared::build_responses_input(req);
         let mut body = json!({
             "model": req.model.wire_model(),
-            "input": null,
+            // Set last: the input holds the request's attachment slots.
+            "input": [],
             "tools": tools,
             "stream": stream,
         });
-        body["input"] = Value::Array(input);
         if let Some(instructions) = &req.instructions {
             body["instructions"] = json!(instructions);
         }
@@ -157,6 +157,8 @@ impl OpenAiCompatibleProvider {
         } else {
             passthrough
         };
+        let mut body = TemplateJson::from(body);
+        body.set("input", input);
         Ok(BuiltRequest { body, receipt })
     }
 

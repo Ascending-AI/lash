@@ -17,7 +17,7 @@ pub(crate) struct BreakpointAddress {
     pub(crate) block_index: usize,
 }
 
-type BuiltMessages = (Option<String>, Vec<Value>, Option<BreakpointAddress>);
+type BuiltMessages = (Option<String>, Vec<TemplateJson>, Option<BreakpointAddress>);
 
 impl AnthropicProvider {
     fn role_name(role: &LlmRole) -> &'static str {
@@ -31,13 +31,16 @@ impl AnthropicProvider {
     fn attachment_block_value(
         reference: &AttachmentRef,
         position: AttachmentPosition,
-    ) -> Option<Value> {
+    ) -> TemplateJson {
         let block_type = if reference.media_type.is_image() {
             "image"
         } else {
             "document"
         };
-        Some(json!({"type": block_type, "source": attachment_operand(reference, position)}))
+        TemplateJson::object([
+            ("type", json!(block_type).into()),
+            ("source", TemplateJson::attachment(reference, position)),
+        ])
     }
 
     fn text_block_value(text: &str) -> Value {
@@ -53,6 +56,69 @@ impl AnthropicProvider {
     fn content_block_value(
         block: &LlmContentBlock,
         tool_ids: &HashMap<String, String>,
+    ) -> Result<Option<TemplateJson>, LlmTransportError> {
+        Ok(match block {
+            LlmContentBlock::Attachment { reference } => Some(Self::attachment_block_value(
+                reference,
+                AttachmentPosition::Message,
+            )),
+            LlmContentBlock::ToolResult {
+                call_id, content, ..
+            } => {
+                let mut result = TemplateJson::object([
+                    ("type", json!("tool_result").into()),
+                    (
+                        "tool_use_id",
+                        json!(mapped_tool_call_id(call_id, tool_ids)?).into(),
+                    ),
+                ]);
+                // One result per call: a lone text block is the plain string
+                // form; anything else is the ordered text/image/document
+                // array, each attachment a slot where its block sits.
+                match content.as_slice() {
+                    [] => {}
+                    [ModelToolReturnPart::Text { text }] => {
+                        result.set("content", json!(text));
+                    }
+                    [ModelToolReturnPart::Retained(retained)] => {
+                        result.set("content", json!(retained.witness));
+                    }
+                    blocks => {
+                        let blocks = blocks
+                            .iter()
+                            .filter_map(|block| match block {
+                                ModelToolReturnPart::Text { text } if text.trim().is_empty() => {
+                                    None
+                                }
+                                ModelToolReturnPart::Text { text } => {
+                                    Some(Self::text_block_value(text).into())
+                                }
+                                // Retained output is sent as its witness;
+                                // its reference is never materialized.
+                                ModelToolReturnPart::Retained(retained) => {
+                                    Some(Self::text_block_value(&retained.witness).into())
+                                }
+                                ModelToolReturnPart::Attachment(source) => {
+                                    Some(Self::attachment_block_value(
+                                        source,
+                                        AttachmentPosition::ToolResult,
+                                    ))
+                                }
+                            })
+                            .collect::<Vec<TemplateJson>>();
+                        result.set("content", blocks);
+                    }
+                }
+                Some(result)
+            }
+            other => Self::plain_block_value(other, tool_ids)?.map(TemplateJson::from),
+        })
+    }
+
+    /// The wire shape of a block that can hold no attachment.
+    fn plain_block_value(
+        block: &LlmContentBlock,
+        tool_ids: &HashMap<String, String>,
     ) -> Result<Option<Value>, LlmTransportError> {
         match block {
             LlmContentBlock::Text { text, .. } => {
@@ -61,10 +127,8 @@ impl AnthropicProvider {
                 }
                 Ok(Some(Self::text_block_value(text)))
             }
-            LlmContentBlock::Attachment { reference } => Ok(Self::attachment_block_value(
-                reference,
-                AttachmentPosition::Message,
-            )),
+            // Placed by `content_block_value`: they can hold attachments.
+            LlmContentBlock::Attachment { .. } | LlmContentBlock::ToolResult { .. } => Ok(None),
             LlmContentBlock::ToolCall {
                 call_id,
                 tool_name,
@@ -76,52 +140,6 @@ impl AnthropicProvider {
                 "name": tool_name,
                 "input": tool_call_input_replay_value(input_json),
             }))),
-            LlmContentBlock::ToolResult {
-                call_id, content, ..
-            } => {
-                let mut result = json!({
-                    "type": "tool_result",
-                    "tool_use_id": mapped_tool_call_id(call_id, tool_ids)?,
-                });
-                // One result per call: a lone text block is the plain string
-                // form; anything else is the ordered text/image/document array.
-                match content.as_slice() {
-                    [] => {}
-                    [ModelToolReturnPart::Text { text }] => result["content"] = json!(text),
-                    [ModelToolReturnPart::Retained(retained)] => {
-                        result["content"] = json!(retained.witness)
-                    }
-                    blocks => {
-                        result["content"] = Value::Array(
-                            blocks
-                                .iter()
-                                .filter_map(|block| match block {
-                                    ModelToolReturnPart::Text { text }
-                                        if text.trim().is_empty() =>
-                                    {
-                                        None
-                                    }
-                                    ModelToolReturnPart::Text { text } => {
-                                        Some(Self::text_block_value(text))
-                                    }
-                                    // Retained output is sent as its witness;
-                                    // its reference is never materialized.
-                                    ModelToolReturnPart::Retained(retained) => {
-                                        Some(Self::text_block_value(&retained.witness))
-                                    }
-                                    ModelToolReturnPart::Attachment(source) => {
-                                        Self::attachment_block_value(
-                                            source,
-                                            AttachmentPosition::ToolResult,
-                                        )
-                                    }
-                                })
-                                .collect(),
-                        );
-                    }
-                }
-                Ok(Some(result))
-            }
             LlmContentBlock::Reasoning { text, replay, .. } => {
                 // Anthropic requires a signature to replay a thinking
                 // block. If we don't have one (e.g. aborted stream, or
@@ -177,8 +195,8 @@ impl AnthropicProvider {
 
     // Judge the emitted neighbors: a tagged fallback is a user block, not
     // part of a native section. Lash has no server-tool-result variant.
-    fn native_feedback_position(req: &LlmRequest, index: usize, out: &[Value]) -> bool {
-        let before = out.last().and_then(|message| message["role"].as_str());
+    fn native_feedback_position(req: &LlmRequest, index: usize, out: &[TemplateJson]) -> bool {
+        let before = out.last().and_then(|message| message.str_field("role"));
         let after = req.messages[index + 1..].iter().find(|msg| {
             !Self::native_feedback_content(msg)
                 && (matches!(msg.role, LlmRole::System) || Self::message_has_content(msg))
@@ -196,7 +214,7 @@ impl AnthropicProvider {
     ) -> Result<BuiltMessages, LlmTransportError> {
         let system_prompt = req.instructions.as_deref().map(str::to_owned);
         let tool_ids = provider_call_id_map(req)?;
-        let mut out: Vec<Value> = Vec::new();
+        let mut out: Vec<TemplateJson> = Vec::new();
         let mut breakpoint = None;
         for (index, msg) in req.messages.iter().enumerate() {
             let feedback = matches!(msg.role, LlmRole::System);
@@ -212,7 +230,7 @@ impl AnthropicProvider {
             } else {
                 Self::role_name(&msg.role)
             };
-            let mut blocks: Vec<Value> = Vec::new();
+            let mut blocks: Vec<TemplateJson> = Vec::new();
             let mut marked_block_index = None;
             let tagged;
             let source_blocks = if feedback && !native {
@@ -267,8 +285,10 @@ impl AnthropicProvider {
             // message from the same role.
             let message_count = out.len();
             if let Some(prev) = out.last_mut()
-                && prev.get("role").and_then(|v| v.as_str()) == Some(wire_role)
-                && let Some(prev_content) = prev.get_mut("content").and_then(|c| c.as_array_mut())
+                && prev.str_field("role") == Some(wire_role)
+                && let Some(prev_content) = prev
+                    .field_mut("content")
+                    .and_then(TemplateJson::as_array_mut)
             {
                 if let Some(block_index) = marked_block_index {
                     breakpoint = Some(BreakpointAddress {
@@ -286,24 +306,27 @@ impl AnthropicProvider {
                     block_index,
                 });
             }
-            out.push(json!({
-                "role": wire_role,
-                "content": blocks,
-            }));
+            out.push(TemplateJson::object([
+                ("role", json!(wire_role).into()),
+                ("content", blocks.into()),
+            ]));
         }
 
         // A coalesced user turn may start with feedback injected between a
         // tool call and its results. Anthropic requires every result first.
         for (message_index, message) in out.iter_mut().enumerate() {
-            if message["role"] != "user" {
+            if message.str_field("role") != Some("user") {
                 continue;
             }
             #[expect(
                 clippy::expect_used,
                 reason = "every message this builder emits carries a `content` array"
             )]
-            let blocks = message["content"].as_array_mut().expect("content blocks");
-            let is_result = |block: &Value| block["type"] == "tool_result";
+            let blocks = message
+                .field_mut("content")
+                .and_then(TemplateJson::as_array_mut)
+                .expect("content blocks");
+            let is_result = |block: &TemplateJson| block.str_field("type") == Some("tool_result");
             if let Some(address) = breakpoint.as_mut()
                 && address.message_index == message_index
             {
@@ -372,7 +395,7 @@ impl AnthropicProvider {
         &self,
         cache_retention: CacheRetention,
         system: &mut Option<Value>,
-        messages: &mut [Value],
+        messages: &mut [TemplateJson],
         tools: &mut [Value],
         breakpoint: Option<BreakpointAddress>,
     ) -> bool {
@@ -397,25 +420,23 @@ impl AnthropicProvider {
         if let Some(address) = breakpoint {
             let block = messages
                 .get_mut(address.message_index)
-                .and_then(|message| message.get_mut("content"))
-                .and_then(Value::as_array_mut)
+                .and_then(|message| message.field_mut("content"))
+                .and_then(TemplateJson::as_array_mut)
                 .and_then(|content| content.get_mut(address.block_index))
                 .expect("breakpoint address points to a surviving content block");
-            block["cache_control"] = ctrl.clone();
+            block.set("cache_control", ctrl.clone());
             cache_control_emitted = true;
         }
 
         if breakpoint.is_none()
             && let Some(last_msg) = messages.last_mut()
-            && matches!(
-                last_msg.get("role").and_then(|v| v.as_str()),
-                Some("user" | "system")
-            )
-            && let Some(content) = last_msg.get_mut("content").and_then(|c| c.as_array_mut())
+            && matches!(last_msg.str_field("role"), Some("user" | "system"))
+            && let Some(content) = last_msg
+                .field_mut("content")
+                .and_then(TemplateJson::as_array_mut)
             && let Some(last_block) = content.last_mut()
-            && last_block.is_object()
+            && last_block.set("cache_control", ctrl.clone())
         {
-            last_block["cache_control"] = ctrl.clone();
             cache_control_emitted = true;
         }
 
@@ -451,12 +472,23 @@ impl AnthropicProvider {
         self.build_request(req).map(|(body, _)| body)
     }
 
-    /// The request body and the receipt of the host settings it carries.
-    /// Every refusal happens here, before the caller does any I/O.
+    /// [`Self::build_request_tree`] as plain JSON, each attachment shown by
+    /// its redacted marker.
+    #[cfg(any(test, feature = "testing"))]
     pub(crate) fn build_request(
         &self,
         req: &LlmRequest,
     ) -> Result<(Value, GenerationReceipt), LlmTransportError> {
+        self.build_request_tree(req)
+            .map(|(body, receipt)| (body.redacted(), receipt))
+    }
+
+    /// The request body and the receipt of the host settings it carries.
+    /// Every refusal happens here, before the caller does any I/O.
+    pub(crate) fn build_request_tree(
+        &self,
+        req: &LlmRequest,
+    ) -> Result<(TemplateJson, GenerationReceipt), LlmTransportError> {
         let serving_route = self.route_identity(req.model.wire_model());
         let safe_request = req
             .reasoning_retention_safe_for(
@@ -519,7 +551,8 @@ impl AnthropicProvider {
         let mut body = json!({
             "model": req.model.wire_model(),
             "max_tokens": max_tokens,
-            "messages": messages,
+            // Set last: the messages hold the request's attachment slots.
+            "messages": [],
         });
 
         if let ReasoningRetentionSelection::AnthropicClearThinking { keep } = req
@@ -621,6 +654,8 @@ impl AnthropicProvider {
         } else {
             passthrough
         };
+        let mut body = TemplateJson::from(body);
+        body.set("messages", messages);
         Ok((body, receipt))
     }
 }

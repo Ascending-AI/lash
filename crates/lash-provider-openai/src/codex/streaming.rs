@@ -1137,7 +1137,6 @@ impl Provider for CodexProvider {
             slot,
             delivery,
             crate::attachment_delivery::RESPONSES_CODEC,
-            self.attachment_file_scope(),
         )
     }
 
@@ -1192,7 +1191,6 @@ impl Provider for CodexProvider {
             (stream, Some(receipt)),
             &body,
             crate::attachment_delivery::RESPONSES_CODEC,
-            &["/input/*/content/*", "/input/*/output/*"],
         )
     }
 

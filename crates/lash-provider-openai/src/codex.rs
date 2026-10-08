@@ -24,6 +24,7 @@ use crate::config::OpenAiReasoningDialect;
 use crate::driver::CompletionEndpoint;
 use crate::reasoning::{apply_reasoning, reasoning_object};
 use crate::responses_shared as shared;
+use crate::support::TemplateJson;
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{
     LlmOutputSpec, LlmRequest, ProviderReasoningRetentionSupport, ReasoningRetentionSelection,
@@ -301,14 +302,15 @@ impl CodexProvider {
         req: &LlmRequest,
         stream: bool,
     ) -> Result<Value, LlmTransportError> {
-        self.build_request(req, stream).map(|built| built.body)
+        self.build_request(req, stream)
+            .map(|built| built.body.redacted())
     }
 
     pub(crate) fn build_request(
         &self,
         req: &LlmRequest,
         stream: bool,
-    ) -> Result<BuiltRequest, LlmTransportError> {
+    ) -> Result<BuiltRequest<TemplateJson>, LlmTransportError> {
         self.validated(req, |req, policy, reasoning_body| {
             self.build_validated(req, stream, policy, reasoning_body)
         })
@@ -320,7 +322,7 @@ impl CodexProvider {
         stream: bool,
         policy: ResolvedGenerationPolicy,
         reasoning_body: Value,
-    ) -> Result<BuiltRequest, LlmTransportError> {
+    ) -> Result<BuiltRequest<TemplateJson>, LlmTransportError> {
         let tools = Self::build_tools(req)?;
         let input = shared::build_responses_input(req);
         let mut emission = GenerationEmission {
@@ -331,7 +333,8 @@ impl CodexProvider {
         // mechanics of this stateless wire, not host settings.
         let mut body = json!({
             "model": req.model.wire_model(),
-            "input": input,
+            // Set last: the input holds the request's attachment slots.
+            "input": [],
             "tools": tools,
             "stream": stream,
             "store": false,
@@ -407,6 +410,8 @@ impl CodexProvider {
         } else {
             passthrough
         };
+        let mut body = TemplateJson::from(body);
+        body.set("input", input);
         Ok(BuiltRequest { body, receipt })
     }
 }

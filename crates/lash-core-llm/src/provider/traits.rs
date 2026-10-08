@@ -93,9 +93,10 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
         context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError>;
 
-    /// One live call outside admission: lower `request`, build its response
-    /// context, send. Lowering and delivery are bounded by the request
-    /// timeout; `send` applies the route's own timeouts.
+    /// One live call outside admission: lower `request`, fill its slots as
+    /// an admitted attempt does, build its response context, send. Lowering
+    /// and delivery are bounded by the request timeout; `send` applies the
+    /// route's own timeouts.
     async fn complete(
         &mut self,
         request: LlmRequest,
@@ -105,43 +106,18 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
         let horizon = timeout
             .unwrap_or_else(|| lash_sansio::ProviderAttemptLimits::recommended().per_request());
         let prepare = async {
+            use lash_core_ids::clock::ClockWallTime as _;
             let template = std::sync::Arc::new(self.lower(&request).await?);
-            let slots: Vec<_> = template.slots().cloned().collect();
-            let mut values = Vec::new();
-            let mut delivered = Vec::new();
-            if !slots.is_empty() {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis();
-                let valid_through_ms = u64::try_from(now)
-                    .unwrap_or(u64::MAX)
-                    .saturating_add(u64::try_from(horizon.as_millis()).unwrap_or(u64::MAX))
-                    .saturating_add(60_000);
-                delivered = deliveries
-                    .deliver(
-                        &slots.iter().collect::<Vec<_>>(),
-                        &lash_sansio::llm::attachment_delivery::DeliveryContext {
-                            valid_through_ms,
-                            live_file_scope: self.attachment_file_scope(),
-                        },
-                    )
-                    .await
-                    .map_err(|error| error.into_transport_error())?;
-                if delivered.len() != slots.len() {
-                    return Err(super::attachment_wire::template_error(
-                        "delivery slot count differs",
-                    ));
-                }
-                for (slot, delivery) in slots.iter().zip(&delivered) {
-                    values.push(self.encode_slot(slot, delivery)?);
-                }
-            }
-            let live = LiveRequestBody::fill(template, values)
-                .map_err(super::attachment_wire::template_error)?;
-            Ok((live, slots, delivered))
+            let valid_through_ms = crate::SystemClock
+                .timestamp_ms()
+                .saturating_add(u64::try_from(horizon.as_millis()).unwrap_or(u64::MAX))
+                .saturating_add(super::slot_delivery::DELIVERY_FETCH_HORIZON_MS);
+            let (live, delivered) =
+                super::slot_delivery::fill_slots(&*self, &template, deliveries, valid_through_ms)
+                    .await?;
+            Ok((template, live, delivered))
         };
-        let (live, slots, delivered) = match timeout {
+        let (template, live, delivered) = match timeout {
             None => prepare.await,
             Some(timeout) => tokio::time::timeout(timeout, prepare).await.map_err(|_| {
                 LlmTransportError::new("provider call timed out")
@@ -154,14 +130,13 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
             .send(&live, ResponseContext::of_request(&request))
             .await;
         if let Err(error) = &result {
-            for &index in error.rejected_slots() {
-                if let (Some(slot), Some(value)) = (slots.get(index), delivered.get(index)) {
-                    deliveries
-                        .invalidate(&slot.reference, value)
-                        .await
-                        .map_err(|error| error.into_transport_error())?;
-                }
-            }
+            super::slot_delivery::invalidate_rejected(
+                &template,
+                deliveries,
+                &delivered,
+                error.rejected_slots(),
+            )
+            .await;
         }
         result
     }

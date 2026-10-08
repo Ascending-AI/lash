@@ -45,6 +45,7 @@ fn chat_never_accepts_provider_files() {
             scope: scope.clone(),
             id: DeliverySecret::new("file-secret".into()),
             valid_until_ms: None,
+            uploaded: false,
         };
         let error = provider.encode_slot(&slot, &delivered).unwrap_err();
         assert_eq!(error.retry_verdict, TransportRetryVerdict::Forbidden);

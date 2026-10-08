@@ -52,6 +52,7 @@ fn stop_sequences_reach_chat_and_are_refused_by_responses_and_codex() {
     let (chat, _) = openrouter_provider()
         .build_chat_request_body_with_diagnostics(&req, true)
         .expect("chat body");
+    let chat = chat.redacted();
     assert_eq!(chat.body["stop"], json!(["</lashlang>"]));
     assert_eq!(
         chat.receipt.stop_sequences,
@@ -441,6 +442,7 @@ fn parallel_tool_calls_is_sent_as_the_host_set_it() {
     let (chat, _) = openrouter_provider()
         .build_chat_request_body_with_diagnostics(&req, true)
         .unwrap();
+    let chat = chat.redacted();
     assert_eq!(chat.body["parallel_tool_calls"], json!(false));
     assert_eq!(
         chat.receipt.parallel_tool_calls,
@@ -448,13 +450,15 @@ fn parallel_tool_calls_is_sent_as_the_host_set_it() {
     );
     let responses = OpenAiProvider::new("key")
         .build_responses_request(&req, true)
-        .unwrap();
+        .unwrap()
+        .redacted();
     assert_eq!(responses.body["parallel_tool_calls"], json!(false));
     let codex = CodexProvider::new(std::sync::Arc::new(
         lash_core::provider::ProviderToken::new("access"),
     ))
     .build_request(&req, true)
-    .unwrap();
+    .unwrap()
+    .redacted();
     assert_eq!(codex.body["parallel_tool_calls"], json!(false));
     assert_eq!(
         codex.receipt.parallel_tool_calls,
@@ -468,12 +472,14 @@ fn expose_thinking_requests_a_summary_on_responses_and_codex_even_without_effort
     req.model.metadata_mut().request_defaults.expose_thinking = true;
     let responses = OpenAiProvider::new("key")
         .build_responses_request(&req, true)
-        .unwrap();
+        .unwrap()
+        .redacted();
     let codex = CodexProvider::new(std::sync::Arc::new(
         lash_core::provider::ProviderToken::new("access"),
     ))
     .build_request(&req, true)
-    .unwrap();
+    .unwrap()
+    .redacted();
     for built in [responses, codex] {
         assert_eq!(built.body["reasoning"], json!({ "summary": "auto" }));
         assert_eq!(
@@ -498,6 +504,7 @@ fn expose_thinking_on_chat_is_local_visibility_only() {
     let (chat, _) = openrouter_provider()
         .build_chat_request_body_with_diagnostics(&req, true)
         .expect("expose_thinking is not refused on Chat");
+    let chat = chat.redacted();
     assert!(chat.body.get("reasoning").is_none());
     assert!(chat.body.get("reasoning_effort").is_none());
     assert_eq!(

@@ -1,3 +1,4 @@
+use lash_sansio::llm::types::TemplateJson;
 use serde_json::{Value, json};
 
 use super::*;
@@ -7,8 +8,8 @@ use super::*;
 // ---------------------------------------------------------------------------
 
 fn flush_pending_content(
-    pending: &mut Vec<Value>,
-    input: &mut Vec<Value>,
+    pending: &mut Vec<TemplateJson>,
+    input: &mut Vec<TemplateJson>,
     role: &'static str,
     is_user: bool,
     response_meta: Option<ResponseTextMeta>,
@@ -32,23 +33,27 @@ fn flush_pending_content(
             "id": meta.id.unwrap_or_else(|| format!("msg_lash_{message_index}_{part_index}")),
             "status": meta.status.unwrap_or_else(|| "completed".to_string()),
         });
-        item["content"] = Value::Array(content);
         if let Some(phase) = meta.phase.as_ref() {
             item["phase"] = json!(phase.as_str());
         }
+        let mut item = TemplateJson::from(item);
+        item.set("content", content);
         input.push(item);
         return;
     }
     if is_user
         && let Some(prev) = input.last_mut()
-        && prev.get("role").and_then(|v| v.as_str()) == Some("user")
-        && let Some(existing) = prev.get_mut("content").and_then(Value::as_array_mut)
+        && prev.str_field("role") == Some("user")
+        && let Some(existing) = prev
+            .field_mut("content")
+            .and_then(TemplateJson::as_array_mut)
     {
         existing.extend(content);
     } else {
-        let mut item = json!({"role": role});
-        item["content"] = Value::Array(content);
-        input.push(item);
+        input.push(TemplateJson::object([
+            ("role", json!(role).into()),
+            ("content", content.into()),
+        ]));
     }
 }
 
@@ -131,8 +136,8 @@ pub(crate) fn attachment_feedback(msg: &LlmMessage) -> Option<LlmMessage> {
 // Tool outputs are separate wire items, but belong before the feedback in
 // their user turn. Preserve the order of both outputs and feedback items.
 pub(crate) fn push_tool_output(
-    items: &mut Vec<Value>,
-    item: Value,
+    items: &mut Vec<TemplateJson>,
+    item: TemplateJson,
     feedback_start: &mut Option<usize>,
 ) {
     if let Some(index) = feedback_start {
@@ -161,22 +166,22 @@ pub(crate) fn feedback_boundary(msg: &LlmMessage, item_count: usize, start: &mut
 /// result is text only, otherwise the content-item array with its text and
 /// attachments interleaved in the result's order, so an image stays the
 /// tool's output rather than a separate user turn.
-fn function_call_output(content: &[ModelToolReturnPart]) -> Value {
+fn function_call_output(content: &[ModelToolReturnPart]) -> TemplateJson {
     if content.iter().all(|block| block.attachment().is_none()) {
-        return Value::String(tool_result_text(content).into_owned());
+        return Value::String(tool_result_text(content).into_owned()).into();
     }
-    Value::Array(
+    TemplateJson::Array(
         content
             .iter()
             .filter_map(|block| match block {
                 ModelToolReturnPart::Text { text } if text.is_empty() => None,
                 ModelToolReturnPart::Text { text } => {
-                    Some(json!({"type": "input_text", "text": text}))
+                    Some(json!({"type": "input_text", "text": text}).into())
                 }
                 // Retained output is sent as its witness; its reference is
                 // never materialized.
                 ModelToolReturnPart::Retained(retained) => {
-                    Some(json!({"type": "input_text", "text": retained.witness}))
+                    Some(json!({"type": "input_text", "text": retained.witness}).into())
                 }
                 ModelToolReturnPart::Attachment(source) => Some(input_attachment_part(
                     source,
@@ -188,8 +193,8 @@ fn function_call_output(content: &[ModelToolReturnPart]) -> Value {
 }
 
 /// Build ordered Responses input shared by the direct provider and Codex.
-pub fn build_responses_input(req: &LlmRequest) -> Vec<Value> {
-    let mut input: Vec<Value> = Vec::new();
+pub fn build_responses_input(req: &LlmRequest) -> Vec<TemplateJson> {
+    let mut input: Vec<TemplateJson> = Vec::new();
     let mut feedback_start = None;
     for (message_index, msg) in req.messages.iter().enumerate() {
         feedback_boundary(msg, input.len(), &mut feedback_start);
@@ -201,7 +206,7 @@ pub fn build_responses_input(req: &LlmRequest) -> Vec<Value> {
             role_name(&msg.role)
         };
         let is_user = matches!(msg.role, LlmRole::User);
-        let mut pending_content: Vec<Value> = Vec::new();
+        let mut pending_content: Vec<TemplateJson> = Vec::new();
         let mut pending_meta: Option<ResponseTextMeta> = None;
         let mut pending_part_index = 0usize;
 
@@ -236,16 +241,22 @@ pub fn build_responses_input(req: &LlmRequest) -> Vec<Value> {
                         "input_text"
                     };
                     if part_type == "output_text" {
-                        pending_content.push(json!({
-                            "type": part_type,
-                            "text": text,
-                            "annotations": [],
-                        }));
+                        pending_content.push(
+                            json!({
+                                "type": part_type,
+                                "text": text,
+                                "annotations": [],
+                            })
+                            .into(),
+                        );
                     } else {
-                        pending_content.push(json!({
-                            "type": part_type,
-                            "text": text,
-                        }));
+                        pending_content.push(
+                            json!({
+                                "type": part_type,
+                                "text": text,
+                            })
+                            .into(),
+                        );
                     }
                 }
                 LlmContentBlock::Attachment { reference } => {
@@ -267,7 +278,7 @@ pub fn build_responses_input(req: &LlmRequest) -> Vec<Value> {
                         pending_part_index,
                     );
                     if let Some(item) = reasoning_replay_item(text, replay.as_ref()) {
-                        input.push(item);
+                        input.push(item.into());
                     }
                 }
                 LlmContentBlock::ToolCall {
@@ -297,7 +308,7 @@ pub fn build_responses_input(req: &LlmRequest) -> Vec<Value> {
                     if let Some(id) = replay.as_ref().and_then(|meta| meta.item_id.as_deref()) {
                         item["id"] = json!(id);
                     }
-                    input.push(item);
+                    input.push(item.into());
                 }
                 LlmContentBlock::ToolResult {
                     call_id, content, ..
@@ -313,11 +324,11 @@ pub fn build_responses_input(req: &LlmRequest) -> Vec<Value> {
                     );
                     push_tool_output(
                         &mut input,
-                        json!({
-                            "type": "function_call_output",
-                            "call_id": call_id,
-                            "output": function_call_output(content),
-                        }),
+                        TemplateJson::object([
+                            ("type", json!("function_call_output").into()),
+                            ("call_id", json!(call_id).into()),
+                            ("output", function_call_output(content)),
+                        ]),
                         &mut feedback_start,
                     );
                 }

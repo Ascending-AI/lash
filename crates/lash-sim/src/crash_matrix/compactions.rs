@@ -150,6 +150,10 @@ fn summarizes(request: &LlmRequest) -> bool {
 
 const KIND: &str = "lash-sim-compaction";
 
+#[expect(
+    clippy::expect_used,
+    reason = "the scripted body is a serialized JSON value, which is a valid literal template"
+)]
 fn model(world: Weak<World>) -> ProviderHandle {
     let generations = Arc::new(AtomicU64::new(0));
     let lowering = world.clone();
@@ -186,6 +190,7 @@ fn model(world: Weak<World>) -> ProviderHandle {
                 None,
                 body,
             )
+            .expect("the scripted body is JSON")
         })
         .answer(move |context: ResponseContext, body: String| {
             let world = world.clone();

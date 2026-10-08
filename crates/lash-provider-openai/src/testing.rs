@@ -49,7 +49,7 @@ pub fn serialize_chat_request(
     let (built, diagnostics) =
         provider.build_chat_request_body_with_diagnostics(&request, false)?;
     Ok((
-        built.body,
+        built.body.redacted(),
         CacheBreakpointReport {
             requested: diagnostics.requested,
             emitted: diagnostics.emitted,

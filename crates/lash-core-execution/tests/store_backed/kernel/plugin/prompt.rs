@@ -169,7 +169,8 @@ fn template(call: u32) -> lash_sansio::llm::types::RecordedRequestTemplate {
         model: "model".into(),
     };
     if call == 1 {
-        return RecordedRequestTemplate::literal(route, true, None, format!("{{\"call\":{call}}}"));
+        return RecordedRequestTemplate::literal(route, true, None, format!("{{\"call\":{call}}}"))
+            .expect("the literal is JSON");
     }
     let mut builder = RecordedRequestTemplate::builder(route, true, None);
     builder

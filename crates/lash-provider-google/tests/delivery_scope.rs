@@ -85,6 +85,7 @@ async fn deliver(
             &accepts(provider),
             &DeliveryLimits {
                 max_bytes: 4096,
+                max_upload_bytes: 4096,
                 valid_through_ms: horizon,
             },
         )

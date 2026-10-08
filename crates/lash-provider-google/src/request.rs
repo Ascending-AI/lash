@@ -59,18 +59,33 @@ impl GoogleOAuthProvider {
         Some(signature.to_string())
     }
 
-    #[expect(
-        clippy::expect_used,
-        clippy::unwrap_used,
-        reason = "every content entry here is built by this fn with `parts` as a JSON array; the merge guard re-checks is_array and the sort sees the entries it built"
-    )]
+    /// [`Self::build_contents`] as plain JSON, each attachment part shown
+    /// by its redacted marker.
+    #[cfg(any(test, feature = "testing"))]
     pub(crate) fn build_contents_with_attachment_parts(
         &self,
         req: &LlmRequest,
     ) -> Result<Vec<Value>, LlmTransportError> {
+        Ok(self
+            .build_contents(req)?
+            .iter()
+            .map(TemplateJson::redacted)
+            .collect())
+    }
+
+    /// The `contents` of a request, each attachment a slot where its part
+    /// sits.
+    #[expect(
+        clippy::expect_used,
+        reason = "every content entry here is built by this fn with `parts` as an array; the sort sees the entries it built"
+    )]
+    pub(crate) fn build_contents(
+        &self,
+        req: &LlmRequest,
+    ) -> Result<Vec<TemplateJson>, LlmTransportError> {
         let safe_request = self.reasoning_retention_safe_request(req)?;
         let req = safe_request.as_ref();
-        let mut out: Vec<Value> = Vec::new();
+        let mut out: Vec<TemplateJson> = Vec::new();
         // Gemini 3 accepts media inside a function response; older dialects
         // (and Claude on Vertex) take it only as ordinary user parts.
         let multimodal_function_response = matches!(
@@ -88,7 +103,7 @@ impl GoogleOAuthProvider {
                 LlmRole::User | LlmRole::System => "user",
             };
 
-            let mut parts: Vec<Value> = Vec::new();
+            let mut parts: Vec<TemplateJson> = Vec::new();
             if matches!(msg.role, LlmRole::System) {
                 let text = msg
                     .blocks
@@ -98,7 +113,9 @@ impl GoogleOAuthProvider {
                         _ => None,
                     })
                     .collect::<String>();
-                parts.push(json!({"text": format!("<runtime_feedback>{text}</runtime_feedback>")}));
+                parts.push(
+                    json!({"text": format!("<runtime_feedback>{text}</runtime_feedback>")}).into(),
+                );
             }
             for block in msg.blocks.iter().filter(|block| {
                 !matches!(msg.role, LlmRole::System)
@@ -120,11 +137,14 @@ impl GoogleOAuthProvider {
                         {
                             part["thoughtSignature"] = Value::String(signature);
                         }
-                        parts.push(part);
+                        parts.push(part.into());
                     }
                     LlmContentBlock::Attachment { reference } => {
                         if matches!(msg.role, LlmRole::User | LlmRole::System) {
-                            parts.push(attachment_operand(reference, AttachmentPosition::Message));
+                            parts.push(TemplateJson::attachment(
+                                reference,
+                                AttachmentPosition::Message,
+                            ));
                         }
                     }
                     LlmContentBlock::ToolCall {
@@ -150,7 +170,7 @@ impl GoogleOAuthProvider {
                         if let Some(sig) = effective {
                             part["thoughtSignature"] = Value::String(sig);
                         }
-                        parts.push(part);
+                        parts.push(part.into());
                     }
                     LlmContentBlock::ToolResult {
                         call_id,
@@ -164,15 +184,13 @@ impl GoogleOAuthProvider {
                         // attachment (and all of them on older dialects)
                         // follows the response as user parts, each after its
                         // marker.
-                        let mut response = json!({
-                            "functionResponse": {
-                                "id": call_id,
-                                "name": tool_name.clone().unwrap_or_else(|| "tool".to_string()),
-                                "response": { "output": tool_result_text(content) },
-                            }
-                        });
+                        let mut function_response = TemplateJson::from(json!({
+                            "id": call_id,
+                            "name": tool_name.clone().unwrap_or_else(|| "tool".to_string()),
+                            "response": { "output": tool_result_text(content) },
+                        }));
                         let mut inside = Vec::new();
-                        let mut after = Vec::new();
+                        let mut after: Vec<TemplateJson> = Vec::new();
                         for (index, source) in content
                             .iter()
                             .filter_map(ModelToolReturnPart::attachment)
@@ -181,27 +199,34 @@ impl GoogleOAuthProvider {
                             if multimodal_function_response
                                 && function_response_part_accepts(source)
                             {
-                                inside.push(attachment_operand(
+                                inside.push(TemplateJson::attachment(
                                     source,
                                     AttachmentPosition::ToolResult,
                                 ));
                             } else {
-                                after
-                                    .push(json!({ "text": format!("[Attachment {}]", index + 1) }));
-                                after.push(attachment_operand(
+                                after.push(
+                                    json!({ "text": format!("[Attachment {}]", index + 1) }).into(),
+                                );
+                                after.push(TemplateJson::attachment(
                                     source,
                                     AttachmentPosition::ToolResult,
                                 ));
                             }
                         }
                         if !inside.is_empty() {
-                            response["functionResponse"]["parts"] = Value::Array(inside);
+                            function_response.set("parts", inside);
                         }
-                        parts.push(response);
+                        parts.push(TemplateJson::object([(
+                            "functionResponse",
+                            function_response,
+                        )]));
                         if !after.is_empty() {
-                            parts.push(json!({
-                                "text": format!("Attachments from tool result {call_id}:")
-                            }));
+                            parts.push(
+                                json!({
+                                    "text": format!("Attachments from tool result {call_id}:")
+                                })
+                                .into(),
+                            );
                             parts.extend(after);
                         }
                     }
@@ -219,7 +244,7 @@ impl GoogleOAuthProvider {
                         if let Some(s) = sig {
                             part["thoughtSignature"] = Value::String(s);
                         }
-                        parts.push(part);
+                        parts.push(part.into());
                     }
                 }
             }
@@ -229,25 +254,27 @@ impl GoogleOAuthProvider {
             }
 
             if let Some(prev) = out.last_mut()
-                && prev.get("role").and_then(|r| r.as_str()) == Some(role)
-                && prev.get("parts").is_some_and(|p| p.is_array())
+                && prev.str_field("role") == Some(role)
+                && let Some(prev_parts) =
+                    prev.field_mut("parts").and_then(TemplateJson::as_array_mut)
             {
-                prev["parts"].as_array_mut().unwrap().extend(parts);
+                prev_parts.extend(parts);
             } else {
-                out.push(json!({
-                    "role": role,
-                    "parts": parts,
-                }));
+                out.push(TemplateJson::object([
+                    ("role", json!(role).into()),
+                    ("parts", parts.into()),
+                ]));
             }
         }
         for content in &mut out {
-            if content["role"] == "user" {
+            if content.str_field("role") == Some("user") {
                 // Keep parallel function responses together before the tagged
                 // feedback in their coalesced user turn.
-                content["parts"]
-                    .as_array_mut()
+                content
+                    .field_mut("parts")
+                    .and_then(TemplateJson::as_array_mut)
                     .expect("content parts")
-                    .sort_by_key(|part| part.get("functionResponse").is_none());
+                    .sort_by_key(|part| !part.has_field("functionResponse"));
             }
         }
         Ok(out)
@@ -399,6 +426,23 @@ impl GoogleOAuthProvider {
         project_id: Option<&str>,
     ) -> Result<Value, LlmTransportError> {
         Self::build_request_with_receipt(provider, req, contents, project_id).map(|(body, _)| body)
+    }
+
+    /// [`Self::build_request_with_receipt`] over `contents` that hold the
+    /// request's attachment slots.
+    pub(crate) fn build_request_tree(
+        provider: &GoogleOAuthProvider,
+        req: &LlmRequest,
+        contents: Vec<TemplateJson>,
+        project_id: Option<&str>,
+    ) -> Result<(TemplateJson, GenerationReceipt), LlmTransportError> {
+        let (request, receipt) =
+            Self::build_request_with_receipt(provider, req, Vec::new(), project_id)?;
+        let mut request = TemplateJson::from(request);
+        if let Some(inner) = request.field_mut("request") {
+            inner.set("contents", contents);
+        }
+        Ok((request, receipt))
     }
 
     /// The Cloud Code request and the receipt of the host settings it carries.

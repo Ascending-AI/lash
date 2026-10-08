@@ -188,6 +188,10 @@ enum Mode {
     /// call's template carries one attachment slot, delivered as a fresh
     /// signed URL on every attempt (WIRE-SLOTS).
     Slots,
+    /// As [`Mode::Slots`] on the production path (FIG-5515): the Anthropic
+    /// adapter lowers and sends every call's template, and the session's
+    /// runtime attachment store delivers its slot.
+    AdapterSlots,
     /// As [`Mode::Slots`], with the image's upload ended and the store swept
     /// before every attempt: only the turn's execution holds it.
     SlotHold,
@@ -446,6 +450,7 @@ impl TurnServices for L3Services {
             | Mode::CancelAtAdmission
             | Mode::MaterialLost
             | Mode::Slots
+            | Mode::AdapterSlots
             | Mode::SlotHold
             | Mode::CollidingCommit
             | Mode::OutsideWriterRange => ExecutionBudgets::recommended(),
@@ -588,8 +593,12 @@ impl TurnDrive for L3Drive {
         let literal = format!("{{\"builder\":{generation},\"request\":{lowered}");
         let image = self.services.image.lock_recover().clone();
         let template = match image {
+            Some(image) if self.services.mode == Mode::AdapterSlots => {
+                slots::adapter_template(&request, &image).await?
+            }
             Some(image) => slots::template(&literal, &image),
-            None => RecordedRequestTemplate::literal(route(), true, None, format!("{literal}}}")),
+            None => RecordedRequestTemplate::literal(route(), true, None, format!("{literal}}}"))
+                .expect("the literal is JSON"),
         };
         Ok(PreparedCall::Admit(Box::new(ComposedCall {
             request: Arc::new(request),
@@ -1028,7 +1037,7 @@ impl Scenario for L3 {
             .clone()
             .expect("the database is built first");
         let input = seed::send_turn(&backend, &session(), &run(), "think twice").await?;
-        if matches!(self.mode, Mode::Slots | Mode::SlotHold) {
+        if matches!(self.mode, Mode::Slots | Mode::AdapterSlots | Mode::SlotHold) {
             *self.image.lock_recover() = Some(slots::put_image(&backend).await?);
         }
         match self.mode {
@@ -1152,6 +1161,7 @@ impl Scenario for L3 {
             | Mode::ShortDeadline
             | Mode::HeadMovesUnderTheTurn
             | Mode::Slots
+            | Mode::AdapterSlots
             | Mode::SlotHold => {
                 // Atomic turn progress: one head advance, with its terminal.
                 let commits = committed(CommitLabel::TURN_COMMIT);
@@ -1571,8 +1581,10 @@ fn compositions_of(seen: &Seen, call: u32) -> usize {
 /// how often a call cut at its `model.start` composed (FIG-5255).
 fn cut_laws(mode: Mode, cut: &Cut, seen: &Seen) -> Vec<String> {
     let mut violations = Vec::new();
-    if matches!(mode, Mode::Plain | Mode::Slots | Mode::SlotHold)
-        && cut.point.label == CommitLabel::MODEL_START
+    if matches!(
+        mode,
+        Mode::Plain | Mode::Slots | Mode::AdapterSlots | Mode::SlotHold
+    ) && cut.point.label == CommitLabel::MODEL_START
     {
         // Uncut up to its cut, a plain turn's nth `model.start` admits its
         // nth call. A crash after admission resends the admitted call and
@@ -1606,7 +1618,7 @@ fn cut_laws(mode: Mode, cut: &Cut, seen: &Seen) -> Vec<String> {
         .max()
         .unwrap_or(0);
     match mode {
-        Mode::Plain | Mode::Slots | Mode::SlotHold => {
+        Mode::Plain | Mode::Slots | Mode::AdapterSlots | Mode::SlotHold => {
             if max_attempt != 2 {
                 violations.push(format!(
                     "re-send: a call pinned by a killed node was not re-sent as attempt 2: {:?}",
@@ -1941,6 +1953,22 @@ async fn an_attachment_call_resends_its_template_with_fresh_deliveries() {
     prove_on(
         matrix().labels(SHORT_DEADLINE),
         Mode::Slots,
+        SHORT_DEADLINE,
+        Dialect::SqliteMemory,
+    )
+    .await;
+}
+
+/// WIRE-SLOTS on the production path (FIG-5515): the same cuts and the same
+/// literals-pinned property, with the Anthropic adapter lowering and sending
+/// each call's template and the session's runtime attachment store over
+/// SQLite delivering its slot, so the adapter's codec and the store's
+/// delivery are inside the law rather than replaced by doubles.
+#[tokio::test]
+async fn an_adapter_lowered_attachment_call_resends_its_template_through_the_runtime_store() {
+    prove_on(
+        matrix().labels(SHORT_DEADLINE),
+        Mode::AdapterSlots,
         SHORT_DEADLINE,
         Dialect::SqliteMemory,
     )

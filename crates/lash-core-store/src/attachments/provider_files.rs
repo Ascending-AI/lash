@@ -95,9 +95,10 @@ impl ProviderFileDelivery {
             scope: scope.clone(),
             id: DeliverySecret::new(entry.id.expose().to_owned()),
             valid_until_ms: Some(entry.valid_until_ms),
+            uploaded: false,
         }))
     }
-    /// Read the original within the delivery's byte bound and upload it.
+    /// Read the original within the delivery's upload bound and upload it.
     /// Every error is safe to report: uploader text is rebuilt from its
     /// class.
     async fn upload(
@@ -106,7 +107,7 @@ impl ProviderFileDelivery {
         reference: &AttachmentRef,
         limits: &DeliveryLimits,
     ) -> Result<UploadedProviderFile, AttachmentStoreError> {
-        let read_limit = limits.max_bytes.min(reference.byte_len);
+        let read_limit = limits.max_upload_bytes.min(reference.byte_len);
         let stored = self.inner.get(&reference.id, read_limit).await?;
         validate_attachment_bytes(
             reference,
@@ -178,6 +179,7 @@ impl ProviderFileDelivery {
             scope: scope.clone(),
             id: file.id,
             valid_until_ms: Some(expiry),
+            uploaded: true,
         })
     }
 }

@@ -116,7 +116,7 @@ pub(crate) fn build_request_body(
     endpoint: CompletionEndpoint,
     stream: bool,
     origin_route: &ProviderRouteIdentity,
-) -> Result<BuiltRequest, LlmTransportError> {
+) -> Result<BuiltRequest<TemplateJson>, LlmTransportError> {
     let mut reserved_headers = vec![
         provider.wire.auth_header_name.as_str(),
         "content-type",
@@ -137,7 +137,10 @@ pub(crate) fn build_request_body(
         }
     };
     if provider.resolved_compat(endpoint).cache_session_affinity {
-        built.body["session_id"] = Value::String(req.scope.provider_session_affinity_key());
+        built.body.set(
+            "session_id",
+            Value::String(req.scope.provider_session_affinity_key()),
+        );
     }
     Ok(built)
 }
@@ -261,10 +264,6 @@ pub(crate) async fn lower(
         CompletionEndpoint::Responses => crate::attachment_delivery::RESPONSES_CODEC,
         CompletionEndpoint::ChatCompletions => crate::attachment_delivery::CHAT_CODEC,
     };
-    let patterns: &[&str] = match endpoint {
-        CompletionEndpoint::Responses => &["/input/*/content/*", "/input/*/output/*"],
-        CompletionEndpoint::ChatCompletions => &["/messages/*/content/*/image_url/url"],
-    };
     let scope = provider
         .attachment_credential_scope
         .as_ref()
@@ -296,7 +295,6 @@ pub(crate) async fn lower(
         (req.stream_events.is_some(), Some(receipt)),
         &body,
         codec,
-        patterns,
     )
 }
 

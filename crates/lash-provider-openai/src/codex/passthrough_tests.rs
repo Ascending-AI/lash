@@ -58,7 +58,7 @@ fn codex_passthrough_refuses_owned_nested_and_suppressed_controls() {
         .cloned()
         .unwrap();
     assert_eq!(
-        provider.build_request(&req, false).unwrap().body["host"]["nested"],
+        provider.build_request_body(&req, false).unwrap()["host"]["nested"],
         true
     );
     let provider = provider.with_extra_headers(vec![("SeSsIoN-Id".into(), "other".into())]);

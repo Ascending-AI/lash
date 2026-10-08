@@ -16,6 +16,7 @@ pub async fn attachment_delivery_names_its_content(backend: Arc<dyn AttachmentSt
         .expect("put original");
     let limits = DeliveryLimits {
         max_bytes: 1024,
+        max_upload_bytes: 1024,
         valid_through_ms: 1000,
     };
     let accepts = ProviderAccepts {

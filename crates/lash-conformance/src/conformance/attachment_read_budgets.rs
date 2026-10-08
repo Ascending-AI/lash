@@ -295,14 +295,6 @@ pub async fn attachment_delivery_read_budgets(backend: Arc<dyn AttachmentStore>)
         "provider file ids share the serialization bound"
     );
     assert_eq!(uploader.uploads.load(Ordering::SeqCst), 1);
-    let too_small = store.reconfigured_read_policy(AttachmentReadPolicy {
-        max_blob_bytes: 3,
-        max_request_bytes: 8192,
-    });
-    assert!(
-        too_small.deliver(&[&file_slot], &scoped).await.is_err(),
-        "a cached file cannot bypass the upload scratch reservation"
-    );
     for class in [
         AttachmentStoreFailureClass::Transient,
         AttachmentStoreFailureClass::Terminal,
@@ -364,6 +356,7 @@ pub async fn attachment_delivery_read_budgets(backend: Arc<dyn AttachmentStore>)
     );
     let over_scratch = DeliveryLimits {
         max_bytes: 3,
+        max_upload_bytes: 3,
         valid_through_ms: scoped.valid_through_ms,
     };
     let url_or_file = ProviderAccepts {
@@ -392,6 +385,7 @@ pub async fn attachment_delivery_read_budgets(backend: Arc<dyn AttachmentStore>)
     );
     let fits = DeliveryLimits {
         max_bytes: 4,
+        max_upload_bytes: 4,
         valid_through_ms: u64::MAX / 2,
     };
     for bytes in [false, true] {

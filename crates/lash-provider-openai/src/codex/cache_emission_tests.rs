@@ -27,7 +27,7 @@ fn codex_tool_schema_prompt_cache_key_is_not_cache_emission() {
             .expect("valid declared schema"),
     }]);
 
-    let built = provider.build_request(&req, false).unwrap();
+    let built = provider.build_request(&req, false).unwrap().redacted();
 
     assert!(built.body["tools"][0]["parameters"]["properties"]["prompt_cache_key"].is_object());
     assert!(built.body.get("prompt_cache_key").is_none());
@@ -37,7 +37,7 @@ fn codex_tool_schema_prompt_cache_key_is_not_cache_emission() {
     );
 
     req.model.metadata_mut().request_defaults.cache_retention = CacheRetention::Short;
-    let built = provider.build_request(&req, false).unwrap();
+    let built = provider.build_request(&req, false).unwrap().redacted();
     assert!(built.body.get("prompt_cache_key").is_some());
     assert_eq!(
         built.receipt.cache,

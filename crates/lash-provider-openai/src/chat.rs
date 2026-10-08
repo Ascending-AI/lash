@@ -31,14 +31,23 @@ impl OpenAiCompatibleProvider {
         }
     }
 
-    fn chat_attachment_part(reference: &AttachmentRef, position: AttachmentPosition) -> Value {
-        json!({"type": "image_url", "image_url": {"url": attachment_operand(reference, position)}})
+    fn chat_attachment_part(
+        reference: &AttachmentRef,
+        position: AttachmentPosition,
+    ) -> TemplateJson {
+        TemplateJson::object([
+            ("type", json!("image_url").into()),
+            (
+                "image_url",
+                TemplateJson::object([("url", TemplateJson::attachment(reference, position))]),
+            ),
+        ])
     }
 
-    fn build_chat_messages(req: &LlmRequest) -> Vec<Value> {
-        let mut messages = Vec::new();
+    fn build_chat_messages(req: &LlmRequest) -> Vec<TemplateJson> {
+        let mut messages: Vec<TemplateJson> = Vec::new();
         if let Some(instructions) = &req.instructions {
-            messages.push(json!({"role": req.model.metadata().capability.instruction_role.as_str(), "content": [{"type": "text", "text": instructions}]}));
+            messages.push(json!({"role": req.model.metadata().capability.instruction_role.as_str(), "content": [{"type": "text", "text": instructions}]}).into());
         }
         let mut feedback_start = None;
         for msg in &req.messages {
@@ -50,7 +59,7 @@ impl OpenAiCompatibleProvider {
             } else {
                 role_name(&msg.role)
             };
-            let mut text_parts = Vec::new();
+            let mut text_parts: Vec<TemplateJson> = Vec::new();
             let mut tool_calls = Vec::new();
             let mut reasoning_details = Vec::new();
 
@@ -68,7 +77,7 @@ impl OpenAiCompatibleProvider {
                         {
                             part["__lash_cache_breakpoint"] = json!(true);
                         }
-                        text_parts.push(part);
+                        text_parts.push(part.into());
                     }
                     LlmContentBlock::Attachment { reference }
                         if matches!(msg.role, LlmRole::User) =>
@@ -117,10 +126,13 @@ impl OpenAiCompatibleProvider {
                             .filter_map(ModelToolReturnPart::attachment)
                             .peekable();
                         if attachments.peek().is_some() {
-                            text_parts.push(json!({
-                                "type": "text",
-                                "text": format!("Attachments from tool result {call_id}:"),
-                            }));
+                            text_parts.push(
+                                json!({
+                                    "type": "text",
+                                    "text": format!("Attachments from tool result {call_id}:"),
+                                })
+                                .into(),
+                            );
                             text_parts.extend(attachments.map(|reference| {
                                 Self::chat_attachment_part(
                                     reference,
@@ -138,7 +150,11 @@ impl OpenAiCompatibleProvider {
                         {
                             tool_message["name"] = json!(name);
                         }
-                        shared::push_tool_output(&mut messages, tool_message, &mut feedback_start);
+                        shared::push_tool_output(
+                            &mut messages,
+                            tool_message.into(),
+                            &mut feedback_start,
+                        );
                     }
                     LlmContentBlock::Reasoning { .. } | LlmContentBlock::Attachment { .. } => {}
                     LlmContentBlock::Text { .. } | LlmContentBlock::ToolCall { .. } => {}
@@ -151,9 +167,7 @@ impl OpenAiCompatibleProvider {
             ) && (!text_parts.is_empty() || !tool_calls.is_empty())
             {
                 let mut wire_message = json!({ "role": role });
-                if !text_parts.is_empty() {
-                    wire_message["content"] = Value::Array(text_parts);
-                } else if matches!(msg.role, LlmRole::Assistant) {
+                if text_parts.is_empty() && matches!(msg.role, LlmRole::Assistant) {
                     wire_message["content"] = Value::Null;
                 }
                 if !tool_calls.is_empty() {
@@ -161,6 +175,10 @@ impl OpenAiCompatibleProvider {
                 }
                 if !reasoning_details.is_empty() {
                     wire_message["reasoning_details"] = Value::Array(reasoning_details);
+                }
+                let mut wire_message = TemplateJson::from(wire_message);
+                if !text_parts.is_empty() {
+                    wire_message.set("content", text_parts);
                 }
                 messages.push(wire_message);
             }
@@ -196,16 +214,27 @@ impl OpenAiCompatibleProvider {
             .collect()
     }
 
-    fn add_cache_control_to_text_content(message: &mut Value, cache_control: &Value) -> bool {
-        let Some(content) = message.get_mut("content") else {
-            return false;
-        };
-        let Some(parts) = content.as_array_mut() else {
+    /// The content parts of a wire message, when its content is an array.
+    fn content_parts(message: &mut TemplateJson) -> Option<&mut Vec<TemplateJson>> {
+        if !message
+            .json_field("content")
+            .is_none_or(serde_json::Value::is_array)
+        {
+            return None;
+        }
+        message.field_mut("content")?.as_array_mut()
+    }
+
+    fn add_cache_control_to_text_content(
+        message: &mut TemplateJson,
+        cache_control: &Value,
+    ) -> bool {
+        let Some(parts) = Self::content_parts(message) else {
             return false;
         };
         for part in parts.iter_mut().rev() {
-            if part.get("type").and_then(Value::as_str) == Some("text") {
-                part["cache_control"] = cache_control.clone();
+            if part.str_field("type") == Some("text") {
+                part.set("cache_control", cache_control.clone());
                 return true;
             }
         }
@@ -213,33 +242,31 @@ impl OpenAiCompatibleProvider {
     }
 
     fn add_cache_control_to_marked_text_content(
-        message: &mut Value,
+        message: &mut TemplateJson,
         cache_control: &Value,
     ) -> bool {
-        let Some(parts) = message.get_mut("content").and_then(Value::as_array_mut) else {
+        let Some(parts) = Self::content_parts(message) else {
             return false;
         };
         for part in parts.iter_mut().rev() {
             let is_marked = part
-                .get("__lash_cache_breakpoint")
+                .json_field("__lash_cache_breakpoint")
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
-            if is_marked && part.get("type").and_then(Value::as_str) == Some("text") {
-                part["cache_control"] = cache_control.clone();
-                part.as_object_mut()
-                    .map(|obj| obj.remove("__lash_cache_breakpoint"));
+            if is_marked && part.str_field("type") == Some("text") {
+                part.set("cache_control", cache_control.clone());
+                part.remove("__lash_cache_breakpoint");
                 return true;
             }
         }
         false
     }
 
-    fn strip_internal_cache_markers(messages: &mut [Value]) {
+    fn strip_internal_cache_markers(messages: &mut [TemplateJson]) {
         for message in messages {
-            if let Some(parts) = message.get_mut("content").and_then(Value::as_array_mut) {
+            if let Some(parts) = Self::content_parts(message) {
                 for part in parts {
-                    part.as_object_mut()
-                        .map(|obj| obj.remove("__lash_cache_breakpoint"));
+                    part.remove("__lash_cache_breakpoint");
                 }
             }
         }
@@ -248,7 +275,7 @@ impl OpenAiCompatibleProvider {
     fn apply_chat_cache_control(
         req: &LlmRequest,
         cache_retention: CacheRetention,
-        messages: &mut [Value],
+        messages: &mut [TemplateJson],
         tools: &mut [Value],
     ) -> CacheBreakpointDiagnostics {
         let requested = req
@@ -293,7 +320,7 @@ impl OpenAiCompatibleProvider {
             let fallback_emitted = !applied_explicit_breakpoint
                 && messages.iter_mut().rev().any(|message| {
                     matches!(
-                        message.get("role").and_then(Value::as_str),
+                        message.str_field("role"),
                         Some("user" | "assistant" | "system" | "developer")
                     ) && Self::add_cache_control_to_text_content(message, &cache_control)
                 });
@@ -321,7 +348,7 @@ impl OpenAiCompatibleProvider {
         let mut applied_explicit_breakpoint = false;
         for message in messages.iter_mut().rev() {
             if matches!(
-                message.get("role").and_then(Value::as_str),
+                message.str_field("role"),
                 Some("user" | "assistant" | "system" | "developer")
             ) && Self::add_cache_control_to_marked_text_content(message, &cache_control)
             {
@@ -333,7 +360,7 @@ impl OpenAiCompatibleProvider {
         if !applied_explicit_breakpoint {
             for message in messages.iter_mut().rev() {
                 if matches!(
-                    message.get("role").and_then(Value::as_str),
+                    message.str_field("role"),
                     Some("user" | "assistant" | "system" | "developer")
                 ) && Self::add_cache_control_to_text_content(message, &cache_control)
                 {
@@ -359,7 +386,7 @@ impl OpenAiCompatibleProvider {
         stream: bool,
     ) -> Result<Value, LlmTransportError> {
         self.build_chat_request_body_with_diagnostics(req, stream)
-            .map(|(built, _)| built.body)
+            .map(|(built, _)| built.body.redacted())
     }
 
     /// What Chat Completions, as this endpoint's compat configures it, can
@@ -383,7 +410,7 @@ impl OpenAiCompatibleProvider {
         &self,
         req: &LlmRequest,
         stream: bool,
-    ) -> Result<(BuiltRequest, CacheBreakpointDiagnostics), LlmTransportError> {
+    ) -> Result<(BuiltRequest<TemplateJson>, CacheBreakpointDiagnostics), LlmTransportError> {
         let serving_route = self.route_identity(req.model.wire_model());
         let safe_request = req
             .reasoning_retention_safe_for(
@@ -424,10 +451,10 @@ impl OpenAiCompatibleProvider {
         emission.cache = cache_diagnostics.cache_control_emitted;
         let mut body = json!({
             "model": req.model.wire_model(),
-            "messages": null,
+            // Set last: the messages hold the request's attachment slots.
+            "messages": [],
             "stream": stream,
         });
-        body["messages"] = Value::Array(messages);
         if let Some(provider_routing) = compat.provider_routing {
             body["provider"] = json!(provider_routing);
         }
@@ -493,6 +520,8 @@ impl OpenAiCompatibleProvider {
         } else {
             passthrough
         };
+        let mut body = TemplateJson::from(body);
+        body.set("messages", messages);
         Ok((BuiltRequest { body, receipt }, cache_diagnostics))
     }
 

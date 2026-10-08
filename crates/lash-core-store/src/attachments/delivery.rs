@@ -15,6 +15,10 @@ pub(super) fn delivery_cost(capacity: u64, byte_len: u64, occurrences: u64) -> O
     capacity.checked_add(encoding_allowance(byte_len)?.checked_mul(occurrences)?)
 }
 
+/// The slots of one attempt that share one delivery: the same content as
+/// the same media type under the same effective acceptance. The media type
+/// is part of the key because a provider file is uploaded, cached and typed
+/// by it: the same bytes named as two types are two derivatives.
 struct Group<'a> {
     reference: &'a AttachmentRef,
     accepts: ProviderAccepts,
@@ -58,10 +62,11 @@ impl SlotDeliveries for RuntimeAttachmentStore {
                     id: reference.id.clone(),
                 });
             }
-            if let Some(group) = groups
-                .iter_mut()
-                .find(|group| group.reference.id == reference.id && group.accepts == accepts)
-            {
+            if let Some(group) = groups.iter_mut().find(|group| {
+                group.reference.id == reference.id
+                    && group.reference.media_type == reference.media_type
+                    && group.accepts == accepts
+            }) {
                 if group.reference.byte_len != reference.byte_len {
                     return Err(AttachmentDeliveryError::ContentMismatch {
                         id: reference.id.clone(),
@@ -90,8 +95,12 @@ impl SlotDeliveries for RuntimeAttachmentStore {
                     high = middle - 1;
                 }
             }
+            // An upload reads its bytes once as scratch and sends a file id,
+            // so it is bounded by what remains, not by the inline encoding.
+            let max_upload_bytes = policy.max_blob_bytes.min(remaining);
             let limits = DeliveryLimits {
                 max_bytes: low,
+                max_upload_bytes,
                 valid_through_ms: ctx.valid_through_ms,
             };
             let delivery = self
@@ -129,26 +138,30 @@ impl SlotDeliveries for RuntimeAttachmentStore {
                         .ok_or_else(refusal)?
                 }
                 Delivery::ProviderFile {
-                    id, valid_until_ms, ..
+                    id,
+                    valid_until_ms,
+                    uploaded,
+                    ..
                 } => {
                     check_horizon(group.reference, *valid_until_ms, ctx)?;
-                    // Reserve the bounded upload scratch even on cache hits. The wrapper
-                    // reads with min(max_bytes, byte_len), so its capacity fits this charge.
-                    if group.reference.byte_len > low {
-                        return Err(AttachmentDeliveryError::LimitExceeded { max_bytes: low });
-                    }
-                    delivery_cost(
-                        group.reference.byte_len,
-                        group.reference.byte_len,
-                        occurrences,
-                    )
-                    .and_then(|n| {
-                        (id.len() as u64)
-                            .checked_mul(24)?
-                            .checked_mul(occurrences)?
-                            .checked_add(n)
-                    })
-                    .ok_or_else(refusal)?
+                    // A file id is never encoded inline: it costs its escaped
+                    // length per occurrence, and an upload (a cache miss) the
+                    // bytes it read as scratch. A reused file reads nothing.
+                    let scratch = if *uploaded {
+                        if group.reference.byte_len > max_upload_bytes {
+                            return Err(AttachmentDeliveryError::LimitExceeded {
+                                max_bytes: max_upload_bytes,
+                            });
+                        }
+                        group.reference.byte_len
+                    } else {
+                        0
+                    };
+                    (id.len() as u64)
+                        .checked_mul(24)
+                        .and_then(|n| n.checked_mul(occurrences))
+                        .and_then(|n| n.checked_add(scratch))
+                        .ok_or_else(refusal)?
                 }
             };
             remaining = remaining.checked_sub(cost).ok_or_else(refusal)?;

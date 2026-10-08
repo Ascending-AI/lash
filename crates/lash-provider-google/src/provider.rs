@@ -55,7 +55,8 @@ impl GoogleOAuthProvider {
             stream_events.is_some(),
             generation_disposition,
             request.to_string(),
-        );
+        )
+        .map_err(template_error)?;
         let body = LiveRequestBody::fill(Arc::new(template), Vec::new()).map_err(template_error)?;
         self.execute_body(access_token, &body, stream_events, provider_trace, reading)
             .await
@@ -476,9 +477,9 @@ impl GoogleOAuthProvider {
                 }
             };
         }
-        let contents = self.build_contents_with_attachment_parts(req)?;
+        let contents = self.build_contents(req)?;
         let (request, receipt) =
-            Self::build_request_with_receipt(self, req, contents, self.project_id.as_deref())?;
+            Self::build_request_tree(self, req, contents, self.project_id.as_deref())?;
         lower_attachment_json(
             |mime, position| self.attachment_accepts(req.model.wire_model(), mime, position),
             req,
@@ -486,10 +487,6 @@ impl GoogleOAuthProvider {
             (req.stream_events.is_some(), Some(receipt)),
             &request,
             crate::attachment_delivery::CODEC,
-            &[
-                "/request/contents/*/parts/*",
-                "/request/contents/*/parts/*/functionResponse/parts/*",
-            ],
         )
     }
 

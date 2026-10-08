@@ -318,6 +318,7 @@ PACKAGE_DEPS = {
     "lash-internal-durable-test": {
         "build": {},
         "dev": {
+            "base64": "//third-party/rust:p0024",
             "delegation": "//examples/delegation:delegation",
             "flate2": "//third-party/rust:p0109",
             "lash": "//crates/lash:lash",
@@ -326,8 +327,10 @@ PACKAGE_DEPS = {
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
             "lash_lashlang_runtime": "//crates/lash-lashlang-runtime:lash-lashlang-runtime",
             "lash_llm_tools": "//crates/lash-llm-tools:lash-llm-tools",
+            "lash_llm_transport": "//crates/lash-llm-transport:lash-llm-transport",
             "lash_plugin_standard_compaction": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction",
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
+            "lash_provider_anthropic": "//crates/lash-provider-anthropic:lash-provider-anthropic",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
             "lash_typescript": "//crates/lash-typescript:lash-typescript",
             "lash_vm_broker": "//crates/lash-vm-broker:lash-vm-broker",

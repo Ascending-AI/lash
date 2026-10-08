@@ -75,7 +75,7 @@ fn runtime_feedback_chat_cache_distinguishes_instructions_and_explicit_fences() 
     let (built, diagnostic) = provider
         .build_chat_request_body_with_diagnostics(&req, false)
         .unwrap();
-    let body = built.body;
+    let body = built.body.redacted();
     assert_eq!(diagnostic.requested, 1);
     assert_eq!(diagnostic.emitted, 1);
     assert_eq!(diagnostic.dropped, 0);

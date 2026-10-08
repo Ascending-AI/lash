@@ -1369,7 +1369,7 @@ pub mod provider {
     /// (ADR 0133 §6). Only literals, refs, acceptance and codecs are recorded.
     pub use lash_sansio::llm::types::{
         AttachmentSlot, LiveRequestBody, RecordedRequestTemplate, RequestSegment,
-        RequestTemplateBuilder, SlotCodec, TemplateError, TransientJson,
+        RequestTemplateBuilder, SlotCodec, TemplateError, TemplateJson, TransientJson,
     };
     pub use lash_sansio::llm::types::{
         LlmProviderTraceEvent, LlmProviderTraceSender, ProviderReasoningRetentionSupport,

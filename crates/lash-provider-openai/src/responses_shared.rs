@@ -65,8 +65,8 @@ pub fn role_name(role: &LlmRole) -> &'static str {
 pub fn input_attachment_part(
     reference: &lash_sansio::AttachmentRef,
     position: lash_sansio::llm::attachment_delivery::AttachmentPosition,
-) -> Value {
-    lash_core::provider::attachment_wire::attachment_operand(reference, position)
+) -> lash_sansio::llm::types::TemplateJson {
+    lash_sansio::llm::types::TemplateJson::attachment(reference, position)
 }
 
 pub fn tool_choice_value(choice: &LlmToolChoice) -> &'static str {

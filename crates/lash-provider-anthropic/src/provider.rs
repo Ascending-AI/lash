@@ -85,19 +85,17 @@ impl Provider for AnthropicProvider {
         req: &LlmRequest,
     ) -> Result<RecordedRequestTemplate, LlmTransportError> {
         self.validate_route_and_headers(req.model.wire_model())?;
-        let (body, receipt) = self.build_request(req)?;
-        lower_attachment_json(
+        let (body, receipt) = self.build_request_tree(req)?;
+        let mut template = lower_attachment_json(
             |mime, position| self.attachment_accepts(req.model.wire_model(), mime, position),
             req,
             self.route_identity(req.model.wire_model()),
             (true, Some(receipt)),
             &body,
             crate::attachment_delivery::CODEC,
-            &[
-                "/messages/*/content/*/source",
-                "/messages/*/content/*/content/*/source",
-            ],
-        )
+        )?;
+        template.wire_features = body_betas(&body);
+        Ok(template)
     }
 
     async fn send(
@@ -160,6 +158,27 @@ fn rejects_file_id(status: u16, body: &Value) -> bool {
     })
 }
 
+/// The betas a built body requires, read once at lowering and recorded with
+/// its template. Interleaved thinking is built-in on adaptive thinking; the
+/// beta is only needed for the budget-encoded (`"type": "enabled"`) thinking
+/// block, so it is gated on the thinking shape actually emitted rather than
+/// the model name.
+fn body_betas(body: &TemplateJson) -> Vec<Box<str>> {
+    let mut betas = Vec::new();
+    let budget_thinking = body
+        .json_field("thinking")
+        .and_then(|thinking| thinking.get("type"))
+        .and_then(Value::as_str)
+        == Some("enabled");
+    if budget_thinking {
+        betas.push(INTERLEAVED_THINKING_BETA.into());
+    }
+    if body.json_field("context_management").is_some() {
+        betas.push(CONTEXT_MANAGEMENT_BETA.into());
+    }
+    betas
+}
+
 impl AnthropicProvider {
     /// One attempt of `send`, authenticated by `token`.
     async fn send_attempt(
@@ -177,41 +196,30 @@ impl AnthropicProvider {
             .clone()
             .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
 
-        let body: Value = serde_json::from_str(&admitted.redacted()).map_err(|err| {
-            LlmTransportError::new(format!("The Anthropic request body does not decode: {err}"))
-                .with_kind(ProviderFailureKind::Validation)
-                .with_lash_code(TurnFailureCode::AdmittedRequestUnavailable)
-                .with_retry_verdict(TransportRetryVerdict::Forbidden)
-        })?;
         let generation_disposition = admitted.generation();
         let request_body_bytes = admitted.wire().into_bytes();
+        let redacted = admitted.redacted();
         emit_provider_request_trace(
             provider_trace.as_ref(),
             "anthropic",
             "messages",
-            admitted.redacted().as_bytes(),
+            redacted.as_bytes(),
         );
-        let request_body = Some(admitted.redacted());
+        let request_body = Some(redacted);
         // `fine-grained-tool-streaming-2025-05-14` streams partial JSON so we
-        // can surface tool arguments incrementally. Interleaved thinking is
-        // built-in on adaptive thinking; the beta is only needed for the
-        // budget-encoded (`"type": "enabled"`) thinking block, so we gate on
-        // the thinking shape actually emitted rather than the model name.
+        // can surface tool arguments incrementally. The betas the body
+        // itself requires were read once, when it was lowered.
         let mut betas = vec![FINE_GRAINED_BETA.to_string()];
         if self.auth_scheme == crate::AnthropicAuthScheme::Bearer {
             betas.push(OAUTH_API_BETA.to_string());
         }
-        let budget_thinking = body
-            .get("thinking")
-            .and_then(|thinking| thinking.get("type"))
-            .and_then(Value::as_str)
-            == Some("enabled");
-        if budget_thinking {
-            betas.push(INTERLEAVED_THINKING_BETA.to_string());
-        }
-        if body.get("context_management").is_some() {
-            betas.push(CONTEXT_MANAGEMENT_BETA.to_string());
-        }
+        betas.extend(
+            admitted
+                .template()
+                .wire_features
+                .iter()
+                .map(|beta| beta.to_string()),
+        );
         // A `file` source is beta content. The template cannot say whether
         // this attempt carries one: the delivered forms do.
         if admitted.forms().any(|forms| forms.provider_file) {

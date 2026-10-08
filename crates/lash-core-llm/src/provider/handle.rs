@@ -1,10 +1,12 @@
 use super::support::*;
 use futures_util::FutureExt as _;
-use lash_sansio::llm::attachment_delivery::{Delivery, DeliveryContext};
+use lash_sansio::llm::attachment_delivery::Delivery;
 use lash_trace::EmissionPermit;
 use lash_trace::telemetry::metrics::TelemetryMetrics;
 
-use super::slot_delivery::{AttachmentDeliveryError, SlotDeliveries};
+use super::slot_delivery::{
+    DELIVERY_FETCH_HORIZON_MS, SlotDeliveries, fill_slots, invalidate_rejected,
+};
 
 fn replay_origin_conflict_error(conflict: ProviderReplayOriginConflict) -> LlmTransportError {
     LlmTransportError::new(conflict.to_string())
@@ -259,11 +261,6 @@ impl ProviderHandle {
                 );
             }
         };
-        template.validate().map_err(|error| {
-            LlmTransportError::new(format!("the lowered request template is invalid: {error}"))
-                .with_kind(ProviderFailureKind::Validation)
-                .with_retry_verdict(TransportRetryVerdict::Forbidden)
-        })?;
         check_body_route(&template, &route)?;
         Ok(template)
     }
@@ -1479,10 +1476,6 @@ fn check_body_route(
     .with_retry_verdict(TransportRetryVerdict::Forbidden))
 }
 
-/// How long past a call's total a delivered URL or provider file must stay
-/// valid: the provider may fetch it after the last byte of the request.
-const DELIVERY_FETCH_HORIZON_MS: u64 = 60_000;
-
 /// What one attempt did: sent its filled template, keeping the deliveries
 /// until the provider answered, or failed to fill it and sent nothing.
 enum AttemptSend {
@@ -1491,92 +1484,6 @@ enum AttemptSend {
         delivered: Vec<Arc<Delivery>>,
     },
     Unsent(LlmTransportError),
-}
-
-/// Fill `template`'s slots for one attempt: deliver every slot through
-/// `deliveries` (none for a template with no slot), check each delivery is a
-/// form its slot's acceptance allows, encode each through the slot's pinned
-/// codec, and fill the literals. The deliveries are returned with the live
-/// body so a rejected one can be forgotten; neither is ever recorded.
-async fn fill_slots(
-    provider: &dyn Provider,
-    template: &Arc<RecordedRequestTemplate>,
-    deliveries: &dyn SlotDeliveries,
-    valid_through_ms: u64,
-) -> Result<(LiveRequestBody, Vec<Arc<Delivery>>), LlmTransportError> {
-    let slots: Vec<&AttachmentSlot> = template.slots().collect();
-    let live_file_scope = provider.attachment_file_scope();
-    let delivered = if slots.is_empty() {
-        Vec::new()
-    } else {
-        let ctx = DeliveryContext {
-            valid_through_ms,
-            live_file_scope: live_file_scope.clone(),
-        };
-        deliveries
-            .deliver(&slots, &ctx)
-            .await
-            .map_err(AttachmentDeliveryError::into_transport_error)?
-    };
-    if delivered.len() != slots.len() {
-        return Err(AttachmentDeliveryError::Unavailable {
-            retryable: false,
-            message: format!(
-                "the attachment store answered {} deliveries for {} slots",
-                delivered.len(),
-                slots.len()
-            ),
-        }
-        .into_transport_error());
-    }
-    let mut values = Vec::with_capacity(slots.len());
-    for (slot, delivery) in slots.iter().zip(&delivered) {
-        if !slot
-            .accepts
-            .narrowed_to_live_scope(live_file_scope.as_ref())
-            .allows(delivery)
-        {
-            return Err(AttachmentDeliveryError::Refused {
-                id: slot.reference.id.clone(),
-            }
-            .into_transport_error());
-        }
-        values.push(provider.encode_slot(slot, delivery)?);
-    }
-    let live = LiveRequestBody::fill(Arc::clone(template), values).map_err(|error| {
-        LlmTransportError::new(format!(
-            "the admitted request template cannot be filled: {error}"
-        ))
-        .with_kind(ProviderFailureKind::Validation)
-        .with_lash_code(TurnFailureCode::AdmittedRequestUnavailable)
-        .with_retry_verdict(TransportRetryVerdict::Forbidden)
-    })?;
-    Ok((live, delivered))
-}
-
-/// Forget each delivery the provider rejected, by slot index. A failure to
-/// forget is logged by ref only and does not change the attempt's outcome:
-/// the next attempt's delivery is checked again either way.
-async fn invalidate_rejected(
-    template: &RecordedRequestTemplate,
-    deliveries: &dyn SlotDeliveries,
-    delivered: &[Arc<Delivery>],
-    rejected: &[usize],
-) {
-    let slots: Vec<&AttachmentSlot> = template.slots().collect();
-    for &index in rejected {
-        let (Some(slot), Some(delivery)) = (slots.get(index), delivered.get(index)) else {
-            continue;
-        };
-        if let Err(error) = deliveries.invalidate(&slot.reference, delivery).await {
-            tracing::warn!(
-                target: "lash_core::provider::reliability",
-                attachment_id = %slot.reference.id,
-                error = %error,
-                "a rejected attachment delivery could not be forgotten"
-            );
-        }
-    }
 }
 
 /// The failure of a call refused before its first attempt: nothing was sent.

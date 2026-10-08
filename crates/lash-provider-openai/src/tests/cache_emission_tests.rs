@@ -26,7 +26,7 @@ fn gemini_cache_dialect_reports_fallback_emission_when_marked_text_is_empty() {
     let (built, diagnostics) = openrouter_provider()
         .build_chat_request_body_with_diagnostics(&req, true)
         .unwrap();
-    let body = built.body;
+    let body = built.body.redacted();
 
     assert_eq!(count_object_key(&body, "cache_control"), 1);
     assert_eq!(
@@ -72,6 +72,7 @@ fn tool_schema_cache_key_does_not_count_as_adapter_cache_emission() {
     let (chat, _) = provider
         .build_chat_request_body_with_diagnostics(&req, false)
         .unwrap();
+    let chat = chat.redacted();
 
     assert!(
         chat.body["tools"][0]["function"]["parameters"]["properties"]["cache_control"].is_object()
@@ -81,7 +82,10 @@ fn tool_schema_cache_key_does_not_count_as_adapter_cache_emission() {
         lash_core::GenerationOptionOutcome::OmittedUnsupported
     );
 
-    let responses = provider.build_responses_request(&req, false).unwrap();
+    let responses = provider
+        .build_responses_request(&req, false)
+        .unwrap()
+        .redacted();
     assert!(responses.body["tools"][0]["parameters"]["properties"]["prompt_cache_key"].is_object());
     assert_eq!(
         responses.receipt.cache,

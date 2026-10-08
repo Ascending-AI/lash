@@ -2192,6 +2192,7 @@ name = "lash-internal-durable-test"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
+ "base64 0.23.1",
  "chrono",
  "delegation",
  "flate2",
@@ -2203,8 +2204,10 @@ dependencies = [
  "lash-internal-lashlang",
  "lash-internal-lashlang-runtime",
  "lash-internal-llm-tools",
+ "lash-internal-llm-transport",
  "lash-internal-plugin-standard-compaction",
  "lash-internal-postgres-store",
+ "lash-internal-provider-anthropic",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-typescript",

@@ -136,11 +136,18 @@ None of these changes history or degrades an attachment to a notice.
 
 `AttachmentReadPolicy` keeps its 32 MiB per-blob and 128 MiB per-request
 bounds (ADR 0058). Each attempt reserves one request budget across its slots
-before any backend call: a per-occurrence envelope for MIME and label, each
-unique blob's retained buffer once, its base64 expansion for every
-occurrence, and the escaped length of every URL or file id. A backend
-receives only the actual-byte bound it must enforce. Exceeding a bound is an
-unsent refusal.
+before any backend call: a per-occurrence envelope for MIME and label, and
+then what each delivered form costs. Bytes cost the blob's retained buffer
+once and its base64 expansion for every occurrence. A URL costs its escaped
+length for every occurrence. A provider file costs its escaped id for every
+occurrence, plus the bytes it read as upload scratch when this delivery
+uploaded it; a file reused from the cache reads nothing. A provider file is
+never charged the base64 expansion: provider files exist to carry what does
+not fit inline. Slots share one delivery when they name the same content as
+the same media type under the same acceptance, since a provider file is
+uploaded and typed by its media type. A backend receives only the actual-byte
+bounds it must enforce, one for bytes and one for an upload. Exceeding a
+bound is an unsent refusal.
 
 ### 6. A call records a template and fills its slots live
 

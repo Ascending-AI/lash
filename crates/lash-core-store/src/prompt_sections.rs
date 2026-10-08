@@ -523,6 +523,9 @@ pub struct ChunkedRequestTemplate {
     pub stream: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation: Option<lash_sansio::llm::types::GenerationReceipt>,
+    /// See [`RecordedRequestTemplate::wire_features`](lash_sansio::llm::types::RecordedRequestTemplate).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wire_features: Vec<Box<str>>,
     /// Every segment, in wire order.
     pub segments: Vec<ChunkedSegment>,
 }
@@ -587,7 +590,7 @@ impl ChunkedRequestTemplate {
         use lash_sansio::llm::types::RequestSegment;
         let mut texts = Vec::new();
         let segments = template
-            .segments
+            .segments()
             .iter()
             .map(|segment| match segment {
                 RequestSegment::Literal { text } => ChunkedSegment::Literal {
@@ -604,6 +607,7 @@ impl ChunkedRequestTemplate {
                 route: template.route.clone(),
                 stream: template.stream,
                 generation: template.generation,
+                wire_features: template.wire_features.clone(),
                 segments,
             },
             texts,
@@ -651,13 +655,13 @@ impl ChunkedRequestTemplate {
                 },
             });
         }
-        let template = lash_sansio::llm::types::RecordedRequestTemplate {
-            route: self.route.clone(),
-            stream: self.stream,
-            generation: self.generation,
+        let mut template = lash_sansio::llm::types::RecordedRequestTemplate::from_segments(
+            self.route.clone(),
+            self.stream,
+            self.generation,
             segments,
-        };
-        template.validate()?;
+        )?;
+        template.wire_features = self.wire_features.clone();
         Ok(template)
     }
 }

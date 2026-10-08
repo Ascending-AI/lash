@@ -1975,6 +1975,7 @@ fn receipt_reports_what_each_dialect_carried() {
     let (chat, _) = provider
         .build_chat_request_body_with_diagnostics(&req, false)
         .unwrap();
+    let chat = chat.redacted();
     assert_eq!(
         (chat.receipt.temperature, chat.receipt.seed),
         (Applied, Applied)

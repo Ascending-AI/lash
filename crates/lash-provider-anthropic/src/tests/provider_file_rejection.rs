@@ -72,6 +72,7 @@ async fn refused(status: u16, error: serde_json::Value, file: bool) -> (LlmTrans
             scope: provider.attachment_file_scope().expect("a file scope"),
             id: DeliverySecret::new("file_011".into()),
             valid_until_ms: None,
+            uploaded: false,
         }
     } else {
         Delivery::Bytes(vec![7])

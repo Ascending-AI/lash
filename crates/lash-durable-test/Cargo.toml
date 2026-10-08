@@ -26,6 +26,7 @@ lash-sansio = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 
 [dev-dependencies]
+base64 = { workspace = true }
 flate2 = "1"
 delegation = { workspace = true }
 lash = { workspace = true, features = ["rlm", "testing"] }
@@ -34,6 +35,8 @@ lash-core-execution = { workspace = true, features = ["testing"] }
 lash-core-store = { workspace = true, features = ["testing"] }
 lash-lashlang-runtime = { workspace = true }
 lash-llm-tools = { workspace = true }
+lash-llm-transport = { workspace = true }
+lash-provider-anthropic = { workspace = true }
 lash-plugin-standard-compaction = { workspace = true }
 lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { workspace = true, features = ["testing"] }

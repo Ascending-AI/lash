@@ -114,6 +114,10 @@ pub enum Delivery {
         scope: ProviderFileScope,
         id: DeliverySecret,
         valid_until_ms: Option<u64>,
+        /// Whether this delivery read the attachment's bytes to upload them
+        /// (a cache miss) rather than reusing a file already uploaded. The
+        /// request budget charges the upload's scratch only then.
+        uploaded: bool,
     },
 }
 impl Delivery {
@@ -158,7 +162,13 @@ impl fmt::Debug for Delivery {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DeliveryLimits {
+    /// The most bytes a `Bytes` delivery may hold: what the request budget
+    /// still affords once every occurrence is encoded inline.
     pub max_bytes: u64,
+    /// The most bytes an upload behind a `ProviderFile` delivery may read:
+    /// the scratch the request budget still affords. Never below
+    /// `max_bytes`, since a file id is not encoded inline.
+    pub max_upload_bytes: u64,
     pub valid_through_ms: u64,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]

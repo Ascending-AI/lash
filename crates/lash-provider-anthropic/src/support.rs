@@ -15,7 +15,8 @@ pub(crate) use lash_core::llm::types::{
     LlmResponse, LlmRole, LlmStreamEvent, LlmStreamEvidence, LlmTerminalReason, LlmToolChoice,
     LlmUsage, ProviderReasoningReplay, ProviderReasoningRetentionSupport, ProviderRouteIdentity,
     ReasoningRetentionSelection, ReasoningRetentionValidationError, RecordedRequestTemplate,
-    ResponseContext, StreamBlockIdentity, TransientJson, tool_call_input_replay_value,
+    ResponseContext, StreamBlockIdentity, TemplateJson, TransientJson,
+    tool_call_input_replay_value,
 };
 pub(crate) use lash_core::provider::{
     CacheRetention, GenerationEmission, GenerationWire, OutputCapWire, Provider,
@@ -45,8 +46,7 @@ pub(crate) use crate::config::*;
 pub(crate) use crate::policy::*;
 
 pub(crate) use lash_core::provider::attachment_wire::{
-    attachment_operand, check_slot, lower_attachment_json, message_names_missing_file,
-    reject_missing_provider_files, template_error,
+    check_codec, lower_attachment_json, message_names_missing_file, reject_missing_provider_files,
 };
 pub(crate) use lash_sansio::AttachmentRef;
 pub(crate) use lash_sansio::llm::attachment_delivery::{

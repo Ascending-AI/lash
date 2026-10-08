@@ -22,10 +22,25 @@ pub const OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 /// A request body and the receipt of the host settings it carries, built
 /// together so the receipt comes from what each branch emitted rather than
 /// from reading the body back.
+///
+/// A builder's body is the tree it emitted, each attachment a slot where
+/// its part sits; a send reads the admitted body back as plain JSON.
 #[derive(Clone, Debug)]
-pub(crate) struct BuiltRequest {
-    pub(crate) body: Value,
+pub(crate) struct BuiltRequest<B = Value> {
+    pub(crate) body: B,
     pub(crate) receipt: lash_core::llm::types::GenerationReceipt,
+}
+
+#[cfg(test)]
+impl BuiltRequest<crate::support::TemplateJson> {
+    /// The built request as plain JSON, each attachment shown by its
+    /// redacted marker.
+    pub(crate) fn redacted(self) -> BuiltRequest {
+        BuiltRequest {
+            body: self.body.redacted(),
+            receipt: self.receipt,
+        }
+    }
 }
 
 pub(crate) fn reasoning_retention_transport_error(

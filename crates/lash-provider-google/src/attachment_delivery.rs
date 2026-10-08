@@ -30,16 +30,7 @@ impl GoogleOAuthProvider {
         slot: &AttachmentSlot,
         delivery: &Delivery,
     ) -> Result<TransientJson, LlmTransportError> {
-        check_slot(slot, delivery, CODEC)?;
-        if !slot
-            .accepts
-            .narrowed_to_live_scope(self.file_scope().as_ref())
-            .allows(delivery)
-        {
-            return Err(template_error(
-                "provider-file scope differs from the live scope",
-            ));
-        }
+        check_codec(slot, CODEC)?;
         let value = match delivery {
             Delivery::Bytes(bytes) => json!({"inlineData": {"mimeType": slot.reference.media_type,
                 "data": base64::engine::general_purpose::STANDARD.encode(bytes)}}),

@@ -148,7 +148,7 @@ impl OpenAiProvider {
         stream: bool,
     ) -> Result<Value, LlmTransportError> {
         self.build_responses_request(req, stream)
-            .map(|built| built.body)
+            .map(|built| built.body.redacted())
     }
 
     #[cfg(test)]
@@ -156,7 +156,7 @@ impl OpenAiProvider {
         &self,
         req: &LlmRequest,
         stream: bool,
-    ) -> Result<BuiltRequest, LlmTransportError> {
+    ) -> Result<BuiltRequest<TemplateJson>, LlmTransportError> {
         self.inner.build_responses_request_for_route(
             req,
             stream,
@@ -195,12 +195,7 @@ impl Provider for OpenAiCompatibleProvider {
         slot: &AttachmentSlot,
         delivery: &Delivery,
     ) -> Result<TransientJson, LlmTransportError> {
-        crate::attachment_delivery::encode(
-            slot,
-            delivery,
-            crate::attachment_delivery::CHAT_CODEC,
-            None,
-        )
+        crate::attachment_delivery::encode(slot, delivery, crate::attachment_delivery::CHAT_CODEC)
     }
     fn options(&self) -> ProviderOptions {
         self.options.clone()
@@ -296,7 +291,6 @@ impl Provider for OpenAiProvider {
             slot,
             delivery,
             crate::attachment_delivery::RESPONSES_CODEC,
-            self.attachment_file_scope(),
         )
     }
     fn options(&self) -> ProviderOptions {

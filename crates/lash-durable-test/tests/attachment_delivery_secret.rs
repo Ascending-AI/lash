@@ -99,6 +99,7 @@ impl AttachmentStore for SigningStore {
                 scope,
                 id: DeliverySecret::new(format!("file-{SIGNATURE}-{signed}")),
                 valid_until_ms: Some(limits.valid_through_ms),
+                uploaded: false,
             });
         }
         Ok(Delivery::Url {
@@ -154,12 +155,13 @@ impl Provider for WireRecorder {
         request: &lash_core::LlmRequest,
     ) -> Result<RecordedRequestTemplate, lash_core::llm::transport::LlmTransportError> {
         self.lowered.fetch_add(1, Ordering::SeqCst);
-        let mut template = RecordedRequestTemplate::of_request(
+        let template = RecordedRequestTemplate::of_request(
             self.route_identity(request.model.wire_model()),
             request,
         )
         .map_err(lash_core::provider::attachment_wire::template_error)?;
-        for segment in &mut template.segments {
+        let mut segments = template.segments().to_vec();
+        for segment in &mut segments {
             if let RequestSegment::Attachment { slot } = segment
                 && slot.reference.label.as_deref() == Some("file.png")
             {
@@ -170,7 +172,13 @@ impl Provider for WireRecorder {
                 };
             }
         }
-        Ok(template)
+        RecordedRequestTemplate::from_segments(
+            template.route.clone(),
+            template.stream,
+            template.generation,
+            segments,
+        )
+        .map_err(lash_core::provider::attachment_wire::template_error)
     }
     async fn send(
         &mut self,

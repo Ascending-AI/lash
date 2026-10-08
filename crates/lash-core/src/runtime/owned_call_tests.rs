@@ -82,6 +82,7 @@ async fn world() -> World {
                     None,
                     format!("{{\"builder\":{generation}}}"),
                 )
+                .expect("the literal is JSON")
             })
             .build()
             .into_handle()

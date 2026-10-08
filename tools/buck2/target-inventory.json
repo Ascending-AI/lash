@@ -42572,6 +42572,7 @@
       "declared_features": [],
       "dependencies": [
         "async-trait",
+        "base64",
         "chrono",
         "delegation",
         "flate2",
@@ -42583,8 +42584,10 @@
         "lash-internal-lashlang",
         "lash-internal-lashlang-runtime",
         "lash-internal-llm-tools",
+        "lash-internal-llm-transport",
         "lash-internal-plugin-standard-compaction",
         "lash-internal-postgres-store",
+        "lash-internal-provider-anthropic",
         "lash-internal-sansio",
         "lash-internal-sqlite-store",
         "lash-internal-typescript",

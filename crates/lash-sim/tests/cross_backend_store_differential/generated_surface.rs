@@ -498,6 +498,7 @@ async fn attachment_blob_store_differential_agrees() {
     };
     let limits = DeliveryLimits {
         max_bytes: 1024,
+        max_upload_bytes: 1024,
         valid_through_ms: 0,
     };
     let mut first_id = None;

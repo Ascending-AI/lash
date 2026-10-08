@@ -40,18 +40,8 @@ pub(crate) fn encode(
     slot: &AttachmentSlot,
     delivery: &Delivery,
     codec: &str,
-    live: Option<ProviderFileScope>,
 ) -> Result<TransientJson, LlmTransportError> {
-    check_slot(slot, delivery, codec)?;
-    if !slot
-        .accepts
-        .narrowed_to_live_scope(live.as_ref())
-        .allows(delivery)
-    {
-        return Err(template_error(
-            "provider-file scope differs from the live scope",
-        ));
-    }
+    check_codec(slot, codec)?;
     let mime = &slot.reference.media_type;
     let value = if codec == CHAT_CODEC {
         match delivery {

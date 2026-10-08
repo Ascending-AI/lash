@@ -48,6 +48,7 @@ async fn url_delivery_names_the_put_object_and_respects_the_fetch_horizon() {
     let horizon = now + 120_000;
     let limits = DeliveryLimits {
         max_bytes: 1024,
+        max_upload_bytes: 1024,
         valid_through_ms: horizon,
     };
     let accepts = ProviderAccepts {

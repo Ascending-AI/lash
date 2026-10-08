@@ -239,6 +239,21 @@ async fn sqlite_attachment_delivery_read_budgets() {
 }
 
 #[tokio::test]
+async fn sqlite_attachment_delivery_derives_per_media_type() {
+    let backend = TestBackend::open(SUBSTRATE).await;
+    lash_conformance::attachment_delivery_derives_per_media_type(backend.attachment_store()).await;
+}
+
+#[tokio::test]
+async fn sqlite_attachment_delivery_charges_a_provider_file_as_a_file() {
+    let backend = TestBackend::open(SUBSTRATE).await;
+    lash_conformance::attachment_delivery_charges_a_provider_file_as_a_file(
+        backend.attachment_store(),
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn sqlite_attachment_delivery_names_its_content() {
     let backend = TestBackend::open(SUBSTRATE).await;
     lash_conformance::attachment_delivery_names_its_content(backend.attachment_store()).await;

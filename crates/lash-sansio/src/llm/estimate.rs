@@ -46,7 +46,7 @@ impl RecordedRequestTemplate {
     /// which has the body and no request.
     pub fn estimated_tokens(&self) -> u32 {
         let chars = self
-            .segments
+            .segments()
             .iter()
             .map(|segment| match segment {
                 RequestSegment::Literal { text } => text.len(),
