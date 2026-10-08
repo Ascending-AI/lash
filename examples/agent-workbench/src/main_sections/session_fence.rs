@@ -54,7 +54,8 @@ impl AppState {
         self.admit(session_id, surface, SessionAdmission::Use).await
     }
 
-    /// Admit an already-resolved id for deletion on `surface`.
+    /// Admit an already-resolved id for deletion on `surface`. A durable
+    /// tombstone is accepted so a retry can reconcile an unconfirmed close.
     pub(crate) async fn admit_session_id_for_delete(
         &self,
         session_id: &SessionId,
@@ -89,6 +90,10 @@ impl AppState {
         };
         match durable.was_deleted().await {
             Ok(false) => Ok(()),
+            // An unconfirmed close keeps the fence Retiring. Its retry must
+            // reach the delete's settlement even if the actor closed meanwhile;
+            // only use admission refuses the durable tombstone here.
+            Ok(true) if admission == SessionAdmission::Delete => Ok(()),
             // Not memoized into the in-process mark: the evidence a refusal
             // records names the authority that was consulted, and for a
             // tombstoned session that authority is the store.

@@ -8,7 +8,8 @@ PACKAGE_DEPS = {
             "lash": "//crates/lash:lash",
             "lash_sim": "//crates/lash-sim:lash-sim",
             "sqlx": "//third-party/rust:p0333",
-            "tempfile": "//third-party/rust:p0362"
+            "tempfile": "//third-party/rust:p0362",
+            "tokio": "//third-party/rust:p0371"
         },
         "normal": {
             "anyhow": "//third-party/rust:p0011",

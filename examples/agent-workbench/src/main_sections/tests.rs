@@ -1105,3 +1105,8 @@ async fn persisted_trigger_route_fires_after_reopening_the_core() {
     .expect("the trigger's process finishes in time")
     .expect("trigger process should finish");
 }
+
+#[path = "tests/session_delete_faults.rs"]
+mod session_delete_faults;
+#[path = "tests/session_delete.rs"]
+mod session_delete_tests;

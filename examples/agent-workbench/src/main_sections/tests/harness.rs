@@ -21,6 +21,7 @@ pub(crate) struct Workbench {
 /// the binary's own composition.
 pub(crate) struct WorkbenchBuilder {
     provider: ProviderHandle,
+    session_delete_faults: Option<Arc<super::session_delete_faults::SessionDeleteFaults>>,
     stores: Option<Arc<dyn lash::StoreSet>>,
     live_replay: Option<Arc<dyn lash::observe::LiveReplayStore>>,
     trace_sink: Option<Arc<dyn TraceSink>>,
@@ -34,6 +35,7 @@ impl Workbench {
     pub(crate) fn builder(provider: ProviderHandle) -> WorkbenchBuilder {
         WorkbenchBuilder {
             provider,
+            session_delete_faults: None,
             stores: None,
             live_replay: None,
             trace_sink: None,
@@ -64,6 +66,15 @@ impl Workbench {
 }
 
 impl WorkbenchBuilder {
+    /// Decorate the real store ports before building the engine.
+    pub(crate) fn session_delete_faults(
+        mut self,
+        faults: Arc<super::session_delete_faults::SessionDeleteFaults>,
+    ) -> Self {
+        self.session_delete_faults = Some(faults);
+        self
+    }
+
     /// Serve from `stores`, e.g. the store set an earlier workbench served
     /// from: a restart of the web process over the same database.
     pub(crate) fn stores(mut self, stores: Arc<dyn lash::StoreSet>) -> Self {
@@ -109,6 +120,10 @@ impl WorkbenchBuilder {
                     .await
                     .expect("open a SQLite memory store set"),
             ),
+        };
+        let stores = match self.session_delete_faults {
+            Some(faults) => faults.install(stores),
+            None => stores,
         };
         let selection = LlmProfileSelection {
             model: TEST_MODEL.to_string(),

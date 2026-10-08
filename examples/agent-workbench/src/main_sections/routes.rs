@@ -761,7 +761,7 @@ pub(crate) async fn retire_for_reset(
                 // why there is none. The silent one was the defect.
                 Err(error) if !settled_retired => {
                     eprintln!(
-                        "agent-workbench reset left session {:?} live: {error}",
+                        "agent-workbench reset did not confirm deletion of session {:?}: {error}",
                         old_session_id.as_str()
                     );
                     return Err(error);

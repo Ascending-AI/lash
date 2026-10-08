@@ -45,6 +45,7 @@ tracing-subscriber = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 http = "1"
 http-body-util = { version = "0.1", features = ["channel"] }
 lash = { workspace = true, features = ["rlm", "testing", "typescript"] }
