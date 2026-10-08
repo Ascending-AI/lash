@@ -1167,8 +1167,10 @@ impl PluginSession {
 
     /// Adopt `snapshot`, a recorded head's plugin state, as the live state:
     /// an accepted write the head does not carry is dropped, as a cold
-    /// rebuild from that head drops it (FIG-4392).
-    pub fn hydrate_state(&self, snapshot: &PluginState) -> Result<(), PluginError> {
+    /// rebuild from that head drops it (FIG-4392). A durable run restores
+    /// from its pinned head and its rows instead (`restore_run`).
+    #[cfg(test)]
+    pub(crate) fn hydrate_state(&self, snapshot: &PluginState) -> Result<(), PluginError> {
         if self.is_committed_form(snapshot) {
             return Ok(());
         }
@@ -1177,8 +1179,15 @@ impl PluginSession {
         let snapshot = snapshot.clone();
         let mut live = self.state.lock_recover();
         live.hydrate_live(&snapshot);
-        for plugin in &self.capabilities().plugins {
-            live.data.plugins.entry(plugin.id().into()).or_default();
+        for factory in self.host.factories() {
+            if self
+                .capabilities()
+                .plugins
+                .iter()
+                .any(|plugin| plugin.id() == factory.id())
+            {
+                live.declare_fork(factory.id(), factory.plugin_declaration().state_fork);
+            }
         }
         Ok(())
     }

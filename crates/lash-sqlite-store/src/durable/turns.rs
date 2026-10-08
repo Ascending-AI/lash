@@ -13,8 +13,8 @@ use lash_core_execution::store_backend_support::turn_cancel::{
     turn_cancel_undelivered_wire,
 };
 use lash_durable::domain::{
-    DomainRefusal, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest, TurnEnd, TurnRow,
-    TurnWrite, UnfinishedPhase,
+    DomainRefusal, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest, TurnEnd, TurnNamespace,
+    TurnRow, TurnWrite, UnfinishedPhase,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, Woken};
 use lash_sansio::{SessionId, TurnId};
@@ -49,6 +49,18 @@ CREATE TABLE IF NOT EXISTS turn_phases (
     CONSTRAINT ck_turn_phases_model CHECK (
         (phase = 'model') = (model_request_ref IS NOT NULL)
         AND (phase = 'model') = (model_deadline_ms IS NOT NULL))
+);
+
+-- The plugin namespaces an unfinished turn's run changed (FIG-5301): the
+-- entry (values address and metadata, JSON) and the values body the run last
+-- wrote, dropped with the phase row when the turn ends.
+CREATE TABLE IF NOT EXISTS turn_namespaces (
+    session_id TEXT NOT NULL,
+    run TEXT NOT NULL,
+    plugin TEXT NOT NULL,
+    entry TEXT NOT NULL,
+    body BLOB,
+    PRIMARY KEY (session_id, run, plugin)
 );
 ";
 
@@ -146,6 +158,42 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &TurnWrite)
                 }),
             }
         }
+        TurnWrite::Namespaces {
+            session,
+            run,
+            namespaces,
+        } => {
+            let open = tx
+                .prepare_cached(SQL.open_named_run.sql())?
+                .query_row([session.as_str(), run.as_str()], |_| Ok(()))
+                .optional()?;
+            if open.is_none() {
+                return refuse(DomainRefusal::TurnNotOpen {
+                    session: session.clone(),
+                    run: run.clone(),
+                });
+            }
+            for namespace in namespaces {
+                let entry = match serde_json::to_string(&namespace.entry) {
+                    Ok(entry) => entry,
+                    Err(error) => {
+                        return Ok(Err(corrupt("turn namespace entry", &error.to_string())));
+                    }
+                };
+                cached_execute(
+                    tx,
+                    SQL.upsert_namespace.sql(),
+                    rusqlite::params![
+                        session.as_str(),
+                        run.as_str(),
+                        namespace.plugin,
+                        entry,
+                        namespace.body.as_deref(),
+                    ],
+                )?;
+            }
+            Ok(Ok(()))
+        }
         TurnWrite::Terminal {
             session,
             run,
@@ -179,6 +227,11 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &TurnWrite)
             cached_execute(
                 tx,
                 SQL.delete_phase.sql(),
+                rusqlite::params![session.as_str(), run.as_str()],
+            )?;
+            cached_execute(
+                tx,
+                SQL.delete_namespaces.sql(),
                 rusqlite::params![session.as_str(), run.as_str()],
             )?;
             super::session_mail::settle_held(tx, session, run, commit.now.0)?;
@@ -390,6 +443,35 @@ pub(super) fn turn_end(
         cause,
         head_revision,
     })))
+}
+
+pub(super) fn turn_namespaces(
+    tx: &Connection,
+    session: &SessionId,
+    run: &TurnId,
+) -> Answer<Vec<TurnNamespace>> {
+    let mut statement = tx.prepare_cached(SQL.namespaces.sql())?;
+    let rows = statement
+        .query_map([session.as_str(), run.as_str()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<Vec<u8>>>(2)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut namespaces = Vec::with_capacity(rows.len());
+    for (plugin, entry, body) in rows {
+        let Ok(entry) = serde_json::from_str(&entry) else {
+            return Ok(Err(corrupt("turn namespace entry", &plugin)));
+        };
+        namespaces.push(TurnNamespace {
+            plugin,
+            entry,
+            body: body.map(Into::into),
+        });
+    }
+    Ok(Ok(namespaces))
 }
 
 pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRow>> {

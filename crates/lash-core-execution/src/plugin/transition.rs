@@ -97,11 +97,13 @@ impl PluginHost {
                             .initialize_state(&request.owner, config)
                             .and_then(|values| {
                                 super::state::validate_namespace(&values)?;
+                                let declaration = factory.plugin_declaration();
                                 Ok(PluginNamespaceState {
-                                    format_version: factory.plugin_declaration().format_version,
+                                    format_version: declaration.format_version,
                                     generation: 0,
                                     publication: Default::default(),
-                                    values,
+                                    fork: declaration.state_fork,
+                                    values: Arc::new(values),
                                 })
                             })
                     }

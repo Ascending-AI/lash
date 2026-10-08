@@ -550,6 +550,7 @@ impl DurableStore for FaultStore {
 
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
         let actor = tx.actor().clone();
+        self.script.observe(label, tx.domain());
         let starts = tx
             .domain()
             .iter()
@@ -618,6 +619,14 @@ impl DurableStore for FaultStore {
 impl DurableReads for FaultStore {
     async fn turn(&self, session: &SessionId) -> Result<Option<TurnRow>, DurableError> {
         self.read(self.inner.turn(session)).await
+    }
+
+    async fn turn_namespaces(
+        &self,
+        session: &SessionId,
+        run: &lash_sansio::TurnId,
+    ) -> Result<Vec<lash_durable::domain::TurnNamespace>, DurableError> {
+        self.read(self.inner.turn_namespaces(session, run)).await
     }
 
     async fn turn_end(

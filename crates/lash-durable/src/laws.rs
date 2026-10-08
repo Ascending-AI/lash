@@ -38,6 +38,7 @@ mod formats;
 mod model_calls;
 mod prompts;
 mod session_close;
+mod turn_namespaces;
 
 pub use formats::{
     a_draining_node_claims_nothing_and_releases_ready,
@@ -50,6 +51,7 @@ pub use prompts::{
     prompt_snapshot_roots_survive_phase_pruning_until_released,
 };
 pub use session_close::a_session_close_moves_one_step_at_a_time;
+pub use turn_namespaces::a_runs_namespace_rows_hold_its_bodies_and_end_with_it;
 
 macro_rules! ensure {
     ($condition:expr, $($message:tt)+) => {

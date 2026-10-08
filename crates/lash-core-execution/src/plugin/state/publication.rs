@@ -398,7 +398,7 @@ impl crate::PluginSession {
                     for namespace in &namespaces {
                         registry.reserved.insert(namespace.clone(), address.clone());
                     }
-                    return Ok(self.resolve(&registry, address, segment, proposals));
+                    return Ok(self.resolve(&mut registry, address, segment, proposals));
                 }
             }
             notified.await;
@@ -409,7 +409,7 @@ impl crate::PluginSession {
     /// batches before it, privately.
     fn resolve(
         &self,
-        registry: &PluginStateRegistry,
+        registry: &mut PluginStateRegistry,
         address: &crate::EffectAddress,
         segment: SegmentOrdinal,
         proposals: Vec<Proposal>,
@@ -428,7 +428,7 @@ impl crate::PluginSession {
                         .unwrap_or_default()
                 });
                 namespace.publication.owner_segment = registry.segment;
-                let outcome = match self.admit_batch(&batch, proposer.as_ref(), namespace) {
+                let mut outcome = match self.admit_batch(&batch, proposer.as_ref(), namespace) {
                     Err(refusal) => StateResolutionOutcome::Refused { refusal },
                     Ok(()) => batch.reduce(&namespace.values, &mut |key, name, current, input| {
                         self.run_reducer(
@@ -442,10 +442,28 @@ impl crate::PluginSession {
                         )
                     }),
                 };
-                if let StateResolutionOutcome::Applied { changes } = &outcome {
-                    for change in changes {
-                        change.apply_to(&mut namespace.values);
+                let reduced = match &outcome {
+                    StateResolutionOutcome::Applied { changes } => {
+                        let mut values = (*namespace.values).clone();
+                        for change in changes {
+                            change.apply_to(&mut values);
+                        }
+                        Some(values)
                     }
+                    StateResolutionOutcome::Refused { .. } => None,
+                };
+                let reduced = reduced.and_then(|values| {
+                    match session_budget(registry, &candidates, &plugin, &values) {
+                        Ok(()) => Some(values),
+                        Err(refusal) => {
+                            outcome = StateResolutionOutcome::Refused { refusal };
+                            None
+                        }
+                    }
+                });
+                let namespace = candidates.entry(plugin.clone()).or_default();
+                if let Some(values) = reduced {
+                    namespace.values = Arc::new(values);
                 }
                 let resolution = StateResolution {
                     publisher: address.clone(),
@@ -733,7 +751,7 @@ fn publish_one(
             match &resolution.outcome {
                 StateResolutionOutcome::Applied { changes } => {
                     for change in changes {
-                        change.apply_to(&mut namespace.values);
+                        change.apply_to(namespace.values_mut());
                     }
                 }
                 StateResolutionOutcome::Refused { refusal } => {
@@ -785,3 +803,73 @@ fn settle_owed(
 
 #[cfg(test)]
 mod tests;
+
+/// Whether the session's plugin state, with `plugin`'s namespace holding
+/// `values` and every other namespace as `candidates` or the registry hold
+/// it, stays within its total budget. Past the warn tier the publication is
+/// reported; past the limit it is refused, so a committed state always fits
+/// a fork's capture.
+fn session_budget(
+    registry: &mut PluginStateRegistry,
+    candidates: &BTreeMap<String, PluginNamespaceState>,
+    plugin: &str,
+    values: &BTreeMap<String, Value>,
+) -> Result<(), lash_core_store::tool_run::StateCommandRefusal> {
+    use lash_core_store::plugin_state::{PLUGIN_STATE_SESSION_LIMIT, PLUGIN_STATE_SESSION_WARN};
+    let encoded = |values: &BTreeMap<String, Value>| {
+        serde_json::to_vec(values).map_or(usize::MAX, |bytes| bytes.len())
+    };
+    let mut bytes = encoded(values);
+    let namespaces: Vec<(String, Arc<BTreeMap<String, Value>>)> = registry
+        .data
+        .plugins
+        .iter()
+        .chain(candidates.iter())
+        .filter(|(id, _)| id.as_str() != plugin)
+        .map(|(id, namespace)| {
+            let current = candidates.get(id).unwrap_or(namespace);
+            (id.clone(), Arc::clone(&current.values))
+        })
+        .collect::<BTreeMap<_, _>>()
+        .into_iter()
+        .collect();
+    for (id, values) in namespaces {
+        let measured = match registry.sizes.get(&id) {
+            Some((from, size)) if std::ptr::eq(from.as_ptr(), Arc::as_ptr(&values)) => *size,
+            _ => {
+                let size = encoded(&values);
+                registry
+                    .sizes
+                    .insert(id.clone(), (Arc::downgrade(&values), size));
+                size
+            }
+        };
+        bytes = bytes.saturating_add(measured);
+    }
+    if bytes > PLUGIN_STATE_SESSION_LIMIT {
+        tracing::warn!(
+            event = "plugin_state.session_budget_refused",
+            plugin_id = %plugin,
+            bytes,
+            limit = PLUGIN_STATE_SESSION_LIMIT,
+            "a plugin-state publication would take the session past its total budget and is refused"
+        );
+        return Err(
+            lash_core_store::tool_run::StateCommandRefusal::SessionTooLarge {
+                bytes,
+                limit: PLUGIN_STATE_SESSION_LIMIT,
+            },
+        );
+    }
+    if bytes > PLUGIN_STATE_SESSION_WARN {
+        tracing::warn!(
+            event = "plugin_state.session_budget_warn",
+            plugin_id = %plugin,
+            bytes,
+            warn = PLUGIN_STATE_SESSION_WARN,
+            limit = PLUGIN_STATE_SESSION_LIMIT,
+            "a plugin-state publication takes the session past its warn tier"
+        );
+    }
+    Ok(())
+}

@@ -205,18 +205,19 @@ pub trait TurnDrive: Send {
         Vec::new()
     }
 
-    /// The plugin state the turn has published: every namespace with its
-    /// frontier, as a commit records it. Each phase commits it with its
-    /// checkpoint, the pending checkpoint-callback decisions among it, and
-    /// a resume reinstalls it before the machine restores. `None` for a
-    /// drive that holds no plugins.
-    ///
-    /// # Errors
-    ///
-    /// [`TurnError`] when the state cannot be recorded.
-    fn plugin_state(&self) -> Result<Option<crate::PluginState>, TurnError> {
-        Ok(None)
+    /// The plugin namespaces the turn's run changed that its rows do not
+    /// record yet (FIG-5301): each phase commits them beside its checkpoint,
+    /// the pending checkpoint-callback decisions among them, and a resume
+    /// reinstalls the run's rows over the head before the machine restores.
+    /// An unchanged namespace is never written. Empty for a drive that holds
+    /// no plugins.
+    fn run_changes(&self) -> Vec<lash_durable::domain::TurnNamespace> {
+        Vec::new()
     }
+
+    /// Record that a phase committed `written`, what
+    /// [`run_changes`](Self::run_changes) named.
+    fn run_changes_committed(&self, _written: &[lash_durable::domain::TurnNamespace]) {}
 
     /// Restart the session's live stream before a re-sent model call streams:
     /// existing cursors gap and observers reload (the live replay store's
@@ -767,19 +768,15 @@ pub struct ComposedCall {
 }
 
 /// What a phase row's checkpoint holds: the machine's saved turn, the
-/// plugin state the turn had published when the phase committed, which a
-/// resume reinstalls before it restores the machine, the steering input
-/// and queued turn work its checkpoints delivered, which the phase bound to
-/// the run, and the turn's before-turn decisions, which a resume serves. Encoded by the phase runner, its owner.
+/// steering input and queued turn work its checkpoints delivered, which the
+/// phase bound to the run, and the turn's before-turn decisions, which a
+/// resume serves. It carries no plugin state: the run's changed namespaces
+/// are rows of their own (FIG-5301). Encoded by the phase runner, its owner.
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PhaseCheckpoint {
     /// The machine's checkpoint with the content it names.
     pub saved: SavedTurn<HostTurnProtocol>,
-    /// The turn's published plugin state; `None` for a drive that holds no
-    /// plugins.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plugin_state: Option<crate::PluginState>,
     /// The steering input the turn's checkpoints delivered, with its
     /// application evidence ([`TurnDrive::delivered_inputs`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -796,13 +793,13 @@ pub struct PhaseCheckpoint {
 }
 
 /// A turn restored from its rows: the machine, the effect it re-delivers,
-/// the plugin state its phase committed, and its row.
+/// the plugin namespaces its run changed, and its row.
 pub struct RestoredTurn {
     /// The machine, restored from the checkpoint.
     pub machine: TurnMachine,
-    /// The plugin state the turn's last phase committed, which the resumed
-    /// drive reinstalls.
-    pub plugin_state: Option<crate::PluginState>,
+    /// The namespaces the turn's run changed, as its rows record them,
+    /// which the resumed drive reinstalls over the head.
+    pub namespaces: Vec<lash_durable::domain::TurnNamespace>,
     /// The steering input the turn's checkpoints delivered before its last
     /// phase committed, which the resumed drive settles with its commit.
     pub delivered: Vec<crate::AdmittedTurnInputs>,
@@ -1042,7 +1039,6 @@ impl<'a> TurnRestore<'a> {
             .ok_or_else(|| TurnRestoreError::NoCheckpoint(row.run.clone()))?;
         let PhaseCheckpoint {
             saved,
-            plugin_state,
             delivered,
             delivered_work,
             before_turn: _,
@@ -1062,12 +1058,17 @@ impl<'a> TurnRestore<'a> {
             ),
             None => None,
         };
+        let namespaces = self
+            .cx
+            .durable_reads()?
+            .turn_namespaces(&row.session, &row.run)
+            .await?;
         self.cx.probe().checkpoint_restored(&row.session, &row.run);
         let mut machine = TurnMachine::restore_from_checkpoint(config, saved, window)?;
         let pending = next_work(&mut machine);
         Ok(RestoredTurn {
             machine,
-            plugin_state,
+            namespaces,
             delivered,
             delivered_work,
             pending,

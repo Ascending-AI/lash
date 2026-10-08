@@ -135,11 +135,12 @@ pub use session_types::{
     SessionToolAccessError, UnstatedSessionConfig,
 };
 pub use state::{
-    FrontierRefusal, FrontierStep, HookCause, HookOccurrence, KeyRejection,
-    NamespaceFrontierRefusal, PluginNamespaceState, PluginState, PluginStateEffect,
-    PluginStateError, PluginStateView, PublicationOrdinal, ResolvedStateChange, StagedPluginState,
-    StateCommand, StateCommandOrigin, StateCommandRefusal, StateCommands, StateFrontier,
-    StateReducer, StateReduction, StateResolution, StateResolutionOutcome,
+    FrontierRefusal, FrontierStep, HookCause, HookOccurrence, KeyRejection, NamespaceEntry,
+    NamespaceFrontierRefusal, NamespaceValues, PluginNamespaceState, PluginState,
+    PluginStateEffect, PluginStateError, PluginStateView, PublicationOrdinal, ResolvedStateChange,
+    StagedPluginState, StateCommand, StateCommandOrigin, StateCommandRefusal, StateCommands,
+    StateFork, StateFrontier, StateReducer, StateReduction, StateResolution,
+    StateResolutionOutcome,
 };
 pub use tool_catalog::{
     AfterTurnContributions, AfterTurnDecisions, CheckpointApplication, PluginAbort,

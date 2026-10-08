@@ -39,7 +39,6 @@ use lash_core_execution::runtime::actor::round::{
     self, AdmittedExecution, PolicyView, RoundDraft, RoundError,
 };
 use lash_core_execution::runtime::actor::waits::{self, PinnedKey, WaitRef, WaitSpec};
-use lash_core_store::tool_run::StateResolution;
 use lash_durable::domain::{
     AdmittedId, ExecKey, Ordinal, RunRecordWrite, RunSeq, SnapshotRev, SnapshotWrite,
 };
@@ -135,11 +134,6 @@ pub struct BrokerLedger {
     pub grants: BTreeMap<String, HandleGrant>,
     /// The operation the VM stands on.
     pub pending: Option<PendingOperation>,
-    /// The plugin-state resolutions of the settled members whose records a
-    /// quiet point pruned, in commit order: what they changed, which a
-    /// restore publishes before the execution runs again.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub state: Vec<StateResolution>,
 }
 
 /// The members map as a list of entries: its keys are not strings, so a
@@ -407,23 +401,29 @@ impl SnapshotStore for DurableSnapshotStore {
         }
         // Records no snapshot can reach again go: every run before the
         // oldest one an open member or the pending operation is in. What
-        // their settled members changed stays, in the ledger.
+        // their settled members changed, published once their outcomes
+        // committed, commits with the prune as the turn's run namespaces
+        // (FIG-5301): a pruned outcome is never the only copy of a value.
         let oldest = reachable_from(&checkpoint.ledger);
-        if oldest > 0 {
-            let folded = members.fold().await.map_err(round_refused)?;
-            for view in folded.rounds() {
-                for member in view.members() {
-                    if view.id_of(member).run.0 < oldest && member.outcome().is_some() {
-                        checkpoint
-                            .ledger
-                            .state
-                            .extend_from_slice(member.committed_state());
-                    }
-                }
+        let changes = match (&self.exec, members.bodies()) {
+            (ExecKey::Cell(session, run, _), Some(bodies)) if oldest > 0 => {
+                Some((session.clone(), run.clone(), bodies.run_changes(), bodies))
             }
-        }
+            _ => None,
+        };
         let expected = self.revision().await?;
         let mut tx = self.cx.begin().await.map_err(refused)?;
+        if let Some((session, run, namespaces, _)) = &changes
+            && !namespaces.is_empty()
+        {
+            tx.write(DomainWrite::Turn(
+                lash_durable::domain::TurnWrite::Namespaces {
+                    session: session.clone(),
+                    run: run.clone(),
+                    namespaces: namespaces.clone(),
+                },
+            ));
+        }
         for write in with {
             tx.write(write);
         }
@@ -489,6 +489,9 @@ impl SnapshotStore for DurableSnapshotStore {
             CommitLabel::CELL_SNAPSHOT_ADMIT
         };
         self.commit(tx, label, &mut members).await?;
+        if let Some((_, _, namespaces, bodies)) = &changes {
+            bodies.run_changes_committed(namespaces);
+        }
         if !admitted.is_empty() {
             members.admitted(&admitted).map_err(round_refused)?;
         }

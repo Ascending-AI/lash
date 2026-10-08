@@ -16,10 +16,47 @@ pub(super) enum ResidentCheckpointComponentBody {
     },
     PluginState {
         snapshot: Option<crate::PluginState>,
-        generations: std::collections::BTreeMap<String, u64>,
+        map: PluginStateRecord,
     },
     ExecutionState(Option<Arc<[u8]>>),
     Opaque(Option<Arc<[u8]>>),
+}
+
+/// The head's namespace map as resident state keeps it, with which values
+/// each entry's body was encoded from: a capture holding the same shared
+/// values is unchanged without encoding them again.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub(super) struct PluginStateRecord {
+    pub(super) map: crate::plugin_state::PluginStateMap,
+    #[serde(skip)]
+    pub(super) encoded_from: std::collections::BTreeMap<
+        String,
+        std::sync::Weak<std::collections::BTreeMap<String, serde_json::Value>>,
+    >,
+}
+
+impl PluginStateRecord {
+    pub(super) fn generations(&self) -> std::collections::BTreeMap<String, u64> {
+        self.map
+            .plugins
+            .iter()
+            .map(|(plugin, entry)| (plugin.clone(), entry.generation))
+            .collect()
+    }
+
+    /// The content address of `plugin`'s values when they are the very
+    /// values its recorded body was encoded from.
+    pub(super) fn known_values(
+        &self,
+        plugin: &str,
+        values: &crate::plugin_state::NamespaceValues,
+    ) -> Option<&crate::store::BlobRef> {
+        self.encoded_from
+            .get(plugin)
+            .filter(|encoded| std::ptr::eq(encoded.as_ptr(), Arc::as_ptr(values)))
+            .and(self.map.plugins.get(plugin))
+            .map(|entry| &entry.values)
+    }
 }
 
 /// A body pending its next commit: ADR 0056's "present body" state, where the
@@ -32,7 +69,7 @@ pub(super) enum PendingCheckpointComponentBody {
     },
     PluginState {
         snapshot: crate::PluginState,
-        generations: std::collections::BTreeMap<String, u64>,
+        map: PluginStateRecord,
     },
     ExecutionState(Arc<[u8]>),
     Opaque(Arc<[u8]>),
@@ -50,12 +87,9 @@ impl PendingCheckpointComponentBody {
                 snapshot: Some(snapshot),
                 generation,
             },
-            Self::PluginState {
-                snapshot,
-                generations,
-            } => ResidentCheckpointComponentBody::PluginState {
+            Self::PluginState { snapshot, map } => ResidentCheckpointComponentBody::PluginState {
                 snapshot: Some(snapshot),
-                generations,
+                map,
             },
             Self::ExecutionState(bytes) => {
                 ResidentCheckpointComponentBody::ExecutionState(Some(bytes))
@@ -137,16 +171,16 @@ impl ResidentCheckpointComponent {
         }
     }
 
-    pub(super) fn plugin_generations(&self) -> Option<&std::collections::BTreeMap<String, u64>> {
+    pub(super) fn plugin_record(&self) -> Option<&PluginStateRecord> {
         match self {
             Self::Unchanged {
-                body: ResidentCheckpointComponentBody::PluginState { generations, .. },
+                body: ResidentCheckpointComponentBody::PluginState { map, .. },
                 ..
             }
             | Self::Changed {
-                body: PendingCheckpointComponentBody::PluginState { generations, .. },
+                body: PendingCheckpointComponentBody::PluginState { map, .. },
                 ..
-            } => Some(generations),
+            } => Some(map),
             _ => None,
         }
     }
@@ -221,10 +255,10 @@ impl ResidentCheckpointComponent {
                             generation: *generation,
                         }
                     }
-                    PendingCheckpointComponentBody::PluginState { generations, .. } => {
+                    PendingCheckpointComponentBody::PluginState { map, .. } => {
                         ResidentCheckpointComponentBody::PluginState {
                             snapshot: None,
-                            generations: std::mem::take(generations),
+                            map: std::mem::take(map),
                         }
                     }
                     PendingCheckpointComponentBody::ExecutionState(_)
@@ -271,10 +305,10 @@ impl ResidentCheckpointComponent {
                             generation: *generation,
                         }
                     }
-                    PendingCheckpointComponentBody::PluginState { generations, .. } => {
+                    PendingCheckpointComponentBody::PluginState { map, .. } => {
                         ResidentCheckpointComponentBody::PluginState {
                             snapshot: None,
-                            generations: std::mem::take(generations),
+                            map: std::mem::take(map),
                         }
                     }
                     PendingCheckpointComponentBody::ExecutionState(_) => {

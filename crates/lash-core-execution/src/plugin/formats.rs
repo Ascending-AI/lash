@@ -118,7 +118,7 @@ impl PluginHost {
                 message: error.to_string(),
             })?;
         super::state::validate_namespace(&values)?;
-        namespace.values = values;
+        namespace.values = std::sync::Arc::new(values);
         namespace.format_version = native;
         namespace.generation = namespace.generation.checked_add(1).ok_or_else(|| {
             PluginError::MonotonicCounterOverflow {

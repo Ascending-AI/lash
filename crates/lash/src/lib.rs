@@ -888,12 +888,13 @@ pub mod plugins {
     pub use lash_core::plugin::{
         AfterTurnDecisions, CheckpointApplication, CheckpointComponentKey, CodeExecutionOutcome,
         CodeExecutorPlugin, ExecutionLeafName, ExecutionStateCapture, HydratedExecutionState,
-        InvalidExecutionLeafName, LeafChange, PluginAbort, PluginNamespaceState,
-        PluginSessionMaterializationRequest, PluginSessionRequest, PluginState, PluginStateEffect,
-        PluginTransitionBase, PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
-        ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
-        ProtocolSessionContext, ProtocolSessionPlugin, ProtocolSessionRestoreView,
-        RecordedCallbackPhase, RecordedTurnContribution, SessionAuthorityContext, TurnPreparation,
+        InvalidExecutionLeafName, LeafChange, NamespaceEntry, NamespaceValues, PluginAbort,
+        PluginNamespaceState, PluginSessionMaterializationRequest, PluginSessionRequest,
+        PluginState, PluginStateEffect, PluginTransitionBase, PluginTransitionId,
+        PluginTransitionRecord, PluginTransitionRequest, ProtocolBeforeLlmCallContext,
+        ProtocolDriverPlugin, ProtocolLlmCallAction, ProtocolSessionContext, ProtocolSessionPlugin,
+        ProtocolSessionRestoreView, RecordedCallbackPhase, RecordedTurnContribution,
+        SessionAuthorityContext, TurnPreparation,
     };
     /// The attachment-omission history policy (ADR 0133): a plugin names the
     /// attachments of a turn's projected history its request omits, and core
@@ -928,8 +929,8 @@ pub mod plugins {
         FormatNamespace, FormatRefusal, FrontierRefusal, FrontierStep, HookCause, HookOccurrence,
         KeyRejection, NamespaceFrontierRefusal, PluginConfigNamespace, PluginStateError,
         PluginStateView, PublicationOrdinal, ResolvedStateChange, SessionReadyContext,
-        StateCommand, StateCommandOrigin, StateCommandRefusal, StateCommands, StateFrontier,
-        StateReducer, StateReduction, StateResolution, StateResolutionOutcome,
+        StateCommand, StateCommandOrigin, StateCommandRefusal, StateCommands, StateFork,
+        StateFrontier, StateReducer, StateReduction, StateResolution, StateResolutionOutcome,
     };
     /// Plugin operations: the query / command / task vocabulary. A plugin
     /// author declares an operation by implementing [`PluginOperation`] plus

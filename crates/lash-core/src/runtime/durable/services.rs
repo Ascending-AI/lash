@@ -153,6 +153,9 @@ impl RuntimeTurnServices {
         let live = self.runtimes.live_replay();
         let commit = CommitBase::of(&runtime);
         let (observer, publisher) = live_observer(&runtime, &live, &row.run);
+        // The run starts from the head the runtime opened at: what it
+        // changes from here is what its phases record (FIG-5301).
+        runtime.services.plugins.begin_run();
         let turn = runtime
             .prepare_durable_turn(
                 &controller,

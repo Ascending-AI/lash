@@ -106,7 +106,6 @@ impl ParentLedger {
                 frame_epoch,
                 grants: BTreeMap::new(),
                 pending: None,
-                state: Vec::new(),
             },
         }
     }

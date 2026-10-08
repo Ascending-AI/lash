@@ -116,13 +116,28 @@ namespaces.
 
 ### 6. The checkpoint component
 
-The `plugin_state` keyed component contains ordered plugin namespaces, each
-with format version, generation, publication frontier, receipt digests and
-ordered values. Content addressing gives the body its
-`BlobRef`; the generation is part of that body, rather than a manifest column.
-The runtime recaptures when namespaces exist and the component is absent or
-its complete captured namespace differs, including an ownership change without
-a new value generation. Otherwise it retains the reference.
+The `plugin_state` keyed component is the session's namespace map: for each
+plugin, its format version, generation, publication frontier, receipt
+digests, fork policy and the content address of its values. Each namespace's
+values are one immutable body of their own, the `plugin_state/<plugin>`
+component, by content address (FIG-5301). A commit writes a body only for a
+namespace whose values changed; an unchanged namespace keeps its reference
+and costs nothing, however large. Retention is by reachability from a
+retained head.
+
+A durable run pins the head it starts from and records the namespaces it
+changes as rows beside its turn (`turn_namespaces`), each body written once
+per value. Phase checkpoints carry no plugin state. A restore reinstalls the
+pinned state with the run's rows over it; `turn.commit` promotes them into the
+head, and a cancelled turn drops them with the turn, leaving the head as it
+was. A code cell's quiet point writes the rows before it prunes a settled
+call's records, so pruning never removes the only copy of a value. Resident
+namespaces are immutable and shared, never deep-copied into a prompt cut.
+
+A publication is refused with `StateCommandRefusal::SessionTooLarge` when it
+would take the session's encoded total past 6 MiB, below the 8 MiB capture
+bound; past 4 MiB it applies and is reported
+(`plugin_state.session_budget_warn`).
 
 The `plugin_admission` opaque checkpoint component carries the transition
 request and current native namespace/config view. It uses the existing
@@ -132,13 +147,18 @@ conversion. The separately encoded `plugin_state` component retains the
 admission's writer formats.
 
 Per-key generations add no useful invalidation boundary because capture writes
-the whole component. Resident hydration adopts the recorded native namespaces
-and their frontiers.
+a changed namespace whole. Resident hydration adopts the recorded native
+namespaces and their frontiers.
 
 ### 7. Fork
 
-Fork initialization uses a deep copy of captured parent namespaces and their
-generations. It preserves non-resident namespaces as well as resident ones.
+A fork is bound to the cut its source made visible at capture. Each plugin
+declares at registration what a fork does with its namespace
+(`PluginDeclaration::state_fork`): `copy`, the default, keeps the parent's
+namespace as of the fork point, its values body shared by content address;
+`reset` omits it from the child's map, so the child starts from the plugin's
+initial state. The policy is recorded with the namespace. A fork preserves
+non-resident namespaces as well as resident ones.
 Parent and child publications are independent; there is no merge.
 Fork creation resets publication ownership to the child's initial activation
 and retains the inherited applied receipts. Content-addressed
@@ -162,9 +182,9 @@ reducing coordinator keep every published change behind a recorded result.
 
 A global namespace has no session lifecycle owner. Append-only plugin logs add
 another write algebra and retention contract; capped JSON arrays already serve
-bounded list state. Per-key dependency tracking adds bookkeeping to a component
-that is captured whole. Unconditional capture remains correct but needlessly
-serializes unchanged state. File-store escape hatches move plugin durability
+bounded list state. Per-key dependency tracking adds bookkeeping to a namespace
+that is captured whole. Unconditional capture of every namespace remains
+correct but rewrites unchanged state at every commit. File-store escape hatches move plugin durability
 outside the runtime-owned boundary; larger state belongs in host storage.
 
 ## Consequences

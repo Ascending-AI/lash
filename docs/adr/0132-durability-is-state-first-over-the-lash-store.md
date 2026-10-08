@@ -156,8 +156,10 @@ The execution record splits into a start and an outcome.
   that committed record (FIG-5266). The namespace is the member's owner's:
   the session's for a round member or a code cell's call, the process's for
   an engine process's tool step, which a resumed activation rebuilds from
-  its step outcome rows. A cell's snapshot that prunes a settled call's
-  record carries its resolutions (FIG-5268).
+  its step outcome rows. A cell's quiet point that prunes a settled call's
+  record first records the namespaces the run changed as the run's rows, so
+  the pruned call's change is never replayed from its commands (FIG-5268,
+  FIG-5301).
 - **Group commit.** Finished members commit in batches, one transaction per
   batch.
 

@@ -3,7 +3,7 @@
 
 The engine's tables (`nodes`, `actors`, `actor_mail`, and the domain tables
 the runtime lanes add to the fenced commit: `run_records`, `exec_snapshots`,
-`waits`, `park_events`, `turn_phases`, `session_close`, `session_scope_ends`,
+`waits`, `park_events`, `turn_phases`, `turn_namespaces`, `session_close`, `session_scope_ends`,
 `prompt_snapshots`, `prompt_texts`, `prompt_snapshot_texts`; `lash_`-prefixed on PostgreSQL) are written by one
 neutral statement set and one module per dialect. Since I0 (FIG-5194) each
 of those is a directory: the core in `durable/mod.rs` and one file per
@@ -65,6 +65,7 @@ TABLES = (
     "run_records",
     "exec_snapshots",
     "turn_phases",
+    "turn_namespaces",
     "waits",
     "park_events",
     "session_close",

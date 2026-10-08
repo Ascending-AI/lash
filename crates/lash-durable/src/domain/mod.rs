@@ -54,8 +54,8 @@ pub use session_mail::{
 pub use snapshots::{SnapshotRev, SnapshotRow, SnapshotWrite};
 pub use triggers::{TriggerStart, TriggerStartAnswer};
 pub use turns::{
-    ModelPin, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest, TurnEnd, TurnRow, TurnWrite,
-    UnfinishedPhase,
+    ModelPin, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest, TurnEnd, TurnNamespace,
+    TurnRow, TurnWrite, UnfinishedPhase,
 };
 pub use waits::{
     CANCEL_MAIL, ResolveAnswer, TIMER_DIGEST, WAIT_ROW_FORMAT_VERSION, WaitId, WaitKind,
@@ -343,6 +343,14 @@ pub enum DomainRefusal {
 pub trait DurableReads: Send + Sync {
     /// V0, then L3: the session's unfinished turn, if any.
     async fn turn(&self, session: &SessionId) -> Result<Option<TurnRow>, DurableError>;
+
+    /// FIG-5301: the namespace rows of `session`'s unfinished `run`, by
+    /// plugin.
+    async fn turn_namespaces(
+        &self,
+        session: &SessionId,
+        run: &TurnId,
+    ) -> Result<Vec<TurnNamespace>, DurableError>;
 
     /// L3: how `run` of `session` ended, once it ended.
     async fn turn_end(

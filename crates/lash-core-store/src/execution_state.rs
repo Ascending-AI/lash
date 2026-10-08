@@ -65,6 +65,8 @@ impl std::borrow::Borrow<str> for ExecutionLeafName {
 pub enum CheckpointComponentKey {
     ToolState,
     PluginState,
+    /// One plugin namespace's values body, by plugin.
+    PluginNamespace(String),
     ExecutionState,
     ExecutionLeaf(ExecutionLeafName),
     Other(String),
@@ -75,9 +77,13 @@ impl CheckpointComponentKey {
             crate::store::TOOL_STATE_CHECKPOINT_COMPONENT => Self::ToolState,
             crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT => Self::PluginState,
             crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT => Self::ExecutionState,
-            _ => match ExecutionLeafName::parse(key) {
-                Some(leaf) => Self::ExecutionLeaf(leaf),
-                None => Self::Other(key.to_owned()),
+            _ => match (
+                ExecutionLeafName::parse(key),
+                crate::plugin_state::namespace_component_plugin(key),
+            ) {
+                (Some(leaf), _) => Self::ExecutionLeaf(leaf),
+                (None, Some(plugin)) => Self::PluginNamespace(plugin.to_owned()),
+                (None, None) => Self::Other(key.to_owned()),
             },
         }
     }

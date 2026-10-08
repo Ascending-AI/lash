@@ -315,6 +315,14 @@ impl DurableReads for RecordingStore {
         self.inner.turn(session).await
     }
 
+    async fn turn_namespaces(
+        &self,
+        session: &SessionId,
+        run: &TurnId,
+    ) -> Result<Vec<lash_durable::domain::TurnNamespace>, DurableError> {
+        self.inner.turn_namespaces(session, run).await
+    }
+
     async fn turn_end(
         &self,
         session: &SessionId,

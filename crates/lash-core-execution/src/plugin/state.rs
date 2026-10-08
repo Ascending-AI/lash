@@ -10,7 +10,10 @@
 //! durably. Replay installs the recorded resolution without running the
 //! body, the callback or a reducer.
 mod publication;
-pub use lash_core_store::plugin_state::{KeyRejection, PluginNamespaceState, PluginState};
+mod run;
+pub use lash_core_store::plugin_state::{
+    KeyRejection, NamespaceEntry, NamespaceValues, PluginNamespaceState, PluginState, StateFork,
+};
 pub use lash_core_store::tool_run::{
     FrontierRefusal, FrontierStep, HookCause, HookOccurrence, NamespaceFrontierRefusal,
     PublicationOrdinal, ResolvedStateChange, StateCommand, StateCommandOrigin, StateCommandRefusal,
@@ -362,6 +365,11 @@ pub(super) struct PluginStateRegistry {
     owed: BTreeMap<String, BTreeMap<u64, StateResolution>>,
     /// Woken whenever a reservation settles.
     settled: Arc<tokio::sync::Notify>,
+    /// What a durable run's rows record, while the owner runs one.
+    run: Option<run::RunRows>,
+    /// Each namespace's encoded size, by the values it was measured from:
+    /// what the session budget sums without encoding unchanged values again.
+    sizes: BTreeMap<String, (std::sync::Weak<BTreeMap<String, Value>>, usize)>,
 }
 
 impl PluginStateRegistry {
@@ -389,6 +397,20 @@ impl PluginStateRegistry {
             namespace.publication.owner_segment = registry.segment;
         }
         registry
+    }
+
+    /// Record `fork`, what `plugin` declares a fork does with its namespace,
+    /// on the namespace: a fork follows the recorded policy.
+    pub(super) fn declare_fork(
+        &mut self,
+        plugin: &str,
+        fork: lash_core_store::plugin_state::StateFork,
+    ) {
+        let namespace = self.data.plugins.entry(plugin.to_owned()).or_default();
+        if namespace.fork != fork {
+            namespace.fork = fork;
+            self.source = None;
+        }
     }
 
     pub(super) fn matches_ref(&self, reference: &crate::BlobRef) -> bool {

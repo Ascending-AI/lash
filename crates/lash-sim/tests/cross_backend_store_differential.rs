@@ -612,10 +612,12 @@ fn checkpoint_bodies() -> HydratedSessionCheckpoint {
                 format_version: lash_core::FormatVersion::ONE,
                 generation: 11,
                 publication: Default::default(),
+                fork: Default::default(),
                 values: std::collections::BTreeMap::from([(
                     "state".into(),
                     serde_json::json!({"mode": "durable"}),
-                )]),
+                )])
+                .into(),
             },
         )]
         .into_iter()

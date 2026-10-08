@@ -1447,6 +1447,17 @@ impl DurableReads for PostgresDurableStore {
         .await
     }
 
+    async fn turn_namespaces(
+        &self,
+        session: &lash_sansio::SessionId,
+        run: &lash_sansio::TurnId,
+    ) -> Result<Vec<lash_durable::domain::TurnNamespace>, DurableError> {
+        self.within(CommitCapacity::Work, async {
+            turns::turn_namespaces(&mut *self.reader().await?, session, run).await
+        })
+        .await
+    }
+
     async fn run_records(&self, owner: &OwnerKey) -> Result<Vec<RunRecordRow>, DurableError> {
         self.within(CommitCapacity::Work, async {
             run_records::read(&mut *self.reader().await?, owner).await

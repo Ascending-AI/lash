@@ -1085,6 +1085,18 @@ CREATE TABLE IF NOT EXISTS lash_turn_phases (
         AND (phase = 'model') = (model_deadline_ms IS NOT NULL))
 );
 
+-- The plugin namespaces an unfinished turn's run changed (FIG-5301): the
+-- entry (values address and metadata, JSON) and the values body the run last
+-- wrote, dropped with the phase row when the turn ends.
+CREATE TABLE IF NOT EXISTS lash_turn_namespaces (
+    session_id TEXT NOT NULL,
+    run TEXT NOT NULL,
+    plugin TEXT NOT NULL,
+    entry TEXT NOT NULL,
+    body BYTEA,
+    PRIMARY KEY (session_id, run, plugin)
+);
+
 -- Waits, keyed promises and timers (L5, FIG-5173; ADR 0132 §6): one row per
 -- wait from its minting. The deadline is written once; a resolution is a
 -- conditional update from 'pending', so the first one wins. Only

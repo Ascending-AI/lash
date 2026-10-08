@@ -21,7 +21,7 @@
 use std::collections::BTreeMap;
 
 use crate::compat::{CompatRefusal, VersionRange};
-use crate::plugin_state::{FormatNamespace, FormatVersion, PluginState};
+use crate::plugin_state::{FormatNamespace, FormatVersion, PluginStateMap};
 
 use super::StoreError;
 
@@ -168,13 +168,6 @@ impl PluginPublication {
         }
     }
 
-    /// Add every namespace of a plugin-state checkpoint body.
-    pub fn add_state(&mut self, state: &PluginState) {
-        for (plugin, namespace) in &state.plugins {
-            self.push(plugin, FormatNamespace::State, namespace.format_version);
-        }
-    }
-
     /// Add every namespace of a recorded plugin configuration.
     pub fn add_config(&mut self, config: &crate::PluginConfig) {
         for (plugin, namespace) in config.namespaces() {
@@ -182,9 +175,9 @@ impl PluginPublication {
         }
     }
 
-    /// The namespaces a checkpoint publishes: its plugin-state component when
-    /// the commit carries a changed body. A component the commit only
-    /// references was published, and admitted, by the commit that wrote it.
+    /// The namespaces a checkpoint publishes: its plugin namespace map when
+    /// the commit carries a changed map. A map the commit only references
+    /// was published, and admitted, by the commit that wrote it.
     pub fn add_checkpoint(
         &mut self,
         checkpoint: &super::HydratedSessionCheckpoint,
@@ -194,7 +187,7 @@ impl PluginPublication {
         else {
             return Ok(());
         };
-        let state: PluginState =
+        let map: PluginStateMap =
             rmp_serde::from_slice(body).map_err(|error| StoreError::StoredDataCorrupt {
                 record_kind: "SessionCheckpoint component",
                 message: format!(
@@ -202,7 +195,9 @@ impl PluginPublication {
                     super::PLUGIN_STATE_CHECKPOINT_COMPONENT
                 ),
             })?;
-        self.add_state(&state);
+        for (plugin, entry) in &map.plugins {
+            self.push(plugin, FormatNamespace::State, entry.format_version);
+        }
         Ok(())
     }
 
@@ -574,15 +569,15 @@ mod tests {
 
     #[test]
     fn a_runtime_commit_publication_reads_its_stamps_off_the_payload() {
-        let mut state = PluginState::default();
+        let mut state = PluginStateMap::default();
         state.plugins.insert(
             "probe".into(),
             crate::plugin_state::PluginNamespaceState {
                 format_version: version(2),
                 generation: 1,
-                publication: Default::default(),
-                values: BTreeMap::new(),
-            },
+                ..Default::default()
+            }
+            .entry(crate::plugin_state::NamespaceBody::encode(&BTreeMap::new()).values),
         );
         let mut checkpoint = super::super::HydratedSessionCheckpoint::default();
         checkpoint.components.insert(

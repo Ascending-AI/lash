@@ -108,7 +108,7 @@ impl RuntimeDrive {
             fresh_machine(&mut driver, messages, &parts.observer, invalid_input)?.into_config();
         let RestoredTurn {
             machine,
-            plugin_state,
+            namespaces,
             delivered,
             delivered_work,
             pending,
@@ -120,22 +120,20 @@ impl RuntimeDrive {
         driver.pending_turn_inputs.extend(delivered);
         let opening_work = driver.pending_queued.len();
         driver.pending_queued.extend(delivered_work);
-        // The plugin state the turn's last phase committed, the pending
-        // checkpoint-callback decisions of an admitted call among it, is
-        // reinstalled: preparing the turn again served its recorded
-        // before-turn decisions and ran no callback, so nothing that
-        // committed runs again.
-        if let Some(state) = &plugin_state {
-            driver
-                .session
-                .plugins()
-                .hydrate_state(state)
-                .map_err(|error| {
-                    TurnError::Exec(format!(
-                        "the turn's plugin state did not reinstall: {error}"
-                    ))
-                })?;
-        }
+        // The namespaces the turn's run committed, the pending
+        // checkpoint-callback decisions of an admitted call among them, over
+        // the head the run started from, are reinstalled: preparing the turn
+        // again served its recorded before-turn decisions and ran no
+        // callback, so nothing that committed runs again.
+        driver
+            .session
+            .plugins()
+            .restore_run(namespaces)
+            .map_err(|error| {
+                TurnError::Exec(format!(
+                    "the turn's plugin state did not reinstall: {error}"
+                ))
+            })?;
         // The records the restored machine already delivered through its
         // progress boundaries reached only the previous owner's draft: they
         // join this one, so the turn's commit holds the history an uncut run
@@ -358,13 +356,12 @@ impl TurnDrive for RuntimeDrive {
         self.before_turn.clone()
     }
 
-    fn plugin_state(&self) -> Result<Option<crate::PluginState>, TurnError> {
-        self.driver
-            .session
-            .plugins()
-            .committed_state()
-            .map(Some)
-            .map_err(|error| TurnError::Exec(format!("the turn's plugin state: {error}")))
+    fn run_changes(&self) -> Vec<lash_durable::domain::TurnNamespace> {
+        self.driver.session.plugins().run_changes()
+    }
+
+    fn run_changes_committed(&self, written: &[lash_durable::domain::TurnNamespace]) {
+        self.driver.session.plugins().run_changes_committed(written);
     }
 
     async fn restart_live_stream(&mut self, _cx: &ActorContext) -> Result<(), TurnError> {

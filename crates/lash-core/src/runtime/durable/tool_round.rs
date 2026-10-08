@@ -145,6 +145,7 @@ pub(super) async fn run(
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(exec)?;
             let refused = tools.refusal(&calls);
+            let written = super::phases::write_run_changes(&*drive, &mut tx, &session, &row.run);
             tx.write(DomainWrite::Turn(TurnWrite::Advance {
                 session: session.clone(),
                 run: row.run.clone(),
@@ -174,6 +175,7 @@ pub(super) async fn run(
                 }
             }
             cx.commit(tx, CommitLabel::MODEL_DONE).await?;
+            drive.run_changes_committed(&written);
             if refused.is_some() {
                 RoundRunner::resumed(cx, owner.clone(), run, policies, bodies)
             } else {

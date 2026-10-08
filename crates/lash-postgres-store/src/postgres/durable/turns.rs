@@ -13,8 +13,8 @@ use lash_core_execution::store_backend_support::turn_cancel::{
     turn_cancel_undelivered_wire,
 };
 use lash_durable::domain::{
-    DomainRefusal, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest, TurnEnd, TurnRow,
-    TurnWrite, UnfinishedPhase,
+    DomainRefusal, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest, TurnEnd, TurnNamespace,
+    TurnRow, TurnWrite, UnfinishedPhase,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, Woken};
 use lash_sansio::{SessionId, TurnId};
@@ -115,6 +115,38 @@ pub(super) async fn apply(
             }
             Ok(())
         }
+        TurnWrite::Namespaces {
+            session,
+            run,
+            namespaces,
+        } => {
+            let open: Option<String> = sqlx::query_scalar(SQL.open_named_run.sql())
+                .bind(session.as_str())
+                .bind(run.as_str())
+                .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(sqlx_failure)?;
+            if open.is_none() {
+                return refuse(DomainRefusal::TurnNotOpen {
+                    session: session.clone(),
+                    run: run.clone(),
+                });
+            }
+            for namespace in namespaces {
+                let entry = serde_json::to_string(&namespace.entry)
+                    .map_err(|error| corrupt("turn namespace entry", &error.to_string()))?;
+                sqlx::query(SQL.upsert_namespace.sql())
+                    .bind(session.as_str())
+                    .bind(run.as_str())
+                    .bind(namespace.plugin.as_str())
+                    .bind(entry)
+                    .bind(namespace.body.as_deref())
+                    .execute(crate::observed_sql::executor(&mut *tx))
+                    .await
+                    .map_err(sqlx_failure)?;
+            }
+            Ok(())
+        }
         TurnWrite::Terminal {
             session,
             run,
@@ -138,6 +170,12 @@ pub(super) async fn apply(
                 });
             }
             sqlx::query(SQL.delete_phase.sql())
+                .bind(session.as_str())
+                .bind(run.as_str())
+                .execute(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(sqlx_failure)?;
+            sqlx::query(SQL.delete_namespaces.sql())
                 .bind(session.as_str())
                 .bind(run.as_str())
                 .execute(crate::observed_sql::executor(&mut *tx))
@@ -333,6 +371,33 @@ pub(super) async fn turn_end(
         cause,
         head_revision,
     }))
+}
+
+pub(super) async fn turn_namespaces(
+    tx: &mut PgConnection,
+    session: &SessionId,
+    run: &TurnId,
+) -> Result<Vec<TurnNamespace>, DurableError> {
+    let rows = sqlx::query(SQL.namespaces.sql())
+        .bind(session.as_str())
+        .bind(run.as_str())
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(sqlx_failure)?;
+    rows.into_iter()
+        .map(|row| {
+            let plugin: String = row.try_get(0).map_err(sqlx_failure)?;
+            let entry: String = row.try_get(1).map_err(sqlx_failure)?;
+            let body: Option<Vec<u8>> = row.try_get(2).map_err(sqlx_failure)?;
+            let entry = serde_json::from_str(&entry)
+                .map_err(|_| corrupt("turn namespace entry", &plugin))?;
+            Ok(TurnNamespace {
+                plugin,
+                entry,
+                body: body.map(Into::into),
+            })
+        })
+        .collect()
 }
 
 pub(super) async fn turn(

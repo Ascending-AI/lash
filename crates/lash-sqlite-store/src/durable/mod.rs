@@ -1150,6 +1150,16 @@ impl DurableReads for SqliteDurableStore {
             .await
     }
 
+    async fn turn_namespaces(
+        &self,
+        session: &lash_sansio::SessionId,
+        run: &lash_sansio::TurnId,
+    ) -> Result<Vec<lash_durable::domain::TurnNamespace>, DurableError> {
+        let (session, run) = (session.clone(), run.clone());
+        self.read(move |tx| turns::turn_namespaces(tx, &session, &run))
+            .await
+    }
+
     async fn run_records(&self, owner: &OwnerKey) -> Result<Vec<RunRecordRow>, DurableError> {
         let owner = owner.clone();
         self.read(move |tx| run_records::read(tx, &owner)).await

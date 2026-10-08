@@ -225,6 +225,10 @@ pub enum StateCommandRefusal {
     },
     #[error("the namespace would encode to {bytes} bytes, limit {limit}")]
     NamespaceTooLarge { bytes: usize, limit: usize },
+    /// The session's plugin state would encode past its total budget
+    /// (FIG-5301), below the fork capture bound.
+    #[error("the session's plugin state would encode to {bytes} bytes, limit {limit}")]
+    SessionTooLarge { bytes: usize, limit: usize },
     #[error("command {index} names reducer `{name}`, which its plugin does not register")]
     UnknownReducer { index: usize, name: String },
     #[error(transparent)]

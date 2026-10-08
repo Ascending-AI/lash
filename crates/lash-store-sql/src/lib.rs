@@ -114,6 +114,7 @@ pub const TABLES: &[&str] = &[
     durable::prompts::TABLE,
     durable::prompts::TEXTS_TABLE,
     durable::run_records::TABLE,
+    durable::turns::NAMESPACES_TABLE,
     durable::turns::TABLE,
     durable::session_close::ENDING_TABLE,
     durable::session_close::TABLE,

@@ -81,6 +81,10 @@ law!(
     |store, _advance| { laws::a_turn_counts_the_model_calls_it_admitted(store) }
 );
 law!(
+    a_runs_namespace_rows_hold_its_bodies_and_end_with_it,
+    |store, _advance| { laws::a_runs_namespace_rows_hold_its_bodies_and_end_with_it(store) }
+);
+law!(
     a_session_close_moves_one_step_at_a_time,
     |store, _advance| { laws::a_session_close_moves_one_step_at_a_time(store) }
 );

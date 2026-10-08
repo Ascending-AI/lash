@@ -355,7 +355,7 @@ fn a_renderer_reads_one_namespace_generation() {
             let namespace = registry.data.plugins.entry(plugin.into()).or_default();
             namespace.generation = 1;
             namespace
-                .values
+                .values_mut()
                 .insert(key.into(), serde_json::json!(value));
         }
     }
@@ -377,7 +377,9 @@ fn a_renderer_reads_one_namespace_generation() {
                 let mut registry = registry.lock_recover();
                 let namespace = registry.data.plugins.get_mut("mem").expect("namespace");
                 namespace.generation = 2;
-                namespace.values.insert("t".into(), serde_json::json!(2));
+                namespace
+                    .values_mut()
+                    .insert("t".into(), serde_json::json!(2));
             }
             let after = (input.state().generation(), input.state().get("t").cloned());
             observed.lock_recover().push((before, after));

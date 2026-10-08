@@ -163,6 +163,18 @@ pub trait MemberBodies: Send + Sync {
         Ok(())
     }
 
+    /// The plugin namespaces the members' run changed that its rows do not
+    /// record yet (FIG-5301): a commit that prunes members' records writes
+    /// them, so a pruned outcome is never the only copy of a value or of its
+    /// dedup receipt. Empty for bodies that reduce no session plugin state.
+    fn run_changes(&self) -> Vec<lash_durable::domain::TurnNamespace> {
+        Vec::new()
+    }
+
+    /// Record that a commit wrote `written`, what
+    /// [`run_changes`](Self::run_changes) named.
+    fn run_changes_committed(&self, _written: &[lash_durable::domain::TurnNamespace]) {}
+
     /// Release what `execution`'s park launched, once its park ended:
     /// `cancelled` when the call ends cancelled. Runs before the call's
     /// final outcome is recorded, so a crash in between repeats it; it is

@@ -118,6 +118,11 @@ impl Members {
         self.policies = policies;
     }
 
+    /// The member bodies the host runs, once bound.
+    pub(crate) fn bodies(&self) -> Option<Arc<dyn MemberBodies>> {
+        self.bodies.clone()
+    }
+
     /// Forget the cached records: a commit changed them.
     pub(crate) fn forget(&mut self) {
         self.rows = None;

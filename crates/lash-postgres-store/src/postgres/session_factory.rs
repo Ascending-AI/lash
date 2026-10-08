@@ -556,7 +556,12 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                         )
                 });
             }
-            if inherited_admission || source_frame_ended {
+            // Each namespace forks as its plugin declared (FIG-5301).
+            let forked_state = lash_core_execution::store::fork_checkpoint_plugin_state(
+                &mut checkpoint,
+                self.fence.fleet(),
+            )?;
+            if inherited_admission || source_frame_ended || forked_state {
                 checkpoint_ref = Some(
                     crate::support::put_checkpoint_tx(&mut tx, &checkpoint, self.fence.fleet())
                         .await?

@@ -545,6 +545,7 @@ impl PluginHost {
                     format_version: factory.plugin_declaration().format_version,
                     ..Default::default()
                 });
+            registry.declare_fork(factory.id(), factory.plugin_declaration().state_fork);
         }
         drop(registry);
         let mut plugins = Vec::new();

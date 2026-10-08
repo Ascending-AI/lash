@@ -65,16 +65,7 @@ impl RuntimeSessionState {
         let config = crate::store::persisted_session_config_from_state(self).plugin_config;
         let admission = plugins.capture_plugin_admission(&config, fleet)?;
         let captured = plugins.capture_plugin_state()?;
-        let encoded = crate::store::encode_checkpoint_component(
-            crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT,
-            &captured,
-        )
-        .map_err(|error| {
-            crate::RuntimeError::new(
-                crate::RuntimeErrorCode::RuntimeStoreCorrupt,
-                format!("failed to encode captured plugin checkpoint: {error}"),
-            )
-        })?;
+        let state_matches = self.checkpoint_components.records_plugin_state(&captured);
         let entries = &mut self.checkpoint_components.entries;
         let admission_matches = match (
             entries.get(crate::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT),
@@ -89,14 +80,6 @@ impl RuntimeSessionState {
                 Some(bytes),
             ) => descriptor.blob_ref == crate::BlobRef::for_content(bytes),
             _ => false,
-        };
-        let state_matches = match entries.get(crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT) {
-            None => captured == crate::PluginState::default(),
-            Some(ResidentCheckpointComponent::Unchanged {
-                descriptor,
-                body: ResidentCheckpointComponentBody::PluginState { .. },
-            }) => descriptor.blob_ref == crate::BlobRef::for_content(&encoded),
-            Some(_) => false,
         };
         if !(admission_matches && state_matches) {
             return Ok(false);

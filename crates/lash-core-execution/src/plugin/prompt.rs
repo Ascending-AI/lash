@@ -319,14 +319,21 @@ where
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CommittedPluginNamespace {
     generation: u64,
-    values: BTreeMap<String, serde_json::Value>,
+    values: lash_core_store::plugin_state::NamespaceValues,
 }
 
 impl CommittedPluginNamespace {
     /// Only the runtime freezes a namespace, at the cut it builds from
-    /// committed state.
-    pub(crate) fn new(generation: u64, values: BTreeMap<String, serde_json::Value>) -> Self {
-        Self { generation, values }
+    /// committed state, sharing `values`: a cut references the published
+    /// values and copies none of them.
+    pub(crate) fn new(
+        generation: u64,
+        values: impl Into<lash_core_store::plugin_state::NamespaceValues>,
+    ) -> Self {
+        Self {
+            generation,
+            values: values.into(),
+        }
     }
 
     /// The published generation the values were frozen at.

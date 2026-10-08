@@ -13,6 +13,11 @@
 /// call `model_calls`), and how many model calls the turn admitted.
 pub const TABLE: &str = "turn_phases";
 
+/// The table of the plugin namespaces an unfinished turn's run changed
+/// (FIG-5301): one row per namespace, its entry and the values body the run
+/// last wrote for it, dropped with the turn's phase row.
+pub const NAMESPACES_TABLE: &str = "turn_namespaces";
+
 crate::statements! {
     /// `turn_phases`, `session_runs` and `turn_cancel_requests` statements
     /// both backends issue verbatim. The session head is written by the
@@ -58,6 +63,23 @@ crate::statements! {
 
         /// Drop run `?2` of session `?1`'s phase row.
         delete_phase = "DELETE FROM turn_phases WHERE session_id = ?1 AND run = ?2";
+
+        /// Record plugin `?3`'s namespace entry `?4` for run `?2` of session
+        /// `?1`, with values body `?5`; a null body keeps the one the row
+        /// holds.
+        upsert_namespace = "INSERT INTO turn_namespaces (session_id, run, plugin, entry, body)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT (session_id, run, plugin)
+             DO UPDATE SET entry = excluded.entry,
+                 body = COALESCE(excluded.body, turn_namespaces.body)";
+
+        /// Run `?2` of session `?1`'s namespace rows, by plugin.
+        namespaces = "SELECT plugin, entry, body FROM turn_namespaces
+             WHERE session_id = ?1 AND run = ?2
+             ORDER BY plugin";
+
+        /// Drop run `?2` of session `?1`'s namespace rows.
+        delete_namespaces = "DELETE FROM turn_namespaces WHERE session_id = ?1 AND run = ?2";
 
         /// Session `?1`'s unfinished turn with its phase row.
         unfinished = "SELECT r.run, r.admission_json, p.phase, p.phase_arg, p.iteration,

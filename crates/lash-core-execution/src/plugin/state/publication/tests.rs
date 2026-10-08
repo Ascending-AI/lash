@@ -959,3 +959,84 @@ async fn a_callback_keeps_its_publisher_segment_across_handover() {
     );
     assert_eq!(live.export_state(), checkpoint);
 }
+
+/// A session's plugin state has one total budget, checked when a
+/// publication resolves (FIG-5301): past its warn tier a publication still
+/// applies and is reported; past its limit it is refused with a typed
+/// refusal, and nothing of it applies.
+#[tokio::test]
+async fn a_publication_past_the_session_budget_warns_then_is_refused() {
+    use lash_core_store::plugin_state::{PLUGIN_STATE_SESSION_LIMIT, PLUGIN_STATE_SESSION_WARN};
+    let ids: Vec<&'static str> = (0..56)
+        .map(|index| &*Box::leak(format!("bulk-{index:02}").into_boxed_str()))
+        .collect();
+    let host = crate::PluginHost::new(
+        ids.iter()
+            .map(|id| {
+                Arc::new(StaticPluginFactory::new(
+                    PluginDeclaration::initial(id),
+                    PluginSpec::new(),
+                )) as Arc<dyn crate::plugin::PluginFactory>
+            })
+            .collect(),
+    );
+    let live = session(&host, None);
+    // Four values each just under the value limit: about 120 KB a namespace.
+    let fill = || {
+        ["a", "b", "c", "d"]
+            .into_iter()
+            .fold(StateCommands::new(), |commands, key| {
+                commands.set(key, serde_json::json!("x".repeat(30_000)))
+            })
+    };
+    let (refused, capture) = crate::testing::trace_capture::capturing(|| async {
+        for id in &ids {
+            let outcome = record(&live, id, vec![tool_commands(id, id, fill())]).await;
+            let refusal = match &resolutions(&outcome)[0].outcome {
+                StateResolutionOutcome::Applied { .. } => None,
+                StateResolutionOutcome::Refused { refusal } => Some(refusal.clone()),
+            };
+            publish(&live, id, outcome).unwrap();
+            if let Some(refusal) = refusal {
+                return Some((*id, refusal));
+            }
+        }
+        None
+    })
+    .await;
+    let Some((id, refusal)) = refused else {
+        panic!("no publication was refused past the session's limit");
+    };
+    let StateCommandRefusal::SessionTooLarge { bytes, limit } = refusal else {
+        panic!("the refusal is the session budget's: {refusal:?}");
+    };
+    assert_eq!(limit, PLUGIN_STATE_SESSION_LIMIT);
+    assert!(bytes > PLUGIN_STATE_SESSION_LIMIT, "{bytes}");
+    assert!(
+        live.export_state().plugins[id].values.is_empty(),
+        "nothing of the refused publication applies"
+    );
+    let state = live.export_state();
+    let total: usize = state
+        .plugins
+        .values()
+        .map(|namespace| serde_json::to_vec(&*namespace.values).unwrap().len())
+        .sum();
+    assert!(
+        total > PLUGIN_STATE_SESSION_WARN && total <= PLUGIN_STATE_SESSION_LIMIT,
+        "the applied publications reach past the warn tier and stay within the limit: {total}"
+    );
+    let warned = capture.named("plugin_state.session_budget_warn");
+    assert!(
+        !warned.is_empty(),
+        "a publication past the warn tier is reported"
+    );
+    assert!(
+        warned
+            .iter()
+            .all(|event| event.field("bytes").parse::<usize>().unwrap() > PLUGIN_STATE_SESSION_WARN),
+        "only a publication past the warn tier is reported: {warned:?}"
+    );
+    let reported = capture.exactly_one("plugin_state.session_budget_refused");
+    assert_eq!(reported.field("plugin_id"), id);
+}

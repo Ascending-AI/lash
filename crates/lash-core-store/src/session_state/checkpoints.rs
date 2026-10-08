@@ -43,18 +43,20 @@ impl RuntimeSessionState {
         Ok(self.tool_state_ref() != Some(&crate::store::BlobRef::for_content(&bytes)))
     }
 
-    /// Durable reference for the well-known plugin-snapshot component.
+    /// Durable reference for the head's plugin namespace map.
     pub fn plugin_state_ref(&self) -> Option<&crate::store::BlobRef> {
         self.checkpoint_components
             .component_ref(crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT)
     }
 
-    /// Typed resident view of the well-known plugin-snapshot component.
+    /// The head's plugin state as resident state holds it, while its
+    /// values are resident.
     pub fn plugin_state(&self) -> Option<&crate::PluginState> {
         self.checkpoint_components.plugin_state()
     }
 
-    /// Replace or explicitly delete the well-known plugin-snapshot component.
+    /// Record `snapshot` as the head's plugin state, or delete it. Only a
+    /// namespace whose values changed writes its body at the next commit.
     pub fn set_plugin_state(&mut self, snapshot: Option<crate::PluginState>) {
         self.checkpoint_components.set_plugin_state(snapshot);
     }
@@ -284,10 +286,10 @@ impl RuntimeSessionState {
             self.set_tool_state_snapshot(Some(snapshot));
         }
 
-        // Ownership and receipt evidence can change without a values-generation
-        // change. Compare the complete recorded namespace checkpoint.
+        // A namespace whose values did not change keeps its body's
+        // descriptor; ownership and receipt evidence change only the map.
         let snapshot = capture(plugins)?;
-        if !snapshot.plugins.is_empty() && !self.matches_plugin_checkpoint(&snapshot)? {
+        if !snapshot.plugins.is_empty() {
             self.set_plugin_state(Some(snapshot));
         }
         // The config a commit writes is the recorded one too (FIG-4747): the
@@ -303,31 +305,5 @@ impl RuntimeSessionState {
             view.sticky.plugin_config = config;
         }
         Ok(())
-    }
-
-    /// Released resident bytes still have an authoritative content address.
-    /// Compare the complete namespace, including ownership and receipts,
-    /// rather than treating a released body as an uncommitted write.
-    fn matches_plugin_checkpoint(
-        &self,
-        snapshot: &crate::PluginState,
-    ) -> Result<bool, crate::RuntimeError> {
-        if let Some(resident) = self.plugin_state() {
-            return Ok(resident == snapshot);
-        }
-        let Some(recorded) = self.plugin_state_ref() else {
-            return Ok(false);
-        };
-        let bytes = crate::store::encode_checkpoint_component(
-            crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT,
-            snapshot,
-        )
-        .map_err(|error| {
-            crate::RuntimeError::new(
-                crate::RuntimeErrorCode::RuntimeStoreCorrupt,
-                format!("failed to encode captured plugin checkpoint: {error}"),
-            )
-        })?;
-        Ok(*recorded == crate::store::BlobRef::for_content(&bytes))
     }
 }

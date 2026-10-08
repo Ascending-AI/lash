@@ -1971,7 +1971,6 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
     };
     let checkpoint = serde_json::to_string(&PhaseCheckpoint {
         saved: machine.checkpoint(),
-        plugin_state: None,
         delivered: Vec::new(),
         delivered_work: Vec::new(),
         before_turn: Vec::new(),

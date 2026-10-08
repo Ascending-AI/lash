@@ -689,17 +689,33 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         serde_json::json!({"generation": 887, "tools": {}}),
         "durable fixture semantic drift: tool-state content changed"
     );
-    assert_eq!(
-        serde_json::to_value(
-            checkpoint
-                .decode_component::<PluginState>(
-                    lash_core::store::PLUGIN_STATE_CHECKPOINT_COMPONENT,
-                )
-                .expect("decode durable fixture plugin snapshot")
-                .as_ref()
-                .expect("durable fixture semantic drift: plugin snapshot disappeared")
+    // The head holds the namespace map, each entry naming its namespace's
+    // values body, a component of its own (FIG-5301).
+    let map = checkpoint
+        .decode_component::<std::collections::BTreeMap<String, serde_json::Value>>(
+            lash_core::store::PLUGIN_STATE_CHECKPOINT_COMPONENT,
         )
-        .expect("encode fixture plugin snapshot"),
+        .expect("decode durable fixture plugin namespace map")
+        .expect("durable fixture semantic drift: plugin namespace map disappeared");
+    let namespaces = map
+        .into_iter()
+        .map(|(plugin, mut entry)| {
+            let values = checkpoint
+                .decode_component::<serde_json::Value>(&format!(
+                    "{}/{plugin}",
+                    lash_core::store::PLUGIN_STATE_CHECKPOINT_COMPONENT
+                ))
+                .expect("decode durable fixture plugin namespace body")
+                .expect("durable fixture semantic drift: plugin namespace body disappeared");
+            entry
+                .as_object_mut()
+                .expect("a namespace entry is an object")
+                .insert("values".to_owned(), values);
+            (plugin, entry)
+        })
+        .collect::<serde_json::Map<_, _>>();
+    assert_eq!(
+        serde_json::Value::Object(namespaces),
         serde_json::to_value(fixture_plugin_state()).expect("encode expected plugin snapshot"),
         "durable fixture semantic drift: plugin snapshot content changed"
     );
@@ -1237,10 +1253,12 @@ fn fixture_plugin_state() -> PluginState {
                 format_version: lash_core::FormatVersion::ONE,
                 generation: 887,
                 publication: Default::default(),
+                fork: Default::default(),
                 values: std::collections::BTreeMap::from([(
                     "state".into(),
                     serde_json::json!({"fixture": "plugin-state", "value": 887}),
-                )]),
+                )])
+                .into(),
             },
         )]),
     }

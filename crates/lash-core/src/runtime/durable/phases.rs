@@ -6,8 +6,10 @@
 //! first byte (ADR 0133 §6): a new call takes the next ordinal of the turn's
 //! calls, composes its prompt into its request and is lowered to its exact
 //! provider body, and its admission commits its pin, the checkpoint that
-//! re-delivers it, the turn's plugin state (the pending checkpoint-callback
-//! decisions among it) and its admission record (snapshot and body); a
+//! re-delivers it, the plugin namespaces the turn's run changed since its
+//! last commit (the pending checkpoint-callback decisions among them; an
+//! unchanged namespace is never written) and its admission record
+//! (snapshot and body); a
 //! resend is the same call, prepares nothing and sends the stored body. `model.done` commits the
 //! phase that re-delivers a round or a cell
 //! before it starts, and `turn.commit` publishes the next revision of the
@@ -50,7 +52,7 @@ use lash_sansio::{SavedTurn, SessionId, TurnId};
 use std::sync::Arc;
 
 /// The phase checkpoint of `drive` as it stands: its machine's checkpoint
-/// and the plugin state the turn has published.
+/// and the input and work its checkpoints delivered.
 fn encode_checkpoint(drive: &mut dyn TurnDrive) -> Result<String, TurnError> {
     let saved = drive.machine().checkpoint();
     encode_phase(drive, saved)
@@ -62,13 +64,32 @@ fn encode_phase(
 ) -> Result<String, TurnError> {
     let checkpoint = PhaseCheckpoint {
         saved,
-        plugin_state: drive.plugin_state()?,
         delivered: drive.delivered_inputs(),
         delivered_work: drive.delivered_work(),
         before_turn: drive.before_turn(),
     };
     serde_json::to_string(&checkpoint)
         .map_err(|error| TurnError::Exec(format!("the turn checkpoint does not encode: {error}")))
+}
+
+/// The plugin namespaces `drive`'s run changed that its rows do not record
+/// yet, written into `tx` beside the phase (FIG-5301): what the phase's
+/// commit records once it is acknowledged ([`TurnDrive::run_changes_committed`]).
+pub(super) fn write_run_changes(
+    drive: &dyn TurnDrive,
+    tx: &mut lash_durable::ActorTx,
+    session: &SessionId,
+    run: &TurnId,
+) -> Vec<lash_durable::domain::TurnNamespace> {
+    let changes = drive.run_changes();
+    if !changes.is_empty() {
+        tx.write(DomainWrite::Turn(TurnWrite::Namespaces {
+            session: session.clone(),
+            run: run.clone(),
+            namespaces: changes.clone(),
+        }));
+    }
+    changes
 }
 
 /// The bind of the steering input and queued turn work `drive`'s
@@ -239,6 +260,7 @@ pub async fn run_phases(
                     if let Some(bind) = bind_delivered(drive.as_ref(), &session, &run) {
                         tx.write(bind);
                     }
+                    let written = write_run_changes(drive.as_ref(), &mut tx, &session, &run);
                     tx.write(DomainWrite::Turn(TurnWrite::Advance {
                         session: session.clone(),
                         run: run.clone(),
@@ -249,6 +271,7 @@ pub async fn run_phases(
                         iteration: current,
                     }));
                     cx.commit(tx, label).await?;
+                    drive.run_changes_committed(&written);
                     if !resent {
                         calls = pin.call;
                     }
@@ -287,6 +310,7 @@ pub async fn run_phases(
                     if let Some(bind) = bind_delivered(drive.as_ref(), &session, &run) {
                         tx.write(bind);
                     }
+                    let written = write_run_changes(drive.as_ref(), &mut tx, &session, &run);
                     tx.write(DomainWrite::Turn(TurnWrite::Advance {
                         session: session.clone(),
                         run: run.clone(),
@@ -297,6 +321,7 @@ pub async fn run_phases(
                         iteration: iteration(drive.machine()),
                     }));
                     cx.commit(tx, CommitLabel::MODEL_DONE).await?;
+                    drive.run_changes_committed(&written);
                 }
                 let cell = drive.exec_cell(cx, id, CodeCell { language, code });
                 match turn_cancel::unless_cancelled(cx, &session, cell).await? {

@@ -539,6 +539,10 @@ pub struct PluginDeclaration {
     pub format_version: FormatVersion,
     /// Every format the plugin can write. It contains `format_version`.
     pub writable_formats: Vec<FormatVersion>,
+    /// What a fork of a session does with the plugin's namespace: copy it
+    /// as of the fork point, or reset it to the plugin's initial state.
+    /// Recorded with the namespace, so a later fork follows it.
+    pub state_fork: crate::plugin::StateFork,
 }
 
 impl PluginDeclaration {
@@ -550,6 +554,7 @@ impl PluginDeclaration {
             behavior_revision: BehaviorRevision::ONE,
             format_version: FormatVersion::ONE,
             writable_formats: vec![FormatVersion::ONE],
+            state_fork: crate::plugin::StateFork::Copy,
         }
     }
 }

@@ -194,7 +194,23 @@ pub enum TurnWrite {
         /// The protocol iteration.
         iteration: u32,
     },
-    /// End the turn and drop its phase row. Refused with
+    /// Record namespaces the unfinished turn's run changed (FIG-5301): each
+    /// replaces the run's row for its plugin. The run's changes are the
+    /// session head's namespaces overlaid with these rows until the turn
+    /// ends; a body is written only once per value, and a row without one
+    /// keeps the body it holds. Refused with
+    /// [`DomainRefusal::TurnNotOpen`](super::DomainRefusal::TurnNotOpen) when
+    /// it is not the session's unfinished turn.
+    Namespaces {
+        /// The session.
+        session: SessionId,
+        /// The run.
+        run: TurnId,
+        /// The namespaces, by plugin.
+        namespaces: Vec<TurnNamespace>,
+    },
+    /// End the turn and drop its phase row and its run's namespace rows,
+    /// whether its commit promoted them or a cancel discards them. Refused with
     /// [`DomainRefusal::TurnNotOpen`](super::DomainRefusal::TurnNotOpen) when
     /// it is not the session's unfinished turn.
     Terminal {
@@ -207,6 +223,19 @@ pub enum TurnWrite {
         /// The head revision its commit published, if it published one.
         head_revision: Option<u64>,
     },
+}
+
+/// One plugin namespace an unfinished turn's run changed (FIG-5301).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TurnNamespace {
+    /// The plugin that owns the namespace.
+    pub plugin: String,
+    /// Its entry: its values by content address and its metadata.
+    pub entry: lash_core_store::plugin_state::NamespaceEntry,
+    /// Its values body, when the run's rows do not hold it yet. Read back,
+    /// the body the row holds, which may be an earlier value's: a reader
+    /// trusts it only when it hashes to the entry's address.
+    pub body: Option<std::sync::Arc<[u8]>>,
 }
 
 /// A session's head commit from its own actor (V0, then L3; FIG-5230): the

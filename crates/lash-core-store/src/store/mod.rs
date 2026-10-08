@@ -11,6 +11,7 @@ pub mod attachment_referrers;
 pub mod catalog;
 mod checkpoint;
 pub mod namespace;
+pub use crate::plugin_state::fork_checkpoint_plugin_state;
 pub use checkpoint::{
     CHECKPOINT_COMPONENT_ENCODING_VERSION, CheckpointComponentDescriptor,
     EXECUTION_STATE_CHECKPOINT_COMPONENT, HydratedCheckpointComponent, HydratedSessionCheckpoint,

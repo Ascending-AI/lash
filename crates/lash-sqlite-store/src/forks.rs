@@ -239,7 +239,12 @@ pub(super) async fn fork_at_in_catalog(
                             )
                     });
                 }
-                if inherited_admission || source_frame_ended {
+                // Each namespace forks as its plugin declared (FIG-5301).
+                let forked_state = lash_core_execution::store::fork_checkpoint_plugin_state(
+                    &mut checkpoint,
+                    fleet_format,
+                )?;
+                if inherited_admission || source_frame_ended || forked_state {
                     checkpoint_ref = Some(
                         SqliteStore::put_checkpoint_conn(tx, &checkpoint, blob_profile, fleet_format)?
                             .checkpoint_ref.as_str().to_owned(),

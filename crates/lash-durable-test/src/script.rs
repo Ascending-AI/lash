@@ -237,10 +237,15 @@ impl State {
     }
 }
 
+/// What a law observes of every owner commit before it enters the store:
+/// its label and its domain writes.
+pub type CommitObserver = Arc<dyn Fn(CommitLabel, &[lash_durable::DomainWrite]) + Send + Sync>;
+
 #[derive(Default)]
 pub(crate) struct Shared {
     state: Mutex<State>,
     recorded: tokio::sync::Notify,
+    observer: Mutex<Option<CommitObserver>>,
 }
 
 /// A write about to enter the store, numbered and matched against the rules.
@@ -264,6 +269,14 @@ impl Entry {
 }
 
 impl Shared {
+    /// Hand an owner commit's writes to the law observing them, if any.
+    pub(crate) fn observe(&self, label: CommitLabel, writes: &[lash_durable::DomainWrite]) {
+        let observer = self.observer.lock_recover().clone();
+        if let Some(observer) = observer {
+            observer(label, writes);
+        }
+    }
+
     /// Number one write, record it, and answer the fault an armed rule
     /// gives it.
     pub(crate) fn enter(
@@ -396,6 +409,14 @@ impl Script {
             actor,
             fired: false,
         });
+        self
+    }
+
+    /// Hand every owner commit's label and domain writes to `observer`
+    /// before the commit enters the store, cut or not: what a law counts of
+    /// what each commit submits.
+    pub fn observe_commits(&self, observer: CommitObserver) -> &Self {
+        *self.shared.observer.lock_recover() = Some(observer);
         self
     }
 
