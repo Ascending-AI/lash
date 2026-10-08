@@ -75,6 +75,14 @@ async fn s21(case: &mut Case) -> Result<()> {
     // The round pinned the source's wait when it admitted the call, so the
     // wait exists before the body ran.
     let node = if case.leg == Leg::Resume {
+        // The body logs its key before its park commits. A node killed in
+        // between leaves a started call with no outcome, which its claimer
+        // settles interrupted; this fault is a node dying with the source
+        // parked.
+        case.until("the source's park committed", || async {
+            Ok((support::applied(case, "node-a", "round.outcome")? >= 1).then_some(()))
+        })
+        .await?;
         case.kill("node-a", "the source pending").await?;
         let next = successor(case);
         case.boot(Host::Consumer, next, options.clone()).await?;
