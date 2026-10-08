@@ -268,9 +268,14 @@ async fn s29(case: &mut Case) -> Result<()> {
     case.evidence
         .outputs
         .push(json!({"known tool output": tool}));
+    // The workbench serializes the native tool output (ADR 0136), whose
+    // success value carries its trust envelope; read it with the same type.
+    let known =
+        lash::tools::ToolCallOutcome::Success(lash::tools::ToolValue::untrusted_json(json!([])));
     ensure!(
         tool.len() == 1
-            && tool[0]["output"]["outcome"] == json!({"payload": [], "status": "success"}),
+            && serde_json::from_value::<lash::tools::ToolCallOutput>(tool[0]["output"].clone())
+                .is_ok_and(|output| output.outcome == known),
         "the tool call completed as {tool:?}"
     );
     case.until("no turn is left active", || async {
