@@ -32,7 +32,7 @@ async fn stores(
             (stores, vec![Box::new(directory)])
         }
         "postgres" => {
-            let (stores, database, attachments) = postgres_store_set().await;
+            let (stores, database, attachments) = postgres_store_parts().await;
             (stores, vec![Box::new(database), Box::new(attachments)])
         }
         other => panic!("no storage {other}"),

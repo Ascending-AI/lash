@@ -12,6 +12,7 @@ mod oracle_coverage_tests;
 mod recorded_reality;
 #[cfg(test)]
 mod request_snapshot;
+#[cfg(test)]
 mod response_body_budget;
 #[cfg(test)]
 mod session_mail_matrix;

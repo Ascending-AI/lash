@@ -8695,7 +8695,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5311: restored on the durable facade turn over SQLite memory and file (PostgreSQL #[ignore]d for the pg gate): a response past its body budget fails the turn and stops the retry ladder at one transport call, a refused status fails it. The report assertions (the typed http_response_body_too_large code, one model-call record) are a_refused_response_s_report_names_its_typed_code_on_sqlite_memory, #[ignore]d red on FIG-5334 (send()'s durable report carries no errors and no failed call). The Restate admin and ingress client budget legs are subject-deleted with those clients (5ad9641f9e, FIG-5190)"
+note = "FIG-5311: restored on the durable facade turn over SQLite memory and file: a response past its body budget fails the turn and stops the retry ladder at one transport call, a refused status fails it. The report assertions (the typed http_response_body_too_large code, one model-call record) are a_refused_response_s_report_names_its_typed_code_on_sqlite_memory, #[ignore]d red on FIG-5334 (send()'s durable report carries no errors and no failed call). The Restate admin and ingress client budget legs are subject-deleted with those clients (5ad9641f9e, FIG-5190). response_body_budget_current_turn_path_postgres is not kept: the body budget is the transport's, so a third store tier proves nothing the SQLite legs do not, and no PostgreSQL gate selected it (FIG-5380)"
 
 [[row]]
 path = "crates/lash-sim/src/runner/generated_recovery.rs"

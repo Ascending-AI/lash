@@ -139,6 +139,6 @@ async fn a_run_in_flight_when_its_session_is_deleted_ends_typed_on_sqlite_memory
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires PostgreSQL; run with --include-ignored inside a with-service.sh pg gate"]
 async fn a_run_in_flight_when_its_session_is_deleted_ends_typed_on_postgres() -> Result<()> {
-    let (stores, _database, _attachments) = postgres_store_set().await;
+    let (stores, _database, _attachments) = postgres_store_parts().await;
     a_run_in_flight_when_its_session_is_deleted_ends_typed(stores).await
 }

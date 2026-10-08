@@ -374,7 +374,7 @@ async fn builder_configured_tools_and_hooks_are_never_discarded_on_sqlite() -> R
 #[tokio::test]
 #[ignore = "requires PostgreSQL; run with --include-ignored inside a with-service.sh pg gate"]
 async fn builder_configured_tools_and_hooks_are_never_discarded_on_postgres() -> Result<()> {
-    let (stores, _database, _attachments) = postgres_store_set().await;
+    let (stores, _database, _attachments) = postgres_store_parts().await;
     let backend = lash_conformance::backend_over(stores);
     builder_configured_tools_and_hooks_are_never_discarded(backend).await
 }

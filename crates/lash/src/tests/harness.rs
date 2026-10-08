@@ -57,7 +57,7 @@ pub(crate) async fn sqlite_memory_store_set() -> Arc<lash_sqlite_store::SqliteSt
 /// A PostgreSQL store set over an isolated database of the service the
 /// gate hands the run, and what must outlive it: the database and the
 /// attachment directory. For a law's `#[ignore]`d PostgreSQL leg.
-pub(crate) async fn postgres_store_set() -> (
+pub(crate) async fn postgres_store_parts() -> (
     Arc<lash_postgres_store::PostgresStoreSet>,
     lash_postgres_store::testing::IsolatedDatabase,
     tempfile::TempDir,

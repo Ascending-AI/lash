@@ -1,7 +1,8 @@
-//! HTTP byte refusals hold on the durable turn path over each store: a
-//! provider response past its configured body budget fails the turn with
-//! `http_response_body_too_large` and stops the retry ladder, and a refused
-//! status within the budget fails it without a retry.
+//! HTTP byte refusals hold on the durable turn path over SQLite memory and a
+//! SQLite file: a provider response past its configured body budget fails
+//! the turn with `http_response_body_too_large` and stops the retry ladder,
+//! and a refused status within the budget fails it without a retry. The
+//! budget is the transport's, so no other store tier adds to the proof.
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -171,24 +172,6 @@ async fn response_body_budget_current_turn_path_sqlite_memory_and_file() {
     witness(file, "sqlite-file", Witness::Refusal).await;
 }
 
-#[tokio::test]
-#[ignore = "requires PostgreSQL; select inside a pg16 gate"]
-async fn response_body_budget_current_turn_path_postgres() {
-    let database = crate::postgres_test_isolation::isolated_database().await;
-    let storage = lash_postgres_store::testing::connect(database.url())
-        .await
-        .expect("connect PostgreSQL");
-    let attachments = tempfile::tempdir().unwrap();
-    let postgres: Arc<dyn lash_core::StoreSet> =
-        Arc::new(lash_postgres_store::PostgresStoreSet::new(
-            &storage,
-            Arc::new(lash_core::facade_support::FileAttachmentStore::new(
-                attachments.path(),
-            )),
-        ));
-    witness(postgres, "postgres", Witness::Refusal).await;
-}
-
 /// A refused response's report names its typed code, and records the one
 /// model call the refusal spent.
 #[tokio::test]
@@ -200,11 +183,4 @@ async fn a_refused_response_s_report_names_its_typed_code_on_sqlite_memory() {
             .expect("open a memory store set"),
     );
     witness(memory, "sqlite-memory", Witness::Report).await;
-}
-
-#[test]
-fn postgres_variants_never_pass_without_a_database_url() {
-    crate::postgres_test_isolation::assert_requires_database_url(
-        "response_body_budget::response_body_budget_current_turn_path_postgres",
-    );
 }

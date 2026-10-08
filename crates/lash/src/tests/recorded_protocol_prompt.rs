@@ -274,7 +274,7 @@ async fn a_session_created_under_defaults_a_reopens_under_a_on_sqlite_file() -> 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires PostgreSQL; run with --include-ignored inside a with-service.sh pg gate"]
 async fn a_session_created_under_defaults_a_reopens_under_a_on_postgres() -> Result<()> {
-    let (stores, _database, _attachments) = postgres_store_set().await;
+    let (stores, _database, _attachments) = postgres_store_parts().await;
     a_session_created_under_defaults_a_reopens_under_a(stores).await
 }
 
@@ -366,7 +366,7 @@ async fn a_prompt_command_reaches_the_next_run_and_not_the_running_one_on_sqlite
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires PostgreSQL; run with --include-ignored inside a with-service.sh pg gate"]
 async fn a_prompt_command_reaches_the_next_run_and_not_the_running_one_on_postgres() -> Result<()> {
-    let (stores, _database, _attachments) = postgres_store_set().await;
+    let (stores, _database, _attachments) = postgres_store_parts().await;
     a_prompt_command_reaches_the_next_run_and_not_the_running_one(stores).await
 }
 
@@ -469,7 +469,7 @@ async fn a_run_options_prompt_is_refused_on_sqlite() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires PostgreSQL; run with --include-ignored inside a with-service.sh pg gate"]
 async fn a_run_options_prompt_is_refused_on_postgres() -> Result<()> {
-    let (stores, _database, _attachments) = postgres_store_set().await;
+    let (stores, _database, _attachments) = postgres_store_parts().await;
     a_run_options_prompt_is_refused(stores).await
 }
 

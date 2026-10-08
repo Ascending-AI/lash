@@ -416,17 +416,15 @@ mod crashed_create_drain;
 mod deleted_session_run_replay;
 mod deployment_and_testing_facade;
 mod direct_completion;
+mod direct_completion_lanes;
 #[cfg(feature = "rlm")]
 mod discovery_execution;
 mod durable_session;
-mod direct_completion_lanes;
 mod facade_construction;
 mod facade_turn;
-mod generation_policy;
 mod fixtures;
-use fixtures::{AppTools, LongTextTools, RecordingEvents, SurfacePluginFactory};
-#[cfg(feature = "rlm")]
-use fixtures::{queued_text_provider, typescript_block};
+mod generation_policy;
+use fixtures::{LongTextTools, SurfacePluginFactory};
 pub(crate) mod harness;
 mod node_drain;
 mod output_retention;
@@ -435,9 +433,9 @@ mod projection;
 mod tracing;
 pub(crate) use harness::{
     DecoratedBackend, explicit_ephemeral_facets, explicit_ephemeral_facets_with_budget,
-    llm_profile_spec, mock_llm_profile_spec, mock_session_spec, postgres_store_set,
-    recorded_llm_profile, session_spec_for, sqlite_memory_store_backend, sqlite_memory_store_set,
-    store_backend_with_clock,
+    llm_profile_spec, mock_llm_profile_spec, mock_session_spec, postgres_store_parts,
+    postgres_store_set, recorded_llm_profile, session_spec_for, sqlite_memory_store_backend,
+    sqlite_memory_store_set, store_backend_with_clock,
 };
 #[cfg(feature = "rlm")]
 mod admin_reads_without_runtime;
@@ -450,35 +448,35 @@ mod aggregate_await_comprehension;
 #[cfg(feature = "rlm")]
 mod aggregate_oracle;
 mod plugin_build_refusal;
-mod plugin_operations;
 mod plugin_lifecycle;
+mod plugin_operations;
 mod plugin_reopen;
-mod provider_attempts;
-mod replay_origin;
 mod plugin_stack;
 mod presentation_fallback;
 mod process_start_input;
 mod protocol_effects;
+mod provider_attempts;
 mod recorded_execution_controls;
 mod recorded_protocol_prompt;
 mod recorded_request_defaults;
+mod replay_origin;
 mod response_phase_replay;
+mod round_cancel_state;
 mod run_effects;
 mod send_handle;
 mod session_control;
 mod session_create;
+mod session_turn_process;
 mod standard_compaction_persistence;
 mod standard_protocol_turns;
-mod stream_evidence;
-mod round_cancel_state;
-mod session_turn_process;
 mod store_faults;
+mod stream_evidence;
 mod tool_check_control;
 mod tool_intent_ingress;
 mod tool_restore_report;
-mod turn_checkpoints;
 mod turn_cancel_modes;
 #[cfg(feature = "rlm")]
 mod turn_cancel_waits;
+mod turn_checkpoints;
 mod turn_streaming;
 mod writer_fence;

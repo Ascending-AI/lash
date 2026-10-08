@@ -91,7 +91,7 @@ async fn stores_over(storage: Storage) -> Stores {
             }
         }
         Storage::Postgres => {
-            let (stores, database, attachments) = postgres_store_set().await;
+            let (stores, database, attachments) = postgres_store_parts().await;
             let seams = stores.session_store_factory();
             Stores {
                 stores,

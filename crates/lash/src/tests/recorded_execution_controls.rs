@@ -753,7 +753,7 @@ async fn a_recorded_budget_bounds_every_run_after_an_engine_restart_on_sqlite() 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires PostgreSQL; run with --include-ignored inside a with-service.sh pg gate"]
 async fn a_recorded_budget_bounds_every_run_after_an_engine_restart_on_postgres() -> Result<()> {
-    let (stores, _database, _attachments) = postgres_store_set().await;
+    let (stores, _database, _attachments) = postgres_store_parts().await;
     after_a_restart_over(stores).await
 }
 

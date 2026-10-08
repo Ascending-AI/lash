@@ -8,6 +8,7 @@
 //crates/lash-durable-test:core_node_processes__test
 //crates/lash-durable-test:declared_start__test
 //crates/lash-durable-test:declared_start_crash_laws__test
+//crates/lash-durable-test:deleted_session_crash_laws__test
 //crates/lash-durable-test:drain_by_release__test
 //crates/lash-durable-test:first_party_tools__test
 //crates/lash-durable-test:frame_switch_crash_proof__test
@@ -34,6 +35,7 @@
 //crates/lash-durable-test:tool_group_pool_width__test
 //crates/lash-durable-test:tool_surface_laws__test
 //crates/lash-durable-test:trigger_start_proof__test
+//crates/lash-durable-test:turn_callback_crash_laws__test
 //crates/lash-durable-test:turn_execution_state__test
 //crates/lash-durable-test:turn_phases__test
 //crates/lash-durable-test:turn_terminal_refusals__test

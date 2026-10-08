@@ -6,10 +6,10 @@ mod facade_support {
     pub use lash_core::facade_support::*;
 }
 
-#[path = "integration/facade_host_wrappers.rs"]
-mod facade_host_wrappers;
 #[path = "integration/embed_plugins.rs"]
 mod embed_plugins;
+#[path = "integration/facade_host_wrappers.rs"]
+mod facade_host_wrappers;
 #[path = "integration/facade_inventory.rs"]
 mod facade_inventory;
 #[cfg(feature = "mcp")]
