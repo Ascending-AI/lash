@@ -70,10 +70,18 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
         store.clone(),
     )
     .await;
+    // The old head is a recorded one: a writer committed the session's
+    // initial frame, and the runtime adopted it.
+    lash_core::testing::runtime_helpers::advance_session_head(store.inner.as_ref(), |_| {}).await;
+    runtime
+        .refresh_session_graph_from_store()
+        .await
+        .expect("adopt the recorded initial frame");
     runtime.edit_resident_state_for_test(|state| {
         state.set_execution_state_snapshot(Some(b"old-frame-root".to_vec().into()));
     });
     let old_frame = runtime.state().current_frame_node_id.clone();
+    assert!(old_frame.is_some(), "the old head has a recorded frame");
     let mut replacement = runtime.state().clone();
     lash_core::runtime::state::open_agent_frame_in_state_with_clock(
         &mut replacement,

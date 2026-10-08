@@ -7,8 +7,10 @@
 //! acknowledged, by the node that made it: `Committed { base_revision, entries }`
 //! at the head's revision, carrying the transcript entries the commit added to
 //! what the session's subscribers held, after an `AgentFrameSwitched` when
-//! it opened a frame. Only `Committed` settles the provisional activity the
-//! turn streamed before it.
+//! it left the frame they held for another. A head no commit has given a
+//! graph stands on the session's initial frame, so the commit that opens
+//! that frame switches nothing. Only `Committed` settles the provisional
+//! activity the turn streamed before it.
 //!
 //! A turn's own activity is published before its commit (FIG-5507); only
 //! the commit's observation follows it, so an owner lost between the two,
@@ -56,7 +58,7 @@ pub(in crate::runtime) struct CommitBase {
     session: SessionId,
     store: crate::store::SessionStore,
     revision: SessionRevision,
-    frame: Option<FrameNodeId>,
+    frame: FrameNodeId,
     entries: HashSet<EntryId>,
     decoders: TranscriptDecoders,
 }
@@ -82,7 +84,11 @@ impl CommitBase {
             session: runtime.session_id().clone(),
             store,
             revision: SessionRevision::from_runtime(runtime),
-            frame: runtime.state.current_frame_node_id.clone(),
+            frame: runtime
+                .state
+                .current_frame_node_id
+                .clone()
+                .unwrap_or_else(|| runtime.state.initial_frame_node_id()),
             entries,
             decoders,
         })
@@ -127,8 +133,8 @@ impl CommitBase {
             })
             .unwrap_or_default();
         let mut drafts = Vec::with_capacity(2);
-        if loaded.state.current_frame_node_id != self.frame
-            && let Some(frame_id) = loaded.state.current_frame_node_id.clone()
+        if let Some(frame_id) = loaded.state.current_frame_node_id.clone()
+            && frame_id != self.frame
         {
             drafts.push(LiveReplayEventDraft::new(
                 None::<TurnId>,

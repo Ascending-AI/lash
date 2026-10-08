@@ -500,8 +500,14 @@ impl RuntimeHandle {
         };
 
         let mut drafts = Vec::with_capacity(2);
-        if previous.current_frame_node_id != next.current_frame_node_id
-            && let Some(frame_id) = next.current_frame_node_id.clone()
+        // A head no commit has given a graph stands on the session's initial
+        // frame: opening that frame switches nothing.
+        let held_frame = previous
+            .current_frame_node_id
+            .clone()
+            .unwrap_or_else(|| runtime.state.initial_frame_node_id());
+        if let Some(frame_id) = next.current_frame_node_id.clone()
+            && frame_id != held_frame
         {
             drafts.push(LiveReplayEventDraft::new(
                 None::<TurnId>,

@@ -486,6 +486,9 @@ pub async fn advance_session_head(
             state
         }
     };
+    // A writer's first graph write opens the session's initial frame; a head
+    // no commit has given a graph is adopted without one (FIG-5501).
+    state.ensure_agent_frame_initialized();
     change(&mut state);
     let commit = crate::RuntimeCommit::persisted_state_for_test(&state);
     crate::SessionCommitStore::commit_runtime_state(store, commit)
