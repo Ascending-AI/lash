@@ -257,9 +257,14 @@ impl lash::plugins::ConfigOwner for WorkbenchConfigOwner {
     }
 }
 
-/// The workbench's identity statement, which replaces the standard
-/// protocol's intro.
-pub(crate) const WORKBENCH_INTRO: &str = "You are the Agent Workbench assistant.";
+/// The workbench's identity and work style, owned by the host.
+pub(crate) const WORKBENCH_INTRO: &str = "You are the Agent Workbench assistant. Help the user work through tasks and turn clear requests into useful results.";
+const WORKBENCH_GUIDANCE: &str = "\
+- Be concise and avoid filler.
+- Act once the next step is clear.
+- Prefer the simplest correct solution.
+- Verify a tool's result before relying on it.
+- Answer in Markdown; the workbench UI renders it.";
 pub(crate) const WORKBENCH_INSTRUCTIONS_SECTION: &str = "instructions";
 pub(crate) const WORKBENCH_ACCOUNTS_SECTION: &str = "accounts";
 pub(crate) const WORKBENCH_CONTEXT_BUDGET_SECTION: &str = "context_budget";
@@ -293,8 +298,9 @@ fn recorded_prompt(
         .map_err(|error| lash::plugins::PromptRenderError::new(error.to_string()))
 }
 
-/// The workbench's prompt sections. Its identity is a host section. Its host text, the standing instructions and the
-/// connected accounts, renders from the run's admitted config. The
+/// The workbench's prompt sections. Its identity and turn guidance are host
+/// sections. Its standing instructions and connected accounts render from
+/// the run's admitted config. The
 /// context budget states the shape of the call's projected history back to
 /// the model, late and outside the history, as an annotation: durable
 /// compaction is an explicit Agent Frame transition, not a rewrite of the
@@ -311,6 +317,16 @@ pub(crate) fn register_workbench_sections(reg: &mut PluginRegistrar) -> Result<(
         ]),
         Arc::new(|_: &lash::plugins::PromptInput<'_>| {
             Ok(lash::plugins::SectionText::text(WORKBENCH_INTRO))
+        }),
+    )?;
+    reg.prompt().section(
+        lash::plugins::PromptSectionSpec::new(
+            section_key("guidance")?,
+            lash::prompt::PromptPlacement::InitialInstructions,
+        )
+        .purposes([lash::prompt::PromptPurpose::Turn]),
+        Arc::new(|_: &lash::plugins::PromptInput<'_>| {
+            Ok(lash::plugins::SectionText::text(WORKBENCH_GUIDANCE))
         }),
     )?;
     reg.prompt().section(

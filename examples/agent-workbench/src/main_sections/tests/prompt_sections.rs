@@ -46,7 +46,8 @@ fn cut(prompt: &WorkbenchPrompt, history_messages: u32) -> PromptCut {
 
 /// The workbench's model-facing text is prompt sections (FIG-5258, ADR 0133),
 /// replacing its context transform and its protocol prompt config. Its
-/// identity is its own section, not a protocol's; its standing instructions
+/// identity and turn guidance are its own sections (FIG-5542), not a protocol's;
+/// its standing instructions
 /// and the connected accounts render from the workbench's own recorded
 /// config, which a run is admitted under, in the instructions; the context budget states the call's projected history
 /// late, outside the conversation; and a recorded prompt with no context
@@ -80,6 +81,11 @@ fn workbench_prompt_sections_render_its_recorded_host_text_and_the_context_budge
                 PlacementSource::PluginDefault
             ),
             (
+                "agent_workbench/guidance".to_owned(),
+                PromptPlacement::InitialInstructions,
+                PlacementSource::PluginDefault
+            ),
+            (
                 format!("agent_workbench/{WORKBENCH_INSTRUCTIONS_SECTION}"),
                 PromptPlacement::InitialInstructions,
                 PlacementSource::PluginDefault
@@ -95,6 +101,20 @@ fn workbench_prompt_sections_render_its_recorded_host_text_and_the_context_budge
                 PlacementSource::PluginDefault
             ),
         ]
+    );
+    let compaction = catalog
+        .preview(
+            &PromptPlan::default(),
+            &PromptPurpose::Compaction,
+            &OfferedTools::default(),
+        )
+        .expect("the compaction plan resolves");
+    assert!(
+        compaction
+            .sections
+            .iter()
+            .all(|section| section.section.to_string() != "agent_workbench/guidance"),
+        "workbench guidance applies only to turns"
     );
 
     let recorded = workbench_session_prompt(
@@ -116,7 +136,16 @@ fn workbench_prompt_sections_render_its_recorded_host_text_and_the_context_budge
     assert_eq!(
         rendered(&recorded),
         vec![
-            SectionText::text(WORKBENCH_INTRO),
+            SectionText::text(
+                "You are the Agent Workbench assistant. Help the user work through tasks and turn clear requests into useful results."
+            ),
+            SectionText::text(
+                "- Be concise and avoid filler.\n\
+                 - Act once the next step is clear.\n\
+                 - Prefer the simplest correct solution.\n\
+                 - Verify a tool's result before relying on it.\n\
+                 - Answer in Markdown; the workbench UI renders it."
+            ),
             SectionText::Text(format!(
                 "{}\n\n{}",
                 workbench_prompt().trim(),
@@ -130,7 +159,7 @@ fn workbench_prompt_sections_render_its_recorded_host_text_and_the_context_budge
         context: Vec::new(),
         ..recorded
     };
-    assert_eq!(rendered(&without_context)[2], SectionText::Omit);
+    assert_eq!(rendered(&without_context)[3], SectionText::Omit);
 }
 
 /// The workbench's sections shape the prompt the provider receives (ADR
