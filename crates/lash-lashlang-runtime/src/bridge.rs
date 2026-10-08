@@ -181,8 +181,8 @@ fn parse_duration_ms(value: &str) -> Result<u64, ExecutionHostError> {
 mod tests {
     use super::*;
     use lash_core::{
-        AttachmentSource, MediaType, ToolCallOutput, ToolFailure, ToolFailureClass,
-        ToolFailureSource, ToolValue, facade_support::ToolInvocationReply,
+        AttachmentRef, MediaType, ToolCallOutput, ToolFailure, ToolFailureClass, ToolFailureSource,
+        ToolValue, facade_support::ToolInvocationReply,
     };
     use std::collections::BTreeMap;
 
@@ -260,9 +260,15 @@ mod tests {
         );
         record.insert(
             "attachment".to_string(),
-            ToolValue::Attachment(AttachmentSource::external_url(
+            ToolValue::Attachment(AttachmentRef::new(
+                lash_core::AttachmentId::parse(
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                )
+                .expect("digest"),
                 MediaType::parse("image/png").unwrap(),
-                "https://example.test/image.png",
+                3,
+                None,
+                None,
             )),
         );
         let output = ToolCallOutput::success_tool_value(ToolValue::Object(record));

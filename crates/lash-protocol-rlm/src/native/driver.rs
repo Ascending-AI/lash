@@ -819,7 +819,7 @@ fn omitted_bytes_marker(omitted_bytes: usize) -> ToolValue {
     )]))
 }
 
-fn tool_output_attachments(output: &ToolCallOutput) -> Vec<lash_core::AttachmentSource> {
+fn tool_output_attachments(output: &ToolCallOutput) -> Vec<lash_core::AttachmentRef> {
     let mut attachments = output.attachments();
     match output.control.as_ref() {
         Some(ToolControl::Finish { value }) => attachments.extend(value.attachments()),

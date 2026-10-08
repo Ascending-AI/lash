@@ -276,7 +276,7 @@ async fn store_maintenance_reclaims_only_unreferenced_attachments() {
         State(state.clone()),
         Query(SessionQuery::default()),
         Json(TurnRequest {
-            attachment_id: Some(referenced_id.to_string()),
+            attachment: Some(uploaded.attachment.clone()),
             ..turn_request("Describe the attached PNG briefly.")
         }),
     )

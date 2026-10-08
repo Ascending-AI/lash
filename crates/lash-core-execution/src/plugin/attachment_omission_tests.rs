@@ -4,16 +4,19 @@
 //! decision naming a part that carries no attachment changes nothing.
 
 use super::*;
-use crate::{AttachmentSource, MessageRole, ModelToolReturnPart, ToolCallId};
+use crate::{AttachmentRef, MessageRole, ModelToolReturnPart, ToolCallId};
 
-fn image(id: &str) -> AttachmentSource {
-    AttachmentSource::stored(crate::AttachmentRef {
-        id: crate::AttachmentId::parse(format!("{id}-att")).expect("valid attachment id"),
+fn image(id: &str) -> AttachmentRef {
+    crate::AttachmentRef {
+        id: crate::AttachmentId::parse(
+            format!("{:02x}", id.bytes().fold(0u8, u8::wrapping_add)).repeat(32),
+        )
+        .expect("valid attachment id"),
         media_type: crate::MediaType::parse("image/png").expect("valid media type"),
         byte_len: 3,
         type_metadata: None,
         label: None,
-    })
+    }
 }
 
 fn message(id: &str, role: MessageRole, parts: Vec<Part>) -> Message {
@@ -38,7 +41,7 @@ fn history() -> Vec<Message> {
                     "u1.p1".into(),
                     String::new(),
                     Some(crate::session_model::message::PartAttachment {
-                        source: image("u1"),
+                        reference: image("u1"),
                     }),
                 ),
             ],

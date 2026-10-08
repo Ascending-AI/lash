@@ -1,3 +1,4 @@
+use crate::AttachmentRef;
 /// version_surface = "coexist"
 /// version_guard(items(LASH_COMPOSITION_TOOL_DOMAIN_VERSION, composition_tool_fingerprint))
 const LASH_COMPOSITION_TOOL_DOMAIN_VERSION: &str = "lash-composition-tool/v2";
@@ -14,8 +15,8 @@ use lash_trace::{
 };
 
 use crate::llm::types::{
-    AttachmentSource, LlmContentBlock, LlmMessage, LlmOutputPart, LlmOutputSpec, LlmRequest,
-    LlmRole, LlmToolChoice, LlmToolSpec,
+    LlmContentBlock, LlmMessage, LlmOutputPart, LlmOutputSpec, LlmRequest, LlmRole, LlmToolChoice,
+    LlmToolSpec,
 };
 use crate::session_model::TokenUsage;
 use crate::{ToolCallOutcome, ToolCallOutput};
@@ -490,8 +491,8 @@ fn trace_content_block(block: &LlmContentBlock) -> TraceContentBlock {
             text: text.to_string(),
             cache_breakpoint: *cache_breakpoint,
         },
-        LlmContentBlock::Attachment { source } => TraceContentBlock::Attachment {
-            source: Box::new(trace_attachment(source)),
+        LlmContentBlock::Attachment { reference } => TraceContentBlock::Attachment {
+            reference: Box::new(trace_attachment(reference, "message")),
         },
         LlmContentBlock::ToolCall {
             call_id,
@@ -523,9 +524,9 @@ fn trace_content_block(block: &LlmContentBlock) -> TraceContentBlock {
                     crate::ModelToolReturnPart::Retained(retained) => TraceToolResultBlock::Text {
                         text: retained.witness.clone(),
                     },
-                    crate::ModelToolReturnPart::Attachment(source) => {
+                    crate::ModelToolReturnPart::Attachment(reference) => {
                         TraceToolResultBlock::Attachment {
-                            source: Box::new(trace_attachment(source)),
+                            reference: Box::new(trace_attachment(reference, "tool_result")),
                         }
                     }
                 })
@@ -546,19 +547,13 @@ fn trace_content_block(block: &LlmContentBlock) -> TraceContentBlock {
     }
 }
 
-fn trace_attachment(attachment: &AttachmentSource) -> TraceAttachment {
-    let bytes = match attachment {
-        AttachmentSource::Inline { bytes, .. } => Some(bytes.as_slice()),
-        AttachmentSource::Stored { .. }
-        | AttachmentSource::ExternalUrl { .. }
-        | AttachmentSource::ProviderFile { .. } => None,
-    };
+fn trace_attachment(attachment: &AttachmentRef, position: &str) -> TraceAttachment {
     TraceAttachment {
-        source: crate::llm::transport::source_kind(attachment).to_string(),
-        mime: attachment.media_type().map(ToString::to_string),
-        filename: None,
-        bytes_sha256: bytes.map(sha256_hex),
-        bytes_len: bytes.map(<[u8]>::len),
+        id: attachment.id.to_string(),
+        media_type: attachment.media_type.to_string(),
+        byte_len: attachment.byte_len,
+        position: position.to_string(),
+        delivery_form: None,
     }
 }
 

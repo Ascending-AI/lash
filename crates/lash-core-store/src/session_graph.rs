@@ -346,7 +346,7 @@ pub struct SessionNodeRecord {
 ///         path = "crates/lash-sansio/src/llm/types.rs",
 ///         path = "crates/lash-sansio/src/llm/types/non_negative_finite_f64.rs",
 ///         cover(
-///             AttachmentSource, ProviderReplayMeta, ProviderReasoningReplay, ResponseTextMeta,
+///             AttachmentRef, ProviderReplayMeta, ProviderReasoningReplay, ResponseTextMeta,
 ///             ProviderRouteIdentity, ProviderFileScope, GenerationOptions, NonNegativeFiniteF64,
 ///         ),
 ///     ),

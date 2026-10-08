@@ -234,7 +234,16 @@ async fn retired_session_admission_precedes_attachment_reads_and_submission() {
         State(state.clone()),
         session_query(&session_id),
         Json(TurnRequest {
-            attachment_id: Some("missing-retired-attachment".to_string()),
+            attachment: Some(lash::attachments::AttachmentRef::new(
+                lash::attachments::AttachmentId::parse(
+                    "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                )
+                .expect("digest"),
+                lash::attachments::MediaType::parse("image/png").expect("mime"),
+                3,
+                None,
+                None,
+            )),
             ..turn_request("must not be accepted")
         }),
     )
@@ -457,121 +466,6 @@ async fn product_event_route_lag_emits_durable_ordered_resync() {
 /// An attachment store whose blobs vanish after the first read: the send's
 /// admission finds the attachment, then the turn input built for the send
 /// cannot, so the send is refused after its optimistic row was published.
-struct VanishingAttachmentStore {
-    inner: Arc<dyn lash::persistence::AttachmentStore>,
-    reads: std::sync::atomic::AtomicUsize,
-}
-
-#[async_trait::async_trait]
-impl lash::persistence::AttachmentStore for VanishingAttachmentStore {
-    fn persistence(&self) -> lash::persistence::AttachmentStorePersistence {
-        self.inner.persistence()
-    }
-
-    async fn put(
-        &self,
-        bytes: Vec<u8>,
-        meta: lash::attachments::AttachmentCreateMeta,
-    ) -> Result<lash::attachments::AttachmentRef, lash::persistence::AttachmentStoreError> {
-        self.inner.put(bytes, meta).await
-    }
-
-    async fn get(
-        &self,
-        id: &lash::attachments::AttachmentId,
-        max_bytes: u64,
-    ) -> Result<lash::persistence::StoredAttachment, lash::persistence::AttachmentStoreError> {
-        if self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
-            return self.inner.get(id, max_bytes).await;
-        }
-        Err(lash::persistence::AttachmentStoreError::Backend {
-            operation: "get",
-            class: lash::persistence::AttachmentStoreFailureClass::Transient,
-            source: format!("scripted vanished attachment {id}").into(),
-        })
-    }
-
-    async fn delete(
-        &self,
-        id: &lash::attachments::AttachmentId,
-    ) -> Result<(), lash::persistence::AttachmentStoreError> {
-        self.inner.delete(id).await
-    }
-
-    async fn list(
-        &self,
-    ) -> Result<Vec<lash::persistence::StoredBlobRef>, lash::persistence::AttachmentStoreError>
-    {
-        self.inner.list().await
-    }
-
-    async fn head(
-        &self,
-        id: &lash::attachments::AttachmentId,
-    ) -> Result<Option<lash::persistence::StoredBlobRef>, lash::persistence::AttachmentStoreError>
-    {
-        self.inner.head(id).await
-    }
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn submit_failure_retires_a_user_row_for_a_turn_that_never_commits() {
-    let workbench = Workbench::silent().await;
-    let mut state = workbench.state.clone();
-    let attachments = Arc::new(VanishingAttachmentStore {
-        inner: workbench.stores.attachment_store(),
-        reads: std::sync::atomic::AtomicUsize::new(0),
-    });
-    let attachment = attachments
-        .inner
-        .put(
-            b"not really a png".to_vec(),
-            lash::attachments::AttachmentCreateMeta::new(
-                lash::attachments::MediaType::parse("image/png").expect("png media type"),
-                None,
-                Some("vanishing.png".to_string()),
-            ),
-        )
-        .await
-        .expect("store the attachment the send names");
-    state.attachment_store = attachments;
-    let never_committed = "optimistic row whose turn never commits";
-
-    let _ = send_turn(
-        State(state.clone()),
-        Query(SessionQuery::default()),
-        Json(TurnRequest {
-            attachment_id: Some(attachment.id.to_string()),
-            ..turn_request(never_committed)
-        }),
-    )
-    .await
-    .expect_err("a send whose input cannot be built is refused");
-
-    let settled = read_state(&state, None)
-        .await
-        .expect("project the refused send");
-    assert!(settled.active_turns.is_empty());
-    assert!(settled.transcript.iter().all(|row| {
-        transcript_message(row)
-            .is_none_or(|m| m.text != never_committed && !m.id.starts_with("workbench-user:"))
-    }));
-    assert!(
-        settled
-            .product_events
-            .events
-            .iter()
-            .all(|event| match &event.item {
-                StreamItem::Message { message } => {
-                    message.text != never_committed && !message.id.starts_with("workbench-user:")
-                }
-                StreamItem::TurnInput { .. }
-                | StreamItem::ModelCallRecorded { .. }
-                | StreamItem::Done { .. } => true,
-            })
-    );
-}
-
 /// Every message the session's durable history holds, across frames, as
 /// `(role, text)`.
 async fn durable_history_rows(
@@ -724,8 +618,10 @@ async fn committed_attachment_ref_is_exposed_in_the_workbench_snapshot() {
     let state = &workbench.state;
     let session_id = state.current_session_id();
     let attachment = lash::attachments::AttachmentRef {
-        id: lash::attachments::AttachmentId::parse("sha256:fig994-committed")
-            .expect("valid attachment id"),
+        id: lash::attachments::AttachmentId::parse(
+            "ebfd7953df27a2b8c3752686e96c066aedbeb45a67827f0265ecfd3d8629f565",
+        )
+        .expect("valid attachment id"),
         media_type: lash::attachments::MediaType::parse("image/png")
             .expect("valid test media type"),
         byte_len: 68,
@@ -742,7 +638,7 @@ async fn committed_attachment_ref_is_exposed_in_the_workbench_snapshot() {
         String::new(),
         String::new(),
         Some(lash::messages::PartAttachment {
-            source: lash::direct::AttachmentSource::stored(attachment.clone()),
+            reference: attachment.clone(),
         }),
     ));
     let session = state

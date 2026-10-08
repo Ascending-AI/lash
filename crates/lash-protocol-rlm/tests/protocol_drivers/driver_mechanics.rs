@@ -643,16 +643,14 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
                     tool: "attachment_tool".to_string(),
                     args: serde_json::json!({}),
                     output: lash_core::ToolCallOutput::success_tool_value(
-                        lash_core::ToolValue::Attachment(lash_core::AttachmentSource::stored(
-                            lash_core::facade_support::AttachmentRef::new(
-                                lash_core::AttachmentId::parse("replayed-attachment")
+                        lash_core::ToolValue::Attachment(lash_core::facade_support::AttachmentRef::new(
+                                lash_core::AttachmentId::parse("989a4570e404f95f1be77179059eada1572e0646bc7d82863027d7af976b9053")
                                     .expect("valid attachment id"),
                                 lash_core::MediaType::parse("image/png").unwrap(),
                                 3,
                                 Some(lash_core::AttachmentTypeMetadata::image(Some(1), Some(1))),
                                 Some("replayed".to_string()),
-                            ),
-                        )),
+                            )),
                     ),
                 }),
             }],
@@ -684,11 +682,11 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
     );
     assert_eq!(replayed_tool_call.1, "attachment_tool");
     assert_eq!(
-        replayed_tool_call.2.attachments()[0]
-            .stored_ref()
-            .expect("stored attachment")
-            .id,
-        lash_core::AttachmentId::parse("replayed-attachment").expect("valid attachment id")
+        replayed_tool_call.2.attachments()[0].id,
+        lash_core::AttachmentId::parse(
+            "989a4570e404f95f1be77179059eada1572e0646bc7d82863027d7af976b9053"
+        )
+        .expect("valid attachment id")
     );
     let trajectory = machine_trajectory(&restored);
     let entry = trajectory.last().expect("rlm trajectory entry");

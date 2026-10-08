@@ -56,14 +56,16 @@ fn image_message(id: &str, role: MessageRole, bytes: &[u8]) -> Message {
             format!("{id}.p0"),
             String::new(),
             Some(lash_core::session_model::message::PartAttachment {
-                source: lash_core::AttachmentSource::stored(lash_core::AttachmentRef {
-                    id: lash_core::AttachmentId::parse(format!("{id}-att"))
-                        .expect("valid attachment id"),
+                reference: lash_core::AttachmentRef {
+                    id: lash_core::AttachmentId::parse(
+                        format!("{:02x}", id.bytes().fold(0u8, u8::wrapping_add)).repeat(32),
+                    )
+                    .expect("valid attachment id"),
                     media_type: lash_core::MediaType::parse("image/png").unwrap(),
                     byte_len: bytes.len() as u64,
                     type_metadata: None,
                     label: None,
-                }),
+                },
             }),
         )]
         .into(),

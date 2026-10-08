@@ -222,7 +222,7 @@ vm.runInContext('async function submit(event) {' + submit + '\n}', context);
     await context.submit({preventDefault() {}});
     assert.equal(sends.at(-1).url, '/api/turn');
     assert.equal(sends.at(-1).payload.text, text);
-    assert.equal(sends.at(-1).payload.attachment_id, 'image');
+    assert.equal(sends.at(-1).payload.attachment.id, 'image');
     assert.equal(sends.at(-1).payload.model, 'selected-model');
     assert.equal(context.promptInput.value, '');
     assert.equal(context.selectedAttachment, null);

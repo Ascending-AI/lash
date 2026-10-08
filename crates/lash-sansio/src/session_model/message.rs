@@ -1,9 +1,10 @@
+use crate::AttachmentRef;
 use crate::ToolCallId;
 use crate::TurnId;
 use crate::append_vec::AppendVec;
 use crate::llm::types::{
-    AttachmentSource, LlmContentBlock, LlmMessage, LlmRole, ProviderReasoningReplay,
-    ProviderReplayMeta, ResponseTextMeta,
+    LlmContentBlock, LlmMessage, LlmRole, ProviderReasoningReplay, ProviderReplayMeta,
+    ResponseTextMeta,
 };
 use crate::tool_output::{ModelToolReturnPart, tool_result_text};
 use std::borrow::Cow;
@@ -585,8 +586,9 @@ impl<'de> serde::Deserialize<'de> for PartKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PartAttachment {
-    pub source: AttachmentSource,
+    pub reference: AttachmentRef,
 }
 
 impl Part {
@@ -741,10 +743,10 @@ impl Part {
         }
     }
 
-    /// Every attachment source the part carries, in content order: an
+    /// Every attachment ref the part carries, in content order: an
     /// attachment part's pointer, or the attachment blocks of a tool result.
-    pub fn attachment_sources(&self) -> impl Iterator<Item = &AttachmentSource> {
-        let own = self.attachment().map(|attachment| &attachment.source);
+    pub fn attachments(&self) -> impl Iterator<Item = &AttachmentRef> {
+        let own = self.attachment().map(|attachment| &attachment.reference);
         let blocks = self
             .tool_result_content()
             .unwrap_or_default()
@@ -753,32 +755,32 @@ impl Part {
         own.into_iter().chain(blocks)
     }
 
-    /// Every attachment source the part carries, each with an id unique
+    /// Every attachment ref the part carries, each with an id unique
     /// within the message: an attachment part's own id, or `{id}#{n}` for
     /// the tool result's `n`th attachment (1-based, matching its
     /// `[Attachment n]` marker).
-    pub fn identified_attachment_sources(&self) -> Vec<(String, &AttachmentSource)> {
+    pub fn identified_attachments(&self) -> Vec<(String, &AttachmentRef)> {
         match self {
             Self::ToolResult { id, .. } => self
-                .attachment_sources()
+                .attachments()
                 .enumerate()
                 .map(|(index, source)| (format!("{id}#{}", index + 1), source))
                 .collect(),
             _ => self
-                .attachment_sources()
+                .attachments()
                 .map(|source| (self.id().to_string(), source))
                 .collect(),
         }
     }
 
     /// Mutable access to every attachment source the part carries, in the
-    /// order [`Part::attachment_sources`] yields them.
-    pub fn attachment_sources_mut(&mut self) -> Vec<&mut AttachmentSource> {
+    /// order [`Part::attachments`] yields them.
+    pub fn attachments_mut(&mut self) -> Vec<&mut AttachmentRef> {
         match self {
             Self::Attachment {
                 attachment: Some(attachment),
                 ..
-            } => vec![&mut attachment.source],
+            } => vec![&mut attachment.reference],
             Self::ToolResult { content, .. } => content
                 .iter_mut()
                 .filter_map(|block| match block {
@@ -1032,15 +1034,15 @@ fn render_assistant_tool_call(part: &Part, rendered: &str) -> String {
     }
 }
 
-fn attachment_from_part(part: &Part) -> Option<AttachmentSource> {
+fn attachment_from_part(part: &Part) -> Option<AttachmentRef> {
     if !matches!(part.kind(), PartKind::Attachment) {
         return None;
     }
     let attachment = part.attachment()?;
-    Some(attachment.source.clone())
+    Some(attachment.reference.clone())
 }
 
-fn render_message_for_transcript(msg: &Message, attachments: &mut Vec<AttachmentSource>) -> String {
+fn render_message_for_transcript(msg: &Message, attachments: &mut Vec<AttachmentRef>) -> String {
     let mut out = Vec::new();
     for part in msg.parts.iter() {
         // Reasoning items are display-only from the transcript's point of
@@ -1076,14 +1078,13 @@ pub struct RenderedPrompt {
 }
 
 impl RenderedPrompt {
-    /// Sources in message order, derived from the structured blocks,
+    /// Refs in message order, derived from the structured blocks,
     /// including the attachments inside tool results.
-    pub fn attachments(&self) -> Vec<&AttachmentSource> {
+    pub fn attachments(&self) -> impl Iterator<Item = &AttachmentRef> {
         self.messages
             .iter()
             .flat_map(|message| message.blocks.iter())
-            .flat_map(LlmContentBlock::attachment_sources)
-            .collect()
+            .flat_map(LlmContentBlock::attachments)
     }
 }
 
@@ -1572,7 +1573,7 @@ pub fn render_transcript_prompt(msgs: &[Message]) -> RenderedPrompt {
     let mut message = LlmMessage::text(LlmRole::User, text);
     Arc::make_mut(&mut message.blocks).extend(attachments.into_iter().map(|source| {
         LlmContentBlock::Attachment {
-            source: Box::new(source),
+            reference: Box::new(source),
         }
     }));
     RenderedPrompt {
@@ -1692,7 +1693,7 @@ fn render_structured_message(
                     && matches!(msg.role, MessageRole::User)
                 {
                     blocks.push(LlmContentBlock::Attachment {
-                        source: Box::new(attachment),
+                        reference: Box::new(attachment),
                     });
                     continue;
                 }

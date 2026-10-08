@@ -993,13 +993,10 @@ impl AdmittedTurnInputs {
     pub async fn materialize_checkpoint_turn_input(
         &self,
         turn_id: &crate::TurnId,
-        attachment_store: &crate::RuntimeAttachmentStore,
     ) -> Result<QueuedCheckpointTurnInput, String> {
         let mut messages = Vec::new();
         for input in &self.inputs {
-            if let Some(message) =
-                committed_message_from_pending_input(input, turn_id, attachment_store).await?
-            {
+            if let Some(message) = committed_message_from_pending_input(input, turn_id).await? {
                 messages.push(message);
             }
         }
@@ -1025,11 +1022,11 @@ pub(crate) fn plugin_message_from_turn_input(input: &TurnInput) -> Option<Plugin
         .iter()
         .map(|item| match item {
             crate::InputItem::Text { text } => crate::Part::text(String::new(), text.clone(), None),
-            crate::InputItem::Attachment { source } => crate::Part::attachment_part(
+            crate::InputItem::Attachment { reference } => crate::Part::attachment_part(
                 String::new(),
                 String::new(),
                 Some(lash_sansio::PartAttachment {
-                    source: source.clone(),
+                    reference: reference.clone(),
                 }),
             ),
         })
@@ -1048,11 +1045,8 @@ pub(crate) fn plugin_message_from_turn_input(input: &TurnInput) -> Option<Plugin
 async fn committed_message_from_pending_input(
     pending: &PendingTurnInput,
     turn_id: &crate::TurnId,
-    attachment_store: &crate::RuntimeAttachmentStore,
 ) -> Result<Option<crate::Message>, String> {
-    let normalized =
-        crate::input_normalization::normalize_input_items(&pending.input.items, attachment_store)
-            .await?;
+    let normalized = crate::input_normalization::normalize_input_items(&pending.input.items);
     let message_id = ingress_message_id(&pending.input_id);
     let mut parts = Vec::new();
     for item in normalized {
@@ -1067,7 +1061,7 @@ async fn committed_message_from_pending_input(
                 parts.push(crate::Part::attachment_part(
                     part_id,
                     String::new(),
-                    Some(crate::session_model::message::PartAttachment { source }),
+                    Some(crate::session_model::message::PartAttachment { reference: source }),
                 ));
             }
         }
@@ -1094,18 +1088,18 @@ pub fn ingress_message_id(input_id: &str) -> String {
 
 /// Host-provided per-turn input.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum InputItem {
     Text { text: String },
-    Attachment { source: crate::AttachmentSource },
+    Attachment { reference: crate::AttachmentRef },
 }
 impl InputItem {
     pub fn text(text: impl Into<String>) -> Self {
         Self::Text { text: text.into() }
     }
 
-    pub fn attachment(source: crate::AttachmentSource) -> Self {
-        Self::Attachment { source }
+    pub fn attachment(reference: crate::AttachmentRef) -> Self {
+        Self::Attachment { reference }
     }
 }
 fn no_agent_frame_switches(switches: &u32) -> bool {
@@ -1150,8 +1144,8 @@ impl TurnInput {
         }
     }
 
-    pub fn with_attachment(mut self, source: crate::AttachmentSource) -> Self {
-        self.items.push(InputItem::attachment(source));
+    pub fn with_attachment(mut self, reference: crate::AttachmentRef) -> Self {
+        self.items.push(InputItem::attachment(reference));
         self
     }
 }
@@ -1297,9 +1291,7 @@ impl TurnInput {
             .iter()
             .filter_map(|item| match item {
                 InputItem::Text { .. } => None,
-                InputItem::Attachment { source } => {
-                    source.stored_ref().map(|reference| reference.id.clone())
-                }
+                InputItem::Attachment { reference } => Some(reference.id.clone()),
             })
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()

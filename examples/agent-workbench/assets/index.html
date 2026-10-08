@@ -4436,7 +4436,7 @@
       const accepted = await sendTurn(
         {
           text,
-          attachment_id: attachment?.id || null,
+          attachment: attachment ? { id: attachment.id, media_type: attachment.media_type, byte_len: attachment.byte_len, type_metadata: attachment.type_metadata, label: attachment.label } : null,
           ...selectedModelPayload()
         },
         attachment ? [{ attachment_id: attachment.id, retrieve_url: attachment.retrieve_url }] : []

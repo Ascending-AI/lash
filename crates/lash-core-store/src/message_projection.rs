@@ -33,10 +33,16 @@ mod tests {
 
     #[test]
     fn turn_input_and_durable_projection_preserve_interleaved_parts() {
-        let source = crate::AttachmentSource::Inline {
-            media_type: crate::MediaType::parse("image/png").unwrap(),
-            bytes: vec![0, 255],
-        };
+        let source = crate::AttachmentRef::new(
+            crate::AttachmentId::parse(
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            )
+            .expect("digest"),
+            crate::MediaType::parse("image/png").unwrap(),
+            3,
+            None,
+            None,
+        );
         let mut input = crate::TurnInput::empty();
         input.items = vec![
             crate::InputItem::text("first"),
@@ -47,7 +53,7 @@ mod tests {
         let message = plugin_message_to_message(&plugin, "message");
         assert_eq!(message.parts.len(), 3);
         assert_eq!(message.parts[0].content(), "first");
-        assert_eq!(message.parts[1].attachment().unwrap().source, source);
+        assert_eq!(message.parts[1].attachment().unwrap().reference, source);
         assert_eq!(message.parts[2].content(), "last");
         assert_eq!(
             message

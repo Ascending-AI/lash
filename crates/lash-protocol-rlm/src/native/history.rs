@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::sync::Arc;
 
-use lash_core::llm::types::{AttachmentSource, LlmContentBlock, LlmMessage, LlmRole};
+use lash_core::llm::types::{LlmContentBlock, LlmMessage, LlmRole};
 use lash_core::{
     facade_support::BorrowedChronologicalEntry, facade_support::BorrowedChronologicalPayload,
 };
@@ -336,13 +336,9 @@ fn append_borrowed_entry_image_blocks(
     blocks: &mut Vec<LlmContentBlock>,
 ) {
     if let BorrowedChronologicalPayload::Message(message) = entry.payload {
-        for source in message
-            .parts
-            .iter()
-            .flat_map(|part| part.attachment_sources())
-        {
+        for source in message.parts.iter().flat_map(|part| part.attachments()) {
             blocks.push(LlmContentBlock::Attachment {
-                source: Box::new(source.clone()),
+                reference: Box::new(source.clone()),
             });
         }
     }
@@ -354,7 +350,7 @@ fn append_step_image_blocks(
 ) {
     for image in &step.images {
         blocks.push(LlmContentBlock::Attachment {
-            source: Box::new(AttachmentSource::stored(image.clone())),
+            reference: Box::new(image.clone()),
         });
     }
 }
@@ -396,48 +392,14 @@ fn message_attachment_refs(parts: &[lash_core::Part]) -> Vec<RlmAttachmentRef> {
     parts
         .iter()
         .flat_map(|part| {
-            part.identified_attachment_sources()
+            part.identified_attachments()
                 .into_iter()
-                .map(|(id, attachment)| {
-                    let (media_type, label, source, reference) = attachment_summary(attachment);
-                    RlmAttachmentRef {
-                        id,
-                        media_type,
-                        label,
-                        source,
-                        reference,
-                    }
+                .map(|(id, attachment)| RlmAttachmentRef {
+                    id,
+                    reference: attachment.clone(),
                 })
         })
         .collect()
-}
-
-fn attachment_summary(
-    source: &AttachmentSource,
-) -> (Option<lash_core::MediaType>, Option<String>, String, String) {
-    match source {
-        AttachmentSource::Inline { media_type, .. } => (
-            Some(media_type.clone()),
-            None,
-            "inline".to_string(),
-            "transient".to_string(),
-        ),
-        AttachmentSource::Stored { attachment_ref } => (
-            Some(attachment_ref.media_type.clone()),
-            attachment_ref.label.clone(),
-            "stored".to_string(),
-            attachment_ref.id.to_string(),
-        ),
-        AttachmentSource::ExternalUrl { media_type, url } => (
-            Some(media_type.clone()),
-            None,
-            "external_url".to_string(),
-            url.clone(),
-        ),
-        AttachmentSource::ProviderFile { id, .. } => {
-            (None, None, "provider_file".to_string(), id.clone())
-        }
-    }
 }
 
 fn message_history_text_parts(parts: &[lash_core::Part]) -> String {

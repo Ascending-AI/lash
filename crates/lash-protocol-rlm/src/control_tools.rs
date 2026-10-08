@@ -67,17 +67,16 @@ fn read_output_tool_definition() -> ToolDefinition {
 
 async fn read_output(call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
     let source = call.args.get("archive").cloned().unwrap_or(Value::Null);
-    let Ok(lash_core::ToolValue::Attachment(lash_core::AttachmentSource::Stored {
-        attachment_ref,
-    })) = serde_json::from_value::<lash_core::ToolValue>(source)
+    let Ok(lash_core::ToolValue::Attachment(attachment_ref)) =
+        serde_json::from_value::<lash_core::ToolValue>(source)
     else {
         return ToolOutcome::failure(lash_core::ToolFailure::invalid_request(
             "invalid_output_archive",
-            "archive must be a stored history attachment",
+            "archive must be a history attachment ref",
         ))
         .into();
     };
-    let bytes = match call.context.attachments().get(&attachment_ref.id).await {
+    let bytes = match call.context.attachments().read(&attachment_ref).await {
         Ok(bytes) => bytes,
         Err(error) => {
             return lash_core::ToolAttemptOutcome::host_failed(

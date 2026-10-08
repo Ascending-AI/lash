@@ -3,19 +3,19 @@
 //! the resume-safety check accepts.
 use super::*;
 use lash_core::{
-    AttachmentId, AttachmentSource, AttachmentTypeMetadata, MediaType, ToolCallOutput, ToolValue,
-    facade_support::AttachmentRef, facade_support::ModelToolReturn,
-    facade_support::ModelToolReturnPart,
+    AttachmentId, AttachmentRef, AttachmentTypeMetadata, MediaType, ToolCallOutput, ToolValue,
+    facade_support::ModelToolReturn, facade_support::ModelToolReturnPart,
 };
 
-fn attachment_source(id: &str) -> AttachmentSource {
-    AttachmentSource::stored(AttachmentRef::new(
-        AttachmentId::parse(id).expect("valid attachment id"),
+fn attachment_source(id: &str) -> AttachmentRef {
+    AttachmentRef::new(
+        AttachmentId::parse(format!("{:02x}", id.bytes().fold(0u8, u8::wrapping_add)).repeat(32))
+            .expect("valid attachment id"),
         MediaType::parse("image/png").unwrap(),
         4,
         Some(AttachmentTypeMetadata::image(Some(1), Some(1))),
         Some("tiny".to_string()),
-    ))
+    )
 }
 
 /// FIG-3515: the transcript this protocol commits for any tool value is
@@ -31,7 +31,10 @@ fn committed_tool_results_agree_with_the_resume_safety_check() {
         "image".to_string(),
         ToolValue::Attachment(attachment.clone()),
     );
-    let notice = lash_sansio::AttachmentMaterializationNotice::no_provider_accepts(&attachment);
+    let notice = lash_sansio::AttachmentMaterializationNotice::no_provider_accepts(
+        &attachment,
+        lash_sansio::llm::attachment_delivery::AttachmentPosition::ToolResult,
+    );
     let notice_placeholder = notice.model_placeholder();
     let mut noticed = ModelToolReturn::from_output(
         "shot".to_string(),

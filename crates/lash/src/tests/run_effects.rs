@@ -164,7 +164,7 @@ impl ToolProvider for AttachmentPutTool {
             Err(error) => return lash_core::ToolOutcome::err_fmt(error).into(),
         };
         lash_core::ToolOutcome::from_output(lash_core::ToolCallOutput::success_tool_value(
-            lash_core::ToolValue::Attachment(lash_core::AttachmentSource::stored(reference)),
+            lash_core::ToolValue::Attachment(reference),
         ))
         .into()
     }

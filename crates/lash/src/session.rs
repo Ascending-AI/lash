@@ -651,6 +651,23 @@ impl ParkedSession {
 }
 
 impl LashSession {
+    /// Store content before constructing attachment-bearing input.
+    ///
+    /// The guarded put creates an expiring upload hold. Enqueueing the returned
+    /// ref acquires the session's hold before that upload may expire.
+    pub async fn put_attachment(
+        &self,
+        bytes: Vec<u8>,
+        meta: lash_core::AttachmentCreateMeta,
+    ) -> std::result::Result<lash_core::AttachmentRef, lash_core::AttachmentStoreError> {
+        let store = {
+            let writer = self.runtime.writer();
+            let runtime = writer.lock().await;
+            runtime.host.core.durability.attachment_store.unbound()
+        };
+        store.put(bytes, meta).await
+    }
+
     /// The lifecycle owner of this session: the catalog, effect host,
     /// process services its open was bound to.
     pub fn session_administration(&self) -> lash_core::SessionAdministration {

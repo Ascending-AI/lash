@@ -347,7 +347,6 @@ pub mod facade_support {
     pub use lash_sansio::AcceptedInjectedTurnInput;
     pub use lash_sansio::AttachmentMaterializationNotice;
     pub use lash_sansio::AttachmentMaterializationReason;
-    pub use lash_sansio::AttachmentMaterializationSource;
     pub use lash_sansio::AttachmentRef;
     pub use lash_sansio::EffectId;
     pub use lash_sansio::ErrorEnvelope;
@@ -416,15 +415,15 @@ pub use attachments::{
     AttachmentStore, AttachmentStoreError, AttachmentStoreFailureClass, AttachmentStorePersistence,
     EmptyRootSetPolicy, StoredAttachment, StoredBlobRef,
 };
+pub use lash_sansio::llm::attachment_delivery::ProviderFileScope;
 pub use lash_sansio::llm::types::{
-    AttachmentSource, AttemptOutcome, AttemptRecord, AttemptUsageOutcome, ChargeSafetyDecision,
+    AttemptOutcome, AttemptRecord, AttemptUsageOutcome, ChargeSafetyDecision,
     ChargeSafetyDenialReason, ExecutionEvidence, ExecutionEvidenceCollectionInterruption,
     ExecutionEvidenceMergeError, GenerationOptionOutcome, GenerationOptions, GenerationReceipt,
     LlmCallId, LlmCallRecord, LlmOutputPart, LlmRequest, LlmRequestOwner, LlmRequestScope,
     LlmResponse, LlmStreamEvidence, LlmTerminalReason, NonNegativeFiniteF64, NormalizedError,
-    ProtocolPosition, ProviderEndpointError, ProviderFileScope, ProviderReplayDrop,
-    ProviderReplayDropReason, ProviderReplayKind, ProviderRequestBody, ProviderRouteIdentity,
-    RetryDecision,
+    ProtocolPosition, ProviderEndpointError, ProviderReplayDrop, ProviderReplayDropReason,
+    ProviderReplayKind, ProviderRouteIdentity, RecordedRequestTemplate, RetryDecision,
 };
 pub use lash_sansio::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, Backoff, BatchId,
@@ -644,9 +643,9 @@ pub use plugin::{
 pub use plugin::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
 pub use provider::{
     AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,
-    AttachmentCapabilitySnapshot, AttachmentMimeSource, CacheControlDialect, GoogleDialect,
-    InstructionRole, LlmProfileCapability, OpenAiReasoningContext, ReasoningCapability,
-    ReasoningEncoding, ReasoningIntent, ReasoningRetentionCapability, ReasoningRetentionPolicy,
+    AttachmentCapabilitySnapshot, CacheControlDialect, GoogleDialect, InstructionRole,
+    LlmProfileCapability, OpenAiReasoningContext, ReasoningCapability, ReasoningEncoding,
+    ReasoningIntent, ReasoningRetentionCapability, ReasoningRetentionPolicy,
     ReasoningRetentionSelection, ReasoningRetentionValidationCategory,
     ReasoningRetentionValidationError, ReasoningSelection, SamplingCapability, StreamTermination,
 };

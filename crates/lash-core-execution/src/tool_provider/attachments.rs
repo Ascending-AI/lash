@@ -13,8 +13,8 @@ impl ToolAttachmentClient {
     /// # Integrator class
     ///
     /// Tool implementors use this capability to resolve retained history values.
-    pub async fn get(&self, id: &crate::AttachmentId) -> Result<Vec<u8>, AttachmentStoreError> {
-        self.store.get(id).await.map(|stored| stored.bytes)
+    pub async fn read(&self, reference: &AttachmentRef) -> Result<Vec<u8>, AttachmentStoreError> {
+        self.store.read(reference).await
     }
 
     /// # Integrator class

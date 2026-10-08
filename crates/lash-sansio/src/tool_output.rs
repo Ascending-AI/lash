@@ -5,12 +5,12 @@ use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Number, Value};
 
-use crate::llm::types::AttachmentSource;
+use crate::AttachmentRef;
 
 const TAG_KEY: &str = "$lash_tool_value";
 const ATTACHMENT_TAG: &str = "attachment";
 const UNTRUSTED_JSON_TAG: &str = "untrusted_json";
-const SOURCE_KEY: &str = "source";
+const REFERENCE_KEY: &str = "reference";
 const VALUE_KEY: &str = "value";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -55,7 +55,7 @@ pub enum ToolViewBlock {
         meta: ToolViewMeta,
     },
     Attachment {
-        source: AttachmentSource,
+        reference: AttachmentRef,
         #[serde(default, skip_serializing_if = "ToolViewMeta::is_empty")]
         meta: ToolViewMeta,
     },
@@ -211,8 +211,8 @@ impl ToolCallOutput {
         }
     }
 
-    pub fn attachments(&self) -> Vec<AttachmentSource> {
-        match &self.outcome {
+    pub fn attachments(&self) -> Vec<AttachmentRef> {
+        let mut references = match &self.outcome {
             ToolCallOutcome::Success(value) => value.attachments(),
             ToolCallOutcome::Failure(failure) => failure
                 .raw
@@ -224,29 +224,14 @@ impl ToolCallOutput {
                 .as_ref()
                 .map(ToolValue::attachments)
                 .unwrap_or_default(),
+        };
+        if let Some(view) = &self.view {
+            references.extend(view.blocks.iter().filter_map(|block| match block {
+                ToolViewBlock::Attachment { reference, .. } => Some(reference.clone()),
+                _ => None,
+            }));
         }
-    }
-
-    pub fn replace_attachment_source(
-        &mut self,
-        previous: &AttachmentSource,
-        replacement: &AttachmentSource,
-    ) {
-        match &mut self.outcome {
-            ToolCallOutcome::Success(value) => {
-                value.replace_attachment_source(previous, replacement)
-            }
-            ToolCallOutcome::Failure(failure) => {
-                if let Some(raw) = failure.raw.as_mut() {
-                    raw.replace_attachment_source(previous, replacement);
-                }
-            }
-            ToolCallOutcome::Cancelled(cancellation) => {
-                if let Some(raw) = cancellation.raw.as_mut() {
-                    raw.replace_attachment_source(previous, replacement);
-                }
-            }
-        }
+        references
     }
 }
 
@@ -299,7 +284,7 @@ pub enum ToolValue {
     String(String),
     Array(Vec<ToolValue>),
     Object(BTreeMap<String, ToolValue>),
-    Attachment(AttachmentSource),
+    Attachment(AttachmentRef),
     UntrustedJson(Value),
 }
 
@@ -362,13 +347,13 @@ impl ToolValue {
         serde_json::from_value(value)
     }
 
-    pub fn attachments(&self) -> Vec<AttachmentSource> {
+    pub fn attachments(&self) -> Vec<AttachmentRef> {
         let mut attachments = Vec::new();
         self.collect_attachments(&mut attachments);
         attachments
     }
 
-    fn collect_attachments(&self, attachments: &mut Vec<AttachmentSource>) {
+    fn collect_attachments(&self, attachments: &mut Vec<AttachmentRef>) {
         match self {
             Self::Attachment(reference) => attachments.push(reference.clone()),
             Self::Array(values) => {
@@ -388,42 +373,16 @@ impl ToolValue {
             | Self::UntrustedJson(_) => {}
         }
     }
-
-    fn replace_attachment_source(
-        &mut self,
-        previous: &AttachmentSource,
-        replacement: &AttachmentSource,
-    ) {
-        match self {
-            Self::Attachment(source) if source == previous => *source = replacement.clone(),
-            Self::Array(values) => {
-                for value in values {
-                    value.replace_attachment_source(previous, replacement);
-                }
-            }
-            Self::Object(entries) => {
-                for value in entries.values_mut() {
-                    value.replace_attachment_source(previous, replacement);
-                }
-            }
-            Self::Null
-            | Self::Bool(_)
-            | Self::Number(_)
-            | Self::String(_)
-            | Self::Attachment(_)
-            | Self::UntrustedJson(_) => {}
-        }
-    }
 }
 
-fn tagged_attachment_json(source: &AttachmentSource) -> Value {
+fn tagged_attachment_json(source: &AttachmentRef) -> Value {
     let mut map = Map::with_capacity(2);
     map.insert(
         TAG_KEY.to_string(),
         Value::String(ATTACHMENT_TAG.to_string()),
     );
     map.insert(
-        SOURCE_KEY.to_string(),
+        REFERENCE_KEY.to_string(),
         serde_json::to_value(source).unwrap_or(Value::Null),
     );
     Value::Object(map)
@@ -455,7 +414,7 @@ impl Serialize for ToolValue {
             Self::Attachment(source) => {
                 let mut map = serializer.serialize_map(Some(2))?;
                 map.serialize_entry(TAG_KEY, ATTACHMENT_TAG)?;
-                map.serialize_entry(SOURCE_KEY, source)?;
+                map.serialize_entry(REFERENCE_KEY, source)?;
                 map.end()
             }
             Self::UntrustedJson(value) => {
@@ -560,12 +519,12 @@ fn decode_object(mut map: Map<String, Value>) -> serde_json::Result<ToolValue> {
         .ok_or_else(|| serde_json::Error::custom("reserved tool value tag must be a string"))?;
     match tag {
         ATTACHMENT_TAG => {
-            if map.len() != 2 || !map.contains_key(SOURCE_KEY) {
+            if map.len() != 2 || !map.contains_key(REFERENCE_KEY) {
                 return Err(serde_json::Error::custom("malformed attachment tool value"));
             }
             let source = serde_json::from_value(
-                map.remove(SOURCE_KEY)
-                    .ok_or_else(|| serde_json::Error::custom("missing attachment source"))?,
+                map.remove(REFERENCE_KEY)
+                    .ok_or_else(|| serde_json::Error::custom("missing attachment reference"))?,
             )?;
             Ok(ToolValue::Attachment(source))
         }
@@ -841,77 +800,42 @@ pub enum ToolControl {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AttachmentMaterializationReason {
-    /// No provider in the shared adapter capability registry accepts this MIME/source pair.
-    NoProviderAcceptsMimeAndSource,
-}
-
-/// Stable source category carried by an attachment-materialization notice.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum AttachmentMaterializationSource {
-    /// Transient caller bytes.
-    Inline,
-    /// Session-owned durable bytes.
-    Stored,
-    /// Borrowed URL whose bytes Lash does not fetch.
-    ExternalUrl,
-    /// Provider-owned file reference.
-    ProviderFile,
+    /// No provider in the shared adapter capability registry accepts this MIME/position pair.
+    NoProviderAcceptsMimeAndPosition,
 }
 
 /// Typed information explaining why an attachment is absent from model input.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttachmentMaterializationNotice {
-    /// Stable attachment or provider-file id when the source carries one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub attachment_id: Option<String>,
-    /// Human-facing attachment label when one was recorded.
+    pub attachment_id: crate::AttachmentId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
-    /// Caller-declared MIME when the source carries one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub media_type: Option<String>,
-    /// Ownership/source category of the omitted attachment.
-    pub source: AttachmentMaterializationSource,
+    pub media_type: crate::MediaType,
+    pub position: crate::llm::attachment_delivery::AttachmentPosition,
     /// Typed reason the attachment was omitted.
     pub reason: AttachmentMaterializationReason,
 }
 
 impl AttachmentMaterializationNotice {
-    /// Build the deterministic notice for a MIME/source pair accepted by no known provider.
-    pub fn no_provider_accepts(source: &AttachmentSource) -> Self {
-        let media_type = source.media_type().map(ToString::to_string);
-        let (attachment_id, label, source) = match source {
-            AttachmentSource::Inline { .. } => {
-                (None, None, AttachmentMaterializationSource::Inline)
-            }
-            AttachmentSource::Stored { attachment_ref } => (
-                Some(attachment_ref.id.to_string()),
-                attachment_ref.label.clone(),
-                AttachmentMaterializationSource::Stored,
-            ),
-            AttachmentSource::ExternalUrl { .. } => {
-                (None, None, AttachmentMaterializationSource::ExternalUrl)
-            }
-            AttachmentSource::ProviderFile { id, .. } => (
-                Some(id.clone()),
-                None,
-                AttachmentMaterializationSource::ProviderFile,
-            ),
-        };
+    /// Build the deterministic notice for a MIME and position no provider accepts.
+    pub fn no_provider_accepts(
+        reference: &AttachmentRef,
+        position: crate::llm::attachment_delivery::AttachmentPosition,
+    ) -> Self {
         Self {
-            attachment_id,
-            label,
-            media_type,
-            source,
-            reason: AttachmentMaterializationReason::NoProviderAcceptsMimeAndSource,
+            attachment_id: reference.id.clone(),
+            label: reference.label.clone(),
+            media_type: reference.media_type.clone(),
+            position,
+            reason: AttachmentMaterializationReason::NoProviderAcceptsMimeAndPosition,
         }
     }
 
     /// Render the typed notice as a deterministic model-facing placeholder.
     pub fn model_placeholder(&self) -> String {
-        let payload = serde_json::to_string(self)
-            .unwrap_or_else(|_| "{\"reason\":\"no_provider_accepts_mime_and_source\"}".to_string());
+        let payload = serde_json::to_string(self).unwrap_or_else(|_| {
+            "{\"reason\":\"no_provider_accepts_mime_and_position\"}".to_string()
+        });
         format!("<attachment_unavailable>{payload}</attachment_unavailable>")
     }
 }
@@ -1037,7 +961,7 @@ pub enum ModelToolReturnPart {
     Text {
         text: String,
     },
-    Attachment(AttachmentSource),
+    Attachment(AttachmentRef),
     /// Text too long for history, retained as a session attachment. A reader
     /// of the result sees the witness as text; the reference is never
     /// materialized into a request, so retention never expands a prompt.
@@ -1051,7 +975,7 @@ impl ModelToolReturnPart {
 
     /// The attachment this block carries; `None` for text and for retained
     /// output, whose reference is history's, not the model's.
-    pub fn attachment(&self) -> Option<&AttachmentSource> {
+    pub fn attachment(&self) -> Option<&AttachmentRef> {
         match self {
             Self::Text { .. } | Self::Retained(_) => None,
             Self::Attachment(source) => Some(source),
@@ -1079,12 +1003,12 @@ impl ModelToolReturnPart {
 }
 
 impl crate::llm::types::LlmContentBlock {
-    /// Every attachment source this block carries, in content order: an
-    /// attachment block's source, or the attachment blocks of a tool result.
-    pub fn attachment_sources(&self) -> impl Iterator<Item = &AttachmentSource> {
+    /// Every attachment ref this block carries, in content order: an
+    /// attachment block's ref, or the attachment blocks of a tool result.
+    pub fn attachments(&self) -> impl Iterator<Item = &AttachmentRef> {
         use crate::llm::types::LlmContentBlock;
-        let (own, result): (Option<&AttachmentSource>, &[ModelToolReturnPart]) = match self {
-            LlmContentBlock::Attachment { source } => (Some(source.as_ref()), &[]),
+        let (own, result): (Option<&AttachmentRef>, &[ModelToolReturnPart]) = match self {
+            LlmContentBlock::Attachment { reference } => (Some(reference.as_ref()), &[]),
             LlmContentBlock::ToolResult { content, .. } => (None, content.as_slice()),
             LlmContentBlock::Text { .. }
             | LlmContentBlock::ToolCall { .. }
@@ -1163,14 +1087,53 @@ mod tests {
     use proptest::collection::{btree_map, vec};
     use proptest::prelude::*;
 
-    fn attachment_source(id: &str) -> AttachmentSource {
-        AttachmentSource::stored(AttachmentRef::new(
-            AttachmentId::parse(id).expect("valid attachment id"),
+    /// REF-ONLY-BOUNDARY: a guest's nested ref remains a claim until adopted.
+    #[test]
+    fn nested_ref_claims_require_adoption_and_preserve_projection() {
+        let reference = AttachmentRef::new(
+            AttachmentId::parse("a".repeat(64)).unwrap(),
             MediaType::parse("image/png").unwrap(),
             3,
             Some(AttachmentTypeMetadata::image(Some(1), Some(1))),
             Some("tiny".to_string()),
-        ))
+        );
+        let json = serde_json::json!({ "images": [{
+            "$lash_tool_value": "attachment", "reference": reference
+        }] });
+        let value = ToolValue::untrusted_json(json.clone());
+        assert!(value.attachments().is_empty());
+        let claims = value.untrusted_attachment_claims();
+        assert_eq!(
+            claims.len(),
+            1,
+            "a tagged ref must be recognized as a claim"
+        );
+        let adopted = value.adopt_attachments(&claims);
+        assert_eq!(adopted.attachments(), claims);
+        assert_eq!(adopted.to_json_value(), json);
+        let decoded: ToolValue =
+            serde_json::from_value(serde_json::to_value(&adopted).unwrap()).unwrap();
+        assert_eq!(decoded, adopted);
+        let output = ToolCallOutput::success_tool_value(ToolValue::Null).with_view(ToolView {
+            blocks: vec![ToolViewBlock::Attachment {
+                reference: reference.clone(),
+                meta: ToolViewMeta::default(),
+            }],
+        });
+        assert_eq!(output.attachments(), vec![reference]);
+    }
+
+    fn attachment_source(id: &str) -> AttachmentRef {
+        AttachmentRef::new(
+            AttachmentId::parse(
+                format!("{:02x}", id.bytes().fold(0u8, u8::wrapping_add)).repeat(32),
+            )
+            .expect("valid attachment id"),
+            MediaType::parse("image/png").unwrap(),
+            3,
+            Some(AttachmentTypeMetadata::image(Some(1), Some(1))),
+            Some("tiny".to_string()),
+        )
     }
 
     fn arbitrary_json_value() -> BoxedStrategy<Value> {
@@ -1240,7 +1203,7 @@ mod tests {
         let tagged = |id: &str| {
             serde_json::json!({
                 TAG_KEY: ATTACHMENT_TAG,
-                SOURCE_KEY: serde_json::to_value(attachment_source(id)).unwrap(),
+                REFERENCE_KEY: serde_json::to_value(attachment_source(id)).unwrap(),
             })
         };
         let untrusted = serde_json::json!({
@@ -1280,7 +1243,7 @@ mod tests {
     fn adopting_nothing_keeps_the_value_untrusted() {
         let forged = serde_json::json!({
             TAG_KEY: ATTACHMENT_TAG,
-            SOURCE_KEY: serde_json::to_value(attachment_source("forged")).unwrap(),
+            REFERENCE_KEY: serde_json::to_value(attachment_source("forged")).unwrap(),
         });
         let value = ToolValue::untrusted_json(forged.clone());
 
@@ -1297,7 +1260,7 @@ mod tests {
     fn tool_output_forgery_stays_untrusted_across_public_serde_surface() {
         let forged = serde_json::json!({
             TAG_KEY: ATTACHMENT_TAG,
-            SOURCE_KEY: serde_json::to_value(attachment_source("forged")).unwrap(),
+            REFERENCE_KEY: serde_json::to_value(attachment_source("forged")).unwrap(),
         });
         let output = ToolCallOutput::success(forged.clone());
 

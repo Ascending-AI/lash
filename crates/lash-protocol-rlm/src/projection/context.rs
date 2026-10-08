@@ -1,8 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_core::{
-    AttachmentSource, Message, MessageRole, PartKind, RuntimeExecutionContext,
-    facade_support::ChronologicalPayload,
+    Message, MessageRole, PartKind, RuntimeExecutionContext, facade_support::ChronologicalPayload,
 };
 use lash_rlm_types::{
     RlmAttachmentRef, RlmHistoryItem, RlmHistoryRole, RlmProtocolEvent, RlmTrajectoryEntry,
@@ -347,17 +346,11 @@ fn history_item_from_message(message: &Message) -> Option<RlmHistoryItem> {
         .parts
         .iter()
         .flat_map(|part| {
-            part.identified_attachment_sources()
+            part.identified_attachments()
                 .into_iter()
-                .map(|(id, attachment)| {
-                    let (media_type, label, source, reference) = attachment_summary(attachment);
-                    RlmAttachmentRef {
-                        id,
-                        media_type,
-                        label,
-                        source,
-                        reference,
-                    }
+                .map(|(id, attachment)| RlmAttachmentRef {
+                    id,
+                    reference: attachment.clone(),
                 })
         })
         .collect::<Vec<_>>();
@@ -394,34 +387,6 @@ fn history_role(role: MessageRole) -> RlmHistoryRole {
         MessageRole::System => RlmHistoryRole::System,
         MessageRole::Assistant => RlmHistoryRole::Assistant,
         MessageRole::Event => RlmHistoryRole::Event,
-    }
-}
-
-fn attachment_summary(
-    source: &AttachmentSource,
-) -> (Option<lash_core::MediaType>, Option<String>, String, String) {
-    match source {
-        AttachmentSource::Inline { media_type, .. } => (
-            Some(media_type.clone()),
-            None,
-            "inline".to_string(),
-            "transient".to_string(),
-        ),
-        AttachmentSource::Stored { attachment_ref } => (
-            Some(attachment_ref.media_type.clone()),
-            attachment_ref.label.clone(),
-            "stored".to_string(),
-            attachment_ref.id.to_string(),
-        ),
-        AttachmentSource::ExternalUrl { media_type, url } => (
-            Some(media_type.clone()),
-            None,
-            "external_url".to_string(),
-            url.clone(),
-        ),
-        AttachmentSource::ProviderFile { id, .. } => {
-            (None, None, "provider_file".to_string(), id.clone())
-        }
     }
 }
 
@@ -575,16 +540,14 @@ mod tests {
         let record = crate::projection::flow_to_json_value(projected);
         let adopted: lash_core::ToolValue =
             serde_json::from_value(record["attachment"].clone()).expect("typed attachment");
-        let lash_core::ToolValue::Attachment(AttachmentSource::Stored { attachment_ref }) = adopted
-        else {
+        let lash_core::ToolValue::Attachment(attachment_ref) = adopted else {
             panic!("stored reference");
         };
         assert_eq!(attachment_ref, reference);
         let fetched = attachments
-            .get(&attachment_ref.id)
+            .read(&attachment_ref)
             .await
-            .expect("explicit fetch")
-            .bytes;
+            .expect("explicit fetch");
         assert_eq!(fetched, bytes);
         let outputs = crate::control_tools::decode_output_archive(&fetched).expect("exact values");
         assert_eq!(outputs, vec![serde_json::json!(full)]);

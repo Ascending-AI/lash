@@ -49,8 +49,7 @@ fn request(input: lash_core::AttachmentRef) -> lash_core::ProcessStartRequest {
                 lash_core::PluginOptions::default(),
             )),
             turn_input: Box::new(
-                crate::TurnInput::text("read the host upload")
-                    .with_attachment(lash_core::AttachmentSource::stored(input)),
+                crate::TurnInput::text("read the host upload").with_attachment(input),
             ),
             result: lash_core::SessionTurnOutcome::Turn,
         },

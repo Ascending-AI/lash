@@ -59,7 +59,7 @@ pub(crate) async fn admit_queued_send(
     state: &AppState,
     session_id: &SessionId,
     text: String,
-    attachment_bytes: Option<Vec<u8>>,
+    attachment: Option<lash::attachments::AttachmentRef>,
 ) -> Result<Json<TurnAccepted>, AppError> {
     state
         .authorization
@@ -68,11 +68,8 @@ pub(crate) async fn admit_queued_send(
         })?;
     turns::watch_session_runs(state, session_id).await;
     let mut input = lash::TurnInput::text(text.clone());
-    if let Some(attachment_bytes) = attachment_bytes {
-        input = input.with_attachment(lash::direct::AttachmentSource::inline(
-            lash::attachments::MediaType::parse("image/png").expect("workbench uploads only PNG"),
-            attachment_bytes,
-        ));
+    if let Some(reference) = attachment {
+        input = input.with_attachment(reference);
     }
     let receipt = admit_turn_input(
         state,

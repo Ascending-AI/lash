@@ -236,7 +236,7 @@ pub(crate) struct TurnRequest {
     pub(crate) model: Option<String>,
     pub(crate) model_variant: Option<String>,
     #[serde(default)]
-    pub(crate) attachment_id: Option<String>,
+    pub(crate) attachment: Option<lash::attachments::AttachmentRef>,
     /// The page's name for the row it shows on send; see
     /// [`ChatMessage::client_nonce`].
     #[serde(default)]

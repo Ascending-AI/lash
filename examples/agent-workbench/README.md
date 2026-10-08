@@ -414,15 +414,15 @@ failures and replay outcomes are durable evidence and do not depend on live
 visibility during redrive.
 
 The chat composer can upload one PNG (up to 1 MiB) through
-`POST /api/attachments`, then includes the returned content-addressed id as
-`attachment_id` in `POST /api/turn`. The turn resolves the durable file-store
-blob and supplies it as a stored MIME-tagged `AttachmentSource` through Lash's generic turn
-contract. The Workbench's PNG-only check is a host-surface policy: Lash's provider transports
-enforce their own image/file allowlists from the recorded `lash::provider::AttachmentCapabilitySnapshot`, and an
-unsupported MIME/source combination returns the typed `unsupported_attachment_capability`
-refusal before wire serialization. The same bytes remain available at
-`GET /api/attachments/{attachment_id}` across a workbench restart.
-That retrieval route is deliberately not session-gated so reloads and retired sessions still render: the unguessable SHA-256 content address is an unexpiring bearer capability with no session data in its URL, blobs outlive sessions pending ADR 0024 reclamation, and hosts MUST gate the route if their ids are not content addresses or ids can reach viewers who may not read the blob.
+`POST /api/attachments`, then includes the full returned `AttachmentRef` as
+`attachment` in `POST /api/turn`. The engine delivers that durable content ref
+when the provider sends the request. The Workbench's PNG-only check is a host
+policy. Lash's provider transports enforce their own image/file allowlists from
+the recorded `lash::provider::AttachmentCapabilitySnapshot`, and an unsupported
+MIME and position returns `unsupported_attachment_capability` before sending.
+The same bytes remain available at `GET /api/attachments/{attachment_id}` across
+a workbench restart.
+That retrieval route is deliberately not session-gated so reloads and retired sessions still render: the unguessable BLAKE3 content address is an unexpiring bearer capability with no session data in its URL, blobs outlive sessions pending ADR 0024 reclamation, and hosts MUST gate the route if their ids are not content addresses or ids can reach viewers who may not read the blob.
 The left rail renders reported usage from observed turn events. It resets when
 the browser session resets; hosts retain billing receipts at the provider seam
 (ADR 0127). The attachment persistence gate also verifies usage in model traces.

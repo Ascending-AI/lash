@@ -61,7 +61,10 @@ fn assistant_done(text: impl Into<String>) -> TurnOutcome {
 
 fn test_attachment_ref(byte_len: u64) -> crate::AttachmentRef {
     crate::AttachmentRef {
-        id: crate::AttachmentId::parse("att-test").expect("valid attachment id"),
+        id: crate::AttachmentId::parse(
+            "3cd0b0330a44b423a583def0f3795fdc194067a489c1f3e1bfe61ba204380423",
+        )
+        .expect("valid attachment id"),
         media_type: crate::MediaType::parse("image/png").unwrap(),
         byte_len,
         type_metadata: None,
@@ -972,7 +975,7 @@ fn llm_request_includes_image_prompt_parts_for_attached_images() {
                 "m0.p0".to_string(),
                 String::new(),
                 Some(PartAttachment {
-                    source: crate::llm::types::AttachmentSource::stored(test_attachment_ref(3)),
+                    reference: test_attachment_ref(3),
                 }),
             ),
             Part::text("m0.p1".to_string(), "explain this".to_string(), None),
@@ -987,7 +990,7 @@ fn llm_request_includes_image_prompt_parts_for_attached_images() {
     let (_, request) = find_llm_call(&effects).expect("llm call");
 
     use crate::llm::types::LlmContentBlock;
-    assert_eq!(request.attachments().len(), 1);
+    assert_eq!(request.attachments().count(), 1);
     assert!(request.messages.iter().any(|msg| {
         msg.blocks
             .iter()

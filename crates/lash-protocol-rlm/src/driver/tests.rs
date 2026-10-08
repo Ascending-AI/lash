@@ -342,7 +342,10 @@ fn folded_step_renders_as_emission_cell_not_history_echo() {
 fn committed_transcript_supersedes_terminal_step_by_turn_provenance() {
     let projector = projector(1000);
     let terminal_image = lash_core::AttachmentRef {
-        id: lash_core::AttachmentId::parse("terminal-image").expect("valid attachment id"),
+        id: lash_core::AttachmentId::parse(
+            "e0588aaf696ccc2638d8e207add1b4e512f73e535267eab278525d02bfd1c220",
+        )
+        .expect("valid attachment id"),
         media_type: lash_core::MediaType::parse("image/png").unwrap(),
         byte_len: 3,
         type_metadata: Some(lash_core::AttachmentTypeMetadata::image(Some(1), Some(1))),
@@ -581,7 +584,10 @@ fn printed_images_render_as_llm_image_blocks() {
             code: "print img".to_string(),
             output: vec![r#"{"type":"image","id":"img"}"#.to_string().into()],
             images: vec![lash_core::AttachmentRef {
-                id: lash_core::AttachmentId::parse("img-ref").expect("valid attachment id"),
+                id: lash_core::AttachmentId::parse(
+                    "8f9e0cfb92cb165ce6277b3b26a453fd81ac949a6ab9afba49d348483e8f7c78",
+                )
+                .expect("valid attachment id"),
                 media_type: lash_core::MediaType::parse("image/png").unwrap(),
                 byte_len: 3,
                 type_metadata: Some(lash_core::AttachmentTypeMetadata::image(Some(1), Some(1))),
@@ -610,17 +616,16 @@ fn printed_images_render_as_llm_image_blocks() {
         .iter()
         .flat_map(|message| message.blocks.iter())
         .filter_map(|block| match block {
-            LlmContentBlock::Attachment { source } => Some(source.as_ref()),
+            LlmContentBlock::Attachment { reference } => Some(reference.as_ref()),
             _ => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(attachments.len(), 1);
-    assert!(matches!(
-        &attachments[0],
-        lash_core::AttachmentSource::Stored { attachment_ref }
-            if attachment_ref.id.as_str() == "img-ref"
-                && attachment_ref.media_type.as_str() == "image/png"
-    ));
+    assert_eq!(
+        attachments[0].id.as_str(),
+        "8f9e0cfb92cb165ce6277b3b26a453fd81ac949a6ab9afba49d348483e8f7c78"
+    );
+    assert_eq!(attachments[0].media_type.as_str(), "image/png");
     // The printed image rides the user observation message for the step.
     assert!(messages.iter().any(|message| {
         matches!(message.role, LlmRole::User)

@@ -254,14 +254,9 @@ pub enum RlmHistoryRole {
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct RlmAttachmentRef {
+    /// Attachment occurrence id within the history message.
     pub id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<String>")]
-    pub media_type: Option<lash_sansio::MediaType>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-    pub source: String,
-    pub reference: String,
+    pub reference: lash_sansio::AttachmentRef,
 }
 
 #[derive(
@@ -346,10 +341,8 @@ impl From<&RetainedOutput> for RetainedHistoryValue {
             tag: HistoryValueTag::Retained,
             witness: retained.witness.clone(),
             byte_len: retained.reference.byte_len,
-            attachment: lash_sansio::ToolValue::Attachment(
-                lash_sansio::llm::types::AttachmentSource::stored(retained.reference.clone()),
-            )
-            .to_json_value(),
+            attachment: lash_sansio::ToolValue::Attachment(retained.reference.clone())
+                .to_json_value(),
         }
     }
 }
@@ -512,7 +505,7 @@ mod rlm_step_serde_tests {
             code: "print('hello')".to_string(),
             output: vec!["hello".to_string().into()],
             images: vec![lash_sansio::AttachmentRef {
-                id: "image-1".parse().expect("valid attachment id"),
+                id: ("a".repeat(64)).parse().expect("valid attachment id"),
                 media_type: "image/png".parse().expect("valid media type"),
                 byte_len: 42,
                 type_metadata: Some(lash_sansio::AttachmentTypeMetadata::image(
@@ -533,7 +526,7 @@ mod rlm_step_serde_tests {
     fn retained(witness: &str) -> lash_sansio::RetainedOutput {
         lash_sansio::RetainedOutput {
             reference: lash_sansio::AttachmentRef {
-                id: "retained-1".parse().expect("valid attachment id"),
+                id: ("b".repeat(64)).parse().expect("valid attachment id"),
                 media_type: "application/json".parse().expect("valid media type"),
                 byte_len: 90_000,
                 type_metadata: None,
@@ -722,10 +715,13 @@ mod rlm_step_serde_tests {
             content: "hello".to_string(),
             attachments: vec![super::RlmAttachmentRef {
                 id: "a1".to_string(),
-                media_type: Some("text/plain".parse().expect("valid media type")),
-                label: Some("notes".to_string()),
-                source: "stored".to_string(),
-                reference: "a1".to_string(),
+                reference: lash_sansio::AttachmentRef::new(
+                    lash_sansio::AttachmentId::parse("a".repeat(64)).expect("digest"),
+                    "text/plain".parse().expect("valid media type"),
+                    4,
+                    None,
+                    Some("notes".to_string()),
+                ),
             }],
         };
         let bare_message = RlmHistoryItem::Message {

@@ -36,7 +36,7 @@ pub(crate) struct UserTurnRequest {
     pub(crate) session_id: SessionId,
     pub(crate) text: String,
     pub(crate) model: LlmProfileSelection,
-    pub(crate) attachment_id: Option<String>,
+    pub(crate) attachment: Option<lash::attachments::AttachmentRef>,
 }
 
 /// How long a follower waits before it reads a run again after a read that
@@ -593,26 +593,13 @@ fn unsettled_turn(status: &lash::TurnStatus) -> AppError {
     }
 }
 
-#[expect(clippy::expect_used, reason = "`image/png` is a valid MediaType")]
 pub(crate) async fn workbench_turn_input(
-    state: &AppState,
+    _state: &AppState,
     request: &UserTurnRequest,
 ) -> Result<TurnInput, AppError> {
     let mut input = TurnInput::text(request.text.clone());
-    if let Some(attachment_id) = request.attachment_id.as_deref() {
-        // Request-supplied id: untrusted, so a malformed one is a bad request.
-        let attachment_id = lash::attachments::AttachmentId::parse(attachment_id)
-            .map_err(|err| AppError::bad_request(err.to_string()))?;
-        let stored = state
-            .attachment_store
-            .get(&attachment_id, lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes)
-            .await
-            // Audited: the content-addressed attachment store has no session identity or tombstone error variant.
-            .map_err(AppError::internal)?;
-        input = input.with_attachment(lash::direct::AttachmentSource::inline(
-            lash::attachments::MediaType::parse("image/png").expect("workbench uploads only PNG"),
-            stored.bytes,
-        ));
+    if let Some(reference) = &request.attachment {
+        input = input.with_attachment(reference.clone());
     }
     Ok(input)
 }

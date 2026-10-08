@@ -816,7 +816,7 @@ impl<M: TurnProtocol> ContextProjector<M> for ChatContextProjector {
             instructions: None,
             model: ctx.config.model.clone(),
             messages,
-            resolved_stored: Default::default(),
+
             tools: if ctx.use_tools {
                 Arc::clone(&ctx.environment.tool_specs)
             } else {

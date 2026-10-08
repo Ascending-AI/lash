@@ -139,7 +139,7 @@ fn tool_panicked(payload: Box<dyn std::any::Any + Send>) -> ToolOutcome {
     failure
 }
 
-/// A completed tool output that has crossed the attachment-policy and storage boundary.
+/// A completed tool output ready to record; its producer has already put attachments.
 ///
 /// Its payload is private to this module so record construction cannot accept a raw
 /// [`ToolOutcome`] from a tool body or plugin hook.
@@ -152,60 +152,20 @@ impl NormalizedToolOutput {
 }
 
 pub(crate) async fn normalized_outcome(
-    context: &ToolDispatchContext<'_>,
+    _context: &ToolDispatchContext<'_>,
     ids: &super::context::ToolCallIds,
     tool_name: String,
     args: serde_json::Value,
     result: ToolOutcome,
 ) -> ToolDispatchOutcome {
-    let output = Box::pin(normalize_tool_result_attachments(context, result)).await;
-    super::context::outcome(ids, tool_name, args, output)
-}
-
-async fn normalize_tool_result_attachments(
-    context: &ToolDispatchContext<'_>,
-    result: ToolOutcome,
-) -> NormalizedToolOutput {
-    let mut output = result.into_done_output().unwrap_or_else(|_| {
+    let output = NormalizedToolOutput(result.into_done_output().unwrap_or_else(|_| {
         crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
             crate::ToolFailureClass::Internal,
             "pending_tool_not_finalized",
             "pending tool result reached a completed-output projection path",
         ))
-    });
-    let sources = output.attachments();
-    for source in sources {
-        let crate::AttachmentSource::Inline { media_type, bytes } = &source else {
-            continue;
-        };
-        let attachment_ref = match context
-            .attachment_store
-            .put(
-                bytes.clone(),
-                crate::AttachmentCreateMeta::new(media_type.clone(), None, None),
-            )
-            .await
-        {
-            Ok(attachment_ref) => attachment_ref,
-            Err(error) => {
-                return NormalizedToolOutput(attachment_failure("attachment_store_failed", error));
-            }
-        };
-        output.replace_attachment_source(&source, &crate::AttachmentSource::stored(attachment_ref));
-    }
-    NormalizedToolOutput(output)
-}
-
-fn attachment_failure(code: &str, error: impl std::fmt::Display) -> crate::ToolCallOutput {
-    crate::ToolCallOutput::failure(crate::ToolFailure {
-        cause: None,
-        class: crate::ToolFailureClass::Execution,
-        code: code.to_string(),
-        message: error.to_string(),
-        source: crate::ToolFailureSource::Runtime,
-        suggested_delay_ms: None,
-        raw: None,
-    })
+    }));
+    super::context::outcome(ids, tool_name, args, output)
 }
 
 /// Settles a tool call that parked and has now been resolved.
@@ -363,6 +323,7 @@ mod panic_tests {
             },
             observer: Arc::new(crate::engine::NullObservationSink),
             attachment_store: Arc::new(crate::RuntimeAttachmentStore::unavailable()),
+
             turn_context: crate::TurnContext::default(),
             clock: Arc::new(crate::SystemClock),
             process_lineage: None,

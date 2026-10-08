@@ -21,7 +21,7 @@ fn replay_request(blocks: Vec<LlmContentBlock>) -> LlmRequest {
         )
         .with_reasoning(Default::default()),
         messages: vec![LlmMessage::new(LlmRole::Assistant, blocks)],
-        resolved_stored: Default::default(),
+
         tools: std::sync::Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),

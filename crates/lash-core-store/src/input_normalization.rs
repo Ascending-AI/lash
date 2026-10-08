@@ -1,41 +1,24 @@
-//! These helpers resolve turn input against the attachment store, so they live
-//! beside the durable attachment layer they call.
+//! Input projection preserves ordered refs; producers put before constructing input.
+
+use crate::InputItem;
 
 #[derive(Clone, Debug)]
 pub enum NormalizedItem {
     Text(String),
-    Attachment(crate::AttachmentSource),
+    Attachment(crate::AttachmentRef),
 }
 
-use crate::InputItem;
-
-pub async fn normalize_input_items(
-    items: &[InputItem],
-    attachment_store: &crate::RuntimeAttachmentStore,
-) -> Result<Vec<NormalizedItem>, String> {
-    let mut out: Vec<NormalizedItem> = Vec::new();
+pub fn normalize_input_items(items: &[InputItem]) -> Vec<NormalizedItem> {
+    let mut out = Vec::new();
     for item in items {
         match item {
             InputItem::Text { text } => push_text(&mut out, text.clone()),
-            InputItem::Attachment { source } => {
-                let source = match source {
-                    crate::AttachmentSource::Inline { media_type, bytes } => {
-                        let reference = attachment_store
-                            .put(
-                                bytes.clone(),
-                                crate::AttachmentCreateMeta::new(media_type.clone(), None, None),
-                            )
-                            .await
-                            .map_err(|err| format!("Failed to store inline attachment: {err}"))?;
-                        crate::AttachmentSource::stored(reference)
-                    }
-                    borrowed_or_stored => borrowed_or_stored.clone(),
-                };
-                out.push(NormalizedItem::Attachment(source));
+            InputItem::Attachment { reference } => {
+                out.push(NormalizedItem::Attachment(reference.clone()));
             }
         }
     }
-    Ok(out)
+    out
 }
 
 fn push_text(out: &mut Vec<NormalizedItem>, text: String) {

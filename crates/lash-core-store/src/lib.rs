@@ -86,8 +86,7 @@ pub(crate) use lash_core_llm::session_model::ChargeSafetyPolicy;
 pub(crate) use lash_sansio::AcceptedInjectedTurnInput;
 pub(crate) use lash_sansio::llm::types::ChargeSafetyDecision;
 pub(crate) use lash_sansio::llm::types::{
-    AttachmentSource, ChargeSafetyDenialReason, GenerationOptions, ProtocolPosition,
-    ProviderFileScope,
+    ChargeSafetyDenialReason, GenerationOptions, ProtocolPosition,
 };
 pub(crate) use lash_sansio::session_model::{ConversationRecord, ProtocolEvent, TurnBudget};
 pub(crate) use lash_sansio::session_model::{

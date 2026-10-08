@@ -10,12 +10,7 @@ async fn normalize_items_merges_adjacent_text_items() {
             text: "[file: host-prepared.txt]".to_string(),
         },
     ];
-    let out = normalize_input_items(
-        &items,
-        &lash_core::facade_support::RuntimeAttachmentStore::unavailable(),
-    )
-    .await
-    .expect("normalized");
+    let out = normalize_input_items(&items);
     assert_eq!(out.len(), 1);
     match &out[0] {
         NormalizedItem::Text(text) => {

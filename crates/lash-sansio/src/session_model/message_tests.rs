@@ -7,7 +7,10 @@ fn part(kind: PartKind, content: &str) -> Part {
 
 fn test_attachment_ref(byte_len: u64) -> AttachmentRef {
     AttachmentRef {
-        id: crate::AttachmentId::parse("att-test").expect("valid attachment id"),
+        id: crate::AttachmentId::parse(
+            "3cd0b0330a44b423a583def0f3795fdc194067a489c1f3e1bfe61ba204380423",
+        )
+        .expect("valid attachment id"),
         media_type: crate::MediaType::parse("image/png").unwrap(),
         byte_len,
         type_metadata: None,
@@ -141,7 +144,7 @@ fn attachment_part(bytes: &[u8]) -> Part {
         "p0".to_string(),
         String::new(),
         Some(PartAttachment {
-            source: AttachmentSource::stored(test_attachment_ref(bytes.len() as u64)),
+            reference: test_attachment_ref(bytes.len() as u64),
         }),
     )
 }
@@ -291,7 +294,7 @@ fn render_structured_prompt_preserves_tool_protocol_and_user_images() {
         rendered.messages[1].blocks[1],
         LlmContentBlock::Attachment { .. }
     ));
-    assert_eq!(rendered.attachments().len(), 1);
+    assert_eq!(rendered.attachments().count(), 1);
     assert!(matches!(
         rendered.messages[2].blocks[0],
         LlmContentBlock::ToolCall { .. }
@@ -370,7 +373,7 @@ fn render_transcript_prompt_collects_attachments() {
     let rendered = render_transcript_prompt(&msgs);
     let text = block_text(&rendered.messages[0], 0);
     assert!(text.contains("[Attachment]"));
-    assert_eq!(rendered.attachments().len(), 1);
+    assert_eq!(rendered.attachments().count(), 1);
 }
 
 #[test]
@@ -714,8 +717,8 @@ fn legacy_flat_json_pairs_rejected_when_the_kind_cannot_carry_the_field() {
 
 #[test]
 fn tool_result_attachments_are_counted_and_distinctly_identified() {
-    let first = AttachmentSource::stored(test_attachment_ref(1));
-    let second = AttachmentSource::stored(test_attachment_ref(2));
+    let first = test_attachment_ref(1);
+    let second = test_attachment_ref(2);
     let result = Part::tool_result(
         "m1.p0".into(),
         vec![
@@ -727,7 +730,7 @@ fn tool_result_attachments_are_counted_and_distinctly_identified() {
         "shot".into(),
     );
     assert_eq!(
-        result.identified_attachment_sources(),
+        result.identified_attachments(),
         vec![
             ("m1.p0#1".to_string(), &first),
             ("m1.p0#2".to_string(), &second),
@@ -757,5 +760,8 @@ fn tool_result_attachments_are_counted_and_distinctly_identified() {
             reply_marker: None,
         },
     ];
-    assert_eq!(render_prompt(&msgs).attachments(), vec![&first, &second]);
+    assert_eq!(
+        render_prompt(&msgs).attachments().collect::<Vec<_>>(),
+        vec![&first, &second]
+    );
 }

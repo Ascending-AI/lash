@@ -64,7 +64,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
             model: ctx.config.model.clone(),
             instructions: None,
             messages,
-            resolved_stored: Default::default(),
+
             tools: Arc::new(vec![super::tool::tool_spec(self.dialect.as_ref())]),
             tool_choice: LlmToolChoice::Auto,
             attachment_acceptance: Arc::clone(&ctx.config.attachment_acceptance),

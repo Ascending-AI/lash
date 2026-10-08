@@ -1046,7 +1046,7 @@ fn omitted_bytes_marker(omitted_bytes: usize) -> ToolValue {
     )]))
 }
 
-fn tool_output_attachments(output: &ToolCallOutput) -> Vec<lash_core::AttachmentSource> {
+fn tool_output_attachments(output: &ToolCallOutput) -> Vec<lash_core::AttachmentRef> {
     let mut attachments = output.attachments();
     match output.control.as_ref() {
         Some(ToolControl::Finish { value }) => attachments.extend(value.attachments()),
@@ -1279,18 +1279,21 @@ mod classification_tests;
 mod tests {
     use super::*;
     use lash_core::{
-        AttachmentId, AttachmentSource, AttachmentTypeMetadata, MediaType, ToolCancellation,
+        AttachmentId, AttachmentRef, AttachmentTypeMetadata, MediaType, ToolCancellation,
         ToolFailureClass, facade_support::AttachmentRef,
     };
 
-    fn image_ref(id: &str) -> AttachmentSource {
-        AttachmentSource::stored(AttachmentRef::new(
-            AttachmentId::parse(id).expect("valid attachment id"),
+    fn image_ref(id: &str) -> AttachmentRef {
+        AttachmentRef::new(
+            AttachmentId::parse(
+                format!("{:02x}", id.bytes().fold(0u8, u8::wrapping_add)).repeat(32),
+            )
+            .expect("valid attachment id"),
             MediaType::parse("image/png").unwrap(),
             3,
             Some(AttachmentTypeMetadata::image(Some(1), Some(1))),
             Some("tiny".to_string()),
-        ))
+        )
     }
 
     #[test]

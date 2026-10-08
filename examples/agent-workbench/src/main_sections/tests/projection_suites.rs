@@ -77,7 +77,10 @@ async fn durable_transcript_projection_fixture() -> Vec<crate::ChatRow> {
     let printed_images = ["sha256:rlm-printed-image-a", "sha256:rlm-printed-image-b"]
         .into_iter()
         .map(|id| lash::attachments::AttachmentRef {
-            id: lash::attachments::AttachmentId::parse(id).expect("valid attachment id"),
+            id: lash::attachments::AttachmentId::parse(
+                format!("{:02x}", id.bytes().fold(0u8, u8::wrapping_add)).repeat(32),
+            )
+            .expect("valid attachment id"),
             media_type: lash::attachments::MediaType::parse("image/png").expect("PNG media type"),
             byte_len: 68,
             type_metadata: None,
@@ -92,7 +95,7 @@ async fn durable_transcript_projection_fixture() -> Vec<crate::ChatRow> {
             String::new(),
             String::new(),
             Some(lash::messages::PartAttachment {
-                source: lash::direct::AttachmentSource::stored(attachment.clone()),
+                reference: attachment.clone(),
             }),
         ));
     }

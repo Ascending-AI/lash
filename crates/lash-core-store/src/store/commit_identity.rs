@@ -42,8 +42,7 @@ pub struct OperationId {
 ///     items(
 ///         path = "crates/lash-core-store/src/store/commit_identity.rs",
 ///         path = "crates/lash-core-ids/src/stable_identity.rs", push_json_value, push_message_role,
-///         push_message_origin, push_attachment_type_metadata, push_attachment_ref,
-///         push_attachment_source, push_part_kind, push_part, append_node_identity_bytes,
+///         push_message_origin, push_attachment_type_metadata, push_attachment_ref, push_part_kind, push_part, append_node_identity_bytes,
 ///         append_request_identity_bytes, new_unframed, tag, u8, u32, u64, i64, string, bytes,
 ///         optional, sequence, finish, provider_route,
 ///     ),
@@ -390,45 +389,6 @@ fn push_attachment_ref(
     identity.optional(label.as_ref(), |identity, value| identity.string(value));
 }
 
-fn push_attachment_source(
-    identity: &mut crate::stable_identity::IdentityEncoder,
-    source: &crate::AttachmentSource,
-) {
-    match source {
-        crate::AttachmentSource::Inline { media_type, bytes } => {
-            identity.tag(0);
-            identity.string(media_type.as_str());
-            identity.bytes(bytes);
-        }
-        crate::AttachmentSource::Stored { attachment_ref } => {
-            identity.tag(1);
-            push_attachment_ref(identity, attachment_ref);
-        }
-        crate::AttachmentSource::ExternalUrl { media_type, url } => {
-            identity.tag(2);
-            identity.string(media_type.as_str());
-            identity.string(url);
-        }
-        crate::AttachmentSource::ProviderFile {
-            provider_scope,
-            id,
-            media_type,
-        } => {
-            let crate::ProviderFileScope {
-                provider,
-                credential_scope,
-            } = provider_scope;
-            identity.tag(3);
-            identity.string(provider);
-            identity.string(credential_scope);
-            identity.string(id);
-            identity.optional(media_type.as_ref(), |identity, value| {
-                identity.string(value.as_str())
-            });
-        }
-    }
-}
-
 fn push_part_kind(identity: &mut crate::stable_identity::IdentityEncoder, kind: crate::PartKind) {
     identity.tag(lash_sansio::core_support::fold_part_kind(
         kind,
@@ -449,7 +409,7 @@ fn push_part(identity: &mut crate::stable_identity::IdentityEncoder, part: &crat
             }
             lash_sansio::ModelToolReturnPart::Attachment(source) => {
                 identity.tag(1);
-                push_attachment_source(identity, source);
+                push_attachment_ref(identity, source);
             }
             // A retained output is its witness and the reference to its
             // bytes, never the bytes (FIG-1643).
@@ -465,8 +425,8 @@ fn push_part(identity: &mut crate::stable_identity::IdentityEncoder, part: &crat
         None => identity.string(&part.content()),
     }
     identity.optional(part.attachment(), |identity, attachment| {
-        let lash_sansio::PartAttachment { source } = attachment;
-        push_attachment_source(identity, source)
+        let lash_sansio::PartAttachment { reference } = attachment;
+        push_attachment_ref(identity, reference)
     });
     identity.optional(part.call_id(), |identity, value| {
         identity.string(value.as_str())
@@ -757,14 +717,11 @@ mod append_request_identity_tests {
                             },
                             {
                                 "id": "p2", "kind": "Attachment", "content": "attachment",
-                                "attachment": {"source": {
-                                    "source": "stored",
-                                    "attachment_ref": {
-                                        "id": "attachment-id", "media_type": "image/png",
+                                "attachment": {"reference": {
+                                        "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "media_type": "image/png",
                                         "byte_len": 18446744073709551615_u64,
                                         "type_metadata": {"type": "image", "width": 0, "height": 4294967295_u32},
                                         "label": "attachment-label"
-                                    }
                                 }}
                             },
                             {"id": "p3", "kind": "Code", "content": "code"},
@@ -775,9 +732,9 @@ mod append_request_identity_tests {
                                 "id": "p7", "kind": "ToolResult",
                                 "blocks": [
                                     {"type": "text", "text": "tool-result"},
-                                    {"type": "attachment", "source": "stored", "attachment_ref": {
-                                        "id": "result-attachment", "media_type": "image/png", "byte_len": 4
-                                    }},
+                                    {"type": "attachment",
+                                        "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "media_type": "image/png", "byte_len": 4
+                                    },
                                     {"type": "text", "text": "after"}
                                 ],
                                 "call_id": "tc_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "tool_name": "tool-name"
@@ -791,14 +748,10 @@ mod append_request_identity_tests {
                                 }
                             }
         ,
-                            {"id":"p9", "kind":"Attachment", "content":"", "attachment":{"source":
-                                {"source":"inline", "media_type":"application/octet-stream", "bytes":[0,255]}}},
-                            {"id":"p10", "kind":"Attachment", "content":"", "attachment":{"source":
-                                {"source":"stored", "attachment_ref":{"id":"stored-min", "media_type":"text/plain", "byte_len":0}}}},
-                            {"id":"p11", "kind":"Attachment", "content":"", "attachment":{"source":
-                                {"source":"external_url", "media_type":"image/jpeg", "url":"https://example.test/image.jpg"}}},
-                            {"id":"p12", "kind":"Attachment", "content":"", "attachment":{"source":
-                                {"source":"provider_file", "provider_scope":{"provider":"openai", "credential_scope":"account"}, "id":"file-id", "media_type":"application/pdf"}}}
+                            {"id":"p9", "kind":"Attachment", "content":"", "attachment":{"reference":
+                                {"id":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "media_type":"application/octet-stream", "byte_len":2}}},
+                            {"id":"p10", "kind":"Attachment", "content":"", "attachment":{"reference":
+                                {"id":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "media_type":"text/plain", "byte_len":0}}}
                         ]
                     }
                 }));

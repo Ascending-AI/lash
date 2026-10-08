@@ -1,3 +1,4 @@
+use crate::AttachmentRef;
 use crate::ProcessId;
 use crate::SessionId;
 pub use lash_core_store::effect_identity::*;
@@ -7,15 +8,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::CheckpointKind;
 use crate::llm::types::{
-    AttachmentSource, LlmEventSender, LlmMessage, LlmOutputSpec, LlmProviderTraceSender,
-    LlmToolChoice, LlmToolSpec,
+    LlmEventSender, LlmMessage, LlmOutputSpec, LlmProviderTraceSender, LlmToolChoice, LlmToolSpec,
 };
 use crate::sansio::{ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure, LlmCallError};
 use crate::{
-    AttachmentCreateMeta, CausalRef, CheckpointDelivery, EffectAddress, ExecResponse,
-    ExecutionScope, LlmRequest as CoreLlmRequest, LlmResponse, ProcessAwaitOutput,
-    ProcessExecutionContext, ProcessListMode, ProcessRecord, ProcessStartRegistration,
-    SessionScope,
+    CausalRef, CheckpointDelivery, EffectAddress, ExecResponse, ExecutionScope,
+    LlmRequest as CoreLlmRequest, LlmResponse, ProcessAwaitOutput, ProcessExecutionContext,
+    ProcessListMode, ProcessRecord, ProcessStartRegistration, SessionScope,
 };
 
 use super::executor::RuntimeEffectControllerError;
@@ -1087,58 +1086,26 @@ pub struct LlmRequestSpec {
 }
 
 impl LlmRequestSpec {
-    /// Sources are retained by their message blocks.
-    pub fn attachments(&self) -> Vec<&AttachmentSource> {
+    /// Refs are retained by their message blocks.
+    pub fn attachments(&self) -> impl Iterator<Item = &AttachmentRef> {
         self.messages
             .iter()
             .flat_map(|message| message.blocks.iter())
-            .flat_map(crate::llm::types::LlmContentBlock::attachment_sources)
-            .collect()
+            .flat_map(crate::llm::types::LlmContentBlock::attachments)
     }
 
-    pub async fn from_request(
-        request: &CoreLlmRequest,
-        attachment_store: &crate::RuntimeAttachmentStore,
-    ) -> Result<Self, RuntimeEffectControllerError> {
-        let mut messages = request.messages.clone();
-        for message in &mut messages {
-            if message
-                .blocks
-                .iter()
-                .flat_map(crate::llm::types::LlmContentBlock::attachment_sources)
-                .next()
-                .is_none()
-            {
-                continue;
-            }
-            for block in Arc::make_mut(&mut message.blocks) {
-                match block {
-                    crate::llm::types::LlmContentBlock::Attachment { source } => {
-                        **source = durable_attachment_source(source, attachment_store).await?;
-                    }
-                    crate::llm::types::LlmContentBlock::ToolResult { content, .. } => {
-                        for part in content {
-                            if let crate::ModelToolReturnPart::Attachment(source) = part {
-                                *source =
-                                    durable_attachment_source(source, attachment_store).await?;
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-        Ok(Self {
+    pub fn from_request(request: &CoreLlmRequest) -> Self {
+        Self {
             instructions: request.instructions.clone(),
             model: request.model.clone(),
-            messages,
+            messages: request.messages.clone(),
             tools: Arc::clone(&request.tools),
             tool_choice: request.tool_choice.clone(),
             attachment_acceptance: Arc::clone(&request.attachment_acceptance),
             generation: request.generation.clone(),
             scope: request.scope.clone(),
             output_spec: request.output_spec.clone(),
-        })
+        }
     }
 
     pub fn into_request(
@@ -1150,7 +1117,6 @@ impl LlmRequestSpec {
             instructions: self.instructions,
             model: self.model,
             messages: self.messages,
-            resolved_stored: Default::default(),
             tools: self.tools,
             tool_choice: self.tool_choice,
             attachment_acceptance: self.attachment_acceptance,
@@ -1161,33 +1127,6 @@ impl LlmRequestSpec {
             provider_trace,
         }
     }
-}
-
-async fn durable_attachment_source(
-    attachment: &AttachmentSource,
-    attachment_store: &crate::RuntimeAttachmentStore,
-) -> Result<AttachmentSource, RuntimeEffectControllerError> {
-    let source = match attachment {
-        AttachmentSource::Inline { media_type, bytes } => {
-            let attachment_ref = attachment_store
-                .put(
-                    bytes.clone(),
-                    AttachmentCreateMeta::new(media_type.clone(), None, None),
-                )
-                .await
-                .map_err(|err| {
-                    RuntimeEffectControllerError::new(
-                        crate::RuntimeErrorCode::RuntimeEffectAttachmentStore,
-                        format!(
-                            "failed to store attachment before runtime effect invocation: {err}"
-                        ),
-                    )
-                })?;
-            AttachmentSource::stored(attachment_ref)
-        }
-        durable => durable.clone(),
-    };
-    Ok(source)
 }
 
 #[path = "envelope_outcomes.rs"]

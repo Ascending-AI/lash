@@ -1,4 +1,3 @@
-use crate::llm::types::AttachmentSource;
 use crate::{AttachmentRef, ToolCallRecord};
 
 /// One source-level dispatch, optionally joined to the host tool record it produced.
@@ -32,7 +31,7 @@ pub struct ExecutedCallRecord {
 pub struct OmittedToolCalls {
     pub count: usize,
     pub failures: usize,
-    pub attachments: Vec<AttachmentSource>,
+    pub attachments: Vec<AttachmentRef>,
 }
 
 #[derive(

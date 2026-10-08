@@ -3,22 +3,22 @@
 
 use serde_json::{Map, Value};
 
-use super::{ATTACHMENT_TAG, SOURCE_KEY, TAG_KEY, ToolValue};
-use crate::llm::types::AttachmentSource;
+use super::{ATTACHMENT_TAG, REFERENCE_KEY, TAG_KEY, ToolValue};
+use crate::AttachmentRef;
 
 impl ToolValue {
-    /// Attachment sources that untrusted subtrees name in the tagged
+    /// Attachment refs that untrusted subtrees name in the tagged
     /// attachment shape. Each one is a claim, not an attachment. A caller
     /// adopts only the claims whose provenance it has checked, through
     /// [`Self::adopt_attachments`]. A guest runtime that carries a tool's
     /// attachment through its own values hands it back in this shape.
-    pub fn untrusted_attachment_claims(&self) -> Vec<AttachmentSource> {
+    pub fn untrusted_attachment_claims(&self) -> Vec<AttachmentRef> {
         let mut claims = Vec::new();
         self.collect_untrusted_attachment_claims(&mut claims);
         claims
     }
 
-    fn collect_untrusted_attachment_claims(&self, claims: &mut Vec<AttachmentSource>) {
+    fn collect_untrusted_attachment_claims(&self, claims: &mut Vec<AttachmentRef>) {
         match self {
             Self::UntrustedJson(value) => collect_json_attachment_claims(value, claims),
             Self::Array(values) => {
@@ -39,11 +39,11 @@ impl ToolValue {
         }
     }
 
-    /// Rewrites every untrusted tagged attachment whose source is one of
+    /// Rewrites every untrusted tagged attachment whose ref is one of
     /// `adopted` into a typed [`Self::Attachment`]. Everything else stays
     /// untrusted. The projection is unchanged, because a typed attachment
     /// projects to the same tagged shape.
-    pub fn adopt_attachments(self, adopted: &[AttachmentSource]) -> Self {
+    pub fn adopt_attachments(self, adopted: &[AttachmentRef]) -> Self {
         if adopted.is_empty() {
             return self;
         }
@@ -70,16 +70,16 @@ impl ToolValue {
     }
 }
 
-/// The source an object names when it has exactly the tagged attachment
+/// The ref an object names when it has exactly the tagged attachment
 /// shape; any other object names none.
-fn tagged_attachment_claim(map: &Map<String, Value>) -> Option<AttachmentSource> {
+fn tagged_attachment_claim(map: &Map<String, Value>) -> Option<AttachmentRef> {
     if map.len() != 2 || map.get(TAG_KEY)?.as_str()? != ATTACHMENT_TAG {
         return None;
     }
-    serde_json::from_value(map.get(SOURCE_KEY)?.clone()).ok()
+    serde_json::from_value(map.get(REFERENCE_KEY)?.clone()).ok()
 }
 
-fn collect_json_attachment_claims(value: &Value, claims: &mut Vec<AttachmentSource>) {
+fn collect_json_attachment_claims(value: &Value, claims: &mut Vec<AttachmentRef>) {
     match value {
         Value::Object(map) => match tagged_attachment_claim(map) {
             Some(source) => claims.push(source),
@@ -99,7 +99,7 @@ fn collect_json_attachment_claims(value: &Value, claims: &mut Vec<AttachmentSour
     }
 }
 
-fn names_adopted_attachment(value: &Value, adopted: &[AttachmentSource]) -> bool {
+fn names_adopted_attachment(value: &Value, adopted: &[AttachmentRef]) -> bool {
     let mut claims = Vec::new();
     collect_json_attachment_claims(value, &mut claims);
     claims.iter().any(|claim| adopted.contains(claim))
@@ -109,7 +109,7 @@ fn names_adopted_attachment(value: &Value, adopted: &[AttachmentSource]) -> bool
 /// subtree that names none stays one untrusted value. An object carrying
 /// the reserved tag key without being an adopted attachment is never
 /// split, so a foreign tag cannot decode as a typed value.
-fn adopt_json_attachments(value: Value, adopted: &[AttachmentSource]) -> ToolValue {
+fn adopt_json_attachments(value: Value, adopted: &[AttachmentRef]) -> ToolValue {
     if !names_adopted_attachment(&value, adopted) {
         return ToolValue::UntrustedJson(value);
     }

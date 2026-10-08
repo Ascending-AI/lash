@@ -348,10 +348,20 @@ async fn queued_checkpoint_input_preserves_images() {
                     SESSION,
                     &run,
                     crate::TurnInput::text("see image").with_attachment(
-                        lash_core::AttachmentSource::inline(
-                            lash_core::MediaType::parse("image/png").expect("media type"),
-                            vec![1, 2, 3],
-                        ),
+                        core.session(crate::SessionId::from(SESSION))
+                            .open()
+                            .await
+                            .expect("open")
+                            .put_attachment(
+                                vec![1, 2, 3],
+                                lash_core::AttachmentCreateMeta::new(
+                                    lash_core::MediaType::parse("image/png").expect("media type"),
+                                    None,
+                                    None,
+                                ),
+                            )
+                            .await
+                            .expect("put image"),
                     ),
                 )
                 .await;

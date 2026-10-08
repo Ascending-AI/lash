@@ -515,43 +515,6 @@ async fn admissions_settle_for_finish_cancel_and_error() {
         cancelled.result.outcome,
         lash_core::facade_support::TurnOutcome::Stopped(TurnStop::Cancelled { .. })
     ));
-
-    let error_trace = Arc::new(RecordingTraceSink::default());
-    let error_provider = lash_core::testing::TestProvider::builder()
-        .kind("logical-turn-error")
-        .complete(|_| async { panic!("normalization errors must not call the provider") })
-        .build()
-        .into_handle();
-    // An inline attachment over the core's attachment limit fails input
-    // normalization before any provider call.
-    let (error_core, error_engine) = standard_core_with_attachment_limit(
-        error_provider,
-        Arc::new(NoTools),
-        error_trace.clone(),
-        Some(8),
-    )
-    .await;
-    let error_session = created_session(&error_core, "logical-turn-error")
-        .await
-        .durable()
-        .await
-        .expect("open error session");
-    let invalid = error_session
-        .send(TurnInput::items([InputItem::attachment(
-            lash_core::AttachmentSource::inline(
-                lash_core::MediaType::parse("application/pdf").unwrap(),
-                vec![0_u8; 64],
-            ),
-        )]))
-        .output()
-        .await
-        .expect("invalid input terminalizes");
-    assert_global_invariants(&error_engine, "admissions-settle-error").await;
-    drop(error_engine);
-    assert!(matches!(
-        invalid.result.outcome,
-        lash_core::facade_support::TurnOutcome::Stopped(TurnStop::InvalidInput)
-    ));
 }
 
 /// FIG-5356, ADR 0101 §3: the default frame-switch bound stops typed,

@@ -1464,15 +1464,17 @@ mod attachment_notice_order_tests {
             ))
             .expect("plugin session");
         let reference = crate::AttachmentRef::new(
-            crate::AttachmentId::parse("notice-order").expect("attachment id"),
+            crate::AttachmentId::parse(
+                "1b6d42cdc3895b0073391a47cf8fdd73b17d5dd9cad33c7a45b4b49765631e8d",
+            )
+            .expect("attachment id"),
             crate::MediaType::parse("application/octet-stream").expect("media type"),
             4,
             None,
             None,
         );
-        let output = crate::ToolCallOutput::success_tool_value(crate::ToolValue::Attachment(
-            crate::AttachmentSource::stored(reference),
-        ));
+        let output =
+            crate::ToolCallOutput::success_tool_value(crate::ToolValue::Attachment(reference));
         let facts = Arc::new(crate::plugin::ToolPresentationFacts {
             intent_outcomes: Vec::new(),
         });

@@ -232,8 +232,8 @@ fn builtin_tool_output(
                 ToolViewBlock::Text { text, .. } => {
                     parts.push(ModelToolReturnPart::text(text.clone()))
                 }
-                ToolViewBlock::Attachment { source, .. } => {
-                    parts.push(ModelToolReturnPart::Attachment(source.clone()))
+                ToolViewBlock::Attachment { reference, .. } => {
+                    parts.push(ModelToolReturnPart::Attachment(reference.clone()))
                 }
                 ToolViewBlock::ResourceLink {
                     uri,
@@ -618,7 +618,10 @@ mod tests {
                     });
                 }
                 Ok(AttachmentRef::new(
-                    AttachmentId::parse("full-output").expect("valid id"),
+                    AttachmentId::parse(
+                        "52f54a5f27d6fc4c02d7c5fb426577c919a3bc73d058c243f0abba21823f5b26",
+                    )
+                    .expect("valid id"),
                     MediaType::parse("text/plain").expect("valid type"),
                     text.len() as u64,
                     None,
@@ -787,13 +790,14 @@ mod tests {
 
     #[test]
     fn resource_links_and_media_keep_their_positions() {
-        let source = lash_core::AttachmentSource::stored(AttachmentRef::new(
-            AttachmentId::parse("image").expect("id"),
+        let source = AttachmentRef::new(
+            AttachmentId::parse("6105d6cc76af400325e94d588ce511be5bfdbb73b437dc51eca43917d7a43e3d")
+                .expect("id"),
             MediaType::parse("image/png").expect("type"),
             3,
             None,
             None,
-        ));
+        );
         let meta = ToolViewMeta::default();
         let output = ToolCallOutput::success(serde_json::json!({})).with_view(ToolView {
             blocks: vec![
@@ -802,7 +806,7 @@ mod tests {
                     meta: meta.clone(),
                 },
                 ToolViewBlock::Attachment {
-                    source: source.clone(),
+                    reference: source.clone(),
                     meta: meta.clone(),
                 },
                 ToolViewBlock::ResourceLink {
@@ -845,13 +849,14 @@ mod tests {
     async fn cuts_share_the_cap_and_retain_complete_text_once() {
         let artifacts = Arc::new(Artifacts::default());
         let full = "ab".repeat(600);
-        let source = lash_core::AttachmentSource::stored(AttachmentRef::new(
-            AttachmentId::parse("image").expect("id"),
+        let source = AttachmentRef::new(
+            AttachmentId::parse("6105d6cc76af400325e94d588ce511be5bfdbb73b437dc51eca43917d7a43e3d")
+                .expect("id"),
             MediaType::parse("image/png").expect("type"),
             3,
             None,
             None,
-        ));
+        );
         let output = ToolCallOutput::success(serde_json::json!({})).with_view(ToolView {
             blocks: vec![
                 ToolViewBlock::Text {
@@ -859,7 +864,7 @@ mod tests {
                     meta: ToolViewMeta::default(),
                 },
                 ToolViewBlock::Attachment {
-                    source: source.clone(),
+                    reference: source.clone(),
                     meta: ToolViewMeta::default(),
                 },
                 ToolViewBlock::Text {
@@ -891,9 +896,14 @@ mod tests {
         assert!(matches!(
             result.parts.first(),
             Some(ModelToolReturnPart::Retained(retained))
-                if retained.reference.id.as_str() == "full-output"
+                if retained.reference.id.as_str() == "52f54a5f27d6fc4c02d7c5fb426577c919a3bc73d058c243f0abba21823f5b26"
         ));
-        assert!(text.contains("[output cut: showing") && text.contains("attachment full-output"));
+        assert!(
+            text.contains("[output cut: showing")
+                && text.contains(
+                    "attachment 52f54a5f27d6fc4c02d7c5fb426577c919a3bc73d058c243f0abba21823f5b26"
+                )
+        );
         assert!(text.contains("0..") && text.contains("chars"));
         assert_eq!(
             result
@@ -985,7 +995,9 @@ mod tests {
             panic!("the cut failure is one retained block: {:?}", result.parts);
         };
         assert!(retained.witness.contains("[Tool execution failed]"));
-        assert!(retained.witness.contains("attachment full-output"));
+        assert!(retained.witness.contains(
+            "attachment 52f54a5f27d6fc4c02d7c5fb426577c919a3bc73d058c243f0abba21823f5b26"
+        ));
         let retained_text = artifacts.text.lock().expect("test mutex").clone();
         assert_eq!(retained_text.len(), 1);
         assert!(retained_text[0].starts_with("[Tool execution failed]"));

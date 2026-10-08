@@ -32,10 +32,8 @@ impl LlmRequest {
         }
         chars = chars.saturating_add(
             self.attachments()
-                .iter()
-                .filter_map(|source| self.attachment_bytes(source))
-                .map(|bytes| bytes.len() / 4)
-                .sum(),
+                .map(|reference| usize::try_from(reference.byte_len / 4).unwrap_or(usize::MAX))
+                .fold(0usize, usize::saturating_add),
         );
         ((chars / 4).max(1)).try_into().unwrap_or(u32::MAX)
     }

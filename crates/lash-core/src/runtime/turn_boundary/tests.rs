@@ -346,9 +346,15 @@ async fn gates_advance_after_an_attachment_bearing_tool_result() {
         origin: None,
         reply_marker: None,
     };
-    let image = crate::AttachmentSource::inline(
+    let image = crate::AttachmentRef::new(
+        crate::AttachmentId::parse(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        )
+        .expect("digest"),
         crate::MediaType::parse("image/png").expect("png"),
-        vec![1, 2, 3, 4],
+        4,
+        None,
+        None,
     );
     let turn_one = vec![
         text_message("u1", MessageRole::User, "return the array"),

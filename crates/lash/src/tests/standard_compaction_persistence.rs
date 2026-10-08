@@ -730,12 +730,20 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
         .await?;
 
     session
-        .send(TurnInput::text("remember this image").with_attachment(
-            lash_core::AttachmentSource::inline(
-                lash_core::MediaType::parse("image/png").expect("image media type"),
-                vec![1, 2, 3],
+        .send(
+            TurnInput::text("remember this image").with_attachment(
+                session
+                    .put_attachment(
+                        vec![1, 2, 3],
+                        lash_core::AttachmentCreateMeta::new(
+                            lash_core::MediaType::parse("image/png").expect("image media type"),
+                            None,
+                            None,
+                        ),
+                    )
+                    .await?,
             ),
-        ))
+        )
         .id(crate::TurnId::parse("attachment-prune-first").expect("nonblank host identity"))
         .output()
         .await?;

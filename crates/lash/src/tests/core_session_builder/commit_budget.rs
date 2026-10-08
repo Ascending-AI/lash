@@ -33,19 +33,37 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() {
         .await
         .expect("a graph-only turn fits the node budget");
 
-    let session = core
-        .session(crate::SessionId::parse("commit-adoption-row-budget-surface").expect("id"))
+    core.session(crate::SessionId::parse("commit-adoption-row-budget-surface").expect("id"))
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
+    let session = core
+        .session(crate::SessionId::from("commit-adoption-row-budget-surface"))
+        .open()
+        .await
+        .expect("open");
     let png = || lash_core::MediaType::parse("image/png").expect("image media type");
+    let first = session
+        .put_attachment(
+            vec![1, 2, 3],
+            lash_core::AttachmentCreateMeta::new(png(), None, None),
+        )
+        .await
+        .expect("put first");
+    let second = session
+        .put_attachment(
+            vec![4, 5, 6],
+            lash_core::AttachmentCreateMeta::new(png(), None, None),
+        )
+        .await
+        .expect("put second");
     let error = tokio::time::timeout(
         std::time::Duration::from_secs(60),
         session
             .send(
                 crate::TurnInput::text("adopt two attachments")
-                    .with_attachment(lash_core::AttachmentSource::inline(png(), vec![1, 2, 3]))
-                    .with_attachment(lash_core::AttachmentSource::inline(png(), vec![4, 5, 6])),
+                    .with_attachment(first)
+                    .with_attachment(second),
             )
             .output(),
     )

@@ -1331,9 +1331,9 @@ async fn tool_result_from_rmcp(
                         Ok(reference) => reference,
                         Err(result) => return result,
                     };
-                let source = lash_core::AttachmentSource::stored(reference);
+                let source = reference;
                 view_blocks.push(ToolViewBlock::Attachment {
-                    source: source.clone(),
+                    reference: source.clone(),
                     meta,
                 });
                 content_items.push(mcp_block(
@@ -1352,9 +1352,9 @@ async fn tool_result_from_rmcp(
                         Ok(reference) => reference,
                         Err(result) => return result,
                     };
-                let source = lash_core::AttachmentSource::stored(reference);
+                let source = reference;
                 view_blocks.push(ToolViewBlock::Attachment {
-                    source: source.clone(),
+                    reference: source.clone(),
                     meta,
                 });
                 content_items.push(mcp_block(
@@ -1384,9 +1384,9 @@ async fn tool_result_from_rmcp(
                         Ok(reference) => reference,
                         Err(result) => return result,
                     };
-                    let source = lash_core::AttachmentSource::stored(reference);
+                    let source = reference;
                     view_blocks.push(ToolViewBlock::Attachment {
-                        source: source.clone(),
+                        reference: source.clone(),
                         meta,
                     });
                     content_items.push(mcp_block(

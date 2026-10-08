@@ -374,7 +374,6 @@ pub mod facade_support {
     pub use lash_sansio::AcceptedInjectedTurnInput;
     pub use lash_sansio::AttachmentMaterializationNotice;
     pub use lash_sansio::AttachmentMaterializationReason;
-    pub use lash_sansio::AttachmentMaterializationSource;
     pub use lash_sansio::AttachmentRef;
     pub use lash_sansio::EffectId;
     pub use lash_sansio::ErrorEnvelope;
@@ -445,15 +444,16 @@ pub use attachments::{
     EmptyRootSetPolicy, StoredAttachment, StoredBlobRef,
 };
 pub use lash_core_execution::turn_outcome_from_tool_control;
+pub use lash_sansio::llm::attachment_delivery::ProviderFileScope;
 pub use lash_sansio::llm::types::{
-    AttachmentSource, AttemptOutcome, AttemptRecord, AttemptUsageOutcome, ChargeSafetyDecision,
+    AttemptOutcome, AttemptRecord, AttemptUsageOutcome, ChargeSafetyDecision,
     ChargeSafetyDenialReason, ExecutionEvidence, ExecutionEvidenceCollectionInterruption,
     ExecutionEvidenceMergeError, GenerationOptionOutcome, GenerationOptions, GenerationReceipt,
     LlmCallId, LlmCallRecord, LlmOutputPart, LlmRequest, LlmRequestOwner, LlmRequestScope,
     LlmResponse, LlmStreamEvidence, LlmTerminalReason, LlmTurnScope, NonNegativeFiniteF64,
-    NormalizedError, ProtocolPosition, ProviderEndpointError, ProviderFileScope,
-    ProviderReplayDrop, ProviderReplayDropReason, ProviderReplayKind, ProviderRequestBody,
-    ProviderRouteIdentity, RetryClass, RetryDecision, RetryDeclineCause, RetryWait,
+    NormalizedError, ProtocolPosition, ProviderEndpointError, ProviderReplayDrop,
+    ProviderReplayDropReason, ProviderReplayKind, ProviderRouteIdentity, RecordedRequestTemplate,
+    RetryClass, RetryDecision, RetryDeclineCause, RetryWait,
 };
 pub use lash_sansio::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, Backoff, BatchId,
@@ -561,9 +561,9 @@ pub use plugin::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
 pub use lash_core_execution::{Material, NamesMaterial, SettledOutput, SettledOutputRefusal};
 pub use provider::{
     AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,
-    AttachmentCapabilitySnapshot, AttachmentMimeSource, CacheControlDialect, GoogleDialect,
-    InstructionRole, LlmProfileCapability, OpenAiReasoningContext, ReasoningCapability,
-    ReasoningEncoding, ReasoningIntent, ReasoningRetentionCapability, ReasoningRetentionPolicy,
+    AttachmentCapabilitySnapshot, CacheControlDialect, GoogleDialect, InstructionRole,
+    LlmProfileCapability, OpenAiReasoningContext, ReasoningCapability, ReasoningEncoding,
+    ReasoningIntent, ReasoningRetentionCapability, ReasoningRetentionPolicy,
     ReasoningRetentionSelection, ReasoningRetentionValidationCategory,
     ReasoningRetentionValidationError, ReasoningSelection, SamplingCapability, StreamTermination,
 };

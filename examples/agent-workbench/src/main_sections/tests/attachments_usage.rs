@@ -65,8 +65,10 @@ async fn attachment_usage_gate() {
     // an id that is not a single namespace component is rejected there rather
     // than reaching the store.
     assert!(lash::attachments::AttachmentId::parse("../escape").is_err());
-    let missing_id = lash::attachments::AttachmentId::parse("missing-workbench-attachment")
-        .expect("valid attachment id");
+    let missing_id = lash::attachments::AttachmentId::parse(
+        "ee2862941553e4d152e9c547c018e45952a7029424159d05ca82a39ab689b7f2",
+    )
+    .expect("valid attachment id");
     match attachment_store
         .get(
             &missing_id,
@@ -79,34 +81,18 @@ async fn attachment_usage_gate() {
         }
         other => panic!("missing attachment must return NotFound, got {other:?}"),
     }
-    // What a real provider sends: the call lowered to its exact body, with
-    // stored attachments resolved to their bytes.
+    // The model send carries the upload ref after the host fills its slots.
     let lowered_attachments = Arc::new(Mutex::new(Vec::new()));
     let provider_requests = Arc::new(Mutex::new(Vec::new()));
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-harness")
-        .lower({
+        .send({
             let lowered_attachments = Arc::clone(&lowered_attachments);
-            move |request| {
-                lowered_attachments.lock_recover().push(
-                    request
-                        .attachments()
-                        .iter()
-                        .map(|source| {
-                            (
-                                source.media_type().map(|media| media.as_str().to_string()),
-                                request.attachment_bytes(source).map(<[u8]>::to_vec),
-                                source.stored_ref().map(|reference| reference.id.clone()),
-                            )
-                        })
-                        .collect::<Vec<_>>(),
-                );
-                serde_json::to_string(request).expect("encode the lowered request")
-            }
-        })
-        .complete({
             let provider_requests = Arc::clone(&provider_requests);
-            move |request| {
+            move |request, _wire| {
+                lowered_attachments
+                    .lock_recover()
+                    .push(request.attachments().cloned().collect::<Vec<_>>());
                 provider_requests.lock_recover().push(request);
                 async { Ok(usage_gate_response()) }
             }
@@ -175,7 +161,7 @@ async fn attachment_usage_gate() {
         State(state.clone()),
         Query(SessionQuery::default()),
         Json(TurnRequest {
-            attachment_id: Some(uploaded.attachment.id.to_string()),
+            attachment: Some(uploaded.attachment.clone()),
             ..turn_request("Describe the attached PNG briefly.")
         }),
     )
@@ -210,12 +196,8 @@ async fn attachment_usage_gate() {
     );
     assert_eq!(
         *lowered_attachments.lock_recover(),
-        vec![vec![(
-            Some("image/png".to_string()),
-            Some(png_bytes.clone()),
-            Some(uploaded.attachment.id.clone()),
-        )]],
-        "the one call carries the uploaded PNG's bytes under its stored reference"
+        vec![vec![uploaded.attachment.clone()]],
+        "the one call carries the uploaded PNG's ref"
     );
 
     let before_restart = read_state(state, None)

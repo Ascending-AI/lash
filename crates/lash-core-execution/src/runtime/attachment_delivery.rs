@@ -23,7 +23,6 @@ pub fn delivered_attachment_ids(output: &ProcessAwaitOutput) -> Vec<AttachmentId
     let mut ids = output
         .attachments()
         .iter()
-        .filter_map(|attachment| attachment.stored_ref())
         .map(|attachment_ref| attachment_ref.id.clone())
         .collect::<Vec<_>>();
     ids.sort();

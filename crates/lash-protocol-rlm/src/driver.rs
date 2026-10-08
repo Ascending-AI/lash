@@ -121,7 +121,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
             instructions: None,
             model: ctx.config.model.clone(),
             messages,
-            resolved_stored: Default::default(),
+
             tools: Arc::new(Vec::new()),
             tool_choice: LlmToolChoice::None,
             attachment_acceptance: Arc::clone(&ctx.config.attachment_acceptance),
@@ -200,7 +200,7 @@ pub(crate) fn render_conformance_history_message(
     let attachment_count = rendered
         .iter()
         .flat_map(|message| message.blocks.iter())
-        .flat_map(LlmContentBlock::attachment_sources)
+        .flat_map(LlmContentBlock::attachments)
         .count();
     match rendered.as_slice() {
         [message] if attachment_count == 0 => Ok(message.clone()),

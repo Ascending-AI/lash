@@ -554,7 +554,41 @@ impl HostBridge<'_> {
 
     async fn print(&self, value: FlowValue) -> Result<(), ExecutionHostError> {
         let attachment_store = self.ctx.attachment_store();
-        let images = collect_printed_images(&value, attachment_store.as_ref()).await?;
+        let mut admitted = self
+            .calls
+            .lock_recover()
+            .iter()
+            .filter_map(|(_, call)| call.host_record.as_ref())
+            .flat_map(|record| record.output.attachments())
+            .collect::<Vec<_>>();
+        for entry in self.ctx.chronological_projection().entries() {
+            match &entry.payload {
+                lash_core::facade_support::ChronologicalPayload::Message(message) => {
+                    admitted.extend(
+                        message
+                            .parts
+                            .iter()
+                            .flat_map(lash_core::Part::attachments)
+                            .cloned(),
+                    );
+                }
+                lash_core::facade_support::ChronologicalPayload::ProtocolEvent(event) => {
+                    if let Some(lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step)) =
+                        crate::projection::decode_rlm_protocol_event(event)
+                            .map_err(|error| ExecutionHostError::new(error.to_string()))?
+                    {
+                        admitted.extend(step.images);
+                        admitted.extend(step.output_archive.map(|archive| archive.reference));
+                        if let Some(lash_core::OutputValue::Retained(retained)) =
+                            step.outcome.terminal_value()
+                        {
+                            admitted.push(retained.reference.clone());
+                        }
+                    }
+                }
+            }
+        }
+        let images = collect_printed_images(&value, attachment_store.as_ref(), &admitted).await?;
         self.prints.lock_recover().push(value);
         if !images.is_empty() {
             self.printed_images.lock_recover().extend(images);
@@ -951,16 +985,18 @@ pub(super) struct CollectedExecutionOutput {
 async fn collect_printed_images(
     value: &FlowValue,
     attachment_store: &lash_core::facade_support::RuntimeAttachmentStore,
+    admitted: &[AttachmentRef],
 ) -> Result<Vec<AttachmentRef>, ExecutionHostError> {
     let mut seen = BTreeSet::new();
     let mut images = Vec::new();
-    collect_printed_images_inner(value, attachment_store, &mut seen, &mut images).await?;
+    collect_printed_images_inner(value, attachment_store, admitted, &mut seen, &mut images).await?;
     Ok(images)
 }
 
 fn collect_printed_images_inner<'a>(
     value: &'a FlowValue,
     attachment_store: &'a lash_core::facade_support::RuntimeAttachmentStore,
+    admitted: &'a [AttachmentRef],
     seen: &'a mut BTreeSet<String>,
     images: &'a mut Vec<AttachmentRef>,
 ) -> lash_sansio::future::SendBoxFuture<'a, Result<(), ExecutionHostError>> {
@@ -975,60 +1011,68 @@ fn collect_printed_images_inner<'a>(
                 let id = lash_core::AttachmentId::parse(&image.id).map_err(|err| {
                     ExecutionHostError::new(format!("printed image id is unusable: {err}"))
                 })?;
-                attachment_store.get(&id).await.map_err(|_| {
+                let reference = admitted
+                    .iter()
+                    .find(|reference| {
+                        reference.id == id
+                            && reference.media_type == image.mime
+                            && reference.byte_len == image.size
+                    })
+                    .cloned()
+                    .ok_or_else(|| {
+                        ExecutionHostError::new(
+                            "printed image has no admitted attachment provenance",
+                        )
+                    })?;
+                attachment_store.read(&reference).await.map_err(|_| {
                     ExecutionHostError::new(format!(
-                        "image bytes for `{}` are unavailable or were pruned",
-                        image.id
+                        "image bytes for `{}` are unavailable or do not match its ref",
+                        reference.id
                     ))
                 })?;
-                let reference = AttachmentRef {
-                    id,
-                    media_type: image.mime.clone(),
-                    byte_len: image.size,
-                    type_metadata: Some(lash_core::AttachmentTypeMetadata::image(
-                        image.width,
-                        image.height,
-                    )),
-                    label: Some(image.label.clone()),
-                };
                 images.push(reference);
             }
             FlowValue::Tuple(values) | FlowValue::List(values) => {
                 for value in values.iter() {
-                    collect_printed_images_inner(value, attachment_store, seen, images).await?;
+                    collect_printed_images_inner(value, attachment_store, admitted, seen, images)
+                        .await?;
                 }
             }
             FlowValue::Record(record) => {
                 if matches!(record.get("$lash_tool_value"), Some(FlowValue::String(kind)) if kind.as_str() == "attachment")
-                    && let Some(source) = record.get("source")
-                    && let Ok(lash_core::AttachmentSource::Stored { attachment_ref }) =
-                        serde_json::from_value::<lash_core::AttachmentSource>(flow_to_json_value(
-                            source,
-                        ))
+                    && let Some(reference) = record.get("reference")
+                    && let Ok(attachment_ref) =
+                        serde_json::from_value::<AttachmentRef>(flow_to_json_value(reference))
                 {
+                    let adopted = lash_core::ToolValue::untrusted_json(flow_record_json(record))
+                        .adopt_attachments(admitted);
+                    if !adopted.attachments().contains(&attachment_ref) {
+                        return Err(ExecutionHostError::new(
+                            "printed attachment has no admitted attachment provenance",
+                        ));
+                    }
                     if seen.insert(attachment_ref.id.to_string()) {
-                        attachment_store
-                            .get(&attachment_ref.id)
-                            .await
-                            .map_err(|_| {
-                                ExecutionHostError::new(format!(
-                                    "attachment bytes for `{}` are unavailable or were pruned",
-                                    attachment_ref.id
-                                ))
-                            })?;
+                        attachment_store.read(&attachment_ref).await.map_err(|_| {
+                            ExecutionHostError::new(format!(
+                                "attachment bytes for `{}` are unavailable or were pruned",
+                                attachment_ref.id
+                            ))
+                        })?;
                         images.push(attachment_ref);
                     }
                     return Ok(());
                 }
                 for (_, value) in record.iter() {
-                    collect_printed_images_inner(value, attachment_store, seen, images).await?;
+                    collect_printed_images_inner(value, attachment_store, admitted, seen, images)
+                        .await?;
                 }
             }
             FlowValue::Projected(value) => {
                 // A projection restored without its host descriptor has no value
                 // to scan; it carries no printed image either (FIG-2865).
                 if let Ok(value) = value.materialize() {
-                    collect_printed_images_inner(&value, attachment_store, seen, images).await?;
+                    collect_printed_images_inner(&value, attachment_store, admitted, seen, images)
+                        .await?;
                 }
             }
             FlowValue::Null
@@ -1051,13 +1095,12 @@ mod mcp_media_tests {
 
     #[tokio::test]
     async fn printing_an_mcp_content_block_attaches_its_stored_media() {
-        let directory = tempfile::tempdir().expect("attachment directory");
-        let store = lash_core::facade_support::RuntimeAttachmentStore::ephemeral(
-            lash_sqlite_store::SqliteStoreSet::open((directory.path()).join("attachments.db"))
-                .await
-                .expect("SQLite attachment store")
-                .attachment_store(),
-        );
+        use lash_core::StoreSet as _;
+        let stores = lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("SQLite stores");
+        let store =
+            lash_core::facade_support::RuntimeAttachmentStore::ephemeral(stores.attachment_store());
         let reference = store
             .put(
                 b"audio bytes".to_vec(),
@@ -1069,14 +1112,13 @@ mod mcp_media_tests {
             )
             .await
             .expect("store media");
-        let media = lash_core::ToolValue::Attachment(lash_core::AttachmentSource::stored(
-            reference.clone(),
-        ));
+        let media = lash_core::ToolValue::Attachment(reference.clone());
         let block = crate::projection::json_to_flow_value(serde_json::json!({
             "type": "audio", "mimeType": "audio/wav", "attachment": media.to_json_value()
         }));
+        assert!(collect_printed_images(&block, &store, &[]).await.is_err());
         assert_eq!(
-            collect_printed_images(&block, &store)
+            collect_printed_images(&block, &store, std::slice::from_ref(&reference))
                 .await
                 .expect("print media"),
             vec![reference]

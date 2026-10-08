@@ -137,9 +137,15 @@ pub(crate) async fn upload_attachment(
     let type_metadata = png_dimensions(&bytes).map(|(width, height)| {
         lash::attachments::AttachmentTypeMetadata::image(Some(width), Some(height))
     });
-    let attachment = state
-        .attachment_store
-        .put(
+    let session_id = state.current_session_id();
+    let session = state
+        .create_or_open_session(&session_id, "api.attachment.upload")
+        .await
+        .map_err(|error| {
+            state.session_admission_error(&session_id, "api.attachment.upload", error)
+        })?;
+    let attachment = session
+        .put_attachment(
             bytes,
             lash::attachments::AttachmentCreateMeta::new(
                 media_type,
@@ -266,12 +272,10 @@ pub(crate) async fn send_turn(
             "client_nonce must be 1-64 ASCII letters, digits or '-'",
         ));
     }
-    let attachment_id = request
-        .attachment_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-        .map(str::to_string);
+    let attachment = request.attachment.clone();
+    let attachment_id = attachment
+        .as_ref()
+        .map(|reference| reference.id.to_string());
     let session_id = state.admit_session(&query, "api.turn").await?;
     state
         .authorization
@@ -282,29 +286,6 @@ pub(crate) async fn send_turn(
     // than when a poll reads the session; an unnamed session takes its first
     // prompt as its title.
     state.sessions.record_prompt(&session_id, &text);
-    let attachment = match attachment_id.as_deref() {
-        None => None,
-        Some(attachment_id) => match state
-            .attachment_store
-            .get(
-                // Request-body id: untrusted, so a malformed one is a bad
-                // request rather than a store lookup.
-                &lash::attachments::AttachmentId::parse(attachment_id)
-                    .map_err(|err| AppError::bad_request(err.to_string()))?,
-                lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
-            )
-            .await
-        {
-            Ok(stored) => Some(stored),
-            Err(lash::persistence::AttachmentStoreError::NotFound(_)) => {
-                return Err(AppError::not_found(format!(
-                    "attachment `{attachment_id}` was not found"
-                )));
-            }
-            // Audited: the content-addressed attachment store has no session identity or tombstone error variant.
-            Err(err) => return Err(AppError::internal(err)),
-        },
-    };
     let turn_profile = llm_profile_selection_for_request(
         &state.selected_llm_profile(),
         request.model.as_deref(),
@@ -332,13 +313,7 @@ pub(crate) async fn send_turn(
     // session. The atomic reservation below rechecks after that open, closing
     // the race with another send or a queued-work runner.
     if state.active_turns.for_session(&session_id).is_some() {
-        return admit_queued_send(
-            &state,
-            &session_id,
-            text,
-            attachment.map(|attachment| attachment.bytes),
-        )
-        .await;
+        return admit_queued_send(&state, &session_id, text, attachment.clone()).await;
     }
     drop(
         state
@@ -364,13 +339,7 @@ pub(crate) async fn send_turn(
         ActiveTurnClaim::Claimed => {}
         ActiveTurnClaim::Busy => {
             cleanup.complete();
-            return admit_queued_send(
-                &state,
-                &session_id,
-                text,
-                attachment.map(|attachment| attachment.bytes),
-            )
-            .await;
+            return admit_queued_send(&state, &session_id, text, attachment.clone()).await;
         }
         // The delete fenced this session after the admission read above; the
         // claim is where that ordering is decided, so refuse here exactly as
@@ -391,7 +360,7 @@ pub(crate) async fn send_turn(
                 session_id: session_id.clone(),
                 text,
                 model: turn_profile.clone(),
-                attachment_id,
+                attachment,
             },
             chat_attachments,
             client_nonce,

@@ -189,10 +189,16 @@ fn the_fold_answers_one_call_per_response_call_in_response_order() {
 #[test]
 fn the_fold_carries_member_attachments_after_the_rows() {
     let expansion = expand(vec![wrapper("w", &["read", "read"])], max(64));
-    let attachment = ModelToolReturnPart::Attachment(lash_core::AttachmentSource::ExternalUrl {
-        media_type: lash_core::MediaType::parse("image/png").expect("a media type"),
-        url: "https://example.test/a.png".to_string(),
-    });
+    let attachment = ModelToolReturnPart::Attachment(lash_core::AttachmentRef::new(
+        lash_core::AttachmentId::parse(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        )
+        .expect("digest"),
+        lash_core::MediaType::parse("image/png").expect("a media type"),
+        3,
+        None,
+        None,
+    ));
     let mut completed = expansion.calls.iter().map(succeeded).collect::<Vec<_>>();
     completed[1].model_return.parts.push(attachment.clone());
     let folded = fold(&expansion.plan, completed);

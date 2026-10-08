@@ -635,7 +635,11 @@ pub(crate) fn surface_attachment_materialization_notices(
     model_return: &mut ModelToolReturn,
 ) {
     for notice in output.attachments().iter().filter_map(|source| {
-        crate::attachments::attachment_materialization_notice(snapshot, source)
+        crate::attachments::attachment_materialization_notice(
+            snapshot,
+            source,
+            lash_sansio::llm::attachment_delivery::AttachmentPosition::ToolResult,
+        )
     }) {
         model_return
             .parts
@@ -651,15 +655,17 @@ mod attachment_materialization_tests {
     #[test]
     fn successful_unsupported_attachment_surfaces_typed_admission_notice() {
         let attachment_ref = crate::AttachmentRef {
-            id: crate::AttachmentId::parse("unsupported-tool-attachment").expect("attachment id"),
+            id: crate::AttachmentId::parse(
+                "a38e99b7e70bfb9f89b444caa68b43916cac061841fb555c4ac276776dc551a6",
+            )
+            .expect("attachment id"),
             media_type: crate::MediaType::parse("application/octet-stream").expect("binary MIME"),
             byte_len: 34,
             type_metadata: None,
             label: Some("workspace_badge.bin".to_string()),
         };
-        let output = crate::ToolCallOutput::success_tool_value(crate::ToolValue::Attachment(
-            crate::AttachmentSource::stored(attachment_ref),
-        ));
+        let output =
+            crate::ToolCallOutput::success_tool_value(crate::ToolValue::Attachment(attachment_ref));
         let mut model_return =
             crate::ModelToolReturn::from_output("workspace_badge".to_string(), &output);
 
@@ -673,7 +679,7 @@ mod attachment_materialization_tests {
         assert_eq!(model_return.attachment_notices.len(), 1);
         assert_eq!(
             model_return.attachment_notices[0].reason,
-            crate::AttachmentMaterializationReason::NoProviderAcceptsMimeAndSource
+            crate::AttachmentMaterializationReason::NoProviderAcceptsMimeAndPosition
         );
         assert!(model_return.parts.iter().any(|part| {
             matches!(

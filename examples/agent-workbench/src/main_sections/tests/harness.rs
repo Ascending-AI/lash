@@ -361,7 +361,7 @@ pub(crate) fn turn_request(text: &str) -> TurnRequest {
         text: text.to_string(),
         model: Some(TEST_MODEL.to_string()),
         model_variant: None,
-        attachment_id: None,
+        attachment: None,
         client_nonce: None,
     }
 }
