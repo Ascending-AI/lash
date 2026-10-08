@@ -723,6 +723,11 @@ async fn retry_ladder_survives_a_later_pending_completion(tier: Tier) {
         return;
     };
     let call_id = executions[1].call_id.clone();
+    let starts = records.0.lock_recover().iter().filter(|record| matches!(
+        &record.event,
+        lash::tracing::TraceEvent::ToolCallStarted { call_id: started, .. } if *started == call_id
+    )).count();
+    assert_eq!(starts, 1, "retries and the park are one logical call");
     let completions = records
         .0
         .lock_recover()
@@ -757,6 +762,22 @@ async fn retry_ladder_survives_a_later_pending_completion(tier: Tier) {
         vec![(1, true), (2, false)],
         "the ladder keeps the failed first attempt and completes the second: {attempts:?}"
     );
+    assert!(
+        matches!(
+            attempts[1].detail,
+            lash::tracing::TraceRetryAttemptDetail::Tool {
+                outcome: lash::tracing::TraceToolAttemptOutcome::Completed
+            }
+        ),
+        "the resolved attempt completed: {attempts:?}"
+    );
+    assert_eq!(
+        attempts
+            .iter()
+            .map(|attempt| attempt.delay_ms)
+            .collect::<Vec<_>>(),
+        [Some(1), None]
+    );
     world.shutdown().await;
 }
 
@@ -771,11 +792,81 @@ tiered_laws!(
     a_retried_call_may_park_and_its_resolution_answers,
 );
 
-/// The traced law, on SQLite memory until FIG-5319 lands: a durable turn's
-/// round tool calls are not traced at all today.
+/// The retry trace law runs on SQLite memory.
 mod sqlite_memory_traced {
+    /// An immediate round call has one start and one completion, with its
+    /// completed first attempt, just as a singleton call does.
     #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-    #[ignore = "FIG-5319: a durable turn's round tool calls emit no ToolCallCompleted trace"]
+    async fn successful_round_call_is_traced_with_its_attempt() {
+        let records = std::sync::Arc::new(super::Records::default());
+        let witness = std::sync::Arc::new(super::Witness::default());
+        let sink = std::sync::Arc::clone(&records);
+        let probes = std::sync::Arc::clone(&witness);
+        let world = super::World::new(super::Tier::SqliteMemory, move |backend| {
+            lash::LashCore::standard_builder(backend.clone())
+                .trace_sink(sink)
+                .trace_level(lash::tracing::TraceLevel::Extended)
+                .tools(std::sync::Arc::new(super::Probes {
+                    witness: probes,
+                    backend: backend.clone(),
+                }))
+        })
+        .await
+        .expect("SQLite memory is available");
+        let output = world
+            .run(
+                "traced-success",
+                super::served::spec(64),
+                vec![super::probe(
+                    "provider-success",
+                    super::PROBE,
+                    serde_json::json!({ "label": "success" }),
+                )],
+            )
+            .await;
+        super::served::assert_answered("traced-success", &output);
+        let call = witness.only("success");
+        let events = records
+            .0
+            .lock()
+            .expect("records")
+            .iter()
+            .filter_map(|record| match &record.event {
+                lash::tracing::TraceEvent::ToolCallStarted {
+                    call_id,
+                    provider_call_id,
+                    name,
+                    args,
+                    ..
+                } if *call_id == call.call_id => {
+                    assert_eq!(provider_call_id.as_deref(), Some("provider-success"));
+                    assert_eq!(name, super::PROBE);
+                    assert_eq!(args["label"], "success");
+                    Some("started")
+                }
+                lash::tracing::TraceEvent::ToolCallCompleted {
+                    call_id, attempts, ..
+                } if *call_id == call.call_id => {
+                    let attempts = attempts.as_ref().expect("the completed attempt");
+                    assert_eq!(attempts.len(), 1);
+                    assert_eq!(attempts[0].ordinal, 1);
+                    assert_eq!(attempts[0].delay_ms, None);
+                    assert!(matches!(
+                        attempts[0].detail,
+                        lash::tracing::TraceRetryAttemptDetail::Tool {
+                            outcome: lash::tracing::TraceToolAttemptOutcome::Completed
+                        }
+                    ));
+                    Some("completed")
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(events, ["started", "completed"]);
+        world.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
     async fn retry_ladder_survives_a_later_pending_completion() {
         super::retry_ladder_survives_a_later_pending_completion(super::served::Tier::SqliteMemory)
             .await;

@@ -67,6 +67,8 @@ pub struct RoundMember {
     state: MemberState,
     /// The plugin-state resolutions its final outcome committed.
     committed_state: Vec<StateResolution>,
+    /// Recorded attempt outcomes and the backoff before the next attempt.
+    attempts: BTreeMap<u32, (SettledOutput, Option<u64>)>,
 }
 
 impl RoundMember {
@@ -116,6 +118,14 @@ impl RoundMember {
             | MemberState::RetryDue { .. }
             | MemberState::Waiting { .. } => None,
         }
+    }
+
+    /// The recorded attempts in order, with their outcome and retry delay.
+    /// A park is completed by its resolution at the same attempt number.
+    pub fn attempts(&self) -> impl Iterator<Item = (u32, &SettledOutput, Option<u64>)> {
+        self.attempts
+            .iter()
+            .map(|(attempt, (output, delay))| (*attempt, output, *delay))
     }
 
     fn current_start(&self) -> (Ordinal, u32) {
@@ -354,6 +364,7 @@ fn fold_run(run: RunSeq, records: &[&RunRecordRow]) -> Result<RoundView, FoldRef
                                 attempt: 1,
                             },
                             committed_state: Vec::new(),
+                            attempts: BTreeMap::new(),
                         });
                     }
                     Some(member)
@@ -393,6 +404,10 @@ fn fold_run(run: RunSeq, records: &[&RunRecordRow]) -> Result<RoundView, FoldRef
                     return Err(out_of_order(row));
                 }
                 let member = open_attempt(&mut members, row, settled.start)?;
+                let attempt = member.current_start().1;
+                member
+                    .attempts
+                    .insert(attempt, (settled.output.clone(), None));
                 member.state = MemberState::Final {
                     start: Ordinal(settled.start),
                     outcome: settled.output,
@@ -408,6 +423,17 @@ fn fold_run(run: RunSeq, records: &[&RunRecordRow]) -> Result<RoundView, FoldRef
                 if !retry.output.may_repeat() || attempt >= member.draft.policy().max_attempts() {
                     return Err(out_of_order(row));
                 }
+                let suggested_delay = match &retry.output {
+                    SettledOutput::Failed(failure) => failure.named().suggested_delay_ms,
+                    _ => None,
+                };
+                let delay = member
+                    .draft
+                    .policy()
+                    .delay_ms_for_retry(attempt - 1, suggested_delay);
+                member
+                    .attempts
+                    .insert(attempt, (retry.output.clone(), Some(delay)));
                 member.state = MemberState::RetryDue {
                     start: Ordinal(retry.start),
                     attempt,

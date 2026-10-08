@@ -224,6 +224,7 @@ impl CellTools {
             call.invocation(),
             execution,
             &self.policies(),
+            true,
         )
     }
 

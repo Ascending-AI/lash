@@ -51,6 +51,10 @@ pub struct MemberPin {
 /// Nothing here drives the turn or commits: the phase runner admits, runs
 /// and presents the round, and asks this for what only the catalog knows.
 pub trait RoundTools: Send + Sync {
+    /// Observe `call` as its committed member records leave it, before any
+    /// body runs. Called after every fold; a live observer deduplicates it.
+    fn observe(&self, _call: &PendingToolCall, _member: &super::RoundMember) {}
+
     /// What `call` is admitted as, read from the catalog at `now_ms`. Runs
     /// no hook, preparation or body.
     fn pin(&self, call: &PendingToolCall, now_ms: u64) -> MemberPin;
@@ -238,6 +242,14 @@ impl RoundCalls {
 }
 
 impl MemberBodies for RoundCalls {
+    fn observe(&self, round: &super::RoundView) {
+        for member in round.members() {
+            if let Some(call) = self.calls.get(member.call()) {
+                self.tools.observe(call, member);
+            }
+        }
+    }
+
     fn resolved(
         &self,
         execution: &AdmittedExecution,

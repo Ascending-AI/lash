@@ -11976,7 +11976,7 @@ laws = [
 disposition = "replaced-by:crates/lash-durable-test/tests/tool_call_identity.rs::retry_ladder_survives_a_later_pending_completion"
 status = "deleted"
 owed = "retry ladder survives a later pending completion"
-note = "FIG-5309 re-wrote the law through a host's send() on the core's served node: a deferring Repeatable probe fails its first attempt and parks its second. The retry and park half runs as a_retried_call_may_park_and_its_resolution_answers; the trace half exposed a bug, a durable turn's round tool calls are never traced, and is #[ignore]d (sqlite_memory_traced) against FIG-5319"
+note = "FIG-5309 re-wrote the law through a host's send() on the core's served node: a deferring Repeatable probe fails its first attempt and parks its second. The retry and park half runs as a_retried_call_may_park_and_its_resolution_answers. FIG-5319 enabled the trace half (sqlite_memory_traced): round observations use the singleton trace helpers and the fold's recorded retry ladder, including a later park resolution"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs"

@@ -16,9 +16,8 @@ pub(crate) struct ToolObservationAttribution {
 /// `scope` is the scope the execution runs under, a turn's or a process's, and
 /// `scope_context` carries the matching record identity (session / turn /
 /// iteration) so [`crate::trace::assign_span_identity`] stamps
-/// `tool:<call_id>` under the right turn. The right to emit is not held here:
-/// each emission takes it from the controller its execution issues steps
-/// through.
+/// `tool:<call_id>` under the right turn. Coordination runs live from
+/// committed state, never against a replay journal (ADR 0132 §2).
 #[derive(Clone)]
 pub struct RuntimeExecutionTracing {
     pub(super) runtime: crate::trace::TraceRuntime,
@@ -49,14 +48,10 @@ impl RuntimeExecutionTracing {
         self.scope.as_ref()
     }
 
-    /// The standing of the coordination that issues a call's steps through
-    /// `controller`: the tool lifecycle is observed once those steps' bodies
-    /// have really run.
-    pub(crate) fn coordination(
-        &self,
-        controller: &crate::ActorContext,
-    ) -> crate::trace::TraceStanding {
-        self.runtime.shift(self.scope.clone(), controller)
+    /// Coordination continues from committed state and is never replayed.
+    /// Its observations therefore need no journal frontier (ADR 0132 §2).
+    pub(crate) fn coordination(&self) -> crate::trace::TraceStanding {
+        self.runtime.unreplayed(self.scope.clone())
     }
 }
 
@@ -200,7 +195,7 @@ impl RuntimeExecutionContext<'_> {
         let tracing = self.tracing.as_ref()?;
         Some(match &self.live_step {
             Some(live) => tracing.runtime.body(tracing.scope.clone(), live),
-            None => tracing.coordination(&self.dispatch.effect_controller),
+            None => tracing.coordination(),
         })
     }
 
@@ -222,8 +217,7 @@ impl RuntimeExecutionContext<'_> {
         self
     }
 
-    /// Where the coordination of this execution's tool calls stands: with the
-    /// shift that issues their steps.
+    /// The live standing of this execution's tool-call coordination.
     pub(in crate::session) fn coordination_standing(
         &self,
         tracing: &RuntimeExecutionTracing,
@@ -232,7 +226,7 @@ impl RuntimeExecutionContext<'_> {
         if let Some(standing) = &self.fixture_standing {
             return standing.clone();
         }
-        tracing.coordination(&self.dispatch.effect_controller)
+        tracing.coordination()
     }
 
     pub fn with_code_block_graph_key(mut self, graph_key: Option<String>) -> Self {

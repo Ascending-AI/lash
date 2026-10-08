@@ -27,7 +27,9 @@ impl ProductionToolHandlers<'_> {
         let context = self
             .context
             .with_tool_observation_attribution(&prepared.input.attribution);
-        context.trace_tool_call_started(start, self.context.dispatch().clock.timestamp_ms())?;
+        if self.traces_call {
+            context.trace_tool_call_started(start, self.context.dispatch().clock.timestamp_ms())?;
+        }
         context.emit_tool_call_started(
             call.call_id.as_str(),
             &crate::tool_dispatch::ToolCallIds::of(call),

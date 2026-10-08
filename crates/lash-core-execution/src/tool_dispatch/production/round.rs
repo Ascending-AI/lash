@@ -315,6 +315,7 @@ pub(super) fn member_body(
     invocation: ToolInvocation,
     execution: &AdmittedExecution,
     policies: &PolicyView,
+    traces_call: bool,
 ) -> MemberBody {
     let context = context.clone();
     let owner = owner.clone();
@@ -335,10 +336,11 @@ pub(super) fn member_body(
             };
             // Each attempt owns its handlers: an inline body stops on the
             // member's cancel, which its owner fires on a turn cancel.
-            let handlers = Arc::new(
+            let mut handlers =
                 ProductionToolHandlers::new(context.with_cancellation_token(token.clone()), None)
-                    .with_completion_key(key),
-            );
+                    .with_completion_key(key);
+            handlers.traces_call = traces_call;
+            let handlers = Arc::new(handlers);
             let (end, store_local) = handlers
                 .member_attempt(&owner, &call, invocation, ordinal, may_retry, &token)
                 .await
@@ -600,13 +602,71 @@ pub(super) fn catalog_policies(context: &RuntimeExecutionContext<'_>) -> PolicyV
     )
 }
 
+/// A member's committed answer as the singleton trace helpers read it,
+/// including the call's recorded intent outcomes.
+fn member_record(call: &crate::sansio::PendingToolCall, output: &SettledOutput) -> ToolCallRecord {
+    let mut completed = completed_answer(call, output);
+    super::super::attempt_coordinator::project_recorded_intent_outcomes(
+        &mut completed.output,
+        &completed.intent_outcomes,
+    );
+    ToolCallRecord {
+        call_id: completed.call_id,
+        provider_call_id: completed.provider_call_id,
+        tool: completed.tool_name,
+        args: completed.args,
+        output: completed.output,
+    }
+}
+
 /// The tools a turn's rounds run, over one execution context's catalog.
 struct ProductionRoundTools {
+    /// Calls this live context started, and whether it observed their final.
+    traced: Mutex<BTreeMap<crate::ToolCallId, bool>>,
     context: RuntimeExecutionContext<'static>,
     owner: crate::EffectOpener,
 }
 
 impl RoundTools for ProductionRoundTools {
+    fn observe(
+        &self,
+        call: &crate::sansio::PendingToolCall,
+        member: &crate::runtime::actor::round::RoundMember,
+    ) {
+        let (start, complete) = {
+            let mut traced = self.traced.lock_recover();
+            let start = !traced.contains_key(&call.call_id);
+            let completed = traced.entry(call.call_id.clone()).or_insert(false);
+            let complete = !*completed && member.outcome().is_some();
+            *completed |= complete;
+            (start, complete)
+        };
+        if start {
+            let start = crate::session::ToolCallStart {
+                call_id: &call.call_id,
+                provider_call_id: call.provider_call_id.as_deref(),
+                tool: &call.tool_name,
+                args: &call.args,
+            };
+            if let Err(error) = self
+                .context
+                .trace_tool_call_started(start, self.context.dispatch().clock.timestamp_ms())
+            {
+                self.context.record_nested_effect_error(error);
+            }
+        }
+        if complete && let Some(output) = member.outcome() {
+            let record = member_record(call, output);
+            let attempts = member
+                .attempts()
+                .map(|(ordinal, output, delay)| {
+                    crate::trace::trace_tool_attempt(ordinal, &member_record(call, output), delay)
+                })
+                .collect::<Vec<_>>();
+            self.context.trace_tool_call_completed(&record, &attempts);
+        }
+    }
+
     fn pin(&self, call: &crate::sansio::PendingToolCall, now_ms: u64) -> MemberPin {
         let manifest = self
             .context
@@ -729,6 +789,7 @@ impl RoundTools for ProductionRoundTools {
             invocation,
             execution,
             &self.policies(),
+            false,
         )
     }
 
@@ -810,6 +871,10 @@ impl RuntimeExecutionContext<'_> {
                 "a round's tools need a context that owns its dispatch",
             )
         })?;
-        Ok(Arc::new(ProductionRoundTools { context, owner }))
+        Ok(Arc::new(ProductionRoundTools {
+            context,
+            owner,
+            traced: Mutex::default(),
+        }))
     }
 }

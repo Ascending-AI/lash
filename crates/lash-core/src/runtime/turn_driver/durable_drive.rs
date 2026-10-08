@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
 use lash_core_execution::runtime::actor::round::RoundTools;
 
 use super::*;
@@ -31,7 +32,6 @@ pub(in crate::runtime) struct RuntimeDrive {
     opening_work: usize,
     /// The turn's before-turn decisions, which every phase commits.
     before_turn: Vec<crate::plugin::RecordedTurnContribution>,
-    tools: Option<Arc<dyn RoundTools>>,
     live: Arc<dyn crate::LiveReplayStore>,
     /// Publishes the turn's activity to the live stream: drained once the
     /// turn committed, aborted when the drive is dropped without a commit.
@@ -185,7 +185,6 @@ impl RuntimeDrive {
             settlement,
             opening_work,
             before_turn,
-            tools: None,
             live,
             publisher,
             commit,
@@ -372,12 +371,9 @@ impl TurnDrive for RuntimeDrive {
     }
 
     fn tools(&mut self) -> Result<Arc<dyn RoundTools>, TurnError> {
-        if let Some(tools) = &self.tools {
-            return Ok(Arc::clone(tools));
-        }
-        let tools = self.driver.round_tools(&self.observer).map_err(runtime)?;
-        self.tools = Some(Arc::clone(&tools));
-        Ok(tools)
+        self.driver
+            .round_tools(&self.observer, self.machine.protocol_iteration())
+            .map_err(runtime)
     }
 
     async fn exec_cell(
@@ -527,7 +523,11 @@ impl TurnDrive for RuntimeDrive {
 
 impl RuntimeTurnDriver<'static> {
     /// The turn's round tools: its catalog, under the turn's own opener.
-    fn round_tools(&self, observer: &TurnObserver) -> Result<Arc<dyn RoundTools>, RuntimeError> {
+    fn round_tools(
+        &self,
+        observer: &TurnObserver,
+        protocol_iteration: usize,
+    ) -> Result<Arc<dyn RoundTools>, RuntimeError> {
         let context = self
             .execution_context(
                 observer,
@@ -540,6 +540,7 @@ impl RuntimeTurnDriver<'static> {
                 )
             })?;
         context
+            .with_tracing(self.execution_tracing(protocol_iteration))
             .round_tools(crate::EffectOpener::turn(
                 self.session_id.clone(),
                 self.turn_id.clone(),

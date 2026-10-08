@@ -122,6 +122,10 @@ pub fn member_body(body: super::ToolBody) -> MemberBody {
 /// Where an owner's member bodies come from: a round's catalog tools, or a
 /// process's steps.
 pub trait MemberBodies: Send + Sync {
+    /// Observe the committed state of a round before any member runs.
+    /// Observers keep their own live deduplication; this runs after every fold.
+    fn observe(&self, _round: &RoundView) {}
+
     /// The body of `execution`'s attempt, for its call and request.
     fn body(&self, execution: &AdmittedExecution) -> MemberBody;
 
@@ -399,6 +403,7 @@ impl Lifecycle {
                     self.publish(view.id_of(member), member.committed_state())?;
                 }
             }
+            self.bodies.observe(view);
         }
         // An outcome the rows already have came back on an unacknowledged
         // commit: it is not written again.
