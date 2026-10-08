@@ -1,4 +1,5 @@
 pub(crate) mod attachment_tests;
+mod provider_file_rejection;
 mod request_support;
 mod request_work_tests;
 use request_support::request;

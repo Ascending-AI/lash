@@ -475,6 +475,7 @@ async fn attachment_blob_store_differential_agrees() {
         access_key_id: Some(required("LASH_S3_ACCESS_KEY")),
         secret_access_key: Some(required("LASH_S3_SECRET_KEY").into()),
         path_style: true,
+        presigned_url_delivery: false,
     })
     .unwrap();
     let operations = [

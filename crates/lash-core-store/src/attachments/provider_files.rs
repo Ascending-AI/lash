@@ -97,6 +97,111 @@ impl ProviderFileDelivery {
             valid_until_ms: Some(entry.valid_until_ms),
         }))
     }
+    /// Read the original within the delivery's byte bound and upload it.
+    /// Every error is safe to report: uploader text is rebuilt from its
+    /// class.
+    async fn upload(
+        &self,
+        uploader: &dyn ProviderFileUploader,
+        reference: &AttachmentRef,
+        limits: &DeliveryLimits,
+    ) -> Result<UploadedProviderFile, AttachmentStoreError> {
+        let read_limit = limits.max_bytes.min(reference.byte_len);
+        let stored = self.inner.get(&reference.id, read_limit).await?;
+        validate_attachment_bytes(
+            reference,
+            &stored.bytes,
+            stored.bytes.capacity() as u64,
+            read_limit,
+        )?;
+        uploader
+            .upload(reference, &stored.bytes)
+            .await
+            .map_err(|error| {
+                if error.is_operator_actionable() {
+                    // Uploader diagnostics can contain a remote id or URL.
+                    AttachmentStoreError::Backend {
+                        operation: "upload",
+                        class: super::AttachmentStoreFailureClass::Credentials,
+                        source: "provider-file upload authorization failed".into(),
+                    }
+                } else {
+                    redacted_upload_error(error)
+                }
+            })
+    }
+    /// Remember an uploaded file and deliver it, or refuse one that cannot
+    /// outlive the call.
+    fn admit(
+        &self,
+        file: UploadedProviderFile,
+        reference: &AttachmentRef,
+        scope: &ProviderFileScope,
+        limits: &DeliveryLimits,
+    ) -> Result<Delivery, AttachmentStoreError> {
+        let now = super::now_epoch_ms();
+        let expiry = file
+            .valid_until_ms
+            .unwrap_or(u64::MAX)
+            .min(now.saturating_add(self.limits.ttl_ms));
+        if expiry < limits.valid_through_ms || expiry <= now {
+            // The file exists but cannot be used: its lifetime, or the
+            // cache's, is shorter than one call. Retrying, or delivering
+            // another form, would upload and orphan a file on every call.
+            return Err(AttachmentStoreError::Backend {
+                operation: "upload",
+                class: super::AttachmentStoreFailureClass::Terminal,
+                source: "the uploaded provider file expires before the delivery horizon".into(),
+            });
+        }
+        if self.limits.capacity > 0 {
+            let mut cache = self.cache.lock_recover();
+            cache.retain(|entry| {
+                entry.valid_until_ms > now
+                    && !(entry.reference == reference.id
+                        && entry.media_type == reference.media_type
+                        && &entry.scope == scope)
+            });
+            if cache.len() >= self.limits.capacity {
+                cache.remove(0);
+            }
+            cache.push(CacheEntry {
+                reference: reference.id.clone(),
+                media_type: reference.media_type.clone(),
+                byte_len: reference.byte_len,
+                scope: scope.clone(),
+                id: DeliverySecret::new(file.id.expose().to_owned()),
+                valid_until_ms: expiry,
+            });
+        }
+        Ok(Delivery::ProviderFile {
+            scope: scope.clone(),
+            id: file.id,
+            valid_until_ms: Some(expiry),
+        })
+    }
+}
+
+/// Whether a failed upload leaves the slot's other accepted forms to try.
+/// A missing or mismatching original and a rejected credential are the
+/// call's answer, whatever else is accepted.
+fn falls_back(error: &AttachmentStoreError) -> bool {
+    !matches!(
+        error,
+        AttachmentStoreError::NotFound(_) | AttachmentStoreError::ContentMismatch { .. }
+    ) && !error.is_operator_actionable()
+}
+
+/// A fixed name for a failed upload's log line: never the error's text.
+fn error_class(error: &AttachmentStoreError) -> &'static str {
+    match error {
+        AttachmentStoreError::SizeLimitExceeded { .. }
+        | AttachmentStoreError::ReadLimitExceeded { .. }
+        | AttachmentStoreError::RequestBudgetExceeded { .. } => "bound_exceeded",
+        AttachmentStoreError::DeliveryUnsupported { .. } => "unsupported",
+        AttachmentStoreError::Backend { .. } => "backend",
+        _ => "other",
+    }
 }
 #[async_trait::async_trait]
 impl AttachmentStore for ProviderFileDelivery {
@@ -146,61 +251,18 @@ impl AttachmentStore for ProviderFileDelivery {
             if let Some(delivery) = self.cached(reference, scope, limits.valid_through_ms)? {
                 return Ok(delivery);
             }
-            let read_limit = limits.max_bytes.min(reference.byte_len);
-            let stored = self.inner.get(&reference.id, read_limit).await?;
-            validate_attachment_bytes(
-                reference,
-                &stored.bytes,
-                stored.bytes.capacity() as u64,
-                read_limit,
-            )?;
-            match uploader.upload(reference, &stored.bytes).await {
-                Ok(file) => {
-                    let now = super::now_epoch_ms();
-                    let expiry = file
-                        .valid_until_ms
-                        .unwrap_or(u64::MAX)
-                        .min(now.saturating_add(self.limits.ttl_ms));
-                    if expiry >= limits.valid_through_ms && expiry > now {
-                        if self.limits.capacity > 0 {
-                            let mut cache = self.cache.lock_recover();
-                            cache.retain(|entry| {
-                                entry.valid_until_ms > now
-                                    && !(entry.reference == reference.id
-                                        && entry.media_type == reference.media_type
-                                        && &entry.scope == scope)
-                            });
-                            if cache.len() >= self.limits.capacity {
-                                cache.remove(0);
-                            }
-                            cache.push(CacheEntry {
-                                reference: reference.id.clone(),
-                                media_type: reference.media_type.clone(),
-                                byte_len: reference.byte_len,
-                                scope: scope.clone(),
-                                id: DeliverySecret::new(file.id.expose().to_owned()),
-                                valid_until_ms: expiry,
-                            });
-                        }
-                        return Ok(Delivery::ProviderFile {
-                            scope: scope.clone(),
-                            id: file.id,
-                            valid_until_ms: Some(expiry),
-                        });
-                    }
+            match self.upload(uploader.as_ref(), reference, limits).await {
+                Ok(file) => return self.admit(file, reference, scope, limits),
+                // The uploader is optional: a failure to prepare or make the
+                // upload leaves the slot's other accepted forms deliverable.
+                Err(error) if (accepts.bytes || accepts.url) && falls_back(&error) => {
+                    tracing::warn!(
+                        attachment_id = %reference.id,
+                        class = error_class(&error),
+                        "provider-file upload failed; delivering by another accepted form"
+                    );
                 }
-                Err(error) if error.is_operator_actionable() => {
-                    // Uploader diagnostics can contain a remote id or URL.
-                    return Err(AttachmentStoreError::Backend {
-                        operation: "upload",
-                        class: super::AttachmentStoreFailureClass::Credentials,
-                        source: "provider-file upload authorization failed".into(),
-                    });
-                }
-                Err(error) if !accepts.bytes && !accepts.url => {
-                    return Err(redacted_upload_error(error));
-                }
-                Err(_) => {}
+                Err(error) => return Err(error),
             }
         }
         self.inner

@@ -74,10 +74,14 @@ id is never used outside the scope it was created in.
 The host's `AttachmentStore` turns a ref into one accepted form when a
 request is sent: `deliver(ref, &ProviderAccepts, &DeliveryLimits) ->
 Delivery::{Bytes, Url, ProviderFile}`. SQLite delivers bounded bytes. S3
-delivers a presigned GET URL when a URL is accepted and the horizon fits a
-signature, else bounded bytes. `invalidate_delivery` forgets one cached
-delivery a provider rejected, comparing it so a newer entry survives, and
-`get` remains for explicit reads by tools and archives.
+delivers bounded bytes too, unless the host opts into URL delivery
+(`S3AttachmentStoreBuilder::presigned_url_delivery`, off by default): then
+it delivers a presigned GET URL when a URL is accepted and the horizon fits
+a signature, else bounded bytes. URL delivery is the host's statement that
+the provider's servers can reach its store; nothing narrows a URL the
+provider could not fetch back to bytes. `invalidate_delivery` forgets one
+cached delivery a provider rejected, comparing it so a newer entry
+survives, and `get` remains for explicit reads by tools and archives.
 
 A URL or provider file must serve exactly the content the ref names,
 unchanged, through the attempt's validity horizon. A backend that cannot
@@ -87,9 +91,16 @@ guarded put lifecycle, never by minting a ref from a URL.
 
 Provider-file reuse belongs to the store. An optional component wraps any
 backend with per-provider uploaders and a bounded cache keyed by content id,
-MIME and exact scope. The cache is a derivative: eviction or expiry never
-ends a referrer or deletes original bytes, a miss re-uploads from the
-original, and duplicate uploads after a crash are tolerated.
+MIME and exact scope, with host-set limits
+(`LashCoreBuilder::provider_file_cache`). The cache is a derivative:
+eviction or expiry never ends a referrer or deletes original bytes, a miss
+re-uploads from the original, and duplicate uploads after a crash are
+tolerated. The uploader is optional and never removes a working form: when
+reading for upload or the upload itself fails, the slot is delivered by
+another form it accepts, and the failure is logged by ref id and class. A
+missing or mismatching original and a refused credential stay the call's
+failure, and so does an uploaded file that expires before the attempt's
+horizon (a terminal `upload` backend failure).
 
 ### 4. Delivery is transient
 
@@ -112,7 +123,13 @@ transient store fault is retryable within the call's deadline and settles as
 blob, a content mismatch or an exceeded bound settles as
 `attachment_resolution_failed`; no producible accepted form settles as
 `unsupported_attachment_capability`. A provider's definite rejection of a
-delivered file id or URL invalidates that delivery and retries the attempt.
+delivered provider file (a missing, deleted or expired file id) marks the
+slots that attempt delivered as files and no others: those cached files are
+forgotten and the attempt is retried, uploading afresh, unless the failure
+is an authentication one. The live body tells the adapter each slot's
+delivered form by name, so a slot sent as bytes or a URL is never marked. A
+URL the provider cannot fetch has no recovery: it fails the call as the
+provider classified it, which is the opted-in host's configuration to fix.
 None of these changes history or degrades an attachment to a notice.
 
 ### 5. Budgets stay an engine bound

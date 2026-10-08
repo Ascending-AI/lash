@@ -3,8 +3,8 @@
 
 use crate::config::DEFAULT_BASE_URL;
 use crate::policy::{
-    ANTHROPIC_VERSION, CONTEXT_MANAGEMENT_BETA, FINE_GRAINED_BETA, INTERLEAVED_THINKING_BETA,
-    OAUTH_API_BETA,
+    ANTHROPIC_VERSION, CONTEXT_MANAGEMENT_BETA, FILES_API_BETA, FINE_GRAINED_BETA,
+    INTERLEAVED_THINKING_BETA, OAUTH_API_BETA,
 };
 use crate::stream::StreamState;
 use crate::support::*;
@@ -117,7 +117,7 @@ impl Provider for AnthropicProvider {
         }
         let tokens = Arc::clone(&self.tokens);
         let mut lease = tokens.current(&minting_route).await?;
-        match self
+        let result = match self
             .send_attempt(&context, admitted, &minting_route, &lease.token)
             .await
         {
@@ -136,12 +136,28 @@ impl Provider for AnthropicProvider {
                 }
             }
             other => other,
-        }
+        };
+        result.map_err(|error| reject_missing_provider_files(error, admitted, rejects_file_id))
     }
 
     fn clone_boxed(&self) -> Box<dyn Provider> {
         Box::new(self.clone())
     }
+}
+
+/// Whether a non-2xx body is the API's definite refusal of a file id the
+/// request named: a 404 `not_found_error` or a 400 `invalid_request_error`
+/// whose own message says the file is missing, deleted or expired.
+fn rejects_file_id(status: u16, body: &Value) -> bool {
+    body.get("error").is_some_and(|error| {
+        matches!(
+            (status, error.get("type").and_then(Value::as_str)),
+            (404, Some("not_found_error")) | (400, Some("invalid_request_error"))
+        ) && error
+            .get("message")
+            .and_then(Value::as_str)
+            .is_some_and(message_names_missing_file)
+    })
 }
 
 impl AnthropicProvider {
@@ -195,6 +211,11 @@ impl AnthropicProvider {
         }
         if body.get("context_management").is_some() {
             betas.push(CONTEXT_MANAGEMENT_BETA.to_string());
+        }
+        // A `file` source is beta content. The template cannot say whether
+        // this attempt carries one: the delivered forms do.
+        if admitted.forms().any(|forms| forms.provider_file) {
+            betas.push(FILES_API_BETA.to_string());
         }
 
         let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));

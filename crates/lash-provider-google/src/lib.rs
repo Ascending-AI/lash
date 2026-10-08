@@ -24,6 +24,7 @@ pub use upload::GoogleFileUploader;
 
 #[cfg(test)]
 mod tests {
+    mod provider_file_rejection;
     mod request_support;
     use request_support::{request, request_with_capability};
     mod epilogue;

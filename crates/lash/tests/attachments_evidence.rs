@@ -406,6 +406,7 @@ fn host_store_delivery_contracts() {
     type_witness::<dyn lash::provider::SlotDeliveries>();
     let _ = lash::persistence::ProviderFileDelivery::new;
     let _ = lash::LashCoreBuilder::provider_file_uploaders;
+    let _ = lash::LashCoreBuilder::provider_file_cache;
     fn store_methods<T: lash::persistence::AttachmentStore>() {
         let _ = T::deliver;
         let _ = T::invalidate_delivery;

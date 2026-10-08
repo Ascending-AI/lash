@@ -45,7 +45,8 @@ pub(crate) use crate::config::*;
 pub(crate) use crate::policy::*;
 
 pub(crate) use lash_core::provider::attachment_wire::{
-    attachment_operand, check_slot, lower_attachment_json, template_error,
+    attachment_operand, check_slot, lower_attachment_json, message_names_missing_file,
+    reject_missing_provider_files, template_error,
 };
 pub(crate) use lash_sansio::AttachmentRef;
 pub(crate) use lash_sansio::llm::attachment_delivery::{

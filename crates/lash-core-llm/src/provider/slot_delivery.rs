@@ -41,8 +41,7 @@ pub trait SlotDeliveries: Send + Sync {
     ) -> Result<Vec<Arc<Delivery>>, AttachmentDeliveryError>;
 
     /// Forget a delivery the provider definitely rejected (an expired or
-    /// missing file id, an unfetchable URL), so the next attempt delivers
-    /// afresh. Compare-and-invalidate: a newer cached delivery stays.
+    /// missing file id), so the next attempt delivers afresh. Compare-and-invalidate: a newer cached delivery stays.
     async fn invalidate(
         &self,
         reference: &AttachmentRef,

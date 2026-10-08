@@ -633,6 +633,7 @@ pub struct LashCoreBuilder {
     max_attachment_bytes: Option<Option<u64>>,
     attachment_read_policy: Option<lash_core::AttachmentReadPolicy>,
     provider_file_uploaders: Vec<Arc<dyn lash_core::attachments::ProviderFileUploader>>,
+    provider_file_cache: lash_core::attachments::ProviderFileCacheLimits,
     attachment_upload_expiry: Option<std::time::Duration>,
     output_retention: Option<lash_core::OutputRetentionPolicy>,
     // Core fields applied over the config the backend's ports assemble.
@@ -668,6 +669,7 @@ impl LashCoreBuilder {
             max_attachment_bytes: None,
             attachment_read_policy: None,
             provider_file_uploaders: Vec::new(),
+            provider_file_cache: Default::default(),
             attachment_upload_expiry: None,
             output_retention: None,
             trace_runtime: None,
@@ -769,6 +771,18 @@ impl LashCoreBuilder {
         uploaders: Vec<Arc<dyn lash_core::attachments::ProviderFileUploader>>,
     ) -> Self {
         self.provider_file_uploaders = uploaders;
+        self
+    }
+
+    /// Bound the cache of files those uploaders made: how many it remembers
+    /// and for how long. Defaults to 1024 files for 24 hours; a file must
+    /// outlive the call it is delivered to, so a lifetime shorter than one
+    /// call refuses every upload.
+    pub fn provider_file_cache(
+        mut self,
+        limits: lash_core::attachments::ProviderFileCacheLimits,
+    ) -> Self {
+        self.provider_file_cache = limits;
         self
     }
 
@@ -974,6 +988,7 @@ impl LashCoreBuilder {
         let store_factory = backend.session_store_factory();
         let core = self
             .resolve_runtime_host_config()?
+            .with_provider_file_cache(self.provider_file_cache)
             .with_provider_file_uploaders(std::mem::take(&mut self.provider_file_uploaders));
         let process_observation_hub = Arc::new(
             crate::process_observation::ProcessObservationHub::new(self.process_observation_config),

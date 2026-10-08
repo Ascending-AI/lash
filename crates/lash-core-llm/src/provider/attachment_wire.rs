@@ -3,8 +3,8 @@ use crate::llm::transport::{LlmTransportError, ProviderFailureKind, TransportRet
 use lash_sansio::AttachmentRef;
 use lash_sansio::llm::attachment_delivery::{AttachmentPosition, Delivery};
 use lash_sansio::llm::types::{
-    AttachmentSlot, GenerationReceipt, LlmRequest, ProviderRouteIdentity, RecordedRequestTemplate,
-    SlotCodec, TransientJson,
+    AttachmentSlot, GenerationReceipt, LiveRequestBody, LlmRequest, ProviderRouteIdentity,
+    RecordedRequestTemplate, SlotCodec, TransientJson,
 };
 use serde_json::{Value, json};
 
@@ -19,6 +19,54 @@ pub fn template_error(error: impl std::fmt::Display) -> LlmTransportError {
         .with_kind(ProviderFailureKind::Validation)
         .with_lash_code(lash_sansio::session_model::TurnFailureCode::AdmittedRequestUnavailable)
         .with_retry_verdict(TransportRetryVerdict::Forbidden)
+}
+
+/// Mark the slots `body` delivered as provider files rejected, when
+/// `error` is a refusal before any output whose decoded error body
+/// `names_missing_file`. A body that delivered no provider file marks
+/// nothing, whatever the provider said: bytes and URLs have no cached file
+/// to forget (ADR 0135 §4).
+pub fn reject_missing_provider_files(
+    error: LlmTransportError,
+    body: &LiveRequestBody,
+    names_missing_file: impl FnOnce(u16, &Value) -> bool,
+) -> LlmTransportError {
+    if error.output_started || error.partial_response.is_some() {
+        return error;
+    }
+    let slots = body.provider_file_slots();
+    let definite = !slots.is_empty()
+        && error.http_status.is_some_and(|status| {
+            error
+                .raw
+                .as_deref()
+                .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+                .is_some_and(|value| names_missing_file(status, &value))
+        });
+    if definite {
+        error.with_rejected_slots(slots)
+    } else {
+        error
+    }
+}
+
+/// Whether a provider's own error message says a file it was handed is
+/// missing, deleted or expired. Callers pass the message field of a decoded
+/// error object whose status and type they have already matched, never a
+/// raw body.
+pub fn message_names_missing_file(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    message.contains("file")
+        && [
+            "not found",
+            "no such file",
+            "does not exist",
+            "may not exist",
+            "expired",
+            "deleted",
+        ]
+        .iter()
+        .any(|gone| message.contains(gone))
 }
 
 /// Patterns name only native attachment part positions, with `*` for array

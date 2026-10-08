@@ -32,6 +32,11 @@ pub struct S3AttachmentStoreConfig {
     /// leaves the process only inside the signed S3 request.
     pub secret_access_key: Option<Redacted>,
     pub path_style: bool,
+    /// Deliver an attachment to a provider that accepts URLs as a presigned
+    /// GET URL instead of bytes. Off by default: the provider's servers must
+    /// be able to reach this endpoint, and a URL they cannot fetch fails the
+    /// call.
+    pub presigned_url_delivery: bool,
 }
 
 impl S3AttachmentStoreConfig {
@@ -44,6 +49,7 @@ impl S3AttachmentStoreConfig {
             access_key_id: None,
             secret_access_key: None,
             path_style: false,
+            presigned_url_delivery: false,
         }
     }
 }
@@ -89,6 +95,14 @@ impl S3AttachmentStoreBuilder {
         self
     }
 
+    /// Deliver presigned GET URLs to providers that accept them. Off by
+    /// default, which delivers bytes: turn it on only when the provider's
+    /// servers can reach this store's endpoint.
+    pub fn presigned_url_delivery(mut self, enabled: bool) -> Self {
+        self.config.presigned_url_delivery = enabled;
+        self
+    }
+
     pub fn build(self) -> Result<S3AttachmentStore, AttachmentStoreError> {
         S3AttachmentStore::from_config(self.config)
     }
@@ -124,9 +138,12 @@ impl S3AttachmentStore {
             .map_err(|err| terminal_backend_error("build", err))?;
 
         let store = Arc::new(store);
+        let signer = config
+            .presigned_url_delivery
+            .then(|| store.clone() as Arc<dyn Signer>);
         Ok(Self {
-            store: store.clone(),
-            signer: Some(store),
+            store,
+            signer,
             prefix,
         })
     }
@@ -884,6 +901,7 @@ mod tests {
             access_key_id: Some(required("LASH_S3_ACCESS_KEY")),
             secret_access_key: Some(Redacted::new(required("LASH_S3_SECRET_KEY"))),
             path_style: true,
+            presigned_url_delivery: false,
         })
     }
 

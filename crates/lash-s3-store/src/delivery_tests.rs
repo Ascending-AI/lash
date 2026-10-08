@@ -129,3 +129,22 @@ async fn url_delivery_names_the_put_object_and_respects_the_fetch_horizon() {
         Err(AttachmentStoreError::ContentMismatch { .. })
     ));
 }
+
+// D-URLOPTIN: a configured store delivers bytes unless the host opts in.
+#[test]
+fn presigned_url_delivery_is_a_builder_opt_in() {
+    let builder = || {
+        S3AttachmentStore::builder("bucket", "us-east-1")
+            .access_key_id("key")
+            .secret_access_key("secret")
+    };
+    assert!(builder().build().unwrap().signer.is_none());
+    assert!(
+        builder()
+            .presigned_url_delivery(true)
+            .build()
+            .unwrap()
+            .signer
+            .is_some()
+    );
+}

@@ -18,6 +18,7 @@ use super::{DeploymentStore, ProcessWorkSubstrate, ProcessWorkWiring};
 pub struct RuntimeHostConfig {
     backend: crate::Backend,
     provider_file_uploaders: Vec<Arc<dyn crate::attachments::ProviderFileUploader>>,
+    provider_file_cache: crate::attachments::ProviderFileCacheLimits,
     pub durability: RuntimeDurabilityConfig,
     pub process_engines: ProcessEngineRegistry,
     pub providers: RuntimeProviderConfig,
@@ -307,6 +308,7 @@ impl RuntimeHostConfig {
             tracing: crate::trace::TraceRuntime::new(Arc::clone(&clock)),
             turn_phase_probes: super::RuntimeTurnPhaseProbeSlot::default(),
             provider_file_uploaders: Vec::new(),
+            provider_file_cache: Default::default(),
             clock,
         }
     }
@@ -379,6 +381,19 @@ impl RuntimeHostConfig {
         uploaders: Vec<Arc<dyn crate::attachments::ProviderFileUploader>>,
     ) -> Self {
         self.provider_file_uploaders = uploaders;
+        self.rewrap_delivery_backend()
+    }
+
+    /// Bound the provider-file cache the installed uploaders fill: how many
+    /// files it remembers and for how long.
+    pub fn with_provider_file_cache(
+        mut self,
+        limits: crate::attachments::ProviderFileCacheLimits,
+    ) -> Self {
+        self.provider_file_cache = limits;
+        self.rewrap_delivery_backend()
+    }
+    fn rewrap_delivery_backend(mut self) -> Self {
         let backend = self.delivery_backend(self.backend.attachment_store());
         self.durability.attachment_store = Arc::new(
             self.durability
@@ -397,7 +412,7 @@ impl RuntimeHostConfig {
             Arc::new(crate::attachments::ProviderFileDelivery::new(
                 backend,
                 self.provider_file_uploaders.clone(),
-                Default::default(),
+                self.provider_file_cache,
             ))
         }
     }

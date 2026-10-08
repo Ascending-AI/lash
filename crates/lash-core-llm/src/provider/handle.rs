@@ -484,8 +484,8 @@ impl ProviderHandle {
                 result =
                     result.map_err(|failure| self.components.failure_classifier.classify(failure));
             }
-            // A provider that definitely rejected delivered slots (an expired
-            // file id, an unfetchable URL) refused before generating: the
+            // A provider that definitely rejected delivered slots (a missing
+            // or expired file id) refused before generating: the
             // rejected deliveries are forgotten and the attempt may be made
             // again with fresh ones. Authentication is never a rejection.
             if let Err(failure) = &mut result

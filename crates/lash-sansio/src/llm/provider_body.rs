@@ -1,6 +1,6 @@
 //! Recorded JSON literals and attachment slots; deliveries exist only while sending.
 
-use super::attachment_delivery::{AttachmentPosition, Delivery, ProviderAccepts};
+use super::attachment_delivery::{AttachmentPosition, Delivery, DeliveryForms, ProviderAccepts};
 use super::types::{GenerationReceipt, LlmContentBlock, LlmRequest, ProviderRouteIdentity};
 use crate::AttachmentRef;
 use serde::{Deserialize, Serialize};
@@ -342,11 +342,13 @@ fn write_json(
 /// One encoded JSON value for the live wire, with no serialized form.
 pub struct TransientJson {
     value: String,
+    forms: DeliveryForms,
 }
 impl TransientJson {
-    pub fn new(value: &serde_json::Value, _delivery: &Delivery) -> Self {
+    pub fn new(value: &serde_json::Value, delivery: &Delivery) -> Self {
         Self {
             value: value.to_string(),
+            forms: delivery.forms(),
         }
     }
 }
@@ -394,6 +396,20 @@ impl LiveRequestBody {
     }
     pub fn generation(&self) -> Option<GenerationReceipt> {
         self.template.generation
+    }
+    /// The form each slot was delivered in, in slot order: the form's name,
+    /// never its value.
+    pub fn forms(&self) -> impl Iterator<Item = DeliveryForms> + '_ {
+        self.values.iter().map(|value| value.forms)
+    }
+    /// The slots delivered as provider files, by slot index: the only slots
+    /// a provider's refusal of a file id can name.
+    pub fn provider_file_slots(&self) -> Vec<usize> {
+        self.forms()
+            .enumerate()
+            .filter(|(_, forms)| forms.provider_file)
+            .map(|(index, _)| index)
+            .collect()
     }
     pub fn wire(&self) -> String {
         let mut text = String::new();

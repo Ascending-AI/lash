@@ -10,6 +10,20 @@ fn error_object(value: &Value) -> Option<&Value> {
         .or_else(|| value.get("error"))
 }
 
+/// Whether a non-2xx body is the API's definite refusal of a file id the
+/// request named: a 400 or 404 `invalid_request_error` whose own message
+/// says the file is missing, deleted or expired.
+pub(crate) fn rejects_file_id(status: u16, value: &Value) -> bool {
+    matches!(status, 400 | 404)
+        && error_object(value).is_some_and(|error| {
+            error.get("type").and_then(Value::as_str) == Some("invalid_request_error")
+                && error
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .is_some_and(lash_core::provider::attachment_wire::message_names_missing_file)
+        })
+}
+
 pub(crate) fn classify_openai_error(
     value: &Value,
     mut failure: LlmTransportError,

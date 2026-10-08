@@ -13,6 +13,7 @@ struct FileProbe {
     scope: ProviderFileScope,
     uploads: AtomicUsize,
     failure: Option<AttachmentStoreFailureClass>,
+    valid_until_ms: Option<u64>,
 }
 #[async_trait::async_trait]
 impl ProviderFileUploader for FileProbe {
@@ -35,7 +36,7 @@ impl ProviderFileUploader for FileProbe {
         }
         Ok(UploadedProviderFile {
             id: DeliverySecret::new("overlong-file-id".repeat(8192)),
-            valid_until_ms: None,
+            valid_until_ms: self.valid_until_ms,
         })
     }
 }
@@ -266,6 +267,7 @@ pub async fn attachment_delivery_read_budgets(backend: Arc<dyn AttachmentStore>)
         scope: scope.clone(),
         uploads: AtomicUsize::new(0),
         failure: None,
+        valid_until_ms: None,
     });
     let files = Arc::new(ProviderFileDelivery::new(
         backend.clone(),
@@ -310,6 +312,7 @@ pub async fn attachment_delivery_read_budgets(backend: Arc<dyn AttachmentStore>)
             scope: scoped.live_file_scope.clone().expect("live scope"),
             uploads: AtomicUsize::new(0),
             failure: Some(class),
+            valid_until_ms: None,
         });
         let files = Arc::new(ProviderFileDelivery::new(
             backend.clone(),
@@ -339,6 +342,72 @@ pub async fn attachment_delivery_read_budgets(backend: Arc<dyn AttachmentStore>)
                 matches!(&*fallback.expect("non-auth upload falls back")[0], Delivery::Bytes(bytes) if bytes == &[1;4])
             );
         }
+    }
+    // An installed uploader is optional: a blob over the upload scratch
+    // bound is never read for upload, and still delivers by the URL the
+    // backend can mint without reading it.
+    let scope = scoped.live_file_scope.clone().expect("live scope");
+    let uploader = Arc::new(FileProbe {
+        scope: scope.clone(),
+        uploads: AtomicUsize::new(0),
+        failure: None,
+        valid_until_ms: None,
+    });
+    let files = ProviderFileDelivery::new(
+        Arc::new(DeliveryProbe {
+            inner: backend.clone(),
+            calls: AtomicUsize::new(0),
+            fault: Fault::Unaccepted,
+        }),
+        vec![uploader.clone()],
+        Default::default(),
+    );
+    let over_scratch = DeliveryLimits {
+        max_bytes: 3,
+        valid_through_ms: scoped.valid_through_ms,
+    };
+    let url_or_file = ProviderAccepts {
+        bytes: false,
+        url: true,
+        provider_file: Some(scope.clone()),
+    };
+    assert!(matches!(
+        files
+            .deliver(&first.reference, &url_or_file, &over_scratch)
+            .await,
+        Ok(Delivery::Url { .. })
+    ));
+    assert_eq!(uploader.uploads.load(Ordering::SeqCst), 0);
+    // A file that cannot outlive the call is a typed terminal upload
+    // failure, never a silent change of form.
+    let short_lived = ProviderFileDelivery::new(
+        backend.clone(),
+        vec![Arc::new(FileProbe {
+            scope: scope.clone(),
+            uploads: AtomicUsize::new(0),
+            failure: None,
+            valid_until_ms: Some(1),
+        })],
+        Default::default(),
+    );
+    let fits = DeliveryLimits {
+        max_bytes: 4,
+        valid_through_ms: u64::MAX / 2,
+    };
+    for bytes in [false, true] {
+        let accepts = ProviderAccepts {
+            bytes,
+            url: false,
+            provider_file: Some(scope.clone()),
+        };
+        assert!(matches!(
+            short_lived.deliver(&first.reference, &accepts, &fits).await,
+            Err(AttachmentStoreError::Backend {
+                operation: "upload",
+                class: AttachmentStoreFailureClass::Terminal,
+                ..
+            })
+        ));
     }
     assert_eq!(
         AttachmentReadPolicy::DEFAULT.max_blob_bytes,

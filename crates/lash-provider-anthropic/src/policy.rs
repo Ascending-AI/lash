@@ -14,6 +14,7 @@ pub(crate) const ANTHROPIC_VERSION: &str = "2023-06-01";
 pub(crate) const FINE_GRAINED_BETA: &str = "fine-grained-tool-streaming-2025-05-14";
 pub(crate) const INTERLEAVED_THINKING_BETA: &str = "interleaved-thinking-2025-05-14";
 pub(crate) const CONTEXT_MANAGEMENT_BETA: &str = "context-management-2025-06-27";
+pub(crate) const FILES_API_BETA: &str = "files-api-2025-04-14";
 
 /// The one Anthropic reasoning mapping: a resolved [`ReasoningIntent`] onto
 /// `thinking`/`output_config`, or a refusal.

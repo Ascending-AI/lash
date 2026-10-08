@@ -16,17 +16,27 @@ pub(crate) struct ResponseReading {
 }
 
 impl GoogleOAuthProvider {
-    /// Whether `err` is the API rejecting a file reference the body names.
-    fn rejects_file_reference(err: &LlmTransportError) -> bool {
-        matches!(err.http_status, Some(400 | 404))
-            && err.raw.as_deref().is_some_and(|raw| {
-                let lower = raw.to_ascii_lowercase();
-                (lower.contains("file") || lower.contains("fileuri"))
-                    && (lower.contains("not found")
-                        || lower.contains("expired")
-                        || lower.contains("does not exist"))
-            })
-            && !matches!(err.kind, ProviderFailureKind::Auth)
+    /// Whether a non-2xx body is the API's definite refusal of a file the
+    /// request named: the error object's own status says the resource is
+    /// missing, invalid or inaccessible, and its message names a missing or
+    /// expired file.
+    fn rejects_file_reference(status: u16, body: &Value) -> bool {
+        // A streaming endpoint wraps its error object in an array.
+        let Some(error) = body
+            .get("error")
+            .or_else(|| body.get(0).and_then(|first| first.get("error")))
+        else {
+            return false;
+        };
+        matches!(
+            (status, error.get("status").and_then(Value::as_str)),
+            (404, Some("NOT_FOUND"))
+                | (400, Some("INVALID_ARGUMENT" | "FAILED_PRECONDITION"))
+                | (403, Some("PERMISSION_DENIED"))
+        ) && error
+            .get("message")
+            .and_then(Value::as_str)
+            .is_some_and(message_names_missing_file)
     }
 
     /// Send `request` as a body, for a test that scripts the response.
@@ -483,8 +493,9 @@ impl GoogleOAuthProvider {
         )
     }
 
-    /// Send with the current token and report rejected file slots to the
-    /// caller, which invalidates the host-store derivatives before retry.
+    /// Send with the current token and report the file slots the API
+    /// definitely refused to the caller, which forgets the host store's
+    /// derivatives and decides the retry.
     async fn send_with_token(
         &self,
         context: &ResponseContext,
@@ -502,30 +513,15 @@ impl GoogleOAuthProvider {
                 .unwrap_or(self.stream_termination),
             defaults: context.model().metadata().request_defaults.clone(),
         };
-        match self
-            .execute_body(
-                lease.token.secret().expose_secret(),
-                admitted,
-                stream_events,
-                provider_trace,
-                reading,
-            )
-            .await
-        {
-            Err(err) if Self::rejects_file_reference(&err) => {
-                let slots = admitted
-                    .template()
-                    .slots()
-                    .enumerate()
-                    .filter(|(_, slot)| slot.accepts.provider_file.is_some())
-                    .map(|(index, _)| index)
-                    .collect();
-                Err(err
-                    .with_rejected_slots(slots)
-                    .with_retry_verdict(TransportRetryVerdict::RetryableTransient))
-            }
-            other => other,
-        }
+        self.execute_body(
+            lease.token.secret().expose_secret(),
+            admitted,
+            stream_events,
+            provider_trace,
+            reading,
+        )
+        .await
+        .map_err(|err| reject_missing_provider_files(err, admitted, Self::rejects_file_reference))
     }
 }
 

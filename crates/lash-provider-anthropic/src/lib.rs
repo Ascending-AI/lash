@@ -17,6 +17,7 @@ pub use config::{AnthropicAuthScheme, AnthropicProvider, DEFAULT_BASE_URL};
 
 #[cfg(test)]
 mod tests {
+    mod provider_file_rejection;
     mod request_support;
     use request_support::request;
     mod block_identity_tests;
