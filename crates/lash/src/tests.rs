@@ -408,6 +408,8 @@ fn untimed_fixture_workers() -> crate::rlm::WorkerService {
 
 mod absent_session_delete;
 mod assistant_hook_faults;
+#[cfg(feature = "rlm")]
+mod cell_race_loser;
 mod config_transactions;
 mod core_session_builder;
 mod crashed_create_drain;
