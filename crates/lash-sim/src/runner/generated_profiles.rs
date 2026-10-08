@@ -1052,4 +1052,48 @@ mod seed_tests {
         );
         assert_eq!(corpus.corpus(), Some(WEEKLY_REGRESSION_CORPUS));
     }
+
+    #[test]
+    fn time_budget_stops_the_sweep_cleanly_and_records_reached_seeds() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+
+        // A spent budget stops the sweep before the first seed; the run still
+        // writes a summary so the caller can see how far it got.
+        let artifact_root = tmp.path().to_path_buf();
+        let seeds = crate::quick_seed_sweep(4);
+        let report = run_on_sim_harness_stack(
+            "generated-sim-search-budget-test",
+            SIM_HARNESS_STACK_LIMIT_BYTES,
+            move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(FixedScriptRunnerError::Io)?;
+                runtime.block_on(run_generated_sim_profile(
+                    artifact_root,
+                    "fast-random",
+                    seeds,
+                    24,
+                    SimShard::new(1, 2).expect("shard"),
+                    SimRunMode::Search,
+                    SimSeedSource::exploration(Some("budget-test-salt".to_string())),
+                    Some(Duration::ZERO),
+                ))
+            },
+        )
+        .expect("generated sim search with spent budget");
+
+        assert_eq!(report.mode, "search");
+        assert_eq!(report.time_budget_seconds, Some(0));
+        // The shard still owns its selected seeds; none of them ran.
+        assert_eq!(
+            report.counts.generated_seeds,
+            (0..seeds)
+                .filter(|index| SimShard::new(1, 2).expect("shard").selects(*index))
+                .count()
+        );
+        assert_eq!(report.counts.reached_seeds, 0);
+        assert_eq!(report.counts.boundary_events, 0);
+        assert!(tmp.path().join(GENERATED_SIM_SUMMARY).exists());
+    }
 }
