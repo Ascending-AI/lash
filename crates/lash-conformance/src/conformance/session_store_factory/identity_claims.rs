@@ -8,8 +8,10 @@ use pretty_assertions::assert_eq;
 )]
 pub async fn fork_inherits_history_without_execution_queues_waits_or_journals(
     factory: Arc<dyn crate::store::ConformanceDeployment>,
-    _host: ActorContext,
+    host: ActorContext,
 ) {
+    lash_core::testing::process_execution_env_fixture(host.backend().process_env_store().as_ref())
+        .await;
     let source_id = SessionId::from("fork-isolated-source");
     let fork_id = SessionId::from("fork-isolated-branch");
     let source = factory
@@ -136,8 +138,10 @@ pub async fn fork_inherits_history_without_execution_queues_waits_or_journals(
 pub async fn reclaim_races_fork_and_unpin_without_using_process_roots(
     factory: Arc<dyn crate::DeploymentStore>,
     registry: Arc<dyn crate::ProcessRegistry>,
-    _host: ActorContext,
+    host: ActorContext,
 ) {
+    lash_core::testing::process_execution_env_fixture(host.backend().process_env_store().as_ref())
+        .await;
     let id = SessionId::from("reclaim-race-source");
     let source = factory
         .admit_view(&session_store_request(

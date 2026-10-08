@@ -129,6 +129,7 @@ impl WorkbenchBuilder {
                     .expect("open a SQLite memory store set"),
             ),
         };
+        lash::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
         let stores = match self.session_delete_faults {
             Some(faults) => faults.install(stores),
             None => stores,

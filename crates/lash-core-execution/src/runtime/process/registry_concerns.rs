@@ -225,6 +225,9 @@ pub trait ProcessRegistrar: Send + Sync {
         observers: &[SessionId],
     ) -> Result<PreparedProcessRegistration, PluginError>;
     /// Revalidate existing start and closure fences, then commit exactly the plan.
+    /// A new start requires its environment bytes and retains them under the
+    /// process record in this same transaction; a missing reference refuses
+    /// with `RuntimeErrorCode::ArtifactMissing` without creating an actor.
     async fn commit_process_registration(
         &self,
         prepared: PreparedProcessRegistration,

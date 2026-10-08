@@ -13,10 +13,8 @@ const SCOPE: &str = "intent-ingress-observability-turn";
 /// target, so an identity re-used for a different cancel is the changed
 /// payload the submission ledger refuses.
 async fn test_core() -> lash::Result<(lash::LashCore, ProcessId, ProcessId)> {
-    let stores = lash_sqlite_store::SqliteStoreSet::memory()
-        .await
-        .expect("open a memory store set");
-    let backend = lash_conformance::backend_over(Arc::new(stores));
+    let stores = crate::support::sqlite_memory_store_set().await;
+    let backend = lash_conformance::backend_over(stores);
     let registry = backend.process_registry();
     let mut targets = Vec::new();
     for _ in 0..2 {

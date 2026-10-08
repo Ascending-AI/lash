@@ -472,8 +472,8 @@ pub(super) fn registration(id: &str) -> ProcessRegistration {
     ))
 }
 
-/// A process of the `conformance` engine kind, under an execution env of its
-/// own id.
+/// A process of the `conformance` engine kind, under the shared published
+/// fixture environment.
 pub(super) fn executed_registration(id: &str) -> ProcessRegistration {
     ProcessRegistration::new(
         ProcessInput::Engine {
@@ -483,9 +483,7 @@ pub(super) fn executed_registration(id: &str) -> ProcessRegistration {
         ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
-    .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
-        "process-env:fixture-{id}"
-    ))))
+    .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref()))
     .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
         definition_identity(
             lash_core::ProcessDefinitionRef::unclaimed(
@@ -1018,9 +1016,7 @@ async fn refolded_process_record_matches_stored_projection(
                 ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
-            .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
-                "process-env:fixture-{case}"
-            ))))
+            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref()))
             .with_extra_event_types([plain_event_type("signal.ready")]),
         )
         .await
@@ -1398,7 +1394,7 @@ pub async fn generic_append_rejects_reserved_edge_audit_events(registry: Arc<dyn
 )]
 pub async fn waiting_processes_remain_in_the_non_terminal_scan(registry: Arc<dyn ProcessRegistry>) {
     let definition = serde_json::json!({"suite": "waiting-non-terminal-scan"});
-    let env_ref = ProcessExecutionEnvRef::new("process-env:waiting-non-terminal-scan");
+    let env_ref = lash_core::testing::process_execution_env_fixture_ref();
     let count_before = registry
         .count_non_terminal_processes()
         .await

@@ -78,8 +78,8 @@ pub async fn live_reference_summary_tracks_non_terminal_reference_counts(
 
     let definition_a = serde_json::json!({ "module": "alpha", "process": "main" });
     let definition_b = serde_json::json!({ "module": "beta", "process": "main" });
-    let env_a = ProcessExecutionEnvRef::new("process-env:alpha");
-    let env_b = ProcessExecutionEnvRef::new("process-env:beta");
+    let env_a = lash_core::testing::process_execution_env_fixture_ref();
+    let env_b = super::helpers::process_registry_alternate_environment_ref();
     let mut ids = std::collections::BTreeMap::new();
     for (label, definition, env_ref) in [
         ("proc-ref-a1", definition_a.clone(), env_a.clone()),

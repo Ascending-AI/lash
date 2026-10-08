@@ -326,6 +326,10 @@ impl Cluster {
     /// Register a runbook process that waits `wait` between its steps, under
     /// `start_key`.
     pub async fn register_process(&self, start_key: &str, wait: Duration) -> ProcessRecord {
+        lash_core_execution::testing::process_execution_env_fixture(
+            self.backend.process_env_store().as_ref(),
+        )
+        .await;
         let registration = ProcessRegistration::new(
             ProcessInput::Engine {
                 kind: lash_postgres_workers::process::KIND.to_owned(),

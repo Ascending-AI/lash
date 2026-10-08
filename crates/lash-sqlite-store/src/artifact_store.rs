@@ -172,6 +172,45 @@ fn decode_stored_edge(kind: &str, id: &str) -> Result<ArtifactReferrer, StoreErr
     })
 }
 
+/// Validate and retain a start's environment in the transaction admitting
+/// its process. The writer orders this acquisition against source cleanup.
+pub(crate) fn acquire_process_env_tx(
+    tx: &rusqlite::Connection,
+    env: &lash_core_execution::ProcessExecutionEnvRef,
+    process: &lash_core_execution::ProcessId,
+) -> Result<(), lash_core_execution::PluginError> {
+    let referrer = ArtifactReferrer::ProcessRecord(process.clone());
+    if artifact_fenced_tx(tx, &referrer).map_err(artifact_sqlite_error)? {
+        return Err(ArtifactStoreError::ReferrerEnded { referrer }.into());
+    }
+    let stored: Option<String> = tx
+        .query_row(
+            artifact_sql().refs.select_blob_ref.sql(),
+            params![PROCESS_ENV_NAMESPACE, env.as_str()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(artifact_sqlite_error)?;
+    if stored.is_none() {
+        return Err(ArtifactStoreError::ArtifactMissing {
+            artifact_ref: env.as_str().to_owned(),
+        }
+        .into());
+    }
+    crate::conn::cached_execute(
+        tx,
+        artifact_sql().edges.insert_edge.sql(),
+        params![
+            PROCESS_ENV_NAMESPACE,
+            env.as_str(),
+            referrer.kind().as_str(),
+            referrer.canonical_id()
+        ],
+    )
+    .map_err(artifact_sqlite_error)?;
+    Ok(())
+}
+
 pub(crate) fn artifact_fenced_tx(
     tx: &rusqlite::Connection,
     referrer: &ArtifactReferrer,

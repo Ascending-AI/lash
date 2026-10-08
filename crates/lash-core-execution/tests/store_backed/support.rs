@@ -25,6 +25,21 @@ pub async fn sqlite_memory_store_backend() -> lash_core_execution::Backend {
     lash_conformance::backend_over(sqlite_memory_store_set().await)
 }
 
+/// Storage ports for a process law whose default environment is published.
+pub async fn sqlite_memory_process_store_set() -> std::sync::Arc<lash_sqlite_store::SqliteStoreSet>
+{
+    let stores = sqlite_memory_store_set().await;
+    crate::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    stores
+}
+
+/// A registry fixture whose held-engine registrations name stored bytes.
+pub async fn sqlite_memory_process_store_backend() -> lash_core_execution::Backend {
+    let backend = sqlite_memory_store_backend().await;
+    crate::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
+    backend
+}
+
 /// Waits until the wall clock has passed `epoch_ms`, so a cutoff one
 /// millisecond past a row's stamp is already in the past for the store.
 pub async fn after_millisecond_tick(epoch_ms: u64) {

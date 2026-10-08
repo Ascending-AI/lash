@@ -14,6 +14,7 @@ use crate::backend_fixture::TestBackend;
 lash_conformance::process_prune_reclaim_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let factory = backend.store().await as Arc<dyn DeploymentStore>;
+    lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
     let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
     let probe = Arc::new(crate::blob_probe::SqliteBlobProbe::new(
         backend.database_uri(),

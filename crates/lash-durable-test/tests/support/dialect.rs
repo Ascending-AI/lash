@@ -92,6 +92,10 @@ pub async fn open(
                 )),
                 clock,
             );
+            lash_core_execution::testing::process_execution_env_fixture(
+                stores.process_env_store().as_ref(),
+            )
+            .await;
             let database = lash_core_execution::StoreSet::durable_store(&stores);
             keep.lock_recover().extend([
                 Box::new(isolated) as Box<dyn std::any::Any + Send>,

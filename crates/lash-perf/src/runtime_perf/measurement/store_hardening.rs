@@ -104,6 +104,11 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
             let sqlite_store: Arc<dyn lash_core::RuntimeStore> = sqlite_factory;
             let postgres_store: Arc<dyn lash_core::RuntimeStore> = Arc::new(postgres_factory);
 
+            lash_core::testing::process_execution_env_fixture(
+                sqlite_stores.process_env_store().as_ref(),
+            )
+            .await;
+            lash_core::testing::process_execution_env_fixture(&postgres.process_env_store()).await;
             let memory_registry: Arc<dyn lash_core::ProcessRegistry> =
                 sqlite_memory_stores.process_registry();
             let sqlite_registry: Arc<dyn lash_core::ProcessRegistry> =

@@ -17,9 +17,7 @@ async fn deployment_drain_status_keeps_waiting_process_non_drained() {
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
-            .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new(
-                "process-env:test-engine",
-            ))),
+            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref())),
         )
         .await
         .expect("register waiting process")

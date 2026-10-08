@@ -140,7 +140,8 @@ pub fn held_engine_input(payload: serde_json::Value) -> crate::ProcessInput {
 }
 
 /// A registration of [`held_engine_input`] under the fixture execution
-/// environment reference, which every registration carries.
+/// environment reference, which every registration carries. Publish it with
+/// [`process_execution_env_fixture`] in the store receiving the registration.
 #[cfg(any(test, feature = "testing"))]
 pub fn held_engine_registration(
     payload: serde_json::Value,

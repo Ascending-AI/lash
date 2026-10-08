@@ -95,6 +95,7 @@ mod tests {
         let storage = crate::testing::connect(&database_url)
             .await
             .expect("connect prune rollback storage");
+        lash_core::testing::process_execution_env_fixture(&storage.process_env_store()).await;
         let ghost_id = lash_core_execution::mint_process_id();
         let registry = storage.process_registry();
         let process_id = registry

@@ -574,6 +574,7 @@ async fn register(
     backend: &Backend,
     registration: ProcessRegistration,
 ) -> Result<ProcessId, LawBroken> {
+    crate::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
     backend
         .process_registry()
         .register_process(registration)

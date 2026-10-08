@@ -49,6 +49,8 @@ mod floor_tests {
         let backend = lash_sqlite_store::SqliteStoreSet::memory()
             .await
             .expect("memory backend");
+        lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref())
+            .await;
         let handles = StoreContractHandles {
             registry: backend.process_registry() as Arc<dyn crate::ProcessRegistry>,
             runtime: backend.open_store().await.expect("durable-core store")

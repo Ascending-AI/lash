@@ -177,6 +177,10 @@ async fn postgres(
         Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
         clock,
     );
+    lash_core_execution::testing::process_execution_env_fixture(
+        lash_core_execution::StoreSet::process_env_store(&stores).as_ref(),
+    )
+    .await;
     let database = lash_core_execution::StoreSet::durable_store(&stores);
     keep.push(Box::new(isolated));
     Ok((assemble(Arc::new(stores))?, database))
@@ -270,6 +274,10 @@ pub async fn sqlite(clock: Arc<SimClock>) -> Result<(Backend, Arc<dyn DurableSto
     let stores = lash_sqlite_store::SqliteStoreSet::memory_with_options_and_clock(options, clock)
         .await
         .map_err(|error| error.to_string())?;
+    lash_core_execution::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
     let database: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
     let backend = assemble(Arc::new(stores))?;
     Ok((backend, database))

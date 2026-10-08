@@ -104,9 +104,14 @@ pub async fn memory(clock: Arc<SimClock>) -> SqliteStoreSet {
         inline_calls: true,
         ..SqliteStoreSetOptions::memory()
     };
-    SqliteStoreSet::memory_with_options_and_clock(options, clock)
+    let stores = SqliteStoreSet::memory_with_options_and_clock(options, clock)
         .await
-        .expect("an in-memory store set opens")
+        .expect("an in-memory store set opens");
+    lash_core_execution::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
+    stores
 }
 
 /// The SQLite file store set at `path` on `clock`.
@@ -116,7 +121,12 @@ pub async fn file(path: impl AsRef<Path>, clock: Arc<SimClock>) -> SqliteStoreSe
         inline_calls: true,
         ..SqliteStoreSetOptions::default()
     };
-    SqliteStoreSet::open_with_options_and_clock(path, options, clock)
+    let stores = SqliteStoreSet::open_with_options_and_clock(path, options, clock)
         .await
-        .expect("a file store set opens")
+        .expect("a file store set opens");
+    lash_core_execution::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
+    stores
 }

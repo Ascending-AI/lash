@@ -288,6 +288,8 @@ impl SqliteProcessRegistry {
         let conn = SqliteConnection::open(location.target()).await?;
         ensure_versioned_schema(&conn).await?;
         apply_pragmas(&conn).await?;
+        let store = crate::SqliteStore::open_with_clock(path, Arc::clone(&clock)).await?;
+        lash_core_execution::testing::process_execution_env_fixture(&store).await;
         Ok(Self::on_connection(conn, location, clock))
     }
 

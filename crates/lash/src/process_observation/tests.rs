@@ -117,7 +117,7 @@ fn registration(label: &str, engine_owned: bool) -> lash_core::ProcessRegistrati
     .with_extra_event_types([tick_type()]);
     if engine_owned {
         registration
-            .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new("l8-env")))
+            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref()))
             .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
                 lash_core::ProcessIdentity::for_definition(
                     lash_core::ProcessDefinitionRef::unclaimed(
@@ -1020,6 +1020,7 @@ async fn the_facade_routes_commits_to_the_hub_and_pages_by_cursor() {
             .await
             .expect("open the file store set"),
     );
+    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
     let core = crate::tests::standard_core_over(lash_conformance::backend_over(stores));
     let watched = core.process_registry();
     let process_id = watched

@@ -96,6 +96,8 @@ async fn event_release_differential_on_sqlite_memory_and_file() {
     let file = lash_sqlite_store::SqliteStoreSet::open(directory.path().join("file.db"))
         .await
         .expect("SQLite file store set");
+    lash_core::testing::process_execution_env_fixture(memory.process_env_store().as_ref()).await;
+    lash_core::testing::process_execution_env_fixture(file.process_env_store().as_ref()).await;
     let (_, memory_releases) = release_observations(memory.process_registry().as_ref()).await;
     let (_, file_releases) = release_observations(file.process_registry().as_ref()).await;
     assert_eq!(memory_releases, file_releases);
@@ -301,9 +303,7 @@ pub(super) async fn compare_bounded_process_event_pages(
             lash_core::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         )
-        .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new(
-            "effect-differential-env",
-        )))
+        .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref()))
         .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
             lash_core::ProcessIdentity::for_definition(
                 lash_core::ProcessDefinitionRef::unclaimed(
@@ -608,6 +608,7 @@ async fn prepared_registration_race_keeps_the_first_scope() {
     let stores = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .unwrap_or_else(|error| panic!("SQLite memory: {error}"));
+    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
     assert_eq!(
         prepared_registration_race(stores.process_registry().as_ref(), "memory").await,
         "prepared=read-only writers=one anchor=winner"
@@ -635,6 +636,8 @@ async fn prepared_registration_scope_matches_across_backends() {
         )),
     );
     let nonce = run_nonce();
+    lash_core::testing::process_execution_env_fixture(memory.process_env_store().as_ref()).await;
+    lash_core::testing::process_execution_env_fixture(file.process_env_store().as_ref()).await;
     let expected = prepared_registration_race(memory.process_registry().as_ref(), &nonce).await;
     assert_eq!(
         prepared_registration_race(file.process_registry().as_ref(), &nonce).await,

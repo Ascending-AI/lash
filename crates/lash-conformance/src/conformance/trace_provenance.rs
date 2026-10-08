@@ -66,6 +66,7 @@ pub async fn first_admission_wins_without_changing_business_identity(
     _host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
 ) {
+    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
     let session_id = crate::SessionId::fixture(format!("{prefix}-trace-first-writer"));
     let parts = TraceParts {
         store: crate::conformance::law_session_store(stores.as_ref(), &session_id).await,
@@ -301,7 +302,7 @@ async fn a_retried_start_keeps_its_first_scope(prefix: &str, stores: &Arc<dyn cr
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn a_redelivered_signal_keeps_its_first_cause(
-    prefix: &str,
+    _prefix: &str,
     stores: &Arc<dyn crate::StoreSet>,
 ) {
     let registry = stores.process_registry();
@@ -315,9 +316,7 @@ async fn a_redelivered_signal_keeps_its_first_cause(
                 crate::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
-            .with_execution_env_ref(Some(crate::ProcessExecutionEnvRef::new(format!(
-                "process-env:{prefix}-trace-signal"
-            ))))
+            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref()))
             .with_extra_event_types([super::process_registry::plain_event_type("signal.ready")]),
         )
         .await

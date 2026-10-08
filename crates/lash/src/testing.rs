@@ -36,6 +36,7 @@ pub use lash_core::testing::tool_registry_with_live_provider;
 /// until it is cancelled.
 pub use lash_core::testing::{
     HeldProcessEngine, held_engine_input, held_engine_registration, process_engine_plugin_fixture,
+    process_execution_env_fixture,
 };
 pub use lash_core::testing::{
     MockSessionManager, TestClock, TestProvider, TestProviderBuilder, mock_attempt_context,

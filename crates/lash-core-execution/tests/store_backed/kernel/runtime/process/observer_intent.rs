@@ -4,11 +4,11 @@ mod tests {
     use crate::runtime::{SessionObserverIntentSource, reconcile_session_process_observer_intents};
     use crate::support::prelude::*;
 
-    use crate::support::sqlite_memory_store_set;
+    use crate::support::sqlite_memory_process_store_set;
 
     #[tokio::test]
     async fn noproc_receipts_preserve_missing_and_pruned_outcomes() {
-        let backend = sqlite_memory_store_set().await;
+        let backend = sqlite_memory_process_store_set().await;
         let registry = backend.process_registry();
         let registered = registry
             .register_process(crate::testing::held_engine_registration(
@@ -68,7 +68,7 @@ mod tests {
     /// lash-core's `session_creation_applies_only_named_process_observers_with_typed_outcomes`).
     #[tokio::test]
     async fn named_observer_intents_add_only_their_edges_with_typed_outcomes() {
-        let backend = sqlite_memory_store_set().await;
+        let backend = sqlite_memory_process_store_set().await;
         let registry = backend.process_registry();
         let mut ids = std::collections::BTreeMap::new();
         for label in ["named", "unnamed", "pruned"] {
@@ -164,7 +164,7 @@ mod tests {
     }
     #[tokio::test]
     async fn a_selected_pruned_process_never_retargets_to_a_later_process() {
-        let backend = sqlite_memory_store_set().await;
+        let backend = sqlite_memory_process_store_set().await;
         let registry = backend.process_registry();
         let registration = crate::testing::held_engine_registration(
             serde_json::Value::Null,

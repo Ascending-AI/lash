@@ -11,8 +11,12 @@ use pretty_assertions::assert_eq;
 pub async fn a_same_start_key_successor_after_prune_has_independent_attachment_referrers(
     factory: Arc<dyn crate::DeploymentStore>,
     registry: Arc<dyn crate::ProcessRegistry>,
-    _effect_host: ActorContext,
+    effect_host: ActorContext,
 ) {
+    lash_core::testing::process_execution_env_fixture(
+        effect_host.backend().process_env_store().as_ref(),
+    )
+    .await;
     let key = crate::StartKey::for_host("successor-after-prune");
     let start = || {
         process_registry::registration("successor-after-prune").with_start_key(Some(key.clone()))

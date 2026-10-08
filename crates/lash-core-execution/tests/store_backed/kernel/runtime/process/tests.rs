@@ -4,13 +4,13 @@ use crate::support::prelude::*;
 
 use crate::runtime::process::{
     ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEventAppendRequest,
-    ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
-    ProcessInput, ProcessObserverBy, ProcessProvenance, ProcessRegistration, ProcessValueSelector,
+    ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionEnvSpec, ProcessInput,
+    ProcessObserverBy, ProcessProvenance, ProcessRegistration, ProcessValueSelector,
     ProcessWakeSpec, ProjectionWatermark,
 };
 use crate::{Lifetime, ProcessRegistry, SessionId, StoreSet as _};
 
-use crate::support::sqlite_memory_store_set;
+use crate::support::sqlite_memory_process_store_set;
 
 fn registration(_id: &str) -> ProcessRegistration {
     crate::testing::held_engine_registration(
@@ -27,7 +27,7 @@ fn registration(_id: &str) -> ProcessRegistration {
 /// at the target session, written in the append's own transaction.
 #[tokio::test]
 async fn a_suppressed_append_is_journaled_in_full_and_wakes_nobody() {
-    let stores = sqlite_memory_store_set().await;
+    let stores = sqlite_memory_process_store_set().await;
     let registry = stores.process_registry();
     let sessions = stores.session_store_factory();
     let process_id = crate::ProcessId::fixture("announcement-suppression");
@@ -146,7 +146,7 @@ fn wake_registration(id: &str, target_session_id: &SessionId) -> ProcessRegistra
 
 #[tokio::test]
 async fn prune_retains_exact_artifact_cleanup_until_acknowledged() {
-    let backend = sqlite_memory_store_set().await;
+    let backend = sqlite_memory_process_store_set().await;
     let registry = backend.process_registry();
     let cleanup_ledger = backend.artifact_cleanup();
     let registration = ProcessRegistration::new(
@@ -157,7 +157,7 @@ async fn prune_retains_exact_artifact_cleanup_until_acknowledged() {
         ProcessProvenance::host(),
         Lifetime::Detached,
     )
-    .with_execution_env_ref(Some(ProcessExecutionEnvRef::new("process-env:cleanup")));
+    .with_execution_env_ref(Some(crate::testing::process_execution_env_fixture_ref()));
     let registered = registry
         .register_process(registration)
         .await
@@ -237,7 +237,8 @@ async fn prune_retains_exact_artifact_cleanup_until_acknowledged() {
 
 #[tokio::test]
 async fn delete_session_process_command_revokes_only_observer_edges() {
-    let registry: Arc<dyn ProcessRegistry> = sqlite_memory_store_set().await.process_registry();
+    let registry: Arc<dyn ProcessRegistry> =
+        sqlite_memory_process_store_set().await.process_registry();
     let registry_dyn = Arc::clone(&registry);
     let mut ids = std::collections::BTreeMap::new();
     for label in ["sole", "shared"] {
@@ -341,7 +342,7 @@ async fn delete_session_process_command_revokes_only_observer_edges() {
 /// `ProcessExecutionEnvStore` classifies by code.
 #[tokio::test]
 async fn env_store_reports_typed_referrer_fences_and_carry_refusals() {
-    let backend = sqlite_memory_store_set().await;
+    let backend = crate::support::sqlite_memory_store_set().await;
     let store = backend.process_env_store();
     let spec = ProcessExecutionEnvSpec::new(
         crate::AdmittedPluginConfig::default(),

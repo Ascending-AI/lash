@@ -14,11 +14,13 @@ use std::sync::Arc;
 
 /// A fresh SQLite memory store set: storage ports only, no engine.
 pub(crate) async fn sqlite_memory_store_set() -> Arc<lash_sqlite_store::SqliteStoreSet> {
-    Arc::new(
+    let stores = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
             .expect("open a SQLite memory store set"),
-    )
+    );
+    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    stores
 }
 
 /// A backend over a fresh SQLite memory store set whose effect host only

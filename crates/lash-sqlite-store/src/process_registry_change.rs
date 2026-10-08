@@ -285,10 +285,12 @@ mod tests {
 
     #[tokio::test]
     async fn candidate_tombstone_divergence_rolls_back_all_prune_mutations() {
-        let registry = crate::SqliteStoreSet::memory()
+        let stores = crate::SqliteStoreSet::memory()
             .await
-            .expect("open prune rollback registry")
-            .process_registry();
+            .expect("open prune rollback registry");
+        lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref())
+            .await;
+        let registry = stores.process_registry();
         let ghost_id = lash_core_execution::mint_process_id();
         let process_id = registry
             .register_process(lash_core::testing::held_engine_registration(
