@@ -135,6 +135,7 @@ async fn extended_provider_trace_captures_exact_serialized_anthropic_body_withou
     let traced_body = {
         let requests = transport.requests.lock_recover();
         assert_eq!(requests.len(), 1);
+        assert!(!format!("{:?}", requests[0]).contains(SECRET_SENTINEL));
         requests[0].body.clone()
     };
     assert_eq!(traced_body.as_ref(), request_event.raw.as_bytes());

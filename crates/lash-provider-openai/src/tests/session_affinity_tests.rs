@@ -43,7 +43,8 @@ async fn host_enabled_session_affinity_works_through_a_custom_proxy_url() {
             .all(|(name, _)| !name.eq_ignore_ascii_case("session_id"))
     );
     assert!(wire_request.headers.iter().any(|(name, value)| {
-        name.eq_ignore_ascii_case("x-client-request-id") && value == "session-1:request:test"
+        name.eq_ignore_ascii_case("x-client-request-id")
+            && value.as_str() == "session-1:request:test"
     }));
 }
 

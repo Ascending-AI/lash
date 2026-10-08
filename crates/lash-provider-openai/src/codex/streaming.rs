@@ -549,29 +549,35 @@ impl CodexProvider {
         let mut headers = vec![
             (
                 "Authorization".to_string(),
-                format!("Bearer {}", lease.token.secret().expose_secret()),
+                lash_llm_transport::HttpHeaderValue::sensitive(format!(
+                    "Bearer {}",
+                    lease.token.secret().expose_secret()
+                )),
             ),
-            ("Content-Type".to_string(), "application/json".to_string()),
-            ("Accept".to_string(), "text/event-stream".to_string()),
+            (
+                "Content-Type".to_string(),
+                "application/json".to_string().into(),
+            ),
+            ("Accept".to_string(), "text/event-stream".to_string().into()),
             (
                 "OpenAI-Beta".to_string(),
-                "responses=experimental".to_string(),
+                "responses=experimental".to_string().into(),
             ),
-            ("originator".to_string(), Self::CODEX_ORIGINATOR.to_string()),
-            ("User-Agent".to_string(), Self::codex_user_agent()),
+            ("originator".to_string(), Self::CODEX_ORIGINATOR.into()),
+            ("User-Agent".to_string(), Self::codex_user_agent().into()),
             (
                 "session-id".to_string(),
-                req.scope.provider_session_affinity_key(),
+                req.scope.provider_session_affinity_key().into(),
             ),
             (
                 "x-client-request-id".to_string(),
-                req.scope.request_id.clone(),
+                req.scope.request_id.clone().into(),
             ),
         ];
         if let Some(id) = lease.token.account() {
             headers.push((
                 "ChatGPT-Account-ID".to_string(),
-                id.expose_secret().to_string(),
+                lash_llm_transport::HttpHeaderValue::sensitive(id.expose_secret()),
             ));
         }
         merge_extra_headers(&mut headers, &self.extra_headers, false)?;

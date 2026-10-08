@@ -347,7 +347,7 @@ impl CodexProvider {
         let headers = ws_request.headers_mut();
         headers.insert(
             "Authorization",
-            HeaderValue::from_str(&format!("Bearer {}", lease.token.secret().expose_secret()))
+            sensitive_websocket_header(&format!("Bearer {}", lease.token.secret().expose_secret()))
                 .map_err(|error| {
                     CodexWebSocketAttemptError::before_send(LlmTransportError::new(format!(
                         "Invalid Codex WebSocket authorization header: {error}"
@@ -386,7 +386,7 @@ impl CodexProvider {
         if let Some(account_id) = lease.token.account() {
             headers.insert(
                 "ChatGPT-Account-ID",
-                HeaderValue::from_str(account_id.expose_secret()).map_err(|error| {
+                sensitive_websocket_header(account_id.expose_secret()).map_err(|error| {
                     CodexWebSocketAttemptError::before_send(LlmTransportError::new(format!(
                         "Invalid Codex WebSocket account header: {error}"
                     )))
@@ -399,7 +399,7 @@ impl CodexProvider {
                     "Invalid extra WebSocket header name: {error}"
                 )))
             })?;
-            let value = HeaderValue::from_str(value).map_err(|error| {
+            let value = sensitive_websocket_header(value).map_err(|error| {
                 CodexWebSocketAttemptError::before_send(LlmTransportError::new(format!(
                     "Invalid extra WebSocket header value: {error}"
                 )))
@@ -570,4 +570,12 @@ impl CodexProvider {
         Self::prune_idle_websocket_sessions(&mut sessions);
         Self::enforce_websocket_session_cache_cap(&mut sessions);
     }
+}
+
+fn sensitive_websocket_header(
+    value: &str,
+) -> Result<HeaderValue, tokio_tungstenite::tungstenite::http::header::InvalidHeaderValue> {
+    let mut header = HeaderValue::from_str(value)?;
+    header.set_sensitive(true);
+    Ok(header)
 }

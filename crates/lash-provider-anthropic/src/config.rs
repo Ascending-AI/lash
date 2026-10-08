@@ -9,6 +9,15 @@ pub const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
 pub(crate) static DEFAULT_HTTP_TRANSPORT: LazyLock<Arc<dyn LlmHttpTransport>> =
     LazyLock::new(|| Arc::new(ReqwestLlmHttpTransport::new()));
 
+/// The host chooses where Anthropic receives its token. Token acquisition
+/// and replacement always remain with the host's `TokenSource`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AnthropicAuthScheme {
+    #[default]
+    ApiKey,
+    Bearer,
+}
+
 /// Anthropic API (Claude) provider state and transport.
 ///
 /// Streamed messages accept at most 1,024 content blocks. Starts must use
@@ -17,8 +26,9 @@ pub(crate) static DEFAULT_HTTP_TRANSPORT: LazyLock<Arc<dyn LlmHttpTransport>> =
 #[derive(Clone, Debug)]
 pub struct AnthropicProvider {
     /// The host's token source behind its gate. A token's plaintext leaves
-    /// the process only on the `x-api-key` request header.
+    /// the process only on the selected credential header.
     pub(crate) tokens: Arc<TokenGate>,
+    pub auth_scheme: AnthropicAuthScheme,
     pub base_url: Option<String>,
     pub options: ProviderOptions,
     pub extra_headers: lash_llm_transport::ExtraHeaders,
@@ -36,12 +46,18 @@ impl AnthropicProvider {
     pub fn with_token_source(tokens: Arc<dyn TokenSource>) -> Self {
         Self {
             tokens: Arc::new(TokenGate::new(tokens, "anthropic")),
+            auth_scheme: AnthropicAuthScheme::default(),
             base_url: None,
             options: ProviderOptions::default(),
             extra_headers: Default::default(),
             stream_termination: StreamTermination::RequireTerminalEvidence,
             transport: Arc::clone(&DEFAULT_HTTP_TRANSPORT),
         }
+    }
+
+    pub fn with_auth_scheme(mut self, scheme: AnthropicAuthScheme) -> Self {
+        self.auth_scheme = scheme;
+        self
     }
 
     pub fn with_base_url(mut self, base_url: Option<String>) -> Self {

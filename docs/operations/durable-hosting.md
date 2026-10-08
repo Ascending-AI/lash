@@ -846,3 +846,12 @@ it rebuilds the provider.
 [`examples/codex-host-auth`](../../examples/codex-host-auth) is a complete host
 source for Codex: the ChatGPT device-code login, a refresh on `Expiring` or
 `Rejected`, and a rotation written to the host's file before use.
+
+For Anthropic subscription tokens, choose the placement explicitly with
+`AnthropicProvider::with_token_source(source).with_auth_scheme(AnthropicAuthScheme::Bearer)`.
+The default `ApiKey` scheme sends `x-api-key`; `Bearer` sends `Authorization: Bearer`
+and adds the `oauth-2025-04-20` Anthropic beta token. The non-default scheme is
+included in `serialize_config`, without the credential.
+Both schemes ask the same host-owned token source before each attempt and on rejection.
+Credential header values carry sensitivity through transport and recording, including
+custom OpenAI-compatible auth headers and Codex's bound account ID.

@@ -431,17 +431,20 @@ async fn send_attempt(
     let mut headers = vec![
         (
             provider.wire.auth_header_name.clone(),
-            format!(
+            lash_llm_transport::HttpHeaderValue::sensitive(format!(
                 "{}{}",
                 provider.wire.auth_value_prefix,
                 token.secret().expose_secret()
-            ),
+            )),
         ),
-        ("Content-Type".to_string(), "application/json".to_string()),
-        ("Accept".to_string(), "text/event-stream".to_string()),
+        (
+            "Content-Type".to_string(),
+            "application/json".to_string().into(),
+        ),
+        ("Accept".to_string(), "text/event-stream".to_string().into()),
     ];
     if compat.cache_session_affinity {
-        headers.push(("x-client-request-id".to_string(), request_id.clone()));
+        headers.push(("x-client-request-id".to_string(), request_id.clone().into()));
     }
     merge_extra_headers(&mut headers, &provider.wire.extra_headers, false)?;
     let http_request = LlmHttpRequest {

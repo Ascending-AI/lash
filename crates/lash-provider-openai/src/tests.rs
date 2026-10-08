@@ -354,12 +354,9 @@ async fn default_wire_config_uses_bearer_authorization() {
 
     let requests = transport.requests.lock_recover();
     let wire_request = requests.first().expect("captured request");
-    assert!(
-        wire_request
-            .headers
-            .iter()
-            .any(|(name, value)| { name == "Authorization" && value == "Bearer secret" })
-    );
+    assert!(wire_request.headers.iter().any(|(name, value)| {
+        name == "Authorization" && value.as_str() == "Bearer secret" && value.is_sensitive()
+    }));
     assert_eq!(
         wire_request.url,
         "https://proxy.example/v1/chat/completions"
@@ -386,7 +383,9 @@ async fn custom_wire_config_controls_auth_header_and_prefix() {
         wire_request
             .headers
             .iter()
-            .any(|(name, value)| name == "api-key" && value == "Key secret")
+            .any(|(name, value)| name == "api-key"
+                && value.as_str() == "Key secret"
+                && value.is_sensitive())
     );
     assert!(
         wire_request
@@ -408,7 +407,10 @@ async fn empty_auth_value_prefix_sends_raw_key_without_spacing() {
     assert!(
         requests[0]
             .headers
-            .contains(&("x-api-key".to_string(), "secret".to_string()))
+            .iter()
+            .any(|(name, value)| name == "x-api-key"
+                && value.as_str() == "secret"
+                && value.is_sensitive())
     );
 }
 

@@ -124,7 +124,10 @@ impl GoogleOAuthProvider {
             .with_kind(lash_core::ProviderFailureKind::Validation)
         })?;
         let mut start = LlmHttpRequest::post(GEMINI_FILES_UPLOAD_URL, start_body_bytes)
-            .with_header("Authorization", format!("Bearer {access_token}"))
+            .with_header(
+                "Authorization",
+                lash_llm_transport::HttpHeaderValue::sensitive(format!("Bearer {access_token}")),
+            )
             .with_header("Content-Type", "application/json")
             .with_header("X-Goog-Upload-Protocol", "resumable")
             .with_header("X-Goog-Upload-Command", "start")
@@ -171,7 +174,10 @@ impl GoogleOAuthProvider {
             .to_string();
 
         let mut finalize = LlmHttpRequest::post(upload_url, bytes.to_vec())
-            .with_header("Authorization", format!("Bearer {access_token}"))
+            .with_header(
+                "Authorization",
+                lash_llm_transport::HttpHeaderValue::sensitive(format!("Bearer {access_token}")),
+            )
             .with_header("X-Goog-Upload-Command", "upload, finalize")
             .with_header("X-Goog-Upload-Offset", "0")
             .with_header("Content-Length", bytes.len().to_string())

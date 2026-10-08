@@ -13,7 +13,7 @@ mod support;
 #[cfg(feature = "testing")]
 pub mod testing;
 
-pub use config::{AnthropicProvider, DEFAULT_BASE_URL};
+pub use config::{AnthropicAuthScheme, AnthropicProvider, DEFAULT_BASE_URL};
 
 #[cfg(test)]
 mod tests {
@@ -942,7 +942,7 @@ mod tests {
                 .headers
                 .iter()
                 .find(|(name, _)| name.eq_ignore_ascii_case("anthropic-beta"))
-                .map(|(_, value)| value.clone());
+                .map(|(_, value)| value.as_str().to_string());
             *self.beta.lock_recover() = beta;
             let stream = [
                 "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}\n\n",

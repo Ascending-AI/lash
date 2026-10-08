@@ -62,11 +62,75 @@ impl fmt::Display for HttpMethod {
     }
 }
 
+/// A request header's wire value and disclosure policy. Sensitivity survives
+/// clones and conversion to the underlying HTTP client's header value.
+#[derive(Clone, PartialEq, Eq)]
+pub struct HttpHeaderValue {
+    value: String,
+    sensitive: bool,
+}
+
+impl HttpHeaderValue {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self {
+            value: value.into(),
+            sensitive: false,
+        }
+    }
+
+    pub fn sensitive(value: impl Into<String>) -> Self {
+        Self {
+            value: value.into(),
+            sensitive: true,
+        }
+    }
+
+    pub fn set_sensitive(&mut self, sensitive: bool) {
+        self.sensitive = sensitive;
+    }
+
+    pub fn is_sensitive(&self) -> bool {
+        self.sensitive
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.value
+    }
+}
+
+impl From<String> for HttpHeaderValue {
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<&str> for HttpHeaderValue {
+    fn from(value: &str) -> Self {
+        Self::new(value)
+    }
+}
+
+impl AsRef<str> for HttpHeaderValue {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl fmt::Debug for HttpHeaderValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.sensitive {
+            f.write_str("Sensitive")
+        } else {
+            self.value.fmt(f)
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HttpRequest {
     pub method: HttpMethod,
     pub url: String,
-    pub headers: Vec<(String, String)>,
+    pub headers: Vec<(String, HttpHeaderValue)>,
     pub body: Bytes,
     pub body_for_error: Option<String>,
     pub response_start_timeout_message: Option<String>,
@@ -88,7 +152,11 @@ impl HttpRequest {
         Self::new(HttpMethod::Post, url, body)
     }
 
-    pub fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+    pub fn with_header(
+        mut self,
+        name: impl Into<String>,
+        value: impl Into<HttpHeaderValue>,
+    ) -> Self {
         self.headers.push((name.into(), value.into()));
         self
     }
@@ -97,7 +165,7 @@ impl HttpRequest {
     where
         I: IntoIterator<Item = (K, V)>,
         K: Into<String>,
-        V: Into<String>,
+        V: Into<HttpHeaderValue>,
     {
         self.headers.extend(
             headers
@@ -272,7 +340,14 @@ impl HttpTransport for ReqwestHttpTransport {
             .client
             .request(request.method.as_reqwest(), &request.url);
         for (name, value) in request.headers {
-            http = http.header(name.as_str(), value.as_str());
+            let mut wire_value =
+                reqwest::header::HeaderValue::from_str(value.as_str()).map_err(|_| {
+                    LlmTransportError::new("Invalid HTTP request header value")
+                        .with_kind(ProviderFailureKind::Validation)
+                        .with_retry_verdict(TransportRetryVerdict::Forbidden)
+                })?;
+            wire_value.set_sensitive(value.is_sensitive());
+            http = http.header(name.as_str(), wire_value);
         }
         http = http.body(request.body);
 
@@ -404,18 +479,22 @@ pub async fn read_http_body_text(
     Ok(String::from_utf8_lossy(&body).into_owned())
 }
 
-pub fn header_contains(headers: &[(String, String)], name: &str, needle: &str) -> bool {
+pub fn header_contains<V: AsRef<str>>(headers: &[(String, V)], name: &str, needle: &str) -> bool {
     let needle = needle.to_ascii_lowercase();
     headers.iter().any(|(header_name, value)| {
-        header_name.eq_ignore_ascii_case(name) && value.to_ascii_lowercase().contains(&needle)
+        header_name.eq_ignore_ascii_case(name)
+            && value.as_ref().to_ascii_lowercase().contains(&needle)
     })
 }
 
-pub fn first_header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+pub fn first_header_value<'a, V: AsRef<str>>(
+    headers: &'a [(String, V)],
+    name: &str,
+) -> Option<&'a str> {
     headers
         .iter()
         .find(|(header_name, _)| header_name.eq_ignore_ascii_case(name))
-        .map(|(_, value)| value.as_str())
+        .map(|(_, value)| value.as_ref())
 }
 
 #[expect(

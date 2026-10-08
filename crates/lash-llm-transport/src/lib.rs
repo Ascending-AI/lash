@@ -14,9 +14,9 @@ pub mod token_gate;
 pub mod util;
 
 pub use http::{
-    HttpFailureContext, LlmByteStream, LlmHttpBody, LlmHttpMethod, LlmHttpRequest, LlmHttpResponse,
-    LlmHttpTransport, ReqwestByteStream, ReqwestLlmHttpTransport, first_header_value,
-    header_contains, read_http_body_bytes, read_http_body_text,
+    HttpFailureContext, HttpHeaderValue, LlmByteStream, LlmHttpBody, LlmHttpMethod, LlmHttpRequest,
+    LlmHttpResponse, LlmHttpTransport, ReqwestByteStream, ReqwestLlmHttpTransport,
+    first_header_value, header_contains, read_http_body_bytes, read_http_body_text,
 };
 pub use normalize::{
     frame_sse_payload, http_error_envelope, merge_usage,

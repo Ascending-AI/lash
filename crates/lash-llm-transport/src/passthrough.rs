@@ -5,6 +5,7 @@ use lash_core::{GenerationOptionOutcome, ProviderFailureKind, TurnFailureCode};
 use serde_json::{Map, Value};
 
 /// Host-supplied route headers. Debug output never exposes names or values.
+/// Their values remain sensitive when merged onto a wire request.
 #[derive(Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
 pub struct ExtraHeaders(Vec<(String, String)>);
@@ -137,7 +138,7 @@ pub fn merge_extra_body(
 /// Validate all names before mutating headers. Only `anthropic-beta` is
 /// additive; each comma-separated token is retained once in first-seen order.
 pub fn merge_extra_headers(
-    headers: &mut Vec<(String, String)>,
+    headers: &mut Vec<(String, crate::HttpHeaderValue)>,
     extra: &[(String, String)],
     additive_beta: bool,
 ) -> Result<GenerationOptionOutcome, LlmTransportError> {
@@ -168,6 +169,7 @@ pub fn merge_extra_headers(
                 .find(|(written, _)| written.eq_ignore_ascii_case(name))
         {
             let mut tokens: Vec<String> = existing
+                .as_str()
                 .split(',')
                 .map(str::trim)
                 .filter(|token| !token.is_empty())
@@ -182,10 +184,13 @@ pub fn merge_extra_headers(
                     tokens.push(token.to_string());
                 }
             }
-            *existing = tokens.join(",");
+            *existing = crate::HttpHeaderValue::sensitive(tokens.join(","));
             continue;
         }
-        headers.push((name.clone(), value.clone()));
+        headers.push((
+            name.clone(),
+            crate::HttpHeaderValue::sensitive(value.clone()),
+        ));
     }
     Ok(GenerationOptionOutcome::Applied)
 }
@@ -198,7 +203,7 @@ pub fn validate_extra_headers(
 ) -> Result<(), LlmTransportError> {
     let mut written = reserved
         .iter()
-        .map(|name| ((*name).to_string(), String::new()))
+        .map(|name| ((*name).to_string(), crate::HttpHeaderValue::new("")))
         .collect();
     merge_extra_headers(&mut written, extra, additive_beta).map(|_| ())
 }
@@ -264,7 +269,7 @@ mod tests {
 
     #[test]
     fn header_names_are_case_insensitive_and_beta_tokens_are_additive() {
-        let mut headers = vec![("Content-Type".to_string(), "application/json".to_string())];
+        let mut headers = vec![("Content-Type".to_string(), "application/json".into())];
         assert!(
             merge_extra_headers(
                 &mut headers,
@@ -283,7 +288,7 @@ mod tests {
             .is_err()
         );
         assert_eq!(headers.len(), 1);
-        let mut headers = vec![("anthropic-beta".to_string(), "a,b".to_string())];
+        let mut headers = vec![("anthropic-beta".to_string(), "a,b".into())];
         merge_extra_headers(
             &mut headers,
             &[("ANTHROPIC-BETA".into(), "b,c,a".into())],
@@ -292,7 +297,10 @@ mod tests {
         .unwrap();
         assert_eq!(
             headers,
-            [("anthropic-beta".to_string(), "a,b,c".to_string())]
+            [(
+                "anthropic-beta".to_string(),
+                crate::HttpHeaderValue::sensitive("a,b,c")
+            )]
         );
         let secret: ExtraHeaders = vec![("x-host-key".into(), "secret-marker".into())].into();
         let debug = format!("{secret:?}");

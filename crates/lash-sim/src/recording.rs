@@ -349,22 +349,33 @@ impl RecordingByteStream {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct CaptureScrubber {
     literals: Vec<String>,
 }
 
+impl std::fmt::Debug for CaptureScrubber {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CaptureScrubber")
+            .field("literal_count", &self.literals.len())
+            .finish()
+    }
+}
+
 impl CaptureScrubber {
-    fn new(request_headers: &[(String, String)], user_content_markers: &[String]) -> Self {
+    fn new(
+        request_headers: &[(String, lash_llm_transport::HttpHeaderValue)],
+        user_content_markers: &[String],
+    ) -> Self {
         let mut literals = user_content_markers
             .iter()
             .filter(|marker| !marker.is_empty())
             .cloned()
             .collect::<Vec<_>>();
-        for (name, value) in request_headers {
-            if sensitive_header_name(name) || sensitive_header_value(value) {
-                literals.push(value.clone());
-                if let Some((scheme, credential)) = value.split_once(' ')
+        for (_, value) in request_headers {
+            if value.is_sensitive() && !value.as_str().is_empty() {
+                literals.push(value.as_str().to_string());
+                if let Some((scheme, credential)) = value.as_str().split_once(' ')
                     && scheme.eq_ignore_ascii_case("bearer")
                     && !credential.is_empty()
                 {
@@ -382,11 +393,7 @@ impl CaptureScrubber {
             .iter()
             .map(|(name, value)| ProviderWireHeader {
                 name: name.clone(),
-                value: if sensitive_header_name(name) || sensitive_header_value(value) {
-                    REDACTED.to_string()
-                } else {
-                    self.redact_text(value)
-                },
+                value: self.redact_text(value),
             })
             .collect()
     }
@@ -522,20 +529,6 @@ fn sensitive_json_key(name: &str) -> bool {
     ) || normalized.ends_with("_api_key")
         || normalized.ends_with("_access_token")
         || normalized.ends_with("_refresh_token")
-}
-
-fn sensitive_header_name(name: &str) -> bool {
-    let lower = name.to_ascii_lowercase();
-    matches!(
-        lower.as_str(),
-        "authorization" | "proxy-authorization" | "cookie" | "set-cookie" | "x-api-key"
-    ) || lower.contains("api-key")
-        || lower.contains("token")
-}
-
-fn sensitive_header_value(value: &str) -> bool {
-    let lower = value.to_ascii_lowercase();
-    lower.contains("bearer ") || lower.contains("sk-")
 }
 
 fn recorded_stream_error(
@@ -719,9 +712,15 @@ mod tests {
             headers: vec![
                 (
                     "authorization".to_string(),
-                    format!("Bearer {REQUEST_SECRET}"),
+                    lash_llm_transport::HttpHeaderValue::sensitive(format!(
+                        "Bearer {REQUEST_SECRET}"
+                    )),
                 ),
-                ("content-type".to_string(), "application/json".to_string()),
+                ("content-type".to_string(), "application/json".into()),
+                (
+                    "x-private-context".to_string(),
+                    lash_llm_transport::HttpHeaderValue::sensitive(HEADER_SECRET),
+                ),
             ],
             body: Bytes::from(format!(
                 r#"{{"messages":[{{"role":"user","content":"{USER_MARKER}"}}]}}"#

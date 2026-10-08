@@ -338,7 +338,7 @@ fn scripted_response_exchange(
                 ..
             } => {
                 status = Some(*next_status);
-                headers = redacted_provider_headers(next_headers);
+                headers = next_headers.clone();
                 break;
             }
             _ => {}
@@ -364,41 +364,20 @@ fn scripted_response_exchange(
     }
 }
 
-fn redacted_http_headers(headers: &[(String, String)]) -> Vec<ProviderWireHeader> {
+fn redacted_http_headers(
+    headers: &[(String, lash_llm_transport::HttpHeaderValue)],
+) -> Vec<ProviderWireHeader> {
     headers
         .iter()
         .map(|(name, value)| ProviderWireHeader {
             name: name.clone(),
-            value: redacted_header_value(name, value),
+            value: if value.is_sensitive() {
+                "[redacted]".to_string()
+            } else {
+                value.as_str().to_string()
+            },
         })
         .collect()
-}
-
-fn redacted_provider_headers(headers: &[ProviderWireHeader]) -> Vec<ProviderWireHeader> {
-    headers
-        .iter()
-        .map(|header| ProviderWireHeader {
-            name: header.name.clone(),
-            value: redacted_header_value(&header.name, &header.value),
-        })
-        .collect()
-}
-
-fn redacted_header_value(name: &str, value: &str) -> String {
-    let lower_name = name.to_ascii_lowercase();
-    let lower_value = value.to_ascii_lowercase();
-    if matches!(
-        lower_name.as_str(),
-        "authorization" | "proxy-authorization" | "cookie" | "set-cookie" | "x-api-key"
-    ) || lower_name.contains("api-key")
-        || lower_name.contains("token")
-        || lower_value.contains("bearer ")
-        || lower_value.contains("sk-")
-    {
-        "[redacted]".to_string()
-    } else {
-        value.to_string()
-    }
 }
 
 fn request_body_shape(body: &Bytes) -> Value {
@@ -632,7 +611,21 @@ fn match_request(
             .filter(|(header_name, _)| header_name.eq_ignore_ascii_case(name))
             .map(|(_, value)| value.as_str())
             .collect::<Vec<_>>();
-        matcher.match_values(&script.name, name, &values)?;
+        let sensitive = request.headers.iter().any(|(header_name, value)| {
+            header_name.eq_ignore_ascii_case(name) && value.is_sensitive()
+        });
+        matcher
+            .match_values(&script.name, name, &values)
+            .map_err(|error| {
+                if sensitive {
+                    script_match_error(format!(
+                        "Provider Wire Script `{}` sensitive header `{name}` mismatch",
+                        script.name
+                    ))
+                } else {
+                    error
+                }
+            })?;
     }
 
     if !script.request_match.body.is_empty() {

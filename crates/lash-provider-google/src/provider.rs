@@ -90,7 +90,10 @@ impl GoogleOAuthProvider {
             url.push_str("?alt=sse");
         }
         let mut http_request = LlmHttpRequest::post(url.clone(), request_body_bytes)
-            .with_header("Authorization", format!("Bearer {access_token}"))
+            .with_header(
+                "Authorization",
+                lash_llm_transport::HttpHeaderValue::sensitive(format!("Bearer {access_token}")),
+            )
             .with_header("Content-Type", "application/json")
             .with_body_for_error(request_body.clone().unwrap_or_default())
             .with_response_start_timeout_message("Cloud Code response start timed out");
@@ -388,7 +391,12 @@ impl GoogleOAuthProvider {
         let request_body = Some(String::from_utf8_lossy(&request_body_bytes).into_owned());
         let http_request =
             LlmHttpRequest::post(self.method_url("loadCodeAssist"), request_body_bytes)
-                .with_header("Authorization", format!("Bearer {access_token}"))
+                .with_header(
+                    "Authorization",
+                    lash_llm_transport::HttpHeaderValue::sensitive(format!(
+                        "Bearer {access_token}"
+                    )),
+                )
                 .with_header("Content-Type", "application/json")
                 .with_body_for_error(request_body.clone().unwrap_or_default())
                 .with_response_start_timeout_message(

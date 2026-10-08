@@ -4,6 +4,7 @@
 use crate::config::DEFAULT_BASE_URL;
 use crate::policy::{
     ANTHROPIC_VERSION, CONTEXT_MANAGEMENT_BETA, FINE_GRAINED_BETA, INTERLEAVED_THINKING_BETA,
+    OAUTH_API_BETA,
 };
 use crate::stream::StreamState;
 use crate::support::*;
@@ -32,6 +33,18 @@ impl Provider for AnthropicProvider {
 
     fn serialize_config(&self) -> serde_json::Value {
         let mut map = serde_json::Map::new();
+        if self.auth_scheme != crate::AnthropicAuthScheme::default() {
+            map.insert(
+                "auth_scheme".to_string(),
+                Value::String(
+                    match self.auth_scheme {
+                        crate::AnthropicAuthScheme::ApiKey => "api_key",
+                        crate::AnthropicAuthScheme::Bearer => "bearer",
+                    }
+                    .to_string(),
+                ),
+            );
+        }
         if let Some(base_url) = &self.base_url {
             map.insert(
                 "base_url".to_string(),
@@ -146,6 +159,9 @@ impl AnthropicProvider {
         // budget-encoded (`"type": "enabled"`) thinking block, so we gate on
         // the thinking shape actually emitted rather than the model name.
         let mut betas = vec![FINE_GRAINED_BETA.to_string()];
+        if self.auth_scheme == crate::AnthropicAuthScheme::Bearer {
+            betas.push(OAUTH_API_BETA.to_string());
+        }
         let budget_thinking = body
             .get("thinking")
             .and_then(|thinking| thinking.get("type"))
@@ -160,13 +176,22 @@ impl AnthropicProvider {
 
         let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
         let mut request = LlmHttpRequest::post(url.clone(), request_body_bytes)
-            .with_header("x-api-key", token.secret().expose_secret().to_string())
             .with_header("anthropic-version", ANTHROPIC_VERSION)
             .with_header("anthropic-beta", betas.join(","))
             .with_header("Content-Type", "application/json")
             .with_header("Accept", "text/event-stream")
             .with_body_for_error(request_body.clone().unwrap_or_default())
             .with_response_start_timeout_message("Anthropic response start timed out");
+        let (name, value) = match self.auth_scheme {
+            crate::AnthropicAuthScheme::ApiKey => {
+                ("x-api-key", token.secret().expose_secret().to_string())
+            }
+            crate::AnthropicAuthScheme::Bearer => (
+                "Authorization",
+                format!("Bearer {}", token.secret().expose_secret()),
+            ),
+        };
+        request = request.with_header(name, lash_llm_transport::HttpHeaderValue::sensitive(value));
         merge_extra_headers(&mut request.headers, &self.extra_headers, true)?;
         let stream_bounds = SseStreamBounds::new(timeouts.request_timeout, &self.options);
 
@@ -342,6 +367,7 @@ impl AnthropicProvider {
             &self.extra_headers,
             &[
                 "x-api-key",
+                "authorization",
                 "anthropic-version",
                 "anthropic-beta",
                 "content-type",

@@ -367,3 +367,263 @@ fn validate_recorded_reality_provenance(provenance: &ProviderWireProvenance) -> 
     }
     Ok(())
 }
+
+/// Providers own the disclosure policy even when the credential header's name
+/// is arbitrary. Both recording transports and provider traces obey it.
+#[tokio::test]
+async fn no_credentials_reach_request_debug_recordings_or_traces() {
+    use lash_core::llm::types::{LlmProviderTraceEvent, LlmProviderTraceSender};
+    use lash_core::provider::ProviderToken;
+    use lash_provider_anthropic::AnthropicAuthScheme;
+    use lash_provider_openai::{CodexProvider, OpenAiWireConfig};
+    use lash_sansio::sync::MutexExt;
+    use std::sync::Mutex;
+
+    const MARKER: &str = "credential-disclosure-witness";
+    const ACCOUNT: &str = "account-disclosure-witness";
+
+    #[derive(Debug)]
+    struct InspectRequest {
+        inner: Arc<ScriptedLlmHttpTransport>,
+        sent: Mutex<Vec<lash_llm_transport::LlmHttpRequest>>,
+    }
+
+    #[async_trait::async_trait]
+    impl lash_llm_transport::LlmHttpTransport for InspectRequest {
+        async fn send(
+            &self,
+            request: lash_llm_transport::LlmHttpRequest,
+            timeout: Option<Duration>,
+        ) -> Result<lash_llm_transport::LlmHttpResponse, LlmTransportError> {
+            let debug = format!("{request:?}");
+            assert!(!debug.contains(MARKER));
+            assert!(!debug.contains(ACCOUNT));
+            self.sent.lock_recover().push(request.clone());
+            self.inner.send(request, timeout).await
+        }
+    }
+
+    for (lane, model, path, header, prefix) in [
+        (
+            "openai",
+            "gpt-5.4",
+            "/responses",
+            "authorization",
+            "Bearer ",
+        ),
+        (
+            "compatible",
+            "gpt-5.4",
+            "/chat/completions",
+            "x-arbitrary-credential",
+            "Custom ",
+        ),
+        (
+            "codex",
+            "gpt-5.4",
+            "/backend-api/codex/responses",
+            "authorization",
+            "Bearer ",
+        ),
+        (
+            "google",
+            "gemini-3.1-pro-preview",
+            "/v1internal:generateContent",
+            "authorization",
+            "Bearer ",
+        ),
+        (
+            "anthropic_key",
+            "claude-sonnet-4-20250514",
+            "/v1/messages",
+            "x-api-key",
+            "",
+        ),
+        (
+            "anthropic_bearer",
+            "claude-sonnet-4-20250514",
+            "/v1/messages",
+            "authorization",
+            "Bearer ",
+        ),
+    ] {
+        let mut script: serde_json::Value = serde_json::from_str(OPENAI_HARD_QUOTA).unwrap();
+        script["endpoint"]["path"] = json!(path);
+        script["request_match"] = json!({"any":true});
+        script["timeline"][0]["status"] = json!(400);
+        let scripted = transport(&script.to_string());
+        let inspect = Arc::new(InspectRequest {
+            inner: scripted.clone(),
+            sent: Mutex::new(Vec::new()),
+        });
+        let output = tempfile::tempdir().unwrap();
+        let recorder = Arc::new(crate::RecordingLlmHttpTransport::new(
+            inspect.clone(),
+            crate::ProviderRecordingConfig::new(output.path(), lane, lane).with_request_match(
+                crate::ProviderWireRequestMatch {
+                    any: false,
+                    headers: [(
+                        header.to_string(),
+                        crate::provider::HeaderMatcher {
+                            equals: Some(format!("{prefix}{MARKER}")),
+                            ..Default::default()
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
+                    ..Default::default()
+                },
+            ),
+        ));
+        let mut provider: Box<dyn Provider> = match lane {
+            "openai" => Box::new(OpenAiProvider::new(MARKER).with_transport(recorder.clone())),
+            "compatible" => Box::new(
+                OpenAiCompatibleProvider::new(MARKER, "https://provider.test")
+                    .with_wire_config(OpenAiWireConfig {
+                        auth_header_name: header.to_string(),
+                        auth_value_prefix: prefix.to_string(),
+                        ..Default::default()
+                    })
+                    .with_transport(recorder.clone()),
+            ),
+            "codex" => Box::new(
+                CodexProvider::new(Arc::new(ProviderToken::new(MARKER).with_account(ACCOUNT)))
+                    .force_sse_transport()
+                    .with_http_transport(recorder.clone()),
+            ),
+            "google" => Box::new(
+                GoogleOAuthProvider::new(Arc::new(ProviderToken::new(MARKER)))
+                    .with_project_id(Some("project-1".to_string()))
+                    .with_transport(recorder.clone()),
+            ),
+            "anthropic_key" => Box::new(
+                AnthropicProvider::with_token_source(Arc::new(ProviderToken::new(MARKER)))
+                    .with_transport(recorder.clone()),
+            ),
+            "anthropic_bearer" => Box::new(
+                AnthropicProvider::with_token_source(Arc::new(ProviderToken::new(MARKER)))
+                    .with_auth_scheme(AnthropicAuthScheme::Bearer)
+                    .with_transport(recorder.clone()),
+            ),
+            _ => unreachable!(),
+        };
+        let traces = Arc::new(Mutex::new(Vec::<LlmProviderTraceEvent>::new()));
+        let sink = traces.clone();
+        let mut req = request(model, false, false);
+        req.provider_trace = Some(LlmProviderTraceSender::new(move |event| {
+            sink.lock_recover().push(event)
+        }));
+        let failure = provider
+            .complete(req)
+            .await
+            .expect_err("scripted provider rejection");
+        assert_eq!(failure.http_status, Some(400), "{lane}: {failure:?}");
+        let sent = inspect.sent.lock_recover();
+        assert_eq!(sent.len(), 1, "{lane}");
+        let credential = sent[0]
+            .headers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(header))
+            .unwrap();
+        assert_eq!(credential.1.as_str(), format!("{prefix}{MARKER}"));
+        assert!(credential.1.is_sensitive());
+        if lane == "codex" {
+            let account = sent[0]
+                .headers
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("chatgpt-account-id"))
+                .unwrap();
+            assert_eq!(account.1.as_str(), ACCOUNT);
+            assert!(account.1.is_sensitive());
+        }
+        if lane.starts_with("anthropic") {
+            let other = if lane == "anthropic_key" {
+                "authorization"
+            } else {
+                "x-api-key"
+            };
+            assert!(
+                !sent[0]
+                    .headers
+                    .iter()
+                    .any(|(name, _)| name.eq_ignore_ascii_case(other))
+            );
+            let beta =
+                lash_llm_transport::first_header_value(&sent[0].headers, "anthropic-beta").unwrap();
+            let bearer = lane == "anthropic_bearer";
+            assert_eq!(
+                beta.split(',').any(|token| token == "oauth-2025-04-20"),
+                bearer
+            );
+            let config = provider.serialize_config();
+            assert!(!config.to_string().contains(MARKER));
+            assert_eq!(
+                config
+                    .get("auth_scheme")
+                    .and_then(serde_json::Value::as_str),
+                bearer.then_some("bearer")
+            );
+        }
+        let paths = recorder.recorded_paths().unwrap();
+        assert_eq!(paths.len(), 1, "{lane}");
+        let exchanges = scripted.exchanges().unwrap();
+        assert_eq!(exchanges.len(), 1, "{lane}");
+        let trace_events = traces.lock_recover();
+        assert!(
+            trace_events
+                .iter()
+                .any(|event| event.request_endpoint().is_some())
+        );
+        for exported in [
+            std::fs::read_to_string(&paths[0]).unwrap(),
+            serde_json::to_string(&exchanges).unwrap(),
+            serde_json::to_string(&trace_events.iter().map(|event| json!({"provider":event.provider, "event_name":event.event_name, "raw":event.raw})).collect::<Vec<_>>()).unwrap(),
+            format!("{trace_events:?}"),
+        ] {
+            assert!(!exported.contains(MARKER), "{lane} credential leaked");
+            assert!(!exported.contains(ACCOUNT), "{lane} account leaked");
+        }
+    }
+}
+
+#[tokio::test]
+async fn wire_header_redaction_obeys_flags_instead_of_names_or_value_patterns() {
+    use lash_llm_transport::{HttpHeaderValue, LlmHttpRequest, LlmHttpTransport};
+    let mut script: serde_json::Value = serde_json::from_str(OPENAI_HARD_QUOTA).unwrap();
+    script["request_match"] = json!({"any":true});
+    let scripted = transport(&script.to_string());
+    let output = tempfile::tempdir().unwrap();
+    let recorder = crate::RecordingLlmHttpTransport::new(
+        scripted.clone(),
+        crate::ProviderRecordingConfig::new(output.path(), "flags", "openai-compatible")
+            .with_request_match(
+                serde_json::from_value(json!({"headers":{
+                    "authorization":{"equals":"Bearer public-fixture"},
+                    "x-arbitrary":{"equals":"opaque-marker"}
+                }}))
+                .unwrap(),
+            ),
+    );
+    let request = LlmHttpRequest::post("https://provider.test/chat/completions", "{}")
+        .with_header(
+            "authorization",
+            HttpHeaderValue::new("Bearer public-fixture"),
+        )
+        .with_header("x-arbitrary", HttpHeaderValue::sensitive("opaque-marker"));
+    recorder.send(request.clone(), None).await.unwrap();
+    let exchanges = scripted.exchanges().unwrap();
+    assert_eq!(
+        exchanges[0].request.headers[0].value,
+        "Bearer public-fixture"
+    );
+    assert_eq!(exchanges[0].request.headers[1].value, "[redacted]");
+    let recorded = std::fs::read_to_string(&recorder.recorded_paths().unwrap()[0]).unwrap();
+    assert!(recorded.contains("Bearer public-fixture"));
+    assert!(!recorded.contains("opaque-marker"));
+    script["request_match"] = json!({"headers":{"x-arbitrary":{"equals":"different"}}});
+    let rejected = transport(&script.to_string())
+        .send(request, None)
+        .await
+        .unwrap_err();
+    assert!(!format!("{rejected:?}").contains("opaque-marker"));
+}

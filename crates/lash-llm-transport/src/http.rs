@@ -1,5 +1,5 @@
 pub use lash_http_transport::{
-    ByteStream as LlmByteStream, HttpFailureContext, HttpMethod as LlmHttpMethod,
+    ByteStream as LlmByteStream, HttpFailureContext, HttpHeaderValue, HttpMethod as LlmHttpMethod,
     HttpRequest as LlmHttpRequest, HttpResponse as LlmHttpResponse,
     HttpResponseBody as LlmHttpBody, HttpTransport as LlmHttpTransport, ReqwestByteStream,
     ReqwestHttpTransport as ReqwestLlmHttpTransport, TransportRetryVerdict, first_header_value,
