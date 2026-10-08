@@ -123,6 +123,23 @@ kinds = ["test"]
 targets = ["turn_phases"]
 shards = 6
 
+# The plugin-state target's six matrices used one serial action: its two
+# PostgreSQL laws alone took 225 s before the 300 s action timed out on
+# SQLite (FIG-5427). Spread whole laws over shards, retaining the bound.
+[[rule]]
+packages = ["lash-internal-durable-test"]
+kinds = ["test"]
+targets = ["plugin_state_storage_laws"]
+shards = 6
+
+# All nine pressure/frame laws passed in 295 s, but the action including
+# its fixture work exhausted the unchanged 300 s bound (FIG-5427).
+[[rule]]
+packages = ["lash-internal-durable-test"]
+kinds = ["test"]
+targets = ["pressure_frame_crash_proof"]
+shards = 4
+
 # The remaining long poles of the durable-test run (FIG-5280): whole,
 # vertical_crash_proof's 16 laws ran 156 s, declared_start's 24 ran 137 s,
 # frame_switch_crash_proof's 4 ran 143 s and tool_batches' 21 ran 105 s, all

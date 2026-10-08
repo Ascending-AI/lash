@@ -51,27 +51,18 @@ async fn created(core: &LashCore, id: &'static str) -> crate::DurableSession {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cancelled_provider_stream_does_not_commit_partial_output() {
     const PARTIAL: &str = "partial provider text";
-    let streamed = Arc::new(tokio::sync::Notify::new());
     let model = crate::testing::TestProvider::builder()
         .kind("mock")
         .requires_streaming(true)
-        .complete({
-            let streamed = Arc::clone(&streamed);
-            move |request: LlmRequest| {
-                let streamed = Arc::clone(&streamed);
-                async move {
-                    let stream = request
-                        .stream_events
-                        .expect("a streaming turn requests provider stream events");
-                    stream.send(LlmStreamEvent::Delta {
-                        block: StreamBlockIdentity::new("text:0", 0),
-                        text: PARTIAL.to_string(),
-                    });
-                    streamed.notify_one();
-                    std::future::pending::<std::result::Result<LlmResponse, LlmTransportError>>()
-                        .await
-                }
-            }
+        .complete(|request: LlmRequest| async move {
+            let stream = request
+                .stream_events
+                .expect("a streaming turn requests provider stream events");
+            stream.send(LlmStreamEvent::Delta {
+                block: StreamBlockIdentity::new("text:0", 0),
+                text: PARTIAL.to_string(),
+            });
+            std::future::pending::<std::result::Result<LlmResponse, LlmTransportError>>().await
         })
         .build()
         .into_handle();
@@ -81,8 +72,27 @@ async fn cancelled_provider_stream_does_not_commit_partial_output() {
         .send(crate::TurnInput::text("cancel after partial stream"))
         .await
         .expect("accepted");
-    streamed.notified().await;
+    // Enqueuing a provider delta does not mean the runtime forwarded it:
+    // cancellation wins over queued stream events. Observe the partial on
+    // the host's lane before cancelling the still-pending completion.
+    let mut events = held.events();
+    loop {
+        let activity = events
+            .next_activity()
+            .await
+            .expect("the provider stays pending until its partial is observed")
+            .expect("the live activity reads");
+        if matches!(
+            &activity.event,
+            TurnEvent::AssistantProseDelta { text, .. } if text.as_ref() == PARTIAL
+        ) {
+            break;
+        }
+    }
     held.cancel().await.expect("cancel");
+    while let Some(activity) = events.next_activity().await {
+        activity.expect("the cancelled turn's live activity reads");
+    }
     let output = held.output().await.expect("the cancelled turn settles");
     assert_eq!(output.status(), crate::TurnStatus::Cancelled);
     assert!(output.result.assistant_output.safe_text.is_empty());

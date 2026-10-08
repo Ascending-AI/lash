@@ -44928,6 +44928,7 @@
           "clippy_label": "//crates/lash-durable-test:plugin_state_storage_laws__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:plugin_state_storage_laws__test",
+          "shard_count": 6,
           "tags": [
             "hermetic-postgres"
           ]
@@ -44939,6 +44940,7 @@
           "clippy_label": "//crates/lash-durable-test:pressure_frame_crash_proof__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:pressure_frame_crash_proof__test",
+          "shard_count": 4,
           "tags": [
             "hermetic-postgres"
           ]
