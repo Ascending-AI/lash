@@ -224,20 +224,16 @@ mod tests {
 
     #[test]
     fn compile_module_facade_reports_link_errors() {
-        // FIG-2999: declaring a process is no longer an ability the host can
-        // withhold, so the withheld ability this fixture links against is
-        // `sleep`, which is still one.
+        // FIG-5566: sleep is always available, but a module the host has not
+        // registered still produces a link refusal through the facade.
         let environment = LashlangHostEnvironment::default();
-        let source = "process nap(value: str) { sleep 1 finish value }";
-        let program = b::with_declaration_spans(
-            b::module(
-                vec![b::process(
-                    "nap",
-                    vec![b::param("value", crate::TypeExpr::Str)],
-                    b::block(vec![b::sleep_for(b::num(1.0)), b::finish(b::var("value"))]),
-                )],
-                Vec::new(),
-            ),
+        let source = "missing.read({})";
+        let program = b::with_expression_spans(
+            b::program(vec![b::receiver_call(
+                b::resource(&["missing"]),
+                "read",
+                vec![b::record(Vec::new())],
+            )]),
             &[(0, source.len())],
         );
         let err = compile_module(ModuleCompileRequest {
@@ -250,7 +246,17 @@ mod tests {
         let ModuleCompileError::Link(diagnostic) = err else {
             panic!("expected link error");
         };
+        assert_eq!(
+            diagnostic.span,
+            Some(Span {
+                start: 0,
+                end: source.len()
+            })
+        );
         assert_eq!(diagnostic.line(source), Some(1));
-        assert!(diagnostic.message.contains("sleep"), "{diagnostic:?}");
+        assert_eq!(diagnostic.message, "unknown module `missing`");
+        let rendered = diagnostic.diagnostic.expect("rendered link diagnostic");
+        assert!(rendered.contains(&diagnostic.message), "{rendered}");
+        assert!(rendered.contains(source), "{rendered}");
     }
 }
