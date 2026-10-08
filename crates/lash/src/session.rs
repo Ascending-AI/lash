@@ -1,12 +1,9 @@
 use lash_core::ActorContext;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 
 use crate::durable_session::DurableSession;
 pub use crate::observation_feed::SessionObservationStream;
-use crate::observation_feed::live_replay_error;
 use crate::session_binding::BoundSession;
 use crate::support::{
     Arc, EmbedError, LashCore, LashRuntime, PluginOperations, ProcessHandleView, Result,
@@ -15,13 +12,8 @@ use crate::support::{
     SessionReadView, SessionResume, SessionScope, SessionSpec, SessionStoreCreateRequest,
     ToolManifest, ToolState, TurnInput, build_plugin_host,
 };
-use futures_util::Stream;
 use lash_core::facade_support::ToolStateFacadeOps;
-use lash_core::{LiveReplayStoreError, SessionObservationEvent, facade_support::LiveReplayGap};
-use lash_remote_protocol::{
-    RemoteLiveReplayGap, RemoteSessionCursor, RemoteSessionObservation,
-    RemoteSessionObservationEvent,
-};
+use lash_core::{SessionObservationEvent, facade_support::LiveReplayGap};
 
 /// Builder for one host-named session.
 ///
@@ -1080,11 +1072,6 @@ impl ObservableSession {
         self.feed_source().snapshot().await
     }
 
-    /// [`snapshot`](Self::snapshot) as remote DTOs.
-    pub async fn remote_snapshot(&self) -> Result<RemoteSessionObservation> {
-        Ok(RemoteSessionObservation::from_core(self.snapshot().await?))
-    }
-
     /// The live replay after `cursor`, or a gap whose replacement is the
     /// durable head when the cursor is past the head, or behind it without
     /// a replayed `Committed` bridging to it.
@@ -1102,27 +1089,6 @@ impl ObservableSession {
         self.feed_source().subscribe(cursor).await
     }
 
-    pub async fn subscribe_from_remote_cursor(
-        &self,
-        cursor: &RemoteSessionCursor,
-    ) -> Result<RemoteSessionObservationSubscription> {
-        cursor.validate()?;
-        let cursor = lash_core::SessionCursor::try_from(cursor.clone())?;
-        match self.subscribe_from_cursor(&cursor).await? {
-            SessionObservationSubscription::Subscribed(subscription) => {
-                Ok(RemoteSessionObservationSubscription::Subscribed(
-                    RemoteSessionObservationEventStream::new(subscription),
-                ))
-            }
-            SessionObservationSubscription::Gap { observation, gap } => {
-                Ok(RemoteSessionObservationSubscription::Gap {
-                    observation: observation.into(),
-                    gap: gap.into(),
-                })
-            }
-        }
-    }
-
     /// The session feed from `cursor`: every durable commit past its
     /// revision, in order and once, whichever process made it, with the
     /// provisional events this process's live replay holds.
@@ -1135,20 +1101,6 @@ impl ObservableSession {
     /// and keep polling the same stream; it continues from that cursor.
     pub fn subscribe_and_recover(&self, cursor: SessionCursor) -> SessionObservationStream {
         SessionObservationStream::new(self.feed_source(), cursor)
-    }
-
-    /// Subscribe to remote DTO session observation events and keep the
-    /// subscription alive across recoverable live-replay gaps.
-    pub fn subscribe_and_recover_remote(
-        &self,
-        cursor: RemoteSessionCursor,
-    ) -> Result<RemoteSessionObservationStream> {
-        cursor.validate()?;
-        let cursor = lash_core::SessionCursor::try_from(cursor)?;
-        Ok(RemoteSessionObservationStream {
-            inner: self.subscribe_and_recover(cursor),
-            next_sequence: 0,
-        })
     }
 
     pub fn session_id(&self) -> SessionId {
@@ -1195,8 +1147,7 @@ impl ObservableSession {
 // A public streaming yield produced one item at a time by `Stream::poll_next`;
 // the variant-size spread is transient (never accumulated in a collection), so
 // boxing would only add a per-event heap allocation on the observation hot path
-// and force `*`-deref churn on every SDK consumer. The sibling
-// `RemoteSessionObservationStreamItem` keeps the same inline shape.
+// and force `*`-deref churn on every SDK consumer.
 // justification: the gap is transient and inline to avoid allocation and preserve the public stream-item API.
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug)]
@@ -1211,190 +1162,4 @@ pub enum SessionObservationStreamItem {
         /// Replay gap that required snapshot replacement.
         gap: LiveReplayGap,
     },
-}
-
-/// Result of subscribing to remote observations from a replay cursor.
-pub enum RemoteSessionObservationSubscription {
-    /// Carries a successfully established remote observation stream.
-    Subscribed(RemoteSessionObservationEventStream),
-    /// Carries the snapshot and replay gap encountered while subscribing.
-    Gap {
-        /// Fresh remote observation used to replace a stale projection.
-        observation: RemoteSessionObservation,
-        /// Replay gap that required snapshot replacement.
-        gap: RemoteLiveReplayGap,
-    },
-}
-
-#[derive(Clone, Debug)]
-/// Item delivered by a remote session-observation stream.
-pub enum RemoteSessionObservationStreamItem {
-    /// A replayed or live session observation event encoded as remote DTOs.
-    Event(RemoteSessionObservationEvent),
-    /// A recoverable replay gap with a fresh remote observation snapshot.
-    Gap {
-        /// Fresh remote observation used to replace a stale projection.
-        observation: RemoteSessionObservation,
-        /// Replay gap that required snapshot replacement.
-        gap: RemoteLiveReplayGap,
-    },
-}
-
-/// Stream of remote session observation event activity.
-pub struct RemoteSessionObservationEventStream {
-    inner: lash_core::LiveReplaySubscription,
-    next_sequence: u64,
-}
-
-impl RemoteSessionObservationEventStream {
-    fn new(inner: lash_core::LiveReplaySubscription) -> Self {
-        Self {
-            inner,
-            next_sequence: 0,
-        }
-    }
-
-    pub async fn next_event(&mut self) -> Result<RemoteSessionObservationEvent> {
-        futures_util::future::poll_fn(|cx| Pin::new(&mut *self).poll_next(cx))
-            .await
-            .transpose()?
-            .ok_or_else(|| live_replay_error(LiveReplayStoreError::Closed))
-    }
-}
-
-impl Stream for RemoteSessionObservationEventStream {
-    type Item = Result<RemoteSessionObservationEvent>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match Pin::new(&mut self.inner).poll_next(cx) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Some(Ok(event))) => {
-                let sequence = self.next_sequence;
-                self.next_sequence = self.next_sequence.saturating_add(1);
-                let remote = match RemoteSessionObservationEvent::from_core(sequence, event) {
-                    Ok(remote) => remote,
-                    Err(err) => return Poll::Ready(Some(Err(err.into()))),
-                };
-                Poll::Ready(Some(Ok(remote)))
-            }
-            Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(live_replay_error(err)))),
-            Poll::Ready(None) => Poll::Ready(None),
-        }
-    }
-}
-
-/// Remote DTO stream returned by [`ObservableSession::subscribe_and_recover_remote`].
-pub struct RemoteSessionObservationStream {
-    inner: SessionObservationStream,
-    next_sequence: u64,
-}
-
-impl RemoteSessionObservationStream {
-    /// Returns the stream's current replay cursor.
-    pub fn cursor(&self) -> RemoteSessionCursor {
-        RemoteSessionCursor::from(self.inner.cursor())
-    }
-}
-
-impl Stream for RemoteSessionObservationStream {
-    type Item = Result<RemoteSessionObservationStreamItem>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match Pin::new(&mut self.inner).poll_next(cx) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Some(Ok(SessionObservationStreamItem::Event(event)))) => {
-                let sequence = self.next_sequence;
-                self.next_sequence = self.next_sequence.saturating_add(1);
-                let remote = match RemoteSessionObservationEvent::from_core(sequence, event) {
-                    Ok(remote) => remote,
-                    Err(err) => return Poll::Ready(Some(Err(err.into()))),
-                };
-                Poll::Ready(Some(Ok(RemoteSessionObservationStreamItem::Event(remote))))
-            }
-            Poll::Ready(Some(Ok(SessionObservationStreamItem::Gap { observation, gap }))) => {
-                Poll::Ready(Some(Ok(RemoteSessionObservationStreamItem::Gap {
-                    observation: observation.into(),
-                    gap: gap.into(),
-                })))
-            }
-            Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(err))),
-            Poll::Ready(None) => Poll::Ready(None),
-        }
-    }
-}
-
-#[cfg(test)]
-mod observation_stream_tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn remote_observation_event_stream_advances_sequence_past_events() {
-        use lash_core::LiveReplayStore;
-
-        let store = lash_core::facade_support::InMemoryLiveReplayStore::default();
-        let cursor = store.current_cursor(
-            &SessionId::from("session-seq-test"),
-            lash_core::SessionRevision::new(0),
-        );
-        let activity1 = lash_core::TurnActivity {
-            id: lash_core::TurnActivityId::new("act-1"),
-            correlation_id: lash_core::TurnActivityId::new("corr-1"),
-            event: lash_core::TurnEvent::AssistantProseDelta {
-                text: "hello".into(),
-                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
-            },
-        };
-        let activity2 = lash_core::TurnActivity {
-            id: lash_core::TurnActivityId::new("act-2"),
-            correlation_id: lash_core::TurnActivityId::new("corr-2"),
-            event: lash_core::TurnEvent::AssistantProseDelta {
-                text: "world".into(),
-                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
-            },
-        };
-        for (revision, activity) in [(1, activity1), (2, activity2)] {
-            store
-                .publish(
-                    &SessionId::from("session-seq-test"),
-                    lash_core::SessionRevision::new(revision),
-                    vec![lash_core::LiveReplayEventDraft::new(
-                        Some("turn-1"),
-                        lash_core::SessionObservationEventPayload::TurnActivity(activity),
-                    )],
-                )
-                .await
-                .expect("publish event");
-        }
-
-        let subscription = store
-            .subscribe_after_cursor(&cursor)
-            .await
-            .expect("subscribe");
-        let lash_core::LiveReplaySubscribeOutcome::Subscribed(sub) = subscription else {
-            panic!("expected subscribed");
-        };
-
-        let mut stream = RemoteSessionObservationEventStream::new(sub);
-        assert_eq!(stream.next_sequence, 0);
-
-        let event1 = stream.next_event().await.expect("first event");
-        let lash_remote_protocol::RemoteSessionObservationEventPayload::TurnActivity {
-            activity: act1,
-        } = event1.event
-        else {
-            panic!("expected turn activity");
-        };
-        assert_eq!(act1.sequence, 0);
-        assert_eq!(stream.next_sequence, 1);
-
-        let event2 = stream.next_event().await.expect("second event");
-        let lash_remote_protocol::RemoteSessionObservationEventPayload::TurnActivity {
-            activity: act2,
-        } = event2.event
-        else {
-            panic!("expected turn activity");
-        };
-        assert_eq!(act2.sequence, 1);
-        assert_eq!(stream.next_sequence, 2);
-    }
 }

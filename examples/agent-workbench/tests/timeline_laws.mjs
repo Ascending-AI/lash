@@ -285,7 +285,7 @@ export const laws = [
       time.advance(1000);
       const second = "turn-second";
       view.timeline.applyObservation(activity(second, {
-        type: "turn_input_applied", applications: [{ input_id: "input-next", turn_id: second, committed_message_id: "m-next" }]
+        type: "queued_input_accepted", applications: [{ input_id: "input-next", turn_id: second, committed_message_id: "m-next" }]
       }));
       const keys = rowKeys(view.list);
       env.assert.ok(keys.indexOf(`reply:${first}`) < keys.indexOf(`input:${second}`), `rows: ${keys}`);

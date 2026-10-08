@@ -406,13 +406,7 @@ async fn s30(case: &mut Case) -> Result<()> {
     let again = support::follow(case, node, &input).await?;
     // The live activities a follower may also see are not the terminal; the
     // settled report is.
-    let terminal = |outcome: &serde_json::Value| {
-        let mut report = outcome["report"].clone();
-        if let Some(report) = report.as_object_mut() {
-            report.remove("activities");
-        }
-        report
-    };
+    let terminal = |outcome: &serde_json::Value| outcome["output"]["result"].clone();
     ensure!(
         terminal(&again) == terminal(&outcome),
         "a reattached follower saw another terminal: {again}"

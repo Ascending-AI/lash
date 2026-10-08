@@ -298,13 +298,6 @@ packages = ["lash-runtime", "lash-internal-sqlite-store"]
 kinds = ["unit-test"]
 compile_data = ["//crates/lashlang:old_module_fixture"]
 
-# The process-observation wire contracts validate real items against the
-# published observation-item schema compiled into the test.
-[[rule]]
-packages = ["lash-internal-remote-protocol"]
-kinds = ["unit-test"]
-compile_data = ["//:host_schemas"]
-
 # The Node session oracle (FIG-3599) runs the dialect's session corpora through
 # the RLM executor; the corpora, their Node answers and the census the
 # session generator (FIG-3608) draws rejected cells from live with the dialect.
@@ -429,7 +422,6 @@ packages = ["lash-runtime"]
 kinds = ["bin", "test", "example", "bench"]
 targets = ["integration"]
 data = [
-  "//crates/lash-remote-protocol:rust_sources",
   "//crates/lash-sansio:rust_sources",
   "//crates/lash-tool-support:rust_sources",
   "//crates/lash-trace:rust_sources",

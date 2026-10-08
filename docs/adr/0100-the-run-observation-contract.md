@@ -13,7 +13,7 @@ A bounded live stream cannot prove that an omitted node never ran.
 ## Decision
 
 Lash supplies identities, static maps, cursors, gaps, status projections,
-bounded effect summaries, and versioned host data. Hosts choose layout,
+bounded effect summaries, and local Rust values. Hosts choose layout,
 rendering, interaction, and mutation commands. `WorkflowGraph` is the authoring
 document; a run view combines its static map with observations and durable
 semantic history. Live trace publication is best-effort and cannot fail a
@@ -176,6 +176,8 @@ Evidence: `crates/lashlang/src/workflow_graph/projection.rs:1`,
 `crates/lash-lashlang-runtime/Cargo.toml`, and
 `scripts/check-workflow-graph-model.sh`.
 
+Hosts own transport DTOs and wire compatibility ([ADR 0136](0136-hosts-own-their-wire-contracts.md)).
+
 ## Compatibility matrix
 
 Compatibility is specific to each carrier. Unknown closed variants are refused.
@@ -192,15 +194,12 @@ The pre-1.0 freeze governs changes in place.
 | `TypeExpr` | Its graph or facet carrier | Decoded only in an admitted carrier | Unknown variant fields and variants refused |
 | Trace records and events | `TRACE_SCHEMA_VERSION = 36` | Exact trace record version before event decode | Additive known fields tolerated; closed variants refused |
 | `TraceLashlangGraph` | `TRACE_SCHEMA_VERSION = 36` | Exact snapshot version before shape | Additive fields tolerated; closed status, observation, wait, node, and completeness variants refused |
-| Process observation wire items | `REMOTE_PROTOCOL_VERSION = 100`, trace version for nested payloads | Remote envelope negotiation; epoch mismatch is a live gap | Wire DTOs refuse unknown fields and variants; nested trace follows trace policy |
-| Process event wire pages | `REMOTE_PROTOCOL_VERSION = 100` | Remote envelope negotiation | DTO fields and variants closed; Full/Lite is request data |
 | Durable effect-summary events | `PROCESS_EVENT_VOCABULARY_VERSION = 1` | Fleet read window and registered upcaster before strict payload decode | Unknown summary fields and runtime-owned kinds refused; declared custom payloads remain producer-owned |
 
 The owners and fences are in `crates/lashlang/src/workflow_graph.rs:61`, `:129`,
 `crates/lashlang/src/workflow_graph/facets.rs:12`,
 `crates/lash-trace/src/lib.rs:164`, `:187`,
-`crates/lash-trace/src/lashlang_graph/model.rs:140`,
-`crates/lash-remote-protocol/src/lib.rs:315`, and
+`crates/lash-trace/src/lashlang_graph/model.rs:140`, and
 `crates/lash-core-execution/src/runtime/process/effect_summary.rs:17`, `:125`.
 
 Checked-in JSON Schemas live under `schemas/host/`. Their generator and drift
@@ -215,7 +214,7 @@ A durable per-node trace bus duplicates process semantic history and retains
 unbounded telemetry. The bounded effect summary covers durable outcomes while
 live gaps remain explicit. Artifact hashes in structural node ids remint
 unrelated nodes after edits; executable identity belongs on the carrier.
-Blanket additive decoding weakens authoritative graph and remote shapes;
+Blanket additive decoding weakens authoritative graph shapes;
 compatibility follows each carrier's actual role.
 
 ## Consequences

@@ -5,7 +5,7 @@
 
 **Purpose.** Verify that admitted effects use their actual execution scope and replay key,
 that session and turn attribution contains only known runtime facts, and that complete causal
-identity survives native, SQLite, PostgreSQL, and remote projections.
+identity survives native, SQLite, PostgreSQL, and host projections.
 
 ## Contract
 
@@ -47,7 +47,7 @@ fields.
 3. Do not run schema probes against a user or shared database. Do not change schema stamps to
    make an incompatible store open.
 4. Stop on any local/controller/store call after a wrong-scope refusal, any invented session id,
-   any missing known trigger field, or any difference between the core and remote trace parent.
+   any missing known trigger field, or any difference between the core trace parent.
 
 ## Phase 1 — Representation and admission
 
@@ -96,7 +96,6 @@ that omitted it.
 ## Phase 3 — Cause and shared trace projection
 
 ```sh
-kiln test --test_output=all //crates/lash-remote-protocol:lash-remote-protocol__unit_test --test_arg=remote_cause_validation_preserves_partial_trigger_identity_and_checks_effect_scope
 kiln test --test_output=all //crates/lash-core-execution:lash-core-execution__unit_test --test_arg=turn_keeps_causal_parent_when_present
 ```
 
@@ -104,14 +103,12 @@ kiln test --test_output=all //crates/lash-core-execution:lash-core-execution__un
 run there; repeating it here under a second rationale inflates the phase count without adding
 a witness.)
 
-Inspect failures as identity failures. Do not accept matching display labels as proof. The
-remote round trip must retain every known trigger field, and the core and remote projections
-must use the same scoped causal graph address while retaining unrelated base trace metadata.
+Inspect failures as identity failures. Do not accept matching display labels as proof. The core projection must retain every known trigger field and use the scoped
+causal graph address while retaining unrelated base trace metadata.
 
-## Phase 4 — Remote grammar and cutover
+## Phase 4 — Identity grammar and cutover
 
 ```sh
-kiln test --test_output=all //crates/lash-remote-protocol:lash-remote-protocol__unit_test --test_arg=remote_owner_scope_validation_matches_each_core_owner_grammar
 kiln test --test_output=all //crates/lash-sansio:lash-sansio__unit_test --test_arg=journal_identity_v2_bytes_remain_unchanged_for_all_scope_variants
 kiln test --test_output=all //crates/lash-core-execution:lash-core-execution__unit_test --test_arg=direct_effect_identity_golden_corpus
 kiln test --test_output=all //crates/lash-trace:schema__test --test_arg=trace_schema_version_is_pinned_at_
@@ -133,7 +130,6 @@ wrong. Read the value from the constant:
 | Surface | Constant | Read it at |
 | --- | --- | --- |
 | Trace schema | `TRACE_SCHEMA_VERSION` | `crates/lash-trace/src/lib.rs` |
-| Remote protocol | `REMOTE_PROTOCOL_VERSION` | `crates/lash-remote-protocol/src/lib.rs` |
 | PostgreSQL component | `SCHEMA_VERSION` | `crates/lash-postgres-store/src/lib.rs` |
 | SQLite durable core | `SCHEMA_VERSION` | `crates/lash-sqlite-store/src/schema.rs` |
 | RLM snapshot | `RLM_SNAPSHOT_VERSION` | `crates/lash-protocol-rlm/src/executor/snapshot.rs` |
@@ -151,7 +147,7 @@ remains v1. Those unchanged byte contracts are separate from the versioned forma
 **A version cutover is a fresh-trust-domain redeployment boundary.** This is a standing
 property of any bump on the surfaces above, not a statement about one particular release: when
 the build you are deploying moves any of them past the store's stamp, do not perform a rolling
-upgrade or mix old and new hosts, workers, or remote peers. Drain in-flight
+upgrade or mix old and new hosts, workers, or host clients. Drain in-flight
 work, stop the old deployment, and provision the replacement SQLite/PostgreSQL stores from this
 build together; the PostgreSQL component schema has no migration across
 a cutover, so the replacement database must be created from this build's `schema.sql`. Reset the
@@ -165,6 +161,6 @@ procedure, while local verification may recreate only stores owned by the curren
 
 Record the exact commit, command, exit status, and bounded terminal log for each phase. A pass
 requires scope mismatch before side effects, distinct scoped addresses, truthful optional
-attribution, complete known cause, matching core/remote parent selection, exact owner grammar,
+attribution, complete known cause, matching core parent selection, exact owner grammar,
 and explicit old-format refusal. Preserve the logs with the delivery evidence; never substitute
 source inspection for a failed command.

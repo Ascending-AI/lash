@@ -69,7 +69,6 @@ class Workbench:
         with self.condition:
             cursor = f"cursor-{len(self.observations) + 1:04d}"
             event = {
-                "protocol_version": 100,
                 "session_id": SESSION,
                 "replay_incarnation_id": INCARNATION,
                 "revision": len(self.observations) + 1,
@@ -175,12 +174,11 @@ def handler_for(bench: Workbench):
                 self.stream(lambda: [{"type": "event", "event": event} for event in bench.product if event["sequence"] > cursor])
             elif url.path == "/api/observations":
                 cursor = query.get("cursor", [""])[0]
-                accept = json.dumps({"negotiation": "accept", "selected": 100, "supported": {"min": 100, "max": 100}})
 
                 def backlog():
                     items = [{"type": "cursor", "cursor": cursor or "cursor-0000"}]
                     return items + [item for item in bench.observations if item["event"]["cursor"] > cursor]
-                self.stream(backlog, {"x-lash-protocol-accept": accept})
+                self.stream(backlog)
             elif url.path == "/api/sessions":
                 self.send_json({"sessions": [{"session_id": SESSION, "name": SESSION, "created_at_ms": 0, "last_active_ms": 0, "current": True}],
                                 "current_session_id": SESSION})

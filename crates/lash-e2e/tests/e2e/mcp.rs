@@ -181,7 +181,7 @@ async fn finished(case: &mut Case, node: &str, turn: &Turn, value: &str) -> Resu
         kind == "completed" && reply.as_deref() == Some(value),
         "the turn settled {kind} with {reply:?}, not {value:?}: {outcome}"
     );
-    Ok(outcome["report"].clone())
+    Ok(outcome["output"].clone())
 }
 
 /// The report's `tool_call_started` and `tool_call_completed` activities
@@ -390,7 +390,7 @@ async fn s28(case: &mut Case) -> Result<()> {
     match case.leg {
         Leg::Live => {
             // The live node's own report has the call's native outcome.
-            let badge_call = one_call(&outcome["report"], BADGE_TOOL)?;
+            let badge_call = one_call(&outcome["output"], BADGE_TOOL)?;
             ensure!(
                 resolved_or_typed(&badge_call["outcome"]),
                 "the interrupted badge call neither resolved nor failed typed: {badge_call}"
@@ -404,7 +404,7 @@ async fn s28(case: &mut Case) -> Result<()> {
         Leg::Resume => {
             // A started call without an outcome records Interrupted on the
             // successor and never runs again (ADR 0132 NR-2).
-            let cells: Vec<&Value> = outcome["report"]["activities"]
+            let cells: Vec<&Value> = outcome["output"]["activities"]
                 .as_array()
                 .into_iter()
                 .flatten()

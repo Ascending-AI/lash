@@ -349,11 +349,7 @@ pub mod observe {
     pub use futures_util::Stream;
     pub use lash_core::runtime::ParsedSessionCursor;
 
-    pub use crate::session::{
-        RemoteSessionObservationEventStream, RemoteSessionObservationStream,
-        RemoteSessionObservationStreamItem, RemoteSessionObservationSubscription,
-        SessionObservationStream, SessionObservationStreamItem,
-    };
+    pub use crate::session::{SessionObservationStream, SessionObservationStreamItem};
     pub use lash_core::{
         LiveReplayEventDraft, LiveReplayGapReason, LiveReplayStore, LiveReplayStoreError,
         LiveReplaySubscribeOutcome, SessionCursor, SessionObservationEvent,
@@ -496,11 +492,10 @@ pub mod tools {
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{
         CataloguePreviewEntry, CataloguePreviewOptions, DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT,
-        DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT, RemoteToolGrantBindingExt,
-        ToolBindingResolutionExt, ToolManifestBindingExt, catalogue_preview,
-        catalogue_preview_entries_from_catalog_records, catalogue_preview_entries_from_manifests,
-        catalogue_preview_entry_from_catalog_record, catalogue_preview_entry_from_manifest,
-        required_tool_binding,
+        DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT, ToolBindingResolutionExt, ToolManifestBindingExt,
+        catalogue_preview, catalogue_preview_entries_from_catalog_records,
+        catalogue_preview_entries_from_manifests, catalogue_preview_entry_from_catalog_record,
+        catalogue_preview_entry_from_manifest, required_tool_binding,
     };
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{
@@ -1114,14 +1109,6 @@ pub mod secrets {
     pub use lash_sansio::Redacted;
 }
 
-/// Wire-format DTOs for executing lash across a process boundary, sub-namespaced
-/// by protocol domain. Only the cross-cutting envelope
-/// ([`Envelope`](remote::Envelope),
-/// [`REMOTE_PROTOCOL_VERSION`](remote::REMOTE_PROTOCOL_VERSION)) and the
-/// protocol error type live at this module root; everything else has exactly one
-/// home in a domain sub-namespace.
-pub mod remote;
-
 /// Durable process definitions, handles, and events.
 pub mod process {
     // The vocabulary this module's signatures name (the facade-completeness rule).
@@ -1481,10 +1468,11 @@ pub mod provider {
     /// re-exported so hosts can implement provider decorators (admission
     /// gates, metrics taps) against the facade alone.
     pub use lash_core::{
-        AttemptOutcome, AttemptUsageOutcome, ExecutionEvidence,
+        AttemptOutcome, AttemptUsageOutcome, ChargeSafetyDecision, ExecutionEvidence,
         ExecutionEvidenceCollectionInterruption, ExecutionEvidenceMergeError, LlmRequest,
         LlmRequestScope, LlmResponse, LlmStreamEvidence, LlmTurnScope, NormalizedError,
-        ProtocolPosition, ProviderEndpointError, facade_support::LlmTransportError,
+        ProtocolPosition, ProviderEndpointError, RetryClass, RetryDecision, RetryDeclineCause,
+        RetryWait, facade_support::LlmTransportError,
     };
     /// The namespaced failure code carried on
     /// [`LlmTransportError`](facade_support::LlmTransportError) and attempt

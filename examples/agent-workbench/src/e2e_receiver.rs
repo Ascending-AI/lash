@@ -35,9 +35,7 @@ async fn attach(
         .await
         .map_err(error)?;
     match durable.attach(input_id.clone()).outcome().await {
-        Ok(outcome) => Ok(Json(
-            serde_json::to_value(outcome.to_remote(&session_id, &input_id)).map_err(error)?,
-        )),
+        Ok(outcome) => Ok(Json(serde_json::to_value(outcome).map_err(error)?)),
         Err(lash::EmbedError::Runtime(refusal)) => Ok(Json(serde_json::json!({
             "type": "refused",
             "session_id": session_id,

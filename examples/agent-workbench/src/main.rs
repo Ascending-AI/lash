@@ -67,10 +67,6 @@ use lash::{
 };
 
 use lash::openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
-use lash::remote::Envelope;
-use lash::remote::observations::RemoteLiveReplayGap;
-use lash::remote::observations::RemoteSessionObservation;
-use lash::remote::observations::RemoteSessionObservationEvent;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::{broadcast, mpsc};

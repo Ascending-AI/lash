@@ -30,7 +30,7 @@ tables or fallback acceptance rules.
 
 Each session retains the snapshot revision and rules it opened with. A host
 catalogue update therefore applies to new sessions without changing historical
-attachment rendering. The remote protocol carries the same snapshot to workers.
+attachment rendering. Workers use the retained core snapshot.
 A source outside the host's selected transport rules produces a typed
 `unsupported_attachment_capability` refusal before wire serialization. A source
 accepted by no transport in the snapshot degrades to a deterministic notice.

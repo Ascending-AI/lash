@@ -70,8 +70,7 @@ pub(super) async fn turn_started_identity_targets_cancellation_from_pull_stream(
 }
 
 #[tokio::test]
-pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable_identity()
--> Result<()> {
+pub(super) async fn idle_queued_input_emits_typed_application_and_durable_identity() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         sqlite_memory_store_backend().await,
     ))
@@ -85,7 +84,7 @@ pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable
         .await?;
     let cursor = session
         .observe()
-        .remote_snapshot()
+        .snapshot()
         .await
         .expect("durable snapshot")
         .cursor;
@@ -112,39 +111,29 @@ pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable
         .cloned()
         .expect("queued input should run");
 
-    let crate::observe::RemoteSessionObservationSubscription::Subscribed(mut subscription) =
-        session
-            .observe()
-            .subscribe_from_remote_cursor(&crate::remote::observations::RemoteSessionCursor::new(
-                cursor,
-            ))
-            .await?
+    let crate::observe::SessionObservationSubscription::Subscribed(mut subscription) =
+        session.observe().subscribe_from_cursor(&cursor).await?
     else {
         panic!("recent cursor should replay typed application");
     };
     // Each run publishes the applications its opening committed: the empty
     // input opens its own run with an empty user row (ADR 0132 §4).
     let mut published = Vec::new();
-    while !published.iter().any(
-        |application: &crate::remote::observations::RemoteTurnInputApplication| {
-            application.input_id == admission.input_id
-        },
-    ) {
-        let event =
-            tokio::time::timeout(std::time::Duration::from_secs(2), subscription.next_event())
-                .await
-                .expect("timed out waiting for typed idle application")
-                .expect("remote observation event");
-        let crate::remote::observations::RemoteSessionObservationEventPayload::TurnActivity {
-            activity,
-        } = event.event
+    while !published
+        .iter()
+        .any(|application: &crate::TurnInputApplication| application.input_id == admission.input_id)
+    {
+        let event = tokio::time::timeout(std::time::Duration::from_secs(2), subscription.next())
+            .await
+            .expect("timed out waiting for typed idle application")
+            .expect("observation stream remains open")
+            .expect("local observation event");
+        let crate::observe::SessionObservationEventPayload::TurnActivity(activity) = &event.payload
         else {
             continue;
         };
-        if let crate::remote::usage::RemoteTurnEvent::TurnInputApplied { applications } =
-            activity.event
-        {
-            published.extend(applications);
+        if let crate::TurnEvent::QueuedInputAccepted { applications } = &activity.event {
+            published.extend(applications.iter().cloned());
         }
     }
     let committed = session
@@ -170,7 +159,7 @@ pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable
     assert_eq!(live.turn_id, run.as_str());
     assert_eq!(live.checkpoint, None);
 
-    let durable = session.durable().remote_turn_input_applications().await?;
+    let durable = session.durable().turn_input_applications().await?;
     assert!(
         durable.contains(live),
         "the durable read answers the published application: {durable:?}"
@@ -210,7 +199,7 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
         .await?;
     let stale_cursor = session
         .observe()
-        .remote_snapshot()
+        .snapshot()
         .await
         .expect("durable snapshot")
         .cursor;
@@ -229,19 +218,17 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
         .cloned()
         .expect("queued input should run");
 
-    let mut recovery = session.observe().subscribe_and_recover_remote(
-        crate::remote::observations::RemoteSessionCursor::new(stale_cursor),
-    )?;
+    let mut recovery = session.observe().subscribe_and_recover(stale_cursor);
     let item = tokio::time::timeout(std::time::Duration::from_secs(2), recovery.next())
         .await
         .expect("timed out waiting for replay gap")
         .expect("recovery stream item")?;
     assert!(matches!(
         item,
-        crate::observe::RemoteSessionObservationStreamItem::Gap { .. }
+        crate::observe::SessionObservationStreamItem::Gap { .. }
     ));
 
-    let applications = session.durable().remote_turn_input_applications().await?;
+    let applications = session.durable().turn_input_applications().await?;
     let committed = session
         .durable()
         .read()

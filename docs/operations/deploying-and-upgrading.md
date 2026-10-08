@@ -112,8 +112,8 @@ lashctl version --json
 
 The JSON envelope has `schema_version`, `command`, `result` and `error`.
 `version` reads no store. It reports the release, fleet epoch `F`'s writable
-range, each component's `reads` and `writes` ranges, and the remote wire
-range.
+range and each component's `reads` and `writes` ranges. Hosts own any client
+transport compatibility ([ADR 0136](../adr/0136-hosts-own-their-wire-contracts.md)).
 
 One release runs one worker feature set.
 A component is the PostgreSQL schema or the SQLite database. Each store stamp has a version and a

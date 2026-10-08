@@ -82,60 +82,60 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
             },
         },
     );
-    let expected_record = lash::remote::llm::RemoteLlmCallRecord {
-        call_id: "call-1".to_string(),
+    let expected_record = lash::LlmCallRecord {
+        call_id: lash::LlmCallId("call-1".to_string()),
         label: None,
         replay_drops: Vec::new(),
         attempts: vec![
-            lash::remote::llm::RemoteAttemptRecord {
+            lash::AttemptRecord {
                 ordinal: 1,
-                outcome: lash::remote::llm::RemoteAttemptOutcome::Failed,
-                protocol_position: lash::remote::llm::RemoteProtocolPosition::NoResponse,
+                outcome: lash::provider::AttemptOutcome::Failed,
+                protocol_position: lash::provider::ProtocolPosition::NoResponse,
                 retry_budget_consumed: true,
-                retry_decision: Some(lash::remote::llm::RemoteRetryDecision::Scheduled { delay_ms: 1, wait: lash::remote::llm::RemoteRetryWait::Backoff, class: lash::remote::llm::RemoteRetryClass::NoResponse }),
-                error: Some(lash::remote::llm::RemoteNormalizedError {
-                    class: lash::remote::llm::RemoteProviderFailureKind::Transport,
+                retry_decision: Some(lash::provider::RetryDecision::Scheduled {
+                    delay: Duration::from_millis(1),
+                    wait: lash::provider::RetryWait::Backoff,
+                    class: lash::provider::RetryClass::NoResponse,
+                }),
+                error: Some(lash::provider::NormalizedError {
+                    class: lash::provider::ProviderFailureKind::Transport,
                     code: Some(lash::provider::FailureCode::provider("connection_reset")),
                     http_status: Some(503),
                     provider_request_id: Some("request-1".to_string()),
-                    retry_after_ms: Some(25),
+                    retry_after: Some(Duration::from_millis(25)),
                 }),
-                evidence: Some(lash::remote::llm::RemoteExecutionEvidence {
+                evidence: Some(lash::provider::ExecutionEvidence {
                     collection_interruption: Some(
-                        lash::remote::llm::RemoteExecutionEvidenceCollectionInterruption::ProtocolAbort,
+                        lash::provider::ExecutionEvidenceCollectionInterruption::ProtocolAbort,
                     ),
                     ..Default::default()
                 }),
-                generation_disposition: Some(lash::remote::llm::RemoteGenerationReceipt {
-                    output_token_cap:
-                        lash::remote::llm::RemoteGenerationOptionOutcome::ClampedToCapacity,
-                    temperature: lash::remote::llm::RemoteGenerationOptionOutcome::Applied,
-                    seed: lash::remote::llm::RemoteGenerationOptionOutcome::NotRequested,
-                    stop_sequences:
-                        lash::remote::llm::RemoteGenerationOptionOutcome::SuppressedProtocolOwned,
-                    cache: lash::remote::llm::RemoteGenerationOptionOutcome::OmittedUnsupported,
+                generation_disposition: Some(lash::direct::GenerationReceipt {
+                    output_token_cap: lash::direct::GenerationOptionOutcome::ClampedToCapacity,
+                    temperature: lash::direct::GenerationOptionOutcome::Applied,
+                    seed: lash::direct::GenerationOptionOutcome::NotRequested,
+                    stop_sequences: lash::direct::GenerationOptionOutcome::SuppressedProtocolOwned,
+                    cache: lash::direct::GenerationOptionOutcome::OmittedUnsupported,
                     ..Default::default()
                 }),
-                usage: Some(lash::remote::usage::RemoteUsage {
+                usage: Some(lash::direct::LlmUsage {
                     input_tokens: 11,
                     output_tokens: 7,
                     cache_read_input_tokens: 3,
                     cache_write_input_tokens: 2,
                     reasoning_output_tokens: 5,
                 }),
-                usage_disposition: Default::default(),
             },
-            lash::remote::llm::RemoteAttemptRecord {
+            lash::AttemptRecord {
                 ordinal: 2,
-                outcome: lash::remote::llm::RemoteAttemptOutcome::Completed,
-                protocol_position: lash::remote::llm::RemoteProtocolPosition::TerminalObserved,
+                outcome: lash::provider::AttemptOutcome::Completed,
+                protocol_position: lash::provider::ProtocolPosition::TerminalObserved,
                 retry_budget_consumed: true,
                 retry_decision: None,
                 error: None,
                 evidence: None,
                 generation_disposition: None,
                 usage: None,
-                usage_disposition: Default::default(),
             },
         ],
     };
@@ -269,7 +269,6 @@ async fn retired_session_http_refusals_record_structured_admission_evidence() {
             cursor: None,
             session_id: Some(session_id.clone()),
         }),
-        remote_hello_headers(),
         None,
     )
     .await

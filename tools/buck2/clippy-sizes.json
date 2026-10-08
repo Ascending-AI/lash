@@ -519,22 +519,6 @@
     "peak_bytes": 356401152,
     "samples": 27
   },
-  "lash-internal-remote-protocol/lash_remote_protocol": {
-    "cpu_count": 1,
-    "memory_kb": 1572864,
-    "p95_cores": 1.06,
-    "p99_peak_bytes": 676876288,
-    "peak_bytes": 676876288,
-    "samples": 25
-  },
-  "lash-internal-remote-protocol/remote_schema_generator": {
-    "cpu_count": 1,
-    "memory_kb": 524288,
-    "p95_cores": 1.08,
-    "p99_peak_bytes": 64278528,
-    "peak_bytes": 64278528,
-    "samples": 69
-  },
   "lash-internal-rlm-types/lash_rlm_types": {
     "cpu_count": 1,
     "memory_kb": 524288,

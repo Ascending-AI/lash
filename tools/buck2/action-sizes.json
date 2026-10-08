@@ -151,14 +151,6 @@
     "peak_bytes": 1068408832,
     "samples": 130
   },
-  "lash-internal-remote-protocol/lash_remote_protocol": {
-    "cpu_count": 1,
-    "memory_kb": 2097152,
-    "p95_cores": 1.26,
-    "p99_peak_bytes": 1311789056,
-    "peak_bytes": 1368358912,
-    "samples": 238
-  },
   "lash-internal-sqlite-store/conformance": {
     "cpu_count": 1,
     "memory_kb": 2621440,

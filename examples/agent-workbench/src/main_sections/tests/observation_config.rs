@@ -66,9 +66,7 @@ async fn observation_get_preserves_config(path: &str) {
         .route("/api/state", get(app_state))
         .route(
             "/api/observations",
-            get(|state, query, headers| {
-                session_observations_with_shutdown(state, query, headers, None)
-            }),
+            get(|state, query| session_observations_with_shutdown(state, query, None)),
         )
         .route("/api/queued-work", get(list_queued_work))
         .route("/api/sessions", get(list_sessions))
@@ -82,10 +80,7 @@ async fn observation_get_preserves_config(path: &str) {
         .expect("bind a local port");
     let address = listener.local_addr().expect("the bound address");
     let server = tokio::spawn(async move { axum::serve(listener, app).await });
-    let mut request = reqwest::Client::new().get(format!("http://{address}{path}"));
-    if path == "/api/observations" {
-        request = request.headers(remote_hello_headers());
-    }
+    let request = reqwest::Client::new().get(format!("http://{address}{path}"));
     let response = request.send().await.expect("the route answers");
     assert!(
         response.status().is_success(),

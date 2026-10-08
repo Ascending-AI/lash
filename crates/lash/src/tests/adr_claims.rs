@@ -140,10 +140,10 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
 
 /// One turn whose first model call retries and whose second ends cancelled
 /// reports each call's attempts with the evidence its provider served, and
-/// the remote report carries the same ledger with no invented turn-level
+/// the local report carries the same ledger with no invented turn-level
 /// attribution.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn multi_model_turn_and_remote_report_keep_per_call_evidence() -> Result<()> {
+async fn multi_model_turn_keeps_per_call_evidence() -> Result<()> {
     let attempts = Arc::new(AtomicUsize::new(0));
     let provider = crate::testing::TestProvider::builder()
         .kind("per-call-evidence")
@@ -242,76 +242,6 @@ async fn multi_model_turn_and_remote_report_keep_per_call_evidence() -> Result<(
         assert_eq!(
             evidence.provider_request_id,
             Some(format!("request-{ordinal}"))
-        );
-    }
-    let remote = output.result.to_remote(
-        &SessionId::from("per-call-evidence"),
-        &lash_core::TurnId::from("evidence-run"),
-        &output.activities,
-    );
-    let encoded = serde_json::to_value(&remote).unwrap();
-    let expected = serde_json::to_value(calls).unwrap();
-    let mut ledger = encoded["llm_calls"].clone();
-    for ((wire_call, native_call), call) in ledger
-        .as_array_mut()
-        .unwrap()
-        .iter_mut()
-        .zip(expected.as_array().unwrap())
-        .zip(calls)
-    {
-        for ((wire_attempt, native_attempt), attempt) in wire_call["attempts"]
-            .as_array_mut()
-            .unwrap()
-            .iter_mut()
-            .zip(native_call["attempts"].as_array().unwrap())
-            .zip(&call.attempts)
-        {
-            // The native record derives its usage disposition from its
-            // outcome and usage; the wire states it.
-            assert_eq!(
-                wire_attempt
-                    .as_object_mut()
-                    .unwrap()
-                    .remove("usage_disposition"),
-                Some(serde_json::to_value(attempt.usage_disposition()).unwrap()),
-            );
-            if let Some(evidence) = native_attempt.get("evidence") {
-                for (key, value) in evidence.as_object().unwrap() {
-                    if value.is_null() {
-                        wire_attempt["evidence"]
-                            .as_object_mut()
-                            .unwrap()
-                            .entry(key.clone())
-                            .or_insert(serde_json::Value::Null);
-                    }
-                }
-            }
-            if let Some(retry) = wire_attempt.get_mut("retry_decision") {
-                let delay_ms = retry
-                    .as_object_mut()
-                    .unwrap()
-                    .remove("delay_ms")
-                    .unwrap()
-                    .as_u64()
-                    .unwrap();
-                retry["delay"] =
-                    serde_json::to_value(std::time::Duration::from_millis(delay_ms)).unwrap();
-            }
-        }
-    }
-    assert_eq!(ledger, expected);
-    let round_trip: lash_remote_protocol::RemoteTurnReport =
-        serde_json::from_value(encoded.clone()).unwrap();
-    assert_eq!(serde_json::to_value(round_trip).unwrap(), encoded);
-    for invented in [
-        "producing_model",
-        "primary_model",
-        "served_model",
-        "final_output_provenance",
-    ] {
-        assert!(
-            encoded.get(invented).is_none(),
-            "invented turn-level attribution: {invented}"
         );
     }
     Ok(())

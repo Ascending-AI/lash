@@ -4357,7 +4357,7 @@
           "state": "retired",
           "hold_reason": null,
           "registration": null,
-          "disposition": "Retired, subject deleted: Phase A rollback and finalize were deleted by 9156ec1b32 (FIG-5200). The wire floor that remains, refusing a remote protocol generation outside the supported range, is covered by crates/lash-remote-protocol/src/tests/version_refusal.rs::retired_and_unlanded_remote_protocol_generations_are_refused."
+          "disposition": "Retired, subject deleted: Phase A rollback and finalize were deleted by 9156ec1b32 (FIG-5200)."
         },
         {
           "variant": "default",
@@ -4389,7 +4389,7 @@
           "state": "retired",
           "hold_reason": null,
           "registration": null,
-          "disposition": "Retired, subject deleted: Phase A rollback and finalize were deleted by 9156ec1b32 (FIG-5200). The wire floor that remains, refusing a remote protocol generation outside the supported range, is covered by crates/lash-remote-protocol/src/tests/version_refusal.rs::retired_and_unlanded_remote_protocol_generations_are_refused."
+          "disposition": "Retired, subject deleted: Phase A rollback and finalize were deleted by 9156ec1b32 (FIG-5200)."
         },
         {
           "variant": "default",
@@ -4421,7 +4421,7 @@
           "state": "retired",
           "hold_reason": null,
           "registration": null,
-          "disposition": "Retired, subject deleted: Phase A rollback and finalize were deleted by 9156ec1b32 (FIG-5200). The wire floor that remains, refusing a remote protocol generation outside the supported range, is covered by crates/lash-remote-protocol/src/tests/version_refusal.rs::retired_and_unlanded_remote_protocol_generations_are_refused."
+          "disposition": "Retired, subject deleted: Phase A rollback and finalize were deleted by 9156ec1b32 (FIG-5200)."
         },
         {
           "variant": "default",
@@ -4453,7 +4453,7 @@
           "state": "retired",
           "hold_reason": null,
           "registration": null,
-          "disposition": "Retired, subject deleted: Phase A rollback and finalize were deleted by 9156ec1b32 (FIG-5200). The wire floor that remains, refusing a remote protocol generation outside the supported range, is covered by crates/lash-remote-protocol/src/tests/version_refusal.rs::retired_and_unlanded_remote_protocol_generations_are_refused."
+          "disposition": "Retired, subject deleted: Phase A rollback and finalize were deleted by 9156ec1b32 (FIG-5200)."
         }
       ],
       "setup": "Existing Phase A choreography plus external remote client.",

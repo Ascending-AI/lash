@@ -64,26 +64,6 @@
   "test_request_join": "Exact owned label, exit 0, unique worker record within 250 ms of the uncached report duration.",
   "test_request_proof": [
     {
-      "action_digest": "af4484b8128856f0cfb6d149c46247d7115b3c7e5f354db14fa7c5d0962197e4:147",
-      "anon_peak_bytes": "23543808",
-      "category": "-",
-      "cpu_usec": "1577639",
-      "crate": "lash_remote_protocol",
-      "epoch": 1790936033,
-      "exit": "0",
-      "kind": "-",
-      "op": "2bfb4908-35c1-4299-a0ab-5a781a4ce4f7",
-      "peak_bytes": "27463680",
-      "pkg": "lash-internal-remote-protocol",
-      "report_duration_seconds": 1.815536633,
-      "requested_cpu": "1",
-      "requested_kb": "262144",
-      "test": "run:-://crates/lash-remote-protocol:lash-remote-protocol__unit_test",
-      "tool": "bash",
-      "wall_ms": "1750",
-      "worker": "04"
-    },
-    {
       "action_digest": "99d4be24a8fd78f0d8e9f846d3a94e976481bfdd281e5f0d9568573654418ba2:147",
       "anon_peak_bytes": "349990912",
       "category": "-",

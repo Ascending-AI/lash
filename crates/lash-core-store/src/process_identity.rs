@@ -191,7 +191,7 @@ impl StartKeyNamespace {
 ///
 /// Only lash's own start paths hold one: the tool-intent and trigger-delivery
 /// realizations and the host rails' keyless ordinal, in the execution crate,
-/// and the remote protocol's decoding of a record's key. Neither the `lash`
+/// and host decoding of a record's key. Neither the `lash`
 /// facade nor the runtime crate's root re-exports it, so host and plugin code
 /// cannot name it: a host mints only [`StartKey::for_host`] keys, and a host
 /// rail refuses any other family.

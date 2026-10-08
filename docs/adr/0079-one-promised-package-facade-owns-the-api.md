@@ -18,7 +18,7 @@ those package paths to hosts.
 Optional facade features expose host-wired extensions: `sqlite`, `postgres`,
 `s3`, `openai`, `anthropic`, `google`, `mcp`, `typescript`, and
 `http-transport`. Each selects its domain module and
-internal dependency. Hosts name remote vocabulary through `lash::remote`.
+internal dependency. Hosts own their wire contracts ([ADR 0136](0136-hosts-own-their-wire-contracts.md)).
 
 ### 2. Integrator contracts deepen existing facade modules
 

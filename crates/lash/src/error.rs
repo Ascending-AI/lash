@@ -145,8 +145,6 @@ pub enum EmbedError {
     ConfigSubmit(lash_core::ConfigSubmitError),
     #[error("runtime plugin/control error: {0}")]
     Plugin(#[from] lash_core::PluginError),
-    #[error("remote protocol error: {0}")]
-    RemoteProtocol(#[from] lash_remote_protocol::RemoteProtocolError),
     #[error("failed to encode protocol turn options: {0}")]
     ProtocolTurnOptions(#[from] serde_json::Error),
     #[error("failed to decode protocol turn options: {0}")]
@@ -357,7 +355,6 @@ impl EmbedError {
             | Self::SessionStillInUse
             | Self::TraceFlush(_)
             | Self::Session(_)
-            | Self::RemoteProtocol(_)
             | Self::ProtocolTurnOptions(_)
             | Self::DecodeProtocolTurnOptions(_)
             | Self::Send(_) => false,
@@ -435,7 +432,6 @@ impl EmbedError {
             Self::Session(SessionError::Store { source, .. }) => store_error_is_terminal(source),
             Self::SessionStillInUse
             | Self::TraceFlush(_)
-            | Self::RemoteProtocol(_)
             | Self::ProtocolTurnOptions(_)
             | Self::DecodeProtocolTurnOptions(_)
             | Self::WorkCadence(_)

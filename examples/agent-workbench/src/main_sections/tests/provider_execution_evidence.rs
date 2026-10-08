@@ -1,32 +1,29 @@
 //! Real provider turns deliver their model-call ledgers, attempt evidence
-//! included, on the record surfaces consumers read: the remote observation
+//! included, on the record surfaces consumers read: the local observation
 //! stream and the product snapshot's `model_call_recorded` events. The page
 //! no longer renders these records (FIG-5036); E2E, the load-test
 //! measurements and the provider tests read them here.
 
 use super::*;
-use lash::remote::llm::{
-    RemoteAttemptOutcome, RemoteLlmCallRecord, RemoteProtocolPosition, RemoteProviderFailureKind,
-};
+use lash::LlmCallRecord;
+use lash::provider::{AttemptOutcome, ProtocolPosition, ProviderFailureKind};
 
-/// The next model-call record the remote observation stream delivers.
-async fn next_remote_model_call(
-    observations: &mut lash::observe::RemoteSessionObservationEventStream,
-) -> RemoteLlmCallRecord {
+/// The next model-call record the local observation stream delivers.
+async fn next_model_call(
+    observations: &mut lash::persistence::LiveReplaySubscription,
+) -> LlmCallRecord {
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
-            let remote = observations
+            let event = observations
                 .next()
                 .await
-                .expect("the remote observation stream stays open")
-                .expect("a remote observation update");
-            if let lash::remote::observations::RemoteSessionObservationEventPayload::TurnActivity {
-                activity,
-            } = remote.event
-                && let lash::remote::usage::RemoteTurnEvent::ModelCallRecorded { record } =
-                    activity.event
+                .expect("the local observation stream stays open")
+                .expect("a local observation update");
+            if let lash::observe::SessionObservationEventPayload::TurnActivity(activity) =
+                &event.payload
+                && let lash::TurnEvent::ModelCallRecorded { record } = &activity.event
             {
-                return record;
+                return record.clone();
             }
         }
     })
@@ -36,7 +33,7 @@ async fn next_remote_model_call(
 
 /// The terminal attempt of `record` carries the provider's own evidence.
 fn assert_provider_evidence(
-    record: &RemoteLlmCallRecord,
+    record: &LlmCallRecord,
     response_id: &str,
     served_model: &str,
     finish: &str,
@@ -153,12 +150,10 @@ async fn provider_execution_evidence_reaches_the_record_surfaces() {
         // only on its first poll, which could observe the config commit
         // before its publication and correctly report a gap (FIG-5423).
         let subscribed = observable
-            .subscribe_from_remote_cursor(&lash::remote::observations::RemoteSessionCursor::new(
-                initial.cursor.to_string(),
-            ))
+            .subscribe_from_cursor(&initial.cursor)
             .await
-            .expect("subscribe through the remote observation facade");
-        let lash::observe::RemoteSessionObservationSubscription::Subscribed(mut observations) =
+            .expect("subscribe through the local observation facade");
+        let lash::observe::SessionObservationSubscription::Subscribed(mut observations) =
             subscribed
         else {
             panic!("a live provider observation must not gap");
@@ -179,7 +174,7 @@ async fn provider_execution_evidence_reaches_the_record_surfaces() {
             .expect("the send is admitted")
             .0;
             let turn_id = started_turn_id(&accepted);
-            observed.push(next_remote_model_call(&mut observations).await);
+            observed.push(next_model_call(&mut observations).await);
             wait_for_turn_released(state, &session_id, &turn_id, Duration::from_secs(30)).await;
         }
 
@@ -187,8 +182,8 @@ async fn provider_execution_evidence_reaches_the_record_surfaces() {
         let [failed, completed] = first.attempts.as_slice() else {
             panic!("the first call retried once: {first:?}");
         };
-        assert_eq!(failed.outcome, RemoteAttemptOutcome::Failed);
-        assert_eq!(failed.protocol_position, RemoteProtocolPosition::NoResponse);
+        assert_eq!(failed.outcome, AttemptOutcome::Failed);
+        assert_eq!(failed.protocol_position, ProtocolPosition::NoResponse);
         assert!(failed.evidence.is_none());
         assert_eq!(
             failed
@@ -196,7 +191,7 @@ async fn provider_execution_evidence_reaches_the_record_surfaces() {
                 .as_ref()
                 .expect("the failed attempt keeps its normalized error")
                 .class,
-            RemoteProviderFailureKind::Transport
+            ProviderFailureKind::Transport
         );
         assert!(
             failed
@@ -206,7 +201,7 @@ async fn provider_execution_evidence_reaches_the_record_surfaces() {
                 .is_scheduled()
         );
         assert_eq!(completed.ordinal, 2);
-        assert_eq!(completed.outcome, RemoteAttemptOutcome::Completed);
+        assert_eq!(completed.outcome, AttemptOutcome::Completed);
         for record in &observed {
             assert_provider_evidence(record, response_id, served_model, finish);
         }

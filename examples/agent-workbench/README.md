@@ -294,14 +294,14 @@ and child execution links; command operations still go through the session's
 
 The browser starts with exactly one `GET /api/state` materialization. That
 authoritative response contains the transcript, durable
-`remote_turn_input_applications()`, the Lash observation snapshot/cursor, and
+`turn_input_applications()`, the Lash observation snapshot/cursor, and
 the workbench product-event snapshot/cursor. It then attaches two independent
 lanes after those cursors:
 
 - `/api/observations` is Lash's lane. The server enters
   `ObservableSession::subscribe_recoverable_chat` directly, then encodes its
   updates for HTTP. It forwards provisional turn activity,
-  `RemoteLiveReplayGap`, and terminal replacement. Event identity is
+  the example-owned replay gap, and terminal replacement. Event identity is
   `(session_id, replay_incarnation_id, cursor)`, so a consumer may safely retain
   its bounded identity cache when the server restarts and reuses cursor values.
   A replay gap still clears pre-gap identities before the stream continues from
@@ -367,7 +367,7 @@ carries the same `TurnInputReceipt` `/api/turn/input` returns, and the same
 held durably, rendered as a queued receipt, and answered as its own turn once the
 session's engine executes the next run over it. No optimistic user row is published for it: the receipt is the
 row, and the drained turn's committed message reconciles against it through
-`turn_input_applied`.
+`queued_input_accepted`.
 
 That check is advisory, exactly like the one behind `inject now`. Two sends can
 both read an idle session and race, and the lease and CAS — not the handler —
@@ -378,9 +378,9 @@ rendered those rows re-derives from `/api/state` on that outcome, which is the
 only way a rendered row is removed, so no viewer keeps a conversation row whose
 commit was refused.
 
-`turn_input_applied` is the only application signal. The live path consumes
+`queued_input_accepted` is the only application signal. The live path consumes
 its typed application objects; snapshot recovery uses
-`remote_turn_input_applications()`. The host does not inspect
+`turn_input_applications()`. The host does not inspect
 an untyped diagnostic, and it never infers application from
 `pending_turn_inputs()`: pending input is admission state, not proof that a
 canonical message was committed.

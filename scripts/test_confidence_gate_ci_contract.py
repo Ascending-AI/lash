@@ -2542,7 +2542,6 @@ derive_mutation_jobs() {{
                 "store-features",
                 "runtime-features",
                 "protocol-rlm-testing",
-                "remote-protocol-conversions",
                 "tool-lashlang-proxies",
                 "provider-testing-features",
                 "perf-dhat-heap",

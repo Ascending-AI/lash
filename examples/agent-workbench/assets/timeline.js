@@ -1239,7 +1239,7 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
     hooks.turnActivity?.(event, turnId);
     if (!turnId) return;
     const state = turn(turnId);
-    if (event.type === "turn_input_applied") {
+    if (event.type === "queued_input_accepted") {
       for (const application of event.applications || []) {
         if (!application?.input_id) continue;
         admitInput(application.input_id, application.turn_id || turnId, null, Boolean(application.checkpoint));

@@ -355,22 +355,6 @@ impl GatedProvider {
     }
 }
 
-/// The headers a remote client opens `/api/observations` with: a protocol
-/// Hello for every version this build speaks.
-pub(crate) fn remote_hello_headers() -> axum::http::HeaderMap {
-    let mut headers = axum::http::HeaderMap::new();
-    headers.insert(
-        "x-lash-protocol-hello",
-        serde_json::to_string(&lash::remote::Negotiation::Hello {
-            supported: lash::remote::REMOTE_PROTOCOL,
-        })
-        .expect("encode the protocol Hello")
-        .parse()
-        .expect("a Hello is a header value"),
-    );
-    headers
-}
-
 /// The chat route's request for `text` on the selected model.
 pub(crate) fn turn_request(text: &str) -> TurnRequest {
     TurnRequest {

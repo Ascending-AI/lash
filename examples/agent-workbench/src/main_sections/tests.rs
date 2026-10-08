@@ -63,8 +63,6 @@ mod recoverable_chat_failures_tests;
 #[path = "tests/recoverable_chat.rs"]
 mod recoverable_chat_tests;
 #[cfg(test)]
-#[path = "tests/remote_execution_evidence.rs"]
-mod remote_execution_evidence_tests;
 #[cfg(test)]
 #[path = "tests/session_isolation.rs"]
 mod session_isolation_tests;
@@ -474,7 +472,6 @@ async fn observation_stream(
             cursor,
             session_id: Some(session_id.clone()),
         }),
-        remote_hello_headers(),
         None,
     )
     .await
@@ -575,7 +572,8 @@ async fn event_stream_forwards_session_observation_live_replay() {
         };
         let value = serde_json::to_value(&event).expect("remote event json");
         if value.pointer("/type").and_then(Value::as_str) == Some("turn_activity")
-            && value.pointer("/activity/type").and_then(Value::as_str) == Some("turn_input_applied")
+            && value.pointer("/activity/type").and_then(Value::as_str)
+                == Some("queued_input_accepted")
         {
             assert!(
                 value.pointer("/activity/kind").is_none(),
@@ -600,7 +598,7 @@ async fn event_stream_forwards_session_observation_live_replay() {
     );
     let durable = session
         .durable()
-        .remote_turn_input_applications()
+        .turn_input_applications()
         .await
         .expect("durable workbench applications");
     let settled = durable
@@ -617,11 +615,6 @@ async fn event_stream_forwards_session_observation_live_replay() {
             .is_empty(),
         "application evidence must remain available without a pending-input snapshot"
     );
-    assert!(ui::TIMELINE_JS.contains("turn_input_applied"));
-    for page in [ui::INDEX_HTML, ui::TIMELINE_JS] {
-        assert!(!page.contains("queued_input_accepted"));
-        assert!(!page.contains("runtime_diagnostic"));
-    }
 }
 
 /// A cursor the live replay has trimmed past is a typed `replay_gap` naming
@@ -671,10 +664,7 @@ async fn event_stream_forwards_session_observation_replay_gap() {
             );
             assert_eq!(observation.body.cursor, gap.body.latest_cursor);
             assert_eq!(observation.body.session_id, session_id.as_str());
-            assert_eq!(
-                gap.body.reason,
-                lash::remote::observations::RemoteLiveReplayGapReason::Trimmed
-            );
+            assert_eq!(gap.body.reason, lash::observe::LiveReplayGapReason::Trimmed);
             saw_gap = true;
             break;
         }

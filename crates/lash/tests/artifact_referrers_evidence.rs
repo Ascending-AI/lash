@@ -172,15 +172,6 @@ async fn stored_module_refusals_preserve_causes_and_terminal_semantics(backend: 
                 }
             ),
         }
-        let remote = lash_remote_protocol::RemoteProcessAwaitOutput::try_from(decoded.clone())
-            .expect("remote terminal");
-        let remote: lash_remote_protocol::RemoteProcessAwaitOutput =
-            serde_json::from_value(serde_json::to_value(remote).unwrap()).unwrap();
-        assert_eq!(
-            lash_core::ProcessAwaitOutput::try_from(remote).unwrap(),
-            decoded,
-            "remote peer retains all terminal evidence"
-        );
         let registry = backend.process_registry();
         let retained = registry
             .get_process(&started)

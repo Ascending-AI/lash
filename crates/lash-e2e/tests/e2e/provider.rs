@@ -360,7 +360,7 @@ async fn s26(case: &mut Case, stream: Stream) -> Result<()> {
     // A follower's report is rebuilt from the store and carries usage on
     // the model call records it observed: the one completed attempt's is
     // the provider's.
-    let completed: Vec<Value> = outcome["report"]["activities"]
+    let completed: Vec<Value> = outcome["output"]["activities"]
         .as_array()
         .into_iter()
         .flatten()

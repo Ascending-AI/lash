@@ -14,16 +14,6 @@ use lash_trace::{
 
 const TICK: &str = "fixture.tick";
 
-fn negotiated_remote() -> lash_remote_protocol::Negotiated {
-    use lash_remote_protocol::{Negotiated, Negotiation, REMOTE_PROTOCOL, answer};
-
-    let hello = Negotiation::Hello {
-        supported: REMOTE_PROTOCOL,
-    };
-    Negotiated::from_accept(REMOTE_PROTOCOL, &answer(REMOTE_PROTOCOL, &hello))
-        .expect("local remote protocol range accepts itself")
-}
-
 fn record(process_id: &ProcessId, attempt: u32, occurrence: u64) -> TraceRecord {
     let payload = if occurrence == 0 {
         TraceLanguageExecutionPayload::ExecutionStarted {
@@ -997,21 +987,9 @@ async fn idle_unfinished_processes_are_released_after_the_ttl() {
     assert_eq!(remaining, [ProcessId::fixture("process:live")]);
 }
 
-fn assert_remote_round_trip(item: ProcessObservationItem, process_id: &ProcessId) {
-    let remote = item.into_remote(process_id.clone());
-    let wire = remote
-        .encode_json(&negotiated_remote())
-        .expect("encode remote item");
-    assert_eq!(
-        lash_remote_protocol::RemoteProcessObservationItem::decode_json(&wire)
-            .expect("decode remote item"),
-        remote
-    );
-}
-
 /// The facade wiring: durable commits through the core's watched registry
 /// reach the hub through the ADR 0017 sink, `Processes::events` mints the
-/// cursor, and the remote request and items round-trip.
+/// cursor.
 #[tokio::test]
 async fn the_facade_routes_commits_to_the_hub_and_pages_by_cursor() {
     let dir = tempfile::tempdir().expect("facade tempdir");
@@ -1056,33 +1034,6 @@ async fn the_facade_routes_commits_to_the_hub_and_pages_by_cursor() {
         .event;
     let item = next(&mut subscription).await;
     expect_committed(&item, committed.sequence);
-    assert_remote_round_trip(item, &process_id);
-
-    let request = lash_remote_protocol::RemoteProcessObservationRequest {
-        process_id: process_id.clone(),
-        cursor: Some(cursor.clone()),
-    };
-    let request = lash_remote_protocol::RemoteProcessObservationRequest::decode_json(
-        &request
-            .encode_json(&negotiated_remote())
-            .expect("encode request"),
-    )
-    .expect("decode request");
-    let mut remote = core
-        .processes()
-        .subscribe_observation_remote(&request)
-        .await
-        .expect("remote route");
-    let item = remote.recv_remote().await.expect("recv").expect("item");
-    assert!(
-        matches!(
-            &item,
-            lash_remote_protocol::RemoteProcessObservationItem::Committed { sequence, .. }
-                if *sequence == committed.sequence
-        ),
-        "the remote route resumes from the cursor: {item:?}"
-    );
-
     let mut initial = core
         .processes()
         .subscribe_observation(&process_id, None)
@@ -1090,20 +1041,18 @@ async fn the_facade_routes_commits_to_the_hub_and_pages_by_cursor() {
         .expect("subscribe");
     let snapshot = next(&mut initial).await;
     assert_eq!(snapshot.cursor().sequence(), committed.sequence);
-    assert_remote_round_trip(snapshot, &process_id);
-
     let events = core
         .processes()
-        .events_remote(&lash_remote_protocol::RemoteProcessEventsRequest {
-            process_id: process_id.clone(),
-            limit: std::num::NonZeroUsize::new(64).expect("page size"),
-            mode: ProcessEventQueryMode::Full,
-            cursor: Some(cursor.clone()),
-        })
+        .events(
+            ProcessEventsFrom::After(cursor.clone()),
+            std::num::NonZeroUsize::new(64).expect("page size"),
+            ProcessEventQueryMode::Full,
+        )
         .await
-        .expect("remote events");
-    assert_eq!(events.cursor.sequence(), committed.sequence);
-    assert_eq!(events.cursor.epoch(), cursor.epoch());
+        .expect("local events");
+    let events_cursor = events.cursor.expect("retained cursor");
+    assert_eq!(events_cursor.sequence(), committed.sequence);
+    assert_eq!(events_cursor.epoch(), cursor.epoch());
     let lash_core::ProcessEventReadOutcome::Retained(page) = events.outcome else {
         panic!("retained");
     };

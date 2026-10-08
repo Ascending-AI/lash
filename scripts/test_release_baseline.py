@@ -187,8 +187,7 @@ async fn rewrite() { assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok(
             self.assertEqual(result.returncode, 0, result.stderr)
             return
         self.assertEqual(result.returncode, 1, result.stderr)
-        for name in ["REMOTE_PROTOCOL_VERSION",
-                     "WORKFLOW_GRAPH_SCHEMA_VERSION"]:
+        for name in ["WORKFLOW_GRAPH_SCHEMA_VERSION"]:
             self.assertIn(name, result.stderr)
 
     @unittest.skipUnless(os.environ.get("LASH_RELEASE_CUT") == "1", "FIG-4485: release baseline activates at the 1.0 cut")
@@ -414,12 +413,6 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
             self.assertIn('"lash-process-env/v1"', domains)
             self.assertIn('"lash-process-env/v6"', domains.split('const RETIRED_BLAKE3_DOMAINS:')[1])
             self.assertIn("lash-process-env/v6", baseline.retired_hash_domains(repo))
-            source = repo / "crates/lash-remote-protocol/src/lib.rs"
-            source.write_text(source.read_text().replace("REMOTE_PROTOCOL_VERSION: u32 = 1;",
-                                                       "REMOTE_PROTOCOL_VERSION: u32 = 100;"))
-            errors = baseline.mismatches(baseline.inventory(repo))
-            self.assertTrue(any("REMOTE_PROTOCOL_VERSION" in error for error in errors))
-
             # After the reset every store is at version 1 in compat.rs alone,
             # schema.sql states it, and the catalogs are numbered in it. An
             # artifact that keeps an old number, a backend that repeats the
@@ -431,7 +424,7 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
                 [sys.executable, str(ROOT / "scripts/release_baseline.py"), "--repo", str(repo), "check"],
                 capture_output=True, text=True, cwd=ROOT,
             )
-            self.assertIn("REMOTE_PROTOCOL_VERSION", check.stderr)
+            self.assertEqual(check.returncode, 0, check.stderr)
             self.assertNotIn("stamp", check.stderr)
             artifact = repo / "crates/lash-postgres-store/schema.sql"
             reset_artifact = artifact.read_text()

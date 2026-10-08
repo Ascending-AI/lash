@@ -1,1 +1,0 @@
-[{"id":"remote-tool:echo","name":"echo","input_schema":{"canonical":{"additionalProperties":true,"properties":{},"type":"object"}},"output_schema":{"canonical":{}},"execution_ms":30000}]

@@ -3,7 +3,7 @@
 //! Core validation and remote ingress are two validators over one contract
 //! (FIG-2985). This corpus is the single place a refused shape is spelled, and
 //! both sides consume it: the core parity test asserts every fixture trips the
-//! rule it was written for, and `lash-remote-protocol`'s decoder parity test
+//! rule it was written for, and the core admission law
 //! pushes the same fixtures through the peer-facing decoder and asserts a typed
 //! refusal rather than a panic.
 //!

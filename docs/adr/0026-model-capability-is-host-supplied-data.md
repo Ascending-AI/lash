@@ -2,7 +2,7 @@
 
 ## Decision
 
-Model capabilities are host-supplied data attached to `LlmProfileMetadata`, recorded with the session's `RecordedLlmProfile` when the host's model registry mints it for a `LlmProfileKey`, passed into turn configuration, direct requests and `LlmRequest`, and mirrored by the remote protocol. Providers execute the declared contract and encode it for their route. Capability facts do not come from provider model-name guesses.
+Model capabilities are host-supplied data attached to `LlmProfileMetadata`, recorded with the session's `RecordedLlmProfile` when the host's model registry mints it for a `LlmProfileKey`, passed into turn configuration, direct requests and `LlmRequest`. Providers execute the declared contract and encode it for their route. Capability facts do not come from provider model-name guesses.
 
 `ReasoningCapability` contains exact accepted `efforts`, `encoding`, `disable` and `mandatory`. Selection is `ReasoningSelection::{ProviderDefault, Disabled, Effort}`. A host default is the reasoning selection recorded with the session's `LlmProfileConfig`. Effort names match exactly; there is no alias normalization or case folding. `disable` states whether explicit off is accepted; its wire form belongs to the route.
 

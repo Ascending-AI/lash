@@ -151,15 +151,6 @@ async fn a_run_whose_live_report_is_gone_answers_its_durable_report() -> Result<
             .iter()
             .any(|activity| matches!(activity.event, crate::TurnEvent::ModelCallRecorded { .. }))
     );
-    durable
-        .result
-        .to_remote(
-            &session.session_id(),
-            &"durable-report-run".parse()?,
-            &durable.activities,
-        )
-        .validate()
-        .expect("observed sealed calls remain transportable in a durable report");
     assert_eq!(
         durable.result.state.turn_index,
         live.result.state.turn_index
@@ -477,10 +468,6 @@ async fn a_withdrawn_send_answers_cancelled_without_output() -> Result<()> {
         None,
         "no run took a withdrawn input"
     );
-    outcome
-        .to_remote(&session.session_id(), &input_id)
-        .validate()
-        .expect("a withdrawn input's remote outcome is consistent");
     let refusal = session
         .attach(input_id.clone())
         .output()
@@ -542,13 +529,6 @@ async fn an_input_answered_inside_another_run_resolves_answered_with_that_run() 
     assert_eq!(
         third.run().cloned(),
         Some(lash_core::TurnId::from("second-run"))
-    );
-    let remote = third.to_remote(&session.session_id(), &third_input);
-    remote.validate().expect("the remote outcome is consistent");
-    assert_eq!(
-        remote.run().cloned(),
-        Some(lash_core::TurnId::from("second-run")),
-        "a transport re-attaches through the run that answered"
     );
     let third = third.output().expect("an answered input has a report");
     // One turn applied both inputs, each as its own user row (FIG-5288), so
@@ -969,23 +949,6 @@ async fn an_id_never_accepted_answers_not_accepted() -> Result<()> {
         assert_eq!(outcome.run(), None);
         assert!(outcome.output().is_none());
     }
-    let input_id = session.attach_id(never.clone()).input_id().clone();
-    let remote = live.to_remote(&session.session_id(), &input_id);
-    remote
-        .validate()
-        .expect("a never-accepted input's remote outcome is consistent");
-    assert!(
-        matches!(
-            remote,
-            lash_remote_protocol::RemoteSendOutcome::NotAccepted { .. }
-        ),
-        "{remote:?}"
-    );
-    assert_eq!(
-        remote.status(),
-        lash_remote_protocol::RemoteTurnStatus::NotAccepted
-    );
-
     // A send under the id is accepted as new and runs.
     let sent = session
         .send(TurnInput::text("sent at last"))

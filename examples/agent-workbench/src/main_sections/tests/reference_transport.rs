@@ -44,8 +44,8 @@ use lash::provider::{
     GenerationRetryGuarantee, LlmRequest, LlmTransportError, ProviderFailureKind, ProviderOptions,
     ProviderReliability, TransportRetryVerdict,
 };
-use lash::remote::observations::RemoteSessionObservationEventPayload;
-use lash::remote::usage::RemoteTurnEvent;
+
+use lash::TurnEvent;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -66,7 +66,7 @@ struct DeliveredEventId {
 }
 
 impl DeliveredEventId {
-    fn of(event: &RemoteSessionObservationEvent) -> Self {
+    fn of(event: &ObservationEvent) -> Self {
         Self {
             session_id: event.session_id.to_string(),
             replay_incarnation_id: event.replay_incarnation_id.clone(),
@@ -246,8 +246,8 @@ impl ReferenceTransport {
         true
     }
 
-    fn fold_event(&mut self, event: &RemoteSessionObservationEvent) {
-        if let RemoteSessionObservationEventPayload::Committed { rows, .. } = &event.event {
+    fn fold_event(&mut self, event: &ObservationEvent) {
+        if let ObservationPayload::Committed { rows, .. } = &event.event {
             for record in rows
                 .iter()
                 .filter(|record| record.suppressed.is_none() && record.provenance.is_turn_reply)
@@ -264,7 +264,7 @@ impl ReferenceTransport {
         let Some(turn_id) = event.turn_id.clone() else {
             return;
         };
-        let RemoteSessionObservationEventPayload::TurnActivity { activity } = &event.event else {
+        let ObservationPayload::TurnActivity { activity } = &event.event else {
             // No other turn-scoped payload carries output text, but the turn's
             // row exists as soon as any of its events do.
             self.outputs.entry(turn_id).or_default();
@@ -272,25 +272,25 @@ impl ReferenceTransport {
         };
         let row = self.outputs.entry(turn_id).or_default();
         match &activity.event {
-            RemoteTurnEvent::TurnStarted { .. } => {
+            TurnEvent::TurnStarted { .. } => {
                 // A fresh shift under an existing turn id is a redrive: its
                 // provisional copy supersedes whatever the abandoned shift
                 // left behind. The settled text stays — it is still the last
                 // canonical word until the next refetch.
                 row.provisional_prose.clear();
             }
-            RemoteTurnEvent::AssistantProseDelta { text, .. } => {
+            TurnEvent::AssistantProseDelta { text, .. } => {
                 row.provisional_prose
                     .entry(activity.correlation_id.clone())
                     .or_default()
                     .push_str(text);
             }
-            RemoteTurnEvent::ModelAttemptReset {
+            TurnEvent::ModelAttemptReset {
                 assistant_prose_correlation_ids,
                 ..
             } => {
                 for correlation_id in assistant_prose_correlation_ids {
-                    row.provisional_prose.remove(correlation_id);
+                    row.provisional_prose.remove(correlation_id.0.as_ref());
                 }
             }
             _ => {}
@@ -342,12 +342,10 @@ async fn connect_observations(
             cursor: cursor.map(str::to_string),
             session_id: Some(session_id.clone()),
         }),
-        remote_hello_headers(),
         None,
     )
     .await
     .expect("open observation stream");
-    assert!(response.headers().contains_key("x-lash-protocol-accept"));
     assert_eq!(
         response
             .headers()
@@ -645,7 +643,7 @@ async fn trimmed_gap_recovery_replaces_the_same_output_identity() {
     }
     assert_eq!(
         gap_reason,
-        Some(lash::remote::observations::RemoteLiveReplayGapReason::Trimmed),
+        Some(lash::observe::LiveReplayGapReason::Trimmed),
         "a trimmed persisted cursor must answer with a trimmed gap"
     );
     assert_eq!(

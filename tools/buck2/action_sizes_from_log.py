@@ -253,7 +253,6 @@ BAZEL_TEST_TOOLS = {"test-setup.sh", "generate-xml.sh"}
 MINIMUM_MEMORY_KB = {
     "lash-internal-sqlite-store/conformance_memory": 3 * 1024 * 1024,
     "lash-internal-conformance/lash_conformance": 2560 * 1024,
-    "lash-internal-remote-protocol/lash_remote_protocol": 2 * 1024 * 1024,
     "lash-internal-core-execution/lash_core_execution": 2 * 1024 * 1024,
     "lash-internal-core-execution/store_backed": 2 * 1024 * 1024,
     "lash-internal-core/runtime_turns": 2 * 1024 * 1024,

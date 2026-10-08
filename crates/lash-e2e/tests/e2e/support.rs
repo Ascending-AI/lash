@@ -77,7 +77,7 @@ pub fn settled(outcome: &Value) -> (String, Option<String>) {
     if kind != "settled" {
         return (kind.to_owned(), None);
     }
-    let report = &outcome["report"];
+    let report = &outcome["output"]["result"];
     let kind = match report["outcome"]["type"].as_str() {
         Some("finished") | Some("agent_frame_switch") => "completed".to_owned(),
         Some("stopped") => match report["outcome"]["stop"]["type"].as_str() {

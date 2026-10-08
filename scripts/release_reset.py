@@ -23,7 +23,6 @@ from fixture_regenerators import discover
 SCHEMA_GENERATORS = [
     "//crates/lashlang:workflow_schema_generator__bin",
     "//crates/lash-trace:trace_schema_generator__bin",
-    "//crates/lash-remote-protocol:remote_schema_generator__bin",
     "//crates/lash-core-execution:process_event_schema_generator__bin",
 ]
 

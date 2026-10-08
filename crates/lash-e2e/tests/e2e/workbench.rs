@@ -332,10 +332,6 @@ pub async fn observe(case: &Case, node: &str) -> Result<Feed> {
     );
     let response = reqwest::Client::new()
         .get(url)
-        .header(
-            "x-lash-protocol-hello",
-            json!({"negotiation": "hello", "supported": {"min": 100, "max": 100}}).to_string(),
-        )
         .send()
         .await?
         .error_for_status()?;

@@ -34,7 +34,7 @@
 //!   own cadence, and are read from the deployment rather than from the build.
 //!   They come back from a backend's
 //!   [`StorePreflight`](crate::persistence::StorePreflight) instead.
-//! - **Wire protocol versions.** `REMOTE_PROTOCOL_VERSION` and the trace
+//! - **Projection versions.** The trace
 //!   schema version gate a live peer or a reader, not parked durable bytes.
 //! - **Hash-domain family tags.** A `*_FAMILY_VERSION` (and the frame-key and
 //!   journal-identity tags spelled differently) names the preimage family of a

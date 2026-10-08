@@ -28,7 +28,7 @@ class TestInputTests(unittest.TestCase):
         named = resources(
             ['tests/fixture.json', 'Cargo.toml'],
             [
-                '//crates/lash-remote-protocol:rust_sources',
+                '//crates/lashlang:rust_sources',
                 '//crates/lash-trace:rust_sources',
                 'native//:node',
                 ':worker__bin',
@@ -38,8 +38,8 @@ class TestInputTests(unittest.TestCase):
         self.assertEqual(named['tests/fixture.json'], 'tests/fixture.json')
         self.assertEqual(named['Cargo.toml'], 'Cargo.toml')
         self.assertEqual(
-            named['__lash_inputs__/crates/lash-remote-protocol/rust_sources'],
-            '//crates/lash-remote-protocol:rust_sources',
+            named['__lash_inputs__/crates/lashlang/rust_sources'],
+            '//crates/lashlang:rust_sources',
         )
         self.assertEqual(
             named['__lash_inputs__/crates/lash-trace/rust_sources'],

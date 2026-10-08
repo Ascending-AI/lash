@@ -273,38 +273,6 @@ impl ToolManifestBindingExt for lash_core::ToolManifest {
     }
 }
 
-pub trait RemoteToolGrantBindingExt {
-    fn with_tool_binding(self, tool_binding: ToolBinding) -> Self;
-    fn tool_binding(&self) -> Result<Option<ToolBinding>, ToolBindingError>;
-}
-
-impl RemoteToolGrantBindingExt for lash_remote_protocol::RemoteToolGrant {
-    #[expect(
-        clippy::expect_used,
-        reason = "ToolBinding is a module-owned struct of strings and maps, so serialization into the remote grant's binding map can only fail if the type is widened, which the site's message asserts"
-    )]
-    fn with_tool_binding(mut self, tool_binding: ToolBinding) -> Self {
-        self.bindings.insert(
-            TOOL_BINDING_KEY.to_string(),
-            serde_json::to_value(&tool_binding).expect("tool binding must serialize to JSON"),
-        );
-        self
-    }
-
-    fn tool_binding(&self) -> Result<Option<ToolBinding>, ToolBindingError> {
-        self.bindings
-            .get(TOOL_BINDING_KEY)
-            .cloned()
-            .map(serde_json::from_value)
-            .transpose()
-            .map_err(|source| ToolBindingError::MalformedPayload {
-                tool: self.name.clone(),
-                binding_key: TOOL_BINDING_KEY,
-                source,
-            })
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct LashlangSurface {
     pub abilities: LashlangAbilities,
@@ -808,18 +776,6 @@ impl LashlangProcessInput {
         lash_core::ExecutableGeneration::new(process::lashlang_program_hash(self))
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "validated references form a canonical descriptor"
-    )]
-    pub fn remote_identity(&self) -> lash_remote_protocol::RemoteProcessIdentity {
-        lash_remote_protocol::RemoteProcessIdentity {
-            kind: LASHLANG_ENGINE_KIND.to_string(),
-            label: Some(self.process_name.clone()),
-            definition_id: Some(self.definition_identity().draft().expect("descriptor").id()),
-        }
-    }
-
     pub fn to_process_input(&self) -> Result<lash_core::ProcessInput, serde_json::Error> {
         Ok(lash_core::ProcessInput::Engine {
             kind: LASHLANG_ENGINE_KIND.to_string(),
@@ -829,25 +785,6 @@ impl LashlangProcessInput {
 
     pub fn into_process_input(self) -> Result<lash_core::ProcessInput, serde_json::Error> {
         self.to_process_input()
-    }
-
-    pub fn remote_trigger_subscription_draft(
-        &self,
-        subscription_key: impl Into<String>,
-        env_ref: lash_remote_protocol::RemoteProcessExecutionEnvRef,
-        source_type: impl Into<String>,
-        source_key: impl Into<String>,
-    ) -> Result<lash_remote_protocol::RemoteTriggerSubscriptionDraft, serde_json::Error> {
-        Ok(
-            lash_remote_protocol::RemoteTriggerSubscriptionDraft::for_process(
-                subscription_key,
-                env_ref,
-                source_type,
-                source_key,
-                lash_remote_protocol::RemoteProcessInput::try_from(self.clone())?,
-                self.remote_identity(),
-            ),
-        )
     }
 
     pub fn from_payload(payload: serde_json::Value) -> Result<Self, serde_json::Error> {
@@ -867,17 +804,6 @@ impl LashlangProcessInput {
             self.process_ref.clone(),
             self.process_name.clone(),
         )
-    }
-}
-
-impl TryFrom<LashlangProcessInput> for lash_remote_protocol::RemoteProcessInput {
-    type Error = serde_json::Error;
-
-    fn try_from(value: LashlangProcessInput) -> Result<Self, Self::Error> {
-        Ok(Self::Engine {
-            kind: LASHLANG_ENGINE_KIND.to_string(),
-            payload: serde_json::to_value(value)?,
-        })
     }
 }
 

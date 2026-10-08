@@ -88,14 +88,6 @@ async fn operation_run_follow_returns_the_task_terminal() -> Result<()> {
             if matches!(outcome.as_ref(), lash_core::runtime::PluginOperationCommandOutcome::Completed { output, .. }
                 if output == &serde_json::json!("terminal")))
         );
-        let wire = result.to_remote(
-            &operation.session_id,
-            &lash_core::InputId::from(&operation.run_id()),
-        );
-        wire.validate()?;
-        let decoded: lash_remote_protocol::RemoteSendOutcome =
-            serde_json::from_slice(&serde_json::to_vec(&wire)?)?;
-        assert_eq!(decoded, wire);
         let durable = session.durable();
         drop(session);
         assert_eq!(
@@ -482,26 +474,11 @@ async fn plugin_operation_failure_reaches_the_facade_as_a_typed_settlement() -> 
             ),
             ("accept", FailureProbe::NAME, 1)
         );
-        let issue = lash_core::facade_support::TurnIssue {
-            severity: lash_core::facade_support::TurnIssueSeverity::Advisory,
-            kind: lash_core::TurnFailureKind::Plugin,
-            code: Some(failure.code.clone()),
-            terminal_reason: None,
-            message: failure.message.clone(),
-            raw: None,
-            retryable: Some(false),
-            provider_failure_kind: None,
-            plugin_failures: vec![*failure],
-        };
-        let wire: lash_remote_protocol::RemoteTurnIssue = issue.into();
-        let decoded: lash_remote_protocol::RemoteTurnIssue =
-            serde_json::from_slice(&serde_json::to_vec(&wire)?)?;
-        assert_eq!(decoded, wire);
         assert_eq!(
-            FailureProbe::decode_error(decoded.plugin_failures[0].clone()).unwrap(),
+            FailureProbe::decode_error((*failure).clone()).unwrap(),
             expected
         );
-        let unknown = decoded.plugin_failures[0].payload["sources"]
+        let unknown = failure.payload["sources"]
             .as_array()
             .unwrap()
             .last()

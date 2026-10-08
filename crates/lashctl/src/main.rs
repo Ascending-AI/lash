@@ -335,9 +335,6 @@ fn version_result() -> Value {
             "reads": descriptor.reads,
             "writes": descriptor.writes,
         })).collect::<Vec<_>>(),
-        "wires": {
-            "remote_protocol": lash_remote_protocol::REMOTE_PROTOCOL,
-        },
     })
 }
 

@@ -182,3 +182,5 @@ every decision from 0001 to 0131.
 | 0104 | Replaced | ADR 0132 |
 | 0111 | Retired: engine service names | ADR 0102 D2 owns deployment separation |
 | 0125 | Replaced | ADR 0127 |
+
+| 0136 | [Hosts own their wire contracts](0136-hosts-own-their-wire-contracts.md) |

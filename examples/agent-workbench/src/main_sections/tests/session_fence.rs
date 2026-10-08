@@ -332,7 +332,6 @@ async fn every_session_bound_route_refuses_a_retired_id_with_the_same_conflict()
                         cursor: None,
                         session_id: Some(session_id.clone()),
                     }),
-                    remote_hello_headers(),
                     None,
                 )
                 .map_ok(drop),

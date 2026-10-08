@@ -120,7 +120,6 @@ manifests. Engine-state formats are declared by their process engines.
 | Derived workflow graph and type facets | Their declared read ranges and projection policy. |
 | Content addresses and idempotency families | Preserve stored identity preimages; admit the declared family rather than re-derive an old identity with a new family. |
 | Turn checkpoints, VM snapshots, Run records, wait rows, outcome materials and engine state | The actor's format set, the claim filter and drain by release (§1); 1.0 decode-and-resume fixtures. |
-| Live remote wire | Negotiated or declared wire read/write windows, separately from stored-value versions. |
 | Release fixtures | Capture by release tag; synthetic-next supplies the current upgrade proof. |
 
 Session-state admission validates the session actor's epoch in the store

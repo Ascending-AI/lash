@@ -396,18 +396,6 @@
       "p99_anon_peak_bytes": 356401152,
       "samples": 27
     },
-    "lash-internal-remote-protocol/lash_remote_protocol": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 676876288,
-      "samples": 25
-    },
-    "lash-internal-remote-protocol/remote_schema_generator": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 48824320,
-      "samples": 9
-    },
     "lash-internal-rlm-types/lash_rlm_types": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
@@ -1159,24 +1147,6 @@
       "oom_kills": 0,
       "p99_anon_peak_bytes": 1062019072,
       "samples": 130
-    },
-    "lash-internal-remote-protocol/decode_limits": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 143233024,
-      "samples": 1
-    },
-    "lash-internal-remote-protocol/lash_remote_protocol": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 1311789056,
-      "samples": 238
-    },
-    "lash-internal-remote-protocol/remote_schema_generator": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 352129024,
-      "samples": 39
     },
     "lash-internal-rlm-types/lash_rlm_types": {
       "legacy_peak_bytes": 0,

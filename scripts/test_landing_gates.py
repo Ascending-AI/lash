@@ -70,21 +70,6 @@ class LandingGatesTests(unittest.TestCase):
         self.git("init", "--quiet", "--initial-branch=main")
         return self.commit("post-reset baseline")
 
-    def test_post_reset_unbumped_shape_fails(self):
-        base = self.post_reset_repo()
-        shape = self.repo / "crates/lash-remote-protocol/src/turn_result.rs"
-        original = shape.read_text()
-        self.assertIn("pub struct RemoteTurnReport {", original)
-        shape.write_text(original.replace("pub struct RemoteTurnReport {",
-                                          "pub struct RemoteTurnReport {\n    pub planted: String,", 1))
-        head = self.commit("unbumped guarded shape")
-        unbumped = self.invoke(base, head)
-        (PROOF / "unbumped.log").write_text(unbumped.stdout + unbumped.stderr)
-        self.assertEqual(unbumped.returncode, 1, unbumped.stdout + unbumped.stderr)
-        self.assertIn("version-bump check failed", unbumped.stderr)
-        self.assertIn("REMOTE_PROTOCOL_VERSION is 1 on both sides", unbumped.stderr)
-        print("post-reset unbumped guarded edit: exit 1")
-
     def minimal_repo(self):
         self.copy_gates()
         self.git("init", "--quiet", "--initial-branch=main")

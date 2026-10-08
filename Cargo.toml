@@ -17,7 +17,6 @@ members = [
     "crates/lash-core",
     "crates/lash-conformance",
     "crates/lash-lashlang-runtime",
-    "crates/lash-remote-protocol",
     "crates/lash-http-transport",
     "crates/lash-llm-transport",
     "crates/lash-sqlite-store",
@@ -70,7 +69,6 @@ default-members = [
     "crates/lash-core-execution",
     "crates/lash-core-worker",
     "crates/lash-core",
-    "crates/lash-remote-protocol",
     "crates/lash",
     "crates/lash-trace",
     "crates/lash-rlm-types",
@@ -294,7 +292,6 @@ lash-provider-anthropic = { package = "lash-internal-provider-anthropic", path =
 lash-provider-google = { package = "lash-internal-provider-google", path = "crates/lash-provider-google", version = "=0.0.0-dev" }
 lash-provider-openai = { package = "lash-internal-provider-openai", path = "crates/lash-provider-openai", version = "=0.0.0-dev" }
 lash-regress = { path = "crates/lash-regress", version = "=0.0.0-dev", features = ["utf16"] }
-lash-remote-protocol = { package = "lash-internal-remote-protocol", path = "crates/lash-remote-protocol", version = "=0.0.0-dev" }
 lash-rlm-types = { package = "lash-internal-rlm-types", path = "crates/lash-rlm-types", version = "=0.0.0-dev" }
 lash-sansio = { package = "lash-internal-sansio", path = "crates/lash-sansio", version = "=0.0.0-dev" }
 lash-store-sql = { package = "lash-internal-store-sql", path = "crates/lash-store-sql", version = "=0.0.0-dev" }

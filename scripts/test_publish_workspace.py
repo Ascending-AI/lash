@@ -38,7 +38,6 @@ EXPECTED_INTERNAL_PACKAGES = {
     "lash-provider-anthropic": "lash-internal-provider-anthropic",
     "lash-provider-google": "lash-internal-provider-google",
     "lash-provider-openai": "lash-internal-provider-openai",
-    "lash-remote-protocol": "lash-internal-remote-protocol",
     "lash-render": "lash-internal-render",
     "lash-rlm-types": "lash-internal-rlm-types",
     "lash-s3-store": "lash-internal-s3-store",
@@ -450,20 +449,6 @@ class PublishWorkspaceTest(unittest.TestCase):
                     "*" if cyclic_dev_dependency else "=0.0.0-dev",
                     f"{package['name']} -> {dependency['name']}",
                 )
-
-        facade = next(
-            package
-            for package in metadata["packages"]
-            if package["name"] == "lash-runtime"
-        )
-        remote = next(
-            dependency
-            for dependency in facade["dependencies"]
-            if dependency["name"] == "lash-internal-remote-protocol"
-            and dependency["kind"] is None
-        )
-        self.assertEqual(remote["rename"], "lash-remote-protocol")
-        self.assertIn("core-conversions", remote["features"])
 
         extension = next(
             package

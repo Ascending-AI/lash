@@ -27,7 +27,6 @@ lash = { workspace = true, features = ["rlm", "sqlite", "postgres"] }
 lash-core-execution = { workspace = true }
 lash-core-store = { workspace = true }
 lash-postgres-store = { workspace = true }
-lash-remote-protocol = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

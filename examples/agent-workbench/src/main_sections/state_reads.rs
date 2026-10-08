@@ -9,7 +9,7 @@ pub(crate) struct StateProjectionReads {
     pub(crate) cursor: SessionCursor,
     pub(crate) pending_turn_inputs: Vec<lash::PendingTurnInputRead>,
     pub(crate) queued_work: Vec<lash::persistence::QueuedWorkBatch>,
-    pub(crate) turn_input_applications: Vec<lash::remote::observations::RemoteTurnInputApplication>,
+    pub(crate) turn_input_applications: Vec<lash::TurnInputApplication>,
     pub(crate) turn_failure_settlements: Vec<lash::TurnFailureSettlement>,
 }
 
@@ -177,7 +177,7 @@ pub(crate) async fn read_state_projection(
     };
     let turn_input_applications = if session_present {
         durable
-            .remote_turn_input_applications()
+            .turn_input_applications()
             .await
             .map_err(AppError::internal)?
     } else {

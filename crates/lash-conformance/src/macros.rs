@@ -294,7 +294,6 @@ macro_rules! process_registry_tests {
                 (a_host_retry_with_another_wake_target_conflicts, "host-start-key-wake-target"),
                 (a_host_start_key_after_prune_starts_new_for_any_originator, "host-start-key-after-prune"),
                 (scope_replay_cancel_and_trace_ignore_environment_rebinding, "scope-environment-rebinding"),
-                (remote_start_replay_preserves_recorded_id_key_and_disposition, "remote-start-replay"),
                 (retired_process_shapes_refuse_before_registration_or_effects, "retired-process-shapes"),
                 (keyless_starts_are_always_new, "keyless-starts"),
                 (concurrent_starts_under_one_key_register_one_process, "concurrent-start-key"),

@@ -14,7 +14,7 @@ ADR 0133 §6 are on main.
 
 An attachment reached a model call in four shapes: inline bytes, a stored
 ref, an external URL and a provider file id. Each shape flowed through
-history, the remote wire, commit identity, request budgets, RLM projections,
+history, host projections, commit identity, request budgets, RLM projections,
 traces and every provider adapter. Lash fetched none of the borrowed shapes,
 so a URL or provider file id could be durable history with no content
 identity, no retention and no expiry handling: commit identity hashed the
@@ -34,7 +34,7 @@ would be durable secret material that could expire before the resend.
 
 `AttachmentRef { id, media_type, byte_len, type_metadata, label }` is the only
 attachment concept in input, messages, tool values, tool results, history,
-checkpoints and the remote protocol. `AttachmentId` is the content digest:
+checkpoints and host projections. `AttachmentId` is the content digest:
 exactly 64 lowercase hex characters of the domain-separated BLAKE3 hash of
 the bytes (`content_id`). Nothing else parses as an id, so a ref names
 content, never a locator.
@@ -140,14 +140,12 @@ acquired under the holder its owner puts under, so a ref named only by an
 admitted call survives a takeover and is reclaimable once that owner
 settles.
 
-### 8. The remote protocol carries refs
+### 8. Hosts transport attachment refs
 
-Remote input, LLM blocks, tool-result blocks and tagged tool values carry
-`{"type": "attachment", "reference": {id, media_type, byte_len,
-type_metadata?, label?}}`. Inline bytes travel only through the host's
-remote put operation, which answers a ref before a turn names it. A remote
-worker serving refs shares the attachment backend's namespace or resolves
-through the host; a ref carries no bytes.
+Hosts define DTOs for attachment refs and put operations. They upload bytes
+through their attachment backend before submitting a turn that names the ref.
+A ref carries no bytes; another worker shares the backend namespace or resolves
+through the host ([ADR 0136](0136-hosts-own-their-wire-contracts.md)).
 
 ## Consequences
 

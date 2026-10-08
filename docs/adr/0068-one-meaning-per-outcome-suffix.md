@@ -41,7 +41,7 @@ contract. For example, `TriggerMutationReceipt::disposition` carries a
 `LlmContentBlock::ToolResult` identifies a message-block variant serialized as
 `tool_result`; it is not a domain type named `ToolResult`.
 
-Module paths such as `lash::remote::turn_result` and local variable or test
+Module paths such as `lash::process` and local variable or test
 function names are not outcome-type identifiers. A naming rule cannot authorize
 changing serialized fields, identity tags or durable format versions.
 
@@ -127,5 +127,5 @@ These current types demonstrate the roles rather than recording a rename list.
   [execution policy](../../crates/lash-sansio/src/tool_contract.rs#L13) keep the
   neighbouring roles separate.
 - [Turn report](../../crates/lash/src/turn.rs#L158) and
-  [remote status](../../crates/lash-remote-protocol/src/turn_result.rs#L217)
+  [send outcomes](../../crates/lash/src/send.rs)
   show aggregate and observation roles, including parked and stalled work.

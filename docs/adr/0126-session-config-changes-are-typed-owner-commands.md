@@ -142,9 +142,8 @@ config change under it.
 **Discovery and transport.** `SessionConfigAdmin::commands` returns a catalog
 generated from the registrations: each command's owner, name and
 input/output/refusal schemas, and the config revision it describes. The
-remote envelope (`RemoteConfigTransactionRequest`, `RemoteConfigTransactionOutcome`,
-`RemoteConfigCommandCatalog`) carries the same commands and outcomes, never a
-recorded namespace or a caller-minted replacement.
+host defines its transport DTOs around these commands and outcomes, never a
+recorded namespace or a caller-minted replacement ([ADR 0136](0136-hosts-own-their-wire-contracts.md)).
 
 ## Why and alternatives
 
@@ -174,5 +173,4 @@ Sources: `crates/lash-core-execution/src/plugin/config/mod.rs`,
 `crates/lash-core-execution/src/plugin/config/core.rs`,
 `crates/lash-core-store/src/config_transaction.rs`,
 `crates/lash-core/src/runtime/config_transaction.rs`,
-`crates/lash/src/admin/config_transactions.rs` and
-`crates/lash-remote-protocol/src/config.rs`.
+`crates/lash/src/admin/config_transactions.rs`.

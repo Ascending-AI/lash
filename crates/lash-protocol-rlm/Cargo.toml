@@ -50,7 +50,6 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt", "sync"] }
 
 [dev-dependencies]
-lash-remote-protocol = { workspace = true, features = ["core-conversions"] }
 lash-vm-client = { workspace = true, features = ["testing"] }
 lash-conformance = { workspace = true }
 lash-postgres-store = { workspace = true, features = ["testing"] }

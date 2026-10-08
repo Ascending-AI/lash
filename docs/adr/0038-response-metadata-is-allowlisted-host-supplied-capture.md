@@ -26,8 +26,8 @@ use this common capture mechanism.
 Successful responses carry observations from their response path. Failed
 streaming attempts carry observations accumulated before failure on their
 partial responses. Error-status transport envelopes carry response headers.
-Remote conversion preserves the metadata map through
-`RemoteProviderMetadata.data` in both directions using `BTreeMap` ordering.
+Core retains the metadata map using `BTreeMap` ordering. Hosts own any
+transport projection of these observations ([ADR 0136](0136-hosts-own-their-wire-contracts.md)).
 
 Lash owns capture, not the meaning or suitability of captured values. The
 host chooses every header and pointer. Core has no gateway-specific metadata
@@ -45,6 +45,5 @@ semantics.
 ## Implementation
 
 [Shared capture](../../crates/lash-llm-transport/src/response_metadata.rs),
-[response types](../../crates/lash-sansio/src/llm/types.rs) and
-[remote conversion](../../crates/lash-remote-protocol/src/core_conversions/llm.rs)
+[response types](../../crates/lash-sansio/src/llm/types.rs)
 define the mechanism and its result path.

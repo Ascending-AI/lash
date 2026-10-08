@@ -688,15 +688,6 @@ async fn assert_switch_chain(limit: usize, switches: usize, finishes: bool) {
                 .unwrap(),
         )
         .unwrap();
-        let remote =
-            output
-                .result
-                .to_remote(&SessionId::from("logical-turn-bound"), &bounded_run, &[]);
-        assert_eq!(
-            serde_json::to_value(remote).unwrap()["outcome"]["stop"]["type"],
-            json!("agent_frame_switch_limit"),
-            "the remote host receives the typed bound"
-        );
         // The terminal is durable: attaching again requires no live error
         // event to distinguish the chain bound from another runtime failure.
         let resumed = session

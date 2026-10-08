@@ -391,11 +391,6 @@ fn schema_dialect_types_are_nameable() {
     let dialect = SchemaDialect::OpenaiToolParameters;
     let contract = SchemaContract::default().with_override(dialect, JsonSchema::any());
     let _: SchemaProjectionOverride = contract.projection.overrides[0].clone();
-    let _: lash::remote::llm::RemoteSchemaProjectionOverride =
-        lash::remote::llm::RemoteSchemaProjectionOverride {
-            dialect,
-            schema: JsonSchema::any(),
-        };
     let _ = lash::tools::ToolDefinition::raw(
         "schema",
         "schema",

@@ -1,6 +1,6 @@
 //! The version range every compatibility surface declares (ADR 0115 §1.1).
 //!
-//! A stored component, the fleet epoch `F` and the remote protocol all state
+//! A stored component and the fleet epoch `F` both state
 //! what they support as one inclusive range,
 //! and two builds agree on a version by [`VersionRange::select`]: the highest
 //! version both ranges contain. The JSON shape `{"min":1,"max":1}` is frozen:

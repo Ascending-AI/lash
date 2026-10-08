@@ -5,7 +5,7 @@ pub const AGENT_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
     ScenarioContractSpec {
         suite: "agent",
         test_name: "agent_scenario_foreground_labeled_tool_call",
-        owned_invariant: "Facade root turn, app tool execution, label graph, final value, and remote DTO round trip.",
+        owned_invariant: "Facade root turn, app tool execution, label graph, final value.",
         semantic_oracle: "agent.foreground_tool_call_round_trip",
         required_sim_evidence: &["tool_result", "provider_turn"],
         oracle_id: "sim.oracle.scenario.agent-contract.v1",

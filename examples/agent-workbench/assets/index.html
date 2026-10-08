@@ -4092,17 +4092,7 @@
           const url = projectionState.observationCursor
             ? "/api/observations?cursor=" + encodeURIComponent(projectionState.observationCursor)
             : "/api/observations";
-          const response = await openStream(url, signal, "observation", "the live turn stream", {
-            "x-lash-protocol-hello": JSON.stringify({
-              negotiation: "hello",
-              supported: { min: 100, max: 100 }
-            })
-          });
-          const accept = JSON.parse(response.headers.get("x-lash-protocol-accept") || "null");
-          if (accept?.negotiation !== "accept" || accept.selected !== 100
-              || accept.supported?.min > 100 || accept.supported?.max < 100) {
-            throw new Error("remote protocol negotiation failed");
-          }
+          const response = await openStream(url, signal, "observation", "the live turn stream");
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
           let buffer = "";

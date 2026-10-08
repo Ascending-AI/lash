@@ -257,7 +257,7 @@ async fn s29(case: &mut Case) -> Result<()> {
         kind == "completed" && reply.as_deref() == Some("no processes"),
         "the first turn settled {kind} {reply:?}"
     );
-    let tool: Vec<&Value> = outcome["report"]["activities"]
+    let tool: Vec<&Value> = outcome["output"]["activities"]
         .as_array()
         .into_iter()
         .flatten()

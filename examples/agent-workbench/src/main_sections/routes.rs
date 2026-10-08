@@ -68,7 +68,7 @@ async fn read_state_snapshot(
     // settled yet, so its `done` is still in (or after) the lane snapshot.
     let active_turn = state.active_turns.for_session(session_id);
     let pending_approvals = pending_approvals(state).await?;
-    let observation = RemoteSessionObservation::from_core(lash::observe::SessionObservation {
+    let observation = ObservationSnapshot::from(lash::observe::SessionObservation {
         read_view,
         cursor: cursor.clone(),
     });

@@ -48,9 +48,8 @@ or resuming a process cannot override them through its RLM
 namespace or live extensions. Available process wiring can restrict a
 recorded ability but cannot enable a recorded-disabled ability.
 
-Runs use the registration reconstructed from the record, including after a
-remote round trip; `RemoteProcessRecord` carries the engine configuration
-unchanged. Missing settings are a typed
+Runs use the registration reconstructed from the retained process record,
+including its engine configuration. Missing settings are a typed
 `PluginError::MissingRecordedProcessConfig` refusal (FIG-4558), and malformed
 settings are `PluginError::StoredDataCorrupt`. Both remain typed terminal
 causes across the host boundary. Neither path falls back to deployment

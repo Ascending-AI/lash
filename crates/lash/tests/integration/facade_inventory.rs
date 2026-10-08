@@ -20,7 +20,7 @@
 //! alone; a path that stops resolving is still E0432, a hard error.
 
 #![allow(unused_imports)]
-// --- Ungated facade: lash-internal-core, -sansio, -trace, -remote-protocol ---
+// --- Ungated facade: lash-internal-core, -sansio, -trace ---
 
 // FIG-2971: this file is test/tooling/host code; ambient fs/env/process
 // access is sanctioned here (the workspace clippy ban targets production
@@ -113,10 +113,6 @@ use lash::secrets::Redacted as _;
 // `#[async_trait]` facade traits can be implemented without a host-side
 // `async-trait` dependency.
 use lash::async_trait as _;
-use lash::remote::llm::RemoteSchemaContract as _;
-use lash::remote::llm::RemoteSchemaProjectionPolicy as _;
-use lash::remote::processes::RemoteProcessIdentity as _;
-use lash::remote::processes::RemoteProcessRecord as _;
 use lash::runtime::Clock as _;
 use lash::runtime::RuntimeError as _;
 use lash::runtime::RuntimeErrorCode as _;
@@ -688,22 +684,6 @@ pub(super) mod whole_module_coverage {
             "facade export parser found almost nothing — the parser likely broke",
         );
 
-        assert_module_covered(
-            &exports,
-            "../lash-remote-protocol/src/processes.rs",
-            "../lash-remote-protocol/src/processes",
-            "lash_remote_protocol::processes",
-            "remote::processes",
-            60,
-        );
-        assert_module_covered(
-            &exports,
-            "../lash-remote-protocol/src/triggers.rs",
-            "../lash-remote-protocol/src/triggers",
-            "lash_remote_protocol::triggers",
-            "remote::triggers",
-            20,
-        );
         assert_module_covered(
             &exports,
             "../lash-tool-support/src/lib.rs",

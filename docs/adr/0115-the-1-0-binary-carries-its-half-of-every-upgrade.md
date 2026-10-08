@@ -17,7 +17,7 @@ A version stamp alone cannot protect an already-open writer or an actor that a
 node of the other build claims.
 
 The implementation separates component compatibility, fleet writer formats,
-remote wire negotiation and the format set a node decodes
+host wire contracts and the format set a node decodes
 (`crates/lash-core-store/src/compat.rs`,
 `crates/lash-core-store/src/store/fleet_format.rs`).
 
@@ -27,7 +27,7 @@ remote wire negotiation and the format set a node decodes
 |---|---|---|
 | Component version and reader floor | The schema a build can open | PostgreSQL compatibility row; the SQLite database's compatibility row |
 | `F` | The release compatibility epoch that selects durable writer formats | PostgreSQL `lash_fleet_format`; the SQLite database's `lash_compat` |
-| Wire version | The message shape remote peers exchange | Remote negotiation (§4) |
+| Host wire contract | The message shape host clients exchange | Host-owned compatibility (§4) |
 | Format set | The durable formats a node decodes | `lash_nodes.formats` and the claim filter of [ADR 0106](0106-durable-formats-upgrade-by-migration-or-drain.md) §1 |
 
 Before finalize, N+1 writes only what N reads. This includes semantics as well
@@ -358,23 +358,10 @@ because a newer released build opens it.
 1.0 cutover. Every other refusal stops the deploy. Pre-release state is never
 migrated.
 
-### 4. Remote protocol negotiation
+### 4. Host wire contracts
 
-`Negotiation` carries unversioned, frozen `Hello`, `Accept` and `Unsupported`
-messages. Peers select the highest common version; a disjoint range refuses
-before executable message decoding. `Negotiated::from_accept` validates the
-selection against both ranges
-(`crates/lash-remote-protocol/src/negotiation.rs`).
-
-`Envelope::at` uses that selection. `reply_to` preserves the request version.
-`decode_json(bytes, local)` checks the envelope version before decoding its
-typed body. Unsupported versions carry local and peer ranges, so each request
-can be validated even by a peer that did not see the connection bootstrap
-(`crates/lash-remote-protocol/src/lib.rs`).
-Hosts own transport establishment and negotiation. The default protocol
-version is 100; synthetic-next exposes its successor range
-(`crates/lash-remote-protocol/src/lib.rs`,
-`crates/lash-remote-protocol/src/negotiation.rs`).
+Hosts define their own transport DTOs and compatibility policy. Core Rust
+types carry no wire-stability promise ([ADR 0136](0136-hosts-own-their-wire-contracts.md)).
 
 ### 5. Per-surface obligations
 
@@ -418,12 +405,12 @@ emitting semantics N cannot carry before finalize.
 
 The upgrade harness builds the default and synthetic-next variants from one
 tree. Synthetic-next moves every guarded surface, the component and fleet
-ranges, remote wire ranges, cursor and format set, with old-format writer
+ranges, cursor and format set, with old-format writer
 pins and decoder coverage. Derived projections use regeneration instead of
 lifts (`crates/lash-core-store/src/store/synthetic_next.rs`).
 
 `crates/lash-upgrade-harness/tests/phase_a/main.rs` registers expanded-store
-rollback, skipped-release refusal, writer/finalize races, wire negotiation,
+rollback, skipped-release refusal, writer/finalize races, host compatibility,
 drain by release and rollback, retention and delivery rollback, history after finalize, workflow-graph range checks, and
 the two-binary plugin writer-range rollback over SQLite file and PostgreSQL
 overlap stores. Plugin rollback and retained-history unit laws also cover
@@ -457,7 +444,6 @@ the current numbers. Compatibility descriptors and refusal machinery are
 part of the binary; numeric schema, protocol, cursor and VM constants retain
 their current default values
 (`crates/lash-sqlite-store/src/schema.rs`,
-`crates/lash-remote-protocol/src/lib.rs`,
 `crates/lash-sansio/src/process_cursor.rs`).
 Synthetic-only changes do not advance those default versions.
 

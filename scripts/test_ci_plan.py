@@ -1699,7 +1699,7 @@ class VersionedSurfaceSelectionTests(unittest.TestCase):
     def test_a_constant_file_a_guarded_file_and_the_gate_select_it(self) -> None:
         for path in (
             "crates/lash-postgres-store/schema.sql",
-            "crates/lash-remote-protocol/src/lib.rs",
+            "crates/lash-trace/src/lib.rs",
             "scripts/versioned-surfaces.toml",
             "scripts/check_version_bumps.py",
             ".github/workflows/version-bumps.yml",
@@ -2045,8 +2045,8 @@ class FuzzSmokeTests(unittest.TestCase):
     def test_fuzz_paths_are_known_to_the_classifier(self) -> None:
         plan = ci_plan.classify(
             [
-                ("M", "fuzz/fuzz_targets/remote_wire_dto.rs"),
-                ("A", "fuzz/corpus/remote_wire_dto/seed-turn-input.json"),
+                ("M", "fuzz/fuzz_targets/attachment_metadata.rs"),
+                ("A", "fuzz/corpus/attachment_metadata/seed.json"),
             ]
         )
         self.assertEqual("false", plan["fail_open"])
@@ -2493,7 +2493,7 @@ class DispatchOnlyJobTests(unittest.TestCase):
 class FeatureLanesTests(unittest.TestCase):
     """Every trusted Rust event proves that every feature variant compiles.
 
-    #1979 merged a `lash-remote-protocol` variant that did not compile while
+    #1979 merged a `lash-trace` variant that did not compile while
     `feature-lanes` ran on workflow_dispatch alone (FIG-3572), and #2285
     broke the product live-E2E variant through a public engine API
     change whose diff touched no feature-gated file: a lane break comes from

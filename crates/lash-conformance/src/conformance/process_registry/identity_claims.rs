@@ -303,62 +303,6 @@ pub async fn every_execution_write_refuses_a_superseded_invocation_without_mutat
 }
 
 #[expect(clippy::expect_used, reason = "conformance fixture assertions")]
-pub async fn remote_start_replay_preserves_recorded_id_key_and_disposition(
-    registry: Arc<dyn ProcessRegistry>,
-) {
-    let key = crate::StartKey::for_host("remote-start-replay");
-    let input = registration("remote-start-replay").with_start_key(Some(key.clone()));
-    let first = registry
-        .register_process_reporting_outcome(input.clone(), &[])
-        .await
-        .expect("first start");
-    for expected in [
-        crate::ProcessRegistrationOutcome::Created,
-        crate::ProcessRegistrationOutcome::Existing,
-    ] {
-        let result = if expected == crate::ProcessRegistrationOutcome::Created {
-            first.clone()
-        } else {
-            registry
-                .register_process_reporting_outcome(input.clone(), &[])
-                .await
-                .expect("replayed start")
-        };
-        assert_eq!(result.outcome, expected);
-        let receipt = crate::ProcessStartReceipt::of(&result.record, result.outcome);
-        let wire = lash_remote_protocol::RemoteProcessStartReceipt::from(receipt.clone());
-        assert_eq!(wire.process_id, first.record.id);
-        assert_eq!(wire.start_key_digest.as_deref(), Some(key.as_str()));
-        let encoded = serde_json::to_value(&wire).expect("remote receipt bytes");
-        assert_eq!(
-            encoded["disposition"],
-            if expected == crate::ProcessRegistrationOutcome::Created {
-                "created"
-            } else {
-                "existing"
-            }
-        );
-        let decoded: lash_remote_protocol::RemoteProcessStartReceipt =
-            serde_json::from_value(encoded).expect("decode remote receipt");
-        assert_eq!(
-            crate::ProcessStartReceipt::try_from(decoded).expect("convert retained receipt"),
-            receipt
-        );
-    }
-    assert_eq!(
-        registry
-            .list_processes(&crate::ProcessListFilter {
-                status: crate::ProcessStatusFilter::Any,
-                ..Default::default()
-            })
-            .await
-            .expect("one retained start")
-            .len(),
-        1
-    );
-}
-
-#[expect(clippy::expect_used, reason = "conformance fixture assertions")]
 pub async fn retired_process_shapes_refuse_before_registration_or_effects(
     registry: Arc<dyn ProcessRegistry>,
 ) {
@@ -378,7 +322,6 @@ pub async fn retired_process_shapes_refuse_before_registration_or_effects(
     ] {
         let decoded = serde_json::from_value::<crate::ProcessInput>(value.clone());
         assert!(decoded.is_err(), "retired input decoded: {value}");
-        assert!(serde_json::from_value::<lash_remote_protocol::RemoteProcessInput>(value).is_err());
     }
     assert_eq!(
         registry

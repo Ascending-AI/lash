@@ -325,18 +325,6 @@ impl DurableSession {
         Ok(self.ops.turn_input_applications(store).await?)
     }
 
-    /// Versioned wire form of [`turn_input_applications`](Self::turn_input_applications).
-    pub async fn remote_turn_input_applications(
-        &self,
-    ) -> Result<Vec<lash_remote_protocol::RemoteTurnInputApplication>> {
-        Ok(self
-            .turn_input_applications()
-            .await?
-            .iter()
-            .map(Into::into)
-            .collect())
-    }
-
     /// The session's live replay after `cursor`, as this core's Live Replay
     /// store answers it: the in-window counterpart of
     /// [`turn_input_applications`](Self::turn_input_applications), which is

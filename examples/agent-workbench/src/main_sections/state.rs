@@ -82,12 +82,12 @@ impl LlmProfileSelection {
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct StateSnapshot {
     pub(crate) settings: Settings,
-    pub(crate) observation: RemoteSessionObservation,
+    pub(crate) observation: ObservationSnapshot,
     pub(crate) product_events: ProductEventSnapshot,
     pub(crate) active_turns: Vec<lash::TurnAddress>,
     pub(crate) pending_turn_inputs: Vec<lash::PendingTurnInputRead>,
     pub(crate) queued_work: Vec<lash::persistence::QueuedWorkBatch>,
-    pub(crate) turn_input_applications: Vec<lash::remote::observations::RemoteTurnInputApplication>,
+    pub(crate) turn_input_applications: Vec<lash::TurnInputApplication>,
     pub(crate) turn_failure_settlements: Vec<lash::TurnFailureSettlement>,
     pub(crate) pending_approvals: Vec<approvals::PendingApproval>,
 }
@@ -427,7 +427,7 @@ pub(crate) enum StreamItem {
         receipt: TurnInputReceipt,
     },
     ModelCallRecorded {
-        record: lash::remote::llm::RemoteLlmCallRecord,
+        record: lash::LlmCallRecord,
     },
     Done {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -608,18 +608,18 @@ pub(crate) enum ObservationStreamItem {
         cursor: String,
     },
     Observation {
-        event: Box<Envelope<RemoteSessionObservationEvent>>,
+        event: Box<ObservationEnvelope<ObservationEvent>>,
     },
     ReplayGap {
-        observation: Box<Envelope<RemoteSessionObservation>>,
-        gap: Box<Envelope<RemoteLiveReplayGap>>,
+        observation: Box<ObservationEnvelope<ObservationSnapshot>>,
+        gap: Box<ObservationEnvelope<ObservationGap>>,
     },
     TerminalReplacement {
-        event: Box<Envelope<RemoteSessionObservationEvent>>,
+        event: Box<ObservationEnvelope<ObservationEvent>>,
         cursor: String,
     },
     ResidentReplacement {
-        event: Box<Envelope<RemoteSessionObservationEvent>>,
+        event: Box<ObservationEnvelope<ObservationEvent>>,
         cursor: String,
     },
 }

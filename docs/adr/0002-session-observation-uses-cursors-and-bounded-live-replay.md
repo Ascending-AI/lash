@@ -32,6 +32,6 @@ The facade's feed (`ObservableSession::snapshot`, `subscribe_and_recover`, and t
 
 ## Consequences
 
-Turn streams and `TurnOutput.activities` are convenience APIs. Reconnect uses session observation. The remote protocol carries its observation DTOs and opaque cursor rather than a full read view; per-stream activity sequence numbers provide ordering only. Custom live replay stores implement per-session sequencing and ordered publication themselves; the `LiveReplayStore` trait states every obligation and `lash-conformance` certifies them.
+Turn streams and `TurnOutput.activities` are convenience APIs. Reconnect uses session observation. Hosts project local observations into their own DTOs ([ADR 0136](0136-hosts-own-their-wire-contracts.md)). Custom live replay stores implement per-session sequencing and ordered publication themselves; the `LiveReplayStore` trait states every obligation and `lash-conformance` certifies them.
 
 Durable activity logging is rejected for this interface because settled history already has a store and live transport failure must not affect a commit. The implementation is in [replay](../../crates/lash-core/src/runtime/observation/replay.rs), [publication](../../crates/lash-core/src/runtime/observation.rs) and [revision reconciliation](../../crates/lash/src/observation_feed.rs).

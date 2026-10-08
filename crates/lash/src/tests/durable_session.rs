@@ -1429,19 +1429,6 @@ async fn committed_row_deltas_transport_each_new_node_once() {
             else {
                 continue;
             };
-            let remote = crate::remote::observations::RemoteSessionObservationEvent::from_core(
-                1,
-                event.clone(),
-            )
-            .expect("remote event");
-            let crate::remote::observations::RemoteSessionObservationEventPayload::Committed {
-                rows: transported,
-                ..
-            } = remote.event
-            else {
-                panic!("commit lost its typed rows");
-            };
-            assert_eq!(&transported, rows);
             for row in rows {
                 assert!(
                     seen.insert(row.row_id.clone()),

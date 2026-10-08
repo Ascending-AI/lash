@@ -127,76 +127,74 @@ fn active_turns_reject_bare_legacy_set_with_clear_error() {
 
 #[test]
 fn persisted_attempt_rows_round_trip_non_default_outcomes_positions_and_facts() {
-    use lash::remote::llm::{RemoteAttemptOutcome, RemoteProtocolPosition};
+    use lash::provider::{AttemptOutcome, ProtocolPosition};
 
     let data_dir = tempfile::tempdir().expect("attempt row product event tempdir");
     let path = data_dir.path().join("product-events.json");
     let registry =
         SessionEventRegistry::persistent(path.clone(), 4).expect("persistent product events");
-    let expected_record = lash::remote::llm::RemoteLlmCallRecord {
-                call_id: "boundary-call".to_string(),
-                label: Some("boundary".to_string()),
-                replay_drops: Vec::new(),
-                attempts: vec![
-                    lash::remote::llm::RemoteAttemptRecord {
-                        ordinal: 1,
-                        outcome: RemoteAttemptOutcome::Aborted,
-                        protocol_position: RemoteProtocolPosition::ResponseObserved,
-                        retry_budget_consumed: false,
-                        retry_decision: Some(lash::remote::llm::RemoteRetryDecision::Declined(lash::remote::llm::RemoteRetryDeclineCause::NotRetryable)),
-                        error: Some(lash::remote::llm::RemoteNormalizedError {
-                            class: lash::remote::llm::RemoteProviderFailureKind::Unknown,
-                            code: Some(lash::provider::FailureCode::provider("request_cancelled")),
-                            http_status: Some(499),
-                            provider_request_id: Some("request-1".to_string()),
-                            retry_after_ms: Some(25),
-                        }),
-                        evidence: Some(lash::remote::llm::RemoteExecutionEvidence {
-                            provider_request_id: Some("request-1".to_string()),
-                            collection_interruption: Some(
-                                lash::remote::llm::RemoteExecutionEvidenceCollectionInterruption::ProtocolAbort,
-                            ),
-                            ..Default::default()
-                        }),
-                        generation_disposition: Some(
-                            lash::remote::llm::RemoteGenerationReceipt {
-                                output_token_cap: lash::remote::llm::RemoteGenerationOptionOutcome::ClampedToCapacity,
-                                temperature: lash::remote::llm::RemoteGenerationOptionOutcome::Applied,
-                                seed: lash::remote::llm::RemoteGenerationOptionOutcome::NotRequested,
-                                stop_sequences: lash::remote::llm::RemoteGenerationOptionOutcome::SuppressedProtocolOwned,
-                                cache: lash::remote::llm::RemoteGenerationOptionOutcome::OmittedUnsupported,
-                                ..Default::default()
-                            },
-                        ),
-                        usage: Some(lash::remote::usage::RemoteUsage {
-                            input_tokens: 11,
-                            output_tokens: 7,
-                            cache_read_input_tokens: 3,
-                            cache_write_input_tokens: 2,
-                            reasoning_output_tokens: 5,
-                        }),
-                        usage_disposition: Default::default(),
-                    },
-                    lash::remote::llm::RemoteAttemptRecord {
-                        ordinal: 2,
-                        outcome: RemoteAttemptOutcome::Interrupted,
-                        protocol_position: RemoteProtocolPosition::OutputStarted,
-                        retry_budget_consumed: true,
-                        retry_decision: None,
-                        error: Some(lash::remote::llm::RemoteNormalizedError {
-                            class: lash::remote::llm::RemoteProviderFailureKind::Stream,
-                            code: Some(lash::provider::FailureCode::provider("eof")),
-                            http_status: None,
-                            provider_request_id: None,
-                            retry_after_ms: None,
-                        }),
-                        evidence: None,
-                        generation_disposition: None,
-                        usage: None,
-                        usage_disposition: Default::default(),
-                    },
-                ],
-            };
+    let expected_record = lash::LlmCallRecord {
+        call_id: lash::LlmCallId("boundary-call".to_string()),
+        label: Some("boundary".to_string()),
+        replay_drops: Vec::new(),
+        attempts: vec![
+            lash::AttemptRecord {
+                ordinal: 1,
+                outcome: AttemptOutcome::Aborted,
+                protocol_position: ProtocolPosition::ResponseObserved,
+                retry_budget_consumed: false,
+                retry_decision: Some(lash::provider::RetryDecision::Declined(
+                    lash::provider::RetryDeclineCause::NotRetryable,
+                )),
+                error: Some(lash::provider::NormalizedError {
+                    class: lash::provider::ProviderFailureKind::Unknown,
+                    code: Some(lash::provider::FailureCode::provider("request_cancelled")),
+                    http_status: Some(499),
+                    provider_request_id: Some("request-1".to_string()),
+                    retry_after: Some(Duration::from_millis(25)),
+                }),
+                evidence: Some(lash::provider::ExecutionEvidence {
+                    provider_request_id: Some("request-1".to_string()),
+                    collection_interruption: Some(
+                        lash::provider::ExecutionEvidenceCollectionInterruption::ProtocolAbort,
+                    ),
+                    ..Default::default()
+                }),
+                generation_disposition: Some(lash::direct::GenerationReceipt {
+                    output_token_cap: lash::direct::GenerationOptionOutcome::ClampedToCapacity,
+                    temperature: lash::direct::GenerationOptionOutcome::Applied,
+                    seed: lash::direct::GenerationOptionOutcome::NotRequested,
+                    stop_sequences: lash::direct::GenerationOptionOutcome::SuppressedProtocolOwned,
+                    cache: lash::direct::GenerationOptionOutcome::OmittedUnsupported,
+                    ..Default::default()
+                }),
+                usage: Some(lash::direct::LlmUsage {
+                    input_tokens: 11,
+                    output_tokens: 7,
+                    cache_read_input_tokens: 3,
+                    cache_write_input_tokens: 2,
+                    reasoning_output_tokens: 5,
+                }),
+            },
+            lash::AttemptRecord {
+                ordinal: 2,
+                outcome: AttemptOutcome::Interrupted,
+                protocol_position: ProtocolPosition::OutputStarted,
+                retry_budget_consumed: true,
+                retry_decision: None,
+                error: Some(lash::provider::NormalizedError {
+                    class: lash::provider::ProviderFailureKind::Stream,
+                    code: Some(lash::provider::FailureCode::provider("eof")),
+                    http_status: None,
+                    provider_request_id: None,
+                    retry_after: None,
+                }),
+                evidence: None,
+                generation_disposition: None,
+                usage: None,
+            },
+        ],
+    };
     registry.publish_identified(
         &SessionId::from("session"),
         "model-call",
@@ -213,9 +211,9 @@ fn persisted_attempt_rows_round_trip_non_default_outcomes_positions_and_facts() 
     };
     assert_eq!(record, &expected_record);
     let aborted = &record.attempts[0];
-    assert_eq!(aborted.outcome, RemoteAttemptOutcome::Aborted);
+    assert_eq!(aborted.outcome, AttemptOutcome::Aborted);
     let aborted_position = aborted.protocol_position;
-    assert_eq!(aborted_position, RemoteProtocolPosition::ResponseObserved);
+    assert_eq!(aborted_position, ProtocolPosition::ResponseObserved);
     let error = aborted.error.as_ref().expect("aborted error facts");
     assert_eq!(
         error.code.as_ref().map(|code| code.namespaced()),
@@ -223,22 +221,22 @@ fn persisted_attempt_rows_round_trip_non_default_outcomes_positions_and_facts() 
     );
     assert_eq!(error.http_status, Some(499));
     assert_eq!(error.provider_request_id.as_deref(), Some("request-1"));
-    assert_eq!(error.retry_after_ms, Some(25));
+    assert_eq!(error.retry_after, Some(Duration::from_millis(25)));
     let generation = aborted
         .generation_disposition
         .expect("generation disposition");
     assert_eq!(
         generation.output_token_cap,
-        lash::remote::llm::RemoteGenerationOptionOutcome::ClampedToCapacity
+        lash::direct::GenerationOptionOutcome::ClampedToCapacity
     );
     assert_eq!(
         aborted.usage.as_ref().expect("attempt usage").output_tokens,
         7
     );
     let interrupted = &record.attempts[1];
-    assert_eq!(interrupted.outcome, RemoteAttemptOutcome::Interrupted);
+    assert_eq!(interrupted.outcome, AttemptOutcome::Interrupted);
     let interrupted_position = interrupted.protocol_position;
-    assert_eq!(interrupted_position, RemoteProtocolPosition::OutputStarted);
+    assert_eq!(interrupted_position, ProtocolPosition::OutputStarted);
 }
 
 /// The handover successor opens the same data dir while the drained host is

@@ -101,9 +101,7 @@ async fn follow(
         .await
         .map_err(api_error)?;
     match session.attach(input_id.clone()).outcome().await {
-        Ok(outcome) => Ok(Json(
-            serde_json::to_value(outcome.to_remote(&session_id, &input_id)).map_err(api_error)?,
-        )),
+        Ok(outcome) => Ok(Json(serde_json::to_value(outcome).map_err(api_error)?)),
         Err(lash::EmbedError::Runtime(refusal)) => Ok(Json(json!({
             "type": "refused",
             "session_id": session_id,

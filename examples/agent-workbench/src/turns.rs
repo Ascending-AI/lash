@@ -832,13 +832,10 @@ pub(crate) async fn record_turn_output_for_profile(
     );
     for record in output.llm_calls.iter().cloned() {
         let call_id = record.call_id.0.clone();
-        let remote_record: lash::remote::llm::RemoteLlmCallRecord = record.into();
         state.publish_for_session_identified(
             &session.session_id(),
             format!("turn:{}:model-call:{call_id}", identity.turn_id),
-            crate::StreamItem::ModelCallRecorded {
-                record: remote_record,
-            },
+            crate::StreamItem::ModelCallRecorded { record },
         );
     }
     match &output.outcome {

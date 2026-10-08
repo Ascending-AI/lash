@@ -18,7 +18,7 @@ Most agent stacks treat the LLM as the runtime and stitch state around it — a 
 ## Examples
 
 Runnable apps under `examples/` shift the facade end-to-end, with real
-persistence, remote DTO streams, and optional durable execution.
+persistence, local observation streams, and optional durable execution.
 
 The agent workbench is the product E2E host: it owns its UI and product state,
 opens a Lash session per chat, and resumes browser observation with durable

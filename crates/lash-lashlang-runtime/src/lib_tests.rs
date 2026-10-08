@@ -612,27 +612,6 @@ fn manifest_tool_binding_accessor_reports_absent_valid_and_malformed() {
     assert!(manifest.tool_binding().is_err());
 }
 
-#[test]
-fn remote_grant_tool_binding_accessor_reports_absent_valid_and_malformed() {
-    let grant = remote_tool_grant("read_file");
-    assert_eq!(grant.tool_binding().expect("absent binding"), None);
-
-    let grant = grant.with_tool_binding(ToolBinding::new(["fs"], "read"));
-    let binding = grant
-        .tool_binding()
-        .expect("valid binding")
-        .expect("present binding");
-    assert_eq!(binding.module_path, vec!["fs"]);
-    assert_eq!(binding.operation.as_deref(), Some("read"));
-
-    let mut malformed = grant;
-    malformed.bindings.insert(
-        TOOL_BINDING_KEY.to_string(),
-        serde_json::json!({ "module_path": "fs" }),
-    );
-    assert!(malformed.tool_binding().is_err());
-}
-
 #[tokio::test(flavor = "current_thread")]
 async fn prepared_start_replays_same_start_key_without_duplicate_child_identity() {
     let store = crate::lib_tests::memory_artifact_store().await;
@@ -1047,28 +1026,6 @@ fn plugin_extensions_return_typed_catalog_conflicts() {
             }
         }) if module == "tools" && operation == "lookup"
     ));
-}
-
-fn remote_tool_grant(name: &str) -> lash_remote_protocol::RemoteToolGrant {
-    lash_remote_protocol::RemoteToolGrant {
-        id: format!("remote-tool:{name}"),
-        name: name.to_string(),
-        description: String::new(),
-        input_schema: lash_remote_protocol::RemoteSchemaContract {
-            canonical: lash_core::JsonSchema::admit(
-                lash_core::ToolDefinition::default_input_schema(),
-            )
-            .unwrap(),
-            projection: lash_remote_protocol::RemoteSchemaProjectionPolicy::default(),
-        },
-        output_schema: lash_remote_protocol::RemoteSchemaContract::default(),
-        output_contract: lash_remote_protocol::RemoteToolOutputContract::Static,
-        examples: Vec::new(),
-        argument_projection: None,
-        execution_policy: None,
-        execution_ms: 30_000,
-        bindings: Default::default(),
-    }
 }
 
 pub(crate) fn test_start_site(

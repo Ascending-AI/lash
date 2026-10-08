@@ -5,7 +5,7 @@ Each test builds a miniature workspace — `.rs` files under `crates/` — and
 runs the gate's `violations()` against it. The nested `pub use` and
 non-facade cases are the surface the pre-FIG-4197 gate could not see: it
 read `pub use` trees only in `crates/lash/src/lib.rs` and `pub` items only
-under `crates/lash/src/` and `crates/lash-remote-protocol/src/`.
+under `crates/lash/src/`.
 """
 
 from __future__ import annotations
@@ -67,7 +67,7 @@ class OutcomeSuffixGateTests(unittest.TestCase):
         self.assertNotIn("LedgerView", found)
 
     def test_non_facade_crate_is_scanned(self) -> None:
-        # The old gate read `crates/lash` and `crates/lash-remote-protocol`
+        # The old gate read `crates/lash`
         # alone; a retired suffix in any other workspace crate escaped it.
         self.fixture.write(
             "crates/lash-sim/src/lib.rs", "pub enum SimDisposition { Done }\n"

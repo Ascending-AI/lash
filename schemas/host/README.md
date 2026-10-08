@@ -24,25 +24,13 @@ target runs all of them:
 | `workflow-type-facets` | `WorkflowNodeTypeFacets` | `WORKFLOW_TYPE_FACET_SCHEMA_VERSION` | `crates/lashlang/src/bin/workflow_schema_generator.rs` |
 | `trace-record` | `TraceRecord` with its `TraceEvent` | `TRACE_SCHEMA_VERSION` | `crates/lash-trace/src/bin/trace_schema_generator.rs` |
 | `trace-lashlang-graph` | `TraceLashlangGraph` | `TRACE_SCHEMA_VERSION` | `crates/lash-trace/src/bin/trace_schema_generator.rs` |
-| `remote-config-transaction-request` | `RemoteConfigTransactionRequest` | `REMOTE_PROTOCOL_VERSION` | `crates/lash-remote-protocol/src/bin/remote_schema_generator.rs` |
-| `remote-config-transaction-outcome` | `RemoteConfigTransactionOutcome` | `REMOTE_PROTOCOL_VERSION` | `crates/lash-remote-protocol/src/bin/remote_schema_generator.rs` |
-| `remote-config-command-catalog` | `RemoteConfigCommandCatalog` | `REMOTE_PROTOCOL_VERSION` | `crates/lash-remote-protocol/src/bin/remote_schema_generator.rs` |
-| `remote-process-record` | `RemoteProcessRecord` | `REMOTE_PROTOCOL_VERSION` | `crates/lash-remote-protocol/src/bin/remote_schema_generator.rs` |
-| `remote-process-events-request` | `RemoteProcessEventsRequest` | `REMOTE_PROTOCOL_VERSION` | `crates/lash-remote-protocol/src/bin/remote_schema_generator.rs` |
-| `remote-process-events-response` | `RemoteProcessEventsResponse` | `REMOTE_PROTOCOL_VERSION` | `crates/lash-remote-protocol/src/bin/remote_schema_generator.rs` |
-| `remote-process-observation-request` | `RemoteProcessObservationRequest` | `REMOTE_PROTOCOL_VERSION` | `crates/lash-remote-protocol/src/bin/remote_schema_generator.rs` |
-| `remote-process-observation-item` | `RemoteProcessObservationItem` | `REMOTE_PROTOCOL_VERSION` | `crates/lash-remote-protocol/src/bin/remote_schema_generator.rs` |
-| `remote-session-observation-event` | `RemoteSessionObservationEvent` | `REMOTE_PROTOCOL_VERSION` | `crates/lash-remote-protocol/src/bin/remote_schema_generator.rs` |
 | `process-effect-outcome` | `process.effect_outcome` payload | `PROCESS_EVENT_VOCABULARY_VERSION` | `crates/lash-core-execution/src/bin/process_event_schema_generator.rs` |
 | `process-effect-omissions` | `process.effect_omissions` payload | `PROCESS_EVENT_VOCABULARY_VERSION` | `crates/lash-core-execution/src/bin/process_event_schema_generator.rs` |
 
-A document embedding another owner's shape pins that shape's own version too:
-the remote observation item types its snapshot graph and node event record
-with the trace definitions and pins their `schema_version` to
-`TRACE_SCHEMA_VERSION`. The durable process-event documents are the payload
-schemas the runtime registers and validates appends against, so there is no
-second description to drift. ADR 0100's compatibility matrix states each
-shape's decode rule and names the tests that enforce it.
+The runtime registers and validates the process-event payload schemas. These
+six documents describe their owners' stored or projection contracts. Lash
+ships no engine wire protocol; hosts own transport DTOs and compatibility
+([ADR 0136](../../docs/adr/0136-hosts-own-their-wire-contracts.md)).
 
 ## Run-owned tool and operation contracts
 
@@ -52,7 +40,7 @@ by the session's existing turn service. Deferred descriptors remain pending;
 they are not ToolCompletion values. Source terminals are immutable
 `Resolved(ref)` or `Cancelled`, with no core deadline or timeout terminal.
 Typed admission, plugin-revision and retained-material causes stay typed through
-remote conversion; a text message cannot replace their fields.
+local APIs; a text message cannot replace their fields.
 
 Definition contraction removes obsolete variants, exhaustive matches, schema
 entries and generated TypeScript in the same compiling closure. Refresh the

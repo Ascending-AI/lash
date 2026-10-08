@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1736 rows over 873 files, 4098 laws.
-# By class: mechanical 213, semantic 156, delete 907, replace 460.
-# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 99, L9c 368, L9d 124, L9e 141, L9f 125, L9g 98, L9h 124, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
-# By status: todo 0, ported 211, deleted 1525.
+# 1732 rows over 870 files, 4094 laws.
+# By class: mechanical 213, semantic 156, delete 905, replace 458.
+# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 99, L9c 367, L9d 124, L9e 141, L9f 125, L9g 98, L9h 122, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 22, P5 2.
+# By status: todo 0, ported 211, deleted 1521.
 #
 # New laws owed (replace rows), by owning lane:
 # - none
@@ -10409,13 +10409,13 @@ class = "mechanical"
 lane = "L9b"
 laws = [
   "turn_started_identity_targets_cancellation_from_pull_stream",
-  "idle_queued_input_emits_typed_remote_application_and_durable_identity",
+  "idle_queued_input_emits_typed_application_and_durable_identity",
   "durable_application_read_survives_a_trimmed_live_replay_window",
   "a_send_never_answers_from_a_run_another_store_ran",
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5312 ported in place on SQLite memory; idle_queued_input_emits_typed_remote_application_and_durable_identity reads the durable head (an opened LashSession's view is its open snapshot; turns run on the actor, ADR 0132) and asserts every application names a committed message"
+note = "FIG-5312 ported in place on SQLite memory; idle_queued_input_emits_typed_application_and_durable_identity reads the durable head (an opened LashSession's view is its open snapshot; turns run on the actor, ADR 0132) and asserts every application names a committed message"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/builders_and_queue.rs"
@@ -15280,7 +15280,7 @@ class = "replace"
 lane = "L9c"
 laws = [
   "root_and_child_materialization_install_the_same_plugin_owned_engines",
-  "multi_model_turn_and_remote_report_keep_per_call_evidence",
+  "multi_model_turn_keeps_per_call_evidence",
   "resumed_session_observe_wait_cancel_shift_keep_original_owners",
 ]
 disposition = "replaced-by:crates/lash/src/tests/adr_claims.rs"
@@ -16874,21 +16874,6 @@ owed = "recoverable chat conformance disconnect does not cancel server work"
 note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
 
 [[row]]
-path = "crates/lash/src/tests/turn_streaming/observations/attempt_reset.rs"
-test = "*"
-area = "lash"
-needs = ["turn"]
-class = "replace"
-lane = "L9c"
-laws = [
-  "remote_reset_and_transcript_projection_agree",
-]
-disposition = "replaced-by:crates/lash/src/tests/turn_streaming/observations.rs::remote_reset_and_transcript_projection_agree"
-status = "deleted"
-owed = "remote reset and transcript projection agree"
-note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
-
-[[row]]
 path = "crates/lash/src/tests/turn_streaming/replica_feed.rs"
 test = "*"
 area = "lash"
@@ -17327,21 +17312,6 @@ disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/reco
 status = "deleted"
 owed = "workbench provider failure emits only fixed public product copy"
 note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: the failing turn runs through the chat route"
-
-[[row]]
-path = "examples/agent-workbench/src/main_sections/tests/remote_execution_evidence.rs"
-test = "workbench_remote_recovery_facades_deliver_cursor_events_and_terminal_replacement"
-area = "agent-workbench"
-needs = ["turn"]
-class = "replace"
-lane = "L9h"
-laws = [
-  "workbench_remote_recovery_facades_deliver_cursor_events_and_terminal_replacement",
-]
-disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/remote_execution_evidence.rs::workbench_remote_recovery_facades_deliver_cursor_events_and_terminal_replacement"
-status = "deleted"
-owed = "workbench remote recovery facades deliver cursor events and terminal replacement"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: the turn runs through the chat route; its terminal replacement follows the route's model-selection commit"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/restate_endpoint.rs"
@@ -18698,22 +18668,6 @@ laws = [
 disposition = "subject-deleted"
 status = "deleted"
 note = "FIG-5190 deleted every test of this file (each has its own row): all of them needed an engine. The emptied file went with them."
-
-[[row]]
-path = "examples/agent-workbench/src/main_sections/tests/remote_execution_evidence.rs"
-test = "*"
-area = "agent-workbench"
-needs = ["turn"]
-class = "delete"
-lane = "L9h"
-laws = [
-  "the file held only helpers once its tests were deleted; each test has its own row",
-]
-disposition = "subject-deleted"
-status = "deleted"
-note = "FIG-5190 deleted every test of this file (each has its own row): all of them needed an engine. The emptied file went with them."
-
-# Tests deleted by I0 (FIG-5194): their subject was the effect-host seam the collapse removed (S1).
 
 [[row]]
 path = "crates/lash-core-execution/src/engine/testing/tests.rs"
@@ -26478,20 +26432,6 @@ disposition = "replaced-by:crates/lash-plugin-mcp/src/catalog_peer_tests.rs::mcp
 status = "deleted"
 owed = "a server's guidance follows the catalog revision a call is offered, across refresh and reconnect, and renders without contacting the server"
 note = "FIG-5258 (MCP-CUT): guidance is no longer tool-module metadata; each imported manifest pins its server's guidance by digest and the mcp/server.<server> section renders the pinned text after the server is gone"
-
-[[row]]
-path = "crates/lash-remote-protocol/src/queued_events_tests.rs"
-test = "*"
-area = "observations"
-needs = []
-class = "delete"
-lane = "P4"
-laws = [
-  "legacy_queued_message_and_part_fields_are_rejected",
-]
-disposition = "subject-deleted"
-status = "deleted"
-note = "deleted by FIG-5258 with RemotePluginMessage, RemotePart and queued_messages_committed: the remote protocol carries no plugin message whose legacy fields could be refused"
 
 [[row]]
 path = "crates/lash-sim/src/runner/before_turn_leak_tests.rs"

@@ -282,16 +282,6 @@ impl Processes {
             .await?)
     }
 
-    /// Decode an exact-version remote request into this core's local route.
-    pub async fn subscribe_observation_remote(
-        &self,
-        request: &lash_remote_protocol::RemoteProcessObservationRequest,
-    ) -> Result<crate::process_observation::ProcessObservationSubscription> {
-        request.validate()?;
-        self.subscribe_observation(&request.process_id, request.cursor.as_ref())
-            .await
-    }
-
     fn registry(&self) -> Arc<dyn lash_core::ProcessRegistry> {
         self.core.process_registry()
     }
@@ -698,53 +688,6 @@ impl Processes {
             mode,
         )
         .await?)
-    }
-
-    /// Read a page for the exact lifetime named by a remote request.
-    pub async fn events_remote(
-        &self,
-        request: &lash_remote_protocol::RemoteProcessEventsRequest,
-    ) -> Result<lash_remote_protocol::RemoteProcessEventsResponse> {
-        request.validate()?;
-        let process_id = &request.process_id;
-        let registry = self.registry();
-        let cursor = match request.cursor.clone() {
-            Some(cursor) => cursor,
-            None => {
-                let (epoch, position) = self.core.process_observation_hub.route(process_id);
-                let version = registry
-                    .fleet_format()
-                    .writer_version(lash_core::surface_format!(
-                        lash_sansio::PROCESS_CURSOR_VERSION
-                    ));
-                crate::process_observation::ProcessCursor::at_version(
-                    version,
-                    epoch,
-                    lash_sansio::ProcessCursorReference::for_process(process_id),
-                    position,
-                    0,
-                )
-                .map_err(|error| {
-                    EmbedError::Plugin(lash_core::PluginError::Session(error.to_string()))
-                })?
-            }
-        };
-        let outcome = registry
-            .event_page_after(process_id, cursor.sequence(), request.limit, request.mode)
-            .await?;
-        let cursor = match &outcome {
-            lash_core::ProcessEventReadOutcome::Retained(page) => page
-                .last_sequence(|event| event.sequence, |event| event.sequence)
-                .map_or_else(|| cursor.clone(), |sequence| cursor.with_sequence(sequence)),
-            // The reader resumes after the released prefix it was told about.
-            lash_core::ProcessEventReadOutcome::NoLongerRetained(
-                lash_core::ProcessEventHistoryRetention::Released { released_through },
-            ) => cursor.with_sequence(*released_through),
-            lash_core::ProcessEventReadOutcome::NoLongerRetained(
-                lash_core::ProcessEventHistoryRetention::Pruned { .. },
-            ) => cursor,
-        };
-        Ok((process_id.clone(), outcome, cursor).try_into()?)
     }
 
     pub async fn await_output(
