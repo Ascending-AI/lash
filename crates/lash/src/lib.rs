@@ -182,8 +182,8 @@ pub mod turn;
 pub mod usage;
 
 pub use crate::admin::{
-    AdminMutation, AdvancedToolAdmin, Completions, PluginOperations, SessionCommandAdmin,
-    SessionCommandWithdrawal, ToolAdmin,
+    AdminMutation, AdvancedToolAdmin, Completions, SessionCommandAdmin, SessionCommandWithdrawal,
+    ToolAdmin,
 };
 pub use crate::core::{
     DeploymentDrainStatus, LashCore, LashCoreBuilder, NodeDrainError, NodeDrainReport,
@@ -317,8 +317,8 @@ pub mod prelude {
         InputItem, LashCore, LashCoreBuilder, LashSession, LlmProfileConfig, LlmProfileKey,
         LlmProfileLimits, LlmProfileLimitsError, LlmProfileMetadata, LlmProfileMetadataBuilder,
         LlmProfileRegistry, MaxToolCalls, NoProgressBudget, ObservableSession, ParkedSession,
-        PendingTurnInputCancelOutcome, PluginOperations, PluginStack, RegisteredLlmProfile, Result,
-        SendBuilder, SendHandle, SendOutcome, SessionBuilder, SessionCommand, SessionCommandAdmin,
+        PendingTurnInputCancelOutcome, PluginStack, RegisteredLlmProfile, Result, SendBuilder,
+        SendHandle, SendOutcome, SessionBuilder, SessionCommand, SessionCommandAdmin,
         SessionCommandReceipt, SessionCreateRequest, SessionCreation, SessionDeletion,
         SessionEntry, SessionListFilter, SessionParkRefused, SessionRelationKind, SessionSpec,
         SessionStartPoint, SessionView, ToolAdmin, TurnActivity, TurnActivityFanout,
