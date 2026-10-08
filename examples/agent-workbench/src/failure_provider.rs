@@ -309,7 +309,7 @@ impl Provider for DevFailureProvider {
     async fn send(
         &mut self,
         request: LlmRequest,
-        _body: &lash_sansio::llm::types::LiveRequestBody,
+        _body: &lash::provider::LiveRequestBody,
     ) -> std::result::Result<LlmResponse, LlmTransportError> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
         match self.scenario {

@@ -739,7 +739,7 @@ fn checkpoint_from_spec(
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
 fn differential_attachment_id() -> AttachmentId {
-    AttachmentId::parse("differential-attachment").expect("valid attachment id")
+    AttachmentId::parse("a1".repeat(32)).expect("valid attachment id")
 }
 
 /// The process identity used by the session-ownership fixtures.
@@ -752,7 +752,7 @@ fn differential_process_owner_id() -> lash_sansio::ProcessId {
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
 fn differential_process_attachment_id() -> AttachmentId {
-    AttachmentId::parse("differential-process-attachment").expect("valid attachment id")
+    AttachmentId::parse("b2".repeat(32)).expect("valid attachment id")
 }
 
 // Row shapes for the SQL observation queries. Named because the tuples are wide

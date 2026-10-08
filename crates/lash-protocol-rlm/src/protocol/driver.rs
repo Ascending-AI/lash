@@ -1280,7 +1280,7 @@ mod tests {
     use super::*;
     use lash_core::{
         AttachmentId, AttachmentRef, AttachmentTypeMetadata, MediaType, ToolCancellation,
-        ToolFailureClass, facade_support::AttachmentRef,
+        ToolFailureClass,
     };
 
     fn image_ref(id: &str) -> AttachmentRef {

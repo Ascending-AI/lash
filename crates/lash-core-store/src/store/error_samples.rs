@@ -42,7 +42,7 @@ fn referrer() -> crate::artifact_referrer::ArtifactReferrer {
 }
 
 fn attachment() -> crate::AttachmentId {
-    crate::AttachmentId::parse("sampled-attachment").expect("a well-formed attachment id")
+    crate::AttachmentId::parse("a1".repeat(32)).expect("a well-formed attachment id")
 }
 
 store_error_samples! {

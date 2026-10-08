@@ -100,7 +100,7 @@ async fn raw_provider_complete_drops_foreign_and_unstamped_replay_from_anthropic
         bodies: Arc::clone(&bodies),
     }));
 
-    Provider::complete(&mut provider, req)
+    Provider::complete(&mut provider, req, &lash_core::provider::NoSlotDeliveries)
         .await
         .expect_err("capture transport stops after observing the wire body");
     let wire = bodies.lock_recover().join("\n");

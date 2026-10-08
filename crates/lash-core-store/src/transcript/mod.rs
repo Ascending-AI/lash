@@ -464,8 +464,7 @@ fn decode_part(part: &Part, marked: Option<&str>) -> Option<TranscriptBlock> {
         PartClass::Attachment => TranscriptBlock::Attachment {
             attachment: part
                 .attachment()
-                .and_then(|attachment| attachment.source.stored_ref())
-                .cloned(),
+                .map(|attachment| attachment.reference.clone()),
             text: text(),
         },
         PartClass::ToolCall => TranscriptBlock::ToolCall {
@@ -484,8 +483,8 @@ fn decode_part(part: &Part, marked: Option<&str>) -> Option<TranscriptBlock> {
                     ModelToolReturnPart::Text { text } => {
                         ToolResultBlock::Text { text: text.clone() }
                     }
-                    ModelToolReturnPart::Attachment(source) => ToolResultBlock::Attachment {
-                        attachment: source.stored_ref().cloned(),
+                    ModelToolReturnPart::Attachment(reference) => ToolResultBlock::Attachment {
+                        attachment: Some(reference.clone()),
                     },
                     ModelToolReturnPart::Retained(output) => ToolResultBlock::Retained {
                         output: output.clone(),

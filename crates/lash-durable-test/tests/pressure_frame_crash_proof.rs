@@ -211,7 +211,7 @@ fn model(script: Script, seen: Arc<Mutex<Vec<String>>>) -> ProviderHandle {
         .send(move |request: LlmRequest, body| {
             let seen = Arc::clone(&seen);
             async move {
-                if body.body.contains(SUMMARIZER) {
+                if body.contains(SUMMARIZER) {
                     return Ok(text(&request, SUMMARY));
                 }
                 let rendered = serde_json::to_string(&request.messages).expect("a request encodes");

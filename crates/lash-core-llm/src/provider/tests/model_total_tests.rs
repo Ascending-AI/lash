@@ -279,7 +279,7 @@ impl Provider for RecordingProvider {
     async fn send(
         &mut self,
         _request: LlmRequest,
-        _body: &ProviderRequestBody,
+        _body: &LiveRequestBody,
     ) -> Result<LlmResponse, LlmTransportError> {
         self.sent.lock_recover().push(self.options.llm_timeouts());
         Err(LlmTransportError::new("temporarily unavailable")
@@ -318,11 +318,12 @@ async fn complete_route(
         .with_clock(PausedClock::new());
     let mut request = empty_request();
     let sideband = handle.prepare_completion(&mut request);
-    let body = handle.lower(&request).await.expect("the request lowers");
+    let template = Arc::new(handle.lower(&request).await.expect("the request lowers"));
     let error = handle
         .complete_prepared(
             request,
-            &body,
+            &template,
+            &NoSlotDeliveries,
             sideband,
             crate::ChargeSafetyPolicy::default(),
             &lash_trace::telemetry::metrics::TelemetryMetrics::default(),

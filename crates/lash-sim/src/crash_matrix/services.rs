@@ -619,12 +619,12 @@ impl TurnDrive for SimDrive {
             endpoint: "https://sim.test/v1".into(),
             model: request.model.wire_model().into(),
         };
-        let body = RecordedRequestTemplate::of_request(route, &request)
+        let template = RecordedRequestTemplate::of_request(route, &request)
             .map_err(|error| TurnError::Exec(error.to_string()))?;
         Ok(PreparedCall::Admit(Box::new(ComposedCall {
             request,
             prompt: None,
-            body,
+            template,
         })))
     }
 
@@ -633,7 +633,7 @@ impl TurnDrive for SimDrive {
         _cx: &ActorContext,
         id: EffectId,
         request: Arc<LlmRequest>,
-        _body: &RecordedRequestTemplate,
+        _template: &Arc<RecordedRequestTemplate>,
         _attempt: ModelCallAttempt,
     ) -> Result<(), TurnError> {
         let rendered =

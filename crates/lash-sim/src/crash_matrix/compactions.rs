@@ -145,12 +145,14 @@ fn summarizes(request: &LlmRequest) -> bool {
         })
 }
 
+const KIND: &str = "lash-sim-compaction";
+
 fn model(world: Weak<World>) -> ProviderHandle {
     let generations = Arc::new(AtomicU64::new(0));
     let lowering = world.clone();
     lash_core::testing::TestProvider::builder()
-        .kind("lash-sim-compaction")
-        .lower(move |request: &LlmRequest| {
+        .kind(KIND)
+        .template(move |request: &LlmRequest| {
             let generation = generations.fetch_add(1, Ordering::SeqCst) + 1;
             let body = serde_json::json!({
                 "builder": generation,
@@ -168,12 +170,17 @@ fn model(world: Weak<World>) -> ProviderHandle {
                         .unwrap_or_default()
                 ));
             }
-            body
+            lash_core::RecordedRequestTemplate::literal(
+                lash_core::ProviderRouteIdentity::new(KIND, KIND, request.model.wire_model()),
+                request.stream_events.is_some(),
+                None,
+                body,
+            )
         })
         .send(move |request: LlmRequest, body| {
             let world = world.clone();
             async move {
-                let summary = serde_json::from_str::<serde_json::Value>(&body.body)
+                let summary = serde_json::from_str::<serde_json::Value>(&body)
                     .is_ok_and(|body| body["summary"] == true);
                 if summary && let Some(world) = world.upgrade() {
                     world.note(format!(
@@ -182,7 +189,7 @@ fn model(world: Weak<World>) -> ProviderHandle {
                             .session_id()
                             .map(ToString::to_string)
                             .unwrap_or_default(),
-                        body.body
+                        body
                     ));
                 }
                 let answer = |text: &str| LlmResponse {

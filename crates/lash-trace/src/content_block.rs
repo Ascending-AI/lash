@@ -12,7 +12,7 @@ pub enum TraceContentBlock {
         cache_breakpoint: bool,
     },
     Attachment {
-        source: Box<TraceAttachment>,
+        reference: Box<TraceAttachment>,
     },
     ToolCall {
         call_id: Option<String>,
@@ -45,5 +45,5 @@ fn is_false(value: &bool) -> bool {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TraceToolResultBlock {
     Text { text: String },
-    Attachment { source: Box<TraceAttachment> },
+    Attachment { reference: Box<TraceAttachment> },
 }

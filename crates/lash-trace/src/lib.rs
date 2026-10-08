@@ -688,13 +688,13 @@ pub struct TraceLlmRequest {
 }
 
 impl TraceLlmRequest {
-    /// Sources in message order, derived from their owning blocks.
+    /// Refs in message order, derived from their owning blocks.
     pub fn attachments(&self) -> Vec<&TraceAttachment> {
         self.messages
             .iter()
             .flat_map(|message| &message.blocks)
             .filter_map(|block| match block {
-                TraceContentBlock::Attachment { source } => Some(source.as_ref()),
+                TraceContentBlock::Attachment { reference } => Some(reference.as_ref()),
                 _ => None,
             })
             .collect()
@@ -709,15 +709,14 @@ pub struct TraceLlmMessage {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceAttachment {
-    pub source: String,
+    pub id: String,
+    pub media_type: String,
+    pub byte_len: u64,
+    /// `message` or `tool_result`.
+    pub position: String,
+    /// The delivery form name. Absent on a logical summary taken before send.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mime: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub filename: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bytes_sha256: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bytes_len: Option<usize>,
+    pub delivery_form: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

@@ -81,7 +81,8 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
         body: &LiveRequestBody,
     ) -> Result<LlmResponse, LlmTransportError>;
 
-    /// One live call outside admission. Delivery stays inside the timeout.
+    /// One live call outside admission. Lowering and delivery are bounded by
+    /// the request timeout; `send` applies the route's own timeouts.
     async fn complete(
         &mut self,
         request: LlmRequest,
@@ -90,9 +91,9 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
         let timeout = self.options().llm_timeouts().request_timeout;
         let horizon =
             timeout.unwrap_or_else(|| lash_sansio::ProviderAttemptLimits::default().per_request());
-        let operation = async {
+        let prepare = async {
             let template = std::sync::Arc::new(self.lower(&request).await?);
-            let slots: Vec<_> = template.slots().collect();
+            let slots: Vec<_> = template.slots().cloned().collect();
             let mut values = Vec::new();
             let mut delivered = Vec::new();
             if !slots.is_empty() {
@@ -106,7 +107,7 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
                     .saturating_add(60_000);
                 delivered = deliveries
                     .deliver(
-                        &slots,
+                        &slots.iter().collect::<Vec<_>>(),
                         &lash_sansio::llm::attachment_delivery::DeliveryContext {
                             valid_through_ms,
                             live_file_scope: self.attachment_file_scope(),
@@ -123,31 +124,31 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
                     values.push(self.encode_slot(slot, delivery)?);
                 }
             }
-            let live = LiveRequestBody::fill(std::sync::Arc::clone(&template), values)
+            let live = LiveRequestBody::fill(template, values)
                 .map_err(super::attachment_wire::template_error)?;
-            let result = self.send(request, &live).await;
-            if let Err(error) = &result {
-                for &index in error.rejected_slots() {
-                    if let (Some(slot), Some(value)) = (slots.get(index), delivered.get(index)) {
-                        deliveries
-                            .invalidate(&slot.reference, value)
-                            .await
-                            .map_err(|error| error.into_transport_error())?;
-                    }
+            Ok((live, slots, delivered))
+        };
+        let (live, slots, delivered) = match timeout {
+            None => prepare.await,
+            Some(timeout) => tokio::time::timeout(timeout, prepare).await.map_err(|_| {
+                LlmTransportError::new("provider call timed out")
+                    .with_kind(ProviderFailureKind::Timeout)
+                    .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
+                    .with_lash_code(lash_sansio::session_model::TurnFailureCode::Timeout)
+            })?,
+        }?;
+        let result = self.send(request, &live).await;
+        if let Err(error) = &result {
+            for &index in error.rejected_slots() {
+                if let (Some(slot), Some(value)) = (slots.get(index), delivered.get(index)) {
+                    deliveries
+                        .invalidate(&slot.reference, value)
+                        .await
+                        .map_err(|error| error.into_transport_error())?;
                 }
             }
-            result
-        };
-        match timeout {
-            None => operation.await,
-            Some(timeout) => tokio::time::timeout(timeout, operation)
-                .await
-                .map_err(|_| {
-                    LlmTransportError::new("provider call timed out")
-                        .with_kind(ProviderFailureKind::Timeout)
-                        .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-                })?,
         }
+        result
     }
     fn generation_retry_guarantee(
         &self,

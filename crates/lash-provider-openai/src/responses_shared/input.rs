@@ -161,7 +161,7 @@ pub(crate) fn feedback_boundary(msg: &LlmMessage, item_count: usize, start: &mut
 /// result is text only, otherwise the content-item array with its text and
 /// attachments interleaved in the result's order, so an image stays the
 /// tool's output rather than a separate user turn.
-fn function_call_output(req: &LlmRequest, content: &[ModelToolReturnPart]) -> Value {
+fn function_call_output(content: &[ModelToolReturnPart]) -> Value {
     if content.iter().all(|block| block.attachment().is_none()) {
         return Value::String(tool_result_text(content).into_owned());
     }
@@ -316,7 +316,7 @@ pub fn build_responses_input(req: &LlmRequest) -> Vec<Value> {
                         json!({
                             "type": "function_call_output",
                             "call_id": call_id,
-                            "output": function_call_output(req, content),
+                            "output": function_call_output(content),
                         }),
                         &mut feedback_start,
                     );

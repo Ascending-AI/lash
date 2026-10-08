@@ -189,8 +189,8 @@ fn event_samples() -> Vec<TraceEvent> {
             attachment_id: Some("attachment-id".to_string()),
             label: Some("artifact.bin".to_string()),
             media_type: Some("application/octet-stream".to_string()),
-            source: lash_sansio::AttachmentMaterializationSource::Stored,
-            reason: lash_sansio::AttachmentMaterializationReason::NoProviderAcceptsMimeAndSource,
+            position: lash_sansio::llm::attachment_delivery::AttachmentPosition::Message,
+            reason: lash_sansio::AttachmentMaterializationReason::NoProviderAcceptsMimeAndPosition,
         },
         TraceEvent::CompositionChanged {
             fingerprint: "composition-sha".to_string(),

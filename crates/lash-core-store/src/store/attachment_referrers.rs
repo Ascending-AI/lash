@@ -367,7 +367,7 @@ mod condemnation_record_decode_tests {
 
     fn row(phase: &str) -> StoredAttachmentCondemnation {
         StoredAttachmentCondemnation {
-            digest: crate::AttachmentId::parse("digest").unwrap(),
+            digest: crate::AttachmentId::parse("a1".repeat(32)).unwrap(),
             phase: phase.to_owned(),
             write_token_present: false,
             write_referrer: None,

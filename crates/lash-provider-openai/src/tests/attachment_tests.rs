@@ -11,7 +11,7 @@ fn chat_never_accepts_provider_files() {
     let mime = lash_sansio::MediaType::parse("image/png").unwrap();
     let scope = ProviderFileScope {
         provider: provider.kind().into(),
-        endpoint: provider.route_identity("").endpoint,
+        endpoint: provider.route_identity("").endpoint.into(),
         credential_scope: "account".into(),
     };
     for position in [AttachmentPosition::Message, AttachmentPosition::ToolResult] {

@@ -17,13 +17,13 @@ impl AttachmentStore for HeadlessStore {
         _meta: AttachmentCreateMeta,
     ) -> Result<AttachmentRef, AttachmentStoreError> {
         Err(AttachmentStoreError::NotFound(
-            AttachmentId::parse("absent").expect("literal is a valid attachment id"),
+            AttachmentId::parse("a1".repeat(32)).expect("literal is a valid attachment id"),
         ))
     }
 
     async fn get(&self, _id: &AttachmentId, _max_bytes: u64) -> Result<StoredAttachment, AttachmentStoreError> {
         Err(AttachmentStoreError::NotFound(
-            AttachmentId::parse("absent").expect("literal is a valid attachment id"),
+            AttachmentId::parse("a1".repeat(32)).expect("literal is a valid attachment id"),
         ))
     }
 

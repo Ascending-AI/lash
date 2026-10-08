@@ -56,9 +56,13 @@ fn assert_adversarial_replay_absent(wire: &str) {
 async fn raw_provider_complete_filters_chat_wire_capture() {
     let transport = Arc::new(RecordingHttpTransport::default());
     let mut provider = openrouter_provider().with_transport(transport.clone());
-    Provider::complete(&mut provider, adversarial_raw_request())
-        .await
-        .expect("raw Chat completion");
+    Provider::complete(
+        &mut provider,
+        adversarial_raw_request(),
+        &lash_core::provider::NoSlotDeliveries,
+    )
+    .await
+    .expect("raw Chat completion");
     let requests = transport.requests.lock_recover();
     assert_eq!(requests.len(), 1);
     assert_adversarial_replay_absent(&String::from_utf8_lossy(&requests[0].body));
@@ -68,9 +72,13 @@ async fn raw_provider_complete_filters_chat_wire_capture() {
 async fn raw_provider_complete_filters_responses_wire_capture() {
     let transport = Arc::new(RecordingHttpTransport::default());
     let mut provider = OpenAiProvider::new("key").with_transport(transport.clone());
-    Provider::complete(&mut provider, adversarial_raw_request())
-        .await
-        .expect("raw Responses completion");
+    Provider::complete(
+        &mut provider,
+        adversarial_raw_request(),
+        &lash_core::provider::NoSlotDeliveries,
+    )
+    .await
+    .expect("raw Responses completion");
     let requests = transport.requests.lock_recover();
     assert_eq!(requests.len(), 1);
     assert_adversarial_replay_absent(&String::from_utf8_lossy(&requests[0].body));
@@ -83,9 +91,13 @@ async fn raw_provider_complete_rejects_endpoint_userinfo_before_transport() {
         OpenAiCompatibleProvider::new("key", "https://route-user:route-secret@gateway.example/v1")
             .with_transport(transport.clone());
 
-    let error = Provider::complete(&mut provider, adversarial_raw_request())
-        .await
-        .expect_err("userinfo-bearing routes must fail closed");
+    let error = Provider::complete(
+        &mut provider,
+        adversarial_raw_request(),
+        &lash_core::provider::NoSlotDeliveries,
+    )
+    .await
+    .expect_err("userinfo-bearing routes must fail closed");
     assert_eq!(
         error.code.as_ref().map(|code| code.to_string()),
         Some("lash:invalid_provider_endpoint".to_string())
@@ -144,6 +156,7 @@ async fn openai_chat_and_responses_stamp_fresh_replay_with_the_minting_route() {
     let chat_response = Provider::complete(
         &mut chat,
         request(vec![LlmMessage::text(LlmRole::User, "go")]),
+        &lash_core::provider::NoSlotDeliveries,
     )
     .await
     .expect("chat response parses");
@@ -176,6 +189,7 @@ async fn openai_chat_and_responses_stamp_fresh_replay_with_the_minting_route() {
     let responses_response = Provider::complete(
         &mut responses,
         request(vec![LlmMessage::text(LlmRole::User, "go")]),
+        &lash_core::provider::NoSlotDeliveries,
     )
     .await
     .expect("Responses response parses");

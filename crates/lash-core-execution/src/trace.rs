@@ -10,8 +10,7 @@ const LASH_MODEL_FACING_COMPOSITION_DOMAIN_VERSION: &str = "lash-model-facing-co
 use lash_trace::{
     TraceAttachment, TraceContentBlock, TraceContext, TraceEvent, TraceLlmMessage, TraceLlmRequest,
     TraceRetryAttempt, TraceRetryAttemptDetail, TraceTokenUsage, TraceToolAttemptOutcome,
-    TraceToolResultBlock, TraceToolSpec, llm_node_id, session_node_id, sha256_hex, tool_node_id,
-    turn_node_id,
+    TraceToolResultBlock, TraceToolSpec, llm_node_id, session_node_id, tool_node_id, turn_node_id,
 };
 
 use crate::llm::types::{

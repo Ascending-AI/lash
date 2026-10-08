@@ -19,6 +19,9 @@ use lash_sansio::sync::MutexExt as _;
 
 const MODEL: &str = "attachment-ref-model";
 const BLOB: &[u8] = b"immutable attachment content";
+/// The tool's own content: one delivery serves every slot of one content
+/// id, so the tool result is a second delivery only when its bytes differ.
+const TOOL_BLOB: &[u8] = b"immutable tool attachment content";
 
 fn meta(label: &str) -> AttachmentCreateMeta {
     AttachmentCreateMeta::new(
@@ -196,7 +199,7 @@ impl ToolProvider for NestedMedia {
         let reference = match call
             .context
             .attachments()
-            .put(BLOB.to_vec(), meta("tool.png"))
+            .put(TOOL_BLOB.to_vec(), meta("tool.png"))
             .await
         {
             Ok(reference) => reference,
@@ -204,7 +207,7 @@ impl ToolProvider for NestedMedia {
         };
         assert_eq!(
             call.context.attachments().read(&reference).await.unwrap(),
-            BLOB
+            TOOL_BLOB
         );
         let value = lash_core::ToolValue::Object(std::collections::BTreeMap::from([(
             "content".into(),
@@ -286,6 +289,9 @@ async fn send(url: bool, tools: bool) -> Sent {
         )
         .tools(Arc::new(NestedMedia))
         .max_attachment_bytes(Some(1024))
+        .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "ref-law", "node",
         ))
@@ -296,6 +302,7 @@ async fn send(url: bool, tools: bool) -> Sent {
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(4),
     )
+    .no_progress_budget(lash_core::NoProgressBudget::bounded(12))
     .attachment_acceptance(Arc::new(catalogue()));
     core.session(id.clone())
         .create(lash::SessionCreation::root(spec))
@@ -325,6 +332,7 @@ async fn send(url: bool, tools: bool) -> Sent {
     .unwrap();
     assert!(output.is_success(), "{output:?}");
     let history = output
+        .result
         .state
         .read_view()
         .messages()
@@ -355,7 +363,7 @@ fn identity(references: &[AttachmentRef]) -> lash_core::AppendRequestIdentity {
                 lash_core::Part::attachment_part(
                     format!("part-{i}"),
                     String::new(),
-                    Some(lash_core::PartAttachment {
+                    Some(lash::messages::PartAttachment {
                         reference: reference.clone(),
                     }),
                 )

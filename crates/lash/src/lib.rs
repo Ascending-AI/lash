@@ -634,10 +634,10 @@ pub mod persistence {
     pub use lash_core::{
         AdoptedAttachmentCondemnation, AttachmentCondemnation, AttachmentCondemnationAdoption,
         AttachmentCondemnationPhase, AttachmentCondemnationProvenance,
-        AttachmentCondemnationRecord, AttachmentCondemnationSettlement, AttachmentDeleteArming,
-        AttachmentDeleteStallReason, AttachmentReadPolicy, AttachmentReclamationPolicy,
-        AttachmentRetentionFailure, AttachmentRetentionStoreFailure, AttachmentRootSet,
-        AttachmentSettlementOutcome, AttachmentStore, AttachmentStoreError,
+        AttachmentCondemnationRecord, AttachmentCondemnationSettlement, AttachmentContentMismatch,
+        AttachmentDeleteArming, AttachmentDeleteStallReason, AttachmentReadPolicy,
+        AttachmentReclamationPolicy, AttachmentRetentionFailure, AttachmentRetentionStoreFailure,
+        AttachmentRootSet, AttachmentSettlementOutcome, AttachmentStore, AttachmentStoreError,
         AttachmentStoreFailureClass, AttachmentStorePersistence, AttachmentSweepGeneration,
         AttachmentWriteFence, AttachmentWritePermit, AttachmentWriteToken, EmptyRootSetPolicy,
         MAX_ATTACHMENT_DELETE_ATTEMPTS, ProcessExecutionEnvStore, StoredAttachment, StoredBlobRef,
@@ -1348,7 +1348,7 @@ pub mod provider {
     /// The admitted request template and the transient body filled for one attempt
     /// (ADR 0133 §6). Only literals, refs, acceptance and codecs are recorded.
     pub use lash_sansio::llm::types::{
-        AttachmentSlot, LiveRequestBody, RecordedRequestTemplate, RequestSegment,
+        AttachmentSlot, DeliveryRedactor, LiveRequestBody, RecordedRequestTemplate, RequestSegment,
         RequestTemplateBuilder, SlotCodec, TemplateError, TransientJson,
     };
     pub use lash_sansio::llm::types::{

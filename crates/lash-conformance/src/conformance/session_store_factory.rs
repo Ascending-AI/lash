@@ -544,7 +544,7 @@ pub async fn ended_process_record_has_no_attachment_edges(
     let store: Arc<dyn crate::RuntimeStore> = factory.clone();
     let referrer =
         crate::ArtifactReferrer::ProcessRecord(crate::ProcessId::fixture("pruned-record"));
-    let id = crate::AttachmentId::parse("pruned-record-attachment").expect("id");
+    let id = crate::AttachmentId::parse("a1".repeat(32)).expect("id");
     let write = crate::AttachmentWrite {
         attachment_id: id.clone(),
         claim: crate::ReferrerClaim::unguarded(referrer.clone()).expect("claim"),
@@ -1680,7 +1680,7 @@ async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
 )]
 async fn session_store_factory_pending_write_is_a_root(factory: Arc<dyn crate::DeploymentStore>) {
     let store: Arc<dyn crate::RuntimeStore> = factory.clone();
-    let id = crate::AttachmentId::parse("pending-root-without-age").expect("id");
+    let id = crate::AttachmentId::parse("b2".repeat(32)).expect("id");
     let write = crate::AttachmentWrite {
         attachment_id: id.clone(),
         claim: crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::ProcessRecord(

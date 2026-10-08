@@ -176,7 +176,7 @@ plugin_error_samples! {
         process_id: process(),
     },
     ProcessOutputAttachmentUnavailable { .. } => PluginError::ProcessOutputAttachmentUnavailable {
-        digest: crate::AttachmentId::parse("sampled-attachment").expect("a well-formed id"),
+        digest: crate::AttachmentId::parse("a1".repeat(32)).expect("a well-formed id"),
     },
     ProcessUnknown { .. } => PluginError::ProcessUnknown { process_id: process() },
     ProcessChangeCursorPruned { .. } => PluginError::ProcessChangeCursorPruned {

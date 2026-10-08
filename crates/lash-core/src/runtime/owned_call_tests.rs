@@ -13,7 +13,10 @@ use tokio_util::sync::CancellationToken;
 use super::{OwnedAdmission, OwnedCall, OwnedPrompt};
 use crate::prompt_sections::{PromptPlan, PromptPurpose};
 use crate::testing::{TestClock, TestProvider};
-use crate::{ActorContext, ExecutionBudgets, ExecutionBudgetsConfig, LlmProfiles as _};
+use crate::{
+    ActorContext, ExecutionBudgets, ExecutionBudgetsConfig, LlmProfiles as _,
+    RecordedRequestTemplate,
+};
 
 const SESSION: &str = "owned-call-deadline";
 const MODEL: &str = "owned-call-model";
@@ -67,9 +70,18 @@ async fn world() -> World {
         let lowerings = Arc::clone(&lowerings);
         TestProvider::builder()
             .kind("owned-call")
-            .lower(move |_| {
+            .template(move |request| {
                 let generation = lowerings.fetch_add(1, Ordering::SeqCst) + 1;
-                format!("{{\"builder\":{generation}}}")
+                RecordedRequestTemplate::literal(
+                    crate::ProviderRouteIdentity::new(
+                        "owned-call",
+                        "owned-call",
+                        request.model.wire_model(),
+                    ),
+                    request.stream_events.is_some(),
+                    None,
+                    format!("{{\"builder\":{generation}}}"),
+                )
             })
             .build()
             .into_handle()
@@ -147,9 +159,9 @@ async fn admit(world: &World) -> OwnedAdmission {
     .expect("the owner admits the call")
 }
 
-fn sent(admission: OwnedAdmission) -> (Arc<str>, u64) {
+fn sent(admission: OwnedAdmission) -> (Arc<RecordedRequestTemplate>, u64) {
     match admission {
-        OwnedAdmission::Send { admitted, .. } => (admitted.body.body, admitted.limit.expires_at),
+        OwnedAdmission::Send { admitted, .. } => (admitted.template, admitted.limit.expires_at),
         OwnedAdmission::Unsent(error) => panic!("the call settled unsent: {error:?}"),
     }
 }

@@ -132,7 +132,7 @@ impl Provider for Capped {
     async fn send(
         &mut self,
         request: LlmRequest,
-        body: &lash_sansio::llm::types::LiveRequestBody,
+        body: &lash::provider::LiveRequestBody,
     ) -> std::result::Result<LlmResponse, LlmTransportError> {
         let bytes = serde_json::to_vec(&request).map_err(|error| refusal(error.to_string()))?;
         let output = request
@@ -142,7 +142,7 @@ impl Provider for Capped {
         if request.model.wire_model() != self.budget.model
             || bytes.len() > self.budget.max_input_bytes
             || output > self.budget.max_output_tokens as u64
-            || !request.attachments().is_empty()
+            || request.attachments().next().is_some()
         {
             return Err(refusal(
                 "live request exceeds model/input/output/attachment bounds",

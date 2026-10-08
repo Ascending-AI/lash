@@ -227,7 +227,7 @@ pub async fn gc_blobs(factory: ReopenableRuntimeStore) {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn attachment_acquisition_preserves_receiving_referrer(store: Arc<dyn RuntimeStore>) {
-    let id = AttachmentId::parse("acquire-reference").expect("id");
+    let id = AttachmentId::parse("a1".repeat(32)).expect("id");
     let source = crate::ArtifactReferrer::ProcessRecord(crate::ProcessId::fixture("source"));
     crate::conformance::helpers::record_completed_attachment_write(
         &store,

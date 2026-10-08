@@ -179,11 +179,7 @@ fn committed_attachment_ids(state: &crate::RuntimeSessionState) -> Vec<crate::At
     let mut ids = std::collections::BTreeSet::new();
     for message in &state.read_model().messages {
         for part in message.parts.iter() {
-            ids.extend(
-                part.attachment_sources()
-                    .filter_map(|source| source.stored_ref())
-                    .map(|reference| reference.id.clone()),
-            );
+            ids.extend(part.attachments().map(|reference| reference.id.clone()));
             ids.extend(
                 part.retained_outputs()
                     .map(|retained| retained.reference.id.clone()),

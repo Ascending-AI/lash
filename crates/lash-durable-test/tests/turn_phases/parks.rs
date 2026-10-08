@@ -219,6 +219,7 @@ impl Scenario for Poisoned {
                     mode: Mode::Plain,
                     seen: Arc::default(),
                     backend: Arc::clone(&self.backend),
+                    image: Arc::default(),
                 }),
                 Arc::clone(&self.tripwire) as _,
             ),

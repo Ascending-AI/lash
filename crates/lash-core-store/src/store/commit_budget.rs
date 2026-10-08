@@ -520,7 +520,7 @@ mod tests {
             },
         );
         commit.committed_attachment_ids =
-            vec![crate::AttachmentId::parse("budget-attachment").expect("valid attachment id")];
+            vec![crate::AttachmentId::parse("a1".repeat(32)).expect("valid attachment id")];
 
         let expected_graph_bytes = serde_json::to_vec(&node).expect("encode graph node").len();
         let expected_session_config_bytes = serde_json::to_vec(&commit.config)
@@ -535,7 +535,7 @@ mod tests {
         .expect("encode checkpoint root")
         .len();
         let expected_checkpoint_bytes = expected_root_bytes + changed_body.len();
-        let expected_attachment_bytes = "budget-attachment".len();
+        let expected_attachment_bytes = commit.committed_attachment_ids[0].as_str().len();
 
         assert!(matches!(
             commit.validate_budget(),

@@ -1736,9 +1736,12 @@ async fn responses_handle_does_not_retry_unfinished_tool_arguments() {
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let result = handle
-        .complete(requiring_terminal_evidence(streamed_request(Arc::new(
-            std::sync::Mutex::new(Vec::new()),
-        ))), &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            requiring_terminal_evidence(streamed_request(Arc::new(std::sync::Mutex::new(
+                Vec::new(),
+            )))),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await;
 
     assert_eq!(
@@ -1773,9 +1776,12 @@ async fn responses_handle_does_not_retry_opaque_reasoning_output() {
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let result = handle
-        .complete(requiring_terminal_evidence(streamed_request(Arc::new(
-            std::sync::Mutex::new(Vec::new()),
-        ))), &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            requiring_terminal_evidence(streamed_request(Arc::new(std::sync::Mutex::new(
+                Vec::new(),
+            )))),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await;
 
     assert_eq!(
@@ -1888,9 +1894,10 @@ async fn responses_stream_without_terminal_event_completes_by_default_and_fails_
     let mut tolerant =
         OpenAiProvider::new("key").with_transport(single_stream_transport(partial_body));
     let response = tolerant
-        .complete(streamed_request(Arc::new(
-            std::sync::Mutex::new(Vec::new()),
-        )), &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("a stream without its terminal event completes by default");
     assert_eq!(response.full_text(), "partial");
@@ -1902,7 +1909,7 @@ async fn responses_stream_without_terminal_event_completes_by_default_and_fails_
     required.model.metadata_mut().capability.stream_termination =
         Some(StreamTermination::RequireTerminalEvidence);
     let error = strict
-        .complete(required)
+        .complete(required, &lash_core::provider::NoSlotDeliveries)
         .await
         .expect_err("required terminal evidence refuses the stream");
     assert_eq!(

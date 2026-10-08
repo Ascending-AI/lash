@@ -432,7 +432,7 @@ impl ProviderHandle {
                         .await
                     {
                         Ok((live, delivered)) => AttemptSend::Sent {
-                            result: provider.send(attempt_request, &live).await,
+                            result: Box::new(provider.send(attempt_request, &live).await),
                             delivered,
                         },
                         Err(error) => AttemptSend::Unsent(error),
@@ -461,7 +461,7 @@ impl ProviderHandle {
                 ));
             };
             let (mut result, delivered, unsent_attempt, panic_payload) = match attempt {
-                Ok(AttemptSend::Sent { result, delivered }) => (result, delivered, false, None),
+                Ok(AttemptSend::Sent { result, delivered }) => (*result, delivered, false, None),
                 Ok(AttemptSend::Unsent(error)) => (Err(error), Vec::new(), true, None),
                 Err(payload) => {
                     let message = crate::panic_containment::payload_message(payload.as_ref());
@@ -1474,7 +1474,7 @@ const DELIVERY_FETCH_HORIZON_MS: u64 = 60_000;
 /// until the provider answered, or failed to fill it and sent nothing.
 enum AttemptSend {
     Sent {
-        result: Result<LlmResponse, LlmTransportError>,
+        result: Box<Result<LlmResponse, LlmTransportError>>,
         delivered: Vec<Arc<Delivery>>,
     },
     Unsent(LlmTransportError),

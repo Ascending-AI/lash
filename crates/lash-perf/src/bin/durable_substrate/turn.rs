@@ -512,12 +512,12 @@ impl TurnDrive for BenchDrive {
             endpoint: "https://perf.test/v1".into(),
             model: "scripted".into(),
         };
-        let body = RecordedRequestTemplate::of_request(route, &request)
+        let template = RecordedRequestTemplate::of_request(route, &request)
             .map_err(|error| TurnError::Exec(error.to_string()))?;
         Ok(PreparedCall::Admit(Box::new(ComposedCall {
             request,
             prompt: None,
-            body,
+            template,
         })))
     }
 
@@ -526,7 +526,7 @@ impl TurnDrive for BenchDrive {
         _cx: &ActorContext,
         id: EffectId,
         request: Arc<LlmRequest>,
-        _body: &RecordedRequestTemplate,
+        _template: &Arc<RecordedRequestTemplate>,
         attempt: ModelCallAttempt,
     ) -> Result<(), TurnError> {
         let ModelCallAttempt {

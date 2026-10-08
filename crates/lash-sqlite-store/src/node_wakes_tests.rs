@@ -227,7 +227,7 @@ impl Activation for Tally {
 
 /// The attachment the sweeper child condemns.
 fn swept() -> lash_core_execution::AttachmentId {
-    lash_core_execution::AttachmentId::parse("swept-elsewhere").expect("an attachment id")
+    lash_core_execution::AttachmentId::parse("a1".repeat(32)).expect("an attachment id")
 }
 
 /// Facts observed at the production runner's node-wake boundary.

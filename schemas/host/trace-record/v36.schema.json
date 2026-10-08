@@ -4,36 +4,18 @@
       "description": "Why Lash replaced an attachment with a model-visible placeholder.",
       "oneOf": [
         {
-          "const": "no_provider_accepts_mime_and_source",
-          "description": "No provider in the shared adapter capability registry accepts this MIME/source pair.",
+          "const": "no_provider_accepts_mime_and_position",
+          "description": "No provider in the shared adapter capability registry accepts this MIME/position pair.",
           "type": "string"
         }
       ]
     },
-    "AttachmentMaterializationSource": {
-      "description": "Stable source category carried by an attachment-materialization notice.",
-      "oneOf": [
-        {
-          "const": "inline",
-          "description": "Transient caller bytes.",
-          "type": "string"
-        },
-        {
-          "const": "stored",
-          "description": "Session-owned durable bytes.",
-          "type": "string"
-        },
-        {
-          "const": "external_url",
-          "description": "Borrowed URL whose bytes Lash does not fetch.",
-          "type": "string"
-        },
-        {
-          "const": "provider_file",
-          "description": "Provider-owned file reference.",
-          "type": "string"
-        }
-      ]
+    "AttachmentPosition": {
+      "enum": [
+        "message",
+        "tool_result"
+      ],
+      "type": "string"
     },
     "AttemptOutcome": {
       "enum": [
@@ -822,38 +804,34 @@
     },
     "TraceAttachment": {
       "properties": {
-        "bytes_len": {
-          "format": "uint",
+        "byte_len": {
+          "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         },
-        "bytes_sha256": {
+        "delivery_form": {
+          "description": "The delivery form name. Absent on a logical summary taken before send.",
           "type": [
             "string",
             "null"
           ]
         },
-        "filename": {
-          "type": [
-            "string",
-            "null"
-          ]
+        "id": {
+          "type": "string"
         },
-        "mime": {
-          "type": [
-            "string",
-            "null"
-          ]
+        "media_type": {
+          "type": "string"
         },
-        "source": {
+        "position": {
+          "description": "`message` or `tool_result`.",
           "type": "string"
         }
       },
       "required": [
-        "source"
+        "id",
+        "media_type",
+        "byte_len",
+        "position"
       ],
       "type": "object"
     },
@@ -931,13 +909,13 @@
               "const": "attachment",
               "type": "string"
             },
-            "source": {
+            "reference": {
               "$ref": "#/$defs/TraceAttachment"
             }
           },
           "required": [
             "kind",
-            "source"
+            "reference"
           ],
           "type": "object"
         },
@@ -3173,13 +3151,13 @@
               "const": "attachment",
               "type": "string"
             },
-            "source": {
+            "reference": {
               "$ref": "#/$defs/TraceAttachment"
             }
           },
           "required": [
             "kind",
-            "source"
+            "reference"
           ],
           "type": "object"
         }
@@ -3603,11 +3581,11 @@
             "null"
           ]
         },
+        "position": {
+          "$ref": "#/$defs/AttachmentPosition"
+        },
         "reason": {
           "$ref": "#/$defs/AttachmentMaterializationReason"
-        },
-        "source": {
-          "$ref": "#/$defs/AttachmentMaterializationSource"
         },
         "type": {
           "const": "attachment_degraded",
@@ -3616,7 +3594,7 @@
       },
       "required": [
         "type",
-        "source",
+        "position",
         "reason"
       ],
       "type": "object"

@@ -377,10 +377,7 @@ impl RuntimeTurnDriver<'_> {
             drop_held_rows(&self.pending_turn_inputs, &mut admitted);
             if !admitted.inputs.is_empty() {
                 let materialized = admitted
-                    .materialize_checkpoint_turn_input(
-                        &self.turn_id,
-                        self.host.core.durability.attachment_store.as_ref(),
-                    )
+                    .materialize_checkpoint_turn_input(&self.turn_id)
                     .await
                     .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err))?;
                 self.pending_checkpoint_turn_inputs = Some(admitted);

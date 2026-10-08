@@ -147,6 +147,16 @@ const ATTACHMENT_STORE_EXCLUSIONS: &[(&str, &str)] = &[
         "blob-byte store, not a session-row store; compared by \
          attachment_blob_store_differential_agrees",
     ),
+    (
+        "deliver",
+        "blob-byte store, not a session-row store; compared by \
+         attachment_blob_store_differential_agrees",
+    ),
+    (
+        "invalidate_delivery",
+        "blob-byte store, not a session-row store; compared by \
+         attachment_blob_store_differential_agrees",
+    ),
 ];
 
 /// Every `AttachmentReferrers` method is executed. The trait is part of the

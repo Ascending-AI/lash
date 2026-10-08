@@ -88,10 +88,9 @@ impl RuntimeDrive {
             messages,
             before_turn,
             trace_scope,
-            invalid_input,
             attachments,
         } = turn;
-        let machine = fresh_machine(&mut driver, messages, &parts.observer, invalid_input)?;
+        let machine = fresh_machine(&mut driver, messages)?;
         Ok(Self::assemble(
             driver,
             machine,
@@ -114,11 +113,9 @@ impl RuntimeDrive {
             messages,
             before_turn,
             trace_scope,
-            invalid_input,
             attachments,
         } = turn;
-        let config =
-            fresh_machine(&mut driver, messages, &parts.observer, invalid_input)?.into_config();
+        let config = fresh_machine(&mut driver, messages)?.into_config();
         let RestoredTurn {
             machine,
             namespaces,
@@ -214,29 +211,16 @@ impl RuntimeDrive {
     }
 }
 
-/// The machine a prepared turn starts: ended at once when its input did not
-/// normalize or its recorded model selection is refused.
+/// The machine a prepared turn starts: ended at once when its recorded model
+/// selection is refused.
 fn fresh_machine(
     driver: &mut RuntimeTurnDriver<'static>,
     messages: crate::MessageSequence,
-    observer: &TurnObserver,
-    invalid_input: Option<String>,
 ) -> Result<TurnMachine, TurnError> {
     driver.protocol_reply.mark_run_start(messages.iter());
     let refused = driver.validate_recorded_selection().err();
     let mut machine = driver.turn_machine(messages);
-    if let Some(message) = invalid_input {
-        driver.emit_recorded(
-            observer,
-            make_error_event(
-                crate::TurnFailureKind::InputValidation,
-                Some(crate::TurnFailureCode::InvalidTurnInput.into()),
-                message.clone(),
-                Some(message),
-            ),
-        );
-        machine.finish_with_outcome(TurnOutcome::Stopped(TurnStop::InvalidInput));
-    } else if let Some(event) = refused {
+    if let Some(event) = refused {
         machine.fail_turn(*event);
     }
     Ok(machine)

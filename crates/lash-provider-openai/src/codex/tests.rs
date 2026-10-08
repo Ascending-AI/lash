@@ -366,9 +366,13 @@ async fn raw_provider_complete_filters_codex_sse_and_websocket_wire_captures() {
         http.url.clone(),
         "ws://127.0.0.1:9/unused".to_string(),
     );
-    Provider::complete(&mut sse_provider, adversarial_codex_raw_request())
-        .await
-        .expect("raw Codex SSE completion");
+    Provider::complete(
+        &mut sse_provider,
+        adversarial_codex_raw_request(),
+        &lash_core::provider::NoSlotDeliveries,
+    )
+    .await
+    .expect("raw Codex SSE completion");
     let sse_wire = http.captured().join("\n");
     assert_codex_adversarial_replay_absent(&sse_wire);
     let ws = spawn_scripted_websocket(vec![ScriptedWsAction::Complete {
@@ -382,9 +386,13 @@ async fn raw_provider_complete_filters_codex_sse_and_websocket_wire_captures() {
         "http://127.0.0.1:9/unused".to_string(),
         ws.url.clone(),
     );
-    Provider::complete(&mut websocket_provider, adversarial_codex_raw_request())
-        .await
-        .expect("raw Codex WebSocket completion");
+    Provider::complete(
+        &mut websocket_provider,
+        adversarial_codex_raw_request(),
+        &lash_core::provider::NoSlotDeliveries,
+    )
+    .await
+    .expect("raw Codex WebSocket completion");
     let websocket_wire = serde_json::to_string(&ws.captured()).expect("captured websocket JSON");
     assert_codex_adversarial_replay_absent(&websocket_wire);
 }
@@ -1834,7 +1842,10 @@ async fn codex_websocket_clean_eof_completes_by_default_and_fails_when_terminal_
         tolerant_ws.url.clone(),
     );
     let response = tolerant
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]), &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("a clean close after output completes by default");
     assert_eq!(response.full_text(), "partial");

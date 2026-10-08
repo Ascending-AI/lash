@@ -131,7 +131,7 @@ async fn raw_provider_complete_drops_foreign_and_unstamped_replay_from_google_wi
         bodies: Arc::clone(&bodies),
     }));
 
-    Provider::complete(&mut provider, req)
+    Provider::complete(&mut provider, req, &lash_core::provider::NoSlotDeliveries)
         .await
         .expect("raw completion");
     let wire = bodies.lock_recover().join("\n");

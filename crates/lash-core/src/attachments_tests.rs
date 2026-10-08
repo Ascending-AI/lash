@@ -1621,7 +1621,7 @@ fn pinned_session_attachment_acceptance_survives_model_catalogue_change() {
         notices.is_empty(),
         "the opening revision must preserve historical rendering"
     );
-    assert_eq!(historical.attachments(), vec![&source]);
+    assert_eq!(historical.attachments().collect::<Vec<_>>(), vec![&source]);
     assert_eq!(
         historical.attachment_acceptance.revision,
         "test-host-revision-1"
@@ -1633,7 +1633,7 @@ fn pinned_session_attachment_acceptance_survives_model_catalogue_change() {
         1
     );
     assert!(
-        unpinned.attachments().is_empty(),
+        unpinned.attachments().next().is_none(),
         "the changed table must be a meaningful counterexample"
     );
 }

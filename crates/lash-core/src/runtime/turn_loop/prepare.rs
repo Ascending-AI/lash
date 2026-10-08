@@ -1,16 +1,5 @@
-//! What a turn's preparation shares: the resident head's refresh, input
-//! normalization and the turn's trace metadata.
-
-use super::*;
-
-impl LashRuntime {
-    pub async fn normalize_input_items(
-        &self,
-        items: &[InputItem],
-    ) -> Result<Vec<NormalizedItem>, String> {
-        normalize_input_items(items, self.host.core.durability.attachment_store.as_ref()).await
-    }
-}
+//! What a turn's preparation shares: the resident head's refresh and the
+//! turn's trace metadata.
 
 pub(super) fn turn_trace_metadata(
     state: &crate::runtime::RuntimeSessionState,

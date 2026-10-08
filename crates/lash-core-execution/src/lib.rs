@@ -43,7 +43,8 @@ pub use lash_core_store::process_identity::process_execution_env_ref_for_bytes;
 pub use lash_core_store::process_identity::process_id_from_handle_json;
 pub use lash_core_store::protocol_turn_options::{ProtocolTurnOptions, ProtocolTurnOptionsError};
 pub use lash_core_store::runtime_error::{
-    AttachmentRetentionFailure, AttachmentRetentionStoreFailure, IngressReservedSourceKeyRefusal,
+    AttachmentContentMismatch, AttachmentRetentionFailure, AttachmentRetentionStoreFailure,
+    IngressReservedSourceKeyRefusal,
 };
 pub use lash_core_store::runtime_owner::RuntimeOwner;
 pub use lash_core_store::surface_format;

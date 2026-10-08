@@ -48,7 +48,7 @@ async fn native_adapters_preserve_allowlisted_metadata_on_failed_streams() {
                     streamed_request(Arc::new(std::sync::Mutex::new(vec![]))),
                     &["X-Request-Cost"],
                     &["/cost", "/missing"],
-                )))
+                )), &lash_core::provider::NoSlotDeliveries)
                 .await
                 .expect_err("truncated and error streams fail");
             if explicit_error {

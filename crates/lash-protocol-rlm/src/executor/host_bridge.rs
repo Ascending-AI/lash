@@ -1095,7 +1095,6 @@ mod mcp_media_tests {
 
     #[tokio::test]
     async fn printing_an_mcp_content_block_attaches_its_stored_media() {
-        use lash_core::StoreSet as _;
         let stores = lash_sqlite_store::SqliteStoreSet::memory()
             .await
             .expect("SQLite stores");

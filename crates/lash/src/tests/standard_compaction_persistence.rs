@@ -741,7 +741,8 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
                             None,
                         ),
                     )
-                    .await?,
+                    .await
+                    .expect("put image"),
             ),
         )
         .id(crate::TurnId::parse("attachment-prune-first").expect("nonblank host identity"))

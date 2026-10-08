@@ -1,14 +1,19 @@
+#![expect(
+    clippy::expect_used,
+    reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the setup helpers around them in this target are test code too"
+)]
+
 use async_trait::async_trait;
 use lash_core::facade_support::LlmTransportError;
 use lash_core::provider::{Provider, ProviderToken};
+use lash_core_store::attachments::AttachmentStore;
 use lash_core_store::attachments::provider_files::{
     ProviderFileCacheLimits, ProviderFileDelivery, ProviderFileUploader,
 };
-use lash_core_store::attachments::{AttachmentCreateMeta, AttachmentStore};
 use lash_llm_transport::{LlmHttpBody, LlmHttpRequest, LlmHttpResponse, LlmHttpTransport};
 use lash_provider_google::GoogleOAuthProvider;
 use lash_sansio::llm::attachment_delivery::{Delivery, DeliveryLimits, ProviderAccepts};
-use lash_sansio::{AttachmentRef, MediaType};
+use lash_sansio::{AttachmentCreateMeta, AttachmentRef, MediaType};
 use serde_json::json;
 use std::sync::{Arc, Mutex};
 
@@ -38,12 +43,12 @@ impl LlmHttpTransport for FilesTransport {
                 body: LlmHttpBody::buffered(""),
             });
         }
-        let mut count = self.uploads.lock().unwrap();
+        let mut count = self.uploads.lock().expect("uploads lock");
         *count += 1;
         let expiry = chrono::DateTime::from_timestamp_millis(
-            i64::try_from(*self.expiry_ms.lock().unwrap()).unwrap(),
+            i64::try_from(*self.expiry_ms.lock().expect("expiry lock")).expect("expiry fits"),
         )
-        .unwrap()
+        .expect("a valid expiry")
         .to_rfc3339();
         Ok(LlmHttpResponse {
             status: 200,
@@ -84,7 +89,7 @@ async fn deliver(
             },
         )
         .await
-        .unwrap()
+        .expect("the provider file is delivered")
 }
 
 // DELIVERY-SCOPE: a cached derivative never changes or retains the original ref.

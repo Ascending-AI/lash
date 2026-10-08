@@ -90,21 +90,19 @@ impl Provider for LoggedProvider {
     fn attachment_accepts(
         &self,
         model: &str,
-        mime: &lash_sansio::MediaType,
-        position: lash_sansio::llm::attachment_delivery::AttachmentPosition,
-    ) -> lash_sansio::llm::attachment_delivery::ProviderAccepts {
+        mime: &lash::attachments::MediaType,
+        position: lash::attachments::AttachmentPosition,
+    ) -> lash::attachments::ProviderAccepts {
         self.inner.attachment_accepts(model, mime, position)
     }
-    fn attachment_file_scope(
-        &self,
-    ) -> Option<lash_sansio::llm::attachment_delivery::ProviderFileScope> {
+    fn attachment_file_scope(&self) -> Option<lash::attachments::ProviderFileScope> {
         self.inner.attachment_file_scope()
     }
     fn encode_slot(
         &self,
-        slot: &lash_sansio::llm::types::AttachmentSlot,
-        delivery: &lash_sansio::llm::attachment_delivery::Delivery,
-    ) -> Result<lash_sansio::llm::types::TransientJson, LlmTransportError> {
+        slot: &lash::provider::AttachmentSlot,
+        delivery: &lash::attachments::Delivery,
+    ) -> Result<lash::provider::TransientJson, LlmTransportError> {
         self.inner.encode_slot(slot, delivery)
     }
     fn options(&self) -> ProviderOptions {
@@ -151,7 +149,7 @@ impl Provider for LoggedProvider {
     async fn send(
         &mut self,
         request: LlmRequest,
-        body: &lash_sansio::llm::types::LiveRequestBody,
+        body: &lash::provider::LiveRequestBody,
     ) -> Result<LlmResponse, LlmTransportError> {
         let request_id = request.scope.request_id.clone();
         let attempt_index = self.capture.rows().len() + 1;

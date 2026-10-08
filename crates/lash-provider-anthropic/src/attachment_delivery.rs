@@ -6,7 +6,7 @@ impl AnthropicProvider {
             .as_ref()
             .map(|scope| ProviderFileScope {
                 provider: self.kind().into(),
-                endpoint: self.route_identity("").endpoint,
+                endpoint: self.route_identity("").endpoint.into(),
                 credential_scope: scope.clone(),
             })
     }

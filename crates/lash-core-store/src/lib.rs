@@ -106,7 +106,6 @@ pub(crate) type SessionHistoryRecord =
 
 // Items the moved modules name at the crate root because `lash-core`'s
 // `lib.rs` re-exported them there.
-pub(crate) use attachments::RuntimeAttachmentStore;
 pub(crate) use queued_drain_policy::{
     QueuedDrainCandidate, QueuedDrainFamily, QueuedDrainPolicy, QueuedDrainRequest,
 };
@@ -258,7 +257,6 @@ pub(crate) mod plugin {
         LeafChange,
     };
 }
-pub(crate) use lash_sansio::attachment::AttachmentCreateMeta;
 
 pub(crate) use runtime_error::RuntimeErrorCause;
 pub mod transcript;

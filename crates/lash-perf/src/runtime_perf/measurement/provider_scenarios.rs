@@ -109,7 +109,7 @@ pub(super) async fn run_once_direct_llm_client(
         run.turn_then(
             turn_index,
             async {
-                let response = runtime_perf_timed(
+                let response = Box::pin(runtime_perf_timed(
                     scenario,
                     turn_index,
                     "direct_llm_client.complete",
@@ -120,7 +120,7 @@ pub(super) async fn run_once_direct_llm_client(
                             .await
                             .map_err(anyhow::Error::from)
                     },
-                )
+                ))
                 .await
                 .with_context(|| {
                     format!(

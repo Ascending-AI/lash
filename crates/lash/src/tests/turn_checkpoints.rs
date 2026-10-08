@@ -376,11 +376,17 @@ async fn queued_checkpoint_input_preserves_images() {
     );
     assert!(late.set(core).is_ok());
     let core = late.get().expect("the core");
+    // The host catalogue names the serving provider exactly.
+    let mut acceptance = (*lash_core::attachments::attachment_test_acceptance()).clone();
+    for acceptor in &mut acceptance.acceptors {
+        if acceptor.provider == "test" {
+            acceptor.provider = "turn-checkpoints".into();
+        }
+    }
     let session = core
         .session(crate::SessionId::from(SESSION))
         .create(crate::SessionCreation::root(
-            mock_session_spec()
-                .attachment_acceptance(lash_core::attachments::attachment_test_acceptance()),
+            mock_session_spec().attachment_acceptance(Arc::new(acceptance)),
         ))
         .await
         .expect("created");

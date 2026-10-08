@@ -136,7 +136,10 @@ async fn fixed_texts_provider_response_shape_mutation_guard() {
     let mut provider =
         fixed_texts_provider("lash-sim-fixed-text-guard", vec!["facade response text"]);
     let response = provider
-        .complete(openai_compatible_request(false))
+        .complete(
+            openai_compatible_request(false),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("fixed text provider response");
 
@@ -154,7 +157,10 @@ async fn fixed_texts_provider_response_shape_mutation_guard() {
 async fn rlm_final_value_provider_response_shape_mutation_guard() {
     let mut provider = rlm_final_value_provider();
     let response = provider
-        .complete(openai_compatible_request(true))
+        .complete(
+            openai_compatible_request(true),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("rlm final-value provider response");
 
@@ -170,7 +176,10 @@ async fn pending_tool_roundtrip_provider_response_shape_mutation_guard() {
     let final_answer = Arc::new(tokio::sync::Notify::new());
     let mut provider = pending_tool_roundtrip_provider(Arc::clone(&final_answer));
     let tool_response = provider
-        .complete(openai_compatible_request(false))
+        .complete(
+            openai_compatible_request(false),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("pending tool provider tool-call response");
     assert!(
@@ -184,7 +193,10 @@ async fn pending_tool_roundtrip_provider_response_shape_mutation_guard() {
 
     final_answer.notify_one();
     let final_response = provider
-        .complete(openai_compatible_request(false))
+        .complete(
+            openai_compatible_request(false),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("pending tool provider final response");
     assert_eq!(final_response.full_text(), "done");

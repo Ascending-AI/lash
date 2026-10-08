@@ -193,5 +193,3 @@ async fn lifecycle_snapshot_competing_pruner() {
 
 #[path = "conformance/attachment_fail_closed.rs"]
 mod attachment_fail_closed;
-#[path = "conformance/attachment_read_budget.rs"]
-mod attachment_read_budget;

@@ -759,9 +759,9 @@ pub mod core_internal {
 }
 
 pub use lash_core_execution::{
-    AttachmentRetentionFailure, AttachmentRetentionStoreFailure, CompletedToolCall, Response,
-    ToolIntentCommandFailure, ToolIntentExecutionOutcome, ToolIntentRealized,
-    ToolIntentRefusalReason, ToolIntentRuntimeFailure,
+    AttachmentContentMismatch, AttachmentRetentionFailure, AttachmentRetentionStoreFailure,
+    CompletedToolCall, Response, ToolIntentCommandFailure, ToolIntentExecutionOutcome,
+    ToolIntentRealized, ToolIntentRefusalReason, ToolIntentRuntimeFailure,
 };
 
 pub use lash_core_execution::{EffectAttempt, RecordedEffectExecution};

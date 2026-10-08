@@ -365,7 +365,7 @@ pub(crate) async fn overflow_recovery_decision(
                 .parts
                 .iter()
                 .map(|part| {
-                    approx_token_count(&part.content()) + 1_200 * part.attachment_sources().count()
+                    approx_token_count(&part.content()) + 1_200 * part.attachments().count()
                 })
                 .sum::<usize>()
         })

@@ -25,7 +25,7 @@ pub async fn a_same_start_key_successor_after_prune_has_independent_attachment_r
         .register_process(start())
         .await
         .expect("register first process");
-    let digest = crate::AttachmentId::parse("successor-shared-digest").expect("digest");
+    let digest = crate::AttachmentId::parse("a1".repeat(32)).expect("digest");
     let previous = crate::ArtifactReferrer::ProcessRecord(first.id.clone());
     let write = crate::AttachmentWrite {
         attachment_id: digest.clone(),

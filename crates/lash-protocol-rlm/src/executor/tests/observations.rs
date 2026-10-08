@@ -72,10 +72,9 @@ pub(super) fn print_observation_preserves_typed_value_and_records_cut_metadata()
             .as_ref()
             .expect("aggregate is archived");
         let bytes = attachments
-            .get(&archive.reference.id)
+            .read(&archive.reference)
             .await
-            .expect("exact archive")
-            .bytes;
+            .expect("exact archive");
         let observations: Vec<lash_core::Observation> =
             serde_json::from_slice(&bytes).expect("observations");
         assert_eq!(observations.len(), 1);
@@ -108,10 +107,9 @@ pub(super) fn console_log_of_a_large_record_stops_at_the_char_cap() {
         assert!(response.error.is_none(), "{:?}", response.error);
         let archive = response.output_archive.as_ref().expect("archive");
         let bytes = attachments
-            .get(&archive.reference.id)
+            .read(&archive.reference)
             .await
-            .expect("archive bytes")
-            .bytes;
+            .expect("archive bytes");
         let observations: Vec<lash_core::Observation> =
             serde_json::from_slice(&bytes).expect("observations");
         let metadata = &observations[0].projection;

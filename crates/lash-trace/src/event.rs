@@ -68,7 +68,7 @@ pub enum TraceEvent {
         label: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         media_type: Option<String>,
-        source: lash_sansio::AttachmentMaterializationSource,
+        position: lash_sansio::llm::attachment_delivery::AttachmentPosition,
         reason: lash_sansio::AttachmentMaterializationReason,
     },
     /// Complete model-facing composition captured only when its fingerprint

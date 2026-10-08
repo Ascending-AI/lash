@@ -273,11 +273,7 @@ impl DirectCompletionCapability {
                 );
             }
         };
-        let request_spec = crate::LlmRequestSpec::from_request(
-            &request,
-            current.host.core.durability.attachment_store.as_ref(),
-        )
-        .await?;
+        let request_spec = crate::LlmRequestSpec::from_request(&request);
         let envelope = crate::RuntimeEffectEnvelope::new(
             invocation,
             crate::RuntimeEffectCommand::Direct {

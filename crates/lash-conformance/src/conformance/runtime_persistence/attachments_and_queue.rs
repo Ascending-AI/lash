@@ -3,7 +3,7 @@ use pretty_assertions::assert_eq;
 
 #[expect(clippy::expect_used, reason = "conformance setup")]
 pub async fn attachment_writes_keep_independent_referrers(store: Arc<dyn RuntimeStore>) {
-    let id = AttachmentId::parse("independent-reference").expect("id");
+    let id = AttachmentId::parse("a1".repeat(32)).expect("id");
     let a = crate::ArtifactReferrer::ProcessRecord(crate::ProcessId::fixture("a"));
     let b = crate::ArtifactReferrer::ProcessRecord(crate::ProcessId::fixture("b"));
     for referrer in [&a, &b] {

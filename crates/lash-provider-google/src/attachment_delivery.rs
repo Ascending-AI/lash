@@ -9,7 +9,7 @@ impl GoogleOAuthProvider {
             .or(self.resolved_project_id.get().map(String::as_str))?;
         Some(ProviderFileScope {
             provider: self.kind().into(),
-            endpoint: self.route_identity_for_model("").endpoint,
+            endpoint: self.route_identity_for_model("").endpoint.into(),
             credential_scope: format!("{}:{scope}{project}", scope.len()),
         })
     }

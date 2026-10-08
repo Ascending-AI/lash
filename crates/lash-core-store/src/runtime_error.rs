@@ -10,7 +10,9 @@ use crate::{RuntimeEffectKind, SessionId};
 use serde::{Deserialize, Serialize};
 
 mod attachment_retention;
-pub use attachment_retention::{AttachmentRetentionFailure, AttachmentRetentionStoreFailure};
+pub use attachment_retention::{
+    AttachmentContentMismatch, AttachmentRetentionFailure, AttachmentRetentionStoreFailure,
+};
 mod cause;
 mod classification;
 mod controller;

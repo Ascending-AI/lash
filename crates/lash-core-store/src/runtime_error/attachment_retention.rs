@@ -1,8 +1,10 @@
 //! The attachment-store cause that survives a journal or plugin boundary.
 
-use crate::attachments::{AttachmentStoreError, AttachmentStoreFailureClass};
+use crate::attachments::{
+    AttachmentStoreError, AttachmentStoreFailureClass, ContentMismatchDetail,
+};
 use crate::runtime_error::{RuntimeEffectControllerError, RuntimeErrorCause, RuntimeErrorCode};
-use crate::{AttachmentId, StoreError};
+use crate::{AttachmentId, MediaType, StoreError};
 
 /// Structured attachment failure evidence. Backend diagnostics remain on the
 /// runtime error's message; classification and refusal data remain typed.
@@ -25,6 +27,16 @@ pub enum AttachmentRetentionFailure {
     },
     RequestBudgetExceeded {
         max_bytes: u64,
+    },
+    /// No form the request accepted can carry this attachment.
+    DeliveryUnsupported {
+        attachment_id: AttachmentId,
+        media_type: MediaType,
+    },
+    /// The stored content disagrees with the reference that names it.
+    ContentMismatch {
+        attachment_id: AttachmentId,
+        detail: AttachmentContentMismatch,
     },
     Io {
         path: std::path::PathBuf,
@@ -56,6 +68,16 @@ pub enum AttachmentRetentionFailure {
         attachment_id: AttachmentId,
         attempts: u32,
     },
+}
+
+/// Which claim of a reference its stored content failed.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(tag = "claim", rename_all = "snake_case")]
+pub enum AttachmentContentMismatch {
+    Length { expected: u64, actual: u64 },
+    Digest,
 }
 
 /// A nested store cause with the store's authoritative retry class and its
@@ -112,7 +134,8 @@ impl AttachmentRetentionFailure {
             Self::SizeLimitExceeded { .. }
             | Self::ReadLimitExceeded { .. }
             | Self::RequestBudgetExceeded { .. } => C::ResourceLimit,
-            Self::NotFound { .. } | Self::Contract => C::Internal,
+            Self::DeliveryUnsupported { .. } => C::InvalidRequest,
+            Self::NotFound { .. } | Self::ContentMismatch { .. } | Self::Contract => C::Internal,
             Self::Io { .. } => C::Io,
             Self::Backend { class, .. } => match class {
                 AttachmentStoreFailureClass::Transient => C::Unavailable,
@@ -146,6 +169,8 @@ impl AttachmentRetentionFailure {
             | Self::SizeLimitExceeded { .. }
             | Self::ReadLimitExceeded { .. }
             | Self::RequestBudgetExceeded { .. }
+            | Self::DeliveryUnsupported { .. }
+            | Self::ContentMismatch { .. }
             | Self::Io { .. }
             | Self::Contract
             | Self::RootSetEnumerationFailed { .. } => false,
@@ -177,6 +202,19 @@ impl AttachmentStoreError {
             },
             Self::RequestBudgetExceeded { max_bytes } => F::RequestBudgetExceeded {
                 max_bytes: *max_bytes,
+            },
+            Self::DeliveryUnsupported { id, media_type } => F::DeliveryUnsupported {
+                attachment_id: id.clone(),
+                media_type: media_type.clone(),
+            },
+            Self::ContentMismatch { id, detail } => F::ContentMismatch {
+                attachment_id: id.clone(),
+                detail: match *detail {
+                    ContentMismatchDetail::Length { expected, actual } => {
+                        AttachmentContentMismatch::Length { expected, actual }
+                    }
+                    ContentMismatchDetail::Digest => AttachmentContentMismatch::Digest,
+                },
             },
             Self::Io { path, source } => F::Io {
                 path: path.clone(),

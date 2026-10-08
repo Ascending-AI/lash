@@ -252,8 +252,8 @@ async fn process_record_is_a_root_without_registry_liveness() {
         head: lash_core_execution::SessionCreationHead::Config,
     };
     store.admit_session(&request).await.expect("admit session");
-    let attachment_id = lash_core_execution::AttachmentId::parse("unwired-process-attachment")
-        .expect("valid attachment id");
+    let attachment_id =
+        lash_core_execution::AttachmentId::parse("a1".repeat(32)).expect("valid attachment id");
     let intent = lash_core_execution::AttachmentWrite {
         attachment_id: attachment_id.clone(),
         claim: lash_core_execution::ReferrerClaim::unguarded(

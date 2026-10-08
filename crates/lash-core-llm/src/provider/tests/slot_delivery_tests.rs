@@ -148,7 +148,7 @@ async fn every_attempt_delivers_afresh_and_unsent_or_rejected_deliveries_are_ret
     let provider = RejectOnceProvider {
         options: ProviderOptions {
             reliability: ProviderReliability::default()
-                .max_attempts(3)
+                .max_attempts(Some(3))
                 .base_delay_ms(0)
                 .max_delay_ms(0),
             ..Default::default()

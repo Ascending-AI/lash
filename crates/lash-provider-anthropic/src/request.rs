@@ -51,7 +51,6 @@ impl AnthropicProvider {
     /// Returns `None` for blocks that have no valid wire form (e.g. an
     /// empty text block — Anthropic 400s on those).
     fn content_block_value(
-        req: &LlmRequest,
         block: &LlmContentBlock,
         tool_ids: &HashMap<String, String>,
     ) -> Result<Option<Value>, LlmTransportError> {
@@ -246,7 +245,7 @@ impl AnthropicProvider {
                 msg.blocks.as_slice()
             };
             for block in source_blocks {
-                if let Some(value) = Self::content_block_value(req, block, &tool_ids)? {
+                if let Some(value) = Self::content_block_value(block, &tool_ids)? {
                     if matches!(
                         block,
                         LlmContentBlock::Text {

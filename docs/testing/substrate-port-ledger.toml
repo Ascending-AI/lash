@@ -1,7 +1,7 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1732 rows over 870 files, 4091 laws.
+# 1732 rows over 870 files, 4089 laws.
 # By class: mechanical 196, semantic 140, delete 954, replace 442.
 # By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 99, L9c 367, L9d 124, L9e 141, L9f 125, L9g 98, L9h 122, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 22, P5 2.
 # By status: todo 0, ported 191, deleted 1541.
@@ -254,14 +254,13 @@ needs = ["round", "process"]
 class = "mechanical"
 lane = "L9d"
 laws = [
-  "external_process_inline_attachment_is_denied_before_await_recording",
   "an_unreadable_process_handle_is_refused_and_recorded_by_every_handle_operation",
   "process_handle_operations_share_one_authority_rule",
   "a_realized_start_intent_grants_the_run_possession_of_its_child",
 ]
 disposition = "port"
 status = "ported"
-note = "L9d (FIG-5182) re-wrote a_realized_start_intent_grants_the_run_possession_of_its_child on a SQLite memory backend: its presentation runs in place inside the call's admitted execution (L4)"
+note = "L9d (FIG-5182) re-wrote a_realized_start_intent_grants_the_run_possession_of_its_child on a SQLite memory backend: its presentation runs in place inside the call's admitted execution (L4). FIG-5446 deleted external_process_inline_attachment_is_denied_before_await_recording with inline attachment sources: process inputs carry refs only"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/session/tool_execution/check_contributions.rs"
@@ -8845,14 +8844,14 @@ class = "mechanical"
 lane = "L9g"
 laws = [
   "sqlite_attachment_gc_never_collects_a_blob_a_referrer_row_holds",
-  "sqlite_attachment_materialization_read_budgets",
-  "sqlite_attachment_materialization_turn_witnesses",
+  "sqlite_attachment_delivery_read_budgets",
+  "sqlite_attachment_delivery_names_its_content",
   "lash_conformance::attachment_store_reopenable_tests!",
   "lash_conformance::attachment_store_tests!",
 ]
 disposition = "port"
 status = "ported"
-note = "L9g (FIG-5185): its store laws run in place on SQLite file and SQLite memory; the turn witness has its own row"
+note = "L9g (FIG-5185): its store laws run in place on SQLite file and SQLite memory; the turn witness has its own row. FIG-5443 replaced the materialization read budgets with the delivery laws (DELIVERY-BOUNDS, ATTACHMENT-IDENTITY)"
 
 [[row]]
 path = "crates/lash-sqlite-store/tests/conformance/suite.rs"
@@ -11090,7 +11089,6 @@ laws = [
   "session_event_registry_isolates_channels_and_recreates_after_removal",
   "settled_product_reconciliation_keeps_the_cursor_monotonic",
   "product_event_route_lag_emits_durable_ordered_resync",
-  "submit_failure_retires_a_user_row_for_a_turn_that_never_commits",
   "continue_as_keeps_every_frames_rows_and_survives_reload",
   "committed_attachment_ref_is_exposed_in_the_workbench_snapshot",
   "send_turn_state_projection_stays_readable_and_settles_to_durable_truth",
@@ -11098,7 +11096,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5316 ported these laws onto the in-process workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core, AppState and session watchers over a SQLite memory store set; a retired session is tombstoned through the core's own delete, so every refusal comes from the store tombstone. A stale cancel of a settled turn is UnknownOrRevoked on the durable engine, and the law pins that it adds no Done"
+note = "FIG-5316 ported these laws onto the in-process workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core, AppState and session watchers over a SQLite memory store set; a retired session is tombstoned through the core's own delete, so every refusal comes from the store tombstone. A stale cancel of a settled turn is UnknownOrRevoked on the durable engine, and the law pins that it adds no Done. FIG-5446 deleted submit_failure_retires_a_user_row_for_a_turn_that_never_commits with the pre-admission inline rewrite it drove"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs"
@@ -12285,7 +12283,7 @@ laws = [
 disposition = "replaced-by:crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/attachment_normalization.rs"
 status = "deleted"
 owed = "denied second source records no manifest intent for the first; and 4 more law(s) of the file, by test name"
-note = "FIG-5309 re-wrote the file's four laws over a SQLite memory session's attachment store, each call's attempt run in place; transient_manifest_publication_failure_never_reexecutes_the_tool was already deleted by FIG-5165 (4b37797805), its execution policy covered by L-B1 and L-B2"
+note = "FIG-5309 re-wrote the file's four laws over a SQLite memory session's attachment store, each call's attempt run in place; transient_manifest_publication_failure_never_reexecutes_the_tool was already deleted by FIG-5165 (4b37797805), its execution policy covered by L-B1 and L-B2. FIG-5434 and FIG-5446 then deleted the file with the source policy and the late inline normalization; crates/lash-durable-test/tests/attachment_ref_laws.rs pins the surviving ref boundary"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs"

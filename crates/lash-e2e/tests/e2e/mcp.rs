@@ -554,11 +554,11 @@ fn attachment(report: &Value) -> Result<Value> {
         .filter(|block| block["type"] == "attachment")
         .collect();
     ensure!(
-        blocks.len() == 1 && blocks[0]["source"]["source"] == "stored",
+        blocks.len() == 1 && blocks[0]["reference"].is_object(),
         "the badge call presented {} attachments: {output}",
         blocks.len()
     );
-    let reference = blocks[0]["source"]["attachment_ref"].clone();
+    let reference = blocks[0]["reference"].clone();
     ensure!(
         reference["byte_len"] == BADGE.len()
             && reference["media_type"] == "application/octet-stream",

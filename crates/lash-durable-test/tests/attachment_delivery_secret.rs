@@ -230,6 +230,7 @@ async fn a_delivered_url_reaches_only_the_live_wire() {
     let core = lash::LashCore::standard_builder(backend.clone())
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .trace_jsonl_path(trace_path.clone())
         .serve_test_llm_profile(
             ProviderHandle::new(ProviderComponents::new(Box::new(provider))),

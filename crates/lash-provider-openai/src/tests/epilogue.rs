@@ -53,9 +53,12 @@ async fn responses_completion_epilogue_conformance() {
                 EpilogueTransport::new(responses_epilogue_wire(scenario), streamed, scenario),
             ));
             provider
-                .complete(requiring_terminal_evidence(streamed_request(Arc::new(
-                    std::sync::Mutex::new(Vec::new()),
-                ))), &lash_core::provider::NoSlotDeliveries)
+                .complete(
+                    requiring_terminal_evidence(streamed_request(Arc::new(std::sync::Mutex::new(
+                        Vec::new(),
+                    )))),
+                    &lash_core::provider::NoSlotDeliveries,
+                )
                 .await
         })
         .await;
@@ -75,9 +78,12 @@ async fn codex_completion_epilogue_conformance() {
             scenario,
         )));
         provider
-            .complete(requiring_terminal_evidence(streamed_request(Arc::new(
-                std::sync::Mutex::new(Vec::new()),
-            ))), &lash_core::provider::NoSlotDeliveries)
+            .complete(
+                requiring_terminal_evidence(streamed_request(Arc::new(std::sync::Mutex::new(
+                    Vec::new(),
+                )))),
+                &lash_core::provider::NoSlotDeliveries,
+            )
             .await
     })
     .await;

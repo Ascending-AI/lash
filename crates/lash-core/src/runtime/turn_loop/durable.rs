@@ -18,9 +18,6 @@ pub(in crate::runtime) struct DurableTurn {
     /// admission record for a fresh turn, from the checkpoint for a resumed
     /// one. Every phase commits it.
     pub(in crate::runtime) trace_scope: lash_trace::DurableTraceScope,
-    /// Why the admitted input did not normalize: the turn ends at once,
-    /// `InvalidInput`, without calling the model.
-    pub(in crate::runtime) invalid_input: Option<String>,
     /// The turn's execution, bound to the session's attachment store while
     /// the turn runs: every put of the turn is held by it (ADR 0124 §4).
     pub(in crate::runtime) attachments: Option<crate::attachments::AttachmentExecutionBinding>,
@@ -100,7 +97,6 @@ impl LashRuntime {
             .plugins
             .adopt_state_segment(crate::tool_run::SegmentOrdinal(state_segment));
         let mut turn_delta = Vec::new();
-        let mut invalid_input = None;
         let mut input_item_count = 0;
         let mut user_messages = Vec::new();
         for pending in admissions
@@ -108,13 +104,7 @@ impl LashRuntime {
             .iter()
             .flat_map(|admitted| &admitted.inputs)
         {
-            let normalized = match self.normalize_input_items(&pending.input.items).await {
-                Ok(items) => items,
-                Err(error) => {
-                    invalid_input = Some(error);
-                    break;
-                }
-            };
+            let normalized = normalize_input_items(&pending.input.items);
             input_item_count += normalized.len();
             let user_id = crate::runtime::ingress_message_id(&pending.input_id);
             user_messages.push(opening_user_message(
@@ -125,17 +115,13 @@ impl LashRuntime {
             ));
         }
         // A run without host input still opens with an empty user message.
-        // Invalid input contributes no user messages.
-        if user_messages.is_empty() && invalid_input.is_none() {
+        if user_messages.is_empty() {
             user_messages.push(opening_user_message(
                 format!("m_turn_{run}_input"),
                 run,
                 None,
                 Vec::new(),
             ));
-        }
-        if invalid_input.is_some() {
-            user_messages.clear();
         }
         turn_delta.extend(user_messages);
         let trace_metadata = prepare::turn_trace_metadata(&self.state, input_item_count);
@@ -360,7 +346,6 @@ impl LashRuntime {
             messages,
             before_turn,
             trace_scope: turn_boundary.scope,
-            invalid_input,
             attachments,
         })
     }
@@ -410,11 +395,11 @@ fn opening_user_message(
                 parts.push(Part::text(part_id, text, None));
             }
             NormalizedItem::Text(_) => {}
-            NormalizedItem::Attachment(source) => {
+            NormalizedItem::Attachment(reference) => {
                 parts.push(Part::attachment_part(
                     part_id,
                     String::new(),
-                    Some(crate::session_model::message::PartAttachment { source }),
+                    Some(crate::session_model::message::PartAttachment { reference }),
                 ));
             }
         }

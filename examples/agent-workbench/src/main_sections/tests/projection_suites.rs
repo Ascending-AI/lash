@@ -105,9 +105,7 @@ async fn durable_transcript_projection_fixture() -> Vec<crate::ChatRow> {
         code: "durable.tool_projection()".to_string(),
         output_archive: Some(Box::new(lash::attachments::RetainedOutput {
             reference: lash::attachments::AttachmentRef {
-                id: "sha256:durable-print-archive"
-                    .parse()
-                    .expect("attachment id"),
+                id: lash::attachments::content_id(b"durable-print-archive"),
                 media_type: "application/json".parse().expect("media type"),
                 byte_len: 90_000,
                 type_metadata: None,

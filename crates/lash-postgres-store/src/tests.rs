@@ -491,9 +491,9 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
     ));
     let store = std::sync::Arc::new(storage.store());
     let factory = storage.session_store_factory();
-    let attachment_id =
-        lash_core_execution::AttachmentId::parse(format!("fence-race-{}", std::process::id()))
-            .expect("valid attachment id");
+    let attachment_id = lash_core_execution::attachments::content_id(
+        format!("fence-race-{}", std::process::id()).as_bytes(),
+    );
     sqlx::query("DELETE FROM lash_attachment_condemnations WHERE attachment_id = $1")
         .bind(attachment_id.as_str())
         .execute(storage.pool())

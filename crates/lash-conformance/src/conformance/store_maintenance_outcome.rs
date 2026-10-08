@@ -37,7 +37,7 @@ pub trait StoreMaintenanceFaultInjector: Send + Sync {
 )]
 pub fn report_failure_channels_are_incomplete(backend: &str) {
     let failed_id =
-        crate::AttachmentId::parse("maintenance-failed").expect("valid failed attachment id");
+        crate::AttachmentId::parse("a1".repeat(32)).expect("valid failed attachment id");
     let failed = crate::attachments::AttachmentReclamationReport {
         failed_ids: vec![failed_id],
         ..crate::attachments::AttachmentReclamationReport::default()
@@ -49,7 +49,7 @@ pub fn report_failure_channels_are_incomplete(backend: &str) {
     );
 
     let deferred_id =
-        crate::AttachmentId::parse("maintenance-deferred").expect("valid deferred attachment id");
+        crate::AttachmentId::parse("b2".repeat(32)).expect("valid deferred attachment id");
     let deferred = crate::attachments::AttachmentReclamationReport {
         reclaimed_count: 1,
         condemn_deferred_ids: vec![deferred_id],

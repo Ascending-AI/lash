@@ -1117,7 +1117,7 @@ impl Provider for CodexProvider {
             .as_ref()
             .map(|scope| ProviderFileScope {
                 provider: self.kind().into(),
-                endpoint: self.route_identity("").endpoint,
+                endpoint: self.route_identity("").endpoint.into(),
                 credential_scope: scope.clone(),
             })
     }
@@ -1170,7 +1170,11 @@ impl Provider for CodexProvider {
         req: &LlmRequest,
     ) -> Result<RecordedRequestTemplate, LlmTransportError> {
         let route = self.route_identity(req.model.wire_model());
-        route.validate_endpoint().map_err(template_error)?;
+        route.validate_endpoint().map_err(|error| {
+            LlmTransportError::new(error.to_string())
+                .with_kind(ProviderFailureKind::Validation)
+                .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
+        })?;
         self.preflight(req)?;
         let stream = req.stream_events.is_some();
         let BuiltRequest { body, receipt } = self.build_request(req, stream)?;
@@ -1265,5 +1269,5 @@ impl Provider for CodexProvider {
 
 use crate::support::{
     AttachmentPosition, Delivery, ProviderAccepts, ProviderFileScope, lower_attachment_json,
-    protect_callbacks, protect_result, template_error,
+    protect_callbacks, protect_result,
 };

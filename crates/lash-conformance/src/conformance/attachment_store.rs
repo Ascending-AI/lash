@@ -236,7 +236,7 @@ async fn attachment_head_reflects_put_and_refreshes_timestamp(store: Arc<dyn Att
 async fn attachment_get_unknown_is_not_found(store: Arc<dyn AttachmentStore>) {
     let err = store
         .get(
-            &AttachmentId::parse("sha256:does-not-exist").expect("valid attachment id"),
+            &AttachmentId::parse("a1".repeat(32)).expect("valid attachment id"),
             32 * 1024 * 1024,
         )
         .await
@@ -278,7 +278,7 @@ async fn attachment_delete_removes_content_and_is_idempotent(store: Arc<dyn Atta
         .await
         .expect("delete of already-absent content is a no-op");
     store
-        .delete(&AttachmentId::parse("sha256:never-existed").expect("valid attachment id"))
+        .delete(&AttachmentId::parse("b2".repeat(32)).expect("valid attachment id"))
         .await
         .expect("delete of unknown id is a no-op");
 }
@@ -288,8 +288,7 @@ async fn attachment_delete_removes_content_and_is_idempotent(store: Arc<dyn Atta
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn attachment_head_reports_absence(store: Arc<dyn AttachmentStore>) {
-    let never_written =
-        AttachmentId::parse("sha256:never-written-head").expect("valid attachment id");
+    let never_written = AttachmentId::parse("c3".repeat(32)).expect("valid attachment id");
     assert!(
         store
             .head(&never_written)

@@ -635,7 +635,7 @@ async fn absent_rows_remain_honest_successful_outcomes() {
     assert!(
         lash_core_execution::AttachmentReferrers::attachment_referrers(
             store.as_ref(),
-            &lash_core_execution::AttachmentId::parse("absent").unwrap()
+            &lash_core_execution::AttachmentId::parse("a1".repeat(32)).unwrap()
         )
         .await
         .expect("list uncommitted attachments")
@@ -728,17 +728,15 @@ async fn malformed_durable_rows_surface_typed_corruption() {
 
     raw.pragma_update(None, "ignore_check_constraints", true)
         .expect("allow unknown durable enum injection");
+    let unknown_owner = lash_core_execution::AttachmentId::parse("b2".repeat(32)).unwrap();
     raw.execute(
-        "INSERT INTO attachment_referrer_edges (attachment_id, referrer_kind, referrer_id) VALUES ('unknown-owner', 'unknown', 'opaque')",
-        [],
+        "INSERT INTO attachment_referrer_edges (attachment_id, referrer_kind, referrer_id) VALUES (?1, 'unknown', 'opaque')",
+        params![unknown_owner.as_str()],
     )
     .expect("insert unknown owner kind");
     assert!(matches!(
-        lash_core_execution::AttachmentReferrers::attachment_referrers(
-            &store,
-            &lash_core_execution::AttachmentId::parse("unknown-owner").unwrap()
-        )
-        .await,
+        lash_core_execution::AttachmentReferrers::attachment_referrers(&store, &unknown_owner)
+            .await,
         Err(StoreError::Incompatible { .. })
     ));
 
@@ -905,7 +903,7 @@ async fn closed_connection_surfaces_storage_failure_for_every_read_family() {
         "AttachmentReferrers::attachment_referrers",
         lash_core_execution::AttachmentReferrers::attachment_referrers(
             store.as_ref(),
-            &lash_core_execution::AttachmentId::parse("absent").unwrap(),
+            &lash_core_execution::AttachmentId::parse("a1".repeat(32)).unwrap(),
         )
         .await,
     );

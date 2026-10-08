@@ -712,7 +712,7 @@ impl Provider for TestProvider {
     fn generation_retry_guarantee(
         &self,
         _request: &LlmRequest,
-        _body: &lash_sansio::llm::types::LiveRequestBody,
+        _template: &lash_sansio::llm::types::RecordedRequestTemplate,
     ) -> crate::provider::GenerationRetryGuarantee {
         self.generation_retry_guarantee
     }

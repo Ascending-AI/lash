@@ -304,10 +304,6 @@ fn measure_hardening_identity_phases(
     Ok(())
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "the attachment id is synthesized from a session id and turn index, which the parse accepts, per the message"
-)]
 async fn measure_store_hardening_backend_turn(
     store: &Arc<dyn lash_core::RuntimeStore>,
     session_id: &SessionId,
@@ -316,9 +312,9 @@ async fn measure_store_hardening_backend_turn(
     names: StoreHardeningPhaseNames,
 ) -> anyhow::Result<BTreeMap<String, RuntimePerfPhaseRunResult>> {
     let mut phases = BTreeMap::new();
-    let attachment_id =
-        lash_core::AttachmentId::parse(format!("hardening-attachment-{session_id}-{turn_index}"))
-            .expect("valid attachment id");
+    let attachment_id = lash_core::attachments::content_id(
+        format!("hardening-attachment-{session_id}-{turn_index}").as_bytes(),
+    );
     let attachment_write = AttachmentWrite {
         attachment_id: attachment_id.clone(),
         claim: lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::Session(

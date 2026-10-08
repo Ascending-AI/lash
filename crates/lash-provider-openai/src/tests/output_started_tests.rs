@@ -353,9 +353,12 @@ async fn assert_streamed_output_stops_retry(first: &'static str) {
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let failure = handle
-        .complete(requiring_terminal_evidence(streamed_request(Arc::new(
-            std::sync::Mutex::new(Vec::new()),
-        ))), &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            requiring_terminal_evidence(streamed_request(Arc::new(std::sync::Mutex::new(
+                Vec::new(),
+            )))),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect_err("observed stream output must stop the retry ladder");
 

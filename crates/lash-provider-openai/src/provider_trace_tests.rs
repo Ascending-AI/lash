@@ -286,9 +286,19 @@ async fn codex_websocket_provider_trace_captures_exact_serialized_request_body()
     assert_auth_material_absent(&request_event);
     assert_auth_material_absent_from_error(&error);
 
+    // The frame is the traced body inside its `response.create` envelope.
     let observed_bodies = server.captured_raw();
     assert_eq!(observed_bodies.len(), 1);
-    assert_eq!(request_event.raw.as_bytes(), observed_bodies[0]);
+    let mut frame: serde_json::Value =
+        serde_json::from_slice(&observed_bodies[0]).expect("the frame is JSON");
+    assert_eq!(
+        frame.as_object_mut().and_then(|frame| frame.remove("type")),
+        Some(serde_json::json!("response.create"))
+    );
+    assert_eq!(
+        frame,
+        serde_json::from_str::<serde_json::Value>(&request_event.raw).expect("the trace is JSON")
+    );
     assert_eq!(
         error.request_body.as_ref().map(|body| body.as_str()),
         Some(request_event.raw.as_str())

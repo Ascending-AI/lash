@@ -84,8 +84,9 @@ async fn attachment_usage_gate() {
     // The model send carries the upload ref after the host fills its slots.
     let lowered_attachments = Arc::new(Mutex::new(Vec::new()));
     let provider_requests = Arc::new(Mutex::new(Vec::new()));
+    // The workbench catalogue names its serving provider exactly.
     let provider = lash::testing::TestProvider::builder()
-        .kind("workbench-harness")
+        .kind("openai-compatible")
         .send({
             let lowered_attachments = Arc::clone(&lowered_attachments);
             let provider_requests = Arc::clone(&provider_requests);

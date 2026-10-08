@@ -10,6 +10,7 @@
 use super::*;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
+use lash_sansio::llm::attachment_delivery::{Delivery, DeliveryLimits, ProviderAccepts};
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -437,6 +438,10 @@ async fn generated_cross_backend_surface_differential_agrees() {
 #[derive(Clone, Debug)]
 enum BlobOperation {
     Put(Vec<u8>),
+    /// Deliver the last put ref as bytes, the one form every backend serves.
+    DeliverLast,
+    /// Reject the last delivery: a no-op for stores that cache no derivative.
+    InvalidateLast,
     DeleteFirst,
     DeleteAbsent,
 }
@@ -476,6 +481,8 @@ async fn attachment_blob_store_differential_agrees() {
         BlobOperation::Put(vec![1, 2, 3]),
         BlobOperation::Put(vec![9, 8]),
         BlobOperation::Put(vec![1, 2, 3]),
+        BlobOperation::DeliverLast,
+        BlobOperation::InvalidateLast,
         BlobOperation::DeleteFirst,
         BlobOperation::DeleteAbsent,
     ];
@@ -484,7 +491,16 @@ async fn attachment_blob_store_differential_agrees() {
          backends=sqlite-memory,sqlite-file,s3; omitted_operations=all other byte sequences and operation \
          sequences"
     );
+    let bytes_only = ProviderAccepts {
+        bytes: true,
+        ..ProviderAccepts::NONE
+    };
+    let limits = DeliveryLimits {
+        max_bytes: 1024,
+        valid_through_ms: 0,
+    };
     let mut first_id = None;
+    let mut last = None;
     for operation in &operations {
         match operation {
             BlobOperation::Put(bytes) => {
@@ -500,7 +516,36 @@ async fn attachment_blob_store_differential_agrees() {
                 let s3_ref = s3.put(bytes.clone(), meta()).await.unwrap();
                 assert_eq!(memory_ref.id, file_ref.id);
                 assert_eq!(file_ref.id, s3_ref.id);
-                first_id.get_or_insert(memory_ref.id);
+                assert_eq!(memory_ref, file_ref);
+                assert_eq!(file_ref, s3_ref);
+                first_id.get_or_insert(memory_ref.id.clone());
+                last = Some((memory_ref, bytes.clone()));
+            }
+            BlobOperation::DeliverLast => {
+                let (reference, bytes) = last.as_ref().unwrap();
+                let stores: [&dyn AttachmentStore; 3] = [memory.as_ref(), file.as_ref(), &s3];
+                for store in stores {
+                    let delivery = store
+                        .deliver(reference, &bytes_only, &limits)
+                        .await
+                        .unwrap();
+                    assert!(
+                        matches!(&delivery, Delivery::Bytes(delivered) if delivered == bytes),
+                        "a bytes-only acceptance delivered {delivery:?}"
+                    );
+                }
+            }
+            BlobOperation::InvalidateLast => {
+                let (reference, bytes) = last.as_ref().unwrap();
+                let rejected = Delivery::Bytes(bytes.clone());
+                memory
+                    .invalidate_delivery(reference, &rejected)
+                    .await
+                    .unwrap();
+                file.invalidate_delivery(reference, &rejected)
+                    .await
+                    .unwrap();
+                s3.invalidate_delivery(reference, &rejected).await.unwrap();
             }
             BlobOperation::DeleteFirst => {
                 let id = first_id.as_ref().unwrap();
@@ -509,7 +554,8 @@ async fn attachment_blob_store_differential_agrees() {
                 s3.delete(id).await.unwrap();
             }
             BlobOperation::DeleteAbsent => {
-                let id = lash_core::AttachmentId::parse("absent").expect("valid attachment id");
+                let id =
+                    lash_core::AttachmentId::parse("0".repeat(64)).expect("a digest-shaped id");
                 memory.delete(&id).await.unwrap();
                 file.delete(&id).await.unwrap();
                 s3.delete(&id).await.unwrap();

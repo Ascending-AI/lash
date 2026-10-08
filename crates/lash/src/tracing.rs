@@ -3,7 +3,7 @@
 /// boundary that grants the right to.
 pub use lash_core::facade_support::{JournalFrontier, LiveStep, StepIssue, TraceStanding};
 pub use lash_core::facade_support::{ProviderCompletionSideband, StoreObserver};
-pub use lash_sansio::{AttachmentMaterializationReason, AttachmentMaterializationSource};
+pub use lash_sansio::AttachmentMaterializationReason;
 /// The scope, cause, permit and identity vocabulary the trace runtime's
 /// signatures name.
 pub use lash_trace::telemetry::metrics::{

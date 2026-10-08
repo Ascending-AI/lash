@@ -1,6 +1,5 @@
 //! Allocation and scheduling policy for OpenAI request construction.
 use base64::Engine;
-use serde::Serialize;
 use std::io::{self, Write};
 
 mod raw_budget;

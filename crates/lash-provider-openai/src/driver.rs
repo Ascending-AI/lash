@@ -231,7 +231,11 @@ pub(crate) async fn lower(
         &provider.base_url,
         req.model.wire_model(),
     );
-    route.validate_endpoint().map_err(template_error)?;
+    route.validate_endpoint().map_err(|error| {
+        LlmTransportError::new(error.to_string())
+            .with_kind(ProviderFailureKind::Validation)
+            .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
+    })?;
     let mut safe = req.clone();
     safe.drop_foreign_replay(&route);
     // Clone construction settings without retaining a response checkpoint.
@@ -263,8 +267,8 @@ pub(crate) async fn lower(
         .attachment_credential_scope
         .as_ref()
         .map(|credential_scope| ProviderFileScope {
-            provider: route.provider.clone(),
-            endpoint: route.endpoint.clone(),
+            provider: route.provider.to_string(),
+            endpoint: route.endpoint.to_string(),
             credential_scope: credential_scope.clone(),
         });
     let accepts = |mime: &lash_sansio::MediaType, position| match endpoint {
