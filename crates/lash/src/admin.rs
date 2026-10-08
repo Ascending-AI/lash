@@ -119,11 +119,6 @@ pub struct SessionAdmin {
     pub(crate) process_work: Arc<dyn lash_core::ProcessWorkSubstrate>,
 }
 
-/// The first and the longest pause between a pending command's settlement
-/// reads.
-const COMMAND_SETTLEMENT_POLL_FLOOR: std::time::Duration = std::time::Duration::from_millis(25);
-const COMMAND_SETTLEMENT_POLL_CEILING: std::time::Duration = std::time::Duration::from_secs(1);
-
 impl SessionAdmin {
     pub fn config(&self) -> SessionConfigAdmin {
         SessionConfigAdmin {
@@ -196,7 +191,8 @@ impl SessionAdmin {
         &self,
         receipt: lash_core::runtime::SessionCommandReceipt,
     ) -> Result<lash_core::runtime::SessionCommandSettlement> {
-        let mut pause = COMMAND_SETTLEMENT_POLL_FLOOR;
+        let pacing = self.target.observer_pacing().admin;
+        let mut pause = pacing.initial();
         loop {
             let settlement = {
                 let writer = self.runtime.writer();
@@ -216,7 +212,7 @@ impl SessionAdmin {
                 return Ok(settlement);
             }
             tokio::time::sleep(pause).await;
-            pause = (pause * 2).min(COMMAND_SETTLEMENT_POLL_CEILING);
+            pause = pacing.next(pause);
         }
     }
 
@@ -353,7 +349,10 @@ impl SessionAdmin {
             .observe()
             .process_registry
             .clone()
-            .map(lash_core::facade_support::ProcessWorkObserver::new)
+            .map(|registry| {
+                lash_core::facade_support::ProcessWorkObserver::new(registry)
+                    .with_read_attempts(self.target.observer_pacing().snapshot_read_attempts)
+            })
     }
 
     /// Observer edges are session-scoped and deliberately frame-less.

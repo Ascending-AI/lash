@@ -189,10 +189,7 @@ pub async fn empty_root_set_refusal_returns_its_partial_report(
     let failure = crate::attachments::reclaim_unreferenced_attachments(
         &*factory,
         attachments.as_ref(),
-        crate::AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: crate::EmptyRootSetPolicy::Refuse,
-        },
+        crate::AttachmentReclamationPolicy::new(0, crate::EmptyRootSetPolicy::Refuse),
     )
     .await
     .expect_err("an unauthorized empty root set must refuse");

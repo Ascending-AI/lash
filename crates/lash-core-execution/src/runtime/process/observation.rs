@@ -17,6 +17,7 @@ use super::registry::ProcessRegistry;
 #[derive(Clone)]
 pub struct ProcessWorkObserver {
     registry: Arc<dyn ProcessRegistry>,
+    read_attempts: std::num::NonZeroUsize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -200,11 +201,20 @@ impl ObservedWorkItem {
 /// process's full event history; detail views page through `event_page`
 /// with a cursor.
 pub const SNAPSHOT_EVENT_TAIL: usize = 32;
-const SNAPSHOT_READ_ATTEMPTS: usize = 2;
 
 impl ProcessWorkObserver {
     pub fn new(registry: Arc<dyn ProcessRegistry>) -> Self {
-        Self { registry }
+        Self {
+            registry,
+            read_attempts: std::num::NonZeroUsize::MIN.saturating_add(1),
+        }
+    }
+
+    /// Set the bounded record/event-tail pairing retries. The standard preset
+    /// attempts twice, a historical choice without workload measurements.
+    pub fn with_read_attempts(mut self, attempts: std::num::NonZeroUsize) -> Self {
+        self.read_attempts = attempts;
+        self
     }
 
     pub async fn snapshot_for_session(
@@ -276,7 +286,7 @@ impl ProcessWorkObserver {
         &self,
         mut record: ProcessRecord,
     ) -> Result<ObservedWorkItem, PluginError> {
-        for attempt in 0..SNAPSHOT_READ_ATTEMPTS {
+        for attempt in 0..self.read_attempts.get() {
             let process_id = record.id.clone();
             let events: Vec<_> = self
                 .registry
@@ -287,7 +297,7 @@ impl ProcessWorkObserver {
                 .collect();
             let process = ObservedProcess::from_record(record);
             let item = ObservedWorkItem { process, events };
-            if !item.has_mispaired_event_tail() || attempt + 1 == SNAPSHOT_READ_ATTEMPTS {
+            if !item.has_mispaired_event_tail() || attempt + 1 == self.read_attempts.get() {
                 return Ok(item);
             }
             let Some(refreshed) = self.registry.get_process(&process_id).await? else {

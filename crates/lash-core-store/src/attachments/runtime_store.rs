@@ -57,45 +57,71 @@ impl AttachmentStore for UnavailableAttachmentStore {
     }
 }
 
-/// How many times a `put` re-acquires the write fence before giving the digest
-/// back to the caller as [`AttachmentStoreError::ReclamationInFlight`].
-///
-/// The bound exists so a condemnation abandoned by a sweeper that died
-/// mid-delete surfaces as a typed, retryable error instead of spinning
-/// forever; the next sweep adopts and finishes that condemnation.
-const RECLAMATION_FENCE_ATTEMPTS: u32 = 64;
-
-/// The first few re-acquires are pure yields, for the common case where the
-/// sweep's delete is a local unlink already in flight.
-const RECLAMATION_FENCE_YIELD_ATTEMPTS: u32 = 8;
-
-/// Backoff floor and ceiling for the remaining re-acquires.
-///
-/// These delays pace a retry loop; they do not bound anyone's liveness and
-/// nothing expires because of them. The protocol stays clockless in the sense
-/// that matters: no state transition, and in particular no reclamation, is ever
-/// authorized by elapsed time. Sleeping between CAS attempts is a politeness to
-/// the store, not a lease.
-///
-/// The ceiling is chosen so the total wait comfortably outlasts a remote
-/// object-store delete (tens to hundreds of milliseconds) rather than a
-/// scheduler quantum: the previous yield-only loop could exhaust itself in
-/// microseconds against a perfectly healthy sweeper.
-const RECLAMATION_FENCE_BACKOFF_MIN: std::time::Duration = std::time::Duration::from_millis(2);
-const RECLAMATION_FENCE_BACKOFF_MAX: std::time::Duration = std::time::Duration::from_millis(250);
-
-/// Wait before the `attempt`-th re-acquire of the write fence.
-async fn reclamation_fence_backoff(clock: &dyn crate::Clock, attempt: u32) {
-    if attempt <= RECLAMATION_FENCE_YIELD_ATTEMPTS {
-        clock.sleep(std::time::Duration::ZERO).await;
-        return;
-    }
-    let doublings = (attempt - RECLAMATION_FENCE_YIELD_ATTEMPTS - 1).min(16);
-    let delay = RECLAMATION_FENCE_BACKOFF_MIN
-        .saturating_mul(1u32 << doublings)
-        .min(RECLAMATION_FENCE_BACKOFF_MAX);
-    clock.sleep(delay).await;
+/// Retry pacing when attachment reclamation holds the write fence.
+/// Sleeping authorizes no deletion; a store CAS remains the authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AttachmentReclamationRetryPolicy {
+    attempts: std::num::NonZeroU32,
+    yields: u32,
+    initial: std::time::Duration,
+    maximum: std::time::Duration,
 }
+impl AttachmentReclamationRetryPolicy {
+    /// Standard preset: 64 attempts, the first 8 yielding, then backoff from
+    /// 2ms to 250ms. Backoff addresses remote deletes that outlast scheduler
+    /// yields; these exact values have no supporting workload measurement.
+    pub const fn standard() -> Self {
+        Self {
+            attempts: std::num::NonZeroU32::MIN.saturating_add(63),
+            yields: 8,
+            initial: std::time::Duration::from_millis(2),
+            maximum: std::time::Duration::from_millis(250),
+        }
+    }
+    /// Reject a delay that would spin or an inverted backoff range.
+    pub fn new(
+        attempts: std::num::NonZeroU32,
+        yields: u32,
+        initial: std::time::Duration,
+        maximum: std::time::Duration,
+    ) -> Result<Self, AttachmentReclamationRetryPolicyError> {
+        if initial.is_zero() || initial > maximum || yields >= attempts.get() {
+            return Err(AttachmentReclamationRetryPolicyError);
+        }
+        Ok(Self {
+            attempts,
+            yields,
+            initial,
+            maximum,
+        })
+    }
+    pub const fn attempts(self) -> std::num::NonZeroU32 {
+        self.attempts
+    }
+    /// Delay before the given re-acquire; zero means yield.
+    pub fn delay(self, attempt: u32) -> std::time::Duration {
+        if attempt <= self.yields {
+            return std::time::Duration::ZERO;
+        }
+        let mut delay = self.initial;
+        for _ in 0..(attempt - self.yields - 1).min(128) {
+            delay = delay.saturating_mul(2).min(self.maximum);
+            if delay == self.maximum {
+                break;
+            }
+        }
+        delay
+    }
+}
+impl Default for AttachmentReclamationRetryPolicy {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+/// Invalid attachment reclamation retry pacing.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("attachment retry requires positive ordered delays and fewer initial yields than attempts")]
+pub struct AttachmentReclamationRetryPolicyError;
 
 /// The default lifetime of an unbound session upload's staging referrer.
 pub const DEFAULT_ATTACHMENT_UPLOAD_EXPIRY_MS: u64 = 86_400_000;
@@ -131,6 +157,7 @@ pub struct RuntimeAttachmentStore {
     read_policy: AttachmentReadPolicy,
     upload_expiry_ms: u64,
     output_retention: lash_sansio::OutputRetentionPolicy,
+    reclamation_retry: AttachmentReclamationRetryPolicy,
     execution: Mutex<Option<BoundAttachmentExecution>>,
     clock: Arc<dyn crate::Clock>,
 }
@@ -177,6 +204,7 @@ impl RuntimeAttachmentStore {
             read_policy: AttachmentReadPolicy::DEFAULT,
             upload_expiry_ms: DEFAULT_ATTACHMENT_UPLOAD_EXPIRY_MS,
             output_retention: lash_sansio::OutputRetentionPolicy::DEFAULT,
+            reclamation_retry: AttachmentReclamationRetryPolicy::standard(),
             execution: Mutex::new(None),
             clock,
         }
@@ -190,6 +218,7 @@ impl RuntimeAttachmentStore {
             read_policy: AttachmentReadPolicy::DEFAULT,
             upload_expiry_ms: DEFAULT_ATTACHMENT_UPLOAD_EXPIRY_MS,
             output_retention: lash_sansio::OutputRetentionPolicy::DEFAULT,
+            reclamation_retry: AttachmentReclamationRetryPolicy::standard(),
             execution: Mutex::new(None),
             clock: Arc::new(crate::SystemClock),
         }
@@ -206,6 +235,18 @@ impl RuntimeAttachmentStore {
     }
     pub fn holder(&self) -> &AttachmentHolder {
         &self.holder
+    }
+    /// Select the write-fence retry preset for attachment puts.
+    pub fn with_reclamation_retry(mut self, policy: AttachmentReclamationRetryPolicy) -> Self {
+        self.reclamation_retry = policy;
+        self
+    }
+    /// Reconfigure retries while preserving the bound retention and execution.
+    pub fn reconfigured_reclamation_retry(&self, policy: AttachmentReclamationRetryPolicy) -> Self {
+        self.reconfigured().with_reclamation_retry(policy)
+    }
+    pub fn reclamation_retry(&self) -> AttachmentReclamationRetryPolicy {
+        self.reclamation_retry
     }
     pub fn with_max_attachment_bytes(mut self, max_attachment_bytes: Option<u64>) -> Self {
         self.max_attachment_bytes = max_attachment_bytes;
@@ -276,6 +317,7 @@ impl RuntimeAttachmentStore {
             read_policy: self.read_policy,
             upload_expiry_ms: self.upload_expiry_ms,
             output_retention: self.output_retention,
+            reclamation_retry: self.reclamation_retry,
             execution: Mutex::new(self.execution.lock_recover().clone()),
             clock: Arc::clone(&self.clock),
         }
@@ -394,13 +436,15 @@ impl RuntimeAttachmentStore {
                 // re-puts the content. The delay paces the retry; it authorizes
                 // nothing and expires nothing.
                 AttachmentWriteFence::ReclamationInFlight => {
-                    if attempts >= RECLAMATION_FENCE_ATTEMPTS {
+                    if attempts >= self.reclamation_retry.attempts().get() {
                         return Err(AttachmentStoreError::ReclamationInFlight {
                             attachment_id,
                             attempts,
                         });
                     }
-                    reclamation_fence_backoff(self.clock.as_ref(), attempts).await;
+                    self.clock
+                        .sleep(self.reclamation_retry.delay(attempts))
+                        .await;
                     continue;
                 }
             };
@@ -454,9 +498,11 @@ impl RuntimeAttachmentStore {
                 // cannot stamp evidence. Retry behind a fresh fence: a permanent
                 // end refuses the next begin, while a recovered write may resume.
                 Err(StoreError::StaleWritePermit { .. })
-                    if attempts < RECLAMATION_FENCE_ATTEMPTS =>
+                    if attempts < self.reclamation_retry.attempts().get() =>
                 {
-                    reclamation_fence_backoff(self.clock.as_ref(), attempts).await;
+                    self.clock
+                        .sleep(self.reclamation_retry.delay(attempts))
+                        .await;
                     continue;
                 }
                 Err(source) => {

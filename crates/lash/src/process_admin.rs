@@ -57,9 +57,10 @@ impl Processes {
     }
 
     fn make_observer(&self) -> Result<lash_core::facade_support::ProcessWorkObserver> {
-        Ok(lash_core::facade_support::ProcessWorkObserver::new(
-            self.registry(),
-        ))
+        Ok(
+            lash_core::facade_support::ProcessWorkObserver::new(self.registry())
+                .with_read_attempts(self.core.observer_pacing.snapshot_read_attempts),
+        )
     }
 
     /// The listing filter [`prune`](Self::prune) surveys effect-journal

@@ -164,8 +164,9 @@ pub use turn_queue::{
 };
 
 pub use work::{
-    DurableProcessWork, NoProcessWork, ProcessRegistryAwaiter, ProcessTerminalWait,
-    ProcessWorkSubstrate, ProcessWorkWiring, WorkCadenceError, WorkCadencePolicy,
+    CommitAdmissionPolicy, CommitAdmissionPolicyError, DurableProcessWork, NoProcessWork,
+    PollPacing, ProcessRegistryAwaiter, ProcessTerminalWait, ProcessWorkSubstrate,
+    ProcessWorkWiring, RuntimePacingPolicy, WorkCadenceError, WorkCadencePolicy,
 };
 
 // Turn-execution vocabulary. These types and the phase-probe trait carry no

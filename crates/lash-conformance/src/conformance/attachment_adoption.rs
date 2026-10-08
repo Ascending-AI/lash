@@ -232,10 +232,7 @@ pub async fn cross_session_attachment_adoption_conformance(
     let report = reclaim_unreferenced_attachments(
         f.as_ref(),
         bytes.as_ref(),
-        AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: EmptyRootSetPolicy::AuthorizeDeleteAll,
-        },
+        AttachmentReclamationPolicy::new(0, EmptyRootSetPolicy::AuthorizeDeleteAll),
     )
     .await
     .unwrap();
@@ -255,10 +252,7 @@ pub async fn cross_session_attachment_adoption_conformance(
     let report = reclaim_unreferenced_attachments(
         f.as_ref(),
         bytes.as_ref(),
-        AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: EmptyRootSetPolicy::AuthorizeDeleteAll,
-        },
+        AttachmentReclamationPolicy::new(0, EmptyRootSetPolicy::AuthorizeDeleteAll),
     )
     .await
     .unwrap();

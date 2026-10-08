@@ -43,6 +43,7 @@ impl ActorContext {
         let mut next = self.scope.with();
         next.journal_guard = Some(guard);
         Self {
+            idle_poll: self.idle_poll,
             inner: Arc::clone(&self.inner),
             scope: Arc::new(next),
         }
@@ -142,6 +143,7 @@ impl ActorContext {
         let mut next = self.scope.with();
         next.frontier = Arc::clone(&shift.scope.frontier);
         Self {
+            idle_poll: self.idle_poll,
             inner: Arc::clone(&self.inner),
             scope: Arc::new(next),
         }

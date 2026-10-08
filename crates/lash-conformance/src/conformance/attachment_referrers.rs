@@ -269,10 +269,7 @@ pub async fn retained_output_is_held_by_its_execution_until_a_commit_names_it(
         reclaim_unreferenced_attachments(
             h.factory.as_ref(),
             backend.as_ref(),
-            AttachmentReclamationPolicy {
-                grace_period_ms: 0,
-                empty_root_set: EmptyRootSetPolicy::AuthorizeDeleteAll,
-            },
+            AttachmentReclamationPolicy::new(0, EmptyRootSetPolicy::AuthorizeDeleteAll),
         )
         .await
         .unwrap()
@@ -529,10 +526,7 @@ pub async fn attachment_prefix_pin_keeps_the_session_edge_until_unpin(
         reclaim_unreferenced_attachments(
             h.factory.as_ref(),
             bytes.as_ref(),
-            AttachmentReclamationPolicy {
-                grace_period_ms: 0,
-                empty_root_set: EmptyRootSetPolicy::AuthorizeDeleteAll,
-            },
+            AttachmentReclamationPolicy::new(0, EmptyRootSetPolicy::AuthorizeDeleteAll),
         )
         .await
         .unwrap()
@@ -900,10 +894,7 @@ async fn partial_attachment_enumeration(h: AttachmentReferrerHandles, truncate_p
     let result = reclaim_unreferenced_attachments(
         &partial,
         bytes.as_ref(),
-        AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: EmptyRootSetPolicy::AuthorizeDeleteAll,
-        },
+        AttachmentReclamationPolicy::new(0, EmptyRootSetPolicy::AuthorizeDeleteAll),
     )
     .await;
     assert!(

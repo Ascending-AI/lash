@@ -86,7 +86,6 @@ mod tests {
         let work_cadence = WorkCadencePolicy {
             poll_initial: Duration::from_secs(2),
             poll_max: Duration::from_secs(3),
-            ..WorkCadencePolicy::default()
         };
         let awaiter = ProcessRegistryAwaiter::for_registry(Arc::new(faults.clone()))
             .with_work_cadence(work_cadence);

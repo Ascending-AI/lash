@@ -60,6 +60,7 @@ pub(crate) enum SendTarget {
 /// and cancels go through, and the live replay events come from.
 #[derive(Clone)]
 pub(crate) struct SendParts {
+    pub(crate) observer_pacing: Arc<crate::ObserverPacing>,
     pub(crate) session_id: SessionId,
     pub(crate) store: lash_core::store::SessionStore,
     pub(crate) ops: DurableSessionOps,
@@ -107,6 +108,13 @@ impl SendContext {
 }
 
 impl SendTarget {
+    pub(crate) fn observer_pacing(&self) -> crate::ObserverPacing {
+        match self {
+            Self::Live(session) => *session.binding.observer_pacing,
+            Self::Durable(session) => *session.observer_pacing,
+        }
+    }
+
     pub(crate) async fn context(&self) -> Result<SendContext> {
         match self {
             Self::Live(session) => Ok(SendContext {
@@ -804,7 +812,7 @@ fn spawn_events(
     cursor: lash_core::SessionCursor,
     shared: Arc<HandleShared>,
 ) -> TurnEvents {
-    let (tx, rx) = mpsc::channel(64);
+    let (tx, rx) = mpsc::channel(target.observer_pacing().send_channel.get());
     let task_tx = tx.clone();
     tokio::spawn(async move {
         if let Err(error) = settle(&target, &subject, &cursor, &shared, Tap::Channel(task_tx)).await

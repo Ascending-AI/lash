@@ -15,10 +15,7 @@ use lash_sansio::{SessionId, sync::MutexExt};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
-/// Maximum number of waiting attempts retained for one hot session.
-const COMMIT_ADMISSION_MAX_WAITERS: usize = 64;
-
-const COMMIT_ADMISSION_WAIT_TTL: Duration = Duration::from_secs(30);
+use super::CommitAdmissionPolicy;
 
 /// The only data retained for a queued commit attempt.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -72,15 +69,14 @@ struct CommitAdmissionObservation {
     queue_depth: usize,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct CommitAdmissionCoordinator {
     inner: Arc<CommitAdmissionInner>,
 }
 
+#[derive(Default)]
 struct CommitAdmissionInner {
     state: Mutex<CommitAdmissionState>,
-    max_waiters: usize,
-    wait_ttl: Duration,
 }
 
 #[derive(Default)]
@@ -100,30 +96,13 @@ struct CommitAdmissionWaiter {
     admitted: Notify,
 }
 
-impl Default for CommitAdmissionCoordinator {
-    fn default() -> Self {
-        Self::with_limits(COMMIT_ADMISSION_MAX_WAITERS, COMMIT_ADMISSION_WAIT_TTL)
-    }
-}
-
 impl CommitAdmissionCoordinator {
-    fn with_limits(max_waiters: usize, wait_ttl: Duration) -> Self {
-        assert!(max_waiters > 0, "commit admission depth must be nonzero");
-        assert!(!wait_ttl.is_zero(), "commit admission TTL must be nonzero");
-        Self {
-            inner: Arc::new(CommitAdmissionInner {
-                state: Mutex::new(CommitAdmissionState::default()),
-                max_waiters,
-                wait_ttl,
-            }),
-        }
-    }
-
     async fn run_head_advancing_attempt<T, E, F, Fut>(
         &self,
         session_id: impl Into<SessionId>,
         work_identity: impl Into<String>,
         cancellation: CancellationToken,
+        policy: CommitAdmissionPolicy,
         attempt: F,
     ) -> Result<T, E>
     where
@@ -135,6 +114,7 @@ impl CommitAdmissionCoordinator {
             .acquire_typed(
                 CommitAdmissionClaim::new(session_id, work_identity),
                 cancellation,
+                policy,
             )
             .await
             // Admission refusal uses the existing retryable busy/resource
@@ -156,6 +136,7 @@ impl CommitAdmissionCoordinator {
         &self,
         claim: CommitAdmissionClaim,
         cancellation: CancellationToken,
+        policy: CommitAdmissionPolicy,
     ) -> Result<CommitAdmissionGuard, CommitAdmissionError> {
         let queued_at = Instant::now();
         let queued = {
@@ -170,12 +151,12 @@ impl CommitAdmissionCoordinator {
                     .sessions
                     .get(&claim.session_id)
                     .map_or(0, |session| session.waiters.len());
-                if queue_depth >= self.inner.max_waiters {
+                if queue_depth >= policy.max_waiters.get() {
                     tracing::warn!(
                         session_id = %claim.session_id,
                         work_identity = %claim.work_identity,
                         queue_depth,
-                        max_waiters = self.inner.max_waiters,
+                        max_waiters = policy.max_waiters.get(),
                         event = "commit_admission.queue_full",
                         "same-session commit admission queue shed a waiter"
                     );
@@ -183,7 +164,7 @@ impl CommitAdmissionCoordinator {
                         session_id: claim.session_id,
                         work_identity: claim.work_identity,
                         queue_depth,
-                        max_waiters: self.inner.max_waiters,
+                        max_waiters: policy.max_waiters.get(),
                     });
                 }
                 state.next_waiter_id = state.next_waiter_id.wrapping_add(1);
@@ -226,7 +207,7 @@ impl CommitAdmissionCoordinator {
             () = waiter.admitted.notified() => WaitOutcome::Admitted,
             () = cancellation.cancelled() => WaitOutcome::Cancelled,
             // Substrate-boundary allowlist: process-local TTL, not durable time.
-            () = tokio::time::sleep(self.inner.wait_ttl) => WaitOutcome::TimedOut,
+            () = tokio::time::sleep(policy.wait_ttl) => WaitOutcome::TimedOut,
         };
 
         if !matches!(outcome, WaitOutcome::Admitted)
@@ -390,6 +371,7 @@ pub async fn run_head_advancing_commit_attempt<T, E, F, Fut>(
     session_id: impl Into<SessionId>,
     work_identity: impl Into<String>,
     cancellation: CancellationToken,
+    policy: CommitAdmissionPolicy,
     attempt: F,
 ) -> Result<T, E>
 where
@@ -399,7 +381,7 @@ where
 {
     PROCESS_COMMIT_ADMISSION
         .get_or_init(CommitAdmissionCoordinator::default)
-        .run_head_advancing_attempt(session_id, work_identity, cancellation, attempt)
+        .run_head_advancing_attempt(session_id, work_identity, cancellation, policy, attempt)
         .await
 }
 
@@ -513,6 +495,7 @@ mod tests {
             .acquire_typed(
                 CommitAdmissionClaim::new("session", "first"),
                 CancellationToken::new(),
+                CommitAdmissionPolicy::standard(),
             )
             .await
             .expect("first admission");
@@ -525,6 +508,7 @@ mod tests {
                     .acquire_typed(
                         CommitAdmissionClaim::new("session", identity),
                         CancellationToken::new(),
+                        CommitAdmissionPolicy::standard(),
                     )
                     .await
                     .expect("queued admission");
@@ -566,6 +550,7 @@ mod tests {
             .acquire_typed(
                 CommitAdmissionClaim::new("session", "first"),
                 CancellationToken::new(),
+                CommitAdmissionPolicy::standard(),
             )
             .await
             .expect("first admission");
@@ -578,6 +563,7 @@ mod tests {
                     .acquire_typed(
                         CommitAdmissionClaim::new("session", "cancelled"),
                         cancellation,
+                        CommitAdmissionPolicy::standard(),
                     )
                     .await
             })
@@ -599,11 +585,15 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn timeout_and_depth_guardrails_shed_without_reordering() {
-        let coordinator = CommitAdmissionCoordinator::with_limits(1, Duration::from_millis(10));
+        let coordinator = CommitAdmissionCoordinator::default();
         let first = coordinator
             .acquire_typed(
                 CommitAdmissionClaim::new("session", "first"),
                 CancellationToken::new(),
+                CommitAdmissionPolicy {
+                    max_waiters: std::num::NonZeroUsize::MIN,
+                    wait_ttl: Duration::from_millis(10),
+                },
             )
             .await
             .expect("first admission");
@@ -614,6 +604,10 @@ mod tests {
                     .acquire_typed(
                         CommitAdmissionClaim::new("session", "timeout"),
                         CancellationToken::new(),
+                        CommitAdmissionPolicy {
+                            max_waiters: std::num::NonZeroUsize::MIN,
+                            wait_ttl: Duration::from_millis(10),
+                        },
                     )
                     .await
             })
@@ -623,6 +617,10 @@ mod tests {
             .acquire_typed(
                 CommitAdmissionClaim::new("session", "shed"),
                 CancellationToken::new(),
+                CommitAdmissionPolicy {
+                    max_waiters: std::num::NonZeroUsize::MIN,
+                    wait_ttl: Duration::from_millis(10),
+                },
             )
             .await;
         assert!(matches!(

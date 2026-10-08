@@ -127,7 +127,8 @@ pub struct AttachmentCondemnationRecord {
 /// Why a condemned digest's physical delete stalled before later retries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AttachmentDeleteStallReason {
-    /// Retryable failures reached [`MAX_ATTACHMENT_DELETE_ATTEMPTS`].
+    /// Retryable failures reached the sweep policy's attempt limit
+    /// (standard preset: [`MAX_ATTACHMENT_DELETE_ATTEMPTS`]).
     AttemptsExhausted,
     /// The backend refused the delete because of credentials, authorization,
     /// or a terminal or contract failure. Later retries can observe recovery.
@@ -156,7 +157,10 @@ impl AttachmentDeleteStallReason {
     }
 }
 
-/// How many failed physical deletes of one condemned digest the sweeps make,
+/// Standard preset for failed physical deletes of one condemned digest.
+/// A sweep can select another limit through `AttachmentReclamationPolicy`.
+/// This historical value has no supporting workload measurement.
+/// The sweeps make this many attempts,
 /// one per sweep, before the condemnation stalls
 /// [`AttemptsExhausted`](AttachmentDeleteStallReason::AttemptsExhausted).
 pub const MAX_ATTACHMENT_DELETE_ATTEMPTS: u32 = 5;

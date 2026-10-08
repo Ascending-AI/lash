@@ -10,7 +10,6 @@
 //! typed cause and the head revision its commit published.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use lash_durable::domain::{
     MailAnswer, MailDomainWrite, TurnCancelAnswer, TurnCancelRequest as DurableCancelRequest,
@@ -107,10 +106,6 @@ pub fn turn_stop_cause(stop: &TurnStop) -> Result<String, RuntimeError> {
     })
 }
 
-/// How long [`TurnWorkDriver::await_terminal`] waits between reads of the
-/// turn's row: from the first interval, doubling to the last.
-const TERMINAL_POLL: (Duration, Duration) = (Duration::from_millis(20), Duration::from_secs(1));
-
 /// Where a [`TurnWorkDriver`] publishes the queue change its withdrawal made:
 /// best-effort, after the withdrawal committed, so a publication that fails
 /// never fails the cancel.
@@ -138,6 +133,7 @@ pub trait QueueWithdrawalPublisher: Send + Sync {
 /// enforce authorization before exposing this driver across a trust boundary.
 #[derive(Clone)]
 pub struct TurnWorkDriver {
+    terminal_poll: super::PollPacing,
     backend: Backend,
     withdrawals: Option<Arc<dyn QueueWithdrawalPublisher>>,
 }
@@ -155,7 +151,14 @@ impl TurnWorkDriver {
         Self {
             backend,
             withdrawals: None,
+            terminal_poll: super::PollPacing::terminal_standard(),
         }
+    }
+
+    /// Poll terminal rows on this validated schedule.
+    pub fn with_terminal_pacing(mut self, pacing: super::PollPacing) -> Self {
+        self.terminal_poll = pacing;
+        self
     }
 
     /// This driver, publishing each withdrawal's queue change to
@@ -261,7 +264,7 @@ impl TurnWorkDriver {
     ) -> Result<TurnTerminal, RuntimeError> {
         address.validate()?;
         let clock = self.backend.clock();
-        let mut interval = TERMINAL_POLL.0;
+        let mut interval = self.terminal_poll.initial();
         loop {
             let ended = self
                 .backend
@@ -273,7 +276,7 @@ impl TurnWorkDriver {
                 return terminal_of(address, &ended);
             }
             clock.sleep(interval).await;
-            interval = interval.saturating_mul(2).min(TERMINAL_POLL.1);
+            interval = self.terminal_poll.next(interval);
         }
     }
 }

@@ -83,6 +83,7 @@ enum DurableAcquisition {
 /// non-creating acquisition rule and the observation contract.
 #[derive(Clone)]
 pub struct DurableSession {
+    pub(crate) observer_pacing: Arc<crate::ObserverPacing>,
     transcript_decoders: crate::transcript::TranscriptDecoders,
     session_id: SessionId,
     ops: DurableSessionOps,
@@ -161,8 +162,10 @@ impl DurableSession {
         live_replay_store: Arc<dyn LiveReplayStore>,
         models: Arc<dyn lash_core::LlmProfiles>,
         trace_scopes: Arc<dyn lash_core::TraceScopeFactory>,
+        observer_pacing: Arc<crate::ObserverPacing>,
     ) -> Self {
         Self {
+            observer_pacing,
             transcript_decoders: Default::default(),
             ops: DurableSessionOps::new(session_id.clone(), Arc::clone(&live_replay_store)),
             acquisition: DurableAcquisition::Catalog,
@@ -191,8 +194,10 @@ impl DurableSession {
         catalog: Arc<dyn DeploymentStore>,
         models: Arc<dyn lash_core::LlmProfiles>,
         trace_scopes: Arc<dyn lash_core::TraceScopeFactory>,
+        observer_pacing: Arc<crate::ObserverPacing>,
     ) -> Self {
         Self {
+            observer_pacing,
             transcript_decoders: Default::default(),
             ops: DurableSessionOps::new(session_id.clone(), Arc::clone(&live_replay_store)),
             acquisition: DurableAcquisition::Bound(Arc::new(store)),
@@ -211,6 +216,7 @@ impl DurableSession {
     /// send handle bound to this Durable Session reads and writes through.
     pub(crate) async fn send_parts(&self) -> Result<crate::send::SendParts> {
         Ok(crate::send::SendParts {
+            observer_pacing: Arc::clone(&self.observer_pacing),
             session_id: self.session_id.clone(),
             store: self.store().await?.clone(),
             ops: self.ops.clone(),

@@ -1056,11 +1056,13 @@ impl LashRuntime {
             .batch_ids
             .first()
             .map_or_else(|| "session-command".to_string(), ToString::to_string);
+        let admission_policy = self.host.core.control.commit_admission;
         let result: Result<bool, RuntimeCommitAdmissionError> =
             super::run_head_advancing_commit_attempt(
                 session_id.clone(),
                 work_identity.clone(),
                 cancellation,
+                admission_policy,
                 move |waited, queue_depth| async move {
                     super::commit_admission::record_product_commit_admission(
                         "session_command_commit",

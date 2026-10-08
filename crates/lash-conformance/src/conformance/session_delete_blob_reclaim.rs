@@ -896,10 +896,8 @@ async fn attachment_prefix_retention(backend_name: &str, handles: SessionDeleteB
         retained.removed_receipt_count, 1,
         "terminal parent receipt is pruned while the fork retains its image"
     );
-    let policy = crate::AttachmentReclamationPolicy {
-        grace_period_ms: 0,
-        empty_root_set: crate::EmptyRootSetPolicy::AuthorizeDeleteAll,
-    };
+    let policy =
+        crate::AttachmentReclamationPolicy::new(0, crate::EmptyRootSetPolicy::AuthorizeDeleteAll);
     let reconciled =
         crate::reclaim_unreferenced_attachments(handles.factory.as_ref(), bytes.as_ref(), policy)
             .await

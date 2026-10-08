@@ -80,6 +80,7 @@ impl<'run> RuntimeTurnDriver<'run> {
             .map(|context| {
                 let context = context
                     .with_tool_material_store(self.host.core.backend().tool_material_store())
+                    .with_tool_fault_retry(self.host.core.control.pacing.tool_fault_retry)
                     .with_process_work(self.host.work.process_wiring().cloned());
                 context
                     .with_logical_run(crate::TurnAddress::new(

@@ -163,8 +163,6 @@ impl RuntimeTurnDriver<'_> {
         &self,
         checkpoint: CheckpointKind,
     ) -> Result<crate::store::CheckpointAdmission, RuntimeError> {
-        /// The most steering inputs one checkpoint delivers.
-        const MAX_CHECKPOINT_INPUTS: usize = 64;
         if checkpoint != CheckpointKind::AfterWork {
             return Ok(crate::store::CheckpointAdmission::default());
         }
@@ -189,7 +187,7 @@ impl RuntimeTurnDriver<'_> {
             .into_iter()
             .filter(|input| addressed_here(input) && input.ingress().admits_checkpoint(checkpoint))
             .collect::<Vec<_>>();
-        steering.truncate(MAX_CHECKPOINT_INPUTS);
+        steering.truncate(self.host.core.control.pacing.checkpoint_inputs.get());
         Ok(crate::store::CheckpointAdmission {
             inputs: crate::store::plan_checkpoint_input_admission(
                 &self.session_id,

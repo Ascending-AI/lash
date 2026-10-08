@@ -687,6 +687,7 @@ mod contention_tests {
             session_id,
             "first",
             CancellationToken::new(),
+            lash_core::runtime::CommitAdmissionPolicy::standard(),
             |_, _| async {
                 store.commit_runtime_state(first_commit).await?;
                 Ok::<(), anyhow::Error>(())
@@ -713,6 +714,7 @@ mod contention_tests {
             session_id,
             "retry",
             CancellationToken::new(),
+            lash_core::runtime::CommitAdmissionPolicy::standard(),
             |_, _| async {
                 let mut fresh =
                     load_runtime_perf_session_state(&store, &SessionId::from(session_id))

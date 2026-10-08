@@ -245,8 +245,9 @@ use io::normalize_input_items;
 pub use lash_core_execution::runtime::DirectCompletionClient;
 pub use lash_core_execution::runtime::EffectOpenerError;
 pub use lash_core_execution::runtime::work::{
-    DurableProcessWork, NoProcessWork, ProcessRegistryAwaiter, ProcessTerminalWait,
-    ProcessWorkSubstrate, ProcessWorkWiring, WorkCadenceError, WorkCadencePolicy,
+    CommitAdmissionPolicy, CommitAdmissionPolicyError, DurableProcessWork, NoProcessWork,
+    PollPacing, ProcessRegistryAwaiter, ProcessTerminalWait, ProcessWorkSubstrate,
+    ProcessWorkWiring, RuntimePacingPolicy, WorkCadenceError, WorkCadencePolicy,
 };
 /// The trace handle a host config carries.
 pub use lash_core_execution::runtime::{TraceEmitter, TraceRuntime};

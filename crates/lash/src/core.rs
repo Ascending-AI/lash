@@ -54,6 +54,7 @@ pub struct LashCore {
     pub(crate) recovery: Arc<recovery::RecoverySlot>,
     /// The node the backend's session actors run on (ADR 0132 §3).
     pub(crate) node: Arc<node::NodeSlot>,
+    pub(crate) observer_pacing: Arc<crate::ObserverPacing>,
 }
 
 pub use lash_core::session_delete::SessionDeletion;
@@ -455,7 +456,9 @@ impl LashCore {
             backend.session_store_factory(),
             Arc::clone(&self.live_replay_store),
         );
-        facade_support::TurnWorkDriver::new(backend).publishing_withdrawals(Arc::new(withdrawals))
+        facade_support::TurnWorkDriver::new(backend)
+            .with_terminal_pacing(self.observer_pacing.terminal)
+            .publishing_withdrawals(Arc::new(withdrawals))
     }
 
     /// Create `request.session_id` at the state `target` of `session` names,
@@ -655,9 +658,20 @@ pub struct LashCoreBuilder {
     process_event_sinks: Vec<Arc<dyn facade_support::ProcessEventSink>>,
     process_observation_config: crate::process_observation::ProcessObservationConfig,
     serves_sessions: bool,
+    attachment_reclamation_retry: crate::persistence::AttachmentReclamationRetryPolicy,
+    work_cadence: crate::WorkCadencePolicy,
+    relay_policy: crate::RelayPolicy,
+    commit_admission: crate::CommitAdmissionPolicy,
+    observer_pacing: crate::ObserverPacing,
+    runtime_pacing: crate::RuntimePacingPolicy,
+    recovery_pacing: crate::RecoveryPacing,
 }
 
 impl LashCoreBuilder {
+    /// Standard serving preset: this core serves its backend's sessions.
+    /// This is the historical product choice, without workload measurements;
+    /// `.serve_sessions(false)` selects an observer and producer only.
+    pub const STANDARD_SERVE_SESSIONS: bool = true;
     fn new(backend: Backend) -> Self {
         Self {
             protocol_factory: None,
@@ -689,7 +703,15 @@ impl LashCoreBuilder {
             live_replay_store: None,
             process_event_sinks: Vec::new(),
             process_observation_config: Default::default(),
-            serves_sessions: true,
+            serves_sessions: Self::STANDARD_SERVE_SESSIONS,
+            attachment_reclamation_retry:
+                crate::persistence::AttachmentReclamationRetryPolicy::standard(),
+            work_cadence: crate::WorkCadencePolicy::standard(),
+            relay_policy: crate::RelayPolicy::standard(),
+            commit_admission: crate::CommitAdmissionPolicy::standard(),
+            observer_pacing: crate::ObserverPacing::standard(),
+            runtime_pacing: crate::RuntimePacingPolicy::standard(),
+            recovery_pacing: crate::RecoveryPacing::standard(),
         }
     }
 
@@ -950,6 +972,56 @@ impl LashCoreBuilder {
         self
     }
 
+    /// Configure attachment write-fence retries independently of retention.
+    /// Omission selects the documented standard preset.
+    pub fn attachment_reclamation_retry(
+        mut self,
+        policy: crate::persistence::AttachmentReclamationRetryPolicy,
+    ) -> Self {
+        self.attachment_reclamation_retry = policy;
+        self
+    }
+
+    /// Pace registry awaiters. Omission selects [`crate::WorkCadencePolicy::standard`].
+    pub fn work_cadence(mut self, policy: crate::WorkCadencePolicy) -> Self {
+        self.work_cadence = policy;
+        self
+    }
+
+    /// Configure obligation retries, claims and delivery budgets. Omission
+    /// selects [`crate::RelayPolicy::standard`]. This and `recovery_pass_budget`
+    /// share the delivery budget: the last call setting it wins.
+    pub fn relay_policy(mut self, policy: crate::RelayPolicy) -> Self {
+        self.recovery_pass.attempt = std::time::Duration::from_millis(policy.attempt_budget_ms);
+        self.relay_policy = policy;
+        self
+    }
+
+    /// Bound same-session admission waits. Omission selects the standard preset.
+    pub fn commit_admission(mut self, policy: crate::CommitAdmissionPolicy) -> Self {
+        self.commit_admission = policy;
+        self
+    }
+
+    /// Pace facade reads and event buffers. Omission selects the standard preset.
+    pub fn observer_pacing(mut self, pacing: crate::ObserverPacing) -> Self {
+        self.observer_pacing = pacing;
+        self
+    }
+
+    /// Set tool-fault retry pacing and checkpoint input chunks.
+    /// Omission selects [`crate::RuntimePacingPolicy::standard`].
+    pub fn runtime_pacing(mut self, pacing: crate::RuntimePacingPolicy) -> Self {
+        self.runtime_pacing = pacing;
+        self
+    }
+
+    /// Pace background cleanup and its page size. Omission selects the standard preset.
+    pub fn recovery_pacing(mut self, pacing: crate::RecoveryPacing) -> Self {
+        self.recovery_pacing = pacing;
+        self
+    }
+
     /// Configure the bounded live replay buffer used by session observation
     /// cursors. This is best-effort reconnect recovery only; durable state
     /// still comes from the session store and [`SessionReadView`].
@@ -1010,7 +1082,10 @@ impl LashCoreBuilder {
         });
         let process_work = lash_core::ProcessWorkWiring::new(
             lash_core::runtime::watch_process_registry(backend.process_registry()),
-            Arc::new(lash_core::DurableProcessWork::new(backend.clone())),
+            Arc::new(
+                lash_core::DurableProcessWork::new(backend.clone())
+                    .with_work_cadence(self.work_cadence.clone())?,
+            ),
         );
         let process_lifecycle_feed = Arc::new(crate::process_lifecycle::ProcessLifecycleFeed::new(
             Arc::clone(&live_replay_store),
@@ -1068,18 +1143,22 @@ impl LashCoreBuilder {
             .build();
         let recovery = Arc::new(recovery::RecoverySlot::new(
             &env,
-            self.recovery_lease.unwrap_or_default(),
+            self.recovery_lease
+                .unwrap_or_else(lash_core::engine::RecoveryLeaseConfig::standard),
         ));
         // The artifact-cleanup outbox's due pass (ADR 0132 §12): a cleanup
         // whose producer died before its immediate attempt is delivered here.
-        recovery.start_cleanup(Arc::new(
-            lash_core::runtime::artifact_cleanup::ArtifactCleanupRelay::over_backend(
-                &backend,
-                host_process_engines.clone(),
-            )
-            .with_policy(env.core.control.relay_policy())
-            .with_metrics(env.core.tracing.metrics().clone()),
-        ));
+        recovery.start_cleanup(
+            Arc::new(
+                lash_core::runtime::artifact_cleanup::ArtifactCleanupRelay::over_backend(
+                    &backend,
+                    host_process_engines.clone(),
+                )
+                .with_policy(env.core.control.relay_policy())
+                .with_metrics(env.core.tracing.metrics().clone()),
+            ),
+            self.recovery_pacing,
+        );
         let substrate = CoreWorkSetup {
             process: process_work,
         };
@@ -1087,6 +1166,7 @@ impl LashCoreBuilder {
         let substrate_slot = Arc::new(CoreWorkSlot::new(substrate));
         let plugin_factories = Arc::new(plugin_factories);
         let core = LashCore {
+            observer_pacing: Arc::new(self.observer_pacing),
             runtime_owner,
             env,
             backend,

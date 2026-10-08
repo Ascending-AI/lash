@@ -116,8 +116,9 @@ async fn cancel_run(
         backend.session_store_factory(),
         std::sync::Arc::clone(&parts.live_replay_store),
     );
-    let driver =
-        TurnWorkDriver::new(backend).publishing_withdrawals(std::sync::Arc::new(withdrawals));
+    let driver = TurnWorkDriver::new(backend)
+        .with_terminal_pacing(parts.observer_pacing.terminal)
+        .publishing_withdrawals(std::sync::Arc::new(withdrawals));
     // The cancel addresses the run's running physical turn.
     let turn = driver
         .running_turn(&TurnAddress::new(parts.session_id.clone(), run.clone()))

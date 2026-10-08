@@ -46,6 +46,7 @@ impl RuntimeSessionServices {
             crate::TurnContext::default(),
             self.current.execution_env_spec()?,
         )
+        .with_tool_fault_retry(core.control.pacing.tool_fault_retry)
         .with_turn_phase_probe(self.current.turn_phase_probe.clone())
         .with_fleet_format(core.session_store_factory().fleet_format())
         .with_tool_material_store(core.backend().tool_material_store())

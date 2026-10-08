@@ -96,10 +96,7 @@ async fn sweep(
     reclaim_unreferenced_attachments(
         factory,
         attachments.as_ref(),
-        AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: EmptyRootSetPolicy::AuthorizeDeleteAll,
-        },
+        AttachmentReclamationPolicy::new(0, EmptyRootSetPolicy::AuthorizeDeleteAll),
     )
     .await
     .expect("attachment sweep")

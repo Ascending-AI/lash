@@ -359,10 +359,7 @@ async fn condemn_cas_spares_a_live_blob_every_read_shaped_guard_missed() {
     let report = reclaim_unreferenced_attachments(
         &roots,
         &*backend,
-        AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: EmptyRootSetPolicy::AuthorizeDeleteAll,
-        },
+        AttachmentReclamationPolicy::new(0, EmptyRootSetPolicy::AuthorizeDeleteAll),
     )
     .await
     .expect("sweep with deliberately empty snapshot");
@@ -444,10 +441,7 @@ async fn gc_all_deletes_failed_is_incomplete() {
     let report = reclaim_unreferenced_attachments(
         &roots,
         &backend,
-        AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: EmptyRootSetPolicy::AuthorizeDeleteAll,
-        },
+        AttachmentReclamationPolicy::new(0, EmptyRootSetPolicy::AuthorizeDeleteAll),
     )
     .await
     .expect("per-item failures complete an incomplete sweep");
@@ -474,10 +468,7 @@ async fn gc_empty_backend_reports_nothing_to_do_with_root_diagnostic() {
     let report = reclaim_unreferenced_attachments(
         &UnavailableRootSet,
         backend.as_ref(),
-        AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: EmptyRootSetPolicy::Refuse,
-        },
+        AttachmentReclamationPolicy::new(0, EmptyRootSetPolicy::Refuse),
     )
     .await
     .expect("an enumerated empty backend has no destructive scope to refuse");
@@ -514,10 +505,7 @@ async fn gc_empty_root_set_does_not_refuse_when_every_blob_is_fresh() {
     let report = reclaim_unreferenced_attachments(
         &roots,
         backend.as_ref(),
-        AttachmentReclamationPolicy {
-            grace_period_ms: 60 * 60 * 1000,
-            empty_root_set: EmptyRootSetPolicy::Refuse,
-        },
+        AttachmentReclamationPolicy::new(60 * 60 * 1000, EmptyRootSetPolicy::Refuse),
     )
     .await
     .expect("fresh-only backend has no deletion candidate");
@@ -542,10 +530,7 @@ async fn gc_refuses_when_roots_are_unenumerable_and_blobs_are_only_grace_protect
     let report = reclaim_unreferenced_attachments(
         &UnavailableRootSet,
         backend.as_ref(),
-        AttachmentReclamationPolicy {
-            grace_period_ms: 60 * 60 * 1000,
-            empty_root_set: EmptyRootSetPolicy::Refuse,
-        },
+        AttachmentReclamationPolicy::new(60 * 60 * 1000, EmptyRootSetPolicy::Refuse),
     )
     .await
     .expect_err("an unenumerable root set cannot be reported as a healthy sweep");
@@ -605,10 +590,7 @@ async fn gc_non_empty_root_set_still_reclaims_an_unreferenced_blob() {
     let report = reclaim_unreferenced_attachments(
         &roots,
         &*backend,
-        AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: EmptyRootSetPolicy::Refuse,
-        },
+        AttachmentReclamationPolicy::new(0, EmptyRootSetPolicy::Refuse),
     )
     .await
     .expect("healthy non-empty-root sweep");
@@ -669,10 +651,7 @@ async fn shared_bytes_survive_until_all_refs_released_then_gc_collects() {
     let report = reclaim_unreferenced_attachments(
         &root_set,
         &*backend,
-        AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: EmptyRootSetPolicy::Refuse,
-        },
+        AttachmentReclamationPolicy::new(0, EmptyRootSetPolicy::Refuse),
     )
     .await
     .expect("sweep with b holding a ref");
@@ -691,10 +670,7 @@ async fn shared_bytes_survive_until_all_refs_released_then_gc_collects() {
     let report = reclaim_unreferenced_attachments(
         &root_set,
         &*backend,
-        AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: EmptyRootSetPolicy::AuthorizeDeleteAll,
-        },
+        AttachmentReclamationPolicy::new(0, EmptyRootSetPolicy::AuthorizeDeleteAll),
     )
     .await
     .expect("sweep with no refs");
@@ -773,10 +749,7 @@ async fn gc_delete_recheck_spares_blob_refreshed_after_snapshot() {
     let report = reclaim_unreferenced_attachments(
         &root_set,
         &backend,
-        AttachmentReclamationPolicy {
-            grace_period_ms: GRACE_MS,
-            empty_root_set: EmptyRootSetPolicy::Refuse,
-        },
+        AttachmentReclamationPolicy::new(GRACE_MS, EmptyRootSetPolicy::Refuse),
     )
     .await
     .expect("sweep");
@@ -879,10 +852,7 @@ async fn gc_pre_delete_root_recheck_spares_reappeared_ref() {
     let report = reclaim_unreferenced_attachments(
         &root_set,
         &backend,
-        AttachmentReclamationPolicy {
-            grace_period_ms: GRACE_MS,
-            empty_root_set: EmptyRootSetPolicy::Refuse,
-        },
+        AttachmentReclamationPolicy::new(GRACE_MS, EmptyRootSetPolicy::Refuse),
     )
     .await
     .expect("sweep");
@@ -921,10 +891,7 @@ async fn unfenced_root_authority_reports_best_effort_and_detects_the_window_loss
     let report = reclaim_unreferenced_attachments(
         &root_set,
         &backend,
-        AttachmentReclamationPolicy {
-            grace_period_ms: GRACE_MS,
-            empty_root_set: EmptyRootSetPolicy::AuthorizeDeleteAll,
-        },
+        AttachmentReclamationPolicy::new(GRACE_MS, EmptyRootSetPolicy::AuthorizeDeleteAll),
     )
     .await
     .expect("sweep");
@@ -1065,10 +1032,7 @@ async fn fenced_fixture(session_id: &SessionId) -> FencedFixture {
 }
 
 fn collecting_policy() -> AttachmentReclamationPolicy {
-    AttachmentReclamationPolicy {
-        grace_period_ms: 0,
-        empty_root_set: EmptyRootSetPolicy::AuthorizeDeleteAll,
-    }
+    AttachmentReclamationPolicy::new(0, EmptyRootSetPolicy::AuthorizeDeleteAll)
 }
 
 /// Spawn a facade `put` from inside a sweep hook and hand control back only when

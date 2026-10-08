@@ -230,19 +230,25 @@ pub struct RuntimeControlConfig {
     /// producer's immediate `deliver_now` run under alike, so a delivery honors the
     /// host's bound however it is reached.
     pub recovery_pass: crate::engine::RecoveryPassBudget,
+    /// Retry and claim settings for every obligation relay. The delivery budget
+    /// is resolved from `recovery_pass` by [`Self::relay_policy`].
+    pub relay: super::obligations::relay::RelayPolicy,
+    /// Queue capacity and TTL for same-session commit attempts.
+    pub commit_admission: super::CommitAdmissionPolicy,
+    /// Work batches and fault retry pacing used by this runtime.
+    pub pacing: super::RuntimePacingPolicy,
 }
 
 impl RuntimeControlConfig {
     /// The [`RelayPolicy`](crate::runtime::obligations::relay::RelayPolicy) every
-    /// obligation relay of this runtime runs under: the recovery pass's
-    /// attempt budget on the kinds' shared retry shape. There is no second
-    /// default — a `deliver_now` construction that skips it builds a relay
-    /// at the 30 s kind default instead.
+    /// obligation relay of this runtime runs under: the configured retry
+    /// and claim shape with the recovery pass's delivery budget. Both due
+    /// passes and immediate producer attempts use this resolved policy.
     #[must_use]
     pub fn relay_policy(&self) -> crate::runtime::obligations::relay::RelayPolicy {
         crate::runtime::obligations::relay::RelayPolicy {
             attempt_budget_ms: self.recovery_pass.attempt_ms(),
-            ..crate::runtime::obligations::relay::RelayPolicy::default()
+            ..self.relay
         }
     }
 }
@@ -304,6 +310,9 @@ impl RuntimeHostConfig {
                 process_tool_visibility_filter: None,
                 tool_source_policy,
                 recovery_pass: crate::engine::RecoveryPassBudget::default(),
+                relay: super::obligations::relay::RelayPolicy::standard(),
+                commit_admission: super::CommitAdmissionPolicy::standard(),
+                pacing: super::RuntimePacingPolicy::standard(),
             },
             tracing: crate::trace::TraceRuntime::new(Arc::clone(&clock)),
             turn_phase_probes: super::RuntimeTurnPhaseProbeSlot::default(),
@@ -333,7 +342,8 @@ impl RuntimeHostConfig {
             .with_max_attachment_bytes(max_attachment_bytes)
             .with_read_policy(self.durability.attachment_store.read_policy())
             .with_upload_expiry_ms(upload_expiry_ms)
-            .with_output_retention(output_retention),
+            .with_output_retention(output_retention)
+            .with_reclamation_retry(self.durability.attachment_store.reclamation_retry()),
         );
         self.durability.turn_prelude_store = backend.turn_prelude_store();
         let mut config = self

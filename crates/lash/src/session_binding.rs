@@ -9,6 +9,7 @@ use lash_core::ActorContext;
 /// cannot independently consult a core override.
 #[derive(Clone)]
 pub(crate) struct BoundSession {
+    pub(crate) observer_pacing: Arc<crate::ObserverPacing>,
     store: lash_core::store::SessionStore,
     effect_host: ActorContext,
     process: ProcessWorkWiring,
@@ -29,8 +30,10 @@ impl BoundSession {
         env: &RuntimeEnvironment,
         process: ProcessWorkWiring,
         catalog: Arc<dyn DeploymentStore>,
+        observer_pacing: Arc<crate::ObserverPacing>,
     ) -> Self {
         Self {
+            observer_pacing,
             store,
             effect_host: env.core.control.effect_host.clone(),
             process,

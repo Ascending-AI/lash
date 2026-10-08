@@ -15,13 +15,21 @@ pub struct RecoveryPassBudget {
     pub attempt: std::time::Duration,
 }
 
-impl Default for RecoveryPassBudget {
-    fn default() -> Self {
+impl RecoveryPassBudget {
+    /// Standard delivery preset: 30s per attempt. This historical value has
+    /// no supporting workload measurement.
+    pub fn standard() -> Self {
         Self {
             attempt: std::time::Duration::from_millis(
                 crate::runtime::obligations::relay::RelayPolicy::DEFAULT_ATTEMPT_BUDGET_MS,
             ),
         }
+    }
+}
+
+impl Default for RecoveryPassBudget {
+    fn default() -> Self {
+        Self::standard()
     }
 }
 
@@ -53,8 +61,11 @@ pub struct RecoveryLeaseTimings {
     pub min_tenure: std::time::Duration,
 }
 
-impl Default for RecoveryLeaseTimings {
-    fn default() -> Self {
+impl RecoveryLeaseTimings {
+    /// Standard lease preset: TTL 15s, renew every 5s with a 2.5s timeout,
+    /// trust margin 2s, follower retry 5s plus up to 500ms jitter, minimum
+    /// tenure 30s. These historical values have no workload measurements.
+    pub fn standard() -> Self {
         Self {
             ttl: std::time::Duration::from_secs(15),
             renew_every: std::time::Duration::from_secs(5),
@@ -64,6 +75,12 @@ impl Default for RecoveryLeaseTimings {
             follower_jitter: std::time::Duration::from_millis(500),
             min_tenure: std::time::Duration::from_secs(30),
         }
+    }
+}
+
+impl Default for RecoveryLeaseTimings {
+    fn default() -> Self {
+        Self::standard()
     }
 }
 
@@ -79,4 +96,15 @@ pub struct RecoveryLeaseConfig {
     pub generation_rank: i64,
     /// The lease's cadence.
     pub timings: RecoveryLeaseTimings,
+}
+
+impl RecoveryLeaseConfig {
+    /// Standard recovery seat: no rank preference (0), with the documented
+    /// [`RecoveryLeaseTimings::standard`] cadence.
+    pub fn standard() -> Self {
+        Self {
+            generation_rank: 0,
+            timings: RecoveryLeaseTimings::standard(),
+        }
+    }
 }

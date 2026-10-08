@@ -162,10 +162,7 @@ async fn sweep_without_grace(backend: &lash_core::Backend) {
     lash_core::facade_support::reclaim_unreferenced_attachments(
         backend.session_store_factory().as_ref(),
         backend.attachment_store().as_ref(),
-        lash_core::AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: lash_core::EmptyRootSetPolicy::Refuse,
-        },
+        lash_core::AttachmentReclamationPolicy::new(0, lash_core::EmptyRootSetPolicy::Refuse),
     )
     .await
     .expect("sweep the attachments");
@@ -687,10 +684,10 @@ for (let i = 0; i < history.length; i++) {
     let reclaimed = lash_core::facade_support::reclaim_unreferenced_attachments(
         factory.as_ref(),
         backend.attachment_store().as_ref(),
-        lash_core::AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: lash_core::EmptyRootSetPolicy::AuthorizeDeleteAll,
-        },
+        lash_core::AttachmentReclamationPolicy::new(
+            0,
+            lash_core::EmptyRootSetPolicy::AuthorizeDeleteAll,
+        ),
     )
     .await
     .expect("the host authorizes attachment reclamation");

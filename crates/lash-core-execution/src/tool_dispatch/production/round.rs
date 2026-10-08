@@ -308,19 +308,6 @@ fn retry_failure(
     answered(call, output)
 }
 
-/// The pause before a faulted attempt runs again, after `faults` earlier
-/// faults of it: doubling from 10 ms to at most one second, spent from the
-/// call's one limit.
-fn attempt_fault_backoff(faults: u32) -> std::time::Duration {
-    const FIRST_MS: u64 = 10;
-    const MAX_MS: u64 = 1_000;
-    std::time::Duration::from_millis(
-        FIRST_MS
-            .saturating_mul(1_u64.checked_shl(faults).unwrap_or(u64::MAX))
-            .min(MAX_MS),
-    )
-}
-
 /// The body of `execution`, an attempt of the member `call` invoked as
 /// `invocation`, over `context`'s catalog and owned by `owner`'s run: the
 /// call's admission checks, its attempt and its decision, run in memory
@@ -390,7 +377,7 @@ pub(super) fn member_body(
                         context
                             .dispatch()
                             .clock
-                            .sleep(attempt_fault_backoff(faults))
+                            .sleep(context.tool_fault_retry().after_faults(faults))
                             .await;
                         faults = faults.saturating_add(1);
                     }

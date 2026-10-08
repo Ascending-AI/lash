@@ -209,6 +209,7 @@ pub use lash_core::async_trait;
 /// Store→engine delivery obligations (ADR 0109): what a stalled obligation
 /// reports, and how this deployment competes for the recovery leader lease.
 pub use lash_core::engine::{RecoveryLeaseConfig, RecoveryLeaseTimings, RecoveryPassBudget};
+pub mod pacing;
 pub use lash_core::facade_support::{
     TurnCancelAffectedInput, TurnCancelInputOutcome, TurnCancelMode,
     TurnCancelUndeliveredInputPolicy,
@@ -259,6 +260,10 @@ pub use lash_core::{
 pub use lash_core::{
     ExecutionBudgets, ExecutionBudgetsConfig, ExecutionBudgetsError, ExecutionLimit,
     ProviderAttemptLimits, RegistrationRefused,
+};
+pub use pacing::{
+    CommitAdmissionPolicy, CommitAdmissionPolicyError, ObserverPacing, PollPacing, RecoveryPacing,
+    RelayPolicy, RelayPolicyError, RuntimePacingPolicy, WorkCadencePolicy,
 };
 // A host's head write is a session command it submits, settles and may
 // withdraw (FIG-4202): the settlement and the typed outcomes it carries.
@@ -572,6 +577,9 @@ pub mod persistence {
             derive_batch_id, select_leading_session_command,
         };
     }
+    pub use lash_core::attachments::{
+        AttachmentReclamationRetryPolicy, AttachmentReclamationRetryPolicyError,
+    };
     pub use lash_core::session_graph::WindowAnchor;
     pub use lash_core::store::PluginWriterRangesFuture;
     /// A session's fault record (ADR 0109 §9): one segment of
@@ -1176,7 +1184,7 @@ pub mod runtime {
     pub use lash_core::engine::{EngineRefusal, RefusalClass};
     pub use lash_core::runtime::ProcessDefinitionLocalExecution;
     pub use lash_core::runtime::SessionTurnAdmission;
-    pub use lash_core::runtime::obligations::relay::RelayPolicy;
+    pub use lash_core::runtime::obligations::relay::{RelayPolicy, RelayPolicyError};
     pub use lash_core::runtime::{CompactionBase, PresentationBinding, ToolPresentation};
     pub use lash_core::tool_dispatch::ToolAttemptLineage;
     /// The cancellation policy pinned in a Run-owned source descriptor.
@@ -1216,15 +1224,16 @@ pub mod runtime {
     pub use lash_core::runtime::{
         AdmittedDirectSend, AdmittedScope, AssembledTurn, AssistantResponseHookEvents,
         AssistantResponsePlan, AssistantStreamHookState, CheckpointAdmittedSet,
-        DirectCompletionClient, EffectAddress, EmbeddedRuntimeHost, EventSink, ExecutionScope,
-        LlmRequestSpec, LlmStreamRecord, NoopEventSink, NoopTurnActivitySink, ProcessCommand,
-        ProcessEffectOutcome, ProcessListSelection, RunAggregateWakePolicy, RuntimeAttribution,
-        RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeEffectCommand,
-        RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-        RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-        RuntimeEffectReplayMismatchReport, RuntimeEnvironmentBuilder, RuntimeError,
-        RuntimeErrorCode, RuntimeInvocation, RuntimeProviderConfig, SleepSpec, TraceEmitter,
-        TraceRuntime, TurnCancelWait, TurnContext, TurnPrelude, TurnPreludeRef, WorkCadenceError,
+        CommitAdmissionPolicy, CommitAdmissionPolicyError, DirectCompletionClient, EffectAddress,
+        EmbeddedRuntimeHost, EventSink, ExecutionScope, LlmRequestSpec, LlmStreamRecord,
+        NoopEventSink, NoopTurnActivitySink, PollPacing, ProcessCommand, ProcessEffectOutcome,
+        ProcessListSelection, RunAggregateWakePolicy, RuntimeAttribution, RuntimeControlConfig,
+        RuntimeDurabilityConfig, RuntimeEffectCommand, RuntimeEffectControllerError,
+        RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectKind,
+        RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
+        RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeInvocation,
+        RuntimePacingPolicy, RuntimeProviderConfig, SleepSpec, TraceEmitter, TraceRuntime,
+        TurnCancelWait, TurnContext, TurnPrelude, TurnPreludeRef, WorkCadenceError,
         WorkCadencePolicy,
     };
     /// The host clock a [`Backend`](crate::Backend) is opened on, used

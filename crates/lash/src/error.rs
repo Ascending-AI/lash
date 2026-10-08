@@ -142,6 +142,12 @@ pub enum EmbedError {
     },
     #[error("invalid work cadence: {0}")]
     WorkCadence(#[from] lash_core::WorkCadenceError),
+    /// Invalid obligation retry or claim settings.
+    #[error(transparent)]
+    RelayPolicy(#[from] crate::RelayPolicyError),
+    /// Invalid same-session admission wait TTL.
+    #[error(transparent)]
+    CommitAdmissionPolicy(#[from] crate::CommitAdmissionPolicyError),
     /// A ToolAdmin reconfiguration was refused before changing its catalog.
     #[error("tool reconfiguration: {0}")]
     Reconfigure(#[from] lash_core::facade_support::ReconfigureError),
@@ -375,6 +381,8 @@ impl EmbedError {
             | Self::MissingQueuedWorkBatching
             | Self::SessionCreationUnrecorded { .. }
             | Self::WorkCadence(_)
+            | Self::RelayPolicy(_)
+            | Self::CommitAdmissionPolicy(_)
             | Self::SessionStillInUse
             | Self::TraceFlush(_)
             | Self::Session(_)
@@ -462,6 +470,8 @@ impl EmbedError {
             | Self::ProtocolTurnOptions(_)
             | Self::DecodeProtocolTurnOptions(_)
             | Self::WorkCadence(_)
+            | Self::RelayPolicy(_)
+            | Self::CommitAdmissionPolicy(_)
             | Self::Session(_) => false,
         }
     }

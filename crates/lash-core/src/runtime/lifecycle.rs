@@ -226,7 +226,8 @@ impl LashRuntime {
                 .with_max_attachment_bytes(previous_attachment_store.max_attachment_bytes())
                 .with_read_policy(previous_attachment_store.read_policy())
                 .with_upload_expiry_ms(previous_attachment_store.upload_expiry_ms())
-                .with_output_retention(previous_attachment_store.output_retention()),
+                .with_output_retention(previous_attachment_store.output_retention())
+                .with_reclamation_retry(previous_attachment_store.reclamation_retry()),
             );
             host.core.durability.attachment_store = scoped;
         }

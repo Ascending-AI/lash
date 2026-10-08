@@ -601,10 +601,10 @@ impl Law {
         lash::persistence::reclaim_unreferenced_attachments(
             self.backend.session_store_factory().as_ref(),
             self.backend.attachment_store().as_ref(),
-            lash_core::AttachmentReclamationPolicy {
-                grace_period_ms: 0,
-                empty_root_set: lash_core::EmptyRootSetPolicy::AuthorizeDeleteAll,
-            },
+            lash_core::AttachmentReclamationPolicy::new(
+                0,
+                lash_core::EmptyRootSetPolicy::AuthorizeDeleteAll,
+            ),
         )
         .await
         .expect("sweep attachments")

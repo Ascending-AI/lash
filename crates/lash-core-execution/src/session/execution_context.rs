@@ -49,6 +49,7 @@ impl RecordedTurnCancel {
 
 #[derive(Clone)]
 pub struct RuntimeExecutionContext<'run> {
+    tool_fault_retry: crate::runtime::PollPacing,
     pub(super) dispatch: Arc<ToolDispatchContext<'run>>,
     tool_material_store: Option<Arc<dyn crate::store::ToolMaterialStore>>,
 
@@ -169,6 +170,16 @@ pub struct RuntimeExecutionProcessEventContext {
 }
 
 impl<'run> RuntimeExecutionContext<'run> {
+    /// Configure tool-fault retries for this execution and its derived contexts.
+    pub fn with_tool_fault_retry(mut self, pacing: crate::runtime::PollPacing) -> Self {
+        self.tool_fault_retry = pacing;
+        self
+    }
+
+    pub fn tool_fault_retry(&self) -> crate::runtime::PollPacing {
+        self.tool_fault_retry
+    }
+
     /// Restore run-local child possession for a resumed process-engine segment.
     pub fn restore_started_process_ids(&self, process_ids: &[ProcessId]) {
         self.started_process_ids
@@ -406,6 +417,7 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     pub(crate) fn to_static(&self) -> Option<RuntimeExecutionContext<'static>> {
         Some(RuntimeExecutionContext {
+            tool_fault_retry: self.tool_fault_retry,
             dispatch: Arc::new(self.dispatch.to_static()?),
             tool_material_store: self.tool_material_store.clone(),
 

@@ -2,7 +2,7 @@
 //! the deployment's clock.
 //!
 //! A deployment runs its recovery pass on a [`RecoveryInterval`]:
-//! the pass fires every [`RECOVERY_TICK`] from the grid's start, whatever the
+//! the pass fires every configured period from the grid's start, whatever the
 //! pass before it spent, so a pass that returns within the period never
 //! moves the next one. A pass that overran its period fires the next at
 //! once and the grid moves on from there: consecutive passes start at most
@@ -14,7 +14,8 @@ use std::time::{Duration, Instant};
 
 use crate::Clock;
 
-/// The recovery pass's period, `T` in ADR 0109 §1.8.
+/// Standard recovery period: 10s (`T` in ADR 0109 §1.8).
+/// This historical value has no supporting workload measurement.
 pub const RECOVERY_TICK: Duration = Duration::from_secs(10);
 
 /// A fixed-period schedule on a [`Clock`].

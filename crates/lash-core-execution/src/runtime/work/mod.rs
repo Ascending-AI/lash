@@ -1,7 +1,7 @@
 //! The deployment port durable processes are served through
 //! ([`ProcessWorkSubstrate`], [`ProcessWorkWiring`]), with the pieces every
-//! deployment shares: the registry awaiter, the wake-delivery driver and
-//! their pacing. Session work has no port: a producer wakes the session
+//! deployment shares: the registry awaiter and its pacing. Session work has no
+//! port: a producer wakes the session
 //! actor in its own transaction ([`crate::Backend::wake_session`] outside
 //! one).
 
@@ -12,7 +12,10 @@ mod cadence;
 mod durable;
 
 pub use awaiter::ProcessRegistryAwaiter;
-pub use cadence::{WorkCadenceError, WorkCadencePolicy};
+pub use cadence::{
+    CommitAdmissionPolicy, CommitAdmissionPolicyError, PollPacing, RuntimePacingPolicy,
+    WorkCadenceError, WorkCadencePolicy,
+};
 pub use durable::DurableProcessWork;
 
 use super::process::{ProcessRegistry, WatchedRegistry};
@@ -60,21 +63,17 @@ pub enum ProcessTerminalWait {
 pub struct ProcessWorkWiring {
     watched: WatchedRegistry,
     port: Arc<dyn ProcessWorkSubstrate>,
-    event_awaiter: ProcessRegistryAwaiter,
     runs_processes: bool,
 }
 
 impl ProcessWorkWiring {
     /// Pair a watched registry and its change hub with the process port bound
-    /// to exactly that handle. This constructs core's one event awaiter; the
-    /// caller that created the port owns the pairing contract.
+    /// to exactly that handle. The caller that created the port owns the pairing
+    /// contract and configures its waits before installing it.
     pub fn new(watched: WatchedRegistry, port: Arc<dyn ProcessWorkSubstrate>) -> Self {
-        let event_awaiter =
-            ProcessRegistryAwaiter::new(Arc::clone(watched.registry()), watched.hub().clone());
         Self {
             watched,
             port,
-            event_awaiter,
             runs_processes: true,
         }
     }
@@ -94,16 +93,6 @@ impl ProcessWorkWiring {
     /// for [`Self::without_process_work`].
     pub fn runs_processes(&self) -> bool {
         self.runs_processes
-    }
-
-    /// Pace the event awaiter on `work_cadence`.
-    pub fn with_work_cadence(
-        mut self,
-        work_cadence: WorkCadencePolicy,
-    ) -> Result<Self, WorkCadenceError> {
-        work_cadence.validate()?;
-        self.event_awaiter = self.event_awaiter.with_work_cadence(work_cadence);
-        Ok(self)
     }
 
     pub fn registry(&self) -> &Arc<dyn ProcessRegistry> {

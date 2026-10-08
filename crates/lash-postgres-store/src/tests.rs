@@ -719,10 +719,10 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
     let result = lash_core_execution::attachments::reclaim_unreferenced_attachments(
         &wrong_factory,
         backend.as_ref(),
-        lash_core_execution::AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: lash_core_execution::EmptyRootSetPolicy::Refuse,
-        },
+        lash_core_execution::AttachmentReclamationPolicy::new(
+            0,
+            lash_core_execution::EmptyRootSetPolicy::Refuse,
+        ),
     )
     .await;
 

@@ -138,8 +138,11 @@ impl RelayPolicy {
     pub const DEFAULT_ATTEMPT_BUDGET_MS: u64 = 30_000;
 }
 
-impl Default for RelayPolicy {
-    fn default() -> Self {
+impl RelayPolicy {
+    /// Standard relay preset: 1s initial and 15-minute maximum backoff,
+    /// 16 attempts, 60s claim TTL and 30s delivery budget. These historical
+    /// values are not backed by workload measurements.
+    pub fn standard() -> Self {
         Self {
             base_backoff_ms: 1_000,
             max_backoff_ms: 900_000,
@@ -150,7 +153,32 @@ impl Default for RelayPolicy {
     }
 }
 
+impl Default for RelayPolicy {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+
+/// A relay policy that would spin or permit a claim to lapse during delivery.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "relay policy requires positive backoff and delivery budget, initial backoff <= maximum, and delivery budget < claim TTL"
+)]
+pub struct RelayPolicyError;
+
 impl RelayPolicy {
+    /// Refuse busy-spinning retries or claims that expire during an attempt.
+    pub fn validate(&self) -> Result<(), RelayPolicyError> {
+        if self.base_backoff_ms == 0
+            || self.base_backoff_ms > self.max_backoff_ms
+            || self.attempt_budget_ms == 0
+            || self.attempt_budget_ms >= self.claim_ttl_ms
+        {
+            return Err(RelayPolicyError);
+        }
+        Ok(())
+    }
+
     /// The delay before the attempt that follows attempt `attempts`:
     /// `min(base · 2^(attempts − 1), max)`.
     #[must_use]

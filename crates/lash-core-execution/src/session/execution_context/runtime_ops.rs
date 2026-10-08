@@ -84,6 +84,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
         execution_env_spec: crate::ProcessExecutionEnvSpec,
     ) -> Self {
         Self {
+            tool_fault_retry: crate::runtime::PollPacing::fault_standard(),
             dispatch,
             tool_material_store: None,
             process_env_store,

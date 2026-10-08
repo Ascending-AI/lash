@@ -26,6 +26,7 @@ use crate::{AdmittedScope, Backend, Clock, ExecutionScope, RuntimeError, TurnId}
 pub struct ActorContext {
     pub(super) inner: Arc<Inner>,
     pub(super) scope: Arc<Scope>,
+    pub(super) idle_poll: crate::runtime::PollPacing,
 }
 
 /// The scope a context executes under, shared by its clones.
@@ -123,6 +124,7 @@ impl ActorContext {
     ) -> Self {
         let clock = backend.clock();
         Self {
+            idle_poll: crate::runtime::PollPacing::standard(),
             inner: Arc::new(Inner {
                 backend: Some(backend),
                 durable: None,
@@ -152,6 +154,7 @@ impl ActorContext {
         probe: Arc<dyn DurableProbe>,
     ) -> Self {
         Self {
+            idle_poll: crate::runtime::PollPacing::standard(),
             inner: Arc::new(Inner {
                 backend: Some(backend),
                 durable: Some(Arc::clone(owned.store())),
@@ -179,6 +182,7 @@ impl ActorContext {
     #[must_use]
     pub fn unavailable() -> Self {
         Self {
+            idle_poll: crate::runtime::PollPacing::standard(),
             inner: Arc::new(Inner {
                 backend: None,
                 durable: None,
@@ -236,9 +240,17 @@ impl ActorContext {
         DurableInstant(i64::try_from(self.inner.clock.timestamp_ms()).unwrap_or(i64::MAX))
     }
 
+    /// Pace waits without a mailbox or backend using `pacing.maximum()` as
+    /// the fixed delay. The standard preset uses a 1s idle delay, a historical
+    /// value without workload measurements.
+    #[must_use]
+    pub fn with_idle_pacing(mut self, pacing: crate::runtime::PollPacing) -> Self {
+        self.idle_poll = pacing;
+        self
+    }
+
     /// The node's clock, for live enforcement: a local timer for
     /// `expires_at - now`.
-    #[must_use]
     pub fn clock(&self) -> &Arc<dyn Clock> {
         &self.inner.clock
     }
@@ -275,7 +287,7 @@ impl ActorContext {
                     .inner
                     .backend
                     .as_ref()
-                    .map_or(std::time::Duration::from_secs(1), |backend| {
+                    .map_or(self.idle_poll.maximum(), |backend| {
                         backend.config().lease().settings().claim_poll
                     });
                 self.inner.clock.sleep(poll).await;
@@ -438,6 +450,7 @@ impl ActorContext {
     pub fn scoped(&self, admitted: AdmittedScope) -> Result<Self, RuntimeError> {
         admitted.scope().validate()?;
         Ok(Self {
+            idle_poll: self.idle_poll,
             inner: Arc::clone(&self.inner),
             scope: Scope::new(admitted),
         })
@@ -474,6 +487,7 @@ impl ActorContext {
         });
         debug_assert!(fresh.is_some());
         Ok(Self {
+            idle_poll: self.idle_poll,
             inner: Arc::clone(&self.inner),
             scope: next,
         })
@@ -515,6 +529,7 @@ impl ActorContext {
         let mut next = self.scope.with();
         next.trace_scope = Some(Arc::new(scope));
         Self {
+            idle_poll: self.idle_poll,
             inner: Arc::clone(&self.inner),
             scope: Arc::new(next),
         }
@@ -533,6 +548,7 @@ impl ActorContext {
         let mut next = self.scope.with();
         next.physical_turn = Some(Arc::new(turn));
         Self {
+            idle_poll: self.idle_poll,
             inner: Arc::clone(&self.inner),
             scope: Arc::new(next),
         }

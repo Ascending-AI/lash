@@ -28,9 +28,6 @@ pub struct DurableProcessWorkerConfig {
     /// The host config and its one backend, which supplies the session
     /// catalog this worker reaches (ADR 0102, D2).
     pub runtime_host: RuntimeHostConfig,
-    /// Pacing of the registry waits a process run makes through this
-    /// worker's process work.
-    pub work_cadence: crate::WorkCadencePolicy,
     process_work: crate::ProcessWorkWiring,
     /// The host owner identity a process runtime runs under.
     pub lease_owner: crate::LeaseOwnerIdentity,
@@ -51,7 +48,6 @@ impl DurableProcessWorkerConfig {
         Self {
             plugin_host,
             runtime_host,
-            work_cadence: crate::WorkCadencePolicy::default(),
             process_work,
             lease_owner,
         }
@@ -106,27 +102,18 @@ pub struct DurableProcessWorker {
 }
 
 impl DurableProcessWorker {
-    pub fn new(config: DurableProcessWorkerConfig) -> Result<Self, crate::WorkCadenceError> {
-        config.work_cadence.validate()?;
-        Ok(Self {
+    pub fn new(config: DurableProcessWorkerConfig) -> Self {
+        Self {
             config: Arc::new(config),
-        })
+        }
     }
 
     pub fn config(&self) -> &DurableProcessWorkerConfig {
         &self.config
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "the work cadence was validated when the worker was built"
-    )]
     fn process_wiring(&self) -> crate::ProcessWorkWiring {
-        self.config
-            .process_work
-            .clone()
-            .with_work_cadence(self.config.work_cadence.clone())
-            .expect("the work cadence was validated when the worker was built")
+        self.config.process_work.clone()
     }
 
     /// Admit this worker's plugin composition against the fleet record

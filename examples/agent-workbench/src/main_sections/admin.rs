@@ -378,10 +378,7 @@ pub(crate) fn attachment_reclamation_policy(
     retention_ms: u64,
     empty_roots: EmptyRootSetPolicy,
 ) -> lash::persistence::AttachmentReclamationPolicy {
-    lash::persistence::AttachmentReclamationPolicy {
-        grace_period_ms: retention_ms,
-        empty_root_set: empty_roots,
-    }
+    lash::persistence::AttachmentReclamationPolicy::new(retention_ms, empty_roots)
 }
 
 /// The root authority, the backend and the policy are all parameters rather

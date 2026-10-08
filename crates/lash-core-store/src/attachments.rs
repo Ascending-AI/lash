@@ -719,6 +719,28 @@ pub struct AttachmentReclamationPolicy {
     pub grace_period_ms: u64,
     /// How the sweep may interpret an empty live root set.
     pub empty_root_set: EmptyRootSetPolicy,
+    /// Failed deletes before the row is reported stalled. The standard preset
+    /// is 5 attempts, a historical value without workload measurements.
+    delete_attempt_limit: std::num::NonZeroU32,
+}
+
+impl AttachmentReclamationPolicy {
+    /// Choose retention and empty-root authority explicitly, with the standard
+    /// retry preset of 5 failed physical deletes. The retry count is a
+    /// historical value without supporting workload measurements.
+    pub fn new(grace_period_ms: u64, empty_root_set: EmptyRootSetPolicy) -> Self {
+        Self {
+            grace_period_ms,
+            empty_root_set,
+            delete_attempt_limit: std::num::NonZeroU32::MIN
+                .saturating_add(MAX_ATTACHMENT_DELETE_ATTEMPTS - 1),
+        }
+    }
+    /// Override the optional standard delete-attempt limit.
+    pub fn with_delete_attempt_limit(mut self, limit: std::num::NonZeroU32) -> Self {
+        self.delete_attempt_limit = limit;
+        self
+    }
 }
 
 /// Enumerates every blob in `backend`, computes the live root set from
@@ -811,7 +833,8 @@ pub struct AttachmentReclamationPolicy {
 /// second and doubling to a fifteen-minute cap, using the store clock. A
 /// refusal (credentials, authorization, a terminal or contract failure) stalls
 /// the row at once, and a retryable one stalls once
-/// [`MAX_ATTACHMENT_DELETE_ATTEMPTS`] deletes have failed. A stalled row is
+/// the policy's delete-attempt limit is reached (standard preset:
+/// [`MAX_ATTACHMENT_DELETE_ATTEMPTS`]). A stalled row is
 /// retried by later sweeps with capped backoff and stays listed until success
 /// in [`AttachmentReclamationReport::stalled_ids`] and, with its typed reason,
 /// in [`AttachmentRootSet::list_condemnations`].
@@ -973,6 +996,7 @@ where
                     id: &condemnation.digest,
                     phase: condemnation.phase,
                     delete_attempts: condemnation.delete_attempts,
+                    delete_attempt_limit: policy.delete_attempt_limit,
                     stalled: condemnation.stalled,
                 },
                 grace_period_ms,
@@ -1044,6 +1068,7 @@ where
                             id: &blob.id,
                             phase: AttachmentCondemnationPhase::Condemned,
                             delete_attempts: 0,
+                            delete_attempt_limit: policy.delete_attempt_limit,
                             stalled: None,
                         },
                         grace_period_ms,
@@ -1205,6 +1230,7 @@ struct Candidate<'a> {
     phase: AttachmentCondemnationPhase,
     /// Failed deletes recorded before this pass.
     delete_attempts: u32,
+    delete_attempt_limit: std::num::NonZeroU32,
     stalled: Option<AttachmentDeleteStallReason>,
 }
 
@@ -1335,7 +1361,7 @@ async fn record_failed_delete<R>(
     let stall = candidate.stalled.or_else(|| {
         if !error.is_retryable() {
             Some(AttachmentDeleteStallReason::Refused)
-        } else if attempts >= MAX_ATTACHMENT_DELETE_ATTEMPTS {
+        } else if attempts >= candidate.delete_attempt_limit.get() {
             Some(AttachmentDeleteStallReason::AttemptsExhausted)
         } else {
             None
@@ -1449,6 +1475,7 @@ mod runtime_store;
 pub use runtime_store::UnavailableAttachmentStore;
 pub use runtime_store::{
     AttachmentExecutionBinding, AttachmentHolder, AttachmentReadPolicy,
+    AttachmentReclamationRetryPolicy, AttachmentReclamationRetryPolicyError,
     DEFAULT_ATTACHMENT_UPLOAD_EXPIRY_MS, NoopAttachmentReferrers, PersistenceReferrersAdapter,
     RuntimeAttachmentStore,
 };

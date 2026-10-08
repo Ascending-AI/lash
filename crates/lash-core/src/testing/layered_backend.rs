@@ -124,6 +124,17 @@ impl LayeredBackend {
         self
     }
 
+    /// Decorate the cleanup ledger, including its obligation claim port.
+    pub fn map_artifact_cleanup(
+        mut self,
+        layer: impl FnOnce(
+            Arc<dyn crate::store::ArtifactCleanupLedger>,
+        ) -> Arc<dyn crate::store::ArtifactCleanupLedger>,
+    ) -> Self {
+        self.artifact_cleanup = layer(self.artifact_cleanup);
+        self
+    }
+
     /// The decorated backend, as the handle a host config takes.
     pub fn into_backend(self) -> Backend {
         let inner_stores = self.inner.stores();

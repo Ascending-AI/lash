@@ -94,7 +94,8 @@ impl ProcessRuntimeContext {
             .with_max_attachment_bytes(host_attachments.max_attachment_bytes())
             .with_read_policy(host_attachments.read_policy())
             .with_upload_expiry_ms(host_attachments.upload_expiry_ms())
-            .with_output_retention(host_attachments.output_retention()),
+            .with_output_retention(host_attachments.output_retention())
+            .with_reclamation_retry(host_attachments.reclamation_retry()),
         );
         let host = super::host::RuntimeHost { core, work };
         Ok(Self {

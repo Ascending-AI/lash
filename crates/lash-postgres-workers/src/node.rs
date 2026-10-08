@@ -192,8 +192,7 @@ pub async fn run(config: NodeConfig) -> Result<Stopped, String> {
     let session_turns = lash::durability::DurableProcessWorker::new(
         core.durable_process_worker_config()
             .map_err(|error| format!("configure the process worker: {error}"))?,
-    )
-    .map_err(|error| format!("build the process worker: {error}"))?;
+    );
     let processes = ProcessActivation::new(
         backend.clone(),
         Arc::new(WorkerSteps::new(witness)),

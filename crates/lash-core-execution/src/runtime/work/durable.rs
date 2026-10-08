@@ -11,13 +11,29 @@ use crate::{Backend, PluginError};
 /// Process work over the durable backend: a start wakes the process actor.
 pub struct DurableProcessWork {
     backend: Backend,
+    work_cadence: super::WorkCadencePolicy,
 }
 
 impl DurableProcessWork {
     /// Process work over `backend`.
     #[must_use]
     pub fn new(backend: Backend) -> Self {
-        Self { backend }
+        Self {
+            backend,
+            work_cadence: super::WorkCadencePolicy::standard(),
+        }
+    }
+}
+
+impl DurableProcessWork {
+    /// Configure the registry waits this port actually runs.
+    pub fn with_work_cadence(
+        mut self,
+        cadence: super::WorkCadencePolicy,
+    ) -> Result<Self, super::WorkCadenceError> {
+        cadence.validate()?;
+        self.work_cadence = cadence;
+        Ok(self)
     }
 }
 
@@ -38,6 +54,7 @@ impl ProcessWorkSubstrate for DurableProcessWork {
         process_id: &crate::ProcessId,
     ) -> Result<ProcessTerminalWait, PluginError> {
         super::ProcessRegistryAwaiter::for_registry(self.backend.process_registry())
+            .with_work_cadence(self.work_cadence.clone())
             .await_terminal(process_id)
             .await
             .map(ProcessTerminalWait::Terminal)

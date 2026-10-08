@@ -3,25 +3,20 @@
 //!
 //! One slot per core. The election runs on a background task of its own,
 //! which keeps the lease's cadence and resigns when the slot is dropped or the
-//! core shuts down. The cleanup pass runs on another: every
-//! [`RECOVERY_TICK`] it claims a bounded page of due `ArtifactCleanup` rows,
+//! core shuts down. The cleanup pass runs on another: on its configured interval it claims a bounded page of due `ArtifactCleanup` rows,
 //! on every deployment of every store (ADR 0109 §1.7), so a cleanup whose
 //! producer died before its immediate attempt is still delivered. Claim
 //! tokens fence each claim, so two deployments never deliver one row twice.
 
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use lash_core::engine::RecoveryLeaseConfig;
+use lash_core::runtime::obligations::RecoveryInterval;
 use lash_core::runtime::obligations::relay::{ObligationRelay, relay_due};
-use lash_core::runtime::obligations::{RECOVERY_TICK, RecoveryInterval};
 use lash_core::runtime::recovery_lease::RecoveryLease;
 use lash_core::store::{LeaseName, RecoveryLeaderStore};
 
 use crate::support::RuntimeEnvironment;
-
-/// The most due cleanups one pass claims.
-const CLEANUP_PAGE: NonZeroUsize = NonZeroUsize::MIN.saturating_add(255);
 
 pub(crate) struct RecoverySlot {
     /// The slot's one holder, for the core's whole life: an election whose
@@ -90,10 +85,14 @@ impl RecoverySlot {
         });
     }
 
-    /// Run `relay`'s due pass every [`RECOVERY_TICK`] on a task of its own
+    /// Run `relay`'s due pass on the configured interval on a task of its own
     /// until the slot is dropped or the core shuts down. Without a runtime to
     /// run it on, nothing starts: such a core has no background work.
-    pub(crate) fn start_cleanup(&self, relay: Arc<dyn ObligationRelay>) {
+    pub(crate) fn start_cleanup(
+        &self,
+        relay: Arc<dyn ObligationRelay>,
+        pacing: crate::RecoveryPacing,
+    ) {
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             return;
         };
@@ -101,13 +100,13 @@ impl RecoverySlot {
         let clock = Arc::clone(&self.clock);
         let shutdown = self.shutdown.clone();
         runtime.spawn(async move {
-            let mut interval = RecoveryInterval::new(Arc::clone(&clock), RECOVERY_TICK);
+            let mut interval = RecoveryInterval::new(Arc::clone(&clock), pacing.interval());
             loop {
                 tokio::select! {
                     () = shutdown.cancelled() => break,
                     _ = interval.tick() => {}
                 }
-                if let Err(error) = relay_due(relay.as_ref(), clock.as_ref(), CLEANUP_PAGE).await {
+                if let Err(error) = relay_due(relay.as_ref(), clock.as_ref(), pacing.cleanup_page).await {
                     tracing::warn!(%error, "artifact cleanup pass failed; the next tick retries it");
                 }
             }

@@ -3,7 +3,6 @@ use crate::EmbedError;
 use crate::Result;
 use lash_core::SessionId;
 use lash_core::store::SessionLookup;
-use std::time::Duration;
 
 /// Where a state-based wait for a requested session deletion ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -16,9 +15,6 @@ pub enum SessionDeleteCompletion {
     /// The session has no close. This wait starts no deletion.
     NotClosing,
 }
-
-const POLL: Duration = Duration::from_millis(25);
-const MAX_POLL: Duration = Duration::from_secs(1);
 
 impl LashCore {
     /// Await the tombstone of a requested deletion (ADR 0132 §12).
@@ -38,7 +34,8 @@ impl LashCore {
         &self,
         session_id: &SessionId,
     ) -> Result<SessionDeleteCompletion> {
-        let mut poll = POLL;
+        let pacing = self.observer_pacing.deletion;
+        let mut poll = pacing.initial();
         loop {
             let observed = self.deletion_completion(session_id).await;
             match observed {
@@ -57,7 +54,7 @@ impl LashCore {
                 }
             }
             tokio::time::sleep(poll).await;
-            poll = (poll * 2).min(MAX_POLL);
+            poll = pacing.next(poll);
         }
     }
 

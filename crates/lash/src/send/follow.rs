@@ -41,13 +41,6 @@ use crate::error::{EmbedError, Result, SendError};
 use crate::support::TurnActivitySink;
 use crate::turn::{ReportSource, TurnOutput, TurnReport};
 
-/// The first wait between store reads when nothing else wakes a follower.
-const POLL_FLOOR: Duration = Duration::from_millis(25);
-/// The longest wait between store reads.
-const POLL_CEILING: Duration = Duration::from_secs(1);
-/// Unadopted activities a follower buffers before dropping the oldest.
-const BUFFER_CAPACITY: usize = 4096;
-
 /// A terminal wait in flight.
 type AwaitedTerminal =
     BoxFuture<'static, std::result::Result<TurnTerminal, lash_core::RuntimeError>>;
@@ -107,11 +100,12 @@ struct Adoption {
     subject: Subject,
     run: Option<TurnId>,
     buffered: VecDeque<(TurnId, TurnActivity)>,
+    buffer_capacity: usize,
     collected: Vec<TurnActivity>,
 }
 
 impl Adoption {
-    fn new(subject: &Subject) -> Self {
+    fn new(subject: &Subject, buffer_capacity: usize) -> Self {
         Self {
             run: match subject {
                 Subject::Run(run) => Some(run.clone()),
@@ -119,6 +113,7 @@ impl Adoption {
             },
             subject: subject.clone(),
             buffered: VecDeque::new(),
+            buffer_capacity,
             collected: Vec::new(),
         }
     }
@@ -164,7 +159,7 @@ impl Adoption {
                 if self.adopts(turn) {
                     self.deliver(activity.clone(), tap).await;
                 } else if self.run.is_none() {
-                    if self.buffered.len() >= BUFFER_CAPACITY {
+                    if self.buffered.len() >= self.buffer_capacity {
                         self.buffered.pop_front();
                     }
                     self.buffered.push_back((turn.clone(), activity.clone()));
@@ -250,7 +245,8 @@ impl TerminalWait {
         if self.wait.is_some() || self.ended {
             return;
         }
-        let driver = TurnWorkDriver::new(ctx.parts.effect_host.backend().clone());
+        let driver = TurnWorkDriver::new(ctx.parts.effect_host.backend().clone())
+            .with_terminal_pacing(ctx.parts.observer_pacing.terminal);
         let address = TurnAddress::new(
             ctx.parts.session_id.clone(),
             PhysicalTurn::derive_turn_id(run, self.ordinal),
@@ -301,7 +297,7 @@ impl TerminalWait {
                 );
                 // A wait that cannot attach never spins: the store poll
                 // still answers meanwhile.
-                self.pause = Some(POLL_CEILING);
+                self.pause = Some(ctx.parts.observer_pacing.follow.maximum());
             }
         }
     }
@@ -421,20 +417,21 @@ pub(super) async fn follow(
     window: Option<Duration>,
 ) -> Result<Followed> {
     let deadline = window.map(|window| tokio::time::Instant::now() + window);
-    let mut adoption = Adoption::new(subject);
+    let mut adoption = Adoption::new(subject, ctx.parts.observer_pacing.follow_buffer.get());
     let observed_before = from.observed;
     let mut observation = Observation::subscribe(ctx, from, tap).await;
     // Where this follow's observation starts: past the gap, when the cursor
     // it was handed is gone, so a later window never meets that gap again.
     let start_cursor = observation.last_cursor.clone();
     let mut terminal = TerminalWait::new();
-    let mut poll = POLL_FLOOR;
+    let pacing = ctx.parts.observer_pacing.follow;
+    let mut poll = pacing.initial();
     // The store poll is due `poll` after the last resolve, and the run probe
     // ticks at the floor, whatever wakes in between: a wake that resolves
     // nothing (a probe that found no run, another run's activity) delays
     // neither.
     let mut poll_at = tokio::time::Instant::now() + poll;
-    let mut probe_ticks = tokio::time::interval_at(poll_at, POLL_FLOOR);
+    let mut probe_ticks = tokio::time::interval_at(poll_at, pacing.initial());
     probe_ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut resolve_now = true;
     let mut last_pass = false;
@@ -553,7 +550,7 @@ pub(super) async fn follow(
                         observation.last_cursor = event.cursor.clone();
                         resolve_now = adoption.observe(&event, tap).await;
                         if resolve_now {
-                            poll = POLL_FLOOR;
+                            poll = pacing.initial();
                         }
                     }
                     Some(Err(error)) => {
@@ -585,7 +582,7 @@ pub(super) async fn follow(
                 }
             }
             () = tokio::time::sleep_until(poll_at) => {
-                poll = (poll * 2).min(POLL_CEILING);
+                poll = pacing.next(poll);
             }
             () = closes => {
                 last_pass = true;

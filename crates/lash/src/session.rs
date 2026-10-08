@@ -186,6 +186,7 @@ impl SessionBuilder {
             live_replay_store,
             Arc::clone(&self.core.env.core.providers.models),
             Arc::clone(self.core.env.core.tracing.scopes()),
+            Arc::clone(&self.core.observer_pacing),
         )
         .with_transcript_decoders(self.core.transcript_decoders())
     }
@@ -328,6 +329,7 @@ impl SessionBuilder {
             catalog,
             Arc::clone(&self.core.env.core.providers.models),
             Arc::clone(self.core.env.core.tracing.scopes()),
+            Arc::clone(&self.core.observer_pacing),
         )
         .with_transcript_decoders(self.core.transcript_decoders()))
     }
@@ -488,6 +490,7 @@ impl SessionBuilder {
             &env,
             ports.process.clone(),
             resolved.catalog,
+            Arc::clone(&self.core.observer_pacing),
         ));
         env = binding.apply_owner(env);
         // Plugin configuration is creation config (FIG-4112, FIG-4379): the
@@ -1027,6 +1030,7 @@ impl LashSession {
             self.binding.catalog(),
             self.binding.llm_profiles(),
             self.binding.trace_scopes(),
+            Arc::clone(&self.binding.observer_pacing),
         )
         .with_transcript_decoders(self.read_view().transcript_decoders().clone())
     }

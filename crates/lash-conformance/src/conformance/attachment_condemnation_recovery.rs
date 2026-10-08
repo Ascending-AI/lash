@@ -185,10 +185,7 @@ impl AttachmentStore for DeleteLog {
 }
 
 fn authorize_all() -> AttachmentReclamationPolicy {
-    AttachmentReclamationPolicy {
-        grace_period_ms: 0,
-        empty_root_set: EmptyRootSetPolicy::AuthorizeDeleteAll,
-    }
+    AttachmentReclamationPolicy::new(0, EmptyRootSetPolicy::AuthorizeDeleteAll)
 }
 
 /// ADR 0067 §6 across a cold reopen, with two sweepers.

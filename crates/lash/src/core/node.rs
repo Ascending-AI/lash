@@ -226,8 +226,9 @@ impl LashCore {
 
     /// The worker the core's node runs its processes on.
     fn process_worker(&self) -> crate::Result<lash_core_worker::DurableProcessWorker> {
-        lash_core_worker::DurableProcessWorker::new(self.durable_process_worker_config()?)
-            .map_err(|error| lash_core::PluginError::Session(error.to_string()).into())
+        Ok(lash_core_worker::DurableProcessWorker::new(
+            self.durable_process_worker_config()?,
+        ))
     }
 
     /// The turn services a node runs this core's sessions' turns with.

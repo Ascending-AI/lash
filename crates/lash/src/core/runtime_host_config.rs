@@ -33,10 +33,18 @@ impl LashCoreBuilder {
             execution_budgets,
             delta_coalescing,
         );
-        Ok(self.apply_core_overrides(core))
+        let core = self.apply_core_overrides(core);
+        core.control.relay_policy().validate()?;
+        core.control.commit_admission.validate()?;
+        Ok(core)
     }
 
     fn apply_core_overrides(&mut self, mut core: RuntimeHostConfig) -> RuntimeHostConfig {
+        core.durability.attachment_store = Arc::new(
+            core.durability
+                .attachment_store
+                .reconfigured_reclamation_retry(self.attachment_reclamation_retry),
+        );
         if let Some(max) = self.max_attachment_bytes.take() {
             core = core.with_max_attachment_bytes(max);
         }
@@ -77,6 +85,9 @@ impl LashCoreBuilder {
         // recovery pass's relays and every immediate `deliver_now` derive
         // theirs from it (FIG-4246).
         core.control.recovery_pass = self.recovery_pass;
+        core.control.relay = self.relay_policy;
+        core.control.commit_admission = self.commit_admission;
+        core.control.pacing = self.runtime_pacing;
         if let Some(models) = self.models.clone() {
             core.providers.models = models;
         }
@@ -184,5 +195,542 @@ mod tests {
         );
         assert_eq!(first.0.load(Ordering::Relaxed), 0);
         assert_eq!(second.0.load(Ordering::Relaxed), 1);
+    }
+}
+
+#[cfg(test)]
+mod pacing_laws {
+    use super::*;
+    use std::time::Duration;
+
+    fn builder(backend: lash_core::Backend) -> LashCoreBuilder {
+        crate::tests::explicit_ephemeral_facets(LashCore::standard_builder(backend))
+            .serve_sessions(false)
+    }
+
+    /// D-DEFAULTS2: the facade's work cadence controls the actual external
+    /// process waiter, including its exponential maximum.
+    #[tokio::test]
+    async fn facade_work_cadence_controls_terminal_polling() {
+        let backend = crate::tests::sqlite_memory_store_backend().await;
+        let raw = backend.process_registry();
+        let registered = raw
+            .register_process(crate::testing::held_engine_registration(
+                serde_json::json!({}),
+                lash_core::ProcessProvenance::host(),
+                lash_core::Lifetime::Detached,
+            ))
+            .await
+            .expect("register held process");
+        let faults = Arc::new(lash_core::testing::ProcessRegistryFaults::new(raw));
+        faults.set_process_read_pinned(Some(registered.clone()));
+        let backend = crate::testing::LayeredBackend::over(backend)
+            .map_process_registry(|_| faults.clone())
+            .into_backend();
+        let core = builder(backend)
+            .work_cadence(crate::WorkCadencePolicy {
+                poll_initial: Duration::from_secs(2),
+                poll_max: Duration::from_secs(3),
+            })
+            .build(crate::testing::runtime_lease_owner())
+            .expect("configured core");
+        core.shutdown().await.expect("stop background tasks");
+        tokio::time::pause();
+        let port = core.substrate_slot.setup.process.port();
+        let mut wait = Box::pin(port.await_process_terminal(&registered.id));
+        assert!(futures_util::poll!(&mut wait).is_pending());
+        let reads = faults.process_point_reads();
+        tokio::time::advance(Duration::from_millis(1999)).await;
+        assert!(futures_util::poll!(&mut wait).is_pending());
+        assert_eq!(
+            faults.process_point_reads(),
+            reads,
+            "no read before the configured floor"
+        );
+        // Tokio rounds timer deadlines up to its millisecond boundary.
+        tokio::time::advance(Duration::from_millis(2)).await;
+        assert!(futures_util::poll!(&mut wait).is_pending());
+        assert_eq!(faults.process_point_reads(), reads + 1);
+        tokio::time::advance(Duration::from_millis(2999)).await;
+        assert!(futures_util::poll!(&mut wait).is_pending());
+        assert_eq!(faults.process_point_reads(), reads + 1);
+        // Tokio rounds timer deadlines up to its millisecond boundary.
+        tokio::time::advance(Duration::from_millis(2)).await;
+        assert!(futures_util::poll!(&mut wait).is_pending());
+        assert_eq!(faults.process_point_reads(), reads + 2);
+    }
+    /// D-DEFAULTS2: both kinds of recovery delivery use the configured retry
+    /// shape and the most recently selected attempt budget.
+    #[tokio::test]
+    async fn facade_relay_policy_reaches_delivery_and_budget_resolution() {
+        use lash_core::runtime::obligations::relay::ObligationRelay;
+        let backend = crate::tests::sqlite_memory_store_backend().await;
+        let policy = crate::RelayPolicy {
+            base_backoff_ms: 17,
+            max_backoff_ms: 50,
+            attempt_ceiling: std::num::NonZeroU32::MIN.saturating_add(3),
+            claim_ttl_ms: 100,
+            attempt_budget_ms: 10,
+        };
+        let mut configured = builder(backend.clone())
+            .relay_policy(policy)
+            .recovery_pass_budget(crate::RecoveryPassBudget {
+                attempt: Duration::from_millis(21),
+            });
+        let resolved = configured
+            .resolve_runtime_host_config()
+            .expect("valid policy");
+        let relay = lash_core::runtime::artifact_cleanup::ArtifactCleanupRelay::over_backend(
+            &backend,
+            resolved.process_engines.clone(),
+        )
+        .with_policy(resolved.control.relay_policy());
+        assert_eq!(relay.policy().backoff_ms(2), 34);
+        assert_eq!(relay.policy().backoff_ms(3), 50);
+        assert_eq!(relay.policy().claim_ttl_ms, 100);
+        assert_eq!(relay.policy().attempt_ceiling.get(), 4);
+        assert_eq!(relay.policy().attempt_budget_ms, 21);
+        let mut reversed = builder(backend.clone())
+            .recovery_pass_budget(crate::RecoveryPassBudget {
+                attempt: Duration::from_millis(21),
+            })
+            .relay_policy(policy);
+        assert_eq!(
+            reversed
+                .resolve_runtime_host_config()
+                .expect("policy")
+                .control
+                .relay_policy()
+                .attempt_budget_ms,
+            10
+        );
+        let mut invalid = builder(backend).relay_policy(crate::RelayPolicy {
+            claim_ttl_ms: 10,
+            ..policy
+        });
+        assert!(matches!(
+            invalid.resolve_runtime_host_config(),
+            Err(EmbedError::RelayPolicy(_))
+        ));
+    }
+
+    /// D-DEFAULTS2: each caller's facade admission limits govern the shared
+    /// session FIFO; a queued attempt never executes before admission.
+    #[tokio::test]
+    async fn facade_commit_admission_enforces_capacity_and_ttl() {
+        use lash_core::StoreError;
+        use lash_core::runtime::run_head_advancing_commit_attempt;
+        use tokio_util::sync::CancellationToken;
+        let backend = crate::tests::sqlite_memory_store_backend().await;
+        let selected = crate::CommitAdmissionPolicy {
+            max_waiters: std::num::NonZeroUsize::MIN,
+            wait_ttl: Duration::from_millis(7),
+        };
+        let mut configured = builder(backend.clone()).commit_admission(selected);
+        let policy = configured
+            .resolve_runtime_host_config()
+            .expect("valid admission")
+            .control
+            .commit_admission;
+        tokio::time::pause();
+        let mut active = Box::pin(run_head_advancing_commit_attempt(
+            "facade-admission",
+            "active",
+            CancellationToken::new(),
+            policy,
+            |_, _| std::future::pending::<std::result::Result<(), StoreError>>(),
+        ));
+        assert!(futures_util::poll!(&mut active).is_pending());
+        let mut waiting = Box::pin(run_head_advancing_commit_attempt(
+            "facade-admission",
+            "waiting",
+            CancellationToken::new(),
+            policy,
+            |_, _| async { panic!("expired work must not execute") },
+        ));
+        assert!(futures_util::poll!(&mut waiting).is_pending());
+        let refused = run_head_advancing_commit_attempt(
+            "facade-admission",
+            "excess",
+            CancellationToken::new(),
+            policy,
+            |_, _| async { Ok::<(), StoreError>(()) },
+        )
+        .await;
+        assert!(matches!(refused, Err(StoreError::Contended)));
+        tokio::time::advance(Duration::from_millis(6)).await;
+        assert!(futures_util::poll!(&mut waiting).is_pending());
+        tokio::time::advance(Duration::from_millis(1)).await;
+        let expired: std::result::Result<(), StoreError> = waiting.await;
+        assert!(matches!(expired, Err(StoreError::Contended)));
+        drop(active);
+        let mut invalid = builder(backend).commit_admission(crate::CommitAdmissionPolicy {
+            wait_ttl: Duration::ZERO,
+            ..selected
+        });
+        assert!(matches!(
+            invalid.resolve_runtime_host_config(),
+            Err(EmbedError::CommitAdmissionPolicy(_))
+        ));
+    }
+
+    /// D-DEFAULTS2: durable and open session observers retain the configured
+    /// schedules and buffers instead of reinstalling defaults when binding.
+    #[tokio::test]
+    async fn facade_observer_pacing_survives_durable_and_live_binding() {
+        let backend = crate::tests::sqlite_memory_store_backend().await;
+        let schedule = crate::PollPacing::new(Duration::from_millis(37), Duration::from_millis(80))
+            .expect("pacing");
+        let pacing = crate::ObserverPacing {
+            follow: schedule,
+            admin: schedule,
+            deletion: schedule,
+            terminal: schedule,
+            follow_buffer: std::num::NonZeroUsize::MIN.saturating_add(2),
+            send_channel: std::num::NonZeroUsize::MIN.saturating_add(1),
+            snapshot_read_attempts: std::num::NonZeroUsize::MIN.saturating_add(3),
+        };
+        let core = builder(backend)
+            .serve_test_llm_profile(
+                crate::testing::TestProvider::default().into_handle(),
+                crate::tests::mock_llm_profile_spec(),
+            )
+            .observer_pacing(pacing)
+            .build(crate::testing::runtime_lease_owner())
+            .expect("core");
+        let id = lash_core::SessionId::from("pacing-binding");
+        let durable = core
+            .session(id.clone())
+            .create(crate::SessionCreation::root(
+                lash_core::SessionToolAccess::ambient(),
+                crate::tests::mock_session_spec(),
+            ))
+            .await
+            .expect("create");
+        assert_eq!(
+            *durable.send_parts().await.expect("parts").observer_pacing,
+            pacing
+        );
+        let live = core.session(id).open().await.expect("open");
+        assert_eq!(
+            *live
+                .durable()
+                .send_parts()
+                .await
+                .expect("live parts")
+                .observer_pacing,
+            pacing
+        );
+        assert_eq!(live.admin().target.observer_pacing(), pacing);
+        assert_eq!(
+            pacing.follow.next(pacing.follow.initial()),
+            Duration::from_millis(74)
+        );
+        assert_eq!(
+            pacing.admin.next(Duration::from_millis(74)),
+            Duration::from_millis(80)
+        );
+        assert_eq!(
+            core.observer_pacing.deletion.initial(),
+            Duration::from_millis(37)
+        );
+        core.shutdown().await.expect("shutdown");
+    }
+
+    /// D-DEFAULTS2: runtime chunks and tool-fault waits are resolved at the
+    /// facade rather than selected anew by execution contexts.
+    #[tokio::test]
+    async fn facade_runtime_pacing_controls_chunks_and_fault_backoff() {
+        let backend = crate::tests::sqlite_memory_store_backend().await;
+        let retry = crate::PollPacing::new(Duration::from_millis(3), Duration::from_millis(11))
+            .expect("retry");
+        let mut configured = builder(backend).runtime_pacing(crate::RuntimePacingPolicy {
+            tool_fault_retry: retry,
+            checkpoint_inputs: std::num::NonZeroUsize::MIN.saturating_add(2),
+        });
+        let resolved = configured
+            .resolve_runtime_host_config()
+            .expect("runtime policy");
+        assert_eq!(resolved.control.pacing.checkpoint_inputs.get(), 3);
+        assert_eq!(
+            resolved.control.pacing.tool_fault_retry.after_faults(1),
+            Duration::from_millis(6)
+        );
+        assert_eq!(
+            resolved.control.pacing.tool_fault_retry.after_faults(2),
+            Duration::from_millis(11)
+        );
+    }
+
+    /// D-DEFAULTS2: a non-default attachment write-fence bound reaches the
+    /// facade put, including the binding and unbound-store copies it traverses.
+    #[tokio::test]
+    async fn facade_attachment_retry_bounds_a_reclamation_fence() {
+        let backend = crate::tests::sqlite_memory_store_backend().await;
+        let retry = crate::persistence::AttachmentReclamationRetryPolicy::new(
+            std::num::NonZeroU32::MIN.saturating_add(1),
+            0,
+            Duration::from_millis(3),
+            Duration::from_millis(5),
+        )
+        .expect("retry policy");
+        let core = builder(backend.clone())
+            .serve_test_llm_profile(
+                crate::testing::TestProvider::default().into_handle(),
+                crate::tests::mock_llm_profile_spec(),
+            )
+            .attachment_reclamation_retry(retry)
+            .build(crate::testing::runtime_lease_owner())
+            .expect("core");
+        let id = lash_core::SessionId::from("retry-fence");
+        core.session(id.clone())
+            .create(crate::SessionCreation::root(
+                lash_core::SessionToolAccess::ambient(),
+                crate::tests::mock_session_spec(),
+            ))
+            .await
+            .expect("create");
+        let live = core.session(id).open().await.expect("open");
+        let meta = lash_core::AttachmentCreateMeta::new(
+            lash_core::MediaType::parse("text/plain").expect("media type"),
+            None,
+            None,
+        );
+        let bytes = b"held for physical deletion".to_vec();
+        let blob = backend
+            .attachment_store()
+            .put(bytes.clone(), meta.clone())
+            .await
+            .expect("raw blob");
+        let roots = backend.session_store_factory();
+        let sweep = roots.begin_attachment_sweep().await.expect("sweep");
+        roots
+            .condemn_attachment(&blob.id, &sweep)
+            .await
+            .expect("condemn");
+        roots
+            .arm_attachment_delete(&blob.id, &sweep)
+            .await
+            .expect("arm deletion");
+        assert!(matches!(
+            live.put_attachment(bytes, meta).await,
+            Err(lash_core::AttachmentStoreError::ReclamationInFlight { attempts: 2, .. })
+        ));
+        core.shutdown().await.expect("shutdown");
+    }
+
+    struct ClaimProbe {
+        inner: Arc<dyn lash_core::store::ArtifactCleanupLedger>,
+        claims: tokio::sync::mpsc::UnboundedSender<(u64, usize)>,
+    }
+    #[async_trait::async_trait]
+    impl lash_core::store::ObligationLedger for ClaimProbe {
+        fn kind(&self) -> lash_core::store::ObligationKind {
+            self.inner.kind()
+        }
+        async fn claim_due(
+            &self,
+            now_ms: u64,
+            ttl: u64,
+            limit: std::num::NonZeroUsize,
+        ) -> std::result::Result<Vec<lash_core::store::ClaimedObligation>, lash_core::StoreError>
+        {
+            let rows = self.inner.claim_due(now_ms, ttl, limit).await?;
+            let _ = self.claims.send((ttl, limit.get()));
+            Ok(rows)
+        }
+        async fn claim(
+            &self,
+            id: &lash_core::store::ObligationId,
+            token: &lash_core::store::ClaimToken,
+            now: u64,
+            ttl: u64,
+        ) -> std::result::Result<Option<lash_core::store::ClaimedObligation>, lash_core::StoreError>
+        {
+            self.inner.claim(id, token, now, ttl).await
+        }
+        async fn settle(
+            &self,
+            id: &lash_core::store::ObligationId,
+            token: &lash_core::store::ClaimToken,
+            settlement: lash_core::store::ObligationSettlement,
+            now: u64,
+        ) -> std::result::Result<lash_core::store::SettleOutcome, lash_core::StoreError> {
+            self.inner.settle(id, token, settlement, now).await
+        }
+        async fn rearm(
+            &self,
+            id: &lash_core::store::ObligationId,
+            now: u64,
+        ) -> std::result::Result<bool, lash_core::StoreError> {
+            self.inner.rearm(id, now).await
+        }
+        async fn list_stalled(
+            &self,
+            after: Option<&lash_core::store::ObligationId>,
+            limit: std::num::NonZeroUsize,
+        ) -> std::result::Result<Vec<lash_core::store::StalledObligation>, lash_core::StoreError>
+        {
+            self.inner.list_stalled(after, limit).await
+        }
+        async fn count_stalled(&self) -> std::result::Result<u64, lash_core::StoreError> {
+            self.inner.count_stalled().await
+        }
+        async fn standing(
+            &self,
+            id: &lash_core::store::ObligationId,
+        ) -> std::result::Result<Option<lash_core::store::ObligationStanding>, lash_core::StoreError>
+        {
+            self.inner.standing(id).await
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl lash_core::store::ArtifactCleanupLedger for ClaimProbe {
+        async fn arm_cleanup(
+            &self,
+            cleanup: &crate::persistence::ArtifactCleanup,
+            now: u64,
+        ) -> std::result::Result<lash_core::store::ObligationId, lash_core::StoreError> {
+            self.inner.arm_cleanup(cleanup, now).await
+        }
+        async fn nudge(
+            &self,
+            referrer: &lash_core::ArtifactReferrer,
+            now: u64,
+        ) -> std::result::Result<bool, lash_core::StoreError> {
+            self.inner.nudge(referrer, now).await
+        }
+        async fn load_cleanup(
+            &self,
+            id: &lash_core::store::ObligationId,
+        ) -> std::result::Result<Option<crate::persistence::ArtifactCleanup>, lash_core::StoreError>
+        {
+            self.inner.load_cleanup(id).await
+        }
+    }
+
+    /// D-DEFAULTS2: the background cleanup task consumes the facade's page,
+    /// claim TTL and interval. The stock ten-second grid cannot pass this law.
+    #[tokio::test]
+    async fn facade_recovery_pacing_controls_the_background_due_pass() {
+        let backend = crate::tests::sqlite_memory_store_backend().await;
+        let (claims, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let backend = crate::testing::LayeredBackend::over(backend)
+            .map_artifact_cleanup(move |inner| Arc::new(ClaimProbe { inner, claims }))
+            .into_backend();
+        let core = builder(backend)
+            .recovery_pacing(
+                crate::RecoveryPacing::new(Duration::from_millis(30), std::num::NonZeroUsize::MIN)
+                    .expect("recovery pacing"),
+            )
+            .relay_policy(crate::RelayPolicy {
+                claim_ttl_ms: 70_000,
+                ..crate::RelayPolicy::standard()
+            })
+            .build(crate::testing::runtime_lease_owner())
+            .expect("core");
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), received.recv())
+                .await
+                .expect("initial due pass"),
+            Some((70_000, 1))
+        );
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), received.recv())
+                .await
+                .expect("configured next pass"),
+            Some((70_000, 1))
+        );
+        core.shutdown().await.expect("shutdown");
+    }
+    struct FailingDelete(Arc<dyn crate::persistence::AttachmentStore>);
+    #[async_trait::async_trait]
+    impl crate::persistence::AttachmentStore for FailingDelete {
+        async fn put(
+            &self,
+            bytes: Vec<u8>,
+            meta: lash_core::AttachmentCreateMeta,
+        ) -> std::result::Result<lash_core::AttachmentRef, lash_core::AttachmentStoreError>
+        {
+            self.0.put(bytes, meta).await
+        }
+        async fn get(
+            &self,
+            id: &lash_core::AttachmentId,
+            max: u64,
+        ) -> std::result::Result<lash_core::StoredAttachment, lash_core::AttachmentStoreError>
+        {
+            self.0.get(id, max).await
+        }
+        async fn delete(
+            &self,
+            _: &lash_core::AttachmentId,
+        ) -> std::result::Result<(), lash_core::AttachmentStoreError> {
+            Err(lash_core::AttachmentStoreError::Backend {
+                operation: "delete",
+                class: lash_core::AttachmentStoreFailureClass::Transient,
+                source: "retryable fixture delete".into(),
+            })
+        }
+        async fn list(
+            &self,
+        ) -> std::result::Result<Vec<lash_core::StoredBlobRef>, lash_core::AttachmentStoreError>
+        {
+            // Keep freshness outside the grace window without a wall-clock sleep.
+            let mut blobs = self.0.list().await?;
+            for blob in &mut blobs {
+                blob.last_modified_epoch_ms = Some(0);
+            }
+            Ok(blobs)
+        }
+        async fn head(
+            &self,
+            id: &lash_core::AttachmentId,
+        ) -> std::result::Result<Option<lash_core::StoredBlobRef>, lash_core::AttachmentStoreError>
+        {
+            let mut blob = self.0.head(id).await?;
+            if let Some(blob) = &mut blob {
+                blob.last_modified_epoch_ms = Some(0);
+            }
+            Ok(blob)
+        }
+    }
+
+    /// D-DEFAULTS2: the facade's optional physical-delete retry limit affects
+    /// the retained stall fact; a failure before the stock five attempts can stall.
+    #[tokio::test]
+    async fn facade_attachment_delete_limit_changes_stall_admission() {
+        use crate::persistence::AttachmentStore;
+        let backend = crate::tests::sqlite_memory_store_backend().await;
+        let blobs = FailingDelete(backend.attachment_store());
+        let blob = blobs
+            .put(
+                b"unreferenced retry candidate".to_vec(),
+                lash_core::AttachmentCreateMeta::new(
+                    lash_core::MediaType::parse("text/plain").expect("media"),
+                    None,
+                    None,
+                ),
+            )
+            .await
+            .expect("raw unreferenced blob");
+        let roots = backend.session_store_factory();
+        let policy = crate::persistence::AttachmentReclamationPolicy::new(
+            0,
+            crate::persistence::EmptyRootSetPolicy::AuthorizeDeleteAll,
+        )
+        .with_delete_attempt_limit(std::num::NonZeroU32::MIN);
+        let report =
+            crate::persistence::reclaim_unreferenced_attachments(roots.as_ref(), &blobs, policy)
+                .await
+                .expect("completed failing sweep");
+        assert_eq!(report.stalled_ids, vec![blob.id.clone()]);
+        let rows = roots.list_condemnations().await.expect("retained stalls");
+        assert_eq!(rows[0].delete_attempts, 1);
+        assert_eq!(
+            rows[0].stalled,
+            Some(lash_core::AttachmentDeleteStallReason::AttemptsExhausted)
+        );
     }
 }

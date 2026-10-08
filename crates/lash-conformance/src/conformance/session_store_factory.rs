@@ -1642,10 +1642,7 @@ async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
     let report = crate::attachments::reclaim_unreferenced_attachments(
         &*factory,
         backend.as_ref(),
-        crate::AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: crate::EmptyRootSetPolicy::AuthorizeDeleteAll,
-        },
+        crate::AttachmentReclamationPolicy::new(0, crate::EmptyRootSetPolicy::AuthorizeDeleteAll),
     )
     .await
     .expect("sweep");
