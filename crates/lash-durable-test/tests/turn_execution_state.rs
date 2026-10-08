@@ -314,14 +314,21 @@ impl lash::tools::StaticToolExecute for SwitchFrame {
 async fn a_committed_frame_switch_clears_the_execution_state(tier: Tier) {
     const ASK: &str = "switch frames";
     const TASK: &str = "carry on in the new frame";
-    let model = scripted(|request, transcript| {
-        if transcript.contains(TASK) {
-            served::text(request, "carried on")
-        } else {
-            call("execution-state-switch", "switch_frame")
+    let executor = Arc::new(Executor::default());
+    let model = scripted({
+        let executor = Arc::clone(&executor);
+        move |request, transcript| {
+            if transcript.contains(TASK) {
+                // The follow-on's commit captures nothing of its own: its
+                // executor is clean before its only call answers, whenever
+                // the node serves it.
+                executor.dirty.store(false, Ordering::SeqCst);
+                served::text(request, "carried on")
+            } else {
+                call("execution-state-switch", "switch_frame")
+            }
         }
     });
-    let executor = Arc::new(Executor::default());
     let definition = lash_core::ToolDefinition::raw(
         "switch_frame",
         "switch_frame",
@@ -346,8 +353,6 @@ async fn a_committed_frame_switch_clears_the_execution_state(tier: Tier) {
     *executor.snapshot.lock().unwrap() = b"abandoned-frame-execution-state".to_vec();
     executor.dirty.store(true, Ordering::SeqCst);
     world.send(&session, ASK).await;
-    // The follow-on's commit captures nothing of its own.
-    executor.dirty.store(false, Ordering::SeqCst);
     committed(&session, 2).await;
     assert_eq!(
         head_state(&world, &session).await,

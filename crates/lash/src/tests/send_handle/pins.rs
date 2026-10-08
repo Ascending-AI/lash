@@ -12,8 +12,10 @@ use lash_core::Target;
 /// session that recorded them: the plugin admission the checkpoint records,
 /// which a fork's checkpoint omits so the fork records its own (FIG-4913),
 /// and each plugin namespace's publication, which a fork copies or resets as
-/// its plugin declared (FIG-5301). The source's state is read through that
-/// same fork rule.
+/// its plugin declared (FIG-5301), and the config change the session's
+/// observers are still owed, which a fork never owes its own (FIG-5397): a
+/// config command's head carries it until the command's run retires it with
+/// a later commit. The source's state is read through that same fork rule.
 #[derive(Clone, Debug, PartialEq)]
 struct Published {
     leaf: Option<lash_core::NodeId>,
@@ -65,6 +67,7 @@ async fn published_by(core: &LashCore, session: &str) -> Result<Published> {
         checkpoint,
         config: lash_core::PersistedSessionConfig {
             config_revision: 0,
+            undelivered_change: None,
             ..head.config
         },
     })
