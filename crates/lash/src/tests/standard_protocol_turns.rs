@@ -3,7 +3,7 @@
 //! the committed state and what its scripted model was shown.
 
 use super::*;
-use lash_core::{MessageRole, PartKind};
+use lash_core::{MessageRole, PartKind, ProcessEventLogTestSupport as _};
 
 /// A scripted model: each request is recorded, and the `n`th one answers
 /// `answers(n)`.
@@ -869,6 +869,156 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
     assert!(
         at.is_sorted(),
         "the outcomes keep declaration order: {at:?}"
+    );
+    core.shutdown().await.expect("shutdown");
+}
+
+/// `over_budget` returns one signal intent more than a call may declare, all
+/// to `target`.
+struct OverBudget {
+    target: lash_sansio::ProcessId,
+}
+
+fn over_budget_tool() -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw(
+        "tool:over_budget",
+        "over_budget",
+        "Return more signal intents than a call may declare.",
+        lash_core::ToolDefinition::default_input_schema(),
+        serde_json::json!({"type": "object", "additionalProperties": true}),
+    )
+    .expect("valid declared tool schemas")
+    .with_declaration(
+        lash_core::ToolDeclaration::default()
+            .with_intents([lash_core::ToolIntentKind::SignalProcess]),
+    )
+}
+
+#[async_trait]
+impl ToolProvider for OverBudget {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![over_budget_tool().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "over_budget").then(|| Arc::new(over_budget_tool().contract()))
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        let owner = call.context.owner().runtime_owner();
+        lash_core::ToolAttemptOutcome::done(
+            lash_core::ToolOutcomeDone::ok(serde_json::json!({"provider": "done"})),
+            lash_core::ToolIntents::v3(
+                (0..=lash_core::TOOL_INTENT_MAX_COUNT)
+                    .map(|index| {
+                        lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
+                            owner: owner.clone(),
+                            process_id: self.target.clone(),
+                            signal_name: "resume".to_string(),
+                            payload: serde_json::json!({"index": index}),
+                        })
+                    })
+                    .collect(),
+            ),
+        )
+    }
+}
+
+/// The first request calls `over_budget`; the second answers.
+fn over_budget_then_done(n: usize) -> LlmResponse {
+    match n {
+        1 => LlmResponse {
+            parts: vec![LlmOutputPart::ToolCall {
+                call_id: "tc-over-budget".to_string(),
+                tool_name: "over_budget".to_string(),
+                input_json: "{}".to_string(),
+                replay: None,
+            }],
+            ..LlmResponse::default()
+        },
+        _ => text_response("budget refusal observed"),
+    }
+}
+
+/// A call that declares more intents than the per-call count budget has its
+/// whole batch refused at admission: every intent is answered refused with
+/// `count_budget_exceeded`, none executes, and the process they address
+/// receives no signal.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn over_budget_intent_batch_refuses_every_intent_and_executes_zero_commands() {
+    const SESSION: &str = "over-budget-intents";
+    let backend = sqlite_memory_store_backend().await;
+    let registry = backend.process_registry();
+    let target = registry
+        .register_process_with_observers(
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
+                lash_core::ProcessProvenance::host(),
+                lash_core::Lifetime::Detached,
+            )
+            .with_extra_event_types([lash_core::ProcessEventType {
+                name: "signal.resume".to_string(),
+                payload_schema: lash_core::JsonSchema::any(),
+                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+            }]),
+            &[lash_sansio::SessionId::from(SESSION)],
+        )
+        .await
+        .expect("register the intents' target")
+        .id;
+    let events_before = registry
+        .full_event_window(&target, 0)
+        .await
+        .expect("the target's events")
+        .len();
+    let requests = Arc::new(StdMutex::new(Vec::new()));
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .serve_test_llm_profile(
+            scripted_provider(Arc::clone(&requests), over_budget_then_done),
+            mock_llm_profile_spec(),
+        )
+        .plugin(lash_core::testing::process_engine_plugin_fixture())
+        .tools(Arc::new(OverBudget {
+            target: target.clone(),
+        }))
+        .build(crate::testing::runtime_lease_owner())
+        .expect("standard core");
+    let session = core
+        .session(crate::SessionId::from(SESSION))
+        .create(crate::SessionCreation::root(mock_session_spec()))
+        .await
+        .expect("created");
+    let output = session
+        .send(crate::TurnInput::text("declare too many intents"))
+        .output()
+        .await
+        .expect("the turn answers");
+    assert!(output.is_success(), "{output:?}");
+
+    let requests = requests.lock_recover().clone();
+    assert_eq!(requests.len(), 2);
+    let feedback = serde_json::to_string(&requests[1].messages).expect("serialize messages");
+    for index in 0..=lash_core::TOOL_INTENT_MAX_COUNT {
+        let refused =
+            format!("[tool intent signal_process #{index} refused: count_budget_exceeded]");
+        assert_eq!(
+            feedback.matches(&refused).count(),
+            1,
+            "every declared intent is refused once: {refused}"
+        );
+    }
+    assert!(
+        !feedback.contains("executed:"),
+        "no intent of an over-budget batch executes: {feedback}"
+    );
+    assert_eq!(
+        registry
+            .full_event_window(&target, 0)
+            .await
+            .expect("the target's events")
+            .len(),
+        events_before,
+        "the over-budget batch issued no command"
     );
     core.shutdown().await.expect("shutdown");
 }

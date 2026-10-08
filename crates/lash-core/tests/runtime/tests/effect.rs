@@ -13,8 +13,6 @@ use lash_core::plugin::{ProtocolDriverPlugin, ProtocolSessionPlugin};
 use lash_sansio::sync::MutexExt;
 mod fig1127;
 
-mod response_settlement;
-
 const SEED: u64 = 0x5_e100;
 
 #[path = "effect_direct_llm.rs"]
