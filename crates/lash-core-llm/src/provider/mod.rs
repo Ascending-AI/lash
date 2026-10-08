@@ -12,6 +12,7 @@
 
 #[cfg(test)]
 mod charge_safety_tests;
+mod credential;
 pub(crate) mod handle;
 mod models;
 mod options;
@@ -21,6 +22,9 @@ mod support;
 mod tests;
 mod traits;
 
+pub use credential::{
+    ProviderToken, TokenError, TokenErrorKind, TokenRequest, TokenRequestReason, TokenSource,
+};
 pub use handle::{
     ProviderCompletion, ProviderCompletionError, ProviderComponents, ProviderHandle,
     UnconfiguredProvider,

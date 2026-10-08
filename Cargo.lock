@@ -564,6 +564,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-host-auth"
+version = "0.0.0-dev"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.23.1",
+ "form_urlencoded",
+ "lash-runtime",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2488,24 +2503,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-internal-provider-auth"
-version = "0.0.0-dev"
-dependencies = [
- "async-trait",
- "base64 0.23.1",
- "chrono",
- "form_urlencoded",
- "lash-internal-core",
- "lash-internal-sansio",
- "reqwest",
- "serde_json",
- "sha2",
- "thiserror",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "lash-internal-provider-google"
 version = "0.0.0-dev"
 dependencies = [
@@ -2513,7 +2510,6 @@ dependencies = [
  "base64 0.23.1",
  "lash-internal-core",
  "lash-internal-llm-transport",
- "lash-internal-provider-auth",
  "lash-internal-provider-google",
  "lash-internal-sansio",
  "lash-runtime",
@@ -2535,7 +2531,6 @@ dependencies = [
  "lash-internal-core",
  "lash-internal-llm-transport",
  "lash-internal-protocol-rlm",
- "lash-internal-provider-auth",
  "lash-internal-provider-openai",
  "lash-internal-sansio",
  "lash-internal-tool-support",
@@ -2866,7 +2861,6 @@ dependencies = [
  "lash-internal-protocol-rlm",
  "lash-internal-protocol-standard",
  "lash-internal-provider-anthropic",
- "lash-internal-provider-auth",
  "lash-internal-provider-google",
  "lash-internal-provider-openai",
  "lash-internal-remote-protocol",
@@ -2921,7 +2915,6 @@ dependencies = [
  "lash-internal-protocol-rlm",
  "lash-internal-protocol-standard",
  "lash-internal-provider-anthropic",
- "lash-internal-provider-auth",
  "lash-internal-provider-google",
  "lash-internal-provider-openai",
  "lash-internal-rlm-types",

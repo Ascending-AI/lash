@@ -64,13 +64,15 @@ async fn responses_completion_epilogue_conformance() {
 #[tokio::test]
 async fn codex_completion_epilogue_conformance() {
     completion_epilogue_conformance(|scenario| async move {
-        let mut provider = crate::CodexProvider::new("access", "refresh", u64::MAX)
-            .force_sse_transport()
-            .with_http_transport(Arc::new(EpilogueTransport::new(
-                responses_epilogue_wire(scenario),
-                true,
-                scenario,
-            )));
+        let mut provider = crate::CodexProvider::new(std::sync::Arc::new(
+            lash_core::provider::ProviderToken::new("access"),
+        ))
+        .force_sse_transport()
+        .with_http_transport(Arc::new(EpilogueTransport::new(
+            responses_epilogue_wire(scenario),
+            true,
+            scenario,
+        )));
         provider
             .complete(streamed_request(Arc::new(
                 std::sync::Mutex::new(Vec::new()),

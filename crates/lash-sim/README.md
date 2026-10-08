@@ -100,8 +100,8 @@ bound, not a discovered runtime invariant violation.
 - OpenAI-compatible, direct OpenAI Responses, Anthropic, and Google Provider
   Wire Scripts run through real provider crates via the production
   `LlmHttpTransport` seam and are included in the canonical provider matrix;
-  Codex/OAuth/auth-flow exclusions are manifest-reviewed instead of
-  accidental.
+  the Codex WebSocket exclusion is manifest-reviewed instead of accidental.
+  Lash runs no OAuth flow: hosts supply provider tokens.
 - Provider byte-stream handling is additionally property-tested: shared
   proptest strategies live behind the `proptest-support` feature of
   `lash-llm-transport`, with chunk-split invariance properties over the SSE
@@ -144,9 +144,9 @@ bound, not a discovered runtime invariant violation.
   remaining partially modeled durable-effect, backend-failure,
   provider-mutation, tool, and exec-code boundaries, each with a named oracle
   and artifact evidence.
-- Provider manifests include reviewed non-DST exclusions for remaining
-  Codex/OAuth/direct provider paths so direct reqwest/OAuth seams are named
-  instead of accidental.
+- Provider manifests include reviewed non-DST exclusions for the remaining
+  direct provider paths (the Codex WebSocket transport) so direct seams are
+  named instead of accidental.
 - `lash-sim minimize <trace>` writes a minimized package containing the
   minimized trace, replay verdict, oracle verdict, final summary, and package
   manifest. The runner and minimizer share one trace-derived oracle battery;

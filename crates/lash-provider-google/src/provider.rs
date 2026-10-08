@@ -5,17 +5,6 @@
 use crate::support::*;
 use std::sync::Arc;
 
-struct GoogleCredentialCallContext<'a> {
-    provider: &'a mut GoogleOAuthProvider,
-    request: &'a LlmRequest,
-}
-
-struct GoogleSendContext<'a> {
-    provider: &'a mut GoogleOAuthProvider,
-    request: &'a LlmRequest,
-    body: &'a ProviderRequestBody,
-}
-
 /// How to read one response, fixed by the request before any I/O: whether
 /// the stream must end with terminal evidence, and the recorded model's
 /// request defaults, which say whether it surfaces thinking and which
@@ -444,28 +433,25 @@ impl GoogleOAuthProvider {
             .map(|s| s.to_string()))
     }
 
-    /// Lower `req` with `credential`: the project resolved, every stored
+    /// Lower `req` with `lease`'s token: the project resolved, every stored
     /// attachment uploaded or inlined, and the body built once. The upload
     /// references it names are pinned in it.
-    async fn lower_with_credential(
+    async fn lower_with_token(
         &mut self,
         req: &LlmRequest,
-        credential: Lease<GoogleCredential>,
+        lease: &TokenLease,
     ) -> Result<ProviderRequestBody, LlmTransportError> {
-        let GoogleCredential {
-            access_token,
-            refresh_token,
-            ..
-        } = credential.value;
         // The single deliberate exposure point: from here the plaintext only
         // feeds request headers and the upload path.
-        let access_token = access_token.into_inner();
-        let refresh_token = refresh_token.into_inner();
+        let access_token = lease.token.secret().expose_secret();
+        // Uploads are cached per principal. A host that names none partitions
+        // them by token, which uploads again after a rotation.
+        let upload_scope = lease.token.principal().unwrap_or(access_token);
         if self.project_id.is_none() {
             self.project_id = match self.resolved_project_id.get() {
                 Some(resolved) => Some(resolved.clone()),
                 None => {
-                    let resolved = self.resolve_project_id(&access_token).await?;
+                    let resolved = self.resolve_project_id(access_token).await?;
                     if let Some(resolved) = &resolved {
                         let _ = self.resolved_project_id.set(resolved.clone());
                     }
@@ -475,7 +461,7 @@ impl GoogleOAuthProvider {
         }
         let project_id = self.project_id.clone();
         let attachment_parts = self
-            .prepare_attachment_parts(&access_token, &refresh_token, project_id.as_deref(), req)
+            .prepare_attachment_parts(access_token, upload_scope, project_id.as_deref(), req)
             .await?;
         let contents = self.build_contents_with_attachment_parts(req, &attachment_parts)?;
         let (request, receipt) =
@@ -492,14 +478,14 @@ impl GoogleOAuthProvider {
         })
     }
 
-    /// Send `admitted` with `credential`. A rejected file reference evicts
+    /// Send `admitted` with `lease`'s token. A rejected file reference evicts
     /// every upload the body names, so the next lowering uploads again; the
     /// body itself is never rebuilt.
-    async fn send_with_credential(
-        &mut self,
-        req: LlmRequest,
+    async fn send_with_token(
+        &self,
+        req: &LlmRequest,
         admitted: &ProviderRequestBody,
-        credential: Lease<GoogleCredential>,
+        lease: &TokenLease,
     ) -> Result<LlmResponse, LlmTransportError> {
         let stream_events = req.stream_events.clone();
         let provider_trace = req.provider_trace.clone();
@@ -512,10 +498,9 @@ impl GoogleOAuthProvider {
                 .unwrap_or(self.stream_termination),
             defaults: req.model.metadata().request_defaults.clone(),
         };
-        let access_token = credential.value.access_token.into_inner();
         match self
             .execute_body(
-                &access_token,
+                lease.token.secret().expose_secret(),
                 admitted,
                 stream_events,
                 provider_trace,
@@ -561,17 +546,6 @@ fn file_uris(body: &str) -> Vec<String> {
     uris
 }
 
-/// A credential manager's failure as the call's transport error.
-fn credential_failure(error: CredentialExecuteError<LlmTransportError>) -> LlmTransportError {
-    match error {
-        CredentialExecuteError::Credential(error) => error.into_transport_error(),
-        CredentialExecuteError::Call(error) => error,
-        // Unknown failures cannot establish that replay is safe.
-        _ => LlmTransportError::new(error.to_string())
-            .with_retry_verdict(TransportRetryVerdict::Forbidden),
-    }
-}
-
 #[async_trait]
 impl Provider for GoogleOAuthProvider {
     fn kind(&self) -> &'static str {
@@ -591,28 +565,9 @@ impl Provider for GoogleOAuthProvider {
     }
 
     fn serialize_config(&self) -> serde_json::Value {
-        let credential = self.credentials.snapshot();
+        // No credential: the host re-attaches its token source when it
+        // rebuilds the provider.
         let mut map = serde_json::Map::new();
-        map.insert(
-            "access_token".to_string(),
-            serde_json::Value::String(credential.access_token.expose_secret().to_string()),
-        );
-        map.insert(
-            "refresh_token".to_string(),
-            serde_json::Value::String(credential.refresh_token.expose_secret().to_string()),
-        );
-        map.insert(
-            "expires_at".to_string(),
-            serde_json::Value::Number(credential.expires_at.into()),
-        );
-        map.insert(
-            "oauth_client_id".to_string(),
-            serde_json::Value::String(self.oauth_client.id.clone()),
-        );
-        map.insert(
-            "oauth_client_secret".to_string(),
-            serde_json::Value::String(self.oauth_client.secret.expose_secret().to_string()),
-        );
         if self.endpoint != CODE_ASSIST_ENDPOINT {
             map.insert(
                 "endpoint".to_string(),
@@ -657,32 +612,27 @@ impl Provider for GoogleOAuthProvider {
             false,
         )?;
         Self::build_request_with_receipt(self, &req, Vec::new(), None)?;
-        // Every generation refusal lands before the credential refresh, the
-        // project lookup and any attachment upload.
+        // Every generation refusal lands before the token source is asked,
+        // the project lookup and any attachment upload.
         Self::resolve_generation(&req)?;
-        let manager = Arc::clone(&self.credentials);
-        let mut context = GoogleCredentialCallContext {
-            provider: self,
-            request: &req,
-        };
-        manager
-            .execute(&mut context, |context, lease| {
-                Box::pin(async move {
-                    match context
-                        .provider
-                        .lower_with_credential(context.request, lease)
-                        .await
-                    {
-                        Ok(body) => Ok(body),
-                        Err(error) if error.http_status == Some(401) => {
-                            Err(CredentialCallError::PreOutputAuth(error))
-                        }
-                        Err(error) => Err(CredentialCallError::Failed(error)),
+        let route = self.route_identity_for_model(req.model.wire_model());
+        let tokens = Arc::clone(&self.tokens);
+        let mut lease = tokens.current(&route).await?;
+        match self.lower_with_token(&req, &lease).await {
+            Err(error) if rejected_before_output(&error) => {
+                match tokens
+                    .replace(&route, &lease, TokenRequestReason::Rejected)
+                    .await?
+                {
+                    Some(fresh) => {
+                        lease = fresh;
+                        self.lower_with_token(&req, &lease).await
                     }
-                })
-            })
-            .await
-            .map_err(credential_failure)
+                    None => Err(error),
+                }
+            }
+            other => other,
+        }
     }
 
     async fn send(
@@ -702,30 +652,25 @@ impl Provider for GoogleOAuthProvider {
             &["authorization", "content-type"],
             false,
         )?;
-        let manager = Arc::clone(&self.credentials);
-        let mut context = GoogleSendContext {
-            provider: self,
-            request: &req,
-            body,
-        };
-        manager
-            .execute(&mut context, |context, lease| {
-                Box::pin(async move {
-                    match context
-                        .provider
-                        .send_with_credential(context.request.clone(), context.body, lease)
-                        .await
-                    {
-                        Ok(response) => Ok(response),
-                        Err(error) if error.http_status == Some(401) => {
-                            Err(CredentialCallError::PreOutputAuth(error))
-                        }
-                        Err(error) => Err(CredentialCallError::Failed(error)),
+        let route = self.route_identity_for_model(req.model.wire_model());
+        let tokens = Arc::clone(&self.tokens);
+        let mut lease = tokens.current(&route).await?;
+        match self.send_with_token(&req, body, &lease).await {
+            Err(error) if rejected_before_output(&error) => {
+                match tokens
+                    .replace(&route, &lease, TokenRequestReason::Rejected)
+                    .await?
+                {
+                    // Resend the admitted body once with the fresh token.
+                    Some(fresh) => {
+                        lease = fresh;
+                        self.send_with_token(&req, body, &lease).await
                     }
-                })
-            })
-            .await
-            .map_err(credential_failure)
+                    None => Err(error),
+                }
+            }
+            other => other,
+        }
     }
 
     fn clone_boxed(&self) -> Box<dyn Provider> {
@@ -772,7 +717,7 @@ mod error_detail_tests {
         }
     }
 
-    fn completion_request() -> LlmRequest {
+    pub(super) fn completion_request() -> LlmRequest {
         LlmRequest {
             instructions: None,
             model: lash_sansio::llm_profile::LlmProfileConfig::new(
@@ -845,15 +790,9 @@ mod error_detail_tests {
             let transport = Arc::new(ProjectResolutionTransport {
                 calls: AtomicUsize::new(0),
             });
-            let mut provider = GoogleOAuthProvider::new(
-                "access",
-                "refresh",
-                u64::MAX,
-                crate::GoogleOAuthClient {
-                    id: "oauth-client-id".into(),
-                    secret: "oauth-client-secret".into(),
-                },
-            )
+            let mut provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+                lash_core::provider::ProviderToken::new("access"),
+            ))
             .with_transport(transport.clone());
             let error = provider.complete(req).await.expect_err(label);
             assert_eq!(
@@ -874,15 +813,9 @@ mod error_detail_tests {
         let transport = Arc::new(ProjectResolutionTransport {
             calls: AtomicUsize::new(0),
         });
-        let provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            u64::MAX,
-            crate::GoogleOAuthClient {
-                id: "oauth-client-id".into(),
-                secret: "oauth-client-secret".into(),
-            },
-        )
+        let provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+            lash_core::provider::ProviderToken::new("access"),
+        ))
         .with_transport(transport.clone());
 
         for _ in 0..2 {
@@ -906,15 +839,9 @@ mod error_detail_tests {
         let transport = Arc::new(ProjectResolutionTransport {
             calls: AtomicUsize::new(0),
         });
-        let mut provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            u64::MAX,
-            crate::GoogleOAuthClient {
-                id: "oauth-client-id".into(),
-                secret: "oauth-client-secret".into(),
-            },
-        )
+        let mut provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+            lash_core::provider::ProviderToken::new("access"),
+        ))
         .with_transport(transport.clone());
         let mut request = completion_request();
         *request.model.metadata_mut().capability.reasoning_retention =
@@ -941,6 +868,96 @@ mod error_detail_tests {
             transport.calls.load(Ordering::SeqCst),
             0,
             "retention refusal must precede project-resolution HTTP"
+        );
+    }
+}
+
+#[cfg(test)]
+mod token_source_tests {
+    use super::*;
+    use lash_core::provider::{ProviderToken, TokenError, TokenRequest};
+    use lash_sansio::sync::MutexExt;
+    use std::sync::Mutex;
+
+    /// Rotates `token-1` to `token-2` when lash rejects `token-1`.
+    #[derive(Debug, Default)]
+    struct RotatingHost {
+        rotated: Mutex<bool>,
+        asks: Mutex<Vec<TokenRequestReason>>,
+    }
+
+    #[async_trait::async_trait]
+    impl TokenSource for RotatingHost {
+        async fn token(&self, request: TokenRequest<'_>) -> Result<ProviderToken, TokenError> {
+            self.asks.lock_recover().push(request.reason);
+            let mut rotated = self.rotated.lock_recover();
+            if request.reason == TokenRequestReason::Rejected {
+                *rotated = true;
+            }
+            Ok(ProviderToken::new(if *rotated {
+                "token-2"
+            } else {
+                "token-1"
+            }))
+        }
+    }
+
+    /// Answers 401 to `token-1` and completes for any other token.
+    #[derive(Debug, Default)]
+    struct RejectsFirstToken {
+        authorizations: Mutex<Vec<String>>,
+    }
+
+    #[async_trait::async_trait]
+    impl LlmHttpTransport for RejectsFirstToken {
+        async fn send(
+            &self,
+            request: LlmHttpRequest,
+            _timeout: Option<std::time::Duration>,
+        ) -> Result<lash_llm_transport::LlmHttpResponse, LlmTransportError> {
+            let authorization = first_header_value(&request.headers, "authorization")
+                .unwrap_or_default()
+                .to_string();
+            let rejected = authorization == "Bearer token-1";
+            self.authorizations.lock_recover().push(authorization);
+            Ok(lash_llm_transport::LlmHttpResponse {
+                status: if rejected { 401 } else { 200 },
+                headers: Vec::new(),
+                body: lash_llm_transport::LlmHttpBody::buffered(if rejected {
+                    r#"{"error":{"code":401,"status":"UNAUTHENTICATED"}}"#
+                } else {
+                    r#"{"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"done"}]}}]}"#
+                }),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn a_pre_output_401_on_send_asks_the_host_once_and_resends() {
+        let host = Arc::new(RotatingHost::default());
+        let transport = Arc::new(RejectsFirstToken::default());
+        let mut provider = GoogleOAuthProvider::new(host.clone())
+            .with_project_id(Some("project".to_string()))
+            .with_transport(transport.clone());
+
+        let response = provider
+            .complete(super::error_detail_tests::completion_request())
+            .await
+            .expect("the resend with the fresh token completes");
+
+        assert_eq!(response.full_text(), "done");
+        assert_eq!(
+            *transport.authorizations.lock_recover(),
+            vec!["Bearer token-1", "Bearer token-2"]
+        );
+        assert_eq!(
+            *host.asks.lock_recover(),
+            vec![
+                TokenRequestReason::Current,
+                TokenRequestReason::Current,
+                TokenRequestReason::Rejected,
+            ],
+            "lower asks once, send asks once and once more after the 401"
         );
     }
 }

@@ -78,9 +78,11 @@ fn responses_text_image_text_result_is_one_ordered_function_call_output() {
 
 #[test]
 fn codex_text_image_text_result_is_one_ordered_function_call_output() {
-    let body = crate::CodexProvider::new("access", "refresh", 0)
-        .build_request_body(&text_image_text_request(), false)
-        .unwrap();
+    let body = crate::CodexProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access"),
+    ))
+    .build_request_body(&text_image_text_request(), false)
+    .unwrap();
     let outputs = function_call_outputs(&body);
     assert_eq!(outputs.len(), 1, "{body:#}");
     assert_eq!(

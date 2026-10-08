@@ -84,15 +84,9 @@ fn request(events: Arc<Mutex<Vec<LlmStreamEvent>>>) -> LlmRequest {
 #[test]
 fn text_runs_around_a_tool_call_get_distinct_sealed_blocks() {
     let events = Arc::new(Mutex::new(Vec::new()));
-    let mut provider = GoogleOAuthProvider::new(
-        "access-token",
-        "refresh-token",
-        u64::MAX,
-        lash_provider_google::GoogleOAuthClient {
-            id: "oauth-client-id".into(),
-            secret: "oauth-client-secret".into(),
-        },
-    )
+    let mut provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access-token"),
+    ))
     .with_project_id(Some("project-1".to_string()))
     .with_transport(Arc::new(ScriptedSseTransport::new(vec![
         text_tool_text_stream_bytes(),

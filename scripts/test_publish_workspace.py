@@ -36,7 +36,6 @@ EXPECTED_INTERNAL_PACKAGES = {
     "lash-protocol-rlm": "lash-internal-protocol-rlm",
     "lash-protocol-standard": "lash-internal-protocol-standard",
     "lash-provider-anthropic": "lash-internal-provider-anthropic",
-    "lash-provider-auth": "lash-internal-provider-auth",
     "lash-provider-google": "lash-internal-provider-google",
     "lash-provider-openai": "lash-internal-provider-openai",
     "lash-remote-protocol": "lash-internal-remote-protocol",

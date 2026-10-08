@@ -20,8 +20,8 @@ pub(crate) use lash_core::llm::types::{
 };
 pub(crate) use lash_core::provider::{
     CacheRetention, GenerationEmission, GenerationWire, OutputCapWire, Provider,
-    ProviderComponents, ProviderOptions, StreamTermination, ThinkingSummaryWire,
-    resolve_generation_policy,
+    ProviderComponents, ProviderOptions, ProviderToken, StreamTermination, ThinkingSummaryWire,
+    TokenRequestReason, TokenSource, resolve_generation_policy,
 };
 pub(crate) use lash_core::{
     facade_support::ProviderSchemaCapabilities, facade_support::SchemaPurpose,
@@ -35,11 +35,12 @@ pub(crate) use lash_llm_transport::streaming::{SseStreamBounds, drive_sse_respon
 pub(crate) use lash_llm_transport::timeouts::response_start_timeout;
 pub(crate) use lash_llm_transport::util::{emit_provider_request_trace, emit_provider_trace};
 pub(crate) use lash_llm_transport::{
-    LlmHttpRequest, LlmHttpTransport, ReqwestLlmHttpTransport, ResponseMetadataCapture,
+    LlmHttpRequest, LlmHttpTransport, ReqwestLlmHttpTransport, ResponseMetadataCapture, TokenGate,
     first_header_value, merge_extra_body, merge_extra_headers, read_http_body_text,
-    reserved_generation_paths, validate_extra_headers,
+    rejected_before_output, reserved_generation_paths, validate_extra_headers,
 };
-pub(crate) use lash_sansio::{ModelToolReturnPart, Redacted};
+pub(crate) use lash_sansio::ModelToolReturnPart;
+pub(crate) use std::sync::Arc;
 
 pub(crate) use crate::config::*;
 pub(crate) use crate::policy::*;

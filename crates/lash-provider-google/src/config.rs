@@ -3,13 +3,11 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, OnceLock};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-
-use lash_provider_auth::{
-    Credential, CredentialManager, CredentialRefresher, RefreshCause, classify_oauth_refresh_error,
-};
+use std::time::{Duration, Instant};
 
 use crate::support::*;
+#[cfg(test)]
+use lash_core::provider::ProviderToken;
 
 pub(crate) const CODE_ASSIST_ENDPOINT: &str = "https://cloudcode-pa.googleapis.com";
 pub(crate) const CODE_ASSIST_API_VERSION: &str = "v1internal";
@@ -93,71 +91,12 @@ impl UploadedAttachmentCache {
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct GoogleCredential {
-    pub(crate) access_token: Redacted,
-    pub(crate) refresh_token: Redacted,
-    pub(crate) expires_at: u64,
-}
-
-impl std::fmt::Display for GoogleCredential {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("GoogleCredential([REDACTED])")
-    }
-}
-
-impl Credential for GoogleCredential {
-    fn expires_at(&self) -> Option<SystemTime> {
-        (self.expires_at != 0)
-            .then(|| UNIX_EPOCH.checked_add(Duration::from_secs(self.expires_at)))
-            .flatten()
-    }
-}
-
-/// OAuth application credentials registered by the host with Google.
-///
-/// Construct this with named fields so the client ID and secret cannot be
-/// confused with the provider's access and refresh tokens.
-#[derive(Clone, Debug, Deserialize)]
-pub struct GoogleOAuthClient {
-    #[serde(rename = "oauth_client_id")]
-    /// OAuth client ID issued for the host's Google application.
-    pub id: String,
-    #[serde(rename = "oauth_client_secret")]
-    /// OAuth client secret issued for the host's Google application.
-    /// Redacted in every `Debug` rendering.
-    pub secret: Redacted,
-}
-
-#[derive(Debug)]
-struct GoogleCredentialRefresher {
-    oauth_client: GoogleOAuthClient,
-}
-
-#[async_trait]
-impl CredentialRefresher<GoogleCredential> for GoogleCredentialRefresher {
-    async fn refresh(
-        &self,
-        current: &GoogleCredential,
-        _cause: RefreshCause,
-    ) -> Result<GoogleCredential, CredentialError> {
-        let tokens =
-            crate::oauth::refresh_tokens(&self.oauth_client, current.refresh_token.expose_secret())
-                .await
-                .map_err(classify_oauth_refresh_error)?;
-        Ok(GoogleCredential {
-            access_token: tokens.access_token,
-            refresh_token: tokens.refresh_token,
-            expires_at: tokens.expires_at,
-        })
-    }
-}
-
-/// Google OAuth (Gemini via Code Assist) provider.
+/// Google (Gemini via Code Assist) provider. The host owns the Google OAuth
+/// login, refresh and client registration, and supplies access tokens through
+/// a [`TokenSource`].
 #[derive(Clone, Debug)]
 pub struct GoogleOAuthProvider {
-    pub(crate) credentials: Arc<CredentialManager<GoogleCredential>>,
-    pub(crate) oauth_client: GoogleOAuthClient,
+    pub(crate) tokens: Arc<TokenGate>,
     pub(crate) endpoint: String,
     pub(crate) api_version: String,
     pub project_id: Option<String>,
@@ -175,15 +114,7 @@ pub struct GoogleOAuthProvider {
 impl GoogleOAuthProvider {
     #[cfg(test)]
     pub(crate) fn for_test() -> Self {
-        Self::new(
-            "access",
-            "refresh",
-            0,
-            GoogleOAuthClient {
-                id: "oauth-client-id".to_string(),
-                secret: "oauth-client-secret".into(),
-            },
-        )
+        Self::new(Arc::new(ProviderToken::new("access")))
     }
 
     pub(crate) fn uploaded_attachment_cache() -> &'static tokio::sync::Mutex<UploadedAttachmentCache>
@@ -192,27 +123,10 @@ impl GoogleOAuthProvider {
         CACHE.get_or_init(|| tokio::sync::Mutex::new(UploadedAttachmentCache::default()))
     }
 
-    /// Construct a provider from current tokens and the host's named Google
-    /// OAuth application credentials.
-    pub fn new(
-        access_token: impl Into<String>,
-        refresh_token: impl Into<String>,
-        expires_at: u64,
-        oauth_client: GoogleOAuthClient,
-    ) -> Self {
-        let credential = GoogleCredential {
-            access_token: Redacted::new(access_token),
-            refresh_token: Redacted::new(refresh_token),
-            expires_at,
-        };
+    /// A provider that asks `tokens` for an access token before every attempt.
+    pub fn new(tokens: Arc<dyn TokenSource>) -> Self {
         Self {
-            credentials: Arc::new(CredentialManager::new(
-                credential,
-                Arc::new(GoogleCredentialRefresher {
-                    oauth_client: oauth_client.clone(),
-                }),
-            )),
-            oauth_client,
+            tokens: Arc::new(TokenGate::new(tokens, Self::PROVIDER_KIND)),
             endpoint: CODE_ASSIST_ENDPOINT.to_string(),
             api_version: CODE_ASSIST_API_VERSION.to_string(),
             project_id: None,
@@ -291,39 +205,20 @@ impl GoogleOAuthProvider {
 }
 
 #[cfg(test)]
-mod credential_tests {
-    use super::*;
-
-    #[test]
-    fn google_oauth_client_secret_is_redacted_from_debug_output() {
-        let provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            0,
-            GoogleOAuthClient {
-                id: "oauth-client-id".to_string(),
-                secret: "oauth-client-secret-sentinel".into(),
-            },
-        );
-        let debug = format!("{provider:?}");
-        assert!(debug.contains("oauth-client-id"));
-        assert!(!debug.contains("oauth-client-secret-sentinel"));
-    }
-}
-
-#[cfg(test)]
 mod redaction_tests {
     use super::*;
 
     #[test]
-    fn google_credential_tokens_are_redacted_from_debug_output() {
-        let credential = GoogleCredential {
-            access_token: Redacted::new("google-access-sentinel"),
-            refresh_token: Redacted::new("google-refresh-sentinel"),
-            expires_at: 7,
-        };
-        let debug = format!("{credential:?}");
-        assert!(!debug.contains("sentinel"), "leaked: {debug}");
+    fn google_tokens_never_reach_debug_output_or_serialized_config() {
+        let provider =
+            GoogleOAuthProvider::new(Arc::new(ProviderToken::new("google-access-sentinel")));
+        let debug = format!("{provider:?}");
+        assert!(!debug.contains("google-access-sentinel"), "leaked: {debug}");
         assert!(debug.contains("[redacted]"));
+        let config = provider.serialize_config().to_string();
+        assert!(
+            !config.contains("google-access-sentinel"),
+            "leaked: {config}"
+        );
     }
 }

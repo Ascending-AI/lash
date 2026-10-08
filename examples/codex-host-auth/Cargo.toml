@@ -1,0 +1,24 @@
+[package]
+name = "codex-host-auth"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "A host-owned ChatGPT login for the Codex provider: the host runs the device-code login, refreshes and persists the tokens, and hands lash a TokenSource."
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lash = { workspace = true, features = ["openai"] }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+base64 = { workspace = true }
+form_urlencoded = { workspace = true }
+reqwest = { workspace = true, features = ["json", "rustls"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["fs", "macros", "rt-multi-thread", "sync", "time"] }

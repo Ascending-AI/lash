@@ -638,15 +638,9 @@ where
             )
         }
         GOOGLE_OAUTH => {
-            let provider = GoogleOAuthProvider::new(
-                "access-token",
-                "refresh-token",
-                0,
-                lash_provider_google::GoogleOAuthClient {
-                    id: "oauth-client-id".into(),
-                    secret: "oauth-client-secret".into(),
-                },
-            )
+            let provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+                lash_core::provider::ProviderToken::new("access-token"),
+            ))
             .with_project_id(Some("project-1".to_string()))
             .with_transport(transport);
             (

@@ -1,17 +1,15 @@
-//! OpenAI Codex OAuth provider (ChatGPT Plus/Pro/Team via device-code flow).
+//! OpenAI Codex provider (ChatGPT Plus/Pro/Team accounts).
 //!
 //! [`CodexProvider`] is the facade: this file owns the provider's shape
 //! (construction, configuration, the Codex-specific request body) and
 //! delegates the rest to modules that each own one concern —
-//! `credential` for OAuth material and refresh, `session` for the WebSocket
+//! `session` for the WebSocket
 //! session cache and its leases, `continuation` for cached-context planning,
 //! `streaming` for driving a response over either transport, and `failure` for
 //! Codex error classification.
 
 mod continuation;
-mod credential;
 mod failure;
-pub mod oauth;
 mod session;
 mod streaming;
 #[cfg(any(test, feature = "testing"))]
@@ -33,16 +31,14 @@ use lash_core::llm::types::{
 use lash_core::provider::{
     CacheRetention, GenerationEmission, GenerationWire, OutputCapWire, Provider,
     ProviderComponents, ProviderOptions, ProviderReliability, ResolvedGenerationPolicy,
-    ThinkingSummaryWire, resolve_generation_policy,
+    ThinkingSummaryWire, TokenSource, resolve_generation_policy,
 };
 use lash_core::{facade_support::ProviderSchemaCapabilities, facade_support::SchemaPurpose};
 use lash_llm_transport::{
-    LlmHttpTransport, merge_extra_body, reserved_generation_paths, validate_extra_headers,
+    LlmHttpTransport, TokenGate, merge_extra_body, reserved_generation_paths,
+    validate_extra_headers,
 };
-use lash_provider_auth::CredentialManager;
-use lash_sansio::Redacted;
 
-use credential::{CodexCredential, CodexCredentialRefresher};
 use failure::CodexFailureClassifier;
 use session::CodexWebsocketSessionCache;
 
@@ -67,7 +63,9 @@ pub(crate) enum CodexTransport {
     WebsocketCached,
 }
 
-/// OpenAI Codex OAuth provider (ChatGPT Plus/Pro/Team via device-code flow).
+/// OpenAI Codex provider (ChatGPT Plus/Pro/Team accounts). The host owns the
+/// ChatGPT login and refresh and supplies tokens through a [`TokenSource`];
+/// a token's bound account travels as `ChatGPT-Account-ID`.
 ///
 /// Codex speaks the OpenAI Responses streaming protocol, so the request/stream
 /// machinery is shared verbatim from [`crate::responses_shared`].
@@ -77,7 +75,7 @@ pub(crate) enum CodexTransport {
 /// Codex error/quota classification.
 #[derive(Clone, Debug)]
 pub struct CodexProvider {
-    credentials: Arc<CredentialManager<CodexCredential>>,
+    tokens: Arc<TokenGate>,
     pub options: ProviderOptions,
     pub extra_headers: lash_llm_transport::ExtraHeaders,
     pub(crate) transport: CodexTransport,
@@ -92,22 +90,10 @@ impl CodexProvider {
     const CODEX_RESPONSES_URL: &'static str = "https://chatgpt.com/backend-api/codex/responses";
     const CODEX_RESPONSES_WS_URL: &'static str = "wss://chatgpt.com/backend-api/codex/responses";
     const CODEX_RESPONSES_WS_BETA: &'static str = "responses_websockets=2026-02-06";
-    pub fn new(
-        access_token: impl Into<String>,
-        refresh_token: impl Into<String>,
-        expires_at: u64,
-    ) -> Self {
-        let credential = CodexCredential {
-            access_token: Redacted::new(access_token),
-            refresh_token: Redacted::new(refresh_token),
-            expires_at,
-            account_id: None,
-        };
+    /// A provider that asks `tokens` for a token before every attempt.
+    pub fn new(tokens: Arc<dyn TokenSource>) -> Self {
         Self {
-            credentials: Arc::new(CredentialManager::new(
-                credential,
-                Arc::new(CodexCredentialRefresher),
-            )),
+            tokens: Arc::new(TokenGate::new(tokens, "codex")),
             options: ProviderOptions {
                 reliability: ProviderReliability::codex(),
                 ..ProviderOptions::default()
@@ -119,16 +105,6 @@ impl CodexProvider {
             websocket_url: Self::CODEX_RESPONSES_WS_URL.to_string(),
             http_transport: DEFAULT_HTTP_TRANSPORT.clone(),
         }
-    }
-
-    pub fn with_account_id(mut self, account_id: Option<String>) -> Self {
-        let mut credential = self.credentials.snapshot();
-        credential.account_id = account_id.map(Redacted::new);
-        self.credentials = Arc::new(CredentialManager::new(
-            credential,
-            Arc::new(CodexCredentialRefresher),
-        ));
-        self
     }
 
     pub fn with_options(mut self, options: ProviderOptions) -> Self {
@@ -404,21 +380,13 @@ mod redaction_tests {
 
     #[test]
     fn codex_tokens_are_redacted_from_debug_output() {
-        let provider = CodexProvider::new("codex-access-sentinel", "codex-refresh-sentinel", 7)
-            .with_account_id(Some("codex-account-sentinel".to_string()));
+        let provider = CodexProvider::new(Arc::new(
+            lash_core::provider::ProviderToken::new("codex-access-sentinel")
+                .with_account("codex-account-sentinel"),
+        ));
         let debug = format!("{provider:?}");
         assert!(!debug.contains("codex-access-sentinel"), "leaked: {debug}");
-        assert!(!debug.contains("codex-refresh-sentinel"), "leaked: {debug}");
         assert!(!debug.contains("codex-account-sentinel"), "leaked: {debug}");
         assert!(debug.contains("[redacted]"));
-
-        let tokens = oauth::CodexTokens {
-            access_token: Redacted::new("codex-access-sentinel"),
-            refresh_token: Redacted::new("codex-refresh-sentinel"),
-            expires_at: 7,
-            account_id: Some(Redacted::new("codex-account-sentinel")),
-        };
-        let debug = format!("{tokens:?}");
-        assert!(!debug.contains("sentinel"), "leaked: {debug}");
     }
 }

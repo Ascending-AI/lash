@@ -497,20 +497,6 @@ pub(crate) fn provider_transport_exclusions() -> Vec<ProviderTransportExclusion>
             review_owner: "lash-sim provider matrix",
         },
         ProviderTransportExclusion {
-            path: "crates/lash-provider-openai/src/codex/oauth.rs",
-            status: "reviewed_non_dst_exclusion",
-            reason: "OAuth device-code polling and token exchange are auth flows, not LLM provider execution; they use reqwest directly and require separate OAuth script fixtures.",
-            replacement_lane: "auth-flow conformance lane, not live LLM DST",
-            review_owner: "lash-sim provider matrix",
-        },
-        ProviderTransportExclusion {
-            path: "crates/lash-provider-google/src/oauth.rs",
-            status: "reviewed_non_dst_exclusion",
-            reason: "Google OAuth authorization-code and refresh-token HTTP calls remain outside the LLM transport DST because the generated harness scripts provider execution, not credential issuance.",
-            replacement_lane: "auth-flow conformance lane, not live LLM DST",
-            review_owner: "lash-sim provider matrix",
-        },
-        ProviderTransportExclusion {
             path: "crates/lash-core/src/runtime/session_manager/direct.rs",
             status: "reviewed_non_dst_exclusion",
             reason: "Direct completion effects are runtime effect-controller behavior; provider execution behind the direct request is covered through scripted provider transports, while direct effect planning is covered by runtime tests.",

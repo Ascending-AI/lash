@@ -115,9 +115,9 @@ Lash adds only mechanics to the wire. `store: false` and
 needs them. Verbosity and parallel-call defaults are left to the provider
 when the host sets none.
 
-**Validation precedes I/O.** Codex resolves every setting before its
-credential manager may refresh a token. Google resolves before the credential
-refresh, the project lookup and any attachment upload.
+**Validation precedes I/O.** Codex resolves every setting before it asks the
+host's token source for a token. Google resolves before the token source is
+asked, the project lookup and any attachment upload.
 
 **The receipt joins provenance with emission evidence.** Resolution supplies
 what the host asked for. Each adapter reports, from the branch that wrote it,
@@ -156,8 +156,8 @@ refuses an `omitted_sampling_pinned` outcome.
   maps the selected reasoning dialect.
 - `crates/lash-provider-anthropic/src/request.rs:434` declares its wire;
   `crates/lash-provider-anthropic/src/policy.rs:27` maps reasoning.
-- `crates/lash-provider-openai/src/codex.rs:224` validates before credential
-  access; `crates/lash-provider-openai/src/responses.rs:43` builds the
+- `crates/lash-provider-openai/src/codex.rs` (`preflight`) validates before
+  credential access; `crates/lash-provider-openai/src/responses.rs:43` builds the
   Responses request from resolved policy.
 - `crates/lash-core-llm/src/provider/tests/generation_policy_tests.rs` and
   the providers' generation tests pin refusal and emission.

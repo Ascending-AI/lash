@@ -5,7 +5,6 @@ mod config;
 mod conformance_route;
 #[cfg(test)]
 mod execution_evidence_tests;
-pub mod oauth;
 mod provider;
 #[cfg(test)]
 mod provider_trace_tests;
@@ -22,7 +21,7 @@ mod upload;
 #[cfg(test)]
 mod upload_cache_tests;
 
-pub use config::{GoogleOAuthClient, GoogleOAuthProvider};
+pub use config::GoogleOAuthProvider;
 
 #[cfg(test)]
 mod tests {
@@ -105,15 +104,9 @@ mod tests {
     #[tokio::test]
     async fn response_metadata_capture_respects_shared_allowlists() {
         let body = "data: {\"response\":{\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"parts\":[{\"text\":\"done\"}]} }],\"billing\":{\"cost\":2},\"private\":\"hidden\"}}\n\n";
-        let provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            0,
-            crate::GoogleOAuthClient {
-                id: "oauth-client-id".into(),
-                secret: "oauth-client-secret".into(),
-            },
-        )
+        let provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+            lash_core::provider::ProviderToken::new("access"),
+        ))
         .with_transport(Arc::new(StaticSseTransport::with_headers(
             body,
             vec![
@@ -168,15 +161,9 @@ mod tests {
     async fn google_default_tolerates_eof_but_strict_policy_retains_partial_usage() {
         let body = "data: {\"response\":{\"responseId\":\"google-partial-1\",\"modelVersion\":\"gemini-partial-served\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"legacy\"},{\"functionCall\":{\"id\":\"call-1\",\"name\":\"lookup\",\"args\":{\"q\":\"x\"}}}]}}],\"usageMetadata\":{\"promptTokenCount\":6,\"candidatesTokenCount\":2,\"thoughtsTokenCount\":0}}}\n\n";
         let wire_request = json!({ "model": "gemini-test" });
-        let tolerant = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            0,
-            crate::GoogleOAuthClient {
-                id: "oauth-client-id".into(),
-                secret: "oauth-client-secret".into(),
-            },
-        )
+        let tolerant = GoogleOAuthProvider::new(std::sync::Arc::new(
+            lash_core::provider::ProviderToken::new("access"),
+        ))
         .with_transport(Arc::new(StaticSseTransport::new(body)));
         let response = tolerant
             .execute_request(
@@ -193,15 +180,9 @@ mod tests {
 
         let events = Arc::new(std::sync::Mutex::new(Vec::new()));
         let event_sink = Arc::clone(&events);
-        let strict = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            0,
-            crate::GoogleOAuthClient {
-                id: "oauth-client-id".into(),
-                secret: "oauth-client-secret".into(),
-            },
-        )
+        let strict = GoogleOAuthProvider::new(std::sync::Arc::new(
+            lash_core::provider::ProviderToken::new("access"),
+        ))
         .with_transport(Arc::new(StaticSseTransport::new(body)));
         let error = strict
             .execute_request(
@@ -265,15 +246,9 @@ mod tests {
         let body = "data: {\"response\":{\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"parts\":[{\"text\":\"before tool\"},{\"functionCall\":{\"id\":\"call-1\",\"name\":\"lookup\",\"args\":{\"q\":\"x\"}}}]}}]}}\n\n";
         let events = Arc::new(std::sync::Mutex::new(Vec::new()));
         let event_sink = Arc::clone(&events);
-        let provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            0,
-            crate::GoogleOAuthClient {
-                id: "oauth-client-id".into(),
-                secret: "oauth-client-secret".into(),
-            },
-        )
+        let provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+            lash_core::provider::ProviderToken::new("access"),
+        ))
         .with_transport(Arc::new(StaticSseTransport::new(body)));
         let completed = provider
             .execute_request(
@@ -302,15 +277,9 @@ mod tests {
         let body = "data: {\"response\":{\"responseId\":\"google-response-1\",\"modelVersion\":\"gemini-3.1-pro-served\",\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"parts\":[{\"text\":\"done\"}]}}],\"usageMetadata\":{\"promptTokenCount\":6,\"candidatesTokenCount\":2,\"thoughtsTokenCount\":0}}}\n\n";
         let events = Arc::new(std::sync::Mutex::new(Vec::new()));
         let event_sink = Arc::clone(&events);
-        let provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            0,
-            crate::GoogleOAuthClient {
-                id: "oauth-client-id".into(),
-                secret: "oauth-client-secret".into(),
-            },
-        )
+        let provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+            lash_core::provider::ProviderToken::new("access"),
+        ))
         .with_transport(Arc::new(StaticSseTransport::new(body)));
         let response = provider
             .execute_request(
@@ -466,15 +435,9 @@ mod tests {
         let mut req = request(None);
         req.model.metadata_mut().wire_model = "gemini-test".to_string();
         req.messages = lash_core::session_model::render_prompt(&durable_history).messages;
-        let provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            0,
-            crate::GoogleOAuthClient {
-                id: "oauth-client-id".into(),
-                secret: "oauth-client-secret".into(),
-            },
-        );
+        let provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+            lash_core::provider::ProviderToken::new("access"),
+        ));
         let contents = provider
             .build_contents_with_attachment_parts(&req, &[])
             .expect("retention policy");
@@ -488,15 +451,9 @@ mod tests {
     ) -> (lash_core::llm::types::LlmResponse, Vec<LlmStreamEvent>) {
         let events = Arc::new(std::sync::Mutex::new(Vec::new()));
         let event_sink = Arc::clone(&events);
-        let provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            0,
-            crate::GoogleOAuthClient {
-                id: "oauth-client-id".into(),
-                secret: "oauth-client-secret".into(),
-            },
-        )
+        let provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+            lash_core::provider::ProviderToken::new("access"),
+        ))
         .with_transport(Arc::new(StaticSseTransport::new(sse_body(wire_events))));
         let response = provider
             .execute_request(
@@ -987,15 +944,9 @@ mod tests {
 
     #[test]
     fn thinking_config_omits_thoughts_unless_provider_exposes_thinking() {
-        let hidden_provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            0,
-            crate::GoogleOAuthClient {
-                id: "oauth-client-id".into(),
-                secret: "oauth-client-secret".into(),
-            },
-        );
+        let hidden_provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+            lash_core::provider::ProviderToken::new("access"),
+        ));
         let hidden = GoogleOAuthProvider::build_request(
             &hidden_provider,
             &request_with_capability(
@@ -1016,15 +967,9 @@ mod tests {
                 .is_none()
         );
 
-        let exposed_provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            0,
-            crate::GoogleOAuthClient {
-                id: "oauth-client-id".into(),
-                secret: "oauth-client-secret".into(),
-            },
-        );
+        let exposed_provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+            lash_core::provider::ProviderToken::new("access"),
+        ));
         let mut exposed_request = request_with_capability(
             Some("medium"),
             effort_capability(&["low", "medium", "high"]),
@@ -1049,15 +994,9 @@ mod tests {
 
     #[test]
     fn output_token_cap_maps_to_max_output_tokens() {
-        let provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            0,
-            crate::GoogleOAuthClient {
-                id: "oauth-client-id".into(),
-                secret: "oauth-client-secret".into(),
-            },
-        );
+        let provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+            lash_core::provider::ProviderToken::new("access"),
+        ));
 
         let mut req = request(None);
         req.model.metadata_mut().limits.output_tokens =
@@ -1100,15 +1039,9 @@ mod tests {
 
     #[test]
     fn stop_sequences_reach_the_generation_config() {
-        let provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            0,
-            crate::GoogleOAuthClient {
-                id: "oauth-client-id".into(),
-                secret: "oauth-client-secret".into(),
-            },
-        );
+        let provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+            lash_core::provider::ProviderToken::new("access"),
+        ));
         let mut req = request(None);
         req.generation.stop_sequences = vec!["</lashlang>".to_string()];
 
@@ -1128,15 +1061,9 @@ mod tests {
 
     #[test]
     fn caller_sampling_controls_reach_the_generation_config() {
-        let provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            0,
-            crate::GoogleOAuthClient {
-                id: "oauth-client-id".into(),
-                secret: "oauth-client-secret".into(),
-            },
-        );
+        let provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+            lash_core::provider::ProviderToken::new("access"),
+        ));
 
         let (defaulted, defaulted_receipt) = GoogleOAuthProvider::build_request_with_receipt(
             &provider,
@@ -1389,15 +1316,9 @@ mod tests {
 
     #[test]
     fn google_claude_on_vertex_tool_parameters_strip_json_schema_meta_declarations() {
-        let provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            0,
-            crate::GoogleOAuthClient {
-                id: "oauth-client-id".into(),
-                secret: "oauth-client-secret".into(),
-            },
-        );
+        let provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+            lash_core::provider::ProviderToken::new("access"),
+        ));
         let mut claude_on_vertex = request(None);
         claude_on_vertex.model.metadata_mut().wire_model = "claude-sonnet-4-6".to_string();
         claude_on_vertex

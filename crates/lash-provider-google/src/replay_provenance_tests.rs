@@ -124,15 +124,9 @@ async fn raw_provider_complete_drops_foreign_and_unstamped_replay_from_google_wi
         ],
     )];
     let bodies = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let mut provider = GoogleOAuthProvider::new(
-        "access",
-        "refresh",
-        u64::MAX,
-        crate::GoogleOAuthClient {
-            id: "oauth-client-id".into(),
-            secret: "oauth-client-secret".into(),
-        },
-    )
+    let mut provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access"),
+    ))
     .with_transport(Arc::new(CapturingTransport {
         bodies: Arc::clone(&bodies),
     }));

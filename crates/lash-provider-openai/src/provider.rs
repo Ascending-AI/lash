@@ -1,9 +1,24 @@
 use crate::support::*;
 
 impl OpenAiCompatibleProvider {
+    /// A provider that sends the fixed `api_key`.
     pub fn new(api_key: impl Into<String>, base_url: impl Into<String>) -> Self {
+        Self::with_token_source(Arc::new(ProviderToken::new(api_key.into())), base_url)
+    }
+
+    /// A provider that asks `tokens` for a token before every attempt.
+    pub fn with_token_source(tokens: Arc<dyn TokenSource>, base_url: impl Into<String>) -> Self {
+        Self::with_gate(tokens, "openai-compatible", base_url)
+    }
+
+    /// `kind` names the provider to the token source, as `Provider::kind` does.
+    fn with_gate(
+        tokens: Arc<dyn TokenSource>,
+        kind: &'static str,
+        base_url: impl Into<String>,
+    ) -> Self {
         Self {
-            api_key: Redacted::new(api_key),
+            tokens: Arc::new(TokenGate::new(tokens, kind)),
             base_url: base_url.into(),
             options: ProviderOptions::default(),
             compat: OpenAiCompat::default(),
@@ -54,7 +69,13 @@ impl OpenAiCompatibleProvider {
 }
 
 impl OpenAiProvider {
+    /// A provider that sends the fixed `api_key`.
     pub fn new(api_key: impl Into<String>) -> Self {
+        Self::with_token_source(Arc::new(ProviderToken::new(api_key.into())))
+    }
+
+    /// A provider that asks `tokens` for a token before every attempt.
+    pub fn with_token_source(tokens: Arc<dyn TokenSource>) -> Self {
         let compat = OpenAiCompat {
             reasoning: Some(OpenAiReasoningDialect::OpenAi),
             prompt_cache_key: Some(true),
@@ -62,7 +83,8 @@ impl OpenAiProvider {
             ..OpenAiCompat::default()
         };
         Self {
-            inner: OpenAiCompatibleProvider::new(api_key, OPENAI_BASE_URL).with_compat(compat),
+            inner: OpenAiCompatibleProvider::with_gate(tokens, "openai", OPENAI_BASE_URL)
+                .with_compat(compat),
         }
     }
 
@@ -130,10 +152,6 @@ impl Provider for OpenAiCompatibleProvider {
     fn serialize_config(&self) -> serde_json::Value {
         let mut map = serde_json::Map::new();
         map.insert(
-            "api_key".to_string(),
-            serde_json::Value::String(self.api_key.expose_secret().to_string()),
-        );
-        map.insert(
             "base_url".to_string(),
             serde_json::Value::String(self.base_url.clone()),
         );
@@ -197,10 +215,6 @@ impl Provider for OpenAiProvider {
 
     fn serialize_config(&self) -> serde_json::Value {
         let mut map = serde_json::Map::new();
-        map.insert(
-            "api_key".to_string(),
-            serde_json::Value::String(self.inner.api_key.expose_secret().to_string()),
-        );
         if !self.inner.options.is_default() {
             map.insert(
                 "options".to_string(),
@@ -256,8 +270,21 @@ mod redaction_tests {
         assert!(!debug.contains("sk-oai-secret-sentinel"), "leaked: {debug}");
         assert!(debug.contains("[redacted]"));
 
+        assert!(
+            !compatible
+                .serialize_config()
+                .to_string()
+                .contains("sk-oai-secret-sentinel")
+        );
+
         let openai = OpenAiProvider::new("sk-oai-secret-sentinel");
         let debug = format!("{openai:?}");
         assert!(!debug.contains("sk-oai-secret-sentinel"), "leaked: {debug}");
+        assert!(
+            !openai
+                .serialize_config()
+                .to_string()
+                .contains("sk-oai-secret-sentinel")
+        );
     }
 }

@@ -32,10 +32,6 @@ impl Provider for AnthropicProvider {
 
     fn serialize_config(&self) -> serde_json::Value {
         let mut map = serde_json::Map::new();
-        map.insert(
-            "api_key".to_string(),
-            serde_json::Value::String(self.api_key.expose_secret().to_string()),
-        );
         if let Some(base_url) = &self.base_url {
             map.insert(
                 "base_url".to_string(),
@@ -83,6 +79,44 @@ impl Provider for AnthropicProvider {
                 downstream.send(event);
             }));
         }
+        let tokens = Arc::clone(&self.tokens);
+        let mut lease = tokens.current(&minting_route).await?;
+        match self
+            .send_attempt(&req, admitted, &minting_route, &lease.token)
+            .await
+        {
+            Err(error) if rejected_before_output(&error) => {
+                match tokens
+                    .replace(&minting_route, &lease, TokenRequestReason::Rejected)
+                    .await?
+                {
+                    // Resend the admitted body once with the fresh token.
+                    Some(fresh) => {
+                        lease = fresh;
+                        self.send_attempt(&req, admitted, &minting_route, &lease.token)
+                            .await
+                    }
+                    None => Err(error),
+                }
+            }
+            other => other,
+        }
+    }
+
+    fn clone_boxed(&self) -> Box<dyn Provider> {
+        Box::new(self.clone())
+    }
+}
+
+impl AnthropicProvider {
+    /// One attempt of `send`, authenticated by `token`.
+    async fn send_attempt(
+        &self,
+        req: &LlmRequest,
+        admitted: &ProviderRequestBody,
+        minting_route: &ProviderRouteIdentity,
+        token: &ProviderToken,
+    ) -> Result<LlmResponse, LlmTransportError> {
         let stream_events = req.stream_events.clone();
         let provider_trace = req.provider_trace.clone();
         let timeouts = self.options.llm_timeouts();
@@ -126,7 +160,7 @@ impl Provider for AnthropicProvider {
 
         let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
         let mut request = LlmHttpRequest::post(url.clone(), request_body_bytes)
-            .with_header("x-api-key", self.api_key.expose_secret().to_string())
+            .with_header("x-api-key", token.secret().expose_secret().to_string())
             .with_header("anthropic-version", ANTHROPIC_VERSION)
             .with_header("anthropic-beta", betas.join(","))
             .with_header("Content-Type", "application/json")
@@ -237,7 +271,7 @@ impl Provider for AnthropicProvider {
             );
             partial.response_metadata = response_metadata.into_metadata();
             partial
-                .stamp_replay_origin(&minting_route)
+                .stamp_replay_origin(minting_route)
                 .map_err(replay_origin_conflict_error)?;
             return Err(error.with_partial_response(partial));
         }
@@ -253,7 +287,7 @@ impl Provider for AnthropicProvider {
             );
             partial.response_metadata = response_metadata.into_metadata();
             partial
-                .stamp_replay_origin(&minting_route)
+                .stamp_replay_origin(minting_route)
                 .map_err(replay_origin_conflict_error)?;
             return Err(
                 LlmTransportError::new("Anthropic stream ended before message_stop")
@@ -282,13 +316,9 @@ impl Provider for AnthropicProvider {
             expose_thinking: Some(expose_thinking),
         };
         response
-            .stamp_replay_origin(&minting_route)
+            .stamp_replay_origin(minting_route)
             .map_err(replay_origin_conflict_error)?;
         Ok(response)
-    }
-
-    fn clone_boxed(&self) -> Box<dyn Provider> {
-        Box::new(self.clone())
     }
 }
 

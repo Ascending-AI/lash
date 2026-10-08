@@ -249,6 +249,29 @@ pub async fn spawn_scripted_websocket_with_injected_accept_faults(
     actions: Vec<ScriptedWsAction>,
     injected_accept_faults: Vec<InjectedAcceptFault>,
 ) -> ScriptedWsServer {
+    spawn(actions, injected_accept_faults, None).await
+}
+
+/// [`spawn_scripted_websocket`], answering 401 to every handshake that
+/// authenticates with `Bearer {rejected_token}`. The handshake is still
+/// recorded.
+pub async fn spawn_scripted_websocket_rejecting_token(
+    actions: Vec<ScriptedWsAction>,
+    rejected_token: &str,
+) -> ScriptedWsServer {
+    spawn(
+        actions,
+        Vec::new(),
+        Some(format!("Bearer {rejected_token}")),
+    )
+    .await
+}
+
+async fn spawn(
+    actions: Vec<ScriptedWsAction>,
+    injected_accept_faults: Vec<InjectedAcceptFault>,
+    rejected_authorization: Option<String>,
+) -> ScriptedWsServer {
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind ws");
     let addr = listener.local_addr().expect("ws addr");
     let actions = Arc::new(Mutex::new(VecDeque::from(actions)));
@@ -300,6 +323,7 @@ pub async fn spawn_scripted_websocket_with_injected_accept_faults(
             let captured_raw = Arc::clone(&task_captured_raw);
             let handshakes = Arc::clone(&task_handshakes);
             let close_frames = Arc::clone(&task_close_frames);
+            let rejected_authorization = rejected_authorization.clone();
             tokio::spawn(async move {
                 #[expect(
                     clippy::result_large_err,
@@ -317,7 +341,18 @@ pub async fn spawn_scripted_websocket_with_injected_accept_faults(
                                 .map(|value| (name.as_str().to_string(), value.to_string()))
                         })
                         .collect::<Vec<_>>();
+                    let rejected = rejected_authorization.as_deref().is_some_and(|rejected| {
+                        headers.iter().any(|(name, value)| {
+                            name.eq_ignore_ascii_case("authorization") && value == rejected
+                        })
+                    });
                     handshakes.lock_recover().push(headers);
+                    if rejected {
+                        let mut refusal = tokio_tungstenite::tungstenite::http::Response::new(None);
+                        *refusal.status_mut() =
+                            tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED;
+                        return Err(refusal);
+                    }
                     Ok(response)
                 };
                 let Ok(mut ws) = accept_hdr_async(stream, callback).await else {

@@ -22,8 +22,9 @@ use lash_core::llm::types::{
     ExecutionEvidence, LlmRequest, LlmResponse, LlmStreamEvent, LlmStreamEvidence,
     LlmTerminalReason, LlmUsage, ProviderRequestBody, ProviderRouteIdentity,
 };
-use lash_core::provider::{LlmTimeouts, Provider, ProviderOptions, StreamTermination};
-use lash_llm_transport::merge_extra_headers;
+use lash_core::provider::{
+    LlmTimeouts, Provider, ProviderOptions, StreamTermination, TokenRequestReason,
+};
 use lash_llm_transport::streaming::{SseStreamBounds, drive_sse_response, emit_stream_progress};
 use lash_llm_transport::timeouts::response_start_timeout;
 use lash_llm_transport::util::{emit_provider_request_trace, emit_provider_trace};
@@ -32,7 +33,7 @@ use lash_llm_transport::{
     http_error_envelope, openai_terminal_reason_from_response_value,
     openai_usage_from_response_value, read_http_body_text,
 };
-use lash_provider_auth::{CredentialCallError, CredentialExecuteError};
+use lash_llm_transport::{TokenLease, merge_extra_headers, rejected_before_output};
 use lash_sansio::FailureCode;
 
 use crate::common::BuiltRequest;
@@ -41,19 +42,8 @@ use crate::responses_shared as shared;
 use super::continuation::{
     CodexContinuation, CodexWebsocketContextPlan, CodexWebsocketRequestPlan,
 };
-use super::credential::CodexCredential;
 use super::session::{CodexAttemptProgress, CodexWebSocketAttemptError, CodexWebsocketLease};
 use super::{CodexProvider, CodexTransport, PROVIDER};
-
-struct CodexCredentialCallContext<'a> {
-    provider: &'a mut CodexProvider,
-    request: &'a LlmRequest,
-    minting_route: &'a ProviderRouteIdentity,
-    /// The admitted body: the SSE request sends it byte for byte, and a
-    /// WebSocket attempt frames it.
-    built: &'a BuiltRequest,
-    body: &'a ProviderRequestBody,
-}
 
 #[derive(Clone, Debug)]
 struct CodexWebsocketAttemptDiagnostics<'a> {
@@ -157,8 +147,7 @@ impl CodexProvider {
         &self,
         req: LlmRequest,
         built_request: &BuiltRequest,
-        credential: &CodexCredential,
-        credential_generation: u64,
+        lease: &TokenLease,
     ) -> Result<LlmResponse, CodexWebSocketAttemptError> {
         let timeouts = self.options.llm_timeouts();
         // WebSocket connection policy is separate from the response-start
@@ -171,17 +160,15 @@ impl CodexProvider {
         let mut retry_state = CodexWebsocketRetryState::default();
         let mut allow_cached_context = self.websocket_continuation_enabled();
         loop {
-            let lease = self
-                .acquire_websocket(&req, connect_timeout, credential, credential_generation)
-                .await?;
-            let reused_connection = lease.reused;
+            let websocket = self.acquire_websocket(&req, connect_timeout, lease).await?;
+            let reused_connection = websocket.reused;
             let plan = self.websocket_request_plan(
                 &built_request.body,
-                lease.continuation.as_ref(),
-                allow_cached_context && lease.reusable,
+                websocket.continuation.as_ref(),
+                allow_cached_context && websocket.reusable,
             );
             match self
-                .run_websocket_attempt(&req, built_request, lease, &plan, retry_state, timeouts)
+                .run_websocket_attempt(&req, built_request, websocket, &plan, retry_state, timeouts)
                 .await
             {
                 Ok(response) => return Ok(response),
@@ -488,6 +475,496 @@ impl CodexProvider {
         Ok(response)
     }
 
+    /// One attempt: the WebSocket path when it applies, else HTTP/SSE, with
+    /// `lease`'s token bound to the request headers.
+    async fn send_once(
+        &self,
+        req: &LlmRequest,
+        built: &BuiltRequest,
+        admitted: &ProviderRequestBody,
+        lease: &TokenLease,
+    ) -> Result<LlmResponse, LlmTransportError> {
+        let stream_termination = req
+            .model
+            .metadata()
+            .capability
+            .stream_termination
+            .unwrap_or(StreamTermination::RequireTerminalEvidence);
+        if !matches!(self.transport, CodexTransport::Sse) {
+            let fallback_reason = matches!(self.transport, CodexTransport::Auto)
+                .then(|| self.websocket_fallback_reason(req))
+                .flatten();
+            if let Some(reason) = fallback_reason {
+                emit_provider_trace(
+                    req.provider_trace.as_ref(),
+                    "codex",
+                    &json!({
+                        "type": "lash.codex.websocket_fallback_skip",
+                        "transport": format!("{:?}", self.transport),
+                        "reason": reason,
+                    })
+                    .to_string(),
+                );
+                tracing::debug!(
+                    target: "lash_core::llm::codex_oauth",
+                    reason = %reason,
+                    "Skipping Codex WebSocket for session with active Auto fallback"
+                );
+            } else {
+                match self.complete_websocket(req.clone(), built, lease).await {
+                    Ok(response) => {
+                        self.clear_websocket_fallback(req);
+                        return Ok(response);
+                    }
+                    // A rejected handshake goes to the token gate, not to an
+                    // SSE fallback that would send the same token again.
+                    Err(err)
+                        if matches!(self.transport, CodexTransport::Auto)
+                            && err.progress() == CodexAttemptProgress::BeforeSend
+                            && err.error.http_status != Some(401) =>
+                    {
+                        self.record_websocket_fallback(req, &err.error);
+                        tracing::debug!(
+                            target: "lash_core::llm::codex_oauth",
+                            error = %err.error.message,
+                            "Codex WebSocket failed before stream start; falling back to SSE"
+                        );
+                    }
+                    Err(err) => {
+                        self.clear_continuation(req);
+                        let output_started = err.progress() == CodexAttemptProgress::OutputStarted;
+                        return Err(err.error.with_output_started(output_started));
+                    }
+                }
+            }
+        }
+        let stream_events = req.stream_events.clone();
+        let provider_trace = req.provider_trace.clone();
+        let timeouts = self.options.llm_timeouts();
+
+        let generation_disposition = Some(built.receipt);
+        let request_body = Some(admitted.body.to_string());
+        let body_bytes = admitted.body.as_bytes().to_vec();
+        emit_provider_request_trace(provider_trace.as_ref(), "codex", "responses", &body_bytes);
+        let mut headers = vec![
+            (
+                "Authorization".to_string(),
+                format!("Bearer {}", lease.token.secret().expose_secret()),
+            ),
+            ("Content-Type".to_string(), "application/json".to_string()),
+            ("Accept".to_string(), "text/event-stream".to_string()),
+            (
+                "OpenAI-Beta".to_string(),
+                "responses=experimental".to_string(),
+            ),
+            ("originator".to_string(), Self::CODEX_ORIGINATOR.to_string()),
+            ("User-Agent".to_string(), Self::codex_user_agent()),
+            (
+                "session-id".to_string(),
+                req.scope.provider_session_affinity_key(),
+            ),
+            (
+                "x-client-request-id".to_string(),
+                req.scope.request_id.clone(),
+            ),
+        ];
+        if let Some(id) = lease.token.account() {
+            headers.push((
+                "ChatGPT-Account-ID".to_string(),
+                id.expose_secret().to_string(),
+            ));
+        }
+        merge_extra_headers(&mut headers, &self.extra_headers, false)?;
+        let http_request = LlmHttpRequest {
+            method: LlmHttpMethod::Post,
+            url: self.responses_url.clone(),
+            headers,
+            body: bytes::Bytes::from(body_bytes),
+            body_for_error: request_body.clone(),
+            response_start_timeout_message: Some("Codex response start timed out".to_string()),
+        };
+        let stream_bounds = SseStreamBounds::new(timeouts.request_timeout, &self.options);
+        let resp = self
+            .http_transport
+            .send(
+                http_request,
+                response_start_timeout(
+                    timeouts.request_timeout,
+                    timeouts.response_start_timeout,
+                    stream_events.is_some(),
+                ),
+            )
+            .await?;
+        let status = resp.status;
+        let content_type = first_header_value(&resp.headers, "content-type").map(str::to_string);
+        let response_headers = resp.headers.clone();
+        let provider_request_id =
+            first_header_value(&response_headers, "x-request-id").map(str::to_string);
+        let is_sse = header_contains(&resp.headers, "content-type", "text/event-stream");
+        let success = resp.is_success();
+        let body = resp.body;
+        if !success {
+            let text = read_http_body_text(
+                body,
+                self.options.response_body_limit(),
+                timeouts.request_timeout,
+                "Codex response body timed out",
+            )
+            .await?;
+            let message = Self::codex_error_summary(status, &text).unwrap_or_else(|| {
+                format!(
+                    "Codex request failed with {}{}",
+                    status,
+                    content_type
+                        .as_deref()
+                        .map(|ct| format!(" ({ct})"))
+                        .unwrap_or_default()
+                )
+            });
+
+            // Retryability is decided centrally by `CodexFailureClassifier`
+            // from the attached HTTP status; no inline override here.
+            return Err(http_error_envelope(
+                message,
+                status,
+                response_headers,
+                text,
+                request_body.clone(),
+            ));
+        }
+        let mut response_metadata = ResponseMetadataCapture::from_response(
+            &req.model.metadata().request_defaults,
+            &response_headers,
+        );
+        if let Some(tx) = &stream_events {
+            tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                response_started: true,
+                request_body: request_body.clone(),
+                http_summary: Some(format!("HTTP POST {} (stream)", self.responses_url)),
+                execution_evidence: provider_request_id.clone().map(|provider_request_id| {
+                    ExecutionEvidence {
+                        provider_request_id: Some(provider_request_id),
+                        ..Default::default()
+                    }
+                }),
+                generation_disposition,
+                response_metadata: response_metadata.metadata(),
+                ..Default::default()
+            }));
+        }
+
+        let parse_stream =
+            Self::should_parse_stream(stream_events.is_some(), content_type.as_deref());
+
+        if !parse_stream {
+            let text = read_http_body_text(
+                body,
+                self.options.response_body_limit(),
+                timeouts.request_timeout,
+                "Codex response body timed out",
+            )
+            .await
+            .map_err(|err| Self::non_sse_body_read_error(status, content_type.as_deref(), err))?;
+            response_metadata.capture_body_text(&text);
+            emit_provider_trace(provider_trace.as_ref(), "codex", &text);
+            if Self::looks_like_sse_payload(&text) {
+                let mut state = shared::ResponsesStreamState {
+                    expose_thinking: req.model.metadata().request_defaults.expose_thinking,
+                    execution_evidence: provider_request_id.clone().map(|provider_request_id| {
+                        ExecutionEvidence {
+                            provider_request_id: Some(provider_request_id),
+                            ..Default::default()
+                        }
+                    }),
+                    ..Default::default()
+                };
+                shared::parse_sse_payload(PROVIDER, &text, &mut state)?;
+                let block_events = state.take_block_events();
+                let mut response = shared::response_from_stream_state(
+                    state,
+                    request_body,
+                    format!("HTTP POST {} (stream/fallback)", self.responses_url),
+                );
+                response.generation_disposition = generation_disposition;
+                response.response_metadata = response_metadata.into_metadata();
+                if let Some(tx) = &stream_events {
+                    tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                        provider_usage: response.provider_usage.clone(),
+                        execution_evidence: response.execution_evidence.clone(),
+                        ..Default::default()
+                    }));
+                    if response.usage != LlmUsage::default() {
+                        tx.send(LlmStreamEvent::Usage(response.usage.clone()));
+                    }
+                    // The body was itself an SSE payload: the block events
+                    // were already minted while folding it.
+                    for event in block_events {
+                        if !req.model.metadata().request_defaults.expose_thinking
+                            && crate::support::is_reasoning_block_event(&event)
+                        {
+                            continue;
+                        }
+                        tx.send(event);
+                    }
+                    for part in &response.parts {
+                        match part {
+                            lash_core::llm::types::LlmOutputPart::ToolCall { .. } => {
+                                tx.send(LlmStreamEvent::Part(part.clone()));
+                            }
+                            lash_core::llm::types::LlmOutputPart::Reasoning { .. }
+                                if req.model.metadata().request_defaults.expose_thinking =>
+                            {
+                                tx.send(LlmStreamEvent::Part(part.clone()));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                return Ok(response);
+            }
+            let value: Value = serde_json::from_str(&text).map_err(|e| {
+                LlmTransportError::new(format!("Invalid Codex response JSON: {e}"))
+                    .with_raw(text.clone())
+            })?;
+            let mut evidence_state = shared::ResponsesStreamState {
+                execution_evidence: provider_request_id.map(|provider_request_id| {
+                    ExecutionEvidence {
+                        provider_request_id: Some(provider_request_id),
+                        ..Default::default()
+                    }
+                }),
+                ..Default::default()
+            };
+            evidence_state.capture_execution_evidence(&value, true)?;
+            let execution_evidence = evidence_state.execution_evidence;
+            let content = shared::extract_text(&value);
+            let provider_usage = value.get("usage").cloned();
+            let usage = openai_usage_from_response_value(&value);
+            let mut parts = shared::response_parts_from_value(&value);
+            if parts.is_empty() && !content.is_empty() {
+                parts.push(lash_core::llm::types::LlmOutputPart::Text {
+                    text: content.clone(),
+                    response_meta: None,
+                });
+            }
+            if let Some(tx) = &stream_events {
+                tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                    provider_usage: provider_usage.clone(),
+                    execution_evidence: execution_evidence.clone(),
+                    ..Default::default()
+                }));
+                if usage != LlmUsage::default() {
+                    tx.send(LlmStreamEvent::Usage(usage.clone()));
+                }
+                let mut next_ordinal = 0u64;
+                if req.model.metadata().request_defaults.expose_thinking {
+                    for part in parts.iter().filter(|part| {
+                        matches!(part, lash_core::llm::types::LlmOutputPart::Reasoning { .. })
+                    }) {
+                        for (block, text) in
+                            crate::support::reasoning_part_block_texts(part, &mut next_ordinal)
+                        {
+                            if text.is_empty() {
+                                continue;
+                            }
+                            tx.send(LlmStreamEvent::ReasoningBlockStart {
+                                block: block.clone(),
+                            });
+                            tx.send(LlmStreamEvent::ReasoningDelta {
+                                block: block.clone(),
+                                text: text.clone(),
+                            });
+                            tx.send(LlmStreamEvent::ReasoningBlockEnd { block, text });
+                        }
+                        tx.send(LlmStreamEvent::Part(part.clone()));
+                    }
+                }
+                // Each visible message item is its own text block, mirroring
+                // the live SSE mint (`message:{item_id}` / `text:{ordinal}`).
+                for part in &parts {
+                    let lash_core::llm::types::LlmOutputPart::Text {
+                        text,
+                        response_meta,
+                    } = part
+                    else {
+                        continue;
+                    };
+                    if text.is_empty() {
+                        continue;
+                    }
+                    let block = crate::responses_shared::text_part_block_identity(
+                        response_meta.as_ref().and_then(|meta| meta.id.as_deref()),
+                        &mut next_ordinal,
+                    );
+                    tx.send(LlmStreamEvent::TextBlockStart {
+                        block: block.clone(),
+                    });
+                    tx.send(LlmStreamEvent::Delta {
+                        block: block.clone(),
+                        text: text.clone(),
+                    });
+                    tx.send(LlmStreamEvent::TextBlockEnd {
+                        block,
+                        text: text.clone(),
+                    });
+                }
+            }
+            let terminal_reason = openai_terminal_reason_from_response_value(&value, &parts);
+            return Ok(LlmResponse {
+                parts,
+                usage,
+                terminal_reason,
+                terminal_diagnostic: None,
+                provider_usage,
+                request_body,
+                http_summary: Some(format!("HTTP POST {}", self.responses_url)),
+                execution_evidence,
+                generation_disposition,
+                response_metadata: response_metadata.into_metadata(),
+                expose_thinking: Some(req.model.metadata().request_defaults.expose_thinking),
+            });
+        }
+
+        if stream_events.is_some() && !is_sse {
+            tracing::debug!(
+                target: "lash_core::llm::codex_oauth",
+                status,
+                content_type = content_type.as_deref().unwrap_or("<missing>"),
+                "Codex streaming response did not advertise SSE; parsing as stream because stream=true was requested"
+            );
+        }
+
+        let mut state = shared::ResponsesStreamState {
+            expose_thinking: req.model.metadata().request_defaults.expose_thinking,
+            execution_evidence: provider_request_id.map(|provider_request_id| ExecutionEvidence {
+                provider_request_id: Some(provider_request_id),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let expose_thinking = req.model.metadata().request_defaults.expose_thinking;
+        let stream_result = drive_sse_response(
+            body,
+            timeouts.chunk_timeout,
+            stream_bounds,
+            "Codex stream chunk timed out",
+            "Codex request timed out",
+            &mut response_metadata,
+            |raw| {
+                emit_provider_trace(provider_trace.as_ref(), "codex", raw);
+                let prev_usage = state.usage.clone();
+                let mut emitted_parts = Vec::new();
+                shared::process_sse_event(PROVIDER, raw, &mut state, Some(&mut emitted_parts))?;
+                if let Some(tx) = &stream_events
+                    && (state.provider_usage.is_some() || state.execution_evidence.is_some())
+                {
+                    tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                        provider_usage: state.provider_usage.clone(),
+                        execution_evidence: state.execution_evidence.clone(),
+                        ..Default::default()
+                    }));
+                }
+                emit_stream_progress(
+                    stream_events.as_ref(),
+                    state.take_block_events().into_iter().filter(|event| {
+                        expose_thinking || !crate::support::is_reasoning_block_event(event)
+                    }),
+                    &state.usage,
+                    &prev_usage,
+                );
+                if let Some(tx) = &stream_events {
+                    for part in emitted_parts {
+                        if matches!(part, lash_core::llm::types::LlmOutputPart::Reasoning { .. })
+                            && !expose_thinking
+                        {
+                            continue;
+                        }
+                        tx.send(LlmStreamEvent::Part(part));
+                    }
+                }
+                Ok(())
+            },
+        )
+        .await;
+
+        let seal_open_blocks = |state: &mut shared::ResponsesStreamState| {
+            if let Some(tx) = &stream_events {
+                for event in state.finish_blocks() {
+                    if !expose_thinking && crate::support::is_reasoning_block_event(&event) {
+                        continue;
+                    }
+                    tx.send(event);
+                }
+            } else {
+                state.finish_blocks();
+            }
+        };
+        if let Err(error) = stream_result {
+            seal_open_blocks(&mut state);
+            let output_started = state.output_started();
+            let mut partial = shared::response_from_stream_state(
+                state.clone(),
+                request_body.clone(),
+                format!("HTTP POST {} (stream)", self.responses_url),
+            );
+            partial.terminal_reason = LlmTerminalReason::Unknown;
+            partial.generation_disposition = generation_disposition;
+            partial.response_metadata = response_metadata.into_metadata();
+            return Err(error
+                .with_output_started(output_started)
+                .with_partial_response(partial));
+        }
+
+        if stream_termination == StreamTermination::RequireTerminalEvidence
+            && !state.terminal_event_seen
+        {
+            seal_open_blocks(&mut state);
+            let output_started = state.output_started();
+            let mut partial = shared::response_from_stream_state(
+                state.clone(),
+                request_body.clone(),
+                format!("HTTP POST {} (stream)", self.responses_url),
+            );
+            partial.terminal_reason = LlmTerminalReason::Unknown;
+            partial.generation_disposition = generation_disposition;
+            partial.response_metadata = response_metadata.into_metadata();
+            return Err(LlmTransportError::new(
+                "Codex stream ended before a terminal response event",
+            )
+            .with_kind(ProviderFailureKind::Stream)
+            .with_lash_code(TurnFailureCode::StreamEndedBeforeTerminalResponse)
+            .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
+            .with_output_started(output_started)
+            .with_partial_response(partial));
+        }
+
+        if state.final_response.is_none()
+            && state.parts.is_empty()
+            && !state.streamed_item_content_received
+        {
+            return Err(LlmTransportError::new(format!(
+                "Codex stream ended without SSE events (HTTP {}{})",
+                status,
+                content_type
+                    .as_deref()
+                    .map(|ct| format!(", content-type {ct}"))
+                    .unwrap_or_else(|| ", missing content-type".to_string())
+            ))
+            .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
+            .with_lash_code(TurnFailureCode::EmptyStream));
+        }
+
+        seal_open_blocks(&mut state);
+        let mut response = shared::response_from_stream_state(
+            state,
+            request_body,
+            format!("HTTP POST {} (stream)", self.responses_url),
+        );
+        response.generation_disposition = generation_disposition;
+        response.response_metadata = response_metadata.into_metadata();
+        Ok(response)
+    }
+
     fn websocket_http_summary(&self, diagnostics: &CodexWebsocketAttemptDiagnostics<'_>) -> String {
         let context = diagnostics.context.rendered();
         format!(
@@ -568,16 +1045,18 @@ fn codex_replay_origin_conflict(
     error
 }
 
-fn stamp_codex_partial_or_attach_conflict(
+/// `error` with its partial response stamped with the minting route, or the
+/// replay-origin conflict that stamping found.
+fn stamped_codex_failure(
     mut error: LlmTransportError,
     route: &ProviderRouteIdentity,
-) -> Result<LlmTransportError, LlmTransportError> {
+) -> LlmTransportError {
     if let Some(partial) = error.partial_response.as_deref_mut()
         && let Err(conflict) = partial.stamp_replay_origin(route)
     {
-        return Err(codex_replay_origin_conflict(conflict, Some(error)));
+        return codex_replay_origin_conflict(conflict, Some(error));
     }
-    Ok(error)
+    error
 }
 
 #[async_trait]
@@ -607,28 +1086,9 @@ impl Provider for CodexProvider {
     }
 
     fn serialize_config(&self) -> serde_json::Value {
-        let credential = self.credentials.snapshot();
+        // No credential: the host re-attaches its token source when it
+        // rebuilds the provider.
         let mut map = serde_json::Map::new();
-        map.insert(
-            "access_token".to_string(),
-            serde_json::Value::String(credential.access_token.expose_secret().to_string()),
-        );
-        map.insert(
-            "refresh_token".to_string(),
-            serde_json::Value::String(credential.refresh_token.expose_secret().to_string()),
-        );
-        map.insert(
-            "expires_at".to_string(),
-            serde_json::Value::Number(credential.expires_at.into()),
-        );
-        if let Some(account_id) = &credential.account_id {
-            map.insert(
-                "account_id".to_string(),
-                serde_json::Value::String(account_id.expose_secret().to_string()),
-            );
-        } else {
-            map.insert("account_id".to_string(), serde_json::Value::Null);
-        }
         if !self.options.is_default() {
             map.insert(
                 "options".to_string(),
@@ -655,7 +1115,7 @@ impl Provider for CodexProvider {
                 .with_kind(ProviderFailureKind::Validation)
                 .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
         })?;
-        // Every refusal lands before the credential manager may refresh.
+        // Every refusal lands before the host's token source is asked.
         self.preflight(req)?;
         let stream = req.stream_events.is_some();
         let BuiltRequest { body, receipt } = self.build_request(req, stream)?;
@@ -701,556 +1161,33 @@ impl Provider for CodexProvider {
                 },
             ));
         }
-        let manager = Arc::clone(&self.credentials);
-        let mut context = CodexCredentialCallContext {
-            provider: self,
-            request: &req,
-            minting_route: &route,
-            built: &built,
-            body,
-        };
-        manager
-            .execute(&mut context, |context, credential_lease| {
-                Box::pin(async move {
-                    let provider = &mut *context.provider;
-                    let req = context.request;
-                    let minting_route = context.minting_route;
-                    let built = context.built;
-                    let admitted = context.body;
-                    let result: Result<LlmResponse, LlmTransportError> = async {
-            let credential = &credential_lease.value;
-            let stream_termination = req.model.metadata().capability
-                .stream_termination
-                .unwrap_or(StreamTermination::RequireTerminalEvidence);
-            if !matches!(provider.transport, CodexTransport::Sse) {
-                let fallback_reason = matches!(provider.transport, CodexTransport::Auto)
-                    .then(|| provider.websocket_fallback_reason(req))
-                    .flatten();
-                if let Some(reason) = fallback_reason {
-                    emit_provider_trace(
-                        req.provider_trace.as_ref(),
-                        "codex",
-                        &json!({
-                            "type": "lash.codex.websocket_fallback_skip",
-                            "transport": format!("{:?}", provider.transport),
-                            "reason": reason,
-                        })
-                        .to_string(),
-                    );
-                    tracing::debug!(
-                        target: "lash_core::llm::codex_oauth",
-                        reason = %reason,
-                        "Skipping Codex WebSocket for session with active Auto fallback"
-                    );
-                } else {
-                    match provider
-                        .complete_websocket(
-                            req.clone(),
-                            built,
-                            credential,
-                            credential_lease.generation,
-                        )
-                        .await
-                    {
-                        Ok(response) => {
-                            provider.clear_websocket_fallback(req);
-                            return Ok(response);
-                        }
-                        Err(err)
-                            if matches!(provider.transport, CodexTransport::Auto)
-                                && err.progress() == CodexAttemptProgress::BeforeSend =>
-                        {
-                            provider.record_websocket_fallback(req, &err.error);
-                            tracing::debug!(
-                                target: "lash_core::llm::codex_oauth",
-                                error = %err.error.message,
-                                "Codex WebSocket failed before stream start; falling back to SSE"
-                            );
-                        }
-                        Err(err) => {
-                            provider.clear_continuation(req);
-                            let output_started =
-                                err.progress() == CodexAttemptProgress::OutputStarted;
-                            return Err(err.error.with_output_started(output_started));
-                        }
-                    }
-                }
-            }
-            let stream_events = req.stream_events.clone();
-            let provider_trace = req.provider_trace.clone();
-            let timeouts = provider.options.llm_timeouts();
-
-            let generation_disposition = Some(built.receipt);
-            let request_body = Some(admitted.body.to_string());
-            let body_bytes = admitted.body.as_bytes().to_vec();
-            emit_provider_request_trace(provider_trace.as_ref(), "codex", "responses", &body_bytes);
-            let access_token = credential.access_token.expose_secret().to_string();
-            let account_id = credential.account_id.clone();
-            let mut headers = vec![
-                (
-                    "Authorization".to_string(),
-                    format!("Bearer {access_token}"),
-                ),
-                ("Content-Type".to_string(), "application/json".to_string()),
-                ("Accept".to_string(), "text/event-stream".to_string()),
-                (
-                    "OpenAI-Beta".to_string(),
-                    "responses=experimental".to_string(),
-                ),
-                ("originator".to_string(), Self::CODEX_ORIGINATOR.to_string()),
-                ("User-Agent".to_string(), Self::codex_user_agent()),
-                (
-                    "session-id".to_string(),
-                    req.scope.provider_session_affinity_key(),
-                ),
-                (
-                    "x-client-request-id".to_string(),
-                    req.scope.request_id.clone(),
-                ),
-            ];
-            if let Some(id) = account_id.as_ref() {
-                headers.push((
-                    "ChatGPT-Account-ID".to_string(),
-                    id.expose_secret().to_string(),
-                ));
-            }
-            merge_extra_headers(&mut headers, &provider.extra_headers, false)?;
-            let http_request = LlmHttpRequest {
-                method: LlmHttpMethod::Post,
-                url: provider.responses_url.clone(),
-                headers,
-                body: bytes::Bytes::from(body_bytes),
-                body_for_error: request_body.clone(),
-                response_start_timeout_message: Some("Codex response start timed out".to_string()),
-            };
-            let stream_bounds = SseStreamBounds::new(timeouts.request_timeout, &provider.options);
-            let resp = provider
-                .http_transport
-                .send(
-                    http_request,
-                    response_start_timeout(
-                        timeouts.request_timeout,
-                        timeouts.response_start_timeout,
-                        stream_events.is_some(),
-                    ),
-                )
-                .await?;
-            let status = resp.status;
-            let content_type =
-                first_header_value(&resp.headers, "content-type").map(str::to_string);
-            let response_headers = resp.headers.clone();
-            let provider_request_id =
-                first_header_value(&response_headers, "x-request-id").map(str::to_string);
-            let is_sse = header_contains(&resp.headers, "content-type", "text/event-stream");
-            let success = resp.is_success();
-            let body = resp.body;
-            if !success {
-                let text = read_http_body_text(
-                    body,
-                    provider.options.response_body_limit(),
-                    timeouts.request_timeout,
-                    "Codex response body timed out",
-                )
-                .await?;
-                let message = Self::codex_error_summary(status, &text).unwrap_or_else(|| {
-                    format!(
-                        "Codex request failed with {}{}",
-                        status,
-                        content_type
-                            .as_deref()
-                            .map(|ct| format!(" ({ct})"))
-                            .unwrap_or_default()
-                    )
-                });
-
-                // Retryability is decided centrally by `CodexFailureClassifier`
-                // from the attached HTTP status; no inline override here.
-                return Err(http_error_envelope(
-                    message,
-                    status,
-                    response_headers,
-                    text,
-                    request_body.clone(),
-                ));
-            }
-            let mut response_metadata =
-                ResponseMetadataCapture::from_response(&req.model.metadata().request_defaults, &response_headers);
-            if let Some(tx) = &stream_events {
-                tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
-                    response_started: true,
-                    request_body: request_body.clone(),
-                    http_summary: Some(format!("HTTP POST {} (stream)", provider.responses_url)),
-                    execution_evidence: provider_request_id.clone().map(|provider_request_id| {
-                        ExecutionEvidence {
-                            provider_request_id: Some(provider_request_id),
-                            ..Default::default()
-                        }
-                    }),
-                    generation_disposition,
-                    response_metadata: response_metadata.metadata(),
-                    ..Default::default()
-                }));
-            }
-
-            let parse_stream =
-                Self::should_parse_stream(stream_events.is_some(), content_type.as_deref());
-
-            if !parse_stream {
-                let text = read_http_body_text(
-                    body,
-                    provider.options.response_body_limit(),
-                    timeouts.request_timeout,
-                    "Codex response body timed out",
-                )
-                .await
-                .map_err(|err| {
-                    Self::non_sse_body_read_error(status, content_type.as_deref(), err)
-                })?;
-                response_metadata.capture_body_text(&text);
-                emit_provider_trace(provider_trace.as_ref(), "codex", &text);
-                if Self::looks_like_sse_payload(&text) {
-                    let mut state = shared::ResponsesStreamState {
-                        expose_thinking: req.model.metadata().request_defaults.expose_thinking,
-                        execution_evidence: provider_request_id.clone().map(
-                            |provider_request_id| ExecutionEvidence {
-                                provider_request_id: Some(provider_request_id),
-                                ..Default::default()
-                            },
-                        ),
-                        ..Default::default()
-                    };
-                    shared::parse_sse_payload(PROVIDER, &text, &mut state)?;
-                    let block_events = state.take_block_events();
-                    let mut response = shared::response_from_stream_state(
-                        state,
-                        request_body,
-                        format!("HTTP POST {} (stream/fallback)", provider.responses_url),
-                    );
-                    response.generation_disposition = generation_disposition;
-                    response.response_metadata = response_metadata.into_metadata();
-                    if let Some(tx) = &stream_events {
-                        tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
-                            provider_usage: response.provider_usage.clone(),
-                            execution_evidence: response.execution_evidence.clone(),
-                            ..Default::default()
-                        }));
-                        if response.usage != LlmUsage::default() {
-                            tx.send(LlmStreamEvent::Usage(response.usage.clone()));
-                        }
-                        // The body was itself an SSE payload: the block events
-                        // were already minted while folding it.
-                        for event in block_events {
-                            if !req.model.metadata().request_defaults.expose_thinking
-                                && crate::support::is_reasoning_block_event(&event)
-                            {
-                                continue;
-                            }
-                            tx.send(event);
-                        }
-                        for part in &response.parts {
-                            match part {
-                                lash_core::llm::types::LlmOutputPart::ToolCall { .. } => {
-                                    tx.send(LlmStreamEvent::Part(part.clone()));
-                                }
-                                lash_core::llm::types::LlmOutputPart::Reasoning { .. }
-                                    if req.model.metadata().request_defaults.expose_thinking =>
-                                {
-                                    tx.send(LlmStreamEvent::Part(part.clone()));
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    return Ok(response);
-                }
-                let value: Value = serde_json::from_str(&text).map_err(|e| {
-                    LlmTransportError::new(format!("Invalid Codex response JSON: {e}"))
-                        .with_raw(text.clone())
-                })?;
-                let mut evidence_state = shared::ResponsesStreamState {
-                    execution_evidence: provider_request_id.map(|provider_request_id| {
-                        ExecutionEvidence {
-                            provider_request_id: Some(provider_request_id),
-                            ..Default::default()
-                        }
-                    }),
-                    ..Default::default()
-                };
-                evidence_state.capture_execution_evidence(&value, true)?;
-                let execution_evidence = evidence_state.execution_evidence;
-                let content = shared::extract_text(&value);
-                let provider_usage = value.get("usage").cloned();
-                let usage = openai_usage_from_response_value(&value);
-                let mut parts = shared::response_parts_from_value(&value);
-                if parts.is_empty() && !content.is_empty() {
-                    parts.push(lash_core::llm::types::LlmOutputPart::Text {
-                        text: content.clone(),
-                        response_meta: None,
-                    });
-                }
-                if let Some(tx) = &stream_events {
-                    tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
-                        provider_usage: provider_usage.clone(),
-                        execution_evidence: execution_evidence.clone(),
-                        ..Default::default()
-                    }));
-                    if usage != LlmUsage::default() {
-                        tx.send(LlmStreamEvent::Usage(usage.clone()));
-                    }
-                    let mut next_ordinal = 0u64;
-                    if req.model.metadata().request_defaults.expose_thinking {
-                        for part in parts
-                            .iter()
-                            .filter(|part| {
-                                matches!(part, lash_core::llm::types::LlmOutputPart::Reasoning { .. })
-                            })
-                        {
-                            for (block, text) in
-                                crate::support::reasoning_part_block_texts(part, &mut next_ordinal)
-                            {
-                                if text.is_empty() {
-                                    continue;
-                                }
-                                tx.send(LlmStreamEvent::ReasoningBlockStart {
-                                    block: block.clone(),
-                                });
-                                tx.send(LlmStreamEvent::ReasoningDelta {
-                                    block: block.clone(),
-                                    text: text.clone(),
-                                });
-                                tx.send(LlmStreamEvent::ReasoningBlockEnd { block, text });
-                            }
-                            tx.send(LlmStreamEvent::Part(part.clone()));
-                        }
-                    }
-                    // Each visible message item is its own text block, mirroring
-                    // the live SSE mint (`message:{item_id}` / `text:{ordinal}`).
-                    for part in &parts {
-                        let lash_core::llm::types::LlmOutputPart::Text {
-                            text,
-                            response_meta,
-                        } = part
-                        else {
-                            continue;
-                        };
-                        if text.is_empty() {
-                            continue;
-                        }
-                        let block = crate::responses_shared::text_part_block_identity(
-                            response_meta.as_ref().and_then(|meta| meta.id.as_deref()),
-                            &mut next_ordinal,
-                        );
-                        tx.send(LlmStreamEvent::TextBlockStart {
-                            block: block.clone(),
-                        });
-                        tx.send(LlmStreamEvent::Delta {
-                            block: block.clone(),
-                            text: text.clone(),
-                        });
-                        tx.send(LlmStreamEvent::TextBlockEnd {
-                            block,
-                            text: text.clone(),
-                        });
-                    }
-                }
-                let terminal_reason = openai_terminal_reason_from_response_value(&value, &parts);
-                return Ok(LlmResponse {
-                    parts,
-                    usage,
-                    terminal_reason,
-                    terminal_diagnostic: None,
-                    provider_usage,
-                    request_body,
-                    http_summary: Some(format!("HTTP POST {}", provider.responses_url)),
-                    execution_evidence,
-                    generation_disposition,
-                    response_metadata: response_metadata.into_metadata(),
-                    expose_thinking: Some(req.model.metadata().request_defaults.expose_thinking),
-                });
-            }
-
-            if stream_events.is_some() && !is_sse {
-                tracing::debug!(
-                    target: "lash_core::llm::codex_oauth",
-                    status,
-                    content_type = content_type.as_deref().unwrap_or("<missing>"),
-                    "Codex streaming response did not advertise SSE; parsing as stream because stream=true was requested"
-                );
-            }
-
-            let mut state = shared::ResponsesStreamState {
-                expose_thinking: req.model.metadata().request_defaults.expose_thinking,
-                execution_evidence: provider_request_id.map(|provider_request_id| {
-                    ExecutionEvidence {
-                        provider_request_id: Some(provider_request_id),
-                        ..Default::default()
-                    }
-                }),
-                ..Default::default()
-            };
-            let expose_thinking = req.model.metadata().request_defaults.expose_thinking;
-            let stream_result = drive_sse_response(
-                body,
-                timeouts.chunk_timeout,
-                stream_bounds,
-                "Codex stream chunk timed out",
-                "Codex request timed out",
-                &mut response_metadata,
-                |raw| {
-                    emit_provider_trace(provider_trace.as_ref(), "codex", raw);
-                    let prev_usage = state.usage.clone();
-                    let mut emitted_parts = Vec::new();
-                    shared::process_sse_event(PROVIDER, raw, &mut state, Some(&mut emitted_parts))?;
-                    if let Some(tx) = &stream_events
-                        && (state.provider_usage.is_some() || state.execution_evidence.is_some())
-                    {
-                        tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
-                            provider_usage: state.provider_usage.clone(),
-                            execution_evidence: state.execution_evidence.clone(),
-                            ..Default::default()
-                        }));
-                    }
-                    emit_stream_progress(
-                        stream_events.as_ref(),
-                        state
-                            .take_block_events()
-                            .into_iter()
-                            .filter(|event| {
-                                expose_thinking
-                                    || !crate::support::is_reasoning_block_event(event)
-                            }),
-                        &state.usage,
-                        &prev_usage,
-                    );
-                    if let Some(tx) = &stream_events {
-                        for part in emitted_parts {
-                            if matches!(
-                                part,
-                                lash_core::llm::types::LlmOutputPart::Reasoning { .. }
-                            ) && !expose_thinking
-                            {
-                                continue;
-                            }
-                            tx.send(LlmStreamEvent::Part(part));
-                        }
-                    }
-                    Ok(())
-                },
-            )
-            .await;
-
-            let seal_open_blocks = |state: &mut shared::ResponsesStreamState| {
-                if let Some(tx) = &stream_events {
-                    for event in state.finish_blocks() {
-                        if !expose_thinking
-                            && crate::support::is_reasoning_block_event(&event)
-                        {
-                            continue;
-                        }
-                        tx.send(event);
-                    }
-                } else {
-                    state.finish_blocks();
-                }
-            };
-            if let Err(error) = stream_result {
-                seal_open_blocks(&mut state);
-                let output_started = state.output_started();
-                let mut partial = shared::response_from_stream_state(
-                    state.clone(),
-                    request_body.clone(),
-                    format!("HTTP POST {} (stream)", provider.responses_url),
-                );
-                partial.terminal_reason = LlmTerminalReason::Unknown;
-                partial.generation_disposition = generation_disposition;
-                partial.response_metadata = response_metadata.into_metadata();
-                return Err(error
-                    .with_output_started(output_started)
-                    .with_partial_response(partial));
-            }
-
-            if stream_termination == StreamTermination::RequireTerminalEvidence
-                && !state.terminal_event_seen
-            {
-                seal_open_blocks(&mut state);
-                let output_started = state.output_started();
-                let mut partial = shared::response_from_stream_state(
-                    state.clone(),
-                    request_body.clone(),
-                    format!("HTTP POST {} (stream)", provider.responses_url),
-                );
-                partial.terminal_reason = LlmTerminalReason::Unknown;
-                partial.generation_disposition = generation_disposition;
-                partial.response_metadata = response_metadata.into_metadata();
-                return Err(LlmTransportError::new(
-                    "Codex stream ended before a terminal response event",
-                )
-                .with_kind(ProviderFailureKind::Stream)
-                .with_lash_code(TurnFailureCode::StreamEndedBeforeTerminalResponse)
-                .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-                .with_output_started(output_started)
-                .with_partial_response(partial));
-            }
-
-            if state.final_response.is_none()
-                && state.parts.is_empty()
-                && !state.streamed_item_content_received
-            {
-                return Err(LlmTransportError::new(format!(
-                    "Codex stream ended without SSE events (HTTP {}{})",
-                    status,
-                    content_type
-                        .as_deref()
-                        .map(|ct| format!(", content-type {ct}"))
-                        .unwrap_or_else(|| ", missing content-type".to_string())
-                ))
-                .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-                .with_lash_code(TurnFailureCode::EmptyStream));
-            }
-
-            seal_open_blocks(&mut state);
-            let mut response = shared::response_from_stream_state(
-                state,
-                request_body,
-                format!("HTTP POST {} (stream)", provider.responses_url),
-            );
-            response.generation_disposition = generation_disposition;
-            response.response_metadata = response_metadata.into_metadata();
-            Ok(response)
-                    }
-                    .await;
-                    match result {
+        let tokens = Arc::clone(&self.tokens);
+        let mut lease = tokens.current(&route).await?;
+        let mut replaced = false;
+        loop {
+            match self.send_once(&req, &built, body, &lease).await {
                 Ok(mut response) => {
                     response
-                        .stamp_replay_origin(minting_route)
-                        .map_err(|conflict| {
-                            CredentialCallError::Failed(codex_replay_origin_conflict(
-                                conflict, None,
-                            ))
-                        })?;
-                    Ok(response)
+                        .stamp_replay_origin(&route)
+                        .map_err(|conflict| codex_replay_origin_conflict(conflict, None))?;
+                    return Ok(response);
                 }
-                Err(error) if error.http_status == Some(401) => {
-                    let error = stamp_codex_partial_or_attach_conflict(error, minting_route)
-                        .map_err(CredentialCallError::Failed)?;
-                    Err(CredentialCallError::PreOutputAuth(error))
-                }
-                Err(error) => {
-                    let error = stamp_codex_partial_or_attach_conflict(error, minting_route)
-                        .map_err(CredentialCallError::Failed)?;
-                    Err(CredentialCallError::Failed(error))
-                }
+                Err(error) if rejected_before_output(&error) && !replaced => {
+                    match tokens
+                        .replace(&route, &lease, TokenRequestReason::Rejected)
+                        .await?
+                    {
+                        // Resend the admitted body once with the fresh token.
+                        Some(fresh) => {
+                            lease = fresh;
+                            replaced = true;
+                        }
+                        None => return Err(stamped_codex_failure(error, &route)),
                     }
-                })
-            })
-            .await
-            .map_err(|error| match error {
-                CredentialExecuteError::Credential(error) => error.into_transport_error(),
-                CredentialExecuteError::Call(error) => error,
-                // Unknown failures cannot establish that replay is safe.
-                _ => LlmTransportError::new(error.to_string())
-                    .with_retry_verdict(TransportRetryVerdict::Forbidden),
-            })
+                }
+                Err(error) => return Err(stamped_codex_failure(error, &route)),
+            }
+        }
     }
 
     async fn close(&self) -> Result<(), LlmTransportError> {

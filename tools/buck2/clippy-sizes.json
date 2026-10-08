@@ -487,14 +487,6 @@
     "peak_bytes": 122089472,
     "samples": 23
   },
-  "lash-internal-provider-auth/lash_provider_auth": {
-    "cpu_count": 1,
-    "memory_kb": 524288,
-    "p95_cores": 1.06,
-    "p99_peak_bytes": 146313216,
-    "peak_bytes": 175599616,
-    "samples": 117
-  },
   "lash-internal-provider-google/block_identity": {
     "cpu_count": 1,
     "memory_kb": 524288,

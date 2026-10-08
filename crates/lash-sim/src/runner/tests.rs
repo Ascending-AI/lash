@@ -207,14 +207,7 @@ async fn fixed_script_profile_writes_deterministic_manifest() {
     assert_eq!(manifest.summary.passed, 16);
     // Codex HTTP/SSE execution rides the injectable LlmHttpTransport and is
     // in the scripted matrix; the exclusion that remains for codex.rs is
-    // scoped to the provider-native websocket transport, and the OAuth
-    // device-code auth flow stays out of the LLM DST.
-    assert!(
-        manifest
-            .provider_transport_exclusions
-            .iter()
-            .any(|exclusion| exclusion.path.contains("codex/oauth.rs"))
-    );
+    // scoped to the provider-native websocket transport.
     assert!(
         manifest
             .provider_transport_exclusions

@@ -12,7 +12,7 @@ use lash_core::{
     ChargeSafetyDecision, ChargeSafetyDenialReason, GenerationOptions, LlmRequestScope,
     ProtocolPosition,
 };
-use lash_provider_google::{GoogleOAuthClient, GoogleOAuthProvider};
+use lash_provider_google::GoogleOAuthProvider;
 
 #[derive(Debug)]
 struct CountingSseTransport {
@@ -76,15 +76,9 @@ fn handle(body: &'static str) -> (ProviderHandle, Arc<AtomicUsize>) {
         .max_attempts(2)
         .base_delay_ms(0)
         .max_delay_ms(0);
-    let provider = GoogleOAuthProvider::new(
-        "access-token",
-        "refresh-token",
-        0,
-        GoogleOAuthClient {
-            id: "oauth-client-id".to_string(),
-            secret: "oauth-client-secret".into(),
-        },
-    )
+    let provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access-token"),
+    ))
     .with_project_id(Some("test-project".to_string()))
     .with_options(ProviderOptions {
         reliability: ProviderReliability {

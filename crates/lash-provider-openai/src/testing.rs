@@ -75,8 +75,10 @@ pub fn serialize_codex_request(
     request: &LlmRequest,
     retention: CacheRetention,
 ) -> Result<Value, lash_core::facade_support::LlmTransportError> {
-    CodexProvider::new("access", "refresh", 0)
-        .build_request_body(&with_retention(request, retention), false)
+    CodexProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access"),
+    ))
+    .build_request_body(&with_retention(request, retention), false)
 }
 
 /// `request` whose recorded defaults carry `retention`.

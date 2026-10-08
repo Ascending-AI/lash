@@ -31,6 +31,8 @@ mod idle_timeout_tests;
 mod response_error_tests;
 #[path = "session_affinity_tests.rs"]
 mod session_affinity_tests;
+#[path = "token_source_tests.rs"]
+mod token_source_tests;
 fn process_event(state: &mut CodexStreamState, event: Value) {
     CodexProvider::process_sse_event(&event.to_string(), state, None).unwrap();
 }
@@ -147,15 +149,17 @@ fn websocket_test_provider_with_timeouts(
     request_timeout_ms: u64,
     chunk_timeout_ms: Option<u64>,
 ) -> CodexProvider {
-    CodexProvider::new("access", "refresh", 0)
-        .with_transport(transport)
-        .with_options(ProviderOptions {
-            reliability: ProviderReliability::codex()
-                .request_timeout(Some(RequestTimeout::Millis(request_timeout_ms)))
-                .stream_chunk_timeout_ms(chunk_timeout_ms),
-            ..ProviderOptions::default()
-        })
-        .with_endpoint_urls(responses_url, websocket_url)
+    CodexProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access"),
+    ))
+    .with_transport(transport)
+    .with_options(ProviderOptions {
+        reliability: ProviderReliability::codex()
+            .request_timeout(Some(RequestTimeout::Millis(request_timeout_ms)))
+            .stream_chunk_timeout_ms(chunk_timeout_ms),
+        ..ProviderOptions::default()
+    })
+    .with_endpoint_urls(responses_url, websocket_url)
 }
 
 const SCRIPTED_WEBSOCKET_IDLE_TIMEOUT_MS: u64 = 50;
@@ -390,14 +394,18 @@ fn codex_request_body_exposes_reasoning_summary_only_when_configured() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
     req.model.metadata_mut().capability = reasoning_capability();
-    let hidden = CodexProvider::new("access", "refresh", 0)
-        .build_request_body(&req, true)
-        .unwrap();
+    let hidden = CodexProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access"),
+    ))
+    .build_request_body(&req, true)
+    .unwrap();
     assert_eq!(hidden["reasoning"], json!({ "effort": "medium" }));
     req.model.metadata_mut().request_defaults.expose_thinking = true;
-    let exposed = CodexProvider::new("access", "refresh", 0)
-        .build_request_body(&req, true)
-        .unwrap();
+    let exposed = CodexProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access"),
+    ))
+    .build_request_body(&req, true)
+    .unwrap();
     assert_eq!(exposed["reasoning"]["summary"], "auto");
 }
 
@@ -434,9 +442,11 @@ fn codex_request_uses_openai_schema_projection() {
         .expect("valid declared schema"),
         strict: true,
     }));
-    let body = CodexProvider::new("access", "refresh", 0)
-        .build_request_body(&req, false)
-        .unwrap();
+    let body = CodexProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access"),
+    ))
+    .build_request_body(&req, false)
+    .unwrap();
     assert_eq!(body["tools"][0]["parameters"]["properties"], json!({}));
     assert_eq!(
         body["text"]["format"]["schema"]["required"],
@@ -450,7 +460,9 @@ fn codex_request_uses_openai_schema_projection() {
 
 #[test]
 fn codex_request_history_preserves_assistant_message_metadata() {
-    let provider = CodexProvider::new("access", "refresh", 0);
+    let provider = CodexProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access"),
+    ));
     let req = request(vec![LlmMessage::new(
         LlmRole::Assistant,
         vec![lash_core::llm::types::LlmContentBlock::Text {
@@ -488,14 +500,12 @@ async fn codex_websocket_scope_cache_prunes_idle_entries_and_caps_oldest() {
             connection: Box::new(idle_connection),
             continuation: None,
             last_used: now - SESSION_WEBSOCKET_CACHE_TTL - Duration::from_secs(1),
-            credential_generation: 0,
+            token_epoch: 0,
         },
     );
     sessions.by_scope.insert(
         "busy".to_string(),
-        CodexWebsocketSessionEntry::Reserved {
-            credential_generation: 0,
-        },
+        CodexWebsocketSessionEntry::Reserved { token_epoch: 0 },
     );
 
     CodexProvider::prune_idle_websocket_sessions(&mut sessions);
@@ -514,7 +524,7 @@ async fn codex_websocket_scope_cache_prunes_idle_entries_and_caps_oldest() {
                 connection: Box::new(connection),
                 continuation: None,
                 last_used: now - Duration::from_secs((100 - index) as u64),
-                credential_generation: 0,
+                token_epoch: 0,
             },
         );
     }
@@ -542,7 +552,7 @@ async fn codex_websocket_scope_cache_evicts_rotated_credentials() {
             connection: Box::new(old_connection),
             continuation: None,
             last_used: Instant::now(),
-            credential_generation: 4,
+            token_epoch: 4,
         },
     );
     let (current_connection, _) = tokio_tungstenite::connect_async(&ws.url)
@@ -554,11 +564,11 @@ async fn codex_websocket_scope_cache_evicts_rotated_credentials() {
             connection: Box::new(current_connection),
             continuation: None,
             last_used: Instant::now(),
-            credential_generation: 5,
+            token_epoch: 5,
         },
     );
 
-    CodexProvider::evict_websocket_sessions_for_generation(&mut sessions, 5);
+    CodexProvider::evict_websocket_sessions_for_epoch(&mut sessions, 5);
 
     assert!(!sessions.by_scope.contains_key("old"));
     assert!(sessions.by_scope.contains_key("current"));
@@ -571,19 +581,19 @@ fn codex_websocket_scope_cache_generation_eviction_preserves_leased_slot() {
         "leased".to_string(),
         CodexWebsocketSessionEntry::reserved(4),
     );
-    CodexProvider::evict_websocket_sessions_for_generation(&mut sessions, 5);
+    CodexProvider::evict_websocket_sessions_for_epoch(&mut sessions, 5);
     assert!(sessions.by_scope.contains_key("leased"));
 }
 
 fn assert_cleanup_preserves_newer_generation(cleanup: impl FnOnce(&CodexProvider, String)) {
-    let provider = CodexProvider::new("access", "refresh", 0);
+    let provider = CodexProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access"),
+    ));
     let scope_key = "rotated".to_string();
     let mut sessions = provider.websocket_sessions.inner.lock_recover();
     sessions.by_scope.insert(
         scope_key.clone(),
-        CodexWebsocketSessionEntry::Reserved {
-            credential_generation: 5,
-        },
+        CodexWebsocketSessionEntry::Reserved { token_epoch: 5 },
     );
     drop(sessions);
     cleanup(&provider, scope_key.clone());
@@ -591,7 +601,7 @@ fn assert_cleanup_preserves_newer_generation(cleanup: impl FnOnce(&CodexProvider
     let generation = sessions
         .by_scope
         .get(&scope_key)
-        .map(CodexWebsocketSessionEntry::credential_generation);
+        .map(CodexWebsocketSessionEntry::token_epoch);
     assert_eq!(generation, Some(5));
 }
 
@@ -609,7 +619,7 @@ async fn codex_websocket_release_preserves_newer_generation_reservation() {
                 reusable: true,
                 reused: false,
                 continuation: None,
-                credential_generation: 4,
+                token_epoch: 4,
             },
             true,
             None,
@@ -1755,9 +1765,11 @@ fn codex_schema_projection_failure_is_local_validation_error() {
         strict: true,
     }));
 
-    let err = CodexProvider::new("access", "refresh", 0)
-        .build_request_body(&req, false)
-        .unwrap_err();
+    let err = CodexProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access"),
+    ))
+    .build_request_body(&req, false)
+    .unwrap_err();
     assert_eq!(err.kind, ProviderFailureKind::Validation);
     assert!(err.message.contains("allOf"));
 }
@@ -2134,7 +2146,9 @@ mod conformance {
         fn assemble_stream(&self, scenario: Scenario, sse_events: &[String]) -> StreamAssembly {
             let mut state = shared::ResponsesStreamState::default();
             let mut stream_events = Vec::new();
-            let provider = CodexProvider::new("access", "refresh", 0);
+            let provider = CodexProvider::new(std::sync::Arc::new(
+                lash_core::provider::ProviderToken::new("access"),
+            ));
             let route = provider.route_identity("gpt-5.4");
             for raw in sse_events {
                 let mut emitted_parts = Vec::new();
@@ -2165,9 +2179,11 @@ mod conformance {
         }
 
         fn build_next_request(&self, _scenario: Scenario, messages: Vec<LlmMessage>) -> Value {
-            CodexProvider::new("access", "refresh", 0)
-                .build_request_body(&request(messages), false)
-                .expect("codex next request serializes")
+            CodexProvider::new(std::sync::Arc::new(
+                lash_core::provider::ProviderToken::new("access"),
+            ))
+            .build_request_body(&request(messages), false)
+            .expect("codex next request serializes")
         }
     }
 

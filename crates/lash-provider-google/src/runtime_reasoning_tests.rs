@@ -9,7 +9,7 @@ use lash_core::provider::{ProviderHandle, StreamTermination};
 use lash_sansio::sync::MutexExt;
 use serde_json::{Value, json};
 
-use crate::{GoogleOAuthClient, GoogleOAuthProvider};
+use crate::GoogleOAuthProvider;
 
 /// How long a law waits for a turn that can only hang: a deadlock watchdog,
 /// no part of any law.
@@ -109,15 +109,9 @@ async fn google_streaming_runtime_preserves_tool_interleaved_reasoning_boundarie
     let transport = Arc::new(ScriptedSseTransport {
         bodies: std::sync::Mutex::new([sse_body(&first), sse_body(&second)].into_iter().collect()),
     });
-    let provider = GoogleOAuthProvider::new(
-        "access",
-        "refresh",
-        u64::MAX,
-        GoogleOAuthClient {
-            id: "oauth-client-id".into(),
-            secret: "oauth-client-secret".into(),
-        },
-    )
+    let provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access"),
+    ))
     .with_project_id(Some("test-project".into()))
     .with_stream_termination(StreamTermination::RequireTerminalEvidence)
     .with_transport(transport);
@@ -198,15 +192,9 @@ async fn google_streaming_runtime_does_not_republish_reasoning_after_signature_o
     let transport = Arc::new(ScriptedSseTransport {
         bodies: std::sync::Mutex::new([sse_body(&response)].into_iter().collect()),
     });
-    let provider = GoogleOAuthProvider::new(
-        "access",
-        "refresh",
-        u64::MAX,
-        GoogleOAuthClient {
-            id: "oauth-client-id".into(),
-            secret: "oauth-client-secret".into(),
-        },
-    )
+    let provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access"),
+    ))
     .with_project_id(Some("test-project".into()))
     .with_stream_termination(StreamTermination::RequireTerminalEvidence)
     .with_transport(transport);

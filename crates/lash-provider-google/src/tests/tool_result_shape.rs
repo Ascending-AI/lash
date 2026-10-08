@@ -44,15 +44,9 @@ fn contents_with(dialect: GoogleDialect, content: Vec<ModelToolReturnPart>) -> V
         ),
     ];
     GoogleOAuthProvider::validate_attachments(&req).expect("png is supported");
-    GoogleOAuthProvider::new(
-        "access",
-        "refresh",
-        0,
-        crate::GoogleOAuthClient {
-            id: "oauth-client-id".into(),
-            secret: "oauth-client-secret".into(),
-        },
-    )
+    GoogleOAuthProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access"),
+    ))
     .build_contents_with_attachment_parts(&req, &[])
     .expect("contents")
 }

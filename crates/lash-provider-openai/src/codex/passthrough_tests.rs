@@ -2,7 +2,9 @@ use super::*;
 
 #[test]
 fn codex_passthrough_refuses_owned_nested_and_suppressed_controls() {
-    let provider = CodexProvider::new("access", "refresh", u64::MAX);
+    let provider = CodexProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access"),
+    ));
     let base = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     for extra in [
         json!({"model":"other"}),

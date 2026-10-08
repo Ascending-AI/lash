@@ -62,8 +62,14 @@ fn stop_sequences_reach_chat_and_are_refused_by_responses_and_codex() {
         OpenAiProvider::new("key")
             .build_responses_request_body(&req, true)
             .expect_err("Responses has no stop field"),
-        CodexProvider::build_request_body(&CodexProvider::new("token", "refresh", 0), &req, true)
-            .expect_err("Codex has no stop field"),
+        CodexProvider::build_request_body(
+            &CodexProvider::new(std::sync::Arc::new(
+                lash_core::provider::ProviderToken::new("token"),
+            )),
+            &req,
+            true,
+        )
+        .expect_err("Codex has no stop field"),
     ] {
         assert_eq!(
             refusal_code(&error).as_deref(),
@@ -210,9 +216,11 @@ fn codex_refuses_every_sampling_control_and_the_cap() {
             .expect("valid output-token limits");
     cases.push(("output_token_cap", model_cap));
     for (setting, req) in cases {
-        let error = CodexProvider::new("access", "refresh", 0)
-            .build_request_body(&req, false)
-            .expect_err(setting);
+        let error = CodexProvider::new(std::sync::Arc::new(
+            lash_core::provider::ProviderToken::new("access"),
+        ))
+        .build_request_body(&req, false)
+        .expect_err(setting);
         assert_eq!(
             refusal_code(&error).as_deref(),
             Some("lash:unsupported_generation_option"),
@@ -392,9 +400,11 @@ fn no_cap_verbosity_or_parallel_tool_calls_are_sent_unless_the_host_sets_them() 
     let responses = OpenAiProvider::new("key")
         .build_responses_request_body(&req, true)
         .unwrap();
-    let codex = CodexProvider::new("access", "refresh", 0)
-        .build_request_body(&req, true)
-        .unwrap();
+    let codex = CodexProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access"),
+    ))
+    .build_request_body(&req, true)
+    .unwrap();
     for (label, body) in [
         ("chat", &chat),
         ("responses", &responses),
@@ -436,9 +446,11 @@ fn parallel_tool_calls_is_sent_as_the_host_set_it() {
         .build_responses_request(&req, true)
         .unwrap();
     assert_eq!(responses.body["parallel_tool_calls"], json!(false));
-    let codex = CodexProvider::new("access", "refresh", 0)
-        .build_request(&req, true)
-        .unwrap();
+    let codex = CodexProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access"),
+    ))
+    .build_request(&req, true)
+    .unwrap();
     assert_eq!(codex.body["parallel_tool_calls"], json!(false));
     assert_eq!(
         codex.receipt.parallel_tool_calls,
@@ -453,9 +465,11 @@ fn expose_thinking_requests_a_summary_on_responses_and_codex_even_without_effort
     let responses = OpenAiProvider::new("key")
         .build_responses_request(&req, true)
         .unwrap();
-    let codex = CodexProvider::new("access", "refresh", 0)
-        .build_request(&req, true)
-        .unwrap();
+    let codex = CodexProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access"),
+    ))
+    .build_request(&req, true)
+    .unwrap();
     for built in [responses, codex] {
         assert_eq!(built.body["reasoning"], json!({ "summary": "auto" }));
         assert_eq!(
@@ -498,7 +512,9 @@ fn expose_thinking_on_chat_is_local_visibility_only() {
 fn codex_speaks_responses_in_the_openai_reasoning_dialect() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.model.metadata_mut().capability = reasoning_capability();
-    let codex = CodexProvider::new("access", "refresh", 0);
+    let codex = CodexProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access"),
+    ));
 
     req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
     let body = codex.build_request_body(&req, true).unwrap();

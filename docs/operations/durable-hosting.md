@@ -790,3 +790,59 @@ of its descendants. Empty means the subtree has ended. There is no durable
 `EngineEvent::Signal` in mailbox order per sender. Two senders racing have no
 defined order. A host that needs an order across senders puts a sequence in
 the payload and orders in its engine.
+
+## 9. Provider credentials
+
+Lash runs no OAuth. The host owns login, refresh, rotation and secret
+storage, and gives each provider a `lash::provider::TokenSource`. Lash keeps
+no token cache and records no token.
+
+**The seam.** `TokenSource::token(TokenRequest)` returns a `ProviderToken`: a
+secret, an optional expiry, an optional bound account (Codex sends it as
+`ChatGPT-Account-ID`) and an optional non-secret principal that partitions
+provider-side caches such as Google uploads. `ProviderToken` has no
+`Serialize`, and its `Debug` prints neither the secret nor the account.
+
+**When lash asks.** Before every model-call attempt, with
+`TokenRequestReason::Current`. Answer from the host's own cache; it must be
+cheap and safe to call concurrently. When the answer expires within 30 s,
+lash asks once more with `Expiring`. When the provider answers 401 before any
+output, lash asks once with `Rejected` and `stale` set to the token it sent,
+then resends the admitted body once. A 401 after output started is surfaced,
+never retried, and 403 is never retried.
+
+**Compare and refresh.** If `stale` is no longer the host's current token,
+return the current one without refreshing. Returning the same secret means
+"nothing newer", and lash surfaces the provider's 401. Concurrent 401s on one
+provider make one host call between them: lash single-flights `Rejected` per
+provider and numbers the tokens it sees, so per-token state (the Codex
+WebSocket session cache) evicts what an older token opened.
+
+**Persist before you hand out.** A rotating refresh token is dead once the
+identity provider answered. Write the rotation to the host's store before
+returning the new access token.
+
+**Failures.** The host classifies its own failure as a `TokenError`:
+
+| `TokenErrorKind` | Failure code | Retry |
+|---|---|---|
+| `ReauthRequired` | `lash:credential_reauth_required` | never |
+| `Transient { retry_after }` | `lash:credential_source_transient` | retried, after `retry_after` when given |
+| `Unavailable` | `lash:credential_unavailable` | never |
+
+Lash keeps no sticky failure: the next attempt asks again, so a re-login takes
+effect on the next call.
+
+**Static keys.** A fixed API key is a `ProviderToken`, which answers every
+request with itself. `AnthropicProvider::new(key)`, `OpenAiProvider::new(key)`
+and `OpenAiCompatibleProvider::new(key, base_url)` wrap one;
+`with_token_source` takes a host source instead. `CodexProvider::new` and
+`GoogleOAuthProvider::new` take only a source.
+
+**Rebuilding a provider.** `Provider::serialize_config` returns no credential.
+A host that persists provider configuration re-attaches its token source when
+it rebuilds the provider.
+
+[`examples/codex-host-auth`](../../examples/codex-host-auth) is a complete host
+source for Codex: the ChatGPT device-code login, a refresh on `Expiring` or
+`Rejected`, and a rotation written to the host's file before use.

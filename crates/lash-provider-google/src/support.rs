@@ -4,7 +4,6 @@
 
 pub(crate) use async_trait::async_trait;
 pub(crate) use base64::Engine;
-pub(crate) use serde::Deserialize;
 pub(crate) use serde_json::{Value, json};
 
 pub(crate) use lash_core::llm::transport::{
@@ -22,7 +21,7 @@ pub(crate) use lash_core::llm::types::{
 pub(crate) use lash_core::provider::{
     GenerationEmission, GenerationWire, OutputCapWire, Provider, ProviderComponents,
     ProviderOptions, ReasoningIntent, ResolvedGenerationPolicy, StreamTermination,
-    ThinkingSummaryWire, resolve_generation_policy,
+    ThinkingSummaryWire, TokenRequestReason, TokenSource, resolve_generation_policy,
 };
 pub(crate) use lash_llm_transport::normalize::{
     http_error_envelope, serialize_options_tail, terminal_reason_from_parts,
@@ -37,10 +36,8 @@ pub(crate) use lash_llm_transport::{
     first_header_value, merge_extra_body, merge_extra_headers, read_http_body_text,
     reserved_generation_paths, validate_extra_headers,
 };
-pub(crate) use lash_provider_auth::{
-    CredentialCallError, CredentialError, CredentialExecuteError, Lease,
-};
-pub(crate) use lash_sansio::{ModelToolReturnPart, Redacted, tool_result_text};
+pub(crate) use lash_llm_transport::{TokenGate, TokenLease, rejected_before_output};
+pub(crate) use lash_sansio::{ModelToolReturnPart, tool_result_text};
 
 pub(crate) use crate::config::*;
 

@@ -30,14 +30,14 @@ fn upload_http_error_envelope(
 
 impl GoogleOAuthProvider {
     fn upload_cache_key(
-        credential_scope_seed: &str,
+        upload_scope: &str,
         project_id: Option<&str>,
         media_type: &lash_core::MediaType,
         content_id: &lash_core::AttachmentId,
     ) -> UploadedAttachmentCacheKey {
         let credential_hash = lash_sansio::core_support::blake3_domain_hash_hex(
             LASH_GOOGLE_UPLOAD_CREDENTIAL_SCOPE_DOMAIN_VERSION,
-            credential_scope_seed.as_bytes(),
+            upload_scope.as_bytes(),
         );
         UploadedAttachmentCacheKey {
             provider: Self::PROVIDER_KIND,
@@ -66,13 +66,13 @@ impl GoogleOAuthProvider {
     async fn upload_attachment_cached(
         &self,
         access_token: &str,
-        credential_scope_seed: &str,
+        upload_scope: &str,
         project_id: Option<&str>,
         attachment_ref: &lash_core::AttachmentRef,
         bytes: &[u8],
     ) -> Result<UploadedAttachmentRef, LlmTransportError> {
         let key = Self::upload_cache_key(
-            credential_scope_seed,
+            upload_scope,
             project_id,
             &attachment_ref.media_type,
             &attachment_ref.id,
@@ -251,7 +251,7 @@ impl GoogleOAuthProvider {
     pub(crate) async fn prepare_attachment_parts(
         &self,
         access_token: &str,
-        credential_scope_seed: &str,
+        upload_scope: &str,
         project_id: Option<&str>,
         req: &LlmRequest,
     ) -> Result<Vec<(AttachmentSource, Value)>, LlmTransportError> {
@@ -265,7 +265,7 @@ impl GoogleOAuthProvider {
                 match self
                     .upload_attachment_cached(
                         access_token,
-                        credential_scope_seed,
+                        upload_scope,
                         project_id,
                         attachment_ref,
                         bytes,
@@ -338,15 +338,9 @@ mod error_detail_tests {
     }
 
     async fn upload_with(responses: Vec<LlmHttpResponse>) -> LlmTransportError {
-        let provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            u64::MAX,
-            crate::GoogleOAuthClient {
-                id: "oauth-client-id".into(),
-                secret: "oauth-client-secret".into(),
-            },
-        )
+        let provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+            lash_core::provider::ProviderToken::new("access"),
+        ))
         .with_transport(Arc::new(ResponseQueue(Mutex::new(responses.into()))));
         provider
             .upload_attachment(

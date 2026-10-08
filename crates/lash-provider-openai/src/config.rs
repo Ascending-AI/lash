@@ -162,9 +162,9 @@ pub(crate) struct OpenAiResolvedCompat {
 
 #[derive(Clone, Debug)]
 pub struct OpenAiCompatibleProvider {
-    /// The API key. Redacted in every `Debug`/`Display` rendering; the
-    /// plaintext leaves the process only on the authorization header.
-    pub api_key: Redacted,
+    /// The host's token source behind its gate. A token's plaintext leaves
+    /// the process only on the authorization header.
+    pub(crate) tokens: std::sync::Arc<lash_llm_transport::TokenGate>,
     pub base_url: String,
     pub options: ProviderOptions,
     pub compat: OpenAiCompat,

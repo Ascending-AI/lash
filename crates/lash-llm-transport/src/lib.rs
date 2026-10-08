@@ -10,6 +10,7 @@ pub mod proptest_support;
 pub mod response_metadata;
 pub mod streaming;
 pub mod timeouts;
+pub mod token_gate;
 pub mod util;
 
 pub use http::{
@@ -29,4 +30,5 @@ pub use passthrough::{
 };
 pub use response_metadata::ResponseMetadataCapture;
 pub use timeouts::{build_http_client, header_pairs, response_start_timeout, run_with_timeout};
+pub use token_gate::{TOKEN_EXPIRY_SKEW, TokenGate, TokenLease, rejected_before_output};
 pub use util::{emit_provider_request_trace, emit_provider_trace, extract_error_detail, parse_i64};

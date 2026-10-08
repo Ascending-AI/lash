@@ -262,15 +262,9 @@ impl ProviderNormalizer for GoogleNormalizer {
     fn build_next_request(&self, _scenario: Scenario, messages: Vec<LlmMessage>) -> Value {
         let mut req = request(None);
         req.messages = messages;
-        let provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            0,
-            crate::GoogleOAuthClient {
-                id: "oauth-client-id".into(),
-                secret: "oauth-client-secret".into(),
-            },
-        );
+        let provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+            lash_core::provider::ProviderToken::new("access"),
+        ));
         let contents = provider
             .build_contents_with_attachment_parts(&req, &[])
             .expect("retention policy");

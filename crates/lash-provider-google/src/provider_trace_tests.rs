@@ -74,15 +74,9 @@ async fn extended_provider_trace_captures_exact_serialized_google_body_without_a
         "contents": [{"role": "user", "parts": [{"text": "x".repeat(3_000)}]}],
     });
     let transport = Arc::new(RecordingTransport::new(200));
-    let provider = GoogleOAuthProvider::new(
-        SECRET_SENTINEL,
-        "refresh-secret",
-        0,
-        crate::GoogleOAuthClient {
-            id: "oauth-client-id".into(),
-            secret: CLIENT_SECRET_SENTINEL.into(),
-        },
-    )
+    let provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new(SECRET_SENTINEL),
+    ))
     .with_transport(transport.clone());
     let events = Arc::new(Mutex::new(Vec::<LlmProviderTraceEvent>::new()));
     let event_sink = Arc::clone(&events);
@@ -128,15 +122,9 @@ async fn extended_provider_trace_captures_exact_serialized_google_body_without_a
     );
 
     let error_transport = Arc::new(RecordingTransport::new(500));
-    let error_provider = GoogleOAuthProvider::new(
-        SECRET_SENTINEL,
-        "refresh-secret",
-        0,
-        crate::GoogleOAuthClient {
-            id: "oauth-client-id".into(),
-            secret: CLIENT_SECRET_SENTINEL.into(),
-        },
-    )
+    let error_provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new(SECRET_SENTINEL),
+    ))
     .with_transport(error_transport);
     let error_events = Arc::new(Mutex::new(Vec::<LlmProviderTraceEvent>::new()));
     let error_event_sink = Arc::clone(&error_events);

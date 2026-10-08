@@ -243,7 +243,7 @@ pub(crate) async fn lower(
     let blocking = needs_blocking(req);
     // Clone only request-building configuration, never a retained resume state.
     let builder = OpenAiCompatibleProvider {
-        api_key: String::new().into(),
+        tokens: std::sync::Arc::clone(&provider.tokens),
         base_url: provider.base_url.clone(),
         options: provider.options.clone(),
         compat: provider.compat.clone(),
@@ -285,12 +285,46 @@ pub(crate) async fn complete(
     send(provider, req, &body, endpoint).await
 }
 
-/// Send `body`, which [`lower`] produced for `req`, to `endpoint`.
+/// Send `body`, which [`lower`] produced for `req`, to `endpoint`: one
+/// attempt with the host's current token, and one resend of the same body
+/// with a replaced token after a 401 that arrived before any output.
 pub(crate) async fn send(
     provider: &mut OpenAiCompatibleProvider,
     req: LlmRequest,
     body: &ProviderRequestBody,
     endpoint: CompletionEndpoint,
+) -> Result<LlmResponse, LlmTransportError> {
+    let route = ProviderRouteIdentity::for_endpoint(
+        endpoint.provider_kind(),
+        &provider.base_url,
+        req.model.wire_model().to_string(),
+    );
+    let tokens = std::sync::Arc::clone(&provider.tokens);
+    let mut lease = tokens.current(&route).await?;
+    match send_attempt(provider, &req, body, endpoint, &lease.token).await {
+        Err(error) if rejected_before_output(&error) => {
+            match tokens
+                .replace(&route, &lease, TokenRequestReason::Rejected)
+                .await?
+            {
+                Some(fresh) => {
+                    lease = fresh;
+                    send_attempt(provider, &req, body, endpoint, &lease.token).await
+                }
+                None => Err(error),
+            }
+        }
+        other => other,
+    }
+}
+
+/// One attempt of [`send`], authenticated by `token`.
+async fn send_attempt(
+    provider: &mut OpenAiCompatibleProvider,
+    req: &LlmRequest,
+    body: &ProviderRequestBody,
+    endpoint: CompletionEndpoint,
+    token: &ProviderToken,
 ) -> Result<LlmResponse, LlmTransportError> {
     let origin_model = req.model.wire_model().to_string();
     let origin_route = ProviderRouteIdentity::for_endpoint(
@@ -338,7 +372,7 @@ pub(crate) async fn send(
     );
     let tool_argument_decoder = crate::responses_shared::ToolArgumentDecoder::for_request(
         endpoint.provider_kind(),
-        &req,
+        req,
         &compat.schema_capabilities,
     )?;
     let request_key = ResponsesRequestKey {
@@ -400,7 +434,7 @@ pub(crate) async fn send(
             format!(
                 "{}{}",
                 provider.wire.auth_value_prefix,
-                provider.api_key.expose_secret()
+                token.secret().expose_secret()
             ),
         ),
         ("Content-Type".to_string(), "application/json".to_string()),

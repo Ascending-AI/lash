@@ -227,9 +227,11 @@ async fn extended_provider_trace_captures_exact_serialized_chat_body() {
 #[tokio::test]
 async fn codex_sse_provider_trace_captures_exact_serialized_request_body() {
     let transport = Arc::new(RecordingTransport::error());
-    let mut provider = CodexProvider::new(SECRET_SENTINEL, "refresh-token", u64::MAX)
-        .force_sse_transport()
-        .with_http_transport(transport.clone());
+    let mut provider = CodexProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new(SECRET_SENTINEL),
+    ))
+    .force_sse_transport()
+    .with_http_transport(transport.clone());
     let events = Arc::new(Mutex::new(Vec::<LlmProviderTraceEvent>::new()));
     let (req, events) = traced_request(&events);
 
@@ -262,9 +264,11 @@ async fn codex_websocket_provider_trace_captures_exact_serialized_request_body()
         message: "provider unavailable",
     }])
     .await;
-    let mut provider = CodexProvider::new(SECRET_SENTINEL, "refresh-token", u64::MAX)
-        .with_endpoint_urls("http://unused.test/codex/responses", server.url.clone())
-        .force_websocket_transport();
+    let mut provider = CodexProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new(SECRET_SENTINEL),
+    ))
+    .with_endpoint_urls("http://unused.test/codex/responses", server.url.clone())
+    .force_websocket_transport();
     let events = Arc::new(Mutex::new(Vec::<LlmProviderTraceEvent>::new()));
     let (req, events) = traced_request(&events);
 

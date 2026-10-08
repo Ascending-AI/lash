@@ -1429,10 +1429,14 @@ pub mod http_transport {
 
 /// Model-provider configuration and request types.
 pub mod provider {
+    /// The host-owned credential seam: lash asks a host's [`TokenSource`]
+    /// for a [`ProviderToken`] before every model-call attempt and runs no
+    /// OAuth of its own. A fixed API key is a `ProviderToken`.
+    pub use lash_core::provider::{
+        ProviderToken, TokenError, TokenErrorKind, TokenRequest, TokenRequestReason, TokenSource,
+    };
     #[cfg(any(feature = "anthropic", feature = "google", feature = "openai"))]
     pub use lash_llm_transport::ExtraHeaders;
-    #[cfg(any(feature = "google", feature = "openai"))]
-    pub use lash_provider_auth::{OAuthError, OAuthTokenErrorCode, OAuthTokens};
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::llm::transport::HttpFailureContext;
     /// The exact body a provider lowers a request to, and that every send of

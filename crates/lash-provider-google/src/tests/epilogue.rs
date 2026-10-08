@@ -12,7 +12,7 @@ async fn google_completion_epilogue_conformance() {
             EpilogueScenario::TextTruncated => "data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"partial\"}]}}]}}\n\n",
             EpilogueScenario::EmptyOutputLimit => "data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[]},\"finishReason\":\"MAX_TOKENS\"}]}}\n\n",
         };
-        GoogleOAuthProvider::new("access", "refresh", 0, crate::GoogleOAuthClient { id: "id".into(), secret: "secret".into() })
+        GoogleOAuthProvider::new(std::sync::Arc::new(lash_core::provider::ProviderToken::new("access")))
             .with_transport(Arc::new(EpilogueTransport::new(body, true, scenario)))
             .execute_request("access", json!({"model":"gemini-test"}), Some(LlmEventSender::new(|_| {})), None, crate::provider::ResponseReading { stream_termination: StreamTermination::RequireTerminalEvidence, defaults: lash_core::provider::LlmProfileRequestDefaults { expose_thinking: false, ..Default::default() } }, None).await
     }).await;

@@ -77,9 +77,11 @@ fn codex_provider(
     let transport = Arc::new(ScriptedLlmHttpTransport::from_json_str(script)?);
     // Pin the HTTP/SSE path so the injected scripted transport serves the
     // request; Codex's default Auto path would try the WebSocket transport.
-    let provider = CodexProvider::new("access-token", "refresh-token", 0)
-        .force_sse_transport()
-        .with_http_transport(provider_transport(&transport));
+    let provider = CodexProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access-token"),
+    ))
+    .force_sse_transport()
+    .with_http_transport(provider_transport(&transport));
     Ok((provider, transport))
 }
 
@@ -295,15 +297,9 @@ pub(super) async fn prove_google_stream_generate_text() -> Result<ProofRun, Fixe
     let transport = Arc::new(ScriptedLlmHttpTransport::from_json_str(
         GOOGLE_STREAM_GENERATE_TEXT,
     )?);
-    let mut provider = GoogleOAuthProvider::new(
-        "access-token",
-        "refresh-token",
-        0,
-        lash_provider_google::GoogleOAuthClient {
-            id: "oauth-client-id".into(),
-            secret: "oauth-client-secret".into(),
-        },
-    )
+    let mut provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access-token"),
+    ))
     .with_project_id(Some("project-1".to_string()))
     .with_transport(provider_transport(&transport));
     let response = provider.complete(google_request(true)).await?;
@@ -342,15 +338,9 @@ pub(super) async fn prove_google_generate_text() -> Result<ProofRun, FixedScript
     let transport = Arc::new(ScriptedLlmHttpTransport::from_json_str(
         GOOGLE_GENERATE_TEXT,
     )?);
-    let mut provider = GoogleOAuthProvider::new(
-        "access-token",
-        "refresh-token",
-        0,
-        lash_provider_google::GoogleOAuthClient {
-            id: "oauth-client-id".into(),
-            secret: "oauth-client-secret".into(),
-        },
-    )
+    let mut provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access-token"),
+    ))
     .with_project_id(Some("project-1".to_string()))
     .with_transport(provider_transport(&transport));
     let response = provider.complete(google_request(false)).await?;

@@ -15,7 +15,7 @@ use lash_core::provider::{
 };
 use lash_llm_transport::{LlmHttpRequest, LlmHttpResponse, LlmHttpTransport};
 use lash_provider_anthropic::AnthropicProvider;
-use lash_provider_google::{GoogleOAuthClient, GoogleOAuthProvider};
+use lash_provider_google::GoogleOAuthProvider;
 use lash_provider_openai::codex::ws_testing::{ScriptedWsAction, spawn_scripted_websocket};
 use lash_provider_openai::{CodexProvider, OpenAiCompatibleProvider, OpenAiProvider};
 use lash_sansio::llm::types::{
@@ -176,15 +176,9 @@ impl Dialect {
             ),
             Self::GoogleLegacy | Self::GoogleGemini3 | Self::GoogleClaudeOnVertex => {
                 ProviderHandle::new(
-                    GoogleOAuthProvider::new(
-                        "access",
-                        "refresh",
-                        0,
-                        GoogleOAuthClient {
-                            id: "matrix-id".into(),
-                            secret: "matrix-secret".into(),
-                        },
-                    )
+                    GoogleOAuthProvider::new(std::sync::Arc::new(
+                        lash_core::provider::ProviderToken::new("access"),
+                    ))
                     .with_project_id(Some("matrix-project".into()))
                     .with_options(options)
                     .with_extra_headers(headers)
@@ -223,12 +217,14 @@ impl Dialect {
                     .into_components(),
             ),
             Self::CodexSse => ProviderHandle::new(
-                CodexProvider::new("access", "refresh", 0)
-                    .force_sse_transport()
-                    .with_options(options)
-                    .with_extra_headers(headers)
-                    .with_http_transport(transport)
-                    .into_components(),
+                CodexProvider::new(std::sync::Arc::new(
+                    lash_core::provider::ProviderToken::new("access"),
+                ))
+                .force_sse_transport()
+                .with_options(options)
+                .with_extra_headers(headers)
+                .with_http_transport(transport)
+                .into_components(),
             ),
         }
     }
@@ -967,14 +963,16 @@ async fn websocket_generation_settings_have_the_same_dispositions_as_sse() {
         }])
         .await;
         let mut provider = ProviderHandle::new(
-            CodexProvider::new("access", "refresh", 0)
-                .force_websocket_transport()
-                .with_endpoint_urls("http://127.0.0.1:9/unused-sse", server.url.clone())
-                .with_options(ProviderOptions {
-                    reliability: lash_core::provider::ProviderReliability::disabled(),
-                    ..ProviderOptions::default()
-                })
-                .into_components(),
+            CodexProvider::new(std::sync::Arc::new(
+                lash_core::provider::ProviderToken::new("access"),
+            ))
+            .force_websocket_transport()
+            .with_endpoint_urls("http://127.0.0.1:9/unused-sse", server.url.clone())
+            .with_options(ProviderOptions {
+                reliability: lash_core::provider::ProviderReliability::disabled(),
+                ..ProviderOptions::default()
+            })
+            .into_components(),
         );
         let mut request = dialect.request();
         let expected = setting.apply(&mut request);

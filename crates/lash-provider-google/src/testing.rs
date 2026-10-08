@@ -10,15 +10,9 @@ pub fn serialize_request(
     request: &LlmRequest,
     retention: CacheRetention,
 ) -> Result<Value, lash_core::facade_support::LlmTransportError> {
-    let provider = GoogleOAuthProvider::new(
-        "access",
-        "refresh",
-        0,
-        crate::GoogleOAuthClient {
-            id: "oauth-client-id".into(),
-            secret: "oauth-client-secret".into(),
-        },
-    );
+    let provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access"),
+    ));
     let mut request = request.clone();
     request
         .model

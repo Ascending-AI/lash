@@ -34,7 +34,6 @@ lash-core-worker = { workspace = true }
 lash-lashlang-runtime = { workspace = true, optional = true }
 lash-llm-tools = { workspace = true, optional = true }
 lash-llm-transport = { workspace = true, optional = true }
-lash-provider-auth = { workspace = true, optional = true }
 lash-remote-protocol = { workspace = true, features = ["core-conversions"] }
 lash-tool-support = { workspace = true }
 lash-provider-anthropic = { workspace = true, optional = true }
@@ -83,9 +82,9 @@ rlm = [
 sqlite = ["dep:lash-sqlite-store"]
 postgres = ["dep:lash-postgres-store", "dep:sqlx", "tokio/rt", "tokio/time", "tokio/macros"]
 s3 = ["dep:lash-s3-store"]
-openai = ["dep:lash-provider-openai", "dep:lash-llm-transport", "dep:lash-provider-auth"]
+openai = ["dep:lash-provider-openai", "dep:lash-llm-transport"]
 anthropic = ["dep:lash-provider-anthropic", "dep:lash-llm-transport"]
-google = ["dep:lash-provider-google", "dep:lash-llm-transport", "dep:lash-provider-auth"]
+google = ["dep:lash-provider-google", "dep:lash-llm-transport"]
 mcp = ["dep:lash-plugin-mcp"]
 typescript = ["dep:lash-typescript"]
 http-transport = ["dep:lash-http-transport"]

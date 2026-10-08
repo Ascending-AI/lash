@@ -16,9 +16,9 @@ pub(crate) static DEFAULT_HTTP_TRANSPORT: LazyLock<Arc<dyn LlmHttpTransport>> =
 /// without retry.
 #[derive(Clone, Debug)]
 pub struct AnthropicProvider {
-    /// The API key. Redacted in every `Debug`/`Display` rendering; the
-    /// plaintext leaves the process only on the `x-api-key` request header.
-    pub api_key: Redacted,
+    /// The host's token source behind its gate. A token's plaintext leaves
+    /// the process only on the `x-api-key` request header.
+    pub(crate) tokens: Arc<TokenGate>,
     pub base_url: Option<String>,
     pub options: ProviderOptions,
     pub extra_headers: lash_llm_transport::ExtraHeaders,
@@ -27,9 +27,15 @@ pub struct AnthropicProvider {
 }
 
 impl AnthropicProvider {
+    /// A provider that sends the fixed `api_key`.
     pub fn new(api_key: impl Into<String>) -> Self {
+        Self::with_token_source(Arc::new(ProviderToken::new(api_key.into())))
+    }
+
+    /// A provider that asks `tokens` for a token before every attempt.
+    pub fn with_token_source(tokens: Arc<dyn TokenSource>) -> Self {
         Self {
-            api_key: Redacted::new(api_key),
+            tokens: Arc::new(TokenGate::new(tokens, "anthropic")),
             base_url: None,
             options: ProviderOptions::default(),
             extra_headers: Default::default(),
@@ -87,5 +93,11 @@ mod redaction_tests {
         let debug = format!("{provider:?}");
         assert!(!debug.contains("sk-ant-secret-sentinel"), "leaked: {debug}");
         assert!(debug.contains("[redacted]"));
+        assert!(
+            !provider
+                .serialize_config()
+                .to_string()
+                .contains("sk-ant-secret-sentinel")
+        );
     }
 }

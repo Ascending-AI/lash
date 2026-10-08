@@ -64,9 +64,11 @@ fn request_bodies_carry_only_hashed_session_identity() {
     assert_eq!(responses["prompt_cache_key"], cache_key);
     assert!(!responses.to_string().contains(raw_session));
 
-    let codex = crate::CodexProvider::new("access", "refresh", 0)
-        .build_request_body(&req, false)
-        .expect("codex body");
+    let codex = crate::CodexProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access"),
+    ))
+    .build_request_body(&req, false)
+    .expect("codex body");
     assert_eq!(codex["prompt_cache_key"], cache_key);
     assert!(!codex.to_string().contains(raw_session));
 

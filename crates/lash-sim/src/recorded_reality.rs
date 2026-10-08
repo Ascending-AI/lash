@@ -1,18 +1,13 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use bytes::Bytes;
 use lash_core::llm::types::{
     LlmEventSender, LlmJsonSchema, LlmMessage, LlmOutputSpec, LlmRequest, LlmRole,
     LlmTerminalReason, LlmToolChoice,
 };
 use lash_core::provider::{DefaultProviderFailureClassifier, Provider, ProviderFailureClassifier};
 use lash_core::{ProviderFailureKind, facade_support::LlmTransportError};
-use lash_llm_transport::{LlmHttpRequest, LlmHttpTransport, read_http_body_text};
 use lash_provider_anthropic::AnthropicProvider;
-use lash_provider_auth::{
-    CredentialError, CredentialErrorKind, OAuthError, classify_oauth_refresh_error,
-};
 use lash_provider_google::GoogleOAuthProvider;
 use lash_provider_openai::{OpenAiCompatibleProvider, OpenAiProvider};
 use serde_json::json;
@@ -36,12 +31,6 @@ const ANTHROPIC_RATE_LIMIT: &str =
     include_str!("../provider-scripts/recorded-reality/anthropic.messages-rate-limit-429.json");
 const ANTHROPIC_HARD_QUOTA: &str =
     include_str!("../provider-scripts/recorded-reality/anthropic.messages-hard-quota-400.json");
-const OAUTH_INVALID_GRANT: &str =
-    include_str!("../provider-scripts/recorded-reality/oauth.token-invalid-grant-400.json");
-const OAUTH_INVALID_CLIENT: &str =
-    include_str!("../provider-scripts/recorded-reality/oauth.token-invalid-client-401.json");
-const OAUTH_INVALID_SCOPE: &str =
-    include_str!("../provider-scripts/recorded-reality/oauth.token-invalid-scope-400.json");
 const STRUCTURED_REFUSAL: &str =
     include_str!("../provider-scripts/recorded-reality/openai.chat-structured-refusal.json");
 const STRUCTURED_TRUNCATION: &str = include_str!(
@@ -67,9 +56,6 @@ const ALL_RECORDED_REALITY_SCRIPTS: &[(&str, &str)] = &[
         "anthropic.messages-hard-quota-400.json",
         ANTHROPIC_HARD_QUOTA,
     ),
-    ("oauth.token-invalid-grant-400.json", OAUTH_INVALID_GRANT),
-    ("oauth.token-invalid-client-401.json", OAUTH_INVALID_CLIENT),
-    ("oauth.token-invalid-scope-400.json", OAUTH_INVALID_SCOPE),
     ("openai.chat-structured-refusal.json", STRUCTURED_REFUSAL),
     (
         "openai.responses-structured-truncation.json",
@@ -142,15 +128,9 @@ fn classify(failure: LlmTransportError) -> LlmTransportError {
 
 #[tokio::test]
 async fn google_per_minute_throttle_is_retryable_and_honors_retry_info() {
-    let mut provider = GoogleOAuthProvider::new(
-        "access-token",
-        "refresh-token",
-        0,
-        lash_provider_google::GoogleOAuthClient {
-            id: "oauth-client-id".into(),
-            secret: "oauth-client-secret".into(),
-        },
-    )
+    let mut provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access-token"),
+    ))
     .with_project_id(Some("project-1".to_string()))
     .with_transport(transport(GOOGLE_PER_MINUTE));
     let failure = provider
@@ -166,15 +146,9 @@ async fn google_per_minute_throttle_is_retryable_and_honors_retry_info() {
 
 #[tokio::test]
 async fn google_hard_quota_is_not_retried_as_a_per_minute_throttle() {
-    let mut provider = GoogleOAuthProvider::new(
-        "access-token",
-        "refresh-token",
-        0,
-        lash_provider_google::GoogleOAuthClient {
-            id: "oauth-client-id".into(),
-            secret: "oauth-client-secret".into(),
-        },
-    )
+    let mut provider = GoogleOAuthProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access-token"),
+    ))
     .with_project_id(Some("project-1".to_string()))
     .with_transport(transport(GOOGLE_HARD_QUOTA));
     let failure = classify(
@@ -250,38 +224,6 @@ async fn anthropic_rate_limit_and_credit_exhaustion_take_different_retry_paths()
     );
     assert_eq!(quota_failure.kind, ProviderFailureKind::Quota);
     assert!(!quota_failure.is_retryable());
-}
-
-async fn classify_oauth_fixture(script: &str) -> CredentialError {
-    let response = transport(script)
-        .send(
-            LlmHttpRequest::post("https://oauth.example/token", Bytes::new()),
-            None,
-        )
-        .await
-        .expect("scripted token endpoint response");
-    let status = response.status;
-    let body = read_http_body_text(response.body, 16 * 1024 * 1024, None, "read OAuth fixture")
-        .await
-        .expect("OAuth fixture body");
-    classify_oauth_refresh_error(OAuthError::token_endpoint(
-        status,
-        &body,
-        "token endpoint rejected refresh",
-    ))
-}
-
-#[tokio::test]
-async fn oauth_error_bodies_drive_the_structured_refresh_classifier() {
-    let invalid_grant = classify_oauth_fixture(OAUTH_INVALID_GRANT).await;
-    assert_eq!(invalid_grant.kind, CredentialErrorKind::InvalidGrant);
-    assert!(!invalid_grant.is_retryable());
-
-    for sibling in [OAUTH_INVALID_CLIENT, OAUTH_INVALID_SCOPE] {
-        let classified = classify_oauth_fixture(sibling).await;
-        assert_eq!(classified.kind, CredentialErrorKind::Other);
-        assert!(!classified.is_retryable());
-    }
 }
 
 #[tokio::test]

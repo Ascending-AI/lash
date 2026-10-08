@@ -4,7 +4,7 @@
 //! One responsibility: own which socket a Codex request runs on. A continuation
 //! scope keeps at most one reusable connection; a lease hands it to exactly one
 //! in-flight request and takes it back on release; an idle prune, an entry cap,
-//! and a credential-generation eviction bound the cache; and a per-scope
+//! and a token-epoch eviction bound the cache; and a per-scope
 //! fallback marker remembers that the WebSocket path failed so `Auto` can skip
 //! it. `CodexWebSocketAttemptError` lives here because connecting is the first
 //! place an attempt can fail.
@@ -18,13 +18,13 @@ use lash_core::llm::transport::{
     LlmTransportError, ProviderFailureKind, TransportRetryVerdict, TurnFailureCode,
 };
 use lash_core::llm::types::LlmRequest;
+use lash_llm_transport::TokenLease;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use super::CodexProvider;
 use super::continuation::CodexContinuation;
-use super::credential::CodexCredential;
 use super::shared::ResponsesStreamState;
 
 pub(super) const SESSION_WEBSOCKET_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
@@ -69,38 +69,30 @@ pub(super) struct CodexWebsocketFallbackState {
 
 pub(super) enum CodexWebsocketSessionEntry {
     Reserved {
-        credential_generation: u64,
+        token_epoch: u64,
     },
     Idle {
         connection: Box<CodexWsStream>,
         continuation: Option<CodexContinuation>,
         last_used: Instant,
-        credential_generation: u64,
+        token_epoch: u64,
     },
 }
 
 #[derive(Clone, Copy)]
 struct PrunableWebsocketSession {
     last_used: Instant,
-    credential_generation: u64,
+    token_epoch: u64,
 }
 
 impl CodexWebsocketSessionEntry {
-    pub(super) fn reserved(credential_generation: u64) -> Self {
-        Self::Reserved {
-            credential_generation,
-        }
+    pub(super) fn reserved(token_epoch: u64) -> Self {
+        Self::Reserved { token_epoch }
     }
 
-    pub(super) fn credential_generation(&self) -> u64 {
+    pub(super) fn token_epoch(&self) -> u64 {
         match self {
-            Self::Reserved {
-                credential_generation,
-            }
-            | Self::Idle {
-                credential_generation,
-                ..
-            } => *credential_generation,
+            Self::Reserved { token_epoch } | Self::Idle { token_epoch, .. } => *token_epoch,
         }
     }
 
@@ -109,11 +101,11 @@ impl CodexWebsocketSessionEntry {
             Self::Reserved { .. } => None,
             Self::Idle {
                 last_used,
-                credential_generation,
+                token_epoch,
                 ..
             } => Some(PrunableWebsocketSession {
                 last_used: *last_used,
-                credential_generation: *credential_generation,
+                token_epoch: *token_epoch,
             }),
         }
     }
@@ -125,7 +117,7 @@ pub(super) struct CodexWebsocketLease {
     pub(super) reusable: bool,
     pub(super) reused: bool,
     pub(super) continuation: Option<CodexContinuation>,
-    pub(super) credential_generation: u64,
+    pub(super) token_epoch: u64,
 }
 
 /// Monotone attempt progress, ordered from no provider evidence to committed output.
@@ -189,12 +181,12 @@ impl CodexWebSocketAttemptError {
 }
 
 impl CodexProvider {
-    pub(super) fn remove_websocket_scope(&self, scope_key: &str, credential_generation: u64) {
+    pub(super) fn remove_websocket_scope(&self, scope_key: &str, token_epoch: u64) {
         let mut sessions = self.websocket_sessions.inner.lock_recover();
         if sessions
             .by_scope
             .get(scope_key)
-            .is_some_and(|entry| entry.credential_generation() == credential_generation)
+            .is_some_and(|entry| entry.token_epoch() == token_epoch)
         {
             sessions.by_scope.remove(scope_key);
         }
@@ -242,14 +234,14 @@ impl CodexProvider {
         }
     }
 
-    pub(super) fn evict_websocket_sessions_for_generation(
+    pub(super) fn evict_websocket_sessions_for_epoch(
         sessions: &mut CodexWebsocketSessions,
-        credential_generation: u64,
+        token_epoch: u64,
     ) {
         sessions.by_scope.retain(|_, entry| {
             entry
                 .prunable()
-                .is_none_or(|idle| idle.credential_generation == credential_generation)
+                .is_none_or(|idle| idle.token_epoch == token_epoch)
         });
     }
 
@@ -341,7 +333,7 @@ impl CodexProvider {
         &self,
         req: &LlmRequest,
         connect_timeout: Duration,
-        credential: &CodexCredential,
+        lease: &TokenLease,
     ) -> Result<CodexWsStream, CodexWebSocketAttemptError> {
         let mut ws_request =
             self.websocket_url
@@ -355,15 +347,12 @@ impl CodexProvider {
         let headers = ws_request.headers_mut();
         headers.insert(
             "Authorization",
-            HeaderValue::from_str(&format!(
-                "Bearer {}",
-                credential.access_token.expose_secret()
-            ))
-            .map_err(|error| {
-                CodexWebSocketAttemptError::before_send(LlmTransportError::new(format!(
-                    "Invalid Codex WebSocket authorization header: {error}"
-                )))
-            })?,
+            HeaderValue::from_str(&format!("Bearer {}", lease.token.secret().expose_secret()))
+                .map_err(|error| {
+                    CodexWebSocketAttemptError::before_send(LlmTransportError::new(format!(
+                        "Invalid Codex WebSocket authorization header: {error}"
+                    )))
+                })?,
         );
         headers.insert(
             "OpenAI-Beta",
@@ -394,7 +383,7 @@ impl CodexProvider {
         })?;
         headers.insert("session-id", session_value);
         headers.insert("x-client-request-id", request_value);
-        if let Some(account_id) = credential.account_id.as_ref() {
+        if let Some(account_id) = lease.token.account() {
             headers.insert(
                 "ChatGPT-Account-ID",
                 HeaderValue::from_str(account_id.expose_secret()).map_err(|error| {
@@ -454,10 +443,10 @@ impl CodexProvider {
         &self,
         req: &LlmRequest,
         connect_timeout: Duration,
-        credential: &CodexCredential,
-        credential_generation: u64,
+        lease: &TokenLease,
     ) -> Result<CodexWebsocketLease, CodexWebSocketAttemptError> {
         let scope_key = req.continuation_key();
+        let token_epoch = lease.epoch;
 
         enum AcquireDecision {
             Reuse(Box<CodexWebsocketLease>),
@@ -469,21 +458,21 @@ impl CodexProvider {
             let mut sessions = self.websocket_sessions.inner.lock_recover();
             Self::prune_idle_websocket_sessions(&mut sessions);
             Self::enforce_websocket_session_cache_cap(&mut sessions);
-            Self::evict_websocket_sessions_for_generation(&mut sessions, credential_generation);
+            Self::evict_websocket_sessions_for_epoch(&mut sessions, token_epoch);
             match sessions.by_scope.remove(&scope_key) {
                 Some(CodexWebsocketSessionEntry::Reserved {
-                    credential_generation: reserved_generation,
-                }) if reserved_generation == credential_generation => {
+                    token_epoch: reserved_epoch,
+                }) if reserved_epoch == token_epoch => {
                     sessions.by_scope.insert(
                         scope_key,
-                        CodexWebsocketSessionEntry::reserved(reserved_generation),
+                        CodexWebsocketSessionEntry::reserved(reserved_epoch),
                     );
                     AcquireDecision::ConnectEphemeral
                 }
                 Some(CodexWebsocketSessionEntry::Reserved { .. }) => {
                     sessions.by_scope.insert(
                         scope_key.clone(),
-                        CodexWebsocketSessionEntry::reserved(credential_generation),
+                        CodexWebsocketSessionEntry::reserved(token_epoch),
                     );
                     AcquireDecision::ConnectReusable(scope_key)
                 }
@@ -494,7 +483,7 @@ impl CodexProvider {
                 }) => {
                     sessions.by_scope.insert(
                         scope_key.clone(),
-                        CodexWebsocketSessionEntry::reserved(credential_generation),
+                        CodexWebsocketSessionEntry::reserved(token_epoch),
                     );
                     AcquireDecision::Reuse(Box::new(CodexWebsocketLease {
                         websocket: *connection,
@@ -502,13 +491,13 @@ impl CodexProvider {
                         reusable: true,
                         reused: true,
                         continuation,
-                        credential_generation,
+                        token_epoch,
                     }))
                 }
                 None => {
                     sessions.by_scope.insert(
                         scope_key.clone(),
-                        CodexWebsocketSessionEntry::reserved(credential_generation),
+                        CodexWebsocketSessionEntry::reserved(token_epoch),
                     );
                     AcquireDecision::ConnectReusable(scope_key)
                 }
@@ -518,26 +507,21 @@ impl CodexProvider {
         match decision {
             AcquireDecision::Reuse(lease) => Ok(*lease),
             AcquireDecision::ConnectEphemeral => {
-                let websocket = self
-                    .connect_websocket(req, connect_timeout, credential)
-                    .await?;
+                let websocket = self.connect_websocket(req, connect_timeout, lease).await?;
                 Ok(CodexWebsocketLease {
                     websocket,
                     scope_key: None,
                     reusable: false,
                     reused: false,
                     continuation: None,
-                    credential_generation,
+                    token_epoch,
                 })
             }
             AcquireDecision::ConnectReusable(scope_key) => {
-                let websocket = match self
-                    .connect_websocket(req, connect_timeout, credential)
-                    .await
-                {
+                let websocket = match self.connect_websocket(req, connect_timeout, lease).await {
                     Ok(websocket) => websocket,
                     Err(error) => {
-                        self.remove_websocket_scope(&scope_key, credential_generation);
+                        self.remove_websocket_scope(&scope_key, token_epoch);
                         return Err(error);
                     }
                 };
@@ -547,7 +531,7 @@ impl CodexProvider {
                     reusable: true,
                     reused: false,
                     continuation: None,
-                    credential_generation,
+                    token_epoch,
                 })
             }
         }
@@ -566,7 +550,7 @@ impl CodexProvider {
         if sessions
             .by_scope
             .get(&scope_key)
-            .is_none_or(|entry| entry.credential_generation() != lease.credential_generation)
+            .is_none_or(|entry| entry.token_epoch() != lease.token_epoch)
         {
             return;
         }
@@ -580,7 +564,7 @@ impl CodexProvider {
                 connection: Box::new(lease.websocket),
                 continuation,
                 last_used: Instant::now(),
-                credential_generation: lease.credential_generation,
+                token_epoch: lease.token_epoch,
             },
         );
         Self::prune_idle_websocket_sessions(&mut sessions);

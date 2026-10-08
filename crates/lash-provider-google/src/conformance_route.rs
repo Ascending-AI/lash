@@ -8,15 +8,9 @@ use crate::GoogleOAuthProvider;
     reason = "test support: the conformance output was minted by the same route literal above, so it always accepts it back"
 )]
 pub(super) fn stamp_google_replay_origin(parts: &mut [LlmOutputPart]) {
-    let route = GoogleOAuthProvider::new(
-        "access",
-        "refresh",
-        0,
-        crate::GoogleOAuthClient {
-            id: "oauth-client-id".into(),
-            secret: "oauth-client-secret".into(),
-        },
-    )
+    let route = GoogleOAuthProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access"),
+    ))
     .route_identity("gemini-3.1-pro-preview");
     for part in parts {
         part.stamp_replay_origin(&route)

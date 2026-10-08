@@ -81,7 +81,7 @@ pub(super) async fn send(session: &lash::DurableSession, input: &str) -> lash::T
 }
 
 fn websocket_provider(server: &ScriptedWsServer) -> ProviderHandle {
-    let provider = CodexProvider::new("access", "refresh", 0)
+    let provider = CodexProvider::new(std::sync::Arc::new(lash_core::provider::ProviderToken::new("access")))
         .force_websocket_transport()
         // The SSE URL is never dialed on the pinned WebSocket path; point it
         // somewhere unroutable so a regression that falls back to HTTP fails

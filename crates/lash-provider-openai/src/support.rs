@@ -28,8 +28,9 @@ pub(crate) use crate::schema::{classify_openai_error, responses_error_retry_verd
 pub(crate) use lash_core::llm::types::{LlmRequestScope, ResponsePhase, ResponseTextMeta};
 pub(crate) use lash_core::provider::{
     CacheControlDialect, CacheRetention, GenerationEmission, GenerationRetryGuarantee,
-    GenerationWire, Provider, ProviderComponents, ProviderOptions, StreamTermination,
-    ThinkingSummaryWire, resolve_generation_policy,
+    GenerationWire, Provider, ProviderComponents, ProviderOptions, ProviderToken,
+    StreamTermination, ThinkingSummaryWire, TokenRequestReason, TokenSource,
+    resolve_generation_policy,
 };
 pub(crate) use lash_llm_transport::streaming::{
     SseStreamBounds, drive_sse_response, emit_stream_progress,
@@ -38,10 +39,11 @@ pub(crate) use lash_llm_transport::timeouts::response_start_timeout;
 pub(crate) use lash_llm_transport::util::{emit_provider_request_trace, emit_provider_trace};
 pub(crate) use lash_llm_transport::{
     LlmHttpBody, LlmHttpMethod, LlmHttpRequest, LlmHttpTransport, ResponseMetadataCapture,
-    first_header_value, header_contains, http_error_envelope, merge_extra_body,
-    merge_extra_headers, read_http_body_text, reserved_generation_paths, validate_extra_headers,
+    TokenGate, first_header_value, header_contains, http_error_envelope, merge_extra_body,
+    merge_extra_headers, read_http_body_text, rejected_before_output, reserved_generation_paths,
+    validate_extra_headers,
 };
-pub(crate) use lash_sansio::Redacted;
+pub(crate) use std::sync::Arc;
 
 pub(crate) use crate::chat::*;
 pub(crate) use crate::common::*;

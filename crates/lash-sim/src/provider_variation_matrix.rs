@@ -654,18 +654,20 @@ async fn complete_websocket_with_events_and_capture(
         .collect();
     let server = spawn_scripted_websocket(actions).await;
     let mut provider = ProviderHandle::new(
-        CodexProvider::new("access", "refresh", 0)
-            .force_websocket_transport()
-            .with_endpoint_urls("http://127.0.0.1:9/unused-sse", server.url.clone())
-            .with_options(ProviderOptions {
-                reliability: ProviderReliability::codex()
-                    .max_attempts(3)
-                    .base_delay_ms(0)
-                    .max_delay_ms(0)
-                    .stream_chunk_timeout_ms(Some(2_000)),
-                ..ProviderOptions::default()
-            })
-            .into_components(),
+        CodexProvider::new(std::sync::Arc::new(
+            lash_core::provider::ProviderToken::new("access"),
+        ))
+        .force_websocket_transport()
+        .with_endpoint_urls("http://127.0.0.1:9/unused-sse", server.url.clone())
+        .with_options(ProviderOptions {
+            reliability: ProviderReliability::codex()
+                .max_attempts(3)
+                .base_delay_ms(0)
+                .max_delay_ms(0)
+                .stream_chunk_timeout_ms(Some(2_000)),
+            ..ProviderOptions::default()
+        })
+        .into_components(),
     );
     let route = provider.route_identity(dialect_model("codex.responses-websocket"));
     assert_eq!(
@@ -852,15 +854,9 @@ fn http_provider(dialect: &str, transport: Arc<ScriptedLlmHttpTransport>) -> Pro
                 .into_components(),
         ),
         "google.generate-content" => ProviderHandle::new(
-            GoogleOAuthProvider::new(
-                "access",
-                "refresh",
-                0,
-                lash_provider_google::GoogleOAuthClient {
-                    id: "oauth-client-id".into(),
-                    secret: "oauth-client-secret".into(),
-                },
-            )
+            GoogleOAuthProvider::new(std::sync::Arc::new(
+                lash_core::provider::ProviderToken::new("access"),
+            ))
             .with_project_id(Some("matrix-project".to_string()))
             .with_transport(transport)
             .into_components(),
@@ -876,10 +872,12 @@ fn http_provider(dialect: &str, transport: Arc<ScriptedLlmHttpTransport>) -> Pro
                 .into_components(),
         ),
         "codex.responses-sse" => ProviderHandle::new(
-            CodexProvider::new("access", "refresh", 0)
-                .force_sse_transport()
-                .with_http_transport(transport)
-                .into_components(),
+            CodexProvider::new(std::sync::Arc::new(
+                lash_core::provider::ProviderToken::new("access"),
+            ))
+            .force_sse_transport()
+            .with_http_transport(transport)
+            .into_components(),
         ),
         other => panic!("unsupported HTTP matrix dialect {other}"),
     }

@@ -20,6 +20,7 @@ _CLIPPY_CONFIGS = {
     "crates/lash-postgres-workers": ("clippy_config_crates_lash_postgres_workers", "//crates/lash-postgres-workers:clippy.toml"),
     "crates/lash-sim": ("clippy_config_crates_lash_sim", "//crates/lash-sim:clippy.toml"),
     "examples/agent-workbench": ("clippy_config_examples_agent_workbench", "//examples/agent-workbench:clippy.toml"),
+    "examples/codex-host-auth": ("clippy_config_examples_codex_host_auth", "//examples/codex-host-auth:clippy.toml"),
     "examples/e2e-consumer": ("clippy_config_examples_e2e_consumer", "//examples/e2e-consumer:clippy.toml"),
     "examples/toolbench": ("clippy_config_examples_toolbench", "//examples/toolbench:clippy.toml"),
     "examples/workflow-graph-roundtrip": ("clippy_config_examples_workflow_graph_roundtrip", "//examples/workflow-graph-roundtrip:clippy.toml"),

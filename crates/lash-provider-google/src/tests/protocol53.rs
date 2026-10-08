@@ -3,15 +3,9 @@ use lash_core::llm::types::LlmOutputSpec;
 use lash_sansio::{ProviderFailureKind, SchemaContract, SchemaDialect};
 
 fn provider() -> GoogleOAuthProvider {
-    GoogleOAuthProvider::new(
-        "access",
-        "refresh",
-        0,
-        crate::GoogleOAuthClient {
-            id: "client".into(),
-            secret: "secret".into(),
-        },
-    )
+    GoogleOAuthProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access"),
+    ))
 }
 fn projected_contract() -> SchemaContract {
     SchemaContract::admit(json!({"type":"object","properties":{"canonical":{"type":"string"}}}))

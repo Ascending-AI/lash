@@ -20,7 +20,6 @@ members = [
     "crates/lash-remote-protocol",
     "crates/lash-http-transport",
     "crates/lash-llm-transport",
-    "crates/lash-provider-auth",
     "crates/lash-sqlite-store",
     "crates/lash-postgres-store",
     "crates/lashctl",
@@ -54,6 +53,7 @@ members = [
     "examples/integrator-contract",
     "examples/delegation",
     "examples/e2e-consumer",
+    "examples/codex-host-auth",
     "crates/transcript-contract",
     "runbooks/rlm-smoke",
 ]
@@ -79,7 +79,6 @@ default-members = [
     "crates/lash-llm-tools",
     "crates/lash-protocol-standard",
     "crates/lash-protocol-rlm",
-    "crates/lash-provider-auth",
     "crates/lash-provider-openai",
     "crates/lash-provider-anthropic",
     "crates/lash-provider-google",
@@ -292,7 +291,6 @@ lash-plugin-standard-compaction = { package = "lash-internal-plugin-standard-com
 lash-protocol-rlm = { package = "lash-internal-protocol-rlm", path = "crates/lash-protocol-rlm", version = "=0.0.0-dev" }
 lash-protocol-standard = { package = "lash-internal-protocol-standard", path = "crates/lash-protocol-standard", version = "=0.0.0-dev" }
 lash-provider-anthropic = { package = "lash-internal-provider-anthropic", path = "crates/lash-provider-anthropic", version = "=0.0.0-dev" }
-lash-provider-auth = { package = "lash-internal-provider-auth", path = "crates/lash-provider-auth", version = "=0.0.0-dev" }
 lash-provider-google = { package = "lash-internal-provider-google", path = "crates/lash-provider-google", version = "=0.0.0-dev" }
 lash-provider-openai = { package = "lash-internal-provider-openai", path = "crates/lash-provider-openai", version = "=0.0.0-dev" }
 lash-regress = { path = "crates/lash-regress", version = "=0.0.0-dev", features = ["utf16"] }

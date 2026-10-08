@@ -270,7 +270,9 @@ mod tests {
 
     #[test]
     fn context_plan_renders_each_outcome_once() {
-        let provider = CodexProvider::new("access", "refresh", 0);
+        let provider = CodexProvider::new(std::sync::Arc::new(
+            lash_core::provider::ProviderToken::new("access"),
+        ));
         let first_input = json!({"type": "message", "role": "user", "content": "hello"});
         let response_item = json!({"type": "message", "role": "assistant", "content": "answer"});
         let continuation = continuation(&first_input, &response_item);

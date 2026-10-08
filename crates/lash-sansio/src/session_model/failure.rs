@@ -230,12 +230,12 @@ pub enum TurnFailureCode {
     ReasoningBudgetExceedsOutputCap,
     /// A provider tool call carried arguments that were not valid JSON.
     InvalidToolCallInputJson,
-    /// The credential refresh was rejected; the host must re-authenticate.
-    CredentialInvalidGrant,
-    /// The credential refresh failed transiently.
-    CredentialRefreshTransient,
-    /// The credential refresh failed.
-    CredentialRefreshFailed,
+    /// The host's token source needs a person to sign in again.
+    CredentialReauthRequired,
+    /// The host's token source is briefly unavailable.
+    CredentialSourceTransient,
+    /// The host's token source cannot supply a credential.
+    CredentialUnavailable,
     /// The call timed out.
     Timeout,
     /// A model call reached its hard total (`ExecutionBudgets::model_total`)
@@ -361,9 +361,9 @@ impl TurnFailureCode {
             Self::OutputTokenCapRequired => "output_token_cap_required",
             Self::ReasoningBudgetExceedsOutputCap => "reasoning_budget_exceeds_output_cap",
             Self::InvalidToolCallInputJson => "invalid_tool_call_input_json",
-            Self::CredentialInvalidGrant => "credential_invalid_grant",
-            Self::CredentialRefreshTransient => "credential_refresh_transient",
-            Self::CredentialRefreshFailed => "credential_refresh_failed",
+            Self::CredentialReauthRequired => "credential_reauth_required",
+            Self::CredentialSourceTransient => "credential_source_transient",
+            Self::CredentialUnavailable => "credential_unavailable",
             Self::Timeout => "timeout",
             Self::ModelTotalExceeded => "model_total_exceeded",
             Self::PromptCompositionFailed => "prompt_composition_failed",
@@ -468,9 +468,9 @@ impl TurnFailureCode {
             "output_token_cap_required" => Self::OutputTokenCapRequired,
             "reasoning_budget_exceeds_output_cap" => Self::ReasoningBudgetExceedsOutputCap,
             "invalid_tool_call_input_json" => Self::InvalidToolCallInputJson,
-            "credential_invalid_grant" => Self::CredentialInvalidGrant,
-            "credential_refresh_transient" => Self::CredentialRefreshTransient,
-            "credential_refresh_failed" => Self::CredentialRefreshFailed,
+            "credential_reauth_required" => Self::CredentialReauthRequired,
+            "credential_source_transient" => Self::CredentialSourceTransient,
+            "credential_unavailable" => Self::CredentialUnavailable,
             "timeout" => Self::Timeout,
             "model_total_exceeded" => Self::ModelTotalExceeded,
             "prompt_composition_failed" => Self::PromptCompositionFailed,
@@ -555,9 +555,9 @@ impl TurnFailureCode {
         Self::OutputTokenCapRequired,
         Self::ReasoningBudgetExceedsOutputCap,
         Self::InvalidToolCallInputJson,
-        Self::CredentialInvalidGrant,
-        Self::CredentialRefreshTransient,
-        Self::CredentialRefreshFailed,
+        Self::CredentialReauthRequired,
+        Self::CredentialSourceTransient,
+        Self::CredentialUnavailable,
         Self::Timeout,
         Self::ModelTotalExceeded,
         Self::PromptCompositionFailed,

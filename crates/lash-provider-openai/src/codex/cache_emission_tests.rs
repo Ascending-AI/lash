@@ -3,7 +3,9 @@ use lash_core::llm::types::LlmContentBlock;
 
 #[test]
 fn codex_tool_schema_prompt_cache_key_is_not_cache_emission() {
-    let provider = CodexProvider::new("access", "refresh", 0);
+    let provider = CodexProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access"),
+    ));
     let mut req = request(vec![LlmMessage::new(
         LlmRole::User,
         vec![LlmContentBlock::Text {

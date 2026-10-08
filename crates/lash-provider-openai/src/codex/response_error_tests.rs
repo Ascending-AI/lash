@@ -62,9 +62,11 @@ impl LlmHttpTransport for NonSseBodyReadFailureTransport {
 
 #[tokio::test]
 async fn codex_non_sse_body_read_failure_preserves_observed_response_evidence() {
-    let provider = CodexProvider::new("access", "refresh", 0)
-        .force_sse_transport()
-        .with_http_transport(Arc::new(NonSseBodyReadFailureTransport));
+    let provider = CodexProvider::new(std::sync::Arc::new(
+        lash_core::provider::ProviderToken::new("access"),
+    ))
+    .force_sse_transport()
+    .with_http_transport(Arc::new(NonSseBodyReadFailureTransport));
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let failure = handle

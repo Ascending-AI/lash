@@ -24,15 +24,7 @@ async fn native_adapters_preserve_allowlisted_metadata_on_failed_streams() {
     .into_iter()
     .enumerate()
     {
-        let provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            0,
-            crate::GoogleOAuthClient {
-                id: "fixture".into(),
-                secret: "fixture".into(),
-            },
-        )
+        let provider = GoogleOAuthProvider::new(std::sync::Arc::new(lash_core::provider::ProviderToken::new("access")))
         .with_transport(Arc::new(StaticSseTransport::with_headers(
             body,
             vec![
