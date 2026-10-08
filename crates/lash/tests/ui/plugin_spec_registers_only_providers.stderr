@@ -1,7 +1,7 @@
 error[E0308]: mismatched types
-  --> tests/ui/plugin_spec_registers_only_providers.rs:12:65
+  --> tests/ui/plugin_spec_registers_only_providers.rs:13:65
    |
-12 |     let _ = lash::plugins::PluginSpec::new().with_tool_provider(definition);
+13 |     let _ = lash::plugins::PluginSpec::new().with_tool_provider(definition);
    |                                              ------------------ ^^^^^^^^^^ expected `Arc<dyn ToolProvider>`, found `ToolDefinition`
    |                                              |
    |                                              arguments to this method are incorrect
