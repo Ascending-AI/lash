@@ -73,31 +73,130 @@ pub async fn cancel(case: &mut Case, node: &str, id: &str) -> Result<Value> {
 /// `completed`, `cancelled` or `failed:<stop>`; any other answer is its
 /// own type (`withdrawn`, `refused`, `not_accepted`, ...).
 pub fn settled(outcome: &Value) -> (String, Option<String>) {
+    use lash::{TurnFinish, TurnOutcome, TurnStop};
+
     let kind = outcome["type"].as_str().unwrap_or("unknown");
     if kind != "settled" {
         return (kind.to_owned(), None);
     }
-    let report = &outcome["output"]["result"];
-    let kind = match report["outcome"]["type"].as_str() {
-        Some("finished") | Some("agent_frame_switch") => "completed".to_owned(),
-        Some("stopped") => match report["outcome"]["stop"]["type"].as_str() {
-            Some("cancelled") => "cancelled".to_owned(),
-            stop => format!("failed:{}", stop.unwrap_or("unknown")),
-        },
-        other => format!("unknown:{other:?}"),
-    };
-    // A Standard turn finishes with its text; an RLM cell's `finish(value)`
-    // with that value.
-    let finish = &report["outcome"]["finish"];
-    let reply = finish["text"]
-        .as_str()
-        .or_else(|| {
-            (finish["type"] == "final_value")
-                .then(|| finish["value"].as_str())
-                .flatten()
-        })
-        .map(ToOwned::to_owned);
-    (kind, reply)
+    // Both host attach routes serialize the native report (ADR 0136).
+    // Decode its outcome with the same type instead of assuming DTO tags.
+    let turn =
+        match serde_json::from_value::<TurnOutcome>(outcome["output"]["result"]["outcome"].clone())
+        {
+            Ok(turn) => turn,
+            Err(error) => return (format!("unknown:{error}"), None),
+        };
+    match turn {
+        TurnOutcome::Finished(finish) => {
+            let reply = match finish {
+                TurnFinish::AssistantMessage { text } => Some(text),
+                TurnFinish::FinalValue { value } => value.as_str().map(ToOwned::to_owned),
+                TurnFinish::ToolValue { .. } => None,
+            };
+            ("completed".to_owned(), reply)
+        }
+        TurnOutcome::AgentFrameSwitch { .. } => ("completed".to_owned(), None),
+        TurnOutcome::Stopped(TurnStop::Cancelled { .. }) => ("cancelled".to_owned(), None),
+        TurnOutcome::Stopped(stop) => {
+            let kind = match stop {
+                TurnStop::Incomplete => "incomplete",
+                TurnStop::InvalidInput => "invalid_input",
+                TurnStop::MaxTurns => "max_turns",
+                TurnStop::ToolFailure => "tool_failure",
+                TurnStop::ProviderError => "provider_error",
+                TurnStop::ContextOverflow => "context_overflow",
+                TurnStop::PluginAbort => "plugin_abort",
+                TurnStop::RuntimeError => "runtime_error",
+                TurnStop::AgentFrameSwitchLimit => "agent_frame_switch_limit",
+                TurnStop::SubmittedError { .. } => "submitted_error",
+                TurnStop::ToolError { .. } => "tool_error",
+                TurnStop::Cancelled { .. } => unreachable!("cancelled turns are handled above"),
+            };
+            (format!("failed:{kind}"), None)
+        }
+    }
+}
+
+/// FIG-5482: the hosts serialize native turn outcomes inside their settled
+/// envelope; reading that encoding preserves completion, reply and stop kind.
+#[test]
+fn settled_reads_the_host_native_turn_outcome() {
+    use lash::{TurnCancellationEvidence, TurnFinish, TurnOutcome, TurnStop};
+
+    let cases = [
+        (
+            TurnOutcome::Finished(TurnFinish::AssistantMessage {
+                text: "standard reply".into(),
+            }),
+            "completed",
+            Some("standard reply"),
+        ),
+        (
+            TurnOutcome::Finished(TurnFinish::FinalValue {
+                value: json!("cell reply"),
+            }),
+            "completed",
+            Some("cell reply"),
+        ),
+        (
+            TurnOutcome::Finished(TurnFinish::FinalValue {
+                value: json!({"answer": 42}),
+            }),
+            "completed",
+            None,
+        ),
+        (
+            TurnOutcome::Finished(TurnFinish::ToolValue {
+                tool_name: "echo".into(),
+                value: json!("tool reply"),
+            }),
+            "completed",
+            None,
+        ),
+        (
+            TurnOutcome::AgentFrameSwitch {
+                frame_key: lash::FrameKey::from_caller_material("e2e-outcome-law").unwrap(),
+                task: "next frame".into(),
+                initial_nodes: Vec::new(),
+            },
+            "completed",
+            None,
+        ),
+        (
+            TurnOutcome::Stopped(TurnStop::Cancelled {
+                evidence: TurnCancellationEvidence::internal("e2e-outcome-law"),
+            }),
+            "cancelled",
+            None,
+        ),
+        (
+            TurnOutcome::Stopped(TurnStop::ProviderError),
+            "failed:provider_error",
+            None,
+        ),
+        (
+            TurnOutcome::Stopped(TurnStop::ToolError {
+                tool_name: "echo".into(),
+                value: json!("refused"),
+            }),
+            "failed:tool_error",
+            None,
+        ),
+    ];
+    for (turn_outcome, kind, reply) in cases {
+        // This is the same serialization used by both host attach routes.
+        let envelope = json!({"type": "settled", "output": {"result": {"outcome": turn_outcome}}});
+        assert_eq!(
+            settled(&envelope),
+            (kind.to_owned(), reply.map(ToOwned::to_owned)),
+            "{envelope}"
+        );
+    }
+    assert_eq!(
+        settled(&json!({"type": "withdrawn"})),
+        ("withdrawn".into(), None)
+    );
 }
 
 /// What the store holds for turn `run`: its unfinished row's phase, its run
