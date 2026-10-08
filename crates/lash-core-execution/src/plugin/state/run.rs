@@ -45,7 +45,7 @@ impl RunRows {
 /// preparation of the turn adopts on every namespace again, so a namespace
 /// the run left alone is no change of the run's.
 fn same_publication(publication: &StateFrontier, recorded: &StateFrontier) -> bool {
-    publication.applied == recorded.applied && publication.receipts == recorded.receipts
+    publication.applied() == recorded.applied() && publication.recent() == recorded.recent()
 }
 
 /// Whether `namespace` is still `base`, the namespace the run started from.
@@ -77,9 +77,18 @@ fn unrecorded_values(plugin: &str) -> crate::plugin::PluginError {
 impl crate::PluginSession {
     /// Begin a durable run over the state published now, the session head's
     /// as the run's runtime opened it: from here, [`Self::run_changes`]
-    /// names what the run changed.
+    /// names what the run changed. Every namespace's frontier settles what
+    /// the head holds, so the run keeps only the receipts it applies itself
+    /// ([`StateFrontier`]).
     pub fn begin_run(&self) {
-        let mut registry = self.state.lock_recover();
+        let mut guard = self.state.lock_recover();
+        let registry = &mut *guard;
+        for namespace in registry.data.plugins.values_mut() {
+            if !namespace.publication.recent().is_empty() {
+                namespace.publication.settle();
+                registry.source = None;
+            }
+        }
         registry.run = Some(RunRows {
             base: registry.data.clone(),
             base_values: BTreeMap::new(),

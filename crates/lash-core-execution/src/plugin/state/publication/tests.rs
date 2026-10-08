@@ -420,6 +420,88 @@ async fn a_checkpoint_never_reapplies_an_older_delivery() {
     }
 }
 
+/// FIG-5393: a run settles the frontier it begins from and keeps only the
+/// receipts it applies itself. A resolution is delivered by the run's own
+/// records (its effects' journaled outcomes, its members' committed outcome
+/// records, its after-turn state) or by the after-turn state of the commit
+/// that wrote its base head, which that head already holds. So a delivery at
+/// or below the settled ordinal applies nothing, with no receipt left to
+/// compare, and one in the run's window still refuses a receipt that
+/// differs.
+#[tokio::test]
+async fn a_run_keeps_only_its_own_receipts_and_still_deduplicates_its_base() {
+    let host = host(&Arc::default());
+    let total = |total: u64| StateCommands::new().set("total", serde_json::json!(total));
+    let first = session(&host, None);
+    first.begin_run();
+    let earlier = record(
+        &first,
+        "earlier",
+        vec![tool_commands(LEDGER, "earlier", total(1))],
+    )
+    .await;
+    publish(&first, "earlier", earlier.clone()).unwrap();
+    let head = first.export_state();
+    assert_eq!(head.plugins[LEDGER].publication.recent().len(), 1);
+
+    // The next run begins from that head on a node of its own.
+    let second = session(&host, Some(&head));
+    second.begin_run();
+    let base = second.export_state();
+    let frontier = &base.plugins[LEDGER].publication;
+    assert_eq!(frontier.applied(), Some(PublicationOrdinal(1)));
+    assert!(frontier.recent().is_empty(), "the run settles its base");
+    publish(&second, "earlier", journaled(&earlier)).unwrap();
+    assert_eq!(
+        second.export_state(),
+        base,
+        "the base head's after-turn state delivered again applies nothing"
+    );
+    let mut settled = resolutions(&earlier)[0].clone();
+    settled.outcome = StateResolutionOutcome::Applied { changes: vec![] };
+    second
+        .publish_run_resolutions(&settled.publisher.clone(), vec![settled])
+        .unwrap();
+    assert_eq!(
+        second.export_state(),
+        base,
+        "a settled ordinal applies nothing"
+    );
+
+    let later = record(
+        &second,
+        "later",
+        vec![tool_commands(LEDGER, "later", total(2))],
+    )
+    .await;
+    publish(&second, "later", later.clone()).unwrap();
+    let committed = second.export_state();
+    let frontier = &committed.plugins[LEDGER].publication;
+    assert_eq!(frontier.applied(), Some(PublicationOrdinal(2)));
+    assert_eq!(
+        frontier.recent(),
+        &[resolutions(&later)[0].receipt()],
+        "the head the run writes keeps its receipts alone"
+    );
+    publish(&second, "later", journaled(&later)).unwrap();
+    assert_eq!(second.export_state(), committed);
+    let mut divergent = resolutions(&later)[0].clone();
+    divergent.outcome = StateResolutionOutcome::Applied { changes: vec![] };
+    let error = second
+        .publish_run_resolutions(&divergent.publisher.clone(), vec![divergent])
+        .unwrap_err();
+    assert_eq!(
+        error.cause,
+        Some(crate::RuntimeErrorCause::PluginStateFrontier {
+            refusal: Box::new(NamespaceFrontierRefusal {
+                plugin: LEDGER.into(),
+                refusal: FrontierRefusal::ReceiptMismatch { found: 2 },
+            }),
+        })
+    );
+    assert_eq!(value(&second, LEDGER, "total"), Some(serde_json::json!(2)));
+}
+
 /// A refusal case: its step, its proposal and the refusal it must meet.
 type RefusalCase = (&'static str, Proposal, fn(&StateCommandRefusal) -> bool);
 
@@ -960,8 +1042,9 @@ async fn a_callback_keeps_its_publisher_segment_across_handover() {
     assert_eq!(live.export_state(), checkpoint);
 }
 
-/// A session's plugin state has one total budget, checked when a
-/// publication resolves (FIG-5301): past its warn tier a publication still
+/// A session's plugin state has one total budget, its values and
+/// publication frontiers encoded, checked when a publication resolves
+/// (FIG-5301, FIG-5393): past its warn tier a publication still
 /// applies and is reported; past its limit it is refused with a typed
 /// refusal, and nothing of it applies.
 #[tokio::test]
@@ -1020,7 +1103,10 @@ async fn a_publication_past_the_session_budget_warns_then_is_refused() {
     let total: usize = state
         .plugins
         .values()
-        .map(|namespace| serde_json::to_vec(&*namespace.values).unwrap().len())
+        .map(|namespace| {
+            serde_json::to_vec(&*namespace.values).unwrap().len()
+                + serde_json::to_vec(&namespace.publication).unwrap().len()
+        })
         .sum();
     assert!(
         total > PLUGIN_STATE_SESSION_WARN && total <= PLUGIN_STATE_SESSION_LIMIT,

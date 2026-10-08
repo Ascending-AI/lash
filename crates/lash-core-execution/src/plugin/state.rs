@@ -246,8 +246,9 @@ impl PluginStateView {
         &self.plugin_id
     }
 
-    /// The namespace's published generation: the count of publications it
-    /// has applied, which a checkpoint carries as its applied frontier.
+    /// The namespace's published generation: it advances with every
+    /// publication the namespace applies and every format conversion of its
+    /// values.
     pub fn generation(&self) -> u64 {
         self.state
             .lock_recover()

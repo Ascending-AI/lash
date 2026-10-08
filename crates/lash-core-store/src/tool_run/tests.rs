@@ -666,18 +666,23 @@ fn the_state_frontier_applies_each_publication_once_in_order() {
         empty.step(&resolution(2, Some(1), 0)),
         Err(FrontierRefusal::OutOfOrder { found: 2 })
     );
-    let mut applied = StateFrontier {
-        applied: Some(PublicationOrdinal(3)),
-        owner_segment: SegmentOrdinal(1),
-        receipts: Default::default(),
-    };
-    applied
-        .receipts
-        .insert(PublicationOrdinal(2), resolution(2, Some(1), 1).receipt());
+    let mut applied = StateFrontier::default();
+    applied.owner_segment = SegmentOrdinal(1);
+    applied.record(&resolution(1, None, 1));
+    applied.settle();
+    applied.record(&resolution(2, Some(1), 1));
+    applied.record(&resolution(3, Some(2), 1));
+    assert_eq!(applied.applied(), Some(PublicationOrdinal(3)));
+    assert_eq!(applied.recent().len(), 2);
     assert_eq!(
         applied.step(&resolution(2, Some(1), 1)),
         Ok(FrontierStep::AlreadyApplied),
         "a checkpoint never reapplies an older delta"
+    );
+    assert_eq!(
+        applied.step(&resolution(1, None, 0)),
+        Ok(FrontierStep::AlreadyApplied),
+        "a settled publication applies nothing again"
     );
     assert_eq!(
         applied.step(&resolution(4, Some(3), 1)),
@@ -772,28 +777,4 @@ fn presentation_plans_record_explicit_empty_and_decision_only_callbacks() {
             Err(StateCommandRefusal::DecisionOnly)
         );
     }
-}
-
-/// L19: a published state frontier survives the tagged journal envelope.
-#[test]
-fn l19_publication_receipts_round_trip_inside_a_journal_variant() {
-    #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-    #[serde(tag = "outcome")]
-    enum Journal {
-        Published { frontier: StateFrontier },
-    }
-    let frontier = StateFrontier {
-        applied: Some(PublicationOrdinal(1)),
-        owner_segment: SegmentOrdinal(0),
-        receipts: [(
-            PublicationOrdinal(1),
-            crate::BlobRef::for_content(b"recorded resolution"),
-        )]
-        .into(),
-    };
-    let record = Journal::Published { frontier };
-    let bytes = serde_json::to_vec(&record).unwrap();
-    assert_eq!(serde_json::from_slice::<Journal>(&bytes).unwrap(), record);
-    let bytes = rmp_serde::to_vec_named(&record).unwrap();
-    assert_eq!(rmp_serde::from_slice::<Journal>(&bytes).unwrap(), record);
 }

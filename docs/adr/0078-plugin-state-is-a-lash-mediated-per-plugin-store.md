@@ -78,9 +78,16 @@ published nothing.
 
 Resume installs committed resolutions without running the body, the hook, the
 reducer or a format converter. A delivery ahead of its predecessor waits for
-it; one at or below the namespace's frontier applies nothing only when its
-complete receipt digest matches the checkpoint's evidence. A different receipt
-at an applied ordinal is refused as `FrontierRefusal::ReceiptMismatch`. After
+it; one at or below the namespace's frontier applies nothing. The frontier
+keeps the receipt digests of the publications its owner's current run applied:
+a durable run settles the frontier of the head it begins from, so a head holds
+its settled ordinal and the receipts of the run that wrote it, never the whole
+history (FIG-5393). A delivery in that window applies nothing only when its
+complete receipt digest matches, and a different receipt is refused as
+`FrontierRefusal::ReceiptMismatch`. A delivery at or below the settled ordinal
+is one the run's base head already holds: the only records that deliver one
+are the after-turn state of the commit that wrote that head, which cannot
+differ from it, so it applies nothing without a receipt. After
 ownership moves to a later activation, an earlier activation's unapplied
 resolution is refused with a typed `FrontierRefusal`.
 
@@ -117,8 +124,10 @@ namespaces.
 ### 6. The checkpoint component
 
 The `plugin_state` keyed component is the session's namespace map: for each
-plugin, its format version, generation, publication frontier, receipt
-digests, fork policy and the content address of its values. Each namespace's
+plugin, its format version, generation, publication frontier (its settled
+ordinal and the receipt digests of the run that wrote the head), fork policy
+and the content address of its values. The frontier counts in the session's
+plugin-state budget with the values. Each namespace's
 values are one immutable body of their own, the `plugin_state/<plugin>`
 component, by content address (FIG-5301). A commit writes a body only for a
 namespace whose values changed; an unchanged namespace keeps its reference
@@ -161,7 +170,7 @@ initial state. The policy is recorded with the namespace. A fork preserves
 non-resident namespaces as well as resident ones.
 Parent and child publications are independent; there is no merge.
 Fork creation resets publication ownership to the child's initial activation
-and retains the inherited applied receipts. Content-addressed
+and retains the inherited frontier. Content-addressed
 storage can deduplicate unchanged bodies. Retention policy governs how long
 the session's checkpoint contents remain available.
 

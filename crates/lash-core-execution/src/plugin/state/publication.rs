@@ -471,7 +471,7 @@ impl crate::PluginSession {
                     origin: batch.origin,
                     segment,
                     ordinal: namespace.publication.next(),
-                    predecessor: namespace.publication.applied,
+                    predecessor: namespace.publication.applied(),
                     outcome,
                 };
                 namespace.generation = namespace.generation.saturating_add(1);
@@ -806,9 +806,9 @@ mod tests;
 
 /// Whether the session's plugin state, with `plugin`'s namespace holding
 /// `values` and every other namespace as `candidates` or the registry hold
-/// it, stays within its total budget. Past the warn tier the publication is
-/// reported; past the limit it is refused, so a committed state always fits
-/// a fork's capture.
+/// it, stays within its total budget: every namespace's values and its
+/// publication frontier, encoded. Past the warn tier the publication is
+/// reported; past the limit it is refused.
 fn session_budget(
     registry: &mut PluginStateRegistry,
     candidates: &BTreeMap<String, PluginNamespaceState>,
@@ -819,21 +819,25 @@ fn session_budget(
     let encoded = |values: &BTreeMap<String, Value>| {
         serde_json::to_vec(values).map_or(usize::MAX, |bytes| bytes.len())
     };
+    let frontier = |namespace: &PluginNamespaceState| {
+        serde_json::to_vec(&namespace.publication).map_or(usize::MAX, |bytes| bytes.len())
+    };
     let mut bytes = encoded(values);
-    let namespaces: Vec<(String, Arc<BTreeMap<String, Value>>)> = registry
+    let namespaces = registry
         .data
         .plugins
         .iter()
         .chain(candidates.iter())
-        .filter(|(id, _)| id.as_str() != plugin)
         .map(|(id, namespace)| {
             let current = candidates.get(id).unwrap_or(namespace);
-            (id.clone(), Arc::clone(&current.values))
+            (id.clone(), (Arc::clone(&current.values), frontier(current)))
         })
-        .collect::<BTreeMap<_, _>>()
-        .into_iter()
-        .collect();
-    for (id, values) in namespaces {
+        .collect::<BTreeMap<_, _>>();
+    for (id, (values, frontier)) in namespaces {
+        bytes = bytes.saturating_add(frontier);
+        if id == plugin {
+            continue;
+        }
         let measured = match registry.sizes.get(&id) {
             Some((from, size)) if std::ptr::eq(from.as_ptr(), Arc::as_ptr(&values)) => *size,
             _ => {

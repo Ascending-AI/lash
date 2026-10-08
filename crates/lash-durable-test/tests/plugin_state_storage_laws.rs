@@ -20,6 +20,9 @@
 //! - **Fork:** a fork at an earlier revision copies a `copy` namespace as
 //!   of that revision and starts a `reset` one from the plugin's initial
 //!   state; later writes in either session leave the other unchanged.
+//! - **Frontier:** however many turns publish, a head's namespace frontier
+//!   holds every publication's ordinal and only the receipts of the turn
+//!   that wrote it (FIG-5393).
 
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
@@ -405,6 +408,30 @@ async fn committed(
         .plugin_state()
         .and_then(|state| state.plugins.get(plugin))
         .map(|namespace| (*namespace.values).clone()))
+}
+
+/// The publication frontier of `plugin`'s namespace in `session`'s head.
+async fn committed_frontier(
+    backend: &lash::Backend,
+    session: &SessionId,
+    plugin: &str,
+) -> lash_core_execution::tool_run::StateFrontier {
+    let factory = backend.stores().session_store_factory();
+    let view = lash_core_execution::store::SessionStore::new(factory, session.clone())
+        .expect("the session's store");
+    let loaded = lash_core_execution::store::load_session_window_state(
+        &view,
+        lash_core_execution::store::WindowSelector::Current,
+    )
+    .await
+    .expect("the session's committed state")
+    .expect("the session has committed state");
+    loaded
+        .state
+        .plugin_state()
+        .and_then(|state| state.plugins.get(plugin))
+        .map(|namespace| namespace.publication.clone())
+        .expect("the namespace is committed")
 }
 
 /// The scenario on one shape and one dialect, fresh for every matrix cell.
@@ -872,9 +899,52 @@ async fn a_fork_copies_and_resets_namespaces_as_declared_at_its_revision(tier: T
     world.shutdown().await;
 }
 
+/// FIG-5393: a head's frontier holds every publication's ordinal but only
+/// the receipts of the run that wrote it, so it does not grow with the
+/// session: a run settles the frontier it begins from.
+async fn a_heads_frontier_keeps_only_the_receipts_of_the_run_that_wrote_it(tier: Tier) {
+    let world_state = Arc::new(World::default());
+    let Some(world) = served::World::new(tier, |backend| {
+        with_plugins(
+            lash::LashCore::standard_builder(backend.clone()),
+            &world_state,
+        )
+    })
+    .await
+    else {
+        return;
+    };
+    let session = world.session("frontier", served::spec(64)).await;
+    for turn in 1..=3_u64 {
+        let label = format!("frontier-{turn}");
+        world.script(
+            &label,
+            vec![served::response(vec![served::call(
+                &format!("call-note-{turn}"),
+                NOTE,
+                serde_json::json!({ "label": label }),
+            )])],
+        );
+        served::assert_answered(&label, &world.send(&session, &label).await);
+        let frontier = committed_frontier(&world.backend, session.session_id(), NOTES).await;
+        assert_eq!(
+            frontier.applied().map(|applied| applied.0),
+            Some(turn),
+            "the head holds every publication"
+        );
+        assert_eq!(
+            frontier.recent().len(),
+            1,
+            "the head keeps the receipts of the turn that wrote it, not the session's history"
+        );
+    }
+    world.shutdown().await;
+}
+
 tiered_laws!(
     current_thread:
     an_unchanged_namespace_is_never_rewritten_and_changes_survive_every_cut,
     a_cells_pruned_calls_keep_their_changes_and_never_rewrite_an_unchanged_namespace,
     a_fork_copies_and_resets_namespaces_as_declared_at_its_revision,
+    a_heads_frontier_keeps_only_the_receipts_of_the_run_that_wrote_it,
 );

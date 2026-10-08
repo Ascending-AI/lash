@@ -226,7 +226,7 @@ pub enum StateCommandRefusal {
     #[error("the namespace would encode to {bytes} bytes, limit {limit}")]
     NamespaceTooLarge { bytes: usize, limit: usize },
     /// The session's plugin state would encode past its total budget
-    /// (FIG-5301), below the fork capture bound.
+    /// (FIG-5301).
     #[error("the session's plugin state would encode to {bytes} bytes, limit {limit}")]
     SessionTooLarge { bytes: usize, limit: usize },
     #[error("command {index} names reducer `{name}`, which its plugin does not register")]
@@ -449,79 +449,69 @@ pub struct StateResolution {
     pub outcome: StateResolutionOutcome,
 }
 
-/// The applied frontier a checkpoint or handover carries with a namespace.
+/// The applied frontier a checkpoint or handover carries with a namespace:
+/// the publications applied so far, and the receipts of those the owner's
+/// current run applied.
+///
+/// A run settles the frontier it begins from ([`Self::settle`]): every
+/// publication its base head holds is settled, and only the receipts the run
+/// applies itself are kept. A delivered resolution comes from the run's own
+/// records (its effects' journaled outcomes, its members' committed outcome
+/// records, its after-turn staged state) or from the after-turn state of the
+/// run whose commit wrote its base head. The first are reduced within the
+/// run, after its base, so their receipts are in the window; the second are
+/// what that commit wrote, so they are settled and cannot differ from it. A
+/// delivery at or below the settled ordinal therefore applies nothing, and
+/// one in the window applies nothing only if its whole receipt matches.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StateFrontier {
-    /// The last publication applied.
-    pub applied: Option<PublicationOrdinal>,
     /// The segment that owns publication.
     pub owner_segment: SegmentOrdinal,
-    /// Digests of applied resolutions, including origin and resolved content.
-    #[serde(deserialize_with = "deserialize_receipts")]
-    pub receipts: BTreeMap<PublicationOrdinal, crate::BlobRef>,
-}
-
-// JSON object keys become strings when an enclosing tagged enum buffers its
-// content. Decode the key at the map boundary, retaining numeric keys for
-// MessagePack and numeric publication ordinals everywhere else.
-fn deserialize_receipts<'de, D>(
-    deserializer: D,
-) -> Result<BTreeMap<PublicationOrdinal, crate::BlobRef>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    #[derive(PartialEq, Eq, PartialOrd, Ord)]
-    struct ReceiptKey(PublicationOrdinal);
-
-    impl<'de> Deserialize<'de> for ReceiptKey {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            struct KeyVisitor;
-            impl serde::de::Visitor<'_> for KeyVisitor {
-                type Value = ReceiptKey;
-
-                fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                    formatter.write_str("a publication ordinal")
-                }
-
-                fn visit_u64<E: serde::de::Error>(self, ordinal: u64) -> Result<Self::Value, E> {
-                    Ok(ReceiptKey(PublicationOrdinal(ordinal)))
-                }
-
-                fn visit_str<E: serde::de::Error>(self, ordinal: &str) -> Result<Self::Value, E> {
-                    ordinal
-                        .parse()
-                        .map(|ordinal| ReceiptKey(PublicationOrdinal(ordinal)))
-                        .map_err(E::custom)
-                }
-            }
-            deserializer.deserialize_any(KeyVisitor)
-        }
-    }
-
-    BTreeMap::<ReceiptKey, crate::BlobRef>::deserialize(deserializer).map(|receipts| {
-        receipts
-            .into_iter()
-            .map(|(key, receipt)| (key.0, receipt))
-            .collect()
-    })
+    /// The last publication settled; `None` when none is.
+    settled: Option<PublicationOrdinal>,
+    /// Digests of the resolutions applied after `settled`, in order: origin
+    /// and resolved content.
+    recent: Vec<crate::BlobRef>,
 }
 
 impl StateFrontier {
+    /// The last publication applied.
+    #[must_use]
+    pub fn applied(&self) -> Option<PublicationOrdinal> {
+        let applied = self
+            .settled
+            .map_or(0, |settled| settled.0)
+            .saturating_add(self.recent.len() as u64);
+        (applied > 0).then_some(PublicationOrdinal(applied))
+    }
+
     /// The publication the next resolution reduced now takes.
     #[must_use]
     pub fn next(&self) -> PublicationOrdinal {
         PublicationOrdinal(
-            self.applied
+            self.applied()
                 .map_or(1, |applied| applied.0.saturating_add(1)),
         )
     }
 
+    /// The receipts of the publications applied since the frontier settled.
+    #[must_use]
+    pub fn recent(&self) -> &[crate::BlobRef] {
+        &self.recent
+    }
+
     /// Advance after the resolved changes have been accepted and installed.
     pub fn record(&mut self, resolution: &StateResolution) {
-        self.receipts
-            .insert(resolution.ordinal, resolution.receipt());
-        self.applied = Some(resolution.ordinal);
+        debug_assert_eq!(resolution.ordinal, self.next());
+        self.recent.push(resolution.receipt());
+    }
+
+    /// Settle every publication applied so far: a run begins from here, and
+    /// keeps only the receipts it applies itself.
+    pub fn settle(&mut self) {
+        self.settled = self.applied();
+        self.recent.clear();
     }
 }
 
@@ -571,19 +561,28 @@ pub enum FrontierRefusal {
 }
 
 impl StateFrontier {
-    /// Decide what to do with `resolution`. A delivery of an applied
-    /// publication applies nothing only if its entire receipt matches.
+    /// Decide what to do with `resolution`. A delivery of a settled
+    /// publication applies nothing; one of a publication applied since
+    /// applies nothing only if its entire receipt matches.
     ///
     /// # Errors
     ///
-    /// [`FrontierRefusal`] for a stale publisher or a publication that
-    /// skips or reorders the recorded sequence.
+    /// [`FrontierRefusal`] for a stale publisher, a publication that skips
+    /// or reorders the recorded sequence, or one whose receipt differs from
+    /// the one applied at its ordinal.
     pub fn step(&self, resolution: &StateResolution) -> Result<FrontierStep, FrontierRefusal> {
         if self
-            .applied
+            .applied()
             .is_some_and(|applied| resolution.ordinal <= applied)
         {
-            return if self.receipts.get(&resolution.ordinal) == Some(&resolution.receipt()) {
+            let settled = self.settled.map_or(0, |settled| settled.0);
+            if resolution.ordinal.0 <= settled {
+                return Ok(FrontierStep::AlreadyApplied);
+            }
+            let receipt = usize::try_from(resolution.ordinal.0 - settled - 1)
+                .ok()
+                .and_then(|index| self.recent.get(index));
+            return if receipt == Some(&resolution.receipt()) {
                 Ok(FrontierStep::AlreadyApplied)
             } else {
                 Err(FrontierRefusal::ReceiptMismatch {
@@ -597,7 +596,7 @@ impl StateFrontier {
                 found: resolution.segment.0,
             });
         }
-        if resolution.ordinal != self.next() || resolution.predecessor != self.applied {
+        if resolution.ordinal != self.next() || resolution.predecessor != self.applied() {
             return Err(FrontierRefusal::OutOfOrder {
                 found: resolution.ordinal.0,
             });

@@ -320,9 +320,8 @@ pub fn fork_checkpoint_plugin_state(
     Ok(true)
 }
 
-/// The largest encoded total of every namespace's values a session's
-/// publication may commit: below the fork and creation capture bound
-/// (`SESSION_PLUGIN_INIT_MAX_BYTES`, 8 MiB), so every committed state forks.
+/// The largest encoded total a session's publication may commit: every
+/// namespace's values and its publication frontier.
 pub const PLUGIN_STATE_SESSION_LIMIT: usize = 6 * 1024 * 1024;
 /// The encoded total past which a committed publication is reported: the
 /// warn tier of [`PLUGIN_STATE_SESSION_LIMIT`].
