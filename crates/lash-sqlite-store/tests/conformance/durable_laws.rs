@@ -71,7 +71,6 @@ lash_conformance::session_store_factory_tests!(@turn_cancel { session_store_fact
 ]);
 
 /// A fork inherits its source's history and none of its execution.
-#[ignore = "blocked on L4 (FIG-5174): the source turn's tool completion key reaches await_event_legacy::port_pending, todo!() until fig-5174-pending ports it"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn fork_inherits_history_without_execution_queues_waits_or_journals() {
     let backend = TestBackend::open(SUBSTRATE).await;

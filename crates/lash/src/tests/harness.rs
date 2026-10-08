@@ -54,6 +54,29 @@ pub(crate) async fn sqlite_memory_store_set() -> Arc<lash_sqlite_store::SqliteSt
     stores
 }
 
+/// A PostgreSQL store set over an isolated database of the service the
+/// gate hands the run, and what must outlive it: the database and the
+/// attachment directory. For a law's `#[ignore]`d PostgreSQL leg.
+pub(crate) async fn postgres_store_set() -> (
+    Arc<lash_postgres_store::PostgresStoreSet>,
+    lash_postgres_store::testing::IsolatedDatabase,
+    tempfile::TempDir,
+) {
+    let url = lash_postgres_store::testing::required_database_url();
+    let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
+    let storage = lash_postgres_store::testing::connect(database.url())
+        .await
+        .expect("connect PostgreSQL");
+    let attachments = tempfile::tempdir().expect("PostgreSQL attachment directory");
+    let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
+        &storage,
+        Arc::new(lash_core::facade_support::FileAttachmentStore::new(
+            attachments.path(),
+        )),
+    ));
+    (stores, database, attachments)
+}
+
 /// A backend over a fresh SQLite memory store set whose effect host only
 /// records: for a test that needs a backend value but runs no effect.
 pub(crate) async fn sqlite_memory_store_backend() -> lash_core::Backend {

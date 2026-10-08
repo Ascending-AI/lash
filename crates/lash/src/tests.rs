@@ -406,6 +406,7 @@ fn untimed_fixture_workers() -> crate::rlm::WorkerService {
     crate::rlm::WorkerService::new(config)
 }
 
+mod config_transactions;
 mod core_session_builder;
 mod crashed_create_drain;
 mod deployment_and_testing_facade;
@@ -416,6 +417,8 @@ mod durable_session;
 mod facade_construction;
 mod facade_turn;
 mod generation_policy;
+mod fixtures;
+use fixtures::AppTools;
 pub(crate) mod harness;
 mod node_drain;
 mod output_retention;
@@ -443,6 +446,9 @@ mod plugin_operations;
 mod plugin_reopen;
 mod provider_attempts;
 mod replay_origin;
+mod recorded_execution_controls;
+mod recorded_protocol_prompt;
+mod recorded_request_defaults;
 mod response_phase_replay;
 mod run_effects;
 mod send_handle;
