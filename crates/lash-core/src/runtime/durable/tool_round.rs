@@ -139,9 +139,22 @@ pub(super) async fn run(
                 return Ok(RoundExit::CancelRequested);
             }
             let now_ms = u64::try_from(tx.opened_at().0).unwrap_or(0);
+            // Each call's trace admission is proposed with the round's: the
+            // admission record retains its scope, which every later owner
+            // reads back, and the candidate is selected once that record
+            // commits (FIG-5382).
+            let mut candidates = Vec::new();
             let members = calls
                 .iter()
-                .map(|call| round::call_draft(&opener, call, tools.pin(call, now_ms)))
+                .map(|call| {
+                    let draft = round::call_draft(&opener, call, tools.pin(call, now_ms))?;
+                    let proposal = tools.propose_trace(call);
+                    let trace = proposal.map(|proposal| {
+                        candidates.push(proposal.candidate);
+                        proposal.scope
+                    });
+                    Ok::<_, round::RoundCallsRefusal>(draft.with_trace(trace))
+                })
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(exec)?;
             let refused = tools.refusal(&calls);
@@ -174,7 +187,19 @@ pub(super) async fn run(
                     .map_err(exec)?;
                 }
             }
-            cx.commit(tx, CommitLabel::MODEL_DONE).await?;
+            // A commit whose acknowledgement was lost may have landed: its
+            // scopes are selected, as a successor reads them back if so.
+            let committed = cx.commit(tx, CommitLabel::MODEL_DONE).await;
+            let outcome = match &committed {
+                Ok(_) | Err(DurableError::AckLost { .. }) => {
+                    lash_trace::TraceCandidateOutcome::Selected
+                }
+                Err(_) => lash_trace::TraceCandidateOutcome::Refused,
+            };
+            for candidate in candidates {
+                candidate.settle(outcome);
+            }
+            committed?;
             drive.run_changes_committed(&written);
             if refused.is_some() {
                 RoundRunner::resumed(cx, owner.clone(), run, policies, bodies)

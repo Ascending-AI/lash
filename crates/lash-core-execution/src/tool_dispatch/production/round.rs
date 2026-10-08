@@ -693,19 +693,17 @@ impl RoundTools for ProductionRoundTools {
             *completed |= complete;
             (start, complete)
         };
-        if start {
+        // The call was admitted with its round, under the scope its member
+        // carries: a successor re-folding the round traces it under that
+        // scope and admits nothing (FIG-5382).
+        if start && let Some(scope) = member.draft().trace() {
             let start = crate::session::ToolCallStart {
                 call_id: &call.call_id,
                 provider_call_id: call.provider_call_id.as_deref(),
                 tool: &call.tool_name,
                 args: &call.args,
             };
-            if let Err(error) = self
-                .context
-                .trace_tool_call_started(start, self.context.dispatch().clock.timestamp_ms())
-            {
-                self.context.record_nested_effect_error(error);
-            }
+            self.context.trace_tool_call_admitted(start, scope.clone());
         }
         if complete && let Some(output) = member.outcome() {
             let record = member_record(call, output);
@@ -717,6 +715,18 @@ impl RoundTools for ProductionRoundTools {
                 .collect::<Vec<_>>();
             self.context.trace_tool_call_completed(&record, &attempts);
         }
+    }
+
+    fn propose_trace(
+        &self,
+        call: &crate::sansio::PendingToolCall,
+    ) -> Option<crate::runtime::actor::round::TraceProposal> {
+        self.context
+            .propose_tool_trace(&call.call_id, self.context.dispatch().clock.timestamp_ms())
+            .unwrap_or_else(|error| {
+                self.context.record_nested_effect_error(error);
+                None
+            })
     }
 
     fn pin(&self, call: &crate::sansio::PendingToolCall, now_ms: u64) -> MemberPin {

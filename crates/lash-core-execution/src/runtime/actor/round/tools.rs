@@ -46,14 +46,33 @@ pub struct MemberPin {
     pub wait: Option<WaitDeadline>,
 }
 
+/// A call's trace admission, proposed with its round's admission
+/// (FIG-5382): the scope the admission record retains, which every owner
+/// of the round traces the call under, and the candidate the admission's
+/// commit settles. A successor reads the scope back from the record and
+/// proposes nothing, so the call is admitted once across a handover.
+pub struct TraceProposal {
+    /// The scope the call's member carries.
+    pub scope: lash_trace::DurableTraceScope,
+    /// Selected once the admission commits, refused otherwise.
+    pub candidate: Box<dyn lash_trace::TraceAdmissionCandidate>,
+}
+
 /// The tools a turn's rounds run: the catalog the turn was built with.
 ///
 /// Nothing here drives the turn or commits: the phase runner admits, runs
 /// and presents the round, and asks this for what only the catalog knows.
 pub trait RoundTools: Send + Sync {
     /// Observe `call` as its committed member records leave it, before any
-    /// body runs. Called after every fold; a live observer deduplicates it.
+    /// body runs, under the trace scope its admission retained. Called
+    /// after every fold; a live observer deduplicates it.
     fn observe(&self, _call: &PendingToolCall, _member: &super::RoundMember) {}
+
+    /// Propose `call`'s trace admission for its round's admission to
+    /// retain. `None` when the catalog traces nothing.
+    fn propose_trace(&self, _call: &PendingToolCall) -> Option<TraceProposal> {
+        None
+    }
 
     /// What `call` is admitted as, read from the catalog at `now_ms`. Runs
     /// no hook, preparation or body.

@@ -17,6 +17,10 @@
 //! - **One trace:** every record of the turn carries the trace its
 //!   admission started, and every record of the turn's own scope its
 //!   admission's anchor.
+//! - **One tool admission (FIG-5382):** the parked call's scope is selected
+//!   exactly once, the `lash.tool.admitted` span an adapter exports, on the
+//!   turn's trace: the resume reads the scope its round's admission retained
+//!   back instead of admitting the call again.
 //!
 //! The crash half, a turn cut at a phase commit and resumed on the other
 //! node, is `Turn::Trace` in `tool_crash_laws.rs`.
@@ -193,7 +197,8 @@ async fn resumed_turn_keeps_its_trace_scope(tier: Tier, resume: Resume) {
             served::assert_answered("the follow-up turn", &output);
         }
     }
-    let violations = telemetry.first_turn_violations(&name);
+    let mut violations = telemetry.first_turn_violations(&name);
+    violations.extend(telemetry.first_turn_tool_violations(&name, 1..=1));
     world.shutdown().await;
     assert!(
         violations.is_empty(),

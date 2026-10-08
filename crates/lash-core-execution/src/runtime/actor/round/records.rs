@@ -57,6 +57,9 @@ pub(super) struct AdmittedMember {
     wait_deadline_ms: Option<i64>,
     /// The completion wait pinned with the admission, by its id's hex.
     wait_id: Option<String>,
+    /// The call's trace scope the admission retained (FIG-5382).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    trace: Option<lash_trace::DurableTraceScope>,
 }
 
 impl AdmittedMember {
@@ -70,6 +73,7 @@ impl AdmittedMember {
             limit_max_slice_ms: millis(draft.limit().max_slice),
             wait_deadline_ms: draft.wait().map(|wait| wait.at().0),
             wait_id: draft.pinned_wait().map(|pinned| pinned.id.to_hex()),
+            trace: draft.trace().cloned(),
         }
     }
 
@@ -100,7 +104,8 @@ impl AdmittedMember {
             self.wait_deadline_ms
                 .map(|at| WaitDeadline::at_instant(DurableInstant(at))),
         )
-        .with_pinned_wait(pinned))
+        .with_pinned_wait(pinned)
+        .with_trace(self.trace.clone()))
     }
 }
 

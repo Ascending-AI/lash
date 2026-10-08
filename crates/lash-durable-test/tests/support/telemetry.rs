@@ -1,11 +1,13 @@
-//! A recording telemetry adapter for the trace-scope laws (FIG-5363): the
-//! scope factory and projector a core's trace runtime is served with.
+//! A recording telemetry adapter for the trace-scope laws (FIG-5363,
+//! FIG-5382): the scope factory and projector a core's trace runtime is
+//! served with.
 //!
 //! The factory mints a fresh trace for every root or linked proposal and
 //! keeps its parent's trace for an owned one, as an exporting adapter does,
 //! and records every admission a candidate was selected for: the
-//! `lash.turn.admitted` span an adapter exports for a turn's scope. The
-//! projector records the scope every record was made under.
+//! `lash.turn.admitted` span an adapter exports for a turn's scope, and the
+//! `lash.tool.admitted` span for a tool call's. The projector records the
+//! scope every record was made under.
 
 #![allow(dead_code)]
 
@@ -170,6 +172,62 @@ impl Telemetry {
                      admission's trace {original:?}",
                     record_scope.scope
                 ));
+            }
+        }
+        violations
+    }
+
+    /// How the tool calls of `session`'s first turn broke their admission
+    /// (FIG-5382): unless each call's scope was selected a number of times
+    /// in `admissions` (the `lash.tool.admitted` span an adapter exports),
+    /// and every selection is on the trace the turn's admission started.
+    pub fn first_turn_tool_violations(
+        &self,
+        session: &str,
+        admissions: std::ops::RangeInclusive<usize>,
+    ) -> Vec<String> {
+        let recorded = self.0.lock_recover();
+        let Some((turn_scope, turn_anchor)) = recorded.admitted.iter().find(|(scope, _)| {
+            scope.boundary == 0
+                && matches!(
+                    &scope.owner,
+                    TraceScopeOwner::Turn { session_id, .. } if session_id.as_str() == session
+                )
+        }) else {
+            return vec![format!("no turn of session {session} was admitted")];
+        };
+        let TraceScopeOwner::Turn { turn_id, .. } = &turn_scope.owner else {
+            unreachable!("found a turn scope");
+        };
+        let mut calls = std::collections::BTreeMap::<&str, Vec<&TraceCarrier>>::new();
+        for (scope, carrier) in &recorded.admitted {
+            if let TraceScopeOwner::Tool {
+                owner: lash::tracing::TraceToolOwner::Turn { turn_id: owner, .. },
+                call_id,
+            } = &scope.owner
+                && owner == turn_id
+            {
+                calls.entry(call_id.as_str()).or_default().push(carrier);
+            }
+        }
+        let mut violations = Vec::new();
+        if calls.is_empty() && !admissions.contains(&0) {
+            violations.push(format!("no tool call of turn {turn_id} was admitted"));
+        }
+        for (call_id, admitted) in calls {
+            if !admissions.contains(&admitted.len()) {
+                violations.push(format!(
+                    "tool call {call_id} of turn {turn_id} must be admitted {admissions:?} \
+                     times, but was selected with {admitted:?}"
+                ));
+            }
+            for carrier in admitted {
+                if carrier.trace_id() != turn_anchor.trace_id() {
+                    violations.push(format!(
+                        "tool call {call_id}'s admission {carrier:?} is not on its turn's trace \
+                         {turn_anchor:?}"
+                    ));
+                }
             }
         }
         violations

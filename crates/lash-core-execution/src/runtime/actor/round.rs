@@ -102,7 +102,7 @@ pub use records::RUN_RECORD_FORMAT_VERSION;
 pub use rounds::{admit_round, present, presentation, settle_retry, start_retry};
 pub use runner::{RoundEnd, RoundError, RoundRunner, SettledRound};
 pub use tools::{
-    CompletedCall, MemberPin, RoundCalls, RoundCallsRefusal, RoundTools, call_draft,
+    CompletedCall, MemberPin, RoundCalls, RoundCallsRefusal, RoundTools, TraceProposal, call_draft,
     completed_material, decode_completed, request_material, require_admitted, settle_cancelled,
 };
 
@@ -125,8 +125,9 @@ impl PinnedWait {
 }
 
 /// One execution to admit: a call, its tool, its request material, the
-/// policy and limit pinned now, and the wait deadline of a call that may
-/// park (Pending), with the wait its round pins.
+/// policy and limit pinned now, the wait deadline of a call that may park
+/// (Pending), with the wait its round pins, and the trace scope its
+/// admission retains.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecutionDraft {
     call: ToolCallId,
@@ -136,6 +137,7 @@ pub struct ExecutionDraft {
     limit: ExecutionLimit,
     wait: Option<WaitDeadline>,
     pinned: Option<PinnedWait>,
+    trace: Option<lash_trace::DurableTraceScope>,
 }
 
 impl ExecutionDraft {
@@ -158,6 +160,7 @@ impl ExecutionDraft {
             limit,
             wait,
             pinned: None,
+            trace: None,
         }
     }
 
@@ -165,6 +168,14 @@ impl ExecutionDraft {
     #[must_use]
     pub(crate) fn with_pinned_wait(mut self, pinned: Option<PinnedWait>) -> Self {
         self.pinned = pinned;
+        self
+    }
+
+    /// This draft with `trace`, the call's trace scope its admission
+    /// retains ([`TraceProposal`]).
+    #[must_use]
+    pub fn with_trace(mut self, trace: Option<lash_trace::DurableTraceScope>) -> Self {
+        self.trace = trace;
         self
     }
 
@@ -208,6 +219,14 @@ impl ExecutionDraft {
     #[must_use]
     pub fn pinned_wait(&self) -> Option<PinnedWait> {
         self.pinned
+    }
+
+    /// The call's trace scope its admission retained: every owner of the
+    /// round traces the call under it, and none admits it again
+    /// (FIG-5382). `None` for a call admitted untraced.
+    #[must_use]
+    pub fn trace(&self) -> Option<&lash_trace::DurableTraceScope> {
+        self.trace.as_ref()
     }
 }
 

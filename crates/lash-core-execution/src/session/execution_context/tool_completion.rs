@@ -29,15 +29,36 @@ impl<'a> From<&'a crate::ToolCallRecord> for ToolCallStart<'a> {
 }
 
 impl RuntimeExecutionContext<'_> {
-    /// Observe the start of a call under the call's own trace scope. Each execution that reaches the call observes
-    /// it: nothing replays one (ADR 0132 §5).
+    /// Observe the start of a call under the call's own trace scope,
+    /// admitted now. Each execution that reaches the call observes it:
+    /// nothing replays one (ADR 0132 §5).
     pub(crate) fn trace_tool_call_started(
         &self,
         start: ToolCallStart<'_>,
         requested_at_ms: u64,
     ) -> Result<(), crate::RuntimeEffectControllerError> {
+        if let Some(proposal) = self.propose_tool_trace(start.call_id, requested_at_ms)? {
+            proposal
+                .candidate
+                .settle(lash_trace::TraceCandidateOutcome::Selected);
+            self.trace_tool_call_admitted(start, proposal.scope);
+        }
+        Ok(())
+    }
+
+    /// Propose the admission of `call_id`'s trace scope, requested at
+    /// `requested_at_ms`, leaving its candidate for the caller to settle.
+    /// `None` without tracing.
+    pub(crate) fn propose_tool_trace(
+        &self,
+        call_id: &crate::ToolCallId,
+        requested_at_ms: u64,
+    ) -> Result<
+        Option<crate::runtime::actor::round::TraceProposal>,
+        crate::RuntimeEffectControllerError,
+    > {
         let Some(tracing) = &self.tracing else {
-            return Ok(());
+            return Ok(None);
         };
         let opener = crate::EffectOpener::for_scope(&self.admitted_scope()).map_err(|error| {
             crate::RuntimeEffectControllerError::new(
@@ -48,12 +69,28 @@ impl RuntimeExecutionContext<'_> {
         let mut scope = crate::trace::tool_trace_scope(
             &opener,
             tracing.scope.as_ref(),
-            start.call_id,
+            call_id,
             requested_at_ms,
         );
-        let proposed = tracing.runtime.scopes().propose(&scope.scope, &scope.cause);
-        scope.anchor = proposed.anchor();
-        proposed.settle(lash_trace::TraceCandidateOutcome::Selected);
+        let candidate = tracing.runtime.scopes().propose(&scope.scope, &scope.cause);
+        scope.anchor = candidate.anchor();
+        Ok(Some(crate::runtime::actor::round::TraceProposal {
+            scope,
+            candidate,
+        }))
+    }
+
+    /// Observe the start of a call under `scope`, the trace scope its
+    /// admission selected: retained by its round's admission, it is read
+    /// back by every owner of the round and admitted by none (FIG-5382).
+    pub(crate) fn trace_tool_call_admitted(
+        &self,
+        start: ToolCallStart<'_>,
+        scope: lash_trace::DurableTraceScope,
+    ) {
+        let Some(tracing) = &self.tracing else {
+            return;
+        };
         let context = tracing.scope_context.clone();
         let issuing_node = self.issuing_language_node_id.as_deref().map(str::to_string);
         self.coordination_standing(tracing)
@@ -73,7 +110,6 @@ impl RuntimeExecutionContext<'_> {
         self.tool_requests
             .lock_recover()
             .insert(start.call_id.clone(), TracedToolCall { scope, context });
-        Ok(())
     }
 
     /// Observe the completion of a call whose start this execution traced.

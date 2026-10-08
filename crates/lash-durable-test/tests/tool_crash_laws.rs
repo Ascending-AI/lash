@@ -50,7 +50,10 @@
 //! - **Trace scope (FIG-5363):** a step of one native call cut at its
 //!   `model.done` or `round.outcome` resumes from its checkpoint under the
 //!   trace scope its admission retained: its scope is admitted once, and
-//!   every record of the turn carries that admission's trace.
+//!   every record of the turn carries that admission's trace. Its call's
+//!   scope is admitted once too, on that trace, by its round's admission
+//!   (FIG-5382), and at most once when the owner was killed after that
+//!   admission committed, before it learned so.
 //! - The turn committed once and ended, and a zombie's writes after its reap
 //!   are refused.
 
@@ -795,6 +798,22 @@ impl Crash {
         }
         if self.turn == Turn::Trace {
             violations.extend(self.telemetry.first_turn_violations(SESSION));
+            // An owner killed once the round's admission committed, before
+            // it learned so, selects none of its calls' scopes, and its
+            // successor reads them back: the call is admitted at most once.
+            let admissions = match cut {
+                Some(cut)
+                    if cut.point.label == CommitLabel::MODEL_DONE
+                        && cut.fault == Fault::CommitThenAbort =>
+                {
+                    0..=1
+                }
+                _ => 1..=1,
+            };
+            violations.extend(
+                self.telemetry
+                    .first_turn_tool_violations(SESSION, admissions),
+            );
         }
         if let Some(cut) = cut {
             violations.extend(zombie_laws(cut, &trace));
@@ -1775,8 +1794,11 @@ async fn a_turns_puts_are_held_by_its_execution_across_a_crash(tier: Tier) {
 /// A turn cut at a phase commit after its first, under every fault, and
 /// resumed from its checkpoint on the other node reads back the trace scope
 /// its admission retained: its scope is admitted once, and every record of
-/// the turn carries that admission's trace (FIG-5363). A cut before the
-/// first phase commit leaves no checkpoint to resume from.
+/// the turn carries that admission's trace (FIG-5363), and its call's
+/// scope, admitted with its round, is admitted once on that trace, or at
+/// most once when its owner was killed after the round's admission
+/// committed (FIG-5382). A cut before the first phase commit leaves no checkpoint to
+/// resume from.
 async fn a_turn_cut_at_a_phase_commit_resumes_under_its_trace_scope(tier: Tier) {
     prove_at(
         Turn::Trace,
