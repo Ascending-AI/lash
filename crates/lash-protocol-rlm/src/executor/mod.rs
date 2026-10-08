@@ -762,7 +762,9 @@ async fn execute_code_in_worker_scope(
     };
     let lashlang_execution_trace =
         foreground_lashlang_execution_trace(&ctx, &linked_module.artifact, dialect.language_id());
-    if let Some(trace) = &lashlang_execution_trace {
+    if resumed.is_none()
+        && let Some(trace) = &lashlang_execution_trace
+    {
         emit_foreground_execution_started(trace, &linked_module.artifact);
     }
     let identities = match cell.as_ref() {

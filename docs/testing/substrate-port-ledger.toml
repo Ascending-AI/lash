@@ -3185,7 +3185,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5308: -> crates/lash-durable-test/tests/rlm_execution_maps.rs. every_model_code_path_runs_in_a_worker passes; the two map laws are written whole and ignored on FIG-5338 (no language-execution trace on durable) and FIG-5339 (a process body's emit and nested start lack process wiring)."
+note = "FIG-5338: covered-by:crates/lash-durable-test/tests/rlm_execution_maps.rs::production_rlm_map_is_the_compiled_inventory_for_every_loop_kind; covered-by:crates/lash-durable-test/tests/rlm_execution_maps.rs::durable_language_trace_continues_once_across_quiet_points; covered-by:crates/lash-durable-test/tests/rlm_execution_maps.rs::every_model_code_path_runs_in_a_worker. The shared production_process_map_is_the_compiled_inventory_after_a_store_round_trip law remains ignored only on FIG-5339 until fig-5337-work lands its process-body wiring."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/projections_and_snapshots.rs"

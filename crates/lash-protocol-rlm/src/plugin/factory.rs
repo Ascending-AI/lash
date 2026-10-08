@@ -365,6 +365,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
             process_lifecycle,
         });
         let engine = LashlangProcessEngine::new(self.artifact_store.clone(), surface)
+            .with_trace_runtime(ctx.trace_runtime().clone())
             .with_worker_service(self.workers.clone())
             .with_execution_bounds(config.execution_bounds().into_engine())
             .with_run_settings_recorder(recorder);

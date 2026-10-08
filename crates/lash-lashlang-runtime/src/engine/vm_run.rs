@@ -233,6 +233,12 @@ async fn vm_run(
             ));
         }
     };
+    let trace = super::trace::ProcessTrace::new(engine, &run.process, &process_input, &artifact);
+    if input.vm.is_none()
+        && let Some(trace) = &trace
+    {
+        trace.started(&artifact);
+    }
     let owner = segment_continuation_owner(&run.process);
     let start = match input.vm {
         Some(vm) => {
@@ -268,6 +274,7 @@ async fn vm_run(
         }
     };
     let host = QuietPointHost {
+        trace: trace.clone(),
         environment: host_environment.clone(),
         catalog: Arc::clone(&run.tool_catalog),
         inject: Mutex::new(input.inject),
@@ -280,9 +287,14 @@ async fn vm_run(
     let identities = lash_vm_broker::CodeCallIdentities::process_body(run.process.clone());
     let boundary = || false;
     let quiet_points = HeldQuietPoints::default();
+    let observed_host = crate::LanguageTraceHost::new(host, |_: &QuietPointHost, payload| {
+        if let Some(trace) = &trace {
+            trace.emit(payload);
+        }
+    });
     let end = crate::WorkerRun {
         service: &engine.workers,
-        host: &host,
+        host: &observed_host,
         identities,
         owner,
         frame_epoch: lash_vm_protocol::FrameEpoch(0),
@@ -297,6 +309,7 @@ async fn vm_run(
         context: lash_vm_client::RunContext {
             environment: host_environment,
             mode: lashlang::ExecutionMode::Process,
+            observe_execution: trace.is_some(),
             ..Default::default()
         },
         projected: lashlang::ProjectedBindings::new(),
@@ -311,6 +324,7 @@ async fn vm_run(
     }
     .run()
     .await;
+    let host = observed_host.host();
     if let Some(fault) = host.fault.lock_recover().take() {
         return ended(process_lashlang_failure(
             LashlangProcessFailureCode::ProcessSegmentResumeFailed,
@@ -319,7 +333,7 @@ async fn vm_run(
         ));
     }
     let infra = |message: String| VmRunFault(message);
-    match end {
+    let output = match end {
         Err(failure) => match process_worker_failure(&failure) {
             Some(terminal) => ended(terminal),
             None => Err(infra(failure.to_string())),
@@ -357,7 +371,13 @@ async fn vm_run(
                 lash_core::ToolCancellation::runtime("lashlang process was cancelled"),
             )),
         ),
+    };
+    if let Ok(VmRunOutput::Ended { outcome }) = &output
+        && let Some(trace) = &trace
+    {
+        trace.finished(outcome);
     }
+    output
 }
 
 /// Where a `vm_run`'s quiet points go: nowhere durable. Each is held only
@@ -432,6 +452,7 @@ impl crate::OperationAdmissions for NoAdmissions {
 /// from the injection, answers what needs no step in place, and parks the
 /// VM on the first operation that needs one.
 struct QuietPointHost {
+    trace: Option<super::trace::ProcessTrace>,
     environment: lashlang::LashlangHostEnvironment,
     catalog: Arc<lash_core::ToolCatalog>,
     inject: Mutex<Option<Injection>>,
@@ -460,6 +481,9 @@ impl QuietPointHost {
             _ => {}
         }
         if let Some(inject) = self.inject.lock_recover().take() {
+            if let Some(trace) = &self.trace {
+                trace.waiting(&op, self.now_ms, true);
+            }
             return match injection::answer(&op, inject, &self.cancellation) {
                 Ok(result) => result,
                 Err(fault) => Err(self.fault(fault.to_string())),
@@ -468,9 +492,13 @@ impl QuietPointHost {
         if self.issued.lock_recover().is_some() {
             return Err(self.fault("the VM issued an operation after it parked".to_owned()));
         }
+        let observed = self.trace.as_ref().map(|_| op.clone());
         match self.issue(op)? {
             Issue::Answered(result) => result,
             Issue::Park(issued) => {
+                if let (Some(trace), Some(op)) = (&self.trace, &observed) {
+                    trace.waiting(op, self.now_ms, false);
+                }
                 *self.issued.lock_recover() = Some(issued);
                 Ok(AbilityOutcome::HandedOver)
             }

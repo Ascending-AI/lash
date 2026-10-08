@@ -574,15 +574,12 @@ async fn every_model_code_path_runs_in_a_worker(tier: Tier) {
 
 tiered_laws!(every_model_code_path_runs_in_a_worker);
 
-/// The map laws on each tier. Ignored: a durable cell or process emits no
-/// language-execution record (FIG-5338), and a process body's emit and
-/// nested start are refused (FIG-5339).
+/// The map laws on each tier, for durable cells and process bodies.
 macro_rules! map_laws_on {
     ($($module:ident, $tier:ident);+ $(;)?) => {
         $(
             mod $module {
                 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-                #[ignore = "FIG-5338: a durable cell emits no language-execution trace record"]
                 async fn production_rlm_map_is_the_compiled_inventory_for_every_loop_kind() {
                     super::production_rlm_map_is_the_compiled_inventory_for_every_loop_kind(
                         super::served::Tier::$tier,
@@ -591,7 +588,7 @@ macro_rules! map_laws_on {
                 }
 
                 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-                #[ignore = "FIG-5338, FIG-5339: no durable language-execution trace, and a process body's emit and nested start are refused"]
+                #[ignore = "FIG-5339: a process body's emit and nested start lack process wiring"]
                 async fn production_process_map_is_the_compiled_inventory_after_a_store_round_trip() {
                     super::production_process_map_is_the_compiled_inventory_after_a_store_round_trip(
                         super::served::Tier::$tier,
@@ -608,3 +605,112 @@ map_laws_on!(
     maps_sqlite_file, SqliteFile;
     maps_postgres, Postgres;
 );
+
+/// FIG-5338: a cell and a process keep one observed execution while
+/// resuming their snapshots, and publish the process's complete inventory.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn durable_language_trace_continues_once_across_quiet_points() {
+    let sink = Arc::new(RecordingSink::default());
+    let world = world(Tier::SqliteMemory, sim::untimed_workers(), &sink)
+        .await
+        .expect("SQLite memory is available");
+    let output = world
+        .run(
+            "trace-quiet-points",
+            served::spec(64),
+            vec![served::cell(
+                r#"
+const definition = await processes.create({ dialect: "typescript",
+  source: 'const worker = async () => { await sleep(100); await sleep(100); return 42; };'
+});
+const handle = await processes.start({ definition });
+const result = await handle;
+finish(result);
+"#,
+            )],
+        )
+        .await;
+    served::assert_answered("the trace quiet points", &output);
+    let records = sink.records();
+    let events = language_events(&records);
+    let maps = execution_maps(&events);
+    assert_eq!(maps.len(), 2, "one cell map and one process map");
+    let mut kinds = BTreeSet::new();
+    for (started, map) in maps {
+        assert!(
+            kinds.insert(started.identity.entry_kind.clone()),
+            "each execution starts once"
+        );
+        let own = events
+            .iter()
+            .filter(|event| event.identity == started.identity)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            own.iter()
+                .filter(|event| matches!(
+                    event.payload,
+                    TraceLanguageExecutionPayload::ExecutionFinished { .. }
+                ))
+                .count(),
+            1,
+            "each execution finishes once"
+        );
+        let starts = own
+            .iter()
+            .filter_map(|event| match &event.payload {
+                TraceLanguageExecutionPayload::NodeStarted {
+                    node_id,
+                    occurrence,
+                    ..
+                } => Some((node_id.clone(), *occurrence)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(!starts.is_empty(), "the execution's nodes are observed");
+        assert_eq!(
+            starts.len(),
+            starts.iter().collect::<BTreeSet<_>>().len(),
+            "a resumed node never starts twice"
+        );
+        if started.identity.entry_kind == "process" {
+            let artifact = stored_artifact(&world, &started.identity.module_ref).await;
+            let process_ref = artifact
+                .process_ref(&started.identity.entry_name)
+                .expect("the process is exported");
+            let compiled =
+                lashlang::compile(&artifact, lashlang::Entry::Process(process_ref), None)
+                    .expect("the process compiles");
+            assert_map_is_the_compiled_inventory(
+                &compiled,
+                map,
+                &emitted_sites(&events, &started.identity),
+                "the resumed process",
+            );
+            assert_eq!(
+                own.iter()
+                    .filter(|event| matches!(
+                        event.payload,
+                        TraceLanguageExecutionPayload::NodeWaiting { .. }
+                    ))
+                    .count(),
+                2,
+                "both sleeps publish their waits"
+            );
+            assert_eq!(
+                own.iter()
+                    .filter(|event| matches!(
+                        event.payload,
+                        TraceLanguageExecutionPayload::NodeResumed { .. }
+                    ))
+                    .count(),
+                2,
+                "both sleeps publish their resolutions"
+            );
+        }
+    }
+    assert_eq!(
+        kinds,
+        BTreeSet::from(["main".to_owned(), "process".to_owned()])
+    );
+    world.shutdown().await;
+}

@@ -1219,6 +1219,7 @@ pub struct LashlangProcessEngine {
     surface: LashlangSurface,
     execution_bounds: lashlang::ExecutionBounds,
     run_settings_recorder: Option<Arc<dyn LashlangRunSettingsRecorder>>,
+    trace_runtime: Option<lash_core::trace::TraceRuntime>,
 }
 
 impl LashlangProcessEngine {
@@ -1229,6 +1230,7 @@ impl LashlangProcessEngine {
             surface,
             execution_bounds: lashlang::ExecutionBounds::unbounded(),
             run_settings_recorder: None,
+            trace_runtime: None,
         }
     }
 

@@ -17,6 +17,7 @@
 pub(crate) mod advance;
 pub(crate) mod injection;
 pub(crate) mod state;
+mod trace;
 pub(crate) mod vm_run;
 
 use std::sync::Arc;
@@ -131,3 +132,12 @@ fn trigger_step_failure(error: &lashlang::ExecutionHostError) -> lash_core::Tool
 #[cfg(test)]
 #[path = "engine/advance_tests.rs"]
 mod advance_tests;
+
+impl LashlangProcessEngine {
+    /// Observes process language execution through the deployment's trace sinks.
+    #[must_use]
+    pub fn with_trace_runtime(mut self, runtime: lash_core::trace::TraceRuntime) -> Self {
+        self.trace_runtime = Some(runtime);
+        self
+    }
+}
