@@ -15,5 +15,5 @@ pub use crate::store::{ParkId, RunTerminalWrite, SessionHeadRef, TurnCommitId};
 pub use commands::{GatedObservationSink, NullObservationSink, ObservationCursor, ObservationSink};
 pub use context::{ObservedEvent, ReplayKey, ShiftObservation, activity_projection};
 pub use contracts::UpgradePolicy;
-pub use control::{EngineRefusal, OpenRun, RefusalClass, RunLoss, RunRef};
+pub use control::{EngineRefusal, RefusalClass, RunRef};
 pub use recovery::{RecoveryLeaseConfig, RecoveryLeaseTimings, RecoveryPassBudget};

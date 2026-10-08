@@ -258,60 +258,6 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
         self.read_turn_changes(after, limit).await
     }
 
-    async fn non_terminal_runs_page(
-        &self,
-        after: Option<&lash_core_execution::engine::RunRef>,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<lash_core_execution::engine::OpenRun>, StoreError> {
-        let Some(conn) = self.control_ledger().await? else {
-            return Ok(Vec::new());
-        };
-        let session = after.map_or_else(String::new, |key| key.session.to_string());
-        let run = after.map_or_else(String::new, |key| key.run.to_string());
-        let rows = conn
-            .call(move |conn| {
-                let mut stmt = conn.prepare_cached(
-                    crate::session_runs::session_runs_sql()
-                        .runs
-                        .select_open_page
-                        .sql(),
-                )?;
-                let rows = stmt.query_map(params![session, run, limit.get() as i64], |row| {
-                    Ok(lash_core_execution::engine::RunRef {
-                        session: crate::codec::sql_identity(row.get::<_, String>(0)?)?,
-                        run: crate::codec::sql_identity(row.get::<_, String>(1)?)?,
-                    })
-                })?;
-                rows.collect::<Result<Vec<_>, _>>()
-            })
-            .await
-            .map_err(sqlite_error)?;
-        Ok(rows
-            .into_iter()
-            .map(|target| lash_core_execution::engine::OpenRun { target })
-            .collect())
-    }
-    async fn end_lost_run(
-        &self,
-        target: &lash_core_execution::engine::RunRef,
-        loss: lash_core_execution::engine::RunLoss,
-        at_ms: u64,
-    ) -> Result<Option<lash_core_execution::store::RunTerminal>, StoreError> {
-        let Some(conn) = self.control_ledger().await? else {
-            return Ok(None);
-        };
-        let target = target.clone();
-        conn.write_flow(move |tx| {
-            Ok(
-                match crate::session_runs::end_lost_run_conn(tx, &target, loss, at_ms) {
-                    Ok(terminal) => crate::conn::TxOutcome::Commit(Ok(terminal)),
-                    Err(error) => crate::conn::TxOutcome::Rollback(Err(error)),
-                },
-            )
-        })
-        .await
-        .map_err(sqlite_error)?
-    }
     async fn list_control_intents(
         &self,
         after: Option<lash_core_execution::store::ControlIntentId>,

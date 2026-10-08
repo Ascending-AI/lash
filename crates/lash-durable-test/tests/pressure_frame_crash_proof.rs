@@ -21,12 +21,21 @@
 //! - two turns were admitted and two committed, nothing is open, bound or
 //!   mailed;
 //! - a zombie's writes after its reap are refused.
+//!
+//! The pressure hook reads what the session's last turn committed as its
+//! prompt usage. A second matrix (FIG-5352) cuts an RLM turn whose one model
+//! call reports a prompt past the compaction threshold at every label, and
+//! checks the turn commits that call's usage however its owners resumed it:
+//! a pass that resumes it after its committed `model.done` makes no model
+//! call of its own.
 
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 
 #[path = "support/dialect.rs"]
 mod dialect;
+#[path = "support/served.rs"]
+mod served;
 #[path = "support/sim.rs"]
 mod sim;
 
@@ -511,4 +520,199 @@ async fn a_pressure_frame_killed_at_every_label_opens_once_on_postgres() {
         return;
     };
     prove(Dialect::Postgres, Some(url)).await;
+}
+
+const USAGE_SESSION: &str = "prompt-usage-session";
+const USAGE_RUN: &str = "prompt-usage-turn";
+/// The prompt the usage turn's one model call reports: past the 180,000
+/// tokens of the 200,000-token window at which the next turn compacts.
+const PROMPT_TOKENS: i64 = 190_000;
+
+/// FIG-5352: an RLM turn whose one model call reports [`PROMPT_TOKENS`] and
+/// answers a cell that finishes the turn, fresh for every matrix cell.
+struct PromptUsage {
+    tripwire: Arc<Tripwire>,
+    backend: Mutex<Option<Backend>>,
+    core: Mutex<Option<lash::LashCore>>,
+    keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
+}
+
+impl PromptUsage {
+    fn new() -> Self {
+        Self {
+            tripwire: Arc::default(),
+            backend: Mutex::default(),
+            core: Mutex::default(),
+            keep: Mutex::default(),
+        }
+    }
+
+    fn backend(&self) -> Backend {
+        self.backend
+            .lock_recover()
+            .clone()
+            .expect("the database is built first")
+    }
+
+    /// The deployment's RLM core; the simulated nodes run its turns.
+    fn core(&self) -> lash::LashCore {
+        let backend = self.backend();
+        self.core
+            .lock_recover()
+            .get_or_insert_with(|| {
+                let model = lash_core::testing::TestProvider::builder()
+                    .kind("prompt-usage-scripted")
+                    .complete(|_request: LlmRequest| async {
+                        let mut cell = served::cell("finish(\"done\");");
+                        cell.usage = lash_core::llm::types::LlmUsage {
+                            input_tokens: PROMPT_TOKENS,
+                            ..Default::default()
+                        };
+                        Ok(cell)
+                    })
+                    .build()
+                    .into_handle();
+                lash::LashCore::rlm_builder(
+                    backend.clone(),
+                    served::rlm(&backend, None, sim::untimed_workers()),
+                )
+                .serve_sessions(false)
+                .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+                .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+                .serve_test_llm_profile(model, metadata())
+                .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                    "prompt-usage-deployment",
+                    "prompt-usage-boot",
+                ))
+                .expect("the core builds")
+            })
+            .clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl Scenario for PromptUsage {
+    async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
+        let (stores, database): (Arc<dyn StoreSet>, Arc<dyn DurableStore>) =
+            dialect::open(Dialect::SqliteMemory, None, clock, &self.keep).await;
+        let backend = Backend::assemble(BackendParts {
+            stores,
+            settings: sim::settings(),
+            engines: Vec::new(),
+            providers: Arc::new(NoProjectionProviders),
+            formats: lash::formats::actor_state_surfaces(),
+        })
+        .expect("the backend assembles");
+        *self.backend.lock_recover() = Some(backend);
+        database
+    }
+
+    fn config(&self) -> SimNodesConfig {
+        SimNodesConfig {
+            lease: Matrix::test_lease(),
+            decodes: self.backend().formats().decodes(),
+            max_active: 4,
+        }
+    }
+
+    fn activation(&self) -> Arc<dyn Activation> {
+        Arc::new(SessionActivation::new(
+            self.backend(),
+            lash::testing::session_turn_services(&self.core()),
+            Arc::clone(&self.tripwire) as _,
+        ))
+    }
+
+    async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
+        let session = self
+            .core()
+            .session(usage_session())
+            .create(lash::SessionCreation::root(lash::SessionSpec::new(
+                MODEL,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(64),
+            )))
+            .await
+            .map_err(|error| format!("create the session: {error}"))?;
+        session
+            .send(lash::TurnInput::text(ASK))
+            .id(turn(USAGE_RUN))
+            .await
+            .map(drop)
+            .map_err(|error| format!("send the turn: {error}"))?;
+        nodes.start("a");
+        nodes.quiesce().await;
+        nodes.start("b");
+        Ok(())
+    }
+
+    fn actors(&self) -> Vec<ActorKey> {
+        vec![ActorKey::session(USAGE_SESSION).unwrap()]
+    }
+
+    async fn done(&self, nodes: &SimNodes) -> bool {
+        matches!(
+            nodes.database().actor(&ActorKey::session(USAGE_SESSION).unwrap()).await,
+            Ok(Some(snapshot)) if snapshot.state == ActorState::Idle
+        )
+    }
+
+    async fn check(&self, nodes: &SimNodes, cut: Option<&Cut>) -> Vec<String> {
+        let mut violations = Vec::new();
+        match nodes
+            .database()
+            .turn_end(&usage_session(), &turn(USAGE_RUN))
+            .await
+        {
+            Ok(Some(end)) if end.cause.kind() == RunTerminalKind::Answered => {}
+            other => violations.push(format!("the turn did not complete: {other:?}")),
+        }
+        let committed = match self.core().session(usage_session()).open().await {
+            Ok(session) => session.admin().state().export().await.last_prompt_usage,
+            Err(error) => {
+                violations.push(format!("the session does not open: {error}"));
+                return violations;
+            }
+        };
+        if committed.as_ref().map(|usage| usage.input_tokens) != Some(PROMPT_TOKENS) {
+            violations.push(format!(
+                "the turn committed prompt usage {committed:?}, not its call's {PROMPT_TOKENS} tokens"
+            ));
+        }
+        if let Some(cut) = cut {
+            violations.extend(zombie_laws(cut, &nodes.script().trace()));
+        }
+        violations
+    }
+}
+
+fn usage_session() -> SessionId {
+    SessionId::try_from(USAGE_SESSION.to_owned()).unwrap()
+}
+
+/// FIG-5352: an RLM turn whose model call reports a prompt past the
+/// compaction threshold, cut at every label, commits that call's prompt
+/// usage, so the next turn's pressure hook compacts: a pass that resumes the
+/// turn after its committed `model.done` keeps the usage its checkpoint
+/// carries.
+#[tokio::test]
+async fn a_turn_killed_at_every_label_commits_its_last_calls_prompt_usage() {
+    let report = Matrix::new()
+        .faults(&[
+            Fault::FailBefore,
+            Fault::AckHidden,
+            Fault::Zombie,
+            Fault::Abort,
+            Fault::CommitThenAbort,
+        ])
+        .horizon(Duration::from_secs(600))
+        .run_test(PromptUsage::new)
+        .await;
+    report.assert_held();
+    for label in [CommitLabel::MODEL_DONE, CommitLabel::TURN_COMMIT] {
+        assert!(
+            report.labels().contains(&label),
+            "the matrix never cut {label}"
+        );
+    }
 }

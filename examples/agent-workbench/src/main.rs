@@ -130,9 +130,6 @@ pub(crate) use active_turns::*;
 #[path = "main_sections/turn_cancel.rs"]
 mod turn_cancel;
 pub(crate) use turn_cancel::*;
-#[path = "main_sections/unknown_terminals.rs"]
-mod unknown_terminals;
-pub(crate) use unknown_terminals::*;
 #[path = "main_sections/attachment_media.rs"]
 mod attachment_media;
 pub(crate) use attachment_media::*;

@@ -67,7 +67,6 @@ async fn read_state_snapshot(
     // Read after the product lane: a turn this reports as running has not
     // settled yet, so its `done` is still in (or after) the lane snapshot.
     let active_turn = state.active_turns.for_session(session_id);
-    let unknown_turn_terminals = state.unknown_turn_terminals.for_session(session_id);
     let pending_approvals = state.approvals.pending().map_err(AppError::internal)?;
     let observation = RemoteSessionObservation::from_core(lash::observe::SessionObservation {
         read_view,
@@ -91,7 +90,6 @@ async fn read_state_snapshot(
             queued_work,
             turn_input_applications,
             turn_failure_settlements,
-            unknown_turn_terminals,
             pending_approvals,
         },
     })
@@ -816,9 +814,6 @@ pub(crate) async fn settle_retired_slot(
     replaced_current: bool,
     surface: &str,
 ) -> Result<(), AppError> {
-    // The retired id is never served again, so its unknown-terminal disclosures
-    // have no reader left; drop them rather than hold them for the process's life.
-    state.unknown_turn_terminals.remove(retired_session_id);
     state.trace_for_session(
         retired_session_id,
         surface,

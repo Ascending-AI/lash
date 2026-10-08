@@ -264,7 +264,7 @@ export const laws = [
       view.timeline.applySnapshot({
         transcript: commit.rows,
         product_events: { cursor: sequence, events: [userInput(turn, "hello", T0), occurrenceEvent, done(turn)] },
-        active_turns: [], pending_turn_inputs: [], turn_input_applications: [], unknown_turn_terminals: []
+        active_turns: [], pending_turn_inputs: [], turn_input_applications: []
       }, view.timeline.epoch());
       env.assert.deepEqual(serialize(view.list), settled, "the replay-gap rebuild changed the rows");
       env.assert.deepEqual([...view.list.children], nodes, "the replay-gap rebuild replaced nodes");

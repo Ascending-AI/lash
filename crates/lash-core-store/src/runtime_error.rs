@@ -606,10 +606,6 @@ runtime_error_codes! {
         EngineControlUnsupported = "engine_control_unsupported" => Terminal,
         /// A concurrent actor tried to register while the owner awaited a Run step.
         JournalWriteDuringOwnerStep = "journal_write_during_owner_step" => Terminal,
-        // the stored handle names another execution; a retry reads the same handle.
-        /// A park's stored engine handle does not name an execution of the run's
-        /// session, so the engine resumes or releases nothing under it.
-        EngineHandleMismatch = "engine_handle_mismatch" => Terminal,
         // the process holds no park; a redrive of it has nothing to resume.
         /// A process redrive named a process that holds no park.
         ProcessNotParked = "process_not_parked" => Terminal,

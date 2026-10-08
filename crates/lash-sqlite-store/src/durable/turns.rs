@@ -246,33 +246,38 @@ pub(super) fn apply_session_commit(
     write: &SessionCommitWrite,
 ) -> Answer<()> {
     use lash_core_execution::StoreError;
-    let refused = |reason: String| {
-        refuse(DomainRefusal::SessionCommitRefused {
-            session: write.session.clone(),
-            reason,
-        })
+    let refused = |error: &StoreError| {
+        refuse(DomainRefusal::session_commit_refused(
+            write.session.clone(),
+            error,
+        ))
     };
     let runtime_commit = match lash_core_execution::store::decode_session_commit(&write.commit_json)
     {
         Ok(runtime_commit) => runtime_commit,
-        Err(error) => return refused(error.to_string()),
+        Err(error) => return refused(&error),
     };
     if runtime_commit.session_id != write.session
         || runtime_commit.expected_head_revision != write.expected_head
     {
-        return refused(format!(
-            "the commit names session {} at head {}, not {} at {}",
-            runtime_commit.session_id,
-            runtime_commit.expected_head_revision,
-            write.session,
-            write.expected_head
-        ));
+        return refuse(DomainRefusal::SessionCommitRefused {
+            session: write.session.clone(),
+            code: lash_core_execution::RuntimeErrorCode::StoreRefused,
+            cause: None,
+            reason: format!(
+                "the commit names session {} at head {}, not {} at {}",
+                runtime_commit.session_id,
+                runtime_commit.expected_head_revision,
+                write.session,
+                write.expected_head
+            ),
+        });
     }
     let planner =
         match lash_core_execution::store::RuntimeCommitPlanner::prepare(runtime_commit, tx.fleet())
         {
             Ok(planner) => planner,
-            Err(error) => return refused(error.to_string()),
+            Err(error) => return refused(&error),
         };
     let now = integer::<u64>(commit.now.0)?;
     match crate::persistence::session_commit::apply_runtime_commit_conn(
@@ -305,7 +310,7 @@ pub(super) fn apply_session_commit(
             kind: lash_durable::StoreFailureKind::Contended,
             message: "the session head commit contended".to_owned(),
         }))),
-        Err(error) => refused(error.to_string()),
+        Err(error) => refused(&error),
     }
 }
 

@@ -124,6 +124,10 @@ impl RuntimeDrive {
         // delivered before its last phase committed are bound to its run;
         // the turn's commit settles them with the rows its run took.
         driver.pending_turn_inputs.extend(delivered);
+        // The turn's last completed model call may be a pass behind this one:
+        // its usage is what the turn's commit records and its context budget
+        // reads, until this pass completes a call of its own (FIG-5352).
+        driver.latest_prompt_usage = machine.last_call_usage().cloned().and_then(nonzero_usage);
         let opening_work = driver.pending_queued.len();
         driver.pending_queued.extend(delivered_work);
         // The namespaces the turn's run committed, the pending

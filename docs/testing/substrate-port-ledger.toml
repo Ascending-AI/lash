@@ -7614,7 +7614,7 @@ laws = [
 disposition = "subject-deleted"
 status = "deleted"
 owed = "a run handle naming another session's run is refused for good with its code"
-note = "the handle was Restate's own engine handle on a paused invocation (EnginePark), which a resume or release verb could pair with another session's run; the verbs, the paused-work listing and the control relay went with Restate (FIG-5190, 5ad9641f9e). A durable run handle is its session's own (DurableSession::run, attach_id and cancel key the run under the handle's session), so no verb can name another session's run. EngineHandleMismatch is left declared with no producer"
+note = "the handle was Restate's own engine handle on a paused invocation (EnginePark), which a resume or release verb could pair with another session's run; the verbs, the paused-work listing and the control relay went with Restate (FIG-5190, 5ad9641f9e). A durable run handle is its session's own (DurableSession::run, attach_id and cancel key the run under the handle's session), so no verb can name another session's run. EngineHandleMismatch, left with no producer, was deleted (FIG-5352)"
 
 [[row]]
 path = "crates/lash-restate/src/tests/run_control_witnesses.rs"
@@ -7671,7 +7671,7 @@ laws = [
 disposition = "covered-by:crates/lash-durable-test/tests/child_turn_crash_proof.rs::a_child_session_turn_killed_at_every_label_resumes_and_ends_its_process_once"
 status = "deleted"
 owed = "a live process keeps its child run and a terminal one releases it"
-note = "since FIG-5208 (bbffe67d98) a SessionTurn process never executes its child's run: it mails the turn to the child session's actor, which owns the run, and parks on a child_session wait; no recovery pass ends a run SubstrateLost any more (end_lost_run has no caller). The process ends only from the child turn's committed end, or at once when its cancel withdraws an input no run has taken. The law pins that a child turn cut at every label resumes on another owner and its process commits exactly one terminal; declared_start.rs::declared_start_cancel_at_each_point pins the cancel of a parked child"
+note = "since FIG-5208 (bbffe67d98) a SessionTurn process never executes its child's run: it mails the turn to the child session's actor, which owns the run, and parks on a child_session wait; no recovery pass ends a run SubstrateLost any more (end_lost_run, left with no caller, was deleted by FIG-5352). The process ends only from the child turn's committed end, or at once when its cancel withdraws an input no run has taken. The law pins that a child turn cut at every label resumes on another owner and its process commits exactly one terminal; declared_start.rs::declared_start_cancel_at_each_point pins the cancel of a parked child"
 
 [[row]]
 path = "crates/lash-restate/src/tests/run_control_witnesses/process_run.rs"

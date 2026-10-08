@@ -261,37 +261,6 @@ async fn release_run_rows_conn(
     Ok(())
 }
 
-/// Store half of recovery after the engine proves a run's execution is lost
-/// (`loss`). The terminal and its inputs' settlement commit together under
-/// the session history lock. A run that already has
-/// terminal evidence, or no row, is left as it is. A run the engine holds
-/// no execution of that never recorded its admission started nothing: it
-/// is not ended, and its session admits its input again.
-pub(crate) async fn end_lost_run_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    target: &lash_core_execution::engine::RunRef,
-    loss: lash_core_execution::engine::RunLoss,
-    at_ms: u64,
-) -> Result<Option<RunTerminal>, StoreError> {
-    match unanswered_run_tx(tx, target).await? {
-        UnansweredRun::Open => {
-            if loss == lash_core_execution::engine::RunLoss::NoRun
-                && run_admission_conn(tx, &target.session, &target.run)
-                    .await?
-                    .is_none()
-            {
-                return Ok(None);
-            }
-            write_unanswered_run_end_tx(tx, target, at_ms, |cancelled_by| {
-                RunTerminalCause::SubstrateLost { cancelled_by }
-            })
-            .await
-            .map(Some)
-        }
-        UnansweredRun::Ended(_) | UnansweredRun::Unknown => Ok(None),
-    }
-}
-
 /// The run's execution met a typed refusal no retry can change
 /// (FIG-4018): the same transaction as a lost run's, ending it with the
 /// refusal.
@@ -310,13 +279,14 @@ pub(crate) async fn end_refused_run_tx(
         UnansweredRun::Ended(terminal) => Ok(RunEndOutcome::AlreadyEnded(*terminal)),
         UnansweredRun::Unknown => Ok(RunEndOutcome::Unknown),
         UnansweredRun::Open => {
-            write_unanswered_run_end_tx(tx, &target, at_ms, |_| RunTerminalCause::Refused {
+            let cause = RunTerminalCause::Refused {
                 code: refusal.code.clone(),
                 message: refusal.message.clone(),
                 refusal_cause: refusal.cause.clone(),
-            })
-            .await
-            .map(RunEndOutcome::Ended)
+            };
+            write_unanswered_run_end_tx(tx, &target, at_ms, cause)
+                .await
+                .map(RunEndOutcome::Ended)
         }
     }
 }
@@ -382,31 +352,15 @@ async fn unanswered_run_tx(
     )
 }
 
-/// End an open run no commit answered, with the cause `cause` makes of the
-/// run's recorded cancellation request, if any.
+/// End an open run no commit answered with `cause`.
 async fn write_unanswered_run_end_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target: &lash_core_execution::engine::RunRef,
     at_ms: u64,
-    cause: impl FnOnce(Option<String>) -> RunTerminalCause,
+    cause: RunTerminalCause,
 ) -> Result<RunTerminal, StoreError> {
     let session = &target.session;
     let run = &target.run;
-    // `select_request` yields request_id, origin, reason, disposition, mode.
-    let request: Option<
-        lash_core_execution::store_backend_support::turn_cancel::TurnCancelRequestRow,
-    > = sqlx::query_as(
-        crate::turn_ingress::turn_ingress_sql()
-            .cancel_requests
-            .select_request
-            .sql(),
-    )
-    .bind(session.as_str())
-    .bind(run.as_str())
-    .fetch_optional(crate::observed_sql::executor(&mut **tx))
-    .await
-    .map_err(store_sqlx_error)?;
-    let cause = cause(request.map(|row| row.0));
     let terminal = RunTerminal {
         session_id: session.clone(),
         run: run.clone(),

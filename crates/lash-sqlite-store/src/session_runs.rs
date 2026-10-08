@@ -268,35 +268,6 @@ fn release_run_rows_conn(
     Ok(())
 }
 
-/// The engine proved the run's execution is lost (`loss`). This
-/// transaction makes its inputs and run terminal together before recovery
-/// acknowledges the loss.
-/// A run that already has terminal evidence, or no row, is left as it is.
-/// A run the engine holds no execution of that never recorded its admission
-/// started nothing: it is not ended, and its session admits its input
-/// again.
-pub(crate) fn end_lost_run_conn(
-    tx: &Connection,
-    target: &lash_core_execution::engine::RunRef,
-    loss: lash_core_execution::engine::RunLoss,
-    at_ms: u64,
-) -> Result<Option<RunTerminal>, StoreError> {
-    match unanswered_run_conn(tx, target)? {
-        UnansweredRun::Open => {
-            if loss == lash_core_execution::engine::RunLoss::NoRun
-                && run_admission_conn(tx, &target.session, &target.run)?.is_none()
-            {
-                return Ok(None);
-            }
-            write_unanswered_run_end_conn(tx, target, at_ms, |cancelled_by| {
-                RunTerminalCause::SubstrateLost { cancelled_by }
-            })
-            .map(Some)
-        }
-        UnansweredRun::Ended(_) | UnansweredRun::Unknown => Ok(None),
-    }
-}
-
 /// The run's execution met a typed refusal no retry can change
 /// (FIG-4018): the same transaction as a lost run's, ending it with the
 /// refusal.
@@ -315,12 +286,12 @@ pub(crate) fn end_refused_run_conn(
         UnansweredRun::Ended(terminal) => Ok(RunEndOutcome::AlreadyEnded(*terminal)),
         UnansweredRun::Unknown => Ok(RunEndOutcome::Unknown),
         UnansweredRun::Open => {
-            write_unanswered_run_end_conn(tx, &target, at_ms, |_| RunTerminalCause::Refused {
+            let cause = RunTerminalCause::Refused {
                 code: refusal.code.clone(),
                 message: refusal.message.clone(),
                 refusal_cause: refusal.cause.clone(),
-            })
-            .map(RunEndOutcome::Ended)
+            };
+            write_unanswered_run_end_conn(tx, &target, at_ms, cause).map(RunEndOutcome::Ended)
         }
     }
 }
@@ -383,18 +354,15 @@ fn unanswered_run_conn(
     })
 }
 
-/// End an open run no commit answered, with the cause `cause` makes of the
-/// run's recorded cancellation request, if any.
+/// End an open run no commit answered with `cause`.
 fn write_unanswered_run_end_conn(
     tx: &Connection,
     target: &lash_core_execution::engine::RunRef,
     at_ms: u64,
-    cause: impl FnOnce(Option<String>) -> RunTerminalCause,
+    cause: RunTerminalCause,
 ) -> Result<RunTerminal, StoreError> {
     let session = &target.session;
     let run = &target.run;
-    let record = crate::persistence::turn_cancel::load_turn_cancel_request_conn(tx, session, run)?;
-    let cause = cause(record.as_ref().map(|request| request.request_id.clone()));
     let terminal = RunTerminal {
         session_id: session.clone(),
         run: run.clone(),

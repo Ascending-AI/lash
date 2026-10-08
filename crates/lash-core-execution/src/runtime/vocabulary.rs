@@ -446,28 +446,6 @@ pub trait DeploymentStore:
         limit: std::num::NonZeroUsize,
     ) -> Result<crate::store::TurnChangePage, crate::StoreError>;
 
-    /// Open logical runs in `(session, run)` order, after `after`. Recovery
-    /// checks the execution that runs each in bounded pages; it never guesses
-    /// liveness from a missing terminal row alone.
-    async fn non_terminal_runs_page(
-        &self,
-        after: Option<&crate::engine::RunRef>,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<crate::engine::OpenRun>, crate::StoreError>;
-
-    /// End an open run `SubstrateLost` on the engine's evidence `loss` that
-    /// its execution is gone ([`RunLoss`](crate::engine::RunLoss)).
-    /// The write makes the run and its inputs terminal atomically. An
-    /// already terminal or deleted run is a no-op, and so is a run with no
-    /// execution on the engine that never recorded its admission: it started
-    /// nothing, and its session admits its input again.
-    async fn end_lost_run(
-        &self,
-        target: &crate::engine::RunRef,
-        loss: crate::engine::RunLoss,
-        at_ms: u64,
-    ) -> Result<Option<crate::store::RunTerminal>, crate::StoreError>;
-
     /// Retained intents, including permanent engine refusals, in ID order.
     async fn list_control_intents(
         &self,

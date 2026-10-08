@@ -79,16 +79,12 @@ impl LashRuntime {
             Some(hash) => Some(RecordedRunSpec {
                 hash: hash.clone(),
                 session_id: self.state.session_id.clone(),
-                store: self
-                    .session
-                    .as_ref()
-                    .and_then(|session| session.history_store())
-                    .ok_or_else(|| {
-                        RuntimeError::new(
-                            RuntimeErrorCode::QueuedWork,
-                            format!("a run with run spec `{hash}` needs its session store"),
-                        )
-                    })?,
+                store: self.services.store.clone().ok_or_else(|| {
+                    RuntimeError::new(
+                        RuntimeErrorCode::QueuedWork,
+                        format!("a run with run spec `{hash}` needs its session store"),
+                    )
+                })?,
                 definitions: self.host.core.providers.run_definitions.clone(),
                 models: std::sync::Arc::clone(&self.host.core.providers.models),
             }),

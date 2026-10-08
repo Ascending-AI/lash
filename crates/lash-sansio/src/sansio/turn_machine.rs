@@ -66,6 +66,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             protocol_iteration: protocol_run_offset,
             protocol_run_offset,
             cumulative_usage: TokenUsage::default(),
+            last_call_usage: None,
             environment: None,
             observed_cancellation: None,
             resume_work: None,
@@ -247,6 +248,12 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.messages.clone()
     }
 
+    /// The usage the turn's last completed model call reported, restored
+    /// with the turn: a pass that resumes it after that call reads it here.
+    pub fn last_call_usage(&self) -> Option<&TokenUsage> {
+        self.last_call_usage.as_ref()
+    }
+
     pub fn protocol_iteration(&self) -> usize {
         self.protocol_iteration
     }
@@ -310,6 +317,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             protocol_iteration: self.protocol_iteration,
             protocol_run_offset: self.protocol_run_offset,
             cumulative_usage: self.cumulative_usage.clone(),
+            last_call_usage: self.last_call_usage.clone(),
             environment: self.environment.clone(),
         };
         SavedTurn {
@@ -376,6 +384,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             protocol_iteration: checkpoint.protocol_iteration,
             protocol_run_offset: checkpoint.protocol_run_offset,
             cumulative_usage: checkpoint.cumulative_usage,
+            last_call_usage: checkpoint.last_call_usage,
             environment: checkpoint.environment,
             observed_cancellation: None,
             resume_work: None,
@@ -980,6 +989,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
         response_text: &str,
     ) -> Result<(), TokenUsageOverflow> {
         self.cumulative_usage = self.cumulative_usage.checked_add(&usage)?;
+        self.last_call_usage = Some(usage.clone());
         self.emit(SessionStreamEvent::TokenUsage {
             protocol_iteration: self.protocol_iteration,
             usage: usage.clone(),

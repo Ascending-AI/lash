@@ -1472,11 +1472,6 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
     for (const turnId of running) {
       if (!turn(turnId).terminal) activeTurns.set(turnId, now());
     }
-    for (const terminal of state.unknown_turn_terminals || []) {
-      const anchor = rowsOfTurn(terminal.turn_id).at(-1);
-      upsert(`terminal:${terminal.turn_id}`, "note", "local", { text: terminal.note },
-        () => anchor ? { ...anchor.order, seq: anchor.order.seq + 0.5 } : placeAt(snapshotNow));
-    }
     flush();
   }
 

@@ -4424,7 +4424,7 @@
              of the session receives; a local note here was its duplicate. */
           if (evidence) return;
           if (escalated) renderNote("stop escalated to abort · request " + escalated.cancellation.cancellation.request_id);
-          else if (unresolved) renderNote(mode === "stop" ? "stop recorded · waiting for the step boundary" : "turn route cleared · terminal outcome unknown");
+          else if (unresolved) renderNote(mode === "stop" ? "stop recorded · waiting for the step boundary" : "abort recorded · waiting for the turn to end");
           else if (!receipt.accepted) renderNote("turn already finished");
         })
         .catch(() => renderError("the turn could not be stopped"));

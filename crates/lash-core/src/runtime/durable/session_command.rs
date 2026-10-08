@@ -19,6 +19,9 @@ pub(crate) enum CommandCommitError {
     /// The session store refused it, with its own typed refusal; nothing was
     /// written.
     Store(StoreError),
+    /// The session store refused it for one of its own rules, under the
+    /// code and cause it carries the refusal with; nothing was written.
+    Refused(RuntimeError),
     /// The owner's transaction failed: ownership lost (nothing was written),
     /// the store failed, or the acknowledgement was lost.
     Owner(DurableError),
@@ -28,6 +31,7 @@ impl CommandCommitError {
     pub(crate) fn into_runtime_error(self) -> RuntimeError {
         match self {
             Self::Store(error) => crate::runtime::runtime_error_from_store_commit(error),
+            Self::Refused(error) => error,
             Self::Owner(error) => RuntimeError::new(
                 RuntimeErrorCode::StoreCommitFailed,
                 format!("the session command's commit: {error}"),
@@ -44,6 +48,8 @@ impl CommandCommitError {
 ///
 /// [`CommandCommitError::Store`] with the store's refusal (a withdrawn
 /// command, a moved head, a stale append's ancestor, the budget);
+/// [`CommandCommitError::Refused`] when the store refused it for another
+/// of its rules;
 /// [`CommandCommitError::Owner`] when the transaction failed.
 pub(crate) async fn commit(
     owner: &ActorContext,
@@ -60,7 +66,13 @@ pub(crate) async fn commit(
     };
     let mut tx = owner.begin().await.map_err(CommandCommitError::Owner)?;
     tx.write(DomainWrite::SessionCommit(write));
-    match owner.commit(tx, CommitLabel::SESSION_COMMAND).await {
+    let committed = owner.commit(tx, CommitLabel::SESSION_COMMAND).await;
+    if let Err(DurableError::Domain(refusal)) = &committed
+        && let Some(error) = refusal.session_commit_refusal()
+    {
+        return Err(CommandCommitError::Refused(error));
+    }
+    match committed {
         Ok(_) => Ok(()),
         Err(DurableError::Domain(DomainRefusal::HeadMoved {
             expected, found, ..

@@ -1,8 +1,6 @@
 use super::*;
-use lash_core::plugin::config::core::{SetAutonomy, SetGeneration, SetLlmProfile, SetTurnBudget};
+use lash_core::plugin::config::core::{SetLlmProfile, SetTurnBudget};
 use lash_core::testing::{Script, StoreOp};
-
-const SEED: u64 = 0x5_f420;
 
 #[tokio::test]
 async fn command_enqueue_preserves_typed_session_state_version_refusal() {

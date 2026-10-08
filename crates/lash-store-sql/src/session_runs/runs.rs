@@ -44,13 +44,6 @@ crate::statements! {
              WHERE session_id = ?1 AND terminal_kind IS NULL
              ORDER BY run";
 
-        /// Bounded recovery page after the `(session_id, run)` cursor.
-        select_open_page = "SELECT session_id, run
-             FROM session_runs
-             WHERE terminal_kind IS NULL
-               AND (session_id > ?1 OR (session_id = ?1 AND run > ?2))
-             ORDER BY session_id, run LIMIT ?3";
-
         /// Every run of session `?1`: its deletion.
         delete_by_session = "DELETE FROM session_runs WHERE session_id = ?1";
     }

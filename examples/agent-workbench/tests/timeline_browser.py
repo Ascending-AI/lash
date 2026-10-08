@@ -110,7 +110,6 @@ class Workbench:
                 "queued_work": [],
                 "turn_input_applications": [],
                 "turn_failure_settlements": [],
-                "unknown_turn_terminals": [],
                 "pending_approvals": [],
                 "transcript": list(self.transcript),
             }

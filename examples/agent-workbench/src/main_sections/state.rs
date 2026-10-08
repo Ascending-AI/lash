@@ -37,8 +37,6 @@ pub(crate) struct AppState {
     pub(crate) event_tx: SessionEventRegistry,
     pub(crate) mail_world: mail::MailWorld,
     pub(crate) active_turns: ActiveTurns,
-    /// The turns this process pruned without ever seeing a terminal.
-    pub(crate) unknown_turn_terminals: UnknownTurnTerminals,
     pub(crate) authorization: WorkbenchAuthorization,
     pub(crate) approvals: approvals::WorkbenchApprovals,
 }
@@ -85,11 +83,6 @@ pub(crate) struct StateSnapshot {
     pub(crate) queued_work: Vec<lash::persistence::QueuedWorkBatch>,
     pub(crate) turn_input_applications: Vec<lash::remote::observations::RemoteTurnInputApplication>,
     pub(crate) turn_failure_settlements: Vec<lash::TurnFailureSettlement>,
-    /// Turns whose cancellation was recorded and whose terminal never arrived
-    /// (FIG-3163). Carried on the snapshot so the disclosure is readable after
-    /// the fact by anything reading `/api/state`, not only by whoever was
-    /// watching the page in the second the note first appeared.
-    pub(crate) unknown_turn_terminals: Vec<UnknownTurnTerminal>,
     pub(crate) pending_approvals: Vec<approvals::PendingApproval>,
 }
 

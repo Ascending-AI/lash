@@ -115,14 +115,10 @@ impl LashRuntime {
         if opener == StagedOpen::Compaction {
             return self.open_frame(request).await;
         }
-        // A session actor's runtime holds its store in its own services, not
-        // its session's: without it the historical check reads nothing, and
-        // the staged frame collides at the commit on every pass.
-        let store = self.services.store.clone().or_else(|| {
-            self.session
-                .as_ref()
-                .and_then(|session| session.history_store())
-        });
+        // The runtime's own store: a runtime whose session is not
+        // materialized holds it too, and without it the historical check
+        // reads nothing and the staged frame collides at the commit.
+        let store = self.services.store.clone();
         crate::runtime::state::refuse_historical_frame_switch(
             store.as_ref(),
             &self.state.session_id,

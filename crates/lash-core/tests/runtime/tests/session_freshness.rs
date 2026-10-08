@@ -442,3 +442,30 @@ async fn an_invalidation_reload_adopts_the_heads_model_and_generation() {
         ResidentSessionState::Valid
     );
 }
+
+/// FIG-5352: a runtime whose session is not materialized, as a cold runtime
+/// is before its recorded plugin transition publishes, adopts the head
+/// another writer committed: it reads the head from its own store, which a
+/// runtime holds whether or not its session exists.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cold_runtime_adopts_the_committed_head() {
+    let (mut runtime, store) = freshness_runtime().await;
+    append_history(&mut runtime, &store, 2).await;
+    runtime.session = None;
+    advance_session_head(&store, |state| {
+        state.policy.generation = seeded(3);
+    })
+    .await;
+
+    let adopted = runtime
+        .adopt_committed_head()
+        .await
+        .expect("adopt the committed head");
+
+    assert!(adopted, "a cold runtime must adopt the moved head");
+    assert_eq!(
+        runtime.state().effective_policy().generation,
+        seeded(3),
+        "the adoption is the durable head's"
+    );
+}

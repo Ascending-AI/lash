@@ -32,6 +32,7 @@
 
 use lash_durable::CommitLabel;
 use lash_durable::DomainWrite;
+use lash_durable::DurableError;
 use lash_durable::domain::{
     ModelCallId, PromptCallKey, RunSeq, SessionCommitWrite, SessionMailWrite, TurnWrite,
 };
@@ -443,7 +444,19 @@ pub async fn run_phases(
                 // revoked and its first batch of `Until` children marked; the
                 // next pass marks the rest.
                 end_turn_scope(cx, &mut tx, &session, &run).await?;
-                cx.commit(tx, CommitLabel::TURN_COMMIT).await?;
+                // A head commit the session store refuses for one of its own
+                // rules (a node id the session already holds) is refused
+                // again on every pass: it is the turn's runtime refusal, and
+                // a terminal one ends the run (FIG-5352).
+                cx.commit(tx, CommitLabel::TURN_COMMIT)
+                    .await
+                    .map_err(|error| {
+                        let refusal = match &error {
+                            DurableError::Domain(refusal) => refusal.session_commit_refusal(),
+                            _ => None,
+                        };
+                        refusal.map_or(TurnError::Durable(error), TurnError::Runtime)
+                    })?;
                 drive.committed().await;
                 // The commit moved the head: the next turn loads it again.
                 heads.evict();

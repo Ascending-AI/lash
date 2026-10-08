@@ -587,12 +587,8 @@ pub mod persistence {
     pub use lash_core::attachments::{
         AttachmentRootPage, AttachmentRootSource, CompleteAttachmentRoots,
     };
-    /// The engine's evidence that a run's execution is lost, which
-    /// `DeploymentStore::end_lost_run` ends the run on.
-    pub use lash_core::engine::RunLoss;
-    /// Logical run references returned by a run store, and an open run
-    /// as the store's recovery page lists it.
-    pub use lash_core::engine::{OpenRun, RunRef};
+    /// The logical run reference a run store ends a run by.
+    pub use lash_core::engine::RunRef;
     pub use lash_core::facade_support::FileAttachmentStore;
     /// Durable session-store inputs and outputs exposed to storage integrators.
     pub use lash_core::runtime::{

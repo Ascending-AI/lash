@@ -108,57 +108,6 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         })
     }
 
-    async fn non_terminal_runs_page(
-        &self,
-        after: Option<&lash_core_execution::engine::RunRef>,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<lash_core_execution::engine::OpenRun>, StoreError> {
-        let session = after.map_or("", |key| key.session.as_str());
-        let run = after.map_or("", |key| key.run.as_str());
-        let mut connection = crate::acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let rows = sqlx::query(
-            crate::session_runs::session_runs_sql()
-                .runs
-                .select_open_page
-                .sql(),
-        )
-        .bind(session)
-        .bind(run)
-        .bind(limit.get() as i64)
-        .fetch_all(&mut *connection)
-        .await
-        .map_err(crate::store_sqlx_error)?;
-        rows.into_iter()
-            .map(|row| {
-                Ok(lash_core_execution::engine::OpenRun {
-                    target: lash_core_execution::engine::RunRef {
-                        session: SessionId::parse(
-                            row.try_get::<String, _>(0)
-                                .map_err(crate::store_sqlx_error)?,
-                        )?,
-                        run: lash_sansio::TurnId::parse(
-                            row.try_get::<String, _>(1)
-                                .map_err(crate::store_sqlx_error)?,
-                        )?,
-                    },
-                })
-            })
-            .collect()
-    }
-
-    async fn end_lost_run(
-        &self,
-        target: &lash_core_execution::engine::RunRef,
-        loss: lash_core_execution::engine::RunLoss,
-        at_ms: u64,
-    ) -> Result<Option<lash_core_execution::store::RunTerminal>, StoreError> {
-        let mut connection = crate::acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = crate::begin_guarded(&mut *connection, &self.fence).await?;
-        let result = crate::session_runs::end_lost_run_tx(&mut tx, target, loss, at_ms).await?;
-        tx.commit().await.map_err(crate::store_sqlx_error)?;
-        Ok(result)
-    }
-
     async fn list_control_intents(
         &self,
         after: Option<lash_core_execution::store::ControlIntentId>,

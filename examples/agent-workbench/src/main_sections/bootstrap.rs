@@ -435,7 +435,6 @@ pub(crate) fn workbench_app_state(
     Ok(AppState {
         core,
         session_defaults: host.session_defaults,
-        unknown_turn_terminals: UnknownTurnTerminals::default(),
         attachment_store: stores.attachment_store(),
         session_store_factory: stores.session_store_factory(),
         trigger_store: stores.trigger_store(),

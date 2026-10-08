@@ -192,28 +192,33 @@ pub(super) async fn apply_session_commit(
     write: &SessionCommitWrite,
 ) -> Result<(), DurableError> {
     use lash_core_execution::StoreError;
-    let refused = |reason: String| {
-        DurableError::Domain(DomainRefusal::SessionCommitRefused {
-            session: write.session.clone(),
-            reason,
-        })
+    let refused = |error: &StoreError| {
+        DurableError::Domain(DomainRefusal::session_commit_refused(
+            write.session.clone(),
+            error,
+        ))
     };
     let runtime_commit = lash_core_execution::store::decode_session_commit(&write.commit_json)
-        .map_err(|error| refused(error.to_string()))?;
+        .map_err(|error| refused(&error))?;
     if runtime_commit.session_id != write.session
         || runtime_commit.expected_head_revision != write.expected_head
     {
-        return Err(refused(format!(
-            "the commit names session {} at head {}, not {} at {}",
-            runtime_commit.session_id,
-            runtime_commit.expected_head_revision,
-            write.session,
-            write.expected_head
-        )));
+        return Err(DurableError::Domain(DomainRefusal::SessionCommitRefused {
+            session: write.session.clone(),
+            code: lash_core_execution::RuntimeErrorCode::StoreRefused,
+            cause: None,
+            reason: format!(
+                "the commit names session {} at head {}, not {} at {}",
+                runtime_commit.session_id,
+                runtime_commit.expected_head_revision,
+                write.session,
+                write.expected_head
+            ),
+        }));
     }
     let planner =
         lash_core_execution::store::RuntimeCommitPlanner::prepare(runtime_commit, tx.fleet())
-            .map_err(|error| refused(error.to_string()))?;
+            .map_err(|error| refused(&error))?;
     let now = integer::<u64>(commit.now.0)?;
     match crate::runtime_persistence::apply_runtime_commit_tx(tx, &planner, now).await {
         Ok(_) => Ok(()),
@@ -237,7 +242,7 @@ pub(super) async fn apply_session_commit(
             },
         )),
         Err(error @ StoreError::Contended) => Err(super::store_failure(error)),
-        Err(error) => Err(refused(error.to_string())),
+        Err(error) => Err(refused(&error)),
     }
 }
 

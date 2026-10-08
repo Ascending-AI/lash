@@ -26,6 +26,9 @@
 //! - **Poison (FIG-5230):** a turn whose checkpoint does not decode fails
 //!   every pass of its claim; the session parks at the activation-loop
 //!   budget instead of looping.
+//! - **Colliding commit (FIG-5352):** a turn whose head commit the store
+//!   refuses for a node id collision, on every pass alike, ends its run
+//!   with that refusal and leaves the head where it was.
 //! - **Owner-cached head (FIG-5207):** when another writer moves the session
 //!   head while the turn runs, the head commit over the head the owner
 //!   cached is refused once, the cache is evicted, and the turn commits over
@@ -153,6 +156,10 @@ enum Mode {
     /// The first send of the turn's first call loses the call's stored
     /// admission, then its node dies before the model answers.
     MaterialLost,
+    /// The turn's head commit opens one frame twice: both nodes derive the
+    /// frame's one node id, so the session store refuses the commit with a
+    /// node id collision on every pass (FIG-5352).
+    CollidingCommit,
 }
 
 const QUEUED_RUN: &str = "l3-queued-turn";
@@ -391,7 +398,8 @@ impl TurnServices for L3Services {
             | Mode::HeadMovesUnderTheTurn
             | Mode::QueuedCancel
             | Mode::CancelAtAdmission
-            | Mode::MaterialLost => ExecutionBudgets::default(),
+            | Mode::MaterialLost
+            | Mode::CollidingCommit => ExecutionBudgets::default(),
         }
     }
 
@@ -741,7 +749,11 @@ impl TurnDrive for L3Drive {
             .lock_recover()
             .told
             .push(format!("{:?}", done.outcome));
-        head.commit(&self.run, done, commit_budget()).await
+        let commit = head.commit(&self.run, done, commit_budget()).await?;
+        if self.services.mode == Mode::CollidingCommit {
+            return colliding(commit);
+        }
+        Ok(commit)
     }
 
     /// No cell runs, so none is stopped.
@@ -749,6 +761,47 @@ impl TurnDrive for L3Drive {
 
     /// Nothing is held for the commit.
     async fn committed(&mut self) {}
+}
+
+/// [`Mode::CollidingCommit`]'s head commit: `commit` with its last two
+/// appended nodes replaced by two opens of one frame. Each derives the
+/// frame's node id, so the commit passes the store's derivation check and is
+/// refused for the collision.
+fn colliding(commit: TurnCommit) -> Result<TurnCommit, TurnError> {
+    let store = |error: lash_core_store::store::StoreError| TurnError::Exec(error.to_string());
+    let mut runtime =
+        lash_core_store::store::decode_session_commit(&commit.commit_json).map_err(store)?;
+    let frame_key = lash_core::FrameKey::from_caller_material("l3-collide")
+        .map_err(|error| TurnError::Exec(error.to_string()))?;
+    let frame = lash_core::NodeId::from(lash_core_store::session_graph::frame_node_id(
+        &session(),
+        frame_key.as_str(),
+    ));
+    let nodes = runtime.graph.nodes_mut();
+    let [.., first, second] = nodes else {
+        return Err(TurnError::Exec(format!(
+            "the turn's commit appends {} nodes, not the two it collides",
+            nodes.len()
+        )));
+    };
+    for node in [&mut *first, &mut *second] {
+        node.node_id = frame.clone();
+        node.payload = lash_core::SessionNodePayload::FrameOpen {
+            frame_key: frame_key.clone(),
+            reason: lash_core::AgentFrameReason::default(),
+            assignment: lash_core::AgentFrameAssignment::unconfigured(
+                lash_core::SessionPolicy::new(
+                    lash::TurnBudget::Unbounded,
+                    lash::MaxToolCalls::new(16),
+                ),
+            ),
+        };
+    }
+    second.parent_node_id = Some(frame);
+    Ok(TurnCommit {
+        expected_head: commit.expected_head,
+        commit_json: lash_core_store::store::encode_session_commit(&runtime).map_err(store)?,
+    })
 }
 
 /// The L3 scenario's catalog: its protocol never calls a tool.
@@ -1038,6 +1091,10 @@ impl Scenario for L3 {
                     .extend(withdraw_or_cancel_laws(database.as_ref(), &trace, &seen, cut).await);
             }
             Mode::MaterialLost => violations.extend(material_laws(&seen)),
+            Mode::CollidingCommit => {
+                let backend = self.backend.lock_recover().clone().expect("the backend");
+                violations.extend(colliding_commit_laws(&backend, database.as_ref(), &trace).await);
+            }
         }
 
         if self.mode == Mode::HeadMovesUnderTheTurn {
@@ -1051,6 +1108,45 @@ impl Scenario for L3 {
         }
         violations
     }
+}
+
+/// A colliding head commit (FIG-5352): the store refuses the turn's commit
+/// for a node id the session would hold twice, the same way on every pass.
+/// The run ends `Refused` under the store's code with the collision as its
+/// message, in the one `turn.commit` its refusal writes, and the session head
+/// does not move: the session settles, and is not parked after a loop.
+async fn colliding_commit_laws(
+    backend: &Backend,
+    database: &dyn DurableStore,
+    trace: &[lash_durable_test::Write],
+) -> Vec<String> {
+    let mut violations = Vec::new();
+    let refusals = trace
+        .iter()
+        .filter(|write| write.point.label == CommitLabel::TURN_COMMIT && write.committed())
+        .count();
+    if refusals != 1 {
+        violations.push(format!("the refused run wrote {refusals} turn commits"));
+    }
+    match database.turn_end(&session(), &run()).await {
+        Ok(Some(end)) => match end.cause {
+            lash_core_store::store::RunTerminalCause::Refused { code, message, .. }
+                if code == lash_core::RuntimeErrorCode::StoreRefused
+                    && message.contains("already exists in durable session history") => {}
+            cause => violations.push(format!(
+                "the run ended {cause:?}, not refused for the collision"
+            )),
+        },
+        other => violations.push(format!("the run did not end: {other:?}")),
+    }
+    let head = backend
+        .session_store_factory()
+        .load_session_head_meta(&session())
+        .await;
+    if !matches!(&head, Ok(head) if head.as_ref().is_none_or(|head| head.leaf_node_id.is_none())) {
+        violations.push(format!("the refused commit moved the head: {head:?}"));
+    }
+    violations
 }
 
 /// Queued withdraw (FIG-5262): the host's cancel of the input queued behind
@@ -1377,7 +1473,8 @@ fn cut_laws(mode: Mode, cut: &Cut, seen: &Seen) -> Vec<String> {
         | Mode::HeadMovesUnderTheTurn
         | Mode::QueuedCancel
         | Mode::CancelAtAdmission
-        | Mode::MaterialLost => {}
+        | Mode::MaterialLost
+        | Mode::CollidingCommit => {}
     }
     violations
 }
@@ -1678,6 +1775,19 @@ async fn a_call_whose_admitted_body_is_lost_settles_unsent() {
         Dialect::SqliteMemory,
     )
     .await;
+}
+
+/// FIG-5352: a turn whose head commit the store refuses for a node id
+/// collision ends its run with that refusal, instead of failing every pass
+/// until its session parks.
+#[tokio::test]
+async fn a_turn_whose_commit_collides_ends_refused_instead_of_looping() {
+    Matrix::new()
+        .faults(&[])
+        .horizon(Duration::from_secs(600))
+        .run_test(|| L3::new(Mode::CollidingCommit, Dialect::SqliteMemory, None))
+        .await
+        .assert_held();
 }
 
 /// C1 (FIG-5230): a session whose unfinished turn names a checkpoint no

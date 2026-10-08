@@ -539,21 +539,6 @@ impl DeploymentStore for Integrator {
     ) -> Result<lash::persistence::TurnChangePage, StoreError> {
         unreachable!("external signature witness")
     }
-    async fn non_terminal_runs_page(
-        &self,
-        after: Option<&RunRef>,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<OpenRun>, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn end_lost_run(
-        &self,
-        target: &RunRef,
-        loss: RunLoss,
-        at_ms: u64,
-    ) -> Result<Option<RunTerminal>, StoreError> {
-        unreachable!("external signature witness")
-    }
     async fn list_control_intents(
         &self,
         after: Option<ControlIntentId>,

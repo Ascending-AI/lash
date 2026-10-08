@@ -11,7 +11,7 @@ use super::DeploymentStore;
 use crate::StoreError;
 use crate::store::{
     ControlIntent, ControlIntentId, MaintenanceResult, RetentionBound, RetentionReport,
-    RunTerminal, RuntimeStoreDecorator, TurnChangeCursor, TurnChangePage, UnsettledTurnCounts,
+    RuntimeStoreDecorator, TurnChangeCursor, TurnChangePage, UnsettledTurnCounts,
 };
 
 /// Every [`DeploymentStore`] operation: the single place each deployment
@@ -25,8 +25,6 @@ macro_rules! deployment_operations {
             fn artifact_frame_is_retained(&self, frame: &crate::FrameEnvironmentId) -> Result<bool, StoreError>;
             fn count_unsettled_turns(&self) -> Result<UnsettledTurnCounts, StoreError>;
             fn turns_changed_since(&self, after: TurnChangeCursor, limit: NonZeroUsize) -> Result<TurnChangePage, StoreError>;
-            fn non_terminal_runs_page(&self, after: Option<&crate::engine::RunRef>, limit: NonZeroUsize) -> Result<Vec<crate::engine::OpenRun>, StoreError>;
-            fn end_lost_run(&self, target: &crate::engine::RunRef, loss: crate::engine::RunLoss, at_ms: u64) -> Result<Option<RunTerminal>, StoreError>;
             fn list_control_intents(&self, after: Option<ControlIntentId>, limit: NonZeroUsize) -> Result<Vec<ControlIntent>, StoreError>;
             fn reclaim_retained_evidence(&self, bound: RetentionBound) -> MaintenanceResult<RetentionReport>;
         }

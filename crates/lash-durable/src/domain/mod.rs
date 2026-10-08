@@ -307,7 +307,13 @@ pub enum DomainRefusal {
     SessionCommitRefused {
         /// The session.
         session: SessionId,
-        /// The store's refusal.
+        /// The code the store's refusal is carried under past the store
+        /// (`StoreError::runtime_code`): whether retrying the commit can
+        /// succeed is read from it, never from `reason`.
+        code: lash_core_store::runtime_error::RuntimeErrorCode,
+        /// The typed cause beside `code`, when the refusal has one.
+        cause: Option<lash_core_store::runtime_error::RuntimeErrorCause>,
+        /// The store's refusal, as it reads.
         reason: String,
     },
     /// A session-close step is not the one after the stored step.
@@ -332,6 +338,43 @@ pub enum DomainRefusal {
         /// The call.
         call: PromptCallKey,
     },
+}
+
+impl DomainRefusal {
+    /// The session store's refusal `error` of `session`'s head commit, under
+    /// the code and cause the store carries it with past the store.
+    #[must_use]
+    pub fn session_commit_refused(
+        session: SessionId,
+        error: &lash_core_store::store::StoreError,
+    ) -> Self {
+        Self::SessionCommitRefused {
+            session,
+            code: error.runtime_code(),
+            cause: error.runtime_cause(),
+            reason: error.to_string(),
+        }
+    }
+
+    /// The store's refusal of a head commit, as the runtime error it is
+    /// carried as past the store; `None` for every other refusal.
+    #[must_use]
+    pub fn session_commit_refusal(&self) -> Option<lash_core_store::runtime_error::RuntimeError> {
+        let Self::SessionCommitRefused {
+            code,
+            cause,
+            reason,
+            ..
+        } = self
+        else {
+            return None;
+        };
+        let refusal = lash_core_store::runtime_error::RuntimeError::new(code.clone(), reason);
+        Some(match cause {
+            Some(cause) => refusal.with_cause(cause.clone()),
+            None => refusal,
+        })
+    }
 }
 
 /// The owner's and operators' reads of domain rows, unfenced.

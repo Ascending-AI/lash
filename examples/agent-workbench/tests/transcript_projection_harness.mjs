@@ -61,7 +61,7 @@ export function verifyTranscriptSurface(surface, asset, rows, displayOrder = row
     attachments: input.content.attachments.map(attachmentOf),
     provenance: {kind: 'turn_input', turn_id: input.provenance.turn_id}} : null;
   timeline.applySnapshot({transcript: rows, product_events: {cursor: 1, events: ownedInput ? [{event_id: 'owned', type: 'message', message: ownedInput}] : []},
-    active_turns: [], pending_turn_inputs: [], turn_input_applications: [], unknown_turn_terminals: []});
+    active_turns: [], pending_turn_inputs: [], turn_input_applications: []});
   const rendered = list.children.filter(node => !node.hidden);
   const observed = rendered.map(observe);
   const expected = [];

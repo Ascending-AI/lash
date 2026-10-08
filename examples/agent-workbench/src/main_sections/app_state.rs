@@ -307,7 +307,6 @@ impl AppState {
                 | TurnCancelReceipt::Withdrawn { .. }
                 | TurnCancelReceipt::PolicyConflict { .. } => request_id.as_str(),
             };
-            record_unknown_turn_terminal(self, &address, &receipt, routing_retained);
             self.trace_for_session(
                 &address.session_id,
                 "turn.cancel_requested",

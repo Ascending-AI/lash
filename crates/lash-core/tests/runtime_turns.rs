@@ -6,7 +6,6 @@
 
 #![expect(
     clippy::expect_used,
-    clippy::unwrap_used,
     reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the setup helpers around them in this target are test code too"
 )]
 

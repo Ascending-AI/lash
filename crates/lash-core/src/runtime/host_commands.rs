@@ -440,13 +440,9 @@ impl LashRuntime {
         let pending_turn_inputs = if inputs.is_empty() {
             Vec::new()
         } else {
-            let store = self
-                .session
-                .as_ref()
-                .and_then(|session| session.history_store())
-                .ok_or_else(|| {
-                    PluginOperationInvokeError::protocol("plugin input requires a session store")
-                })?;
+            let store = self.services.store.clone().ok_or_else(|| {
+                PluginOperationInvokeError::protocol("plugin input requires a session store")
+            })?;
             super::durable_queue::enqueue_turn_inputs_to_store(
                 self.state.session_id.clone(),
                 store,

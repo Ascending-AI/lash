@@ -1,4 +1,4 @@
-//! The engine control vocabulary: run references, run loss and refusals.
+//! The engine control vocabulary: run references and refusals.
 
 use crate::store::StoreError;
 use crate::{SessionId, TurnId};
@@ -8,34 +8,6 @@ use crate::{SessionId, TurnId};
 pub struct RunRef {
     pub session: SessionId,
     pub run: TurnId,
-}
-
-/// An open logical run as the store's recovery page lists it
-/// ([`DeploymentStore::non_terminal_runs_page`](crate::DeploymentStore::non_terminal_runs_page)).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct OpenRun {
-    pub target: RunRef,
-}
-
-/// The engine's evidence that an open run's execution is lost, which
-/// [`DeploymentStore::end_lost_run`](crate::DeploymentStore::end_lost_run)
-/// ends the run on (ADR 0104 O2, O6).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RunLoss {
-    /// The run's workflow run ended with a failure and recorded no
-    /// outcome: an operator's kill, or a refusal that ended nothing. The
-    /// engine never runs that key again, so the run ends whether or not it
-    /// had recorded its admission.
-    FailedRun,
-    /// No execution holds the run: the engine holds no execution of the run's
-    /// key on any generation lane (the run was purged or its history lost),
-    /// and the execution its admission recorded runs nothing more
-    /// ([`RunExecutor`](crate::store::RunExecutor)). A run that recorded its admission
-    /// started, and its effects may have run, so it ends: a fresh execution
-    /// must never run it again (ADR 0105 L-S8). A run that never recorded
-    /// its admission started nothing; its input is still owed by its ingress
-    /// obligation, which executes it, so the store leaves it open.
-    NoRun,
 }
 
 /// Whether the identical ask may succeed when it is made again.

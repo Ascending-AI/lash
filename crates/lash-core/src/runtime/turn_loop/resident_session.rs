@@ -312,6 +312,8 @@ impl LashRuntime {
     /// pre-turn state (FIG-5346) and a park would flush that state over the
     /// head (FIG-5310).
     pub async fn adopt_committed_head(&mut self) -> Result<bool, RuntimeError> {
+        // The runtime's own store: a cold runtime, whose session is not
+        // materialized, holds it too (FIG-5352).
         let Some(store) = self.services.store.clone() else {
             return Ok(false);
         };
