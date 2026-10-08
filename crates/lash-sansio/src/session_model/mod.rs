@@ -422,43 +422,42 @@ pub struct ErrorEnvelope {
     pub provider_failure_kind: Option<crate::llm::types::ProviderFailureKind>,
 }
 
+/// A failure reported to hosts: the single payload both host lanes carry for
+/// it (`SessionStreamEvent::Error` and the turn activity's `Error`).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ReportedFailure {
+    pub message: String,
+    /// The failure's typed kind, code, terminal reason, retryability and
+    /// provider classification, when its source classified it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub envelope: Option<ErrorEnvelope>,
+}
+
+/// A retry that is about to wait: the single payload both host lanes carry
+/// for it (`SessionStreamEvent::RetryStatus` and the turn activity's
+/// `RetryStatus`).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RetryProgress {
+    pub wait_seconds: u64,
+    pub attempt: usize,
+    pub max_attempts: usize,
+    pub reason: String,
+    /// The failure being retried, when its source classified it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub envelope: Option<ErrorEnvelope>,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type")]
 // justification: this public streaming DTO stays inline to avoid per-event allocation and preserve consumer pattern matching.
 #[allow(clippy::large_enum_variant)]
 pub enum SessionStreamEvent {
-    #[serde(rename = "text_delta")]
-    TextDelta {
-        content: String,
-        /// Provider-minted identity of the assistant-text block this delta
-        /// belongs to.
-        block: crate::llm::types::StreamBlockIdentity,
-    },
-    /// Streaming update for the model's reasoning summary ("thinking"), kept
-    /// separate from assistant response text and never fed back to the model
-    /// on subsequent turns.
-    #[serde(rename = "reasoning_delta")]
-    ReasoningDelta {
-        content: String,
-        /// Provider-minted identity of the reasoning block this delta
-        /// belongs to.
-        block: crate::llm::types::StreamBlockIdentity,
-    },
-    /// A provider-minted assistant-text or reasoning block opened. Blocks are
-    /// the unit hosts render; merging adjacent blocks is the host's choice —
-    /// Lash injects no separators.
-    #[serde(rename = "stream_block_started")]
-    StreamBlockStarted {
-        kind: crate::llm::types::StreamBlockKind,
-        block: crate::llm::types::StreamBlockIdentity,
-    },
-    /// A streamed block closed; `content` is the block's authoritative text.
-    #[serde(rename = "stream_block_completed")]
-    StreamBlockCompleted {
-        kind: crate::llm::types::StreamBlockKind,
-        block: crate::llm::types::StreamBlockIdentity,
-        content: String,
-    },
+    /// One step of a streamed assistant-text or reasoning block: the same
+    /// payload the provider stream, turn activity and the trace carry.
+    /// Reasoning summary text is kept separate from assistant response text
+    /// and is never fed back to the model on subsequent turns.
+    #[serde(rename = "stream_block")]
+    StreamBlock(crate::llm::types::StreamBlockEvent),
     #[serde(rename = "tool_call")]
     ToolCall {
         call_id: crate::ToolCallId,
@@ -505,14 +504,7 @@ pub enum SessionStreamEvent {
         cumulative: LlmUsage,
     },
     #[serde(rename = "retry_status")]
-    RetryStatus {
-        wait_seconds: u64,
-        attempt: usize,
-        max_attempts: usize,
-        reason: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        envelope: Option<ErrorEnvelope>,
-    },
+    RetryStatus(RetryProgress),
     #[serde(rename = "injected_turn_input_accepted")]
     InjectedTurnInputAccepted {
         inputs: Vec<AcceptedInjectedTurnInput>,
@@ -530,11 +522,7 @@ pub enum SessionStreamEvent {
     #[serde(rename = "done")]
     Done,
     #[serde(rename = "error")]
-    Error {
-        message: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        envelope: Option<ErrorEnvelope>,
-    },
+    Error(ReportedFailure),
 }
 
 /// Discriminator of a [`SessionStreamEvent::Message`]: the closed set of
@@ -793,7 +781,7 @@ pub fn make_error_event(
     cuts: RuntimeOutputCuts,
 ) -> SessionStreamEvent {
     let user_message = user_message.into();
-    SessionStreamEvent::Error {
+    SessionStreamEvent::Error(ReportedFailure {
         message: user_message.clone(),
         envelope: Some(make_error_envelope(
             kind,
@@ -803,7 +791,7 @@ pub fn make_error_event(
             raw,
             cuts,
         )),
-    }
+    })
 }
 
 pub fn truncate_raw_error(s: &str, max_chars: usize) -> String {

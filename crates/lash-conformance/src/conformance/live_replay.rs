@@ -9,6 +9,7 @@ use crate::runtime::LiveReplayEventDraft;
 use futures_util::StreamExt as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use pretty_assertions::assert_eq;
 
 /// `make` must return a fresh, empty store on each call.
@@ -914,10 +915,11 @@ fn framed_text_payload(id: &str, text: &str) -> SessionObservationEventPayload {
     SessionObservationEventPayload::TurnActivity(TurnActivity {
         id: crate::TurnActivityId::new(id),
         correlation_id: crate::TurnActivityId::new("text:0"),
-        event: TurnEvent::AssistantProseDelta {
+        event: TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+            kind: StreamBlockKind::AssistantText,
             text: text.into(),
             block: crate::llm::types::StreamBlockIdentity::new("text:0", 0),
-        },
+        }),
     })
 }
 
@@ -998,12 +1000,13 @@ where
 }
 
 fn live_replay_text_payload(text: &str) -> SessionObservationEventPayload {
-    SessionObservationEventPayload::TurnActivity(TurnActivity::independent(
-        TurnEvent::AssistantProseDelta {
+    SessionObservationEventPayload::TurnActivity(TurnActivity::independent(TurnEvent::StreamBlock(
+        StreamBlockEvent::Delta {
+            kind: StreamBlockKind::AssistantText,
             text: text.into(),
             block: crate::llm::types::StreamBlockIdentity::new("text:0", 0),
         },
-    ))
+    )))
 }
 
 async fn publish_one(
@@ -1144,7 +1147,11 @@ fn assert_live_replay_labels(events: &[Arc<SessionObservationEvent>], expected: 
 fn live_replay_event_label(event: &SessionObservationEvent) -> String {
     match &event.payload {
         SessionObservationEventPayload::TurnActivity(activity) => match &activity.event {
-            TurnEvent::AssistantProseDelta { text, .. } => format!("text:{text}"),
+            TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
+                text,
+                ..
+            }) => format!("text:{text}"),
             other => format!("turn:{other:?}"),
         },
         SessionObservationEventPayload::Committed { .. } => "committed".to_string(),

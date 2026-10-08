@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::ReportedFailure;
 
 mod process_fixtures;
 use lash_sansio::ProcessId;
@@ -1443,7 +1444,9 @@ fn agent_failed_child_activity_facts(
             lash::TurnEvent::CodeBlockCompleted {
                 error: Some(error), ..
             } => failed_code_block_errors.push(error.clone()),
-            lash::TurnEvent::Error { message } => turn_error_messages.push(message.clone()),
+            lash::TurnEvent::Error(ReportedFailure { message, .. }) => {
+                turn_error_messages.push(message.clone())
+            }
             lash::TurnEvent::FinalValue { .. } => final_value_event_count += 1,
             _ => {}
         }

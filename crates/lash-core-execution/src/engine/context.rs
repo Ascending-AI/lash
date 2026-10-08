@@ -59,25 +59,12 @@ pub fn activity_projection(event: &SessionStreamEvent) -> Option<TurnEvent> {
         } => Some(TurnEvent::ModelRequestStarted {
             protocol_iteration: *protocol_iteration,
         }),
-        SessionStreamEvent::RetryStatus {
-            wait_seconds,
-            attempt,
-            max_attempts,
-            reason,
-            ..
-        } => Some(TurnEvent::RetryStatus {
-            wait_seconds: *wait_seconds,
-            attempt: *attempt,
-            max_attempts: *max_attempts,
-            reason: reason.clone(),
-        }),
+        SessionStreamEvent::RetryStatus(progress) => Some(TurnEvent::RetryStatus(progress.clone())),
         SessionStreamEvent::PluginEvent { plugin_id, event } => Some(TurnEvent::PluginRuntime {
             plugin_id: plugin_id.clone(),
             event: event.clone(),
         }),
-        SessionStreamEvent::Error { message, .. } => Some(TurnEvent::Error {
-            message: message.clone(),
-        }),
+        SessionStreamEvent::Error(failure) => Some(TurnEvent::Error(failure.clone())),
         SessionStreamEvent::TurnOutcome {
             outcome: crate::TurnOutcome::Finished(crate::TurnFinish::FinalValue { value }),
         } => Some(TurnEvent::FinalValue {

@@ -4,6 +4,7 @@
 //! reason.
 
 use crate::support::*;
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::collections::HashSet;
 
 /// A message may contain at most this many dense, zero-based content blocks.
@@ -347,9 +348,10 @@ impl AnthropicProvider {
                             text: String::new(),
                         };
                         if let Some(tx) = stream_events {
-                            tx.send(LlmStreamEvent::TextBlockStart {
+                            tx.send(LlmStreamEvent::Block(StreamBlockEvent::Started {
+                                kind: StreamBlockKind::AssistantText,
                                 block: Self::block_identity(index, &block_id),
-                            });
+                            }));
                         }
                     }
                     "thinking" => {
@@ -360,9 +362,10 @@ impl AnthropicProvider {
                         if let Some(tx) = stream_events
                             && expose_thinking
                         {
-                            tx.send(LlmStreamEvent::ReasoningBlockStart {
+                            tx.send(LlmStreamEvent::Block(StreamBlockEvent::Started {
+                                kind: StreamBlockKind::Reasoning,
                                 block: Self::block_identity(index, &block_id),
-                            });
+                            }));
                         }
                     }
                     "redacted_thinking" => {
@@ -377,9 +380,10 @@ impl AnthropicProvider {
                         if let Some(tx) = stream_events
                             && expose_thinking
                         {
-                            tx.send(LlmStreamEvent::ReasoningBlockStart {
+                            tx.send(LlmStreamEvent::Block(StreamBlockEvent::Started {
+                                kind: StreamBlockKind::Reasoning,
                                 block: Self::block_identity(index, &block_id),
-                            });
+                            }));
                         }
                     }
                     "tool_use" => {
@@ -414,13 +418,14 @@ impl AnthropicProvider {
                         if !piece.is_empty() {
                             text.push_str(piece);
                             if let Some(tx) = stream_events {
-                                tx.send(LlmStreamEvent::Delta {
+                                tx.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                                    kind: StreamBlockKind::AssistantText,
                                     block: Self::block_identity(
                                         index,
                                         &format!("content_block:{index}"),
                                     ),
                                     text: piece.to_string(),
-                                });
+                                }));
                             }
                         }
                     }
@@ -435,13 +440,14 @@ impl AnthropicProvider {
                             if let Some(tx) = stream_events
                                 && expose_thinking
                             {
-                                tx.send(LlmStreamEvent::ReasoningDelta {
+                                tx.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                                    kind: StreamBlockKind::Reasoning,
                                     block: Self::block_identity(
                                         index,
                                         &format!("content_block:{index}"),
                                     ),
                                     text: piece.to_string(),
-                                });
+                                }));
                             }
                         }
                     }
@@ -494,19 +500,21 @@ impl AnthropicProvider {
                 if let Some(tx) = stream_events {
                     match state.blocks.get(index) {
                         Some(StreamBlock::Text { text }) => {
-                            tx.send(LlmStreamEvent::TextBlockEnd {
+                            tx.send(LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                                kind: StreamBlockKind::AssistantText,
                                 block: Self::block_identity(index, &block_id),
                                 text: text.clone(),
-                            });
+                            }));
                         }
                         Some(
                             StreamBlock::Thinking { text, .. }
                             | StreamBlock::RedactedThinking { text, .. },
                         ) if expose_thinking => {
-                            tx.send(LlmStreamEvent::ReasoningBlockEnd {
+                            tx.send(LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                                kind: StreamBlockKind::Reasoning,
                                 block: Self::block_identity(index, &block_id),
                                 text: text.clone(),
-                            });
+                            }));
                         }
                         _ => {}
                     }

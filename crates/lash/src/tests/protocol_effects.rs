@@ -6,6 +6,7 @@ use super::*;
 use crate::TurnInput;
 use lash_core::facade_support::{TurnOutcome, TurnStop};
 use lash_core::plugin::{ProtocolDriverPlugin, ProtocolSessionPlugin};
+use lash_sansio::ReportedFailure;
 
 const PROTOCOL: &str = "test_protocol";
 
@@ -133,10 +134,10 @@ impl lash_sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol> for TestDriv
             // The failure as the driver received it, reported as the turn's
             // error, so a host can read every field the driver was handed.
             actions.push(lash_core::DriverAction::Emit(
-                lash_core::facade_support::SessionStreamEvent::Error {
+                lash_core::facade_support::SessionStreamEvent::Error(ReportedFailure {
                     message: encoded.to_string(),
                     envelope: None,
-                },
+                }),
             ));
             self.0.lock_recover().push(encoded);
         }

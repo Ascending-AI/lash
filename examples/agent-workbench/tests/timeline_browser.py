@@ -337,7 +337,7 @@ def page_laws(browser, page_file: Path, artifacts: Path | None) -> Laws:
         start = datetime.now(timezone.utc)
 
         bench.activity(turn, {"type": "turn_started"})
-        bench.activity(turn, {"type": "reasoning_delta", "text": "Checking the forecast.", "correlation_id": "r1"})
+        bench.activity(turn, {"type": "stream_block", "phase": "delta", "kind": "reasoning", "text": "Checking the forecast.", "correlation_id": "r1"})
         bench.activity(turn, {"type": "code_block_started", "language": "typescript", "code": "await weather.forecast()"})
         bench.activity(turn, {"type": "tool_call_started", "call_id": "tc_1", "name": "mcp__parallel__web_search_x", "args": {"q": "weather"}})
         bench.activity(turn, {"type": "tool_call_completed", "call_id": "tc_1", "name": "mcp__parallel__web_search_x", "args": {"q": "weather"},
@@ -350,12 +350,12 @@ def page_laws(browser, page_file: Path, artifacts: Path | None) -> Laws:
         if artifacts:
             page.screenshot(path=str(artifacts / "mid-turn-1440.png"), full_page=True)
         # The host event happened before the reply began; it is published late.
-        bench.activity(turn, {"type": "assistant_prose_delta", "text": "It will be ", "correlation_id": "p1"})
+        bench.activity(turn, {"type": "stream_block", "phase": "delta", "kind": "assistant_text", "text": "It will be ", "correlation_id": "p1"})
         page.wait_for_function("() => document.querySelector('#timeline .message.assistant')")
         bench.push_product({"type": "message", "message": {
             "id": "host-event-1", "role": "event", "text": "connected mock account `inbox.work`",
             "at": iso(happened)}})
-        bench.activity(turn, {"type": "assistant_prose_delta", "text": "sunny.", "correlation_id": "p1"})
+        bench.activity(turn, {"type": "stream_block", "phase": "delta", "kind": "assistant_text", "text": "sunny.", "correlation_id": "p1"})
         page.wait_for_function("() => document.querySelector('#timeline [data-key=\"msg:host-event-1\"]')")
         page.wait_for_timeout(100)
         if artifacts:

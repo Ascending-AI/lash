@@ -10,6 +10,7 @@ use lash_core::TurnEvent;
 use lash_core::facade_support::LlmTransportError;
 #[cfg(feature = "rlm")]
 use lash_core::facade_support::{SessionGraphFacadeOps as _, SessionNodeProjection as _};
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use tokio::sync::oneshot;
 
 #[tokio::test]
@@ -194,10 +195,11 @@ pub(super) fn rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_r
                     "```\";\nfinish(",
                     "\"streamed raw final ok\");\n</typescript>",
                 ] {
-                    stream.send(LlmStreamEvent::Delta {
+                    stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                        kind: StreamBlockKind::AssistantText,
                         block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
                         text: chunk.to_string(),
-                    });
+                    }));
                 }
                 Ok(LlmResponse {
                     parts: vec![LlmOutputPart::Text {
@@ -295,11 +297,12 @@ pub(super) fn rlm_abort_drain_ignores_a_late_attempt_reset() -> Result<()> {
             .requires_streaming(true)
             .complete(|request| async move {
                 let stream = request.stream_events.expect("stream events");
-                stream.send(LlmStreamEvent::Delta {
+                stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::AssistantText,
                     block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
                     text: "<typescript>\nfinish(\"cell survived reset\");\n</typescript>\n"
                         .to_string(),
-                });
+                }));
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 stream.send(LlmStreamEvent::AttemptReset);
                 std::future::pending::<std::result::Result<LlmResponse, LlmTransportError>>().await
@@ -353,16 +356,18 @@ pub(super) fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Res
                     )]),
                     ..Default::default()
                 }));
-                stream.send(LlmStreamEvent::Delta {
+                stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::AssistantText,
                     block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
                     text: "<typescript>\nfinish(\"late events survived\");\n</typescript>\n"
                         .to_string(),
-                });
+                }));
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                stream.send(LlmStreamEvent::Delta {
+                stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::AssistantText,
                     block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
                     text: "provider suffix".to_string(),
-                });
+                }));
                 stream.send(LlmStreamEvent::Part(LlmOutputPart::Reasoning {
                     text: "signed reasoning".to_string(),
                     replay: Some(lash_core::llm::types::ProviderReasoningReplay {
@@ -468,11 +473,12 @@ pub(super) fn rlm_abort_drain_deadline_proceeds_with_default_usage() -> Result<(
                 request
                     .stream_events
                     .expect("stream events")
-                    .send(LlmStreamEvent::Delta {
+                    .send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                        kind: StreamBlockKind::AssistantText,
                         block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
                         text: "<typescript>\nfinish(\"deadline survived\");\n</typescript>\n"
                             .to_string(),
-                    });
+                    }));
                 std::future::pending::<std::result::Result<LlmResponse, LlmTransportError>>().await
             })
             .build()

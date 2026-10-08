@@ -2,6 +2,7 @@
 //! backend over a SQLite memory store set, whose own node serves each
 //! session's turn on the durable path (ADR 0132).
 
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -143,7 +144,12 @@ async fn codex_websocket_facade_turn_streams_text_from_local_server() {
         .expect("deadlock watchdog: the turn's activity ends")
     {
         let activity = activity.expect("turn activity");
-        if let TurnEvent::AssistantProseDelta { text, .. } = activity.event {
+        if let TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+            kind: StreamBlockKind::AssistantText,
+            text,
+            ..
+        }) = activity.event
+        {
             streamed.push_str(&text);
         }
     }

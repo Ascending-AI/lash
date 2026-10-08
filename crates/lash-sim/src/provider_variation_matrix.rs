@@ -1,5 +1,6 @@
 //! Versioned provider-variation fixture matrix at the transport seam.
 
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -1228,8 +1229,16 @@ fn assert_failed_identity(dialect: &str, error: &ProviderCompletionError, cell: 
 fn assert_no_empty_stream_output(dialect: &str, case: &str, events: &[LlmStreamEvent]) {
     assert!(
         events.iter().all(|event| match event {
-            LlmStreamEvent::Delta { text, .. } | LlmStreamEvent::ReasoningDelta { text, .. } =>
-                !text.is_empty(),
+            LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
+                text,
+                ..
+            })
+            | LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::Reasoning,
+                text,
+                ..
+            }) => !text.is_empty(),
             LlmStreamEvent::Part(LlmOutputPart::Text { text, .. })
             | LlmStreamEvent::Part(LlmOutputPart::Reasoning { text, .. }) => !text.is_empty(),
             _ => true,
@@ -1264,9 +1273,13 @@ fn assert_retry_stream_reduction(
             segment.iter().all(|event| {
                 !matches!(
                     event,
-                    LlmStreamEvent::Delta { .. }
-                        | LlmStreamEvent::ReasoningDelta { .. }
-                        | LlmStreamEvent::Part(_)
+                    LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                        kind: StreamBlockKind::AssistantText,
+                        ..
+                    }) | LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                        kind: StreamBlockKind::Reasoning,
+                        ..
+                    }) | LlmStreamEvent::Part(_)
                         | LlmStreamEvent::Usage(_)
                 )
             }),
@@ -1311,15 +1324,34 @@ fn assert_retry_stream_reduction(
                 accumulated_text.clear();
                 accumulated_evidence = LlmStreamEvidence::default();
             }
-            LlmStreamEvent::Delta { text: delta, .. } => accumulated_text.push_str(delta),
+            LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
+                text: delta,
+                ..
+            }) => accumulated_text.push_str(delta),
             LlmStreamEvent::Evidence(evidence) => accumulated_evidence
                 .merge(evidence.clone())
                 .expect("matrix retry evidence remains monotonic within an attempt"),
-            LlmStreamEvent::TextBlockStart { .. }
-            | LlmStreamEvent::TextBlockEnd { .. }
-            | LlmStreamEvent::ReasoningBlockStart { .. }
-            | LlmStreamEvent::ReasoningBlockEnd { .. }
-            | LlmStreamEvent::ReasoningDelta { .. }
+            LlmStreamEvent::Block(StreamBlockEvent::Started {
+                kind: StreamBlockKind::AssistantText,
+                ..
+            })
+            | LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                kind: StreamBlockKind::AssistantText,
+                ..
+            })
+            | LlmStreamEvent::Block(StreamBlockEvent::Started {
+                kind: StreamBlockKind::Reasoning,
+                ..
+            })
+            | LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                kind: StreamBlockKind::Reasoning,
+                ..
+            })
+            | LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::Reasoning,
+                ..
+            })
             | LlmStreamEvent::Part(_)
             | LlmStreamEvent::Usage(_)
             | LlmStreamEvent::RetryStatus { .. } => {}

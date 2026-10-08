@@ -11,6 +11,7 @@
 #[path = "support/served.rs"]
 mod served;
 
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -53,10 +54,11 @@ fn text(text: &str) -> LlmOutputPart {
 }
 
 fn delta(text: &str) -> LlmStreamEvent {
-    LlmStreamEvent::Delta {
+    LlmStreamEvent::Block(StreamBlockEvent::Delta {
+        kind: StreamBlockKind::AssistantText,
         block: StreamBlockIdentity::new("text:0", 0),
         text: text.to_owned(),
-    }
+    })
 }
 
 fn usage(input_tokens: i64, output_tokens: i64, cache_read_input_tokens: i64) -> LlmUsage {
@@ -94,7 +96,11 @@ fn streamed_prose(output: &lash::TurnOutput) -> String {
         .activities
         .iter()
         .filter_map(|activity| match &activity.event {
-            TurnEvent::AssistantProseDelta { text, .. } => Some(text.as_ref()),
+            TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
+                text,
+                ..
+            }) => Some(text.as_str()),
             _ => None,
         })
         .collect()
@@ -383,7 +389,7 @@ async fn standard_runtime_preserves_part_boundaries_when_response_is_not_streame
         .activities
         .iter()
         .filter_map(|activity| match &activity.event {
-            TurnEvent::StreamBlockCompleted { block, text, .. } => {
+            TurnEvent::StreamBlock(StreamBlockEvent::Completed { block, text, .. }) => {
                 Some((block.id.clone(), text.to_string()))
             }
             _ => None,

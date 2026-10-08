@@ -138,7 +138,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::llm::types::{
     LlmOutputPart, LlmProviderTraceDirection, LlmProviderTraceEvent, LlmProviderTraceSender,
-    LlmRequest, LlmResponse, LlmStreamEvent, LlmUsage, StreamBlockIdentity, StreamBlockKind,
+    LlmRequest, LlmResponse, LlmStreamEvent, LlmUsage, StreamBlockIdentity,
 };
 use crate::plugin::{CheckpointHookContext, SessionConfigChangedContext, SessionRelation};
 use crate::sansio::{LlmCallError, Response};
@@ -160,8 +160,8 @@ use turn_commit_draft::*;
 use turn_driver::*;
 
 use assembly::{
-    LlmDebugText, LlmDebugToolCall, LlmStreamAccumulator, LlmStreamDebugState, LlmStreamEventLog,
-    LlmStreamState, ReasoningPublicationState, fold_llm_stream_event,
+    LlmStreamAccumulator, LlmStreamDebugState, LlmStreamState, ReasoningPublicationState,
+    fold_llm_stream_event,
 };
 
 /// The context for one step of a command run under `admitted`: the run's

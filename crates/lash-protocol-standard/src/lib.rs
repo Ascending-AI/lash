@@ -14,6 +14,7 @@
 //!   the members' results back into one batch result (ADR 0116 §2).
 
 use lash_sansio::TurnId;
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -941,21 +942,26 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                         item_id,
                     };
                     ordinal += 1;
-                    actions.push(DriverAction::Emit(SessionStreamEvent::StreamBlockStarted {
-                        kind: lash_sansio::llm::types::StreamBlockKind::AssistantText,
-                        block: block.clone(),
-                    }));
-                    actions.push(DriverAction::Emit(SessionStreamEvent::TextDelta {
-                        content: text.clone(),
-                        block: block.clone(),
-                    }));
-                    actions.push(DriverAction::Emit(
-                        SessionStreamEvent::StreamBlockCompleted {
-                            kind: lash_sansio::llm::types::StreamBlockKind::AssistantText,
-                            block,
-                            content: text.clone(),
+                    actions.push(DriverAction::Emit(SessionStreamEvent::StreamBlock(
+                        StreamBlockEvent::Started {
+                            kind: StreamBlockKind::AssistantText,
+                            block: block.clone(),
                         },
-                    ));
+                    )));
+                    actions.push(DriverAction::Emit(SessionStreamEvent::StreamBlock(
+                        StreamBlockEvent::Delta {
+                            kind: StreamBlockKind::AssistantText,
+                            text: text.clone(),
+                            block: block.clone(),
+                        },
+                    )));
+                    actions.push(DriverAction::Emit(SessionStreamEvent::StreamBlock(
+                        StreamBlockEvent::Completed {
+                            kind: StreamBlockKind::AssistantText,
+                            block,
+                            text: text.clone(),
+                        },
+                    )));
                 }
             }
         }

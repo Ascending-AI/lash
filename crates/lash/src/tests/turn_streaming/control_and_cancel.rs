@@ -2,6 +2,8 @@
 //! SQLite memory stores, the core's node serving the session.
 
 use super::*;
+use lash_sansio::RetryProgress;
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn turn_stream_finish_returns_committed_assistant_prose() -> Result<()> {
@@ -59,14 +61,15 @@ async fn retry_status_streams_as_semantic_turn_event() -> Result<()> {
         .snapshot()
         .await
         .into_iter()
-        .find(|event| matches!(&event.event, TurnEvent::RetryStatus { .. }))
+        .find(|event| matches!(&event.event, TurnEvent::RetryStatus(RetryProgress { .. })))
         .expect("retry status event");
-    let TurnEvent::RetryStatus {
+    let TurnEvent::RetryStatus(RetryProgress {
         wait_seconds,
         attempt,
         max_attempts,
         reason,
-    } = retry.event
+        ..
+    }) = retry.event
     else {
         unreachable!();
     };
@@ -156,7 +159,11 @@ async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Result<()> {
     let prose = events
         .into_iter()
         .filter_map(|event| match event.event {
-            TurnEvent::AssistantProseDelta { text, .. } => Some(text.to_string()),
+            TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
+                text,
+                ..
+            }) => Some(text.to_string()),
             _ => None,
         })
         .collect::<String>();

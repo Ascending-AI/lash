@@ -1,3 +1,5 @@
+use crate::ReportedFailure;
+use crate::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
@@ -25,25 +27,29 @@ fn delta(
     let identity = StreamBlockIdentity::new(block, 0);
     let (session, turn) = if reasoning {
         (
-            SessionStreamEvent::ReasoningDelta {
-                content: text.to_string(),
+            SessionStreamEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::Reasoning,
+                text: text.to_string(),
                 block: identity.clone(),
-            },
-            TurnEvent::ReasoningDelta {
+            }),
+            TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::Reasoning,
                 text: text.into(),
                 block: identity,
-            },
+            }),
         )
     } else {
         (
-            SessionStreamEvent::TextDelta {
-                content: text.to_string(),
+            SessionStreamEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
+                text: text.to_string(),
                 block: identity.clone(),
-            },
-            TurnEvent::AssistantProseDelta {
+            }),
+            TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
                 text: text.into(),
                 block: identity,
-            },
+            }),
         )
     };
     observer.publish(RuntimeStreamEvent::Session(session));
@@ -66,15 +72,24 @@ fn drain(observations: &mut TurnObservations) -> Vec<(String, String, String)> {
 
 fn describe(event: RuntimeStreamEvent) -> (String, String, String) {
     match event {
-        RuntimeStreamEvent::Session(SessionStreamEvent::TextDelta { content, block }) => {
-            ("session_text".into(), block.id, content)
-        }
-        RuntimeStreamEvent::Session(SessionStreamEvent::ReasoningDelta { content, block }) => {
-            ("session_reasoning".into(), block.id, content)
-        }
+        RuntimeStreamEvent::Session(SessionStreamEvent::StreamBlock(StreamBlockEvent::Delta {
+            kind: StreamBlockKind::AssistantText,
+            text: content,
+            block,
+        })) => ("session_text".into(), block.id, content),
+        RuntimeStreamEvent::Session(SessionStreamEvent::StreamBlock(StreamBlockEvent::Delta {
+            kind: StreamBlockKind::Reasoning,
+            text: content,
+            block,
+        })) => ("session_reasoning".into(), block.id, content),
         RuntimeStreamEvent::Turn(TurnActivity {
             correlation_id,
-            event: TurnEvent::AssistantProseDelta { text, .. },
+            event:
+                TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::AssistantText,
+                    text,
+                    ..
+                }),
             ..
         }) => (
             "turn_text".into(),
@@ -83,7 +98,12 @@ fn describe(event: RuntimeStreamEvent) -> (String, String, String) {
         ),
         RuntimeStreamEvent::Turn(TurnActivity {
             correlation_id,
-            event: TurnEvent::ReasoningDelta { text, .. },
+            event:
+                TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::Reasoning,
+                    text,
+                    ..
+                }),
             ..
         }) => (
             "turn_reasoning".into(),
@@ -108,9 +128,10 @@ fn marker(observer: &TurnObserver, cursor: &mut ObservationCursor, label: &str) 
         observer,
         ObservedEvent::Activity {
             correlation_id: Some(TurnActivityId::new(label)),
-            event: TurnEvent::Error {
+            event: TurnEvent::Error(ReportedFailure {
                 message: label.to_string(),
-            },
+                envelope: None,
+            }),
         },
     );
 }
@@ -198,7 +219,12 @@ fn activity_ids(observations: &mut TurnObservations) -> Vec<(String, String)> {
         .filter_map(|event| match event {
             RuntimeStreamEvent::Turn(TurnActivity {
                 id,
-                event: TurnEvent::AssistantProseDelta { text, .. },
+                event:
+                    TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                        kind: StreamBlockKind::AssistantText,
+                        text,
+                        ..
+                    }),
                 ..
             }) => Some((id.0.to_string(), text.to_string())),
             RuntimeStreamEvent::Turn(TurnActivity { id, .. }) => {
@@ -283,7 +309,7 @@ fn a_frame_is_cut_before_any_other_event_and_never_spans_blocks_kinds_or_turns()
         vec![
             "turn_text:A:a1",
             "turn_text:A:a2a3",
-            "turn::Error { message: \"tool\" }",
+            "turn::Error(ReportedFailure { message: \"tool\", envelope: None })",
             "turn_text:A:a4a5",
             "turn_text:B:b1",
             "turn_text:A:a6",
@@ -495,9 +521,10 @@ fn keyed_observations_take_their_ids_from_key_and_ordinal() {
         ordinal: 3,
         event: ObservedEvent::Activity {
             correlation_id: None,
-            event: TurnEvent::Error {
+            event: TurnEvent::Error(ReportedFailure {
                 message: "independent".into(),
-            },
+                envelope: None,
+            }),
         },
     });
     observer.observe(ShiftObservation {
@@ -505,18 +532,19 @@ fn keyed_observations_take_their_ids_from_key_and_ordinal() {
         ordinal: 4,
         event: ObservedEvent::Activity {
             correlation_id: Some(TurnActivityId::new("block:7")),
-            event: TurnEvent::Error {
+            event: TurnEvent::Error(ReportedFailure {
                 message: "correlated".into(),
-            },
+                envelope: None,
+            }),
         },
     });
     observer.observe(ShiftObservation {
         key: ReplayKey::new("root:t1:1:0:tool:2"),
         ordinal: 0,
-        event: ObservedEvent::Session(SessionStreamEvent::Error {
+        event: ObservedEvent::Session(SessionStreamEvent::Error(ReportedFailure {
             message: "projected".into(),
             envelope: None,
-        }),
+        })),
     });
     let ids = std::iter::from_fn(|| observations.try_take())
         .filter_map(|event| match event {

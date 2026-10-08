@@ -4,6 +4,7 @@ const LASH_OPENAI_RESPONSES_REQUEST_DOMAIN_VERSION: &str = "lash-openai-response
 
 use crate::request_work::{needs_blocking, run};
 use crate::support::*;
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CompletionEndpoint {
@@ -902,14 +903,20 @@ fn complete_buffered_responses(
                             if text.is_empty() {
                                 continue;
                             }
-                            tx.send(LlmStreamEvent::ReasoningBlockStart {
+                            tx.send(LlmStreamEvent::Block(StreamBlockEvent::Started {
+                                kind: StreamBlockKind::Reasoning,
                                 block: block.clone(),
-                            });
-                            tx.send(LlmStreamEvent::ReasoningDelta {
+                            }));
+                            tx.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                                kind: StreamBlockKind::Reasoning,
                                 block: block.clone(),
                                 text: text.clone(),
-                            });
-                            tx.send(LlmStreamEvent::ReasoningBlockEnd { block, text });
+                            }));
+                            tx.send(LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                                kind: StreamBlockKind::Reasoning,
+                                block,
+                                text,
+                            }));
                         }
                         tx.send(LlmStreamEvent::Part(part.clone()));
                     }
@@ -932,17 +939,20 @@ fn complete_buffered_responses(
                     response_meta.as_ref().and_then(|meta| meta.id.as_deref()),
                     &mut next_ordinal,
                 );
-                tx.send(LlmStreamEvent::TextBlockStart {
+                tx.send(LlmStreamEvent::Block(StreamBlockEvent::Started {
+                    kind: StreamBlockKind::AssistantText,
                     block: block.clone(),
-                });
-                tx.send(LlmStreamEvent::Delta {
+                }));
+                tx.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::AssistantText,
                     block: block.clone(),
                     text: text.clone(),
-                });
-                tx.send(LlmStreamEvent::TextBlockEnd {
+                }));
+                tx.send(LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                    kind: StreamBlockKind::AssistantText,
                     block,
                     text: text.clone(),
-                });
+                }));
             }
         }
     }
@@ -1055,31 +1065,40 @@ fn complete_buffered_chat(
                         if text.is_empty() {
                             continue;
                         }
-                        tx.send(LlmStreamEvent::ReasoningBlockStart {
+                        tx.send(LlmStreamEvent::Block(StreamBlockEvent::Started {
+                            kind: StreamBlockKind::Reasoning,
                             block: block.clone(),
-                        });
-                        tx.send(LlmStreamEvent::ReasoningDelta {
+                        }));
+                        tx.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                            kind: StreamBlockKind::Reasoning,
                             block: block.clone(),
                             text: text.clone(),
-                        });
-                        tx.send(LlmStreamEvent::ReasoningBlockEnd { block, text });
+                        }));
+                        tx.send(LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                            kind: StreamBlockKind::Reasoning,
+                            block,
+                            text,
+                        }));
                     }
                     tx.send(LlmStreamEvent::Part(part.clone()));
                 }
             }
             if !state.full_text.is_empty() {
                 let block = StreamBlockIdentity::new(format!("text:{next_ordinal}"), next_ordinal);
-                tx.send(LlmStreamEvent::TextBlockStart {
+                tx.send(LlmStreamEvent::Block(StreamBlockEvent::Started {
+                    kind: StreamBlockKind::AssistantText,
                     block: block.clone(),
-                });
-                tx.send(LlmStreamEvent::Delta {
+                }));
+                tx.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::AssistantText,
                     block: block.clone(),
                     text: state.full_text.clone(),
-                });
-                tx.send(LlmStreamEvent::TextBlockEnd {
+                }));
+                tx.send(LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                    kind: StreamBlockKind::AssistantText,
                     block,
                     text: state.full_text.clone(),
-                });
+                }));
             }
         }
         for part in parts

@@ -5,6 +5,7 @@
 //! deleted with the engine double).
 
 use super::*;
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 
 use crate::support::TurnInput;
 use lash_core::llm::transport::LlmTransportError;
@@ -854,14 +855,16 @@ async fn standard_runtime_trace_records_stream_event_entries() -> Result<()> {
     let traced = Traced::new(
         mock_provider(vec![MockCall {
             stream_events: vec![
-                LlmStreamEvent::Delta {
+                LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::AssistantText,
                     block: StreamBlockIdentity::new("text:0", 0),
                     text: "Hello ".to_owned(),
-                },
-                LlmStreamEvent::Delta {
+                }),
+                LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::AssistantText,
                     block: StreamBlockIdentity::new("text:0", 0),
                     text: "world".to_owned(),
-                },
+                }),
                 LlmStreamEvent::Part(LlmOutputPart::Text {
                     text: "Hello world".to_owned(),
                     response_meta: None,
@@ -903,20 +906,21 @@ async fn standard_runtime_trace_records_stream_event_entries() -> Result<()> {
     let entries = traced.entries();
     let stream_events = of_type(&entries, "runtime_stream_event");
     assert!(
-        stream_events
-            .iter()
-            .any(|entry| entry["event"]["event_name"] == "delta"
-                && entry["event"]["raw_text"] == "Hello "),
-        "expected delta stream event in trace: {entries:?}"
+        stream_events.iter().any(|entry| {
+            let payload = &entry["event"]["payload"];
+            payload["type"] == "block"
+                && payload["event"]["phase"] == "delta"
+                && payload["event"]["kind"] == "assistant_text"
+                && payload["event"]["block"]["ordinal"].is_u64()
+                && payload["raw_text"] == "Hello "
+        }),
+        "expected the block delta, with its full identity, in trace: {entries:?}"
     );
     assert!(
-        stream_events
-            .iter()
-            .any(|entry| entry["event"]["event_name"] == "text_part"
-                && entry["event"]["raw_text"] == "Hello world"
-                && entry["event"]
-                    .get("visible_text")
-                    .is_none_or(serde_json::Value::is_null)),
+        stream_events.iter().any(|entry| {
+            let payload = &entry["event"]["payload"];
+            payload["type"] == "text_part" && payload["text"] == "Hello world"
+        }),
         "expected text_part stream event in trace: {entries:?}"
     );
     let response_entry = *of_type(&entries, "llm_call_completed")
@@ -1125,14 +1129,16 @@ async fn standard_runtime_trace_omits_stream_event_entries_by_default() -> Resul
     let traced = Traced::new(
         mock_provider(vec![MockCall {
             stream_events: vec![
-                LlmStreamEvent::Delta {
+                LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::AssistantText,
                     block: StreamBlockIdentity::new("text:0", 0),
                     text: "Hello ".to_owned(),
-                },
-                LlmStreamEvent::Delta {
+                }),
+                LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::AssistantText,
                     block: StreamBlockIdentity::new("text:0", 0),
                     text: "world".to_owned(),
-                },
+                }),
             ],
             response: Ok(text_response("Hello world")),
         }])

@@ -10,6 +10,7 @@
     reason = "test target: the fixtures around the laws are test code too"
 )]
 
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -112,17 +113,23 @@ fn text(id: &str, text: &str) -> SessionObservationEventPayload {
     SessionObservationEventPayload::TurnActivity(TurnActivity {
         id: TurnActivityId::new(id),
         correlation_id: TurnActivityId::new("text:0"),
-        event: TurnEvent::AssistantProseDelta {
+        event: TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+            kind: StreamBlockKind::AssistantText,
             text: text.into(),
             block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
-        },
+        }),
     })
 }
 
 fn label(event: &SessionObservationEvent) -> String {
     match &event.payload {
         SessionObservationEventPayload::TurnActivity(TurnActivity {
-            event: TurnEvent::AssistantProseDelta { text, .. },
+            event:
+                TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::AssistantText,
+                    text,
+                    ..
+                }),
             ..
         }) => text.to_string(),
         other => format!("{other:?}"),

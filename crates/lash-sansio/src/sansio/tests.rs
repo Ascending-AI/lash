@@ -1,5 +1,7 @@
+use crate::ReportedFailure;
 use crate::SessionId;
 use crate::TurnId;
+use crate::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -1082,7 +1084,7 @@ fn output_limit_stops_as_incomplete_without_assistant_message() {
     );
     assert!(effects.iter().any(|effect| matches!(
         effect,
-        Effect::Emit(SessionStreamEvent::TextDelta { content, .. }) if content == "partial"
+        Effect::Emit(SessionStreamEvent::StreamBlock(StreamBlockEvent::Delta { kind: StreamBlockKind::AssistantText,text: content, .. })) if content == "partial"
     )));
     assert!(effects.iter().any(|effect| matches!(
         effect,
@@ -1092,10 +1094,10 @@ fn output_limit_stops_as_incomplete_without_assistant_message() {
     )));
     assert!(effects.iter().any(|effect| matches!(
         effect,
-        Effect::Emit(SessionStreamEvent::Error {
+        Effect::Emit(SessionStreamEvent::Error(ReportedFailure {
             envelope: Some(envelope),
             ..
-        }) if envelope.terminal_reason == Some(LlmTerminalReason::OutputLimit)
+        })) if envelope.terminal_reason == Some(LlmTerminalReason::OutputLimit)
     )));
 }
 
@@ -1131,10 +1133,10 @@ fn zero_output_limit_with_a_full_prompt_refines_to_context_overflow() {
     let effects = drain_effects(&mut machine);
     assert!(effects.iter().any(|effect| matches!(
         effect,
-        Effect::Emit(SessionStreamEvent::Error {
+        Effect::Emit(SessionStreamEvent::Error(ReportedFailure {
             envelope: Some(envelope),
             ..
-        }) if envelope.terminal_reason == Some(LlmTerminalReason::ContextOverflow)
+        })) if envelope.terminal_reason == Some(LlmTerminalReason::ContextOverflow)
     )));
     assert!(effects.iter().any(|effect| matches!(
         effect,
@@ -1179,10 +1181,10 @@ fn provider_prompt_subtotal_overflow_fails_the_turn_at_ingress() {
     assert!(machine.is_done());
     assert!(effects.iter().any(|effect| matches!(
         effect,
-        Effect::Emit(SessionStreamEvent::Error {
+        Effect::Emit(SessionStreamEvent::Error(ReportedFailure {
             envelope: Some(envelope),
             ..
-        }) if envelope.kind == crate::session_model::TurnFailureKind::TokenUsageAccounting
+        })) if envelope.kind == crate::session_model::TurnFailureKind::TokenUsageAccounting
             && envelope.code
                 == Some(crate::session_model::TurnFailureCode::TokenUsageOverflow.into())
             && envelope.user_message.contains("input_total_tokens")
@@ -1239,10 +1241,10 @@ fn context_overflow_response_stops_as_its_own_outcome() {
     );
     assert!(effects.iter().any(|effect| matches!(
         effect,
-        Effect::Emit(SessionStreamEvent::Error {
+        Effect::Emit(SessionStreamEvent::Error(ReportedFailure {
             envelope: Some(envelope),
             ..
-        }) if envelope.terminal_reason == Some(LlmTerminalReason::ContextOverflow)
+        })) if envelope.terminal_reason == Some(LlmTerminalReason::ContextOverflow)
     )));
 }
 
@@ -1327,7 +1329,7 @@ fn provider_error_is_live_but_absent_from_the_turn_checkpoint() {
     let live = drain_effects(&mut machine);
     assert!(live.iter().any(|effect| matches!(
         effect,
-        Effect::Emit(SessionStreamEvent::Error { message, .. }) if message.contains(SECRET)
+        Effect::Emit(SessionStreamEvent::Error(ReportedFailure { message, .. })) if message.contains(SECRET)
     )));
 }
 
@@ -1955,10 +1957,10 @@ fn a_recorded_sync_failure_fails_the_turn_under_its_own_code() {
     let envelope = effects
         .iter()
         .find_map(|effect| match effect {
-            Effect::Emit(SessionStreamEvent::Error {
+            Effect::Emit(SessionStreamEvent::Error(ReportedFailure {
                 envelope: Some(envelope),
                 ..
-            }) => Some(envelope),
+            })) => Some(envelope),
             _ => None,
         })
         .expect("the turn fails with an error envelope");

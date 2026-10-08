@@ -1,4 +1,6 @@
 use super::*;
+use lash_sansio::ReportedFailure;
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 
 pub(super) const STANDARD_CONTRACT_ROWS: &[FixedContractRow<TurnMachineContractExecutor>] = &[
     FixedContractRow {
@@ -345,14 +347,19 @@ impl StandardContractObserved {
                     self.checkpoints.push(checkpoint_kind_name(*checkpoint));
                 }
                 lash_core::Effect::Emit(
-                    lash_core::facade_support::SessionStreamEvent::TextDelta { content, .. },
+                    lash_core::facade_support::SessionStreamEvent::StreamBlock(
+                        StreamBlockEvent::Delta {
+                            kind: StreamBlockKind::AssistantText,
+                            text: content,
+                            ..
+                        },
+                    ),
                 ) => {
                     self.text_deltas.push(content.clone());
                 }
-                lash_core::Effect::Emit(lash_core::facade_support::SessionStreamEvent::Error {
-                    message,
-                    ..
-                }) => {
+                lash_core::Effect::Emit(lash_core::facade_support::SessionStreamEvent::Error(
+                    ReportedFailure { message, .. },
+                )) => {
                     self.errors.push(message.clone());
                 }
                 lash_core::Effect::Emit(

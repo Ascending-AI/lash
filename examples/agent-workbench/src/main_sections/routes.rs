@@ -2,6 +2,7 @@ use super::*;
 use lash::ProcessId;
 use lash::SessionId;
 use lash::TurnId;
+use lash::{StreamBlockEvent, StreamBlockKind};
 
 #[path = "routes/host_streams.rs"]
 mod host_streams;
@@ -980,7 +981,11 @@ pub(crate) struct TurnStreamProseChunk {
 impl TurnStreamState {
     pub(crate) fn apply(&mut self, activity: &TurnActivity) {
         match &activity.event {
-            TurnEvent::AssistantProseDelta { text, .. } => {
+            TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
+                text,
+                ..
+            }) => {
                 self.assistant_prose.push(TurnStreamProseChunk {
                     correlation_id: activity.correlation_id.clone(),
                     text: text.to_string(),
@@ -1051,18 +1056,20 @@ mod turn_stream_state_tests {
         };
         sink.emit(TurnActivity::new(
             lash::TurnActivityId::new("prior"),
-            TurnEvent::AssistantProseDelta {
+            TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
                 text: "kept ".into(),
                 block: lash::direct::StreamBlockIdentity::new("text:0", 0),
-            },
+            }),
         ))
         .await;
         sink.emit(TurnActivity::new(
             lash::TurnActivityId::new("failed"),
-            TurnEvent::AssistantProseDelta {
+            TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
                 text: "discarded ".into(),
                 block: lash::direct::StreamBlockIdentity::new("text:0", 0),
-            },
+            }),
         ))
         .await;
         sink.emit(TurnActivity::independent(TurnEvent::ModelAttemptReset {
@@ -1072,10 +1079,11 @@ mod turn_stream_state_tests {
         .await;
         sink.emit(TurnActivity::new(
             lash::TurnActivityId::new("successful"),
-            TurnEvent::AssistantProseDelta {
+            TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
                 text: "answer".into(),
                 block: lash::direct::StreamBlockIdentity::new("text:0", 0),
-            },
+            }),
         ))
         .await;
 
@@ -1090,10 +1098,11 @@ mod turn_stream_state_tests {
         };
         sink.emit(TurnActivity::new(
             lash::TurnActivityId::new("cancelled-attempt"),
-            TurnEvent::AssistantProseDelta {
+            TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
                 text: "provisional text".into(),
                 block: lash::direct::StreamBlockIdentity::new("text:0", 0),
-            },
+            }),
         ))
         .await;
         {
@@ -1108,10 +1117,11 @@ mod turn_stream_state_tests {
     async fn empty_reset_throttle_storm_is_boundary_evidence_not_retract_all() {
         let mut activities = vec![TurnActivity::new(
             lash::TurnActivityId::new("visible-before-boundaries"),
-            TurnEvent::AssistantProseDelta {
+            TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
                 text: "must remain visible".into(),
                 block: lash::direct::StreamBlockIdentity::new("text:0", 0),
-            },
+            }),
         )];
         activities.extend((0..11).map(|_| {
             TurnActivity::independent(TurnEvent::ModelAttemptReset {

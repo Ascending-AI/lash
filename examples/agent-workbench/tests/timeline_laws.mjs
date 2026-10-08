@@ -67,7 +67,7 @@ function streamTurn(view, time, turnId, { nonce = "nonce-1", text = "what is the
   timeline.sendAccepted(nonce, { accepted: true, queued: false, turn_id: turnId });
   time.advance(200);
   timeline.applyObservation(activity(turnId, { type: "turn_started" }));
-  timeline.applyObservation(activity(turnId, { type: "reasoning_delta", text: "Checking the forecast." }, "r1"));
+  timeline.applyObservation(activity(turnId, { type: "stream_block", phase: "delta", kind: "reasoning", text: "Checking the forecast." }, "r1"));
   time.advance(300);
   timeline.applyObservation(activity(turnId, { type: "code_block_started", language: "typescript", code: "await weather.forecast()" }));
   timeline.applyObservation(activity(turnId, {
@@ -84,9 +84,9 @@ function streamTurn(view, time, turnId, { nonce = "nonce-1", text = "what is the
   time.advance(500);
   beforeReply?.();
   time.advance(500);
-  timeline.applyObservation(activity(turnId, { type: "assistant_prose_delta", text: "It will be " }, "p1"));
+  timeline.applyObservation(activity(turnId, { type: "stream_block", phase: "delta", kind: "assistant_text", text: "It will be " }, "p1"));
   time.advance(100);
-  timeline.applyObservation(activity(turnId, { type: "assistant_prose_delta", text: "sunny." }, "p1"));
+  timeline.applyObservation(activity(turnId, { type: "stream_block", phase: "delta", kind: "assistant_text", text: "sunny." }, "p1"));
   time.advance(100);
   return {
     rows: [
@@ -125,11 +125,11 @@ export const laws = [
       const turn = "turn-code-before-reply";
       view.timeline.applyProductEvent(userInput(turn, "say hello in five words", time.now()));
       time.advance(100);
-      view.timeline.applyObservation(activity(turn, { type: "reasoning_delta", text: "Preparing a greeting." }, "r1"));
+      view.timeline.applyObservation(activity(turn, { type: "stream_block", phase: "delta", kind: "reasoning", text: "Preparing a greeting." }, "r1"));
       // Model prose can arrive before the cell it describes executes. Its
       // reply row still belongs after that turn's code and tool rows.
       time.advance(100);
-      view.timeline.applyObservation(activity(turn, { type: "assistant_prose_delta", text: "Hello there, wonderful curious friend." }, "p1"));
+      view.timeline.applyObservation(activity(turn, { type: "stream_block", phase: "delta", kind: "assistant_text", text: "Hello there, wonderful curious friend." }, "p1"));
       for (let index = 0; index < 2; index++) {
         time.advance(100);
         view.timeline.applyObservation(activity(turn, { type: "code_block_started", language: "typescript", code: `await greeting(${index})` }));
@@ -240,7 +240,7 @@ export const laws = [
       const removed = env.removals(view.list);
       const turn = "turn-redeliver";
       view.timeline.applyProductEvent(userInput(turn, "hello", time.now()));
-      const delta = activity(turn, { type: "assistant_prose_delta", text: "Hi " }, "p1");
+      const delta = activity(turn, { type: "stream_block", phase: "delta", kind: "assistant_text", text: "Hi " }, "p1");
       view.timeline.applyObservation(delta);
       view.timeline.applyObservation(delta);
       env.assert.equal(view.timeline.nodeOf(`reply:${turn}`).querySelector(".msg-text").textContent.trim(), "Hi");
@@ -309,7 +309,7 @@ export const laws = [
         type: "tool_call_started", call_id: "tc-approval", name: "mcp__parallel__web_fetch_y", args: { url: "x" }
       }));
       time.advance(200);
-      view.timeline.applyObservation(activity(turn, { type: "reasoning_delta", text: "Waiting on approval." }, "r2"));
+      view.timeline.applyObservation(activity(turn, { type: "stream_block", phase: "delta", kind: "reasoning", text: "Waiting on approval." }, "r2"));
       view.timeline.setApprovals([{
         key: "approval-1", tool: "workbench_ops_apply_change", call_id: "tc-approval", arguments: { target: "x" },
         requesting_session: "laws", requested_at_ms: T0, age_ms: 10

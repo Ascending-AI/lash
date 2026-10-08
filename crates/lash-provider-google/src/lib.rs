@@ -29,6 +29,7 @@ mod tests {
     use request_support::{request, request_with_capability};
     mod epilogue;
     mod generation_tests;
+    use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
     use lash_sansio::sync::MutexExt;
 
     use std::num::NonZeroUsize;
@@ -489,7 +490,11 @@ mod tests {
         let exposed_deltas = exposed_events
             .iter()
             .filter_map(|event| match event {
-                LlmStreamEvent::ReasoningDelta { text, .. } => Some(text.as_str()),
+                LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::Reasoning,
+                    text,
+                    ..
+                }) => Some(text.as_str()),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -547,14 +552,16 @@ mod tests {
         assert!(!hidden.full_text().contains("carefully"));
         assert!(hidden_events.iter().all(|event| !matches!(
             event,
-            LlmStreamEvent::ReasoningDelta { .. }
-                | LlmStreamEvent::Part(LlmOutputPart::Reasoning { .. })
+            LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::Reasoning,
+                ..
+            }) | LlmStreamEvent::Part(LlmOutputPart::Reasoning { .. })
         )));
         for events in [&exposed_events, &hidden_events] {
             assert!(events.iter().all(|event| {
                 !matches!(
                     event,
-                    LlmStreamEvent::Delta { text, .. }
+                    LlmStreamEvent::Block(StreamBlockEvent::Delta { kind: StreamBlockKind::AssistantText,text, .. })
                         if text.contains("plan é") || text.contains("carefully")
                 )
             }));
@@ -649,8 +656,16 @@ mod tests {
         let visible = events
             .iter()
             .filter_map(|event| match event {
-                LlmStreamEvent::ReasoningDelta { text, .. } => Some(("reasoning", text.as_str())),
-                LlmStreamEvent::Delta { text, .. } => Some(("text", text.as_str())),
+                LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::Reasoning,
+                    text,
+                    ..
+                }) => Some(("reasoning", text.as_str())),
+                LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::AssistantText,
+                    text,
+                    ..
+                }) => Some(("text", text.as_str())),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -700,7 +715,10 @@ mod tests {
         let boundary_order = events
             .iter()
             .filter_map(|event| match event {
-                LlmStreamEvent::ReasoningDelta { .. } => Some("reasoning_delta"),
+                LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::Reasoning,
+                    ..
+                }) => Some("reasoning_delta"),
                 LlmStreamEvent::Part(LlmOutputPart::Reasoning { .. }) => Some("reasoning_part"),
                 LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. }) => Some("tool_call"),
                 _ => None,

@@ -8,6 +8,7 @@
 //! SSE stream. Both end in the shared response assembly, and `Auto` falls back
 //! from the first to the second only while no stream events have been seen.
 
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -803,14 +804,20 @@ impl CodexProvider {
                             if text.is_empty() {
                                 continue;
                             }
-                            tx.send(LlmStreamEvent::ReasoningBlockStart {
+                            tx.send(LlmStreamEvent::Block(StreamBlockEvent::Started {
+                                kind: StreamBlockKind::Reasoning,
                                 block: block.clone(),
-                            });
-                            tx.send(LlmStreamEvent::ReasoningDelta {
+                            }));
+                            tx.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                                kind: StreamBlockKind::Reasoning,
                                 block: block.clone(),
                                 text: text.clone(),
-                            });
-                            tx.send(LlmStreamEvent::ReasoningBlockEnd { block, text });
+                            }));
+                            tx.send(LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                                kind: StreamBlockKind::Reasoning,
+                                block,
+                                text,
+                            }));
                         }
                         tx.send(LlmStreamEvent::Part(part.clone()));
                     }
@@ -832,17 +839,20 @@ impl CodexProvider {
                         response_meta.as_ref().and_then(|meta| meta.id.as_deref()),
                         &mut next_ordinal,
                     );
-                    tx.send(LlmStreamEvent::TextBlockStart {
+                    tx.send(LlmStreamEvent::Block(StreamBlockEvent::Started {
+                        kind: StreamBlockKind::AssistantText,
                         block: block.clone(),
-                    });
-                    tx.send(LlmStreamEvent::Delta {
+                    }));
+                    tx.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                        kind: StreamBlockKind::AssistantText,
                         block: block.clone(),
                         text: text.clone(),
-                    });
-                    tx.send(LlmStreamEvent::TextBlockEnd {
+                    }));
+                    tx.send(LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                        kind: StreamBlockKind::AssistantText,
                         block,
                         text: text.clone(),
-                    });
+                    }));
                 }
             }
             let terminal_reason = openai_terminal_reason_from_response_value(&value, &parts);

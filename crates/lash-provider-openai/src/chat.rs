@@ -4,6 +4,7 @@ use lash_core::facade_support::{
     ModelToolReturnPart, SchemaResolutionRequest, resolve_schema, tool_result_text,
 };
 use lash_core::llm::types::ExecutionEvidenceMergeError;
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::borrow::Cow;
 
 const PROVIDER: &str = "OpenAI-compatible";
@@ -935,7 +936,11 @@ impl ChatStreamState {
     fn close_reasoning_block(&mut self) {
         if let Some((block, text)) = self.reasoning_block.take() {
             self.block_events
-                .push(LlmStreamEvent::ReasoningBlockEnd { block, text });
+                .push(LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                    kind: StreamBlockKind::Reasoning,
+                    block,
+                    text,
+                }));
         }
     }
 
@@ -946,19 +951,23 @@ impl ChatStreamState {
         self.close_reasoning_block();
         if self.text_block.is_none() {
             let block = self.mint_block("text");
-            self.block_events.push(LlmStreamEvent::TextBlockStart {
-                block: block.clone(),
-            });
+            self.block_events
+                .push(LlmStreamEvent::Block(StreamBlockEvent::Started {
+                    kind: StreamBlockKind::AssistantText,
+                    block: block.clone(),
+                }));
             self.text_block = Some(block);
         }
         let Some(block) = self.text_block.clone() else {
             return;
         };
         self.full_text.push_str(piece);
-        self.block_events.push(LlmStreamEvent::Delta {
-            block,
-            text: piece.to_string(),
-        });
+        self.block_events
+            .push(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
+                block,
+                text: piece.to_string(),
+            }));
     }
 
     pub(crate) fn push_reasoning_delta(&mut self, piece: &str) {
@@ -967,9 +976,11 @@ impl ChatStreamState {
         }
         if self.reasoning_block.is_none() {
             let block = self.mint_block("reasoning");
-            self.block_events.push(LlmStreamEvent::ReasoningBlockStart {
-                block: block.clone(),
-            });
+            self.block_events
+                .push(LlmStreamEvent::Block(StreamBlockEvent::Started {
+                    kind: StreamBlockKind::Reasoning,
+                    block: block.clone(),
+                }));
             self.reasoning_block = Some((block, String::new()));
         }
         let Some((block, block_text)) = self.reasoning_block.as_mut() else {
@@ -977,10 +988,12 @@ impl ChatStreamState {
         };
         self.reasoning_text.push_str(piece);
         block_text.push_str(piece);
-        self.block_events.push(LlmStreamEvent::ReasoningDelta {
-            block: block.clone(),
-            text: piece.to_string(),
-        });
+        self.block_events
+            .push(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::Reasoning,
+                block: block.clone(),
+                text: piece.to_string(),
+            }));
     }
 
     /// Seals any blocks still open when the stream ends, carrying the
@@ -988,10 +1001,12 @@ impl ChatStreamState {
     pub(crate) fn finish_blocks(&mut self) -> Vec<LlmStreamEvent> {
         self.close_reasoning_block();
         if let Some(block) = self.text_block.take() {
-            self.block_events.push(LlmStreamEvent::TextBlockEnd {
-                block,
-                text: self.full_text.clone(),
-            });
+            self.block_events
+                .push(LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                    kind: StreamBlockKind::AssistantText,
+                    block,
+                    text: self.full_text.clone(),
+                }));
         }
         self.take_block_events()
     }

@@ -22,6 +22,7 @@
 //! classification. Both send a tool result as one `function_call_output`
 //! whose `output` carries the result's images in order.
 
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
@@ -631,7 +632,7 @@ impl ResponsesStreamState {
 
     /// The assistant-text block for one message item: `message:{item_id}` when
     /// the server named the item, else a deterministic per-response ordinal.
-    /// Minted once per slot owner; the first use emits `TextBlockStart`.
+    /// Minted once per slot owner; the first use emits the block start.
     fn text_block(&mut self, owner: usize, item_id: Option<&str>) -> StreamBlockIdentity {
         if let Some(block) = self.text_blocks.get(&owner) {
             return block.clone();
@@ -647,9 +648,11 @@ impl ResponsesStreamState {
         )
         .with_item_id(item_id.map(str::to_string));
         self.text_blocks.insert(owner, block.clone());
-        self.block_events.push(LlmStreamEvent::TextBlockStart {
-            block: block.clone(),
-        });
+        self.block_events
+            .push(LlmStreamEvent::Block(StreamBlockEvent::Started {
+                kind: StreamBlockKind::AssistantText,
+                block: block.clone(),
+            }));
         block
     }
 
@@ -669,9 +672,11 @@ impl ResponsesStreamState {
             ordinal,
         )
         .with_item_id(item_id.map(str::to_string));
-        self.block_events.push(LlmStreamEvent::ReasoningBlockStart {
-            block: block.clone(),
-        });
+        self.block_events
+            .push(LlmStreamEvent::Block(StreamBlockEvent::Started {
+                kind: StreamBlockKind::Reasoning,
+                block: block.clone(),
+            }));
         self.current_reasoning_block = Some((block, summary_index, String::new()));
     }
 
@@ -681,10 +686,12 @@ impl ResponsesStreamState {
         let Some((block, _, text)) = self.current_reasoning_block.take() else {
             return;
         };
-        self.block_events.push(LlmStreamEvent::ReasoningBlockEnd {
-            block,
-            text: text.trim_end().to_string(),
-        });
+        self.block_events
+            .push(LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                kind: StreamBlockKind::Reasoning,
+                block,
+                text: text.trim_end().to_string(),
+            }));
     }
 
     pub fn begin_message(&mut self, item: Option<&Value>, output_index: Option<usize>) {
@@ -722,10 +729,12 @@ impl ResponsesStreamState {
                         _ => None,
                     })
                     .unwrap_or_default();
-                self.block_events.push(LlmStreamEvent::TextBlockEnd {
-                    block,
-                    text: authoritative,
-                });
+                self.block_events
+                    .push(LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                        kind: StreamBlockKind::AssistantText,
+                        block,
+                        text: authoritative,
+                    }));
                 self.sealed_text_owners.insert(owner);
             }
         }
@@ -748,10 +757,12 @@ impl ResponsesStreamState {
             .map(|owner| self.text_block(owner, item_id));
         self.append_text_delta_to_part(part_index, piece);
         if let Some(block) = block {
-            self.block_events.push(LlmStreamEvent::Delta {
-                block,
-                text: piece.to_string(),
-            });
+            self.block_events
+                .push(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::AssistantText,
+                    block,
+                    text: piece.to_string(),
+                }));
         }
     }
 
@@ -791,10 +802,12 @@ impl ResponsesStreamState {
             let block = owner.map(|owner| self.text_block(owner, None));
             self.append_text_delta_to_part(part_index, suffix);
             if let Some(block) = block {
-                self.block_events.push(LlmStreamEvent::Delta {
-                    block,
-                    text: suffix.to_string(),
-                });
+                self.block_events
+                    .push(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                        kind: StreamBlockKind::AssistantText,
+                        block,
+                        text: suffix.to_string(),
+                    }));
             }
             return;
         }
@@ -1061,10 +1074,12 @@ impl ResponsesStreamState {
         }
         if let Some((block, _, block_text)) = self.current_reasoning_block.as_mut() {
             block_text.push_str(delta);
-            self.block_events.push(LlmStreamEvent::ReasoningDelta {
-                block: block.clone(),
-                text: delta.to_string(),
-            });
+            self.block_events
+                .push(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::Reasoning,
+                    block: block.clone(),
+                    text: delta.to_string(),
+                }));
         }
     }
 
@@ -1161,9 +1176,8 @@ impl ResponsesStreamState {
         Some(part.clone())
     }
 
-    /// Drains the block-boundary events (`TextBlockStart`/`Delta`/
-    /// `TextBlockEnd`, `ReasoningBlockStart`/`ReasoningDelta`/
-    /// `ReasoningBlockEnd`) minted while folding the last SSE event.
+    /// Drains the assistant-text and reasoning block events minted while
+    /// folding the last SSE event.
     pub fn take_block_events(&mut self) -> Vec<LlmStreamEvent> {
         std::mem::take(&mut self.block_events)
     }
@@ -1195,7 +1209,11 @@ impl ResponsesStreamState {
                 })
                 .unwrap_or_default();
             self.block_events
-                .push(LlmStreamEvent::TextBlockEnd { block, text });
+                .push(LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                    kind: StreamBlockKind::AssistantText,
+                    block,
+                    text,
+                }));
         }
         self.sealed_text_owners
             .extend(self.text_blocks.keys().copied());

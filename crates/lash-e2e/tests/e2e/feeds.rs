@@ -66,7 +66,10 @@ fn cursor(line: &Value) -> &Value {
 
 /// Whether `line` carries live model stream activity (not a durable row).
 fn streamed(line: &Value) -> bool {
-    line["type"] == "observation" && line["event"]["activity"]["type"] == "stream_block_started"
+    let activity = &line["event"]["activity"];
+    line["type"] == "observation"
+        && activity["type"] == "stream_block"
+        && activity["phase"] == "started"
 }
 
 /// The workbench transcript `node` serves.

@@ -2,6 +2,7 @@
 //! inside the production line budget.
 
 use super::*;
+use crate::llm::types::{StreamBlockEvent, StreamBlockKind};
 
 impl InMemoryLiveReplayStore {
     async fn publish_test_event(
@@ -25,10 +26,11 @@ impl InMemoryLiveReplayStore {
 
 fn activity(text: &str) -> SessionObservationEventPayload {
     SessionObservationEventPayload::TurnActivity(crate::TurnActivity::independent(
-        crate::TurnEvent::AssistantProseDelta {
+        crate::TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+            kind: StreamBlockKind::AssistantText,
             text: text.into(),
             block: crate::llm::types::StreamBlockIdentity::new("text:0", 0),
-        },
+        }),
     ))
 }
 
@@ -39,10 +41,11 @@ fn activity_with_id(id: &str, text: &str) -> SessionObservationEventPayload {
     SessionObservationEventPayload::TurnActivity(crate::TurnActivity {
         id: crate::TurnActivityId::new(id.to_string()),
         correlation_id: crate::TurnActivityId::new(id.to_string()),
-        event: crate::TurnEvent::AssistantProseDelta {
+        event: crate::TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+            kind: StreamBlockKind::AssistantText,
             text: text.into(),
             block: crate::llm::types::StreamBlockIdentity::new("text:0", 0),
-        },
+        }),
     })
 }
 
@@ -155,7 +158,12 @@ fn activity_texts(events: &[Arc<SessionObservationEvent>]) -> Vec<String> {
         .map(|event| match &event.payload {
             SessionObservationEventPayload::TurnActivity(crate::TurnActivity {
                 id,
-                event: crate::TurnEvent::AssistantProseDelta { text, .. },
+                event:
+                    crate::TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                        kind: StreamBlockKind::AssistantText,
+                        text,
+                        ..
+                    }),
                 ..
             }) => format!("{}={text}", id.0),
             other => format!("{other:?}"),
@@ -379,8 +387,12 @@ async fn in_memory_replay_subscription_yields_replay_then_live() {
         .expect("live");
     match &second.payload {
         SessionObservationEventPayload::TurnActivity(activity) => match &activity.event {
-            crate::TurnEvent::AssistantProseDelta { text, .. } => {
-                assert_eq!(text.as_ref(), "b")
+            crate::TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
+                text,
+                ..
+            }) => {
+                assert_eq!(text.as_str(), "b")
             }
             _ => panic!("wrong event"),
         },

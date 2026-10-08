@@ -5,12 +5,15 @@
 //! delivery lag without changing transcript content. Pending deltas therefore
 //! coalesce losslessly by correlation; they are never committed state.
 
+use crate::RetryProgress;
+use crate::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::sync::Arc;
 
 use futures_util::FutureExt as _;
 
 use lash_trace::{
     TraceError, TraceEvent, TraceProviderBodyOmission, TraceProviderEvent, TraceRuntimeStreamEvent,
+    TraceRuntimeStreamPayload,
 };
 
 use super::*;
@@ -21,7 +24,7 @@ mod support;
 use support::*;
 mod terminal;
 
-use host_forwarder::{ProviderDeltaClass, ProviderHostForwarder};
+use host_forwarder::ProviderHostForwarder;
 use lash_sansio::session_model::{FailureCode, TurnFailureCode};
 use terminal::{observed_stream_protocol_position, synthesize_protocol_abort};
 
@@ -778,50 +781,24 @@ impl RuntimeTurnDriver<'_> {
         }
     }
 
-    fn log_llm_stream_event(&self, debug: &mut LlmStreamDebugState, log: LlmStreamEventLog<'_>) {
-        if !self.trace.is_observed() {
+    /// Record one decoded stream event on the extended trace. `payload` is
+    /// built only when a sink will take it.
+    fn trace_stream_event(
+        &self,
+        state: &mut LlmStreamState<'_>,
+        payload: impl FnOnce() -> TraceRuntimeStreamPayload,
+    ) {
+        if !self.trace.is_observed() || !self.trace.level().is_extended() {
             return;
         }
-
-        let elapsed_ms = debug.elapsed_ms(self.host.core.clock.as_ref());
-        if matches!(log.event_type, "delta") {
-            debug
-                .summary
-                .record_text_chunk(log.text.visible, elapsed_ms);
-        }
-
-        if !self.trace.level().is_extended() {
-            return;
-        }
-
-        let mut event = TraceRuntimeStreamEvent {
-            sequence: debug.next_sequence(),
-            elapsed_ms,
-            event_name: log.event_type.to_string(),
-            raw_text: log.text.raw.map(str::to_string),
-            visible_text: log.text.visible.map(str::to_string),
-            item_id: log.item_id.map(str::to_string),
-            block_id: log.block_id.map(str::to_string),
-            output_index: None,
-            call_id: None,
-            tool_name: None,
-            input_json: None,
-            usage: log.usage.cloned(),
+        let event = TraceRuntimeStreamEvent {
+            sequence: state.debug.next_sequence(),
+            elapsed_ms: state.debug.elapsed_ms(self.host.core.clock.as_ref()),
+            payload: payload(),
         };
-
-        if let Some(tool_call) = log.tool_call {
-            event.call_id = Some(tool_call.call_id.to_string());
-            event.tool_name = Some(tool_call.tool_name.to_string());
-            event.input_json = Some(
-                serde_json::from_str(tool_call.input_json).unwrap_or_else(|_| {
-                    serde_json::Value::String(tool_call.input_json.to_string())
-                }),
-            );
-        }
-
         self.trace.observe(|| {
             (
-                self.trace_context(log.protocol_iteration),
+                self.trace_context(state.protocol_iteration),
                 TraceEvent::RuntimeStreamEvent { event },
             )
         });
@@ -902,7 +879,6 @@ impl RuntimeTurnDriver<'_> {
         forwarder: &mut ProviderHostForwarder<'_>,
         text: String,
         block: &StreamBlockIdentity,
-        event_type: &'static str,
         state: &mut LlmStreamState<'_>,
     ) -> Result<(), LlmCallError> {
         if text.is_empty() {
@@ -923,36 +899,30 @@ impl RuntimeTurnDriver<'_> {
         }
         self.forward_plugin_reasoning(forwarder, outcome.reasoning_deltas, state)
             .await;
-        let text = outcome.chunk;
-        self.log_llm_stream_event(
-            state.debug,
-            LlmStreamEventLog {
-                protocol_iteration: state.protocol_iteration,
-                event_type,
-                text: LlmDebugText {
-                    raw: raw_text.as_deref(),
-                    visible: Some(&text),
-                },
-                item_id: block.item_id.as_deref(),
-                block_id: Some(block.id.as_str()),
-                usage: None,
-                tool_call: None,
-            },
-        );
-        if !text.is_empty() {
+        let event =
+            StreamBlockEvent::delta(StreamBlockKind::AssistantText, block.clone(), outcome.chunk);
+        if self.trace.is_observed() {
+            let elapsed_ms = state.debug.elapsed_ms(self.host.core.clock.as_ref());
+            state
+                .debug
+                .summary
+                .record_text_chunk(event.delta_text(), elapsed_ms);
+        }
+        self.trace_stream_event(state, || TraceRuntimeStreamPayload::Block {
+            event: event.clone(),
+            raw_text,
+        });
+        if event.delta_text().is_some_and(|text| !text.is_empty()) {
             fold_llm_stream_event(
                 state.stream_accumulator,
                 state.streamed_usage,
-                &LlmStreamEvent::Delta {
-                    block: block.clone(),
-                    text: text.clone(),
-                },
+                &LlmStreamEvent::Block(event.clone()),
             );
             remember_attempt_correlation(
                 state.assistant_prose_attempt_correlations,
                 &TurnActivityId::stream_block(forwarder.stream_key(), block),
             );
-            forwarder.forward_delta(ProviderDeltaClass::AssistantProse, block.clone(), text);
+            forwarder.forward_block(event);
         }
         Ok(())
     }
@@ -976,29 +946,49 @@ impl RuntimeTurnDriver<'_> {
             format!("plugin-reasoning:{}:{}", state.protocol_iteration, index),
             PLUGIN_BLOCK_ORDINAL_BASE + index,
         );
+        let kind = StreamBlockKind::Reasoning;
         state.reasoning_publication.record_streamed_block(&block);
         remember_attempt_correlation(
             state.reasoning_attempt_correlations,
             &TurnActivityId::stream_block(forwarder.stream_key(), &block),
         );
-        forwarder.forward_block_start(ProviderDeltaClass::Reasoning, block.clone());
+        forwarder.forward_block(StreamBlockEvent::started(kind, block.clone()));
         let mut block_text = String::new();
         for delta in reasoning_deltas {
             if delta.is_empty() {
                 continue;
             }
             block_text.push_str(&delta);
+            let event = StreamBlockEvent::delta(kind, block.clone(), delta);
             fold_llm_stream_event(
                 state.stream_accumulator,
                 state.streamed_usage,
-                &LlmStreamEvent::ReasoningDelta {
-                    block: block.clone(),
-                    text: delta.clone(),
-                },
+                &LlmStreamEvent::Block(event.clone()),
             );
-            forwarder.forward_delta(ProviderDeltaClass::Reasoning, block.clone(), delta);
+            forwarder.forward_block(event);
         }
-        forwarder.forward_block_end(ProviderDeltaClass::Reasoning, block, block_text);
+        forwarder.forward_block(StreamBlockEvent::completed(kind, block, block_text));
+    }
+
+    /// Remember `block` as part of the running attempt, so a provider retry
+    /// retracts it.
+    fn remember_attempt_block(
+        forwarder: &ProviderHostForwarder<'_>,
+        kind: StreamBlockKind,
+        block: &StreamBlockIdentity,
+        state: &mut LlmStreamState<'_>,
+    ) {
+        let correlations = match kind {
+            StreamBlockKind::AssistantText => &mut *state.assistant_prose_attempt_correlations,
+            StreamBlockKind::Reasoning => {
+                state.reasoning_publication.record_streamed_block(block);
+                &mut *state.reasoning_attempt_correlations
+            }
+        };
+        remember_attempt_correlation(
+            correlations,
+            &TurnActivityId::stream_block(forwarder.stream_key(), block),
+        );
     }
 
     async fn forward_provider_stream_event(
@@ -1031,31 +1021,35 @@ impl RuntimeTurnDriver<'_> {
                 *state.plugin_reasoning_blocks = 0;
                 *state.completed_part_index = 0;
             }
-            LlmStreamEvent::TextBlockStart { block } => {
-                *state.text_streamed = true;
+            LlmStreamEvent::Block(event @ StreamBlockEvent::Started { .. }) => {
+                if event.kind() == StreamBlockKind::AssistantText {
+                    *state.text_streamed = true;
+                }
+                Self::remember_attempt_block(forwarder, event.kind(), event.block(), state);
                 fold_llm_stream_event(
                     state.stream_accumulator,
                     state.streamed_usage,
-                    &LlmStreamEvent::TextBlockStart {
-                        block: block.clone(),
-                    },
+                    &LlmStreamEvent::Block(event.clone()),
                 );
-                remember_attempt_correlation(
-                    state.assistant_prose_attempt_correlations,
-                    &TurnActivityId::stream_block(forwarder.stream_key(), &block),
-                );
-                forwarder.forward_block_start(ProviderDeltaClass::AssistantProse, block);
+                forwarder.forward_block(event);
             }
-            LlmStreamEvent::Delta { block, text } => {
-                self.emit_visible_assistant_text(forwarder, text, &block, "delta", state)
+            LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
+                block,
+                text,
+            }) => {
+                self.emit_visible_assistant_text(forwarder, text, &block, state)
                     .await?;
             }
-            LlmStreamEvent::TextBlockEnd { block, text } => {
+            LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                kind: kind @ StreamBlockKind::AssistantText,
+                block,
+                text,
+            }) => {
                 // The end event's text is authoritative for the block. Only
                 // content beyond what streamed as deltas may go through the
                 // plugin stream transform — a stateful chunk hook must never
                 // see the same text twice.
-                let raw_text = self.trace.is_observed().then(|| text.clone());
                 let raw_accumulated = state
                     .block_raw_text
                     .get(&block.id)
@@ -1067,7 +1061,7 @@ impl RuntimeTurnDriver<'_> {
                     // only the unseen tail — covers zero-delta blocks and
                     // non-streamed final-message reconciliation alike.
                     let tail = text[raw_accumulated.len()..].to_string();
-                    self.emit_visible_assistant_text(forwarder, tail, &block, "delta", state)
+                    self.emit_visible_assistant_text(forwarder, tail, &block, state)
                         .await?;
                 }
                 // Prefix extensions seal with the post-transform total hosts
@@ -1081,135 +1075,56 @@ impl RuntimeTurnDriver<'_> {
                 } else {
                     text.clone()
                 };
-                self.log_llm_stream_event(
-                    state.debug,
-                    LlmStreamEventLog {
-                        protocol_iteration: state.protocol_iteration,
-                        event_type: "text_block_end",
-                        text: LlmDebugText {
-                            raw: raw_text.as_deref(),
-                            visible: Some(&sealed),
-                        },
-                        item_id: block.item_id.as_deref(),
-                        block_id: Some(block.id.as_str()),
-                        usage: None,
-                        tool_call: None,
-                    },
-                );
+                let sealed = StreamBlockEvent::completed(kind, block.clone(), sealed);
+                self.trace_stream_event(state, || TraceRuntimeStreamPayload::Block {
+                    event: sealed.clone(),
+                    raw_text: Some(text.clone()),
+                });
                 *state.text_streamed = true;
+                Self::remember_attempt_block(forwarder, kind, &block, state);
                 fold_llm_stream_event(
                     state.stream_accumulator,
                     state.streamed_usage,
-                    &LlmStreamEvent::TextBlockEnd {
-                        block: block.clone(),
-                        text,
-                    },
+                    &LlmStreamEvent::Block(StreamBlockEvent::completed(kind, block, text)),
                 );
-                remember_attempt_correlation(
-                    state.assistant_prose_attempt_correlations,
-                    &TurnActivityId::stream_block(forwarder.stream_key(), &block),
-                );
-                forwarder.forward_block_end(ProviderDeltaClass::AssistantProse, block, sealed);
+                forwarder.forward_block(sealed);
             }
-            LlmStreamEvent::ReasoningBlockStart { block } => {
-                state.reasoning_publication.record_streamed_block(&block);
-                fold_llm_stream_event(
-                    state.stream_accumulator,
-                    state.streamed_usage,
-                    &LlmStreamEvent::ReasoningBlockStart {
-                        block: block.clone(),
-                    },
-                );
-                remember_attempt_correlation(
-                    state.reasoning_attempt_correlations,
-                    &TurnActivityId::stream_block(forwarder.stream_key(), &block),
-                );
-                forwarder.forward_block_start(ProviderDeltaClass::Reasoning, block);
-            }
-            LlmStreamEvent::ReasoningDelta { block, text } => {
-                state.reasoning_publication.record_streamed_block(&block);
-                if !text.is_empty() {
-                    self.log_llm_stream_event(
-                        state.debug,
-                        LlmStreamEventLog {
-                            protocol_iteration: state.protocol_iteration,
-                            event_type: "reasoning_delta",
-                            text: LlmDebugText {
-                                raw: None,
-                                visible: Some(&text),
-                            },
-                            item_id: block.item_id.as_deref(),
-                            block_id: Some(block.id.as_str()),
-                            usage: None,
-                            tool_call: None,
-                        },
-                    );
-                    fold_llm_stream_event(
-                        state.stream_accumulator,
-                        state.streamed_usage,
-                        &LlmStreamEvent::ReasoningDelta {
-                            block: block.clone(),
-                            text: text.clone(),
-                        },
-                    );
-                    remember_attempt_correlation(
-                        state.reasoning_attempt_correlations,
-                        &TurnActivityId::stream_block(forwarder.stream_key(), &block),
-                    );
-                    forwarder.forward_delta(ProviderDeltaClass::Reasoning, block, text);
+            LlmStreamEvent::Block(
+                event @ (StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::Reasoning,
+                    ..
                 }
-            }
-            LlmStreamEvent::ReasoningBlockEnd { block, text } => {
-                state.reasoning_publication.record_streamed_block(&block);
-                self.log_llm_stream_event(
-                    state.debug,
-                    LlmStreamEventLog {
-                        protocol_iteration: state.protocol_iteration,
-                        event_type: "reasoning_block_end",
-                        text: LlmDebugText {
-                            raw: None,
-                            visible: Some(&text),
-                        },
-                        item_id: block.item_id.as_deref(),
-                        block_id: Some(block.id.as_str()),
-                        usage: None,
-                        tool_call: None,
-                    },
-                );
+                | StreamBlockEvent::Completed {
+                    kind: StreamBlockKind::Reasoning,
+                    ..
+                }),
+            ) => {
+                state
+                    .reasoning_publication
+                    .record_streamed_block(event.block());
+                if event.delta_text().is_some_and(str::is_empty) {
+                    return Ok(());
+                }
+                self.trace_stream_event(state, || TraceRuntimeStreamPayload::Block {
+                    event: event.clone(),
+                    raw_text: None,
+                });
+                Self::remember_attempt_block(forwarder, event.kind(), event.block(), state);
                 fold_llm_stream_event(
                     state.stream_accumulator,
                     state.streamed_usage,
-                    &LlmStreamEvent::ReasoningBlockEnd {
-                        block: block.clone(),
-                        text: text.clone(),
-                    },
+                    &LlmStreamEvent::Block(event.clone()),
                 );
-                remember_attempt_correlation(
-                    state.reasoning_attempt_correlations,
-                    &TurnActivityId::stream_block(forwarder.stream_key(), &block),
-                );
-                forwarder.forward_block_end(ProviderDeltaClass::Reasoning, block, text);
+                forwarder.forward_block(event);
             }
             LlmStreamEvent::Part(LlmOutputPart::Text {
                 text,
                 response_meta,
             }) => {
-                let item_id = response_meta.as_ref().and_then(|meta| meta.id.clone());
-                self.log_llm_stream_event(
-                    state.debug,
-                    LlmStreamEventLog {
-                        protocol_iteration: state.protocol_iteration,
-                        event_type: "text_part",
-                        text: LlmDebugText {
-                            raw: Some(&text),
-                            visible: None,
-                        },
-                        item_id: item_id.as_deref(),
-                        block_id: None,
-                        usage: None,
-                        tool_call: None,
-                    },
-                );
+                self.trace_stream_event(state, || TraceRuntimeStreamPayload::TextPart {
+                    text: text.clone(),
+                    item_id: response_meta.as_ref().and_then(|meta| meta.id.clone()),
+                });
                 fold_llm_stream_event(
                     state.stream_accumulator,
                     state.streamed_usage,
@@ -1225,26 +1140,13 @@ impl RuntimeTurnDriver<'_> {
                 input_json,
                 replay,
             }) => {
-                let item_id = replay.as_ref().and_then(|meta| meta.item_id.as_deref());
-                self.log_llm_stream_event(
-                    state.debug,
-                    LlmStreamEventLog {
-                        protocol_iteration: state.protocol_iteration,
-                        event_type: "tool_call_part",
-                        text: LlmDebugText {
-                            raw: None,
-                            visible: None,
-                        },
-                        item_id,
-                        block_id: None,
-                        usage: None,
-                        tool_call: Some(LlmDebugToolCall {
-                            call_id: &call_id,
-                            tool_name: &tool_name,
-                            input_json: &input_json,
-                        }),
-                    },
-                );
+                self.trace_stream_event(state, || TraceRuntimeStreamPayload::ToolCallPart {
+                    call_id: call_id.clone(),
+                    tool_name: tool_name.clone(),
+                    input_json: serde_json::from_str(&input_json)
+                        .unwrap_or_else(|_| serde_json::Value::String(input_json.clone())),
+                    item_id: replay.as_ref().and_then(|meta| meta.item_id.clone()),
+                });
                 fold_llm_stream_event(
                     state.stream_accumulator,
                     state.streamed_usage,
@@ -1257,26 +1159,11 @@ impl RuntimeTurnDriver<'_> {
                 );
             }
             LlmStreamEvent::Part(LlmOutputPart::Reasoning { text, replay }) => {
-                let part = LlmOutputPart::Reasoning {
+                self.trace_stream_event(state, || TraceRuntimeStreamPayload::ReasoningPart {
                     text: text.clone(),
-                    replay: replay.clone(),
-                };
-                let item_id = replay.as_ref().and_then(|meta| meta.item_id.as_deref());
-                self.log_llm_stream_event(
-                    state.debug,
-                    LlmStreamEventLog {
-                        protocol_iteration: state.protocol_iteration,
-                        event_type: "reasoning_part",
-                        text: LlmDebugText {
-                            raw: Some(&text),
-                            visible: None,
-                        },
-                        item_id,
-                        block_id: None,
-                        usage: None,
-                        tool_call: None,
-                    },
-                );
+                    item_id: replay.as_ref().and_then(|meta| meta.item_id.clone()),
+                });
+                let part = LlmOutputPart::Reasoning { text, replay };
                 // Item-level completion: replay material (encrypted content,
                 // signatures, summary) rides here, while any of the item's
                 // blocks that never streamed publish now as complete blocks —
@@ -1289,19 +1176,16 @@ impl RuntimeTurnDriver<'_> {
                     &part,
                     &mut next_ordinal,
                 );
+                let kind = StreamBlockKind::Reasoning;
                 for (block, block_text) in unpublished {
-                    state.reasoning_publication.record_streamed_block(&block);
-                    remember_attempt_correlation(
-                        state.reasoning_attempt_correlations,
-                        &TurnActivityId::stream_block(forwarder.stream_key(), &block),
-                    );
-                    forwarder.forward_block_start(ProviderDeltaClass::Reasoning, block.clone());
-                    forwarder.forward_delta(
-                        ProviderDeltaClass::Reasoning,
+                    Self::remember_attempt_block(forwarder, kind, &block, state);
+                    forwarder.forward_block(StreamBlockEvent::started(kind, block.clone()));
+                    forwarder.forward_block(StreamBlockEvent::delta(
+                        kind,
                         block.clone(),
                         block_text.clone(),
-                    );
-                    forwarder.forward_block_end(ProviderDeltaClass::Reasoning, block, block_text);
+                    ));
+                    forwarder.forward_block(StreamBlockEvent::completed(kind, block, block_text));
                 }
                 fold_llm_stream_event(
                     state.stream_accumulator,
@@ -1310,21 +1194,9 @@ impl RuntimeTurnDriver<'_> {
                 );
             }
             LlmStreamEvent::Usage(usage) => {
-                self.log_llm_stream_event(
-                    state.debug,
-                    LlmStreamEventLog {
-                        protocol_iteration: state.protocol_iteration,
-                        event_type: "usage",
-                        text: LlmDebugText {
-                            raw: None,
-                            visible: None,
-                        },
-                        item_id: None,
-                        block_id: None,
-                        usage: Some(&usage),
-                        tool_call: None,
-                    },
-                );
+                self.trace_stream_event(state, || TraceRuntimeStreamPayload::Usage {
+                    usage: usage.clone(),
+                });
                 fold_llm_stream_event(
                     state.stream_accumulator,
                     state.streamed_usage,
@@ -1352,13 +1224,15 @@ impl RuntimeTurnDriver<'_> {
                 max_attempts,
                 reason,
             } => {
-                forwarder.send_semantic_session_event(SessionStreamEvent::RetryStatus {
-                    wait_seconds,
-                    attempt,
-                    max_attempts,
-                    reason,
-                    envelope: None,
-                });
+                forwarder.send_semantic_session_event(SessionStreamEvent::RetryStatus(
+                    RetryProgress {
+                        wait_seconds,
+                        attempt,
+                        max_attempts,
+                        reason,
+                        envelope: None,
+                    },
+                ));
             }
         }
         Ok(())

@@ -6,6 +6,8 @@ use crate::llm::types::{
     LlmRequestScope, LlmResponse, LlmRole, LlmStreamEvent, LlmToolChoice,
 };
 #[cfg(test)]
+use crate::llm::types::{StreamBlockEvent, StreamBlockKind};
+#[cfg(test)]
 use crate::provider::LlmProfileCapability;
 use crate::provider::{
     LlmProfileEffortValidationCategory, NoSlotDeliveries, ProviderHandle, SlotDeliveries,
@@ -1021,10 +1023,11 @@ mod tests {
         let llm_request = build_llm_request(request, profile("model")).unwrap();
         let sender = transport_stream_events_for_direct(&provider, llm_request.stream_events)
             .expect("explicit direct stream sender must be preserved");
-        sender.send(LlmStreamEvent::Delta {
+        sender.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+            kind: StreamBlockKind::AssistantText,
             block: lash_sansio::llm::types::StreamBlockIdentity::new("text:0", 0),
             text: "delta".to_string(),
-        });
+        }));
         assert_eq!(captured_events.lock_recover().len(), 1);
 
         let streaming_provider = TestProvider::builder()

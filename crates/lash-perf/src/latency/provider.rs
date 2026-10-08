@@ -11,6 +11,7 @@
 //! A provider call parks when its lane's [`LaneHold`] is armed — the `busy`
 //! case's way of keeping a run in flight behind the measured input.
 
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -254,17 +255,19 @@ impl LatencyProviderKind {
         match self {
             Self::Stream => {
                 for index in 0..STREAM_DELTAS {
-                    tx.send(LlmStreamEvent::Delta {
+                    tx.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                        kind: StreamBlockKind::AssistantText,
                         block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
                         text: format!("delta-{index:03} "),
-                    });
+                    }));
                 }
             }
             _ => {
-                tx.send(LlmStreamEvent::Delta {
+                tx.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::AssistantText,
                     block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
                     text: response_text(request),
-                });
+                }));
             }
         }
         tx.send(LlmStreamEvent::Usage(LlmUsage {

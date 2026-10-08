@@ -245,36 +245,13 @@ pub enum TurnEvent {
     CheckpointRecorded {
         protocol_iteration: usize,
     },
-    AssistantProseDelta {
-        text: Arc<str>,
-        /// Provider-minted identity of the assistant-text block this delta
-        /// belongs to. The activity's `correlation_id` names this block
-        /// within its model call's stream.
-        block: crate::llm::types::StreamBlockIdentity,
-    },
-    ReasoningDelta {
-        text: Arc<str>,
-        /// Provider-minted identity of the reasoning block this delta belongs
-        /// to. The activity's `correlation_id` names this block within its
-        /// model call's stream.
-        block: crate::llm::types::StreamBlockIdentity,
-    },
-    /// A provider-minted assistant-text or reasoning block opened. Hosts
-    /// render one block per streamed unit — an OpenAI reasoning summary part,
-    /// an Anthropic content block, or an ordinal run for providers with no
-    /// native notion. Merging adjacent blocks is a host rendering choice;
-    /// Lash injects no separators.
-    StreamBlockStarted {
-        kind: crate::llm::types::StreamBlockKind,
-        block: crate::llm::types::StreamBlockIdentity,
-    },
-    /// A streamed block closed; `text` is the block's authoritative text, so
-    /// hosts can correct drift from accumulated deltas.
-    StreamBlockCompleted {
-        kind: crate::llm::types::StreamBlockKind,
-        block: crate::llm::types::StreamBlockIdentity,
-        text: Arc<str>,
-    },
+    /// One step of a streamed assistant-text or reasoning block: the same
+    /// payload the session stream, the provider stream and the trace carry.
+    /// Hosts render one block per streamed unit — an OpenAI reasoning summary
+    /// part, an Anthropic content block, or an ordinal run for providers with
+    /// no native notion. The activity's `correlation_id` names the block
+    /// within its model call's stream.
+    StreamBlock(crate::llm::types::StreamBlockEvent),
     /// Marks a provider generation boundary before a retry and retracts any
     /// visible text emitted by the superseded attempt.
     ///
@@ -351,12 +328,9 @@ pub enum TurnEvent {
         usage: LlmUsage,
         cumulative: LlmUsage,
     },
-    RetryStatus {
-        wait_seconds: u64,
-        attempt: usize,
-        max_attempts: usize,
-        reason: String,
-    },
+    /// A retry that is about to wait, with the failure being retried: the
+    /// session stream's `RetryStatus` payload.
+    RetryStatus(crate::RetryProgress),
     PluginRuntime {
         plugin_id: String,
         event: crate::PluginRuntimeEvent,
@@ -364,9 +338,9 @@ pub enum TurnEvent {
     QueuedInputAccepted {
         applications: Vec<crate::TurnInputApplication>,
     },
-    Error {
-        message: String,
-    },
+    /// A reported failure with its typed envelope: the session stream's
+    /// `Error` payload.
+    Error(crate::ReportedFailure),
 }
 
 #[async_trait::async_trait]

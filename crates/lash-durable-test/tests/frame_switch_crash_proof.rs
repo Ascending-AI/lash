@@ -32,6 +32,7 @@ mod sim;
 #[path = "support/matrix.rs"]
 mod matrix;
 
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use matrix::MatrixTestExt as _;
 
 use std::sync::{Arc, Mutex};
@@ -122,10 +123,11 @@ fn model(seen: Arc<Mutex<Vec<String>>>) -> ProviderHandle {
                 let response = if rendered.contains(TASK) {
                     let text = FINAL.to_owned();
                     if let Some(stream) = request.stream_events.as_ref() {
-                        stream.send(LlmStreamEvent::Delta {
+                        stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                            kind: StreamBlockKind::AssistantText,
                             block: StreamBlockIdentity::new("text:0", 0),
                             text: text.clone(),
-                        });
+                        }));
                     }
                     LlmResponse {
                         parts: vec![LlmOutputPart::Text {

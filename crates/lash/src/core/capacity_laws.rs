@@ -132,10 +132,13 @@ async fn facade_evidence_cuts_bound_attempts_failures_and_divergences() {
     recorder.observe(ShiftObservation {
         key: ReplayKey::new("capacity"),
         ordinal: 0,
-        event: ObservedEvent::Session(crate::plugins::SessionStreamEvent::TextDelta {
-            content: "€".into(),
-            block: crate::direct::StreamBlockIdentity::new("block", 0),
-        }),
+        event: ObservedEvent::Session(crate::plugins::SessionStreamEvent::StreamBlock(
+            crate::StreamBlockEvent::delta(
+                crate::StreamBlockKind::AssistantText,
+                crate::direct::StreamBlockIdentity::new("block", 0),
+                "€",
+            ),
+        )),
     });
     let captured = recorder.finish();
     assert!(captured.events.is_empty());

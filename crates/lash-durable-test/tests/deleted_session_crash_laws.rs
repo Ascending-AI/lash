@@ -32,6 +32,7 @@ mod sim;
 #[path = "support/matrix.rs"]
 mod matrix;
 
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use matrix::MatrixTestExt as _;
 
 use std::sync::{Arc, Mutex, OnceLock, Weak};
@@ -111,10 +112,11 @@ fn model(world: Arc<World>) -> ProviderHandle {
                     .expect("the close request is the session's mail");
                 let text = "answered".to_owned();
                 if let Some(stream) = request.stream_events.as_ref() {
-                    stream.send(LlmStreamEvent::Delta {
+                    stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                        kind: StreamBlockKind::AssistantText,
                         block: StreamBlockIdentity::new("text:0", 0),
                         text: text.clone(),
-                    });
+                    }));
                 }
                 Ok(LlmResponse {
                     parts: vec![LlmOutputPart::Text {

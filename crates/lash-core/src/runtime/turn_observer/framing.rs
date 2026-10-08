@@ -33,6 +33,7 @@
 //! ([`DeltaCoalescing`](crate::runtime::DeltaCoalescing)); coalescing off
 //! queues every delta as its own event.
 
+use crate::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Instant;
@@ -69,7 +70,7 @@ struct LaneFrame {
 #[derive(Clone, PartialEq, Eq)]
 struct BlockKey {
     turn: Option<TurnId>,
-    reasoning: bool,
+    kind: StreamBlockKind,
     block_id: String,
 }
 
@@ -120,17 +121,15 @@ impl OpenFrame {
     fn seal(self) -> Observation {
         let Observation { turn, mut event } = self.first;
         match &mut event {
-            RuntimeStreamEvent::Session(
-                SessionStreamEvent::TextDelta { content, .. }
-                | SessionStreamEvent::ReasoningDelta { content, .. },
-            ) => *content = self.text,
+            RuntimeStreamEvent::Session(SessionStreamEvent::StreamBlock(
+                StreamBlockEvent::Delta { text, .. },
+            )) => *text = self.text,
             RuntimeStreamEvent::Turn(TurnActivity {
                 id,
-                event:
-                    TurnEvent::AssistantProseDelta { text, .. } | TurnEvent::ReasoningDelta { text, .. },
+                event: TurnEvent::StreamBlock(StreamBlockEvent::Delta { text, .. }),
                 ..
             }) => {
-                *text = self.text.into();
+                *text = self.text;
                 if let Some(span) = self.span {
                     *id = TurnActivityId::observed_range(span.key, span.first, span.last);
                 }
@@ -143,25 +142,18 @@ impl OpenFrame {
 
 fn classify(observation: &Observation) -> Option<Delta<'_>> {
     let turn = observation.turn.clone();
-    let (reasoning, block, text, activity) = match &observation.event {
-        RuntimeStreamEvent::Session(SessionStreamEvent::TextDelta { content, block }) => {
-            (false, block, content.as_str(), None)
-        }
-        RuntimeStreamEvent::Session(SessionStreamEvent::ReasoningDelta { content, block }) => {
-            (true, block, content.as_str(), None)
-        }
-        RuntimeStreamEvent::Turn(TurnActivity {
-            id,
-            correlation_id,
-            event: TurnEvent::AssistantProseDelta { text, block },
-        }) => (false, block, text.as_ref(), Some((id, correlation_id))),
-        RuntimeStreamEvent::Turn(TurnActivity {
-            id,
-            correlation_id,
-            event: TurnEvent::ReasoningDelta { text, block },
-        }) => (true, block, text.as_ref(), Some((id, correlation_id))),
-        _ => return None,
-    };
+    let (kind, block, text, activity) =
+        match &observation.event {
+            RuntimeStreamEvent::Session(SessionStreamEvent::StreamBlock(
+                StreamBlockEvent::Delta { kind, block, text },
+            )) => (*kind, block, text.as_str(), None),
+            RuntimeStreamEvent::Turn(TurnActivity {
+                id,
+                correlation_id,
+                event: TurnEvent::StreamBlock(StreamBlockEvent::Delta { kind, block, text }),
+            }) => (*kind, block, text.as_str(), Some((id, correlation_id))),
+            _ => return None,
+        };
     let activity = match activity {
         None => None,
         Some((id, correlation_id)) => {
@@ -173,7 +165,7 @@ fn classify(observation: &Observation) -> Option<Delta<'_>> {
         lane: lane(&observation.event),
         block: BlockKey {
             turn,
-            reasoning,
+            kind,
             block_id: block.id.clone(),
         },
         text,
@@ -186,10 +178,10 @@ fn classify(observation: &Observation) -> Option<Delta<'_>> {
 fn is_delta(observation: &Observation) -> bool {
     matches!(
         &observation.event,
-        RuntimeStreamEvent::Session(
-            SessionStreamEvent::TextDelta { .. } | SessionStreamEvent::ReasoningDelta { .. }
-        ) | RuntimeStreamEvent::Turn(TurnActivity {
-            event: TurnEvent::AssistantProseDelta { .. } | TurnEvent::ReasoningDelta { .. },
+        RuntimeStreamEvent::Session(SessionStreamEvent::StreamBlock(
+            StreamBlockEvent::Delta { .. }
+        )) | RuntimeStreamEvent::Turn(TurnActivity {
+            event: TurnEvent::StreamBlock(StreamBlockEvent::Delta { .. }),
             ..
         })
     )

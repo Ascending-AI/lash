@@ -308,11 +308,11 @@ pub use lash_core::store::{IngressTerminal, IngressTerminalCause};
 pub use lash_core_store::session_identity::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
 pub use lash_core_store::turn_input_vocabulary::ResolvedRun;
 pub use lash_sansio::llm::types::{
-    AttemptRecord, ChargeSafetyDenialReason, LlmCallId, StreamBlockKind,
+    AttemptRecord, ChargeSafetyDenialReason, LlmCallId, StreamBlockEvent, StreamBlockKind,
 };
 pub use lash_sansio::{
     BlankIdentity, ErrorEnvelope, ExecCodeFailure, FrameKeyError, InvalidProcessId, LlmCallError,
-    ToolCallPosition, ToolCallRoot,
+    ReportedFailure, RetryProgress, ToolCallPosition, ToolCallRoot,
 };
 
 /// `use lash::prelude::*;` brings in the daily core/session/turn vocabulary

@@ -322,7 +322,7 @@ pub enum Response<I = ()> {
         id: EffectId,
         result: Result<LlmResponse, LlmCallError>,
         /// When true, text deltas were already emitted during streaming,
-        /// so the driver should skip emitting `TextDelta` events.
+        /// so the driver should skip emitting text-delta stream blocks.
         text_streamed: bool,
     },
     /// Native tool results.

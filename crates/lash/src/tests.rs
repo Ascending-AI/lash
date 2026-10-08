@@ -4,6 +4,7 @@ use crate::support::{
 };
 use lash_core::facade_support::ProviderHandle;
 use lash_sansio::SessionId;
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use lash_sansio::sync::MutexExt;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -49,10 +50,11 @@ fn mock_provider() -> ProviderHandle {
             let user_text = last_user_text(&request);
             let reply = format!("echo: {user_text}");
             if let Some(events) = request.stream_events.as_ref() {
-                events.send(LlmStreamEvent::Delta {
+                events.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::AssistantText,
                     block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
                     text: reply.clone(),
-                });
+                }));
             }
             Ok(LlmResponse {
                 parts: vec![LlmOutputPart::Text {

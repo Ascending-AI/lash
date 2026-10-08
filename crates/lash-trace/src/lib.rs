@@ -50,7 +50,7 @@ pub mod telemetry;
 pub use content_block::{TraceContentBlock, TraceToolResultBlock};
 pub use domain::{
     TraceAttemptObservation, TraceDomainCompletion, TraceDomainOperation, TraceDomainStatus,
-    TraceRuntimeStreamEvent,
+    TraceRuntimeStreamEvent, TraceRuntimeStreamPayload,
 };
 pub use event::{TraceEvent, TraceEventKind};
 use jsonl_records::truncate_torn_tail;
@@ -182,7 +182,10 @@ pub use telemetry::{
 /// reports model calls in the runtime's own types: one `LlmUsage`, the sealed
 /// `AttemptRecord` for every attempt, typed terminal reason, output parts and
 /// generation receipt, and one `provider_event` whose typed direction
-/// replaces `provider_request` and `provider_stream_event`.
+/// replaces `provider_request` and `provider_stream_event`. FIG-5526
+/// types `runtime_stream_event`: its payload is a closed enum whose block
+/// arm carries the stream-block lifecycle hosts see, with the block's full
+/// identity, in place of a free-text event name beside optional fields.
 ///
 /// version_guard(
 ///     shapes(

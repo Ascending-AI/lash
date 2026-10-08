@@ -7,6 +7,7 @@ use super::*;
 use crate::support::TurnOutcome;
 use lash_core::TurnEvent;
 use lash_core::llm::types::{StreamBlockIdentity, StreamBlockKind};
+use lash_sansio::llm::types::StreamBlockEvent;
 
 /// One turn whose single model call streams `stream` and answers
 /// `response`: its report and every activity it published.
@@ -62,7 +63,11 @@ fn prose_deltas(activities: &[TurnActivity]) -> Vec<String> {
     activities
         .iter()
         .filter_map(|activity| match &activity.event {
-            TurnEvent::AssistantProseDelta { text, .. } => Some(text.to_string()),
+            TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
+                text,
+                ..
+            }) => Some(text.to_string()),
             _ => None,
         })
         .collect()
@@ -72,11 +77,11 @@ fn completed_block_texts(activities: &[TurnActivity]) -> Vec<String> {
     activities
         .iter()
         .filter_map(|activity| match &activity.event {
-            TurnEvent::StreamBlockCompleted {
+            TurnEvent::StreamBlock(StreamBlockEvent::Completed {
                 kind: StreamBlockKind::AssistantText,
                 text,
                 ..
-            } => Some(text.to_string()),
+            }) => Some(text.to_string()),
             _ => None,
         })
         .collect()
@@ -176,7 +181,7 @@ async fn attempt_reset_clears_response_establishment_before_later_evidence() -> 
     Ok(())
 }
 
-/// A `TextBlockEnd` whose text does not extend the streamed deltas is an
+/// A text block completion whose text does not extend the streamed deltas is an
 /// authoritative correction: the block seals with the provider's text, not
 /// the stale accumulated deltas.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -184,17 +189,20 @@ async fn text_block_completion_seals_authoritative_correction() -> Result<()> {
     let (_, activities) = streamed_turn(
         "text-block-correction",
         vec![
-            LlmStreamEvent::TextBlockStart {
+            LlmStreamEvent::Block(StreamBlockEvent::Started {
+                kind: StreamBlockKind::AssistantText,
                 block: block("message:m1"),
-            },
-            LlmStreamEvent::Delta {
+            }),
+            LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
                 block: block("message:m1"),
                 text: "draft".to_string(),
-            },
-            LlmStreamEvent::TextBlockEnd {
+            }),
+            LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                kind: StreamBlockKind::AssistantText,
                 block: block("message:m1"),
                 text: "rewritten ending".to_string(),
-            },
+            }),
         ],
         text_response_with(vec![text("rewritten ending")]),
     )
@@ -205,7 +213,7 @@ async fn text_block_completion_seals_authoritative_correction() -> Result<()> {
     Ok(())
 }
 
-/// A `TextBlockEnd` that extends the streamed prefix forwards only the
+/// A text block completion that extends the streamed prefix forwards only the
 /// unseen tail: replaying the whole authoritative text through a stateful
 /// plugin transform would double-feed the already-seen prefix.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -213,17 +221,20 @@ async fn text_block_completion_forwards_only_the_unseen_tail() -> Result<()> {
     let (_, activities) = streamed_turn(
         "text-block-tail",
         vec![
-            LlmStreamEvent::TextBlockStart {
+            LlmStreamEvent::Block(StreamBlockEvent::Started {
+                kind: StreamBlockKind::AssistantText,
                 block: block("message:m1"),
-            },
-            LlmStreamEvent::Delta {
+            }),
+            LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
                 block: block("message:m1"),
                 text: "Hello".to_string(),
-            },
-            LlmStreamEvent::TextBlockEnd {
+            }),
+            LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                kind: StreamBlockKind::AssistantText,
                 block: block("message:m1"),
                 text: "Hello world".to_string(),
-            },
+            }),
         ],
         text_response_with(vec![text("Hello world")]),
     )
@@ -242,13 +253,15 @@ async fn text_block_completion_without_deltas_publishes_full_text() -> Result<()
     let (_, activities) = streamed_turn(
         "text-block-whole",
         vec![
-            LlmStreamEvent::TextBlockStart {
+            LlmStreamEvent::Block(StreamBlockEvent::Started {
+                kind: StreamBlockKind::AssistantText,
                 block: block("message:m1"),
-            },
-            LlmStreamEvent::TextBlockEnd {
+            }),
+            LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                kind: StreamBlockKind::AssistantText,
                 block: block("message:m1"),
                 text: "whole answer".to_string(),
-            },
+            }),
         ],
         text_response_with(vec![text("whole answer")]),
     )
@@ -282,15 +295,16 @@ async fn unstreamed_reasoning_is_not_republished_while_thinking_is_hidden() -> R
     assert!(
         activities.iter().all(|activity| !matches!(
             activity.event,
-            TurnEvent::ReasoningDelta { .. }
-                | TurnEvent::StreamBlockStarted {
-                    kind: StreamBlockKind::Reasoning,
-                    ..
-                }
-                | TurnEvent::StreamBlockCompleted {
-                    kind: StreamBlockKind::Reasoning,
-                    ..
-                }
+            TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::Reasoning,
+                ..
+            }) | TurnEvent::StreamBlock(StreamBlockEvent::Started {
+                kind: StreamBlockKind::Reasoning,
+                ..
+            }) | TurnEvent::StreamBlock(StreamBlockEvent::Completed {
+                kind: StreamBlockKind::Reasoning,
+                ..
+            })
         )),
         "hidden reasoning must not reach the host: {activities:?}"
     );
@@ -322,7 +336,11 @@ async fn unstreamed_reasoning_republishes_when_thinking_is_exposed() -> Result<(
     let reasoning_deltas = activities
         .iter()
         .filter_map(|activity| match &activity.event {
-            TurnEvent::ReasoningDelta { text, .. } => Some(text.to_string()),
+            TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::Reasoning,
+                text,
+                ..
+            }) => Some(text.to_string()),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -330,10 +348,10 @@ async fn unstreamed_reasoning_republishes_when_thinking_is_exposed() -> Result<(
     assert!(
         activities.iter().any(|activity| matches!(
             activity.event,
-            TurnEvent::StreamBlockCompleted {
+            TurnEvent::StreamBlock(StreamBlockEvent::Completed {
                 kind: StreamBlockKind::Reasoning,
                 ..
-            }
+            })
         )),
         "republished reasoning must seal its block: {activities:?}"
     );

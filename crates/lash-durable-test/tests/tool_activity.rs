@@ -27,6 +27,7 @@
 #[path = "support/served.rs"]
 mod served;
 
+use lash_sansio::llm::types::StreamBlockEvent;
 use std::sync::{Arc, Mutex};
 
 use lash::observe::Stream as _;
@@ -478,10 +479,16 @@ async fn a_durable_turn_streams_a_native_call_s_activity_to_its_sink(tier: Tier)
 /// The live delta's kind, block address and exact suffix.
 fn provider_delta(event: &TurnEvent) -> Option<(bool, StreamBlockIdentity, String)> {
     match event {
-        TurnEvent::AssistantProseDelta { block, text } => {
-            Some((false, block.clone(), text.to_string()))
-        }
-        TurnEvent::ReasoningDelta { block, text } => Some((true, block.clone(), text.to_string())),
+        TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+            kind: StreamBlockKind::AssistantText,
+            block,
+            text,
+        }) => Some((false, block.clone(), text.to_string())),
+        TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+            kind: StreamBlockKind::Reasoning,
+            block,
+            text,
+        }) => Some((true, block.clone(), text.to_string())),
         _ => None,
     }
 }
@@ -537,25 +544,29 @@ async fn a_durable_turn_streams_provider_deltas_before_its_committed_rows(tier: 
                         for (index, (thinking, block, text)) in deltas.iter().enumerate() {
                             if index == 0 || deltas[index - 1].0 != *thinking {
                                 stream.send(if *thinking {
-                                    LlmStreamEvent::ReasoningBlockStart {
+                                    LlmStreamEvent::Block(StreamBlockEvent::Started {
+                                        kind: StreamBlockKind::Reasoning,
                                         block: block.clone(),
-                                    }
+                                    })
                                 } else {
-                                    LlmStreamEvent::TextBlockStart {
+                                    LlmStreamEvent::Block(StreamBlockEvent::Started {
+                                        kind: StreamBlockKind::AssistantText,
                                         block: block.clone(),
-                                    }
+                                    })
                                 });
                             }
                             stream.send(if *thinking {
-                                LlmStreamEvent::ReasoningDelta {
+                                LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                                    kind: StreamBlockKind::Reasoning,
                                     block: block.clone(),
                                     text: text.clone(),
-                                }
+                                })
                             } else {
-                                LlmStreamEvent::Delta {
+                                LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                                    kind: StreamBlockKind::AssistantText,
                                     block: block.clone(),
                                     text: text.clone(),
-                                }
+                                })
                             });
                             // The host acknowledges each suffix before the next
                             // one: observation backpressure cannot coalesce them,
@@ -563,15 +574,17 @@ async fn a_durable_turn_streams_provider_deltas_before_its_committed_rows(tier: 
                             gates[index].passed().await;
                             if index + 1 == deltas.len() || deltas[index + 1].0 != *thinking {
                                 stream.send(if *thinking {
-                                    LlmStreamEvent::ReasoningBlockEnd {
+                                    LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                                        kind: StreamBlockKind::Reasoning,
                                         block: block.clone(),
                                         text: "Consider the evidence.".into(),
-                                    }
+                                    })
                                 } else {
-                                    LlmStreamEvent::TextBlockEnd {
+                                    LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                                        kind: StreamBlockKind::AssistantText,
                                         block: block.clone(),
                                         text: "Here is the answer.".into(),
-                                    }
+                                    })
                                 });
                             }
                         }
@@ -681,15 +694,20 @@ async fn a_durable_turn_streams_provider_deltas_before_its_committed_rows(tier: 
                                         assert!(
                                             !matches!(
                                                 activity.event,
-                                                TurnEvent::ReasoningDelta { .. }
-                                                    | TurnEvent::StreamBlockStarted {
+                                                TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                                                    kind: StreamBlockKind::Reasoning,
+                                                    ..
+                                                }) | TurnEvent::StreamBlock(
+                                                    StreamBlockEvent::Started {
                                                         kind: StreamBlockKind::Reasoning,
                                                         ..
                                                     }
-                                                    | TurnEvent::StreamBlockCompleted {
+                                                ) | TurnEvent::StreamBlock(
+                                                    StreamBlockEvent::Completed {
                                                         kind: StreamBlockKind::Reasoning,
                                                         ..
                                                     }
+                                                )
                                             ),
                                             "hidden reasoning is never published: {event:#?}"
                                         );

@@ -1,5 +1,7 @@
 use super::support::*;
+use lash_sansio::ReportedFailure;
 use lash_sansio::TurnId;
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 
 // Focused RLM driver mechanics: malformed options, driver-state ownership, and checkpoint restore internals.
 
@@ -58,10 +60,10 @@ fn opaque_reasoning_only_response_stops_as_empty_provider_response() {
     let effects = drain_effects(&mut machine);
     assert!(effects.iter().any(|effect| matches!(
         effect,
-        Effect::Emit(SessionStreamEvent::Error {
+        Effect::Emit(SessionStreamEvent::Error(ReportedFailure {
             envelope: Some(envelope),
             ..
-        }) if envelope.code == Some(lash_sansio::TurnFailureCode::EmptyResponse.into())
+        })) if envelope.code == Some(lash_sansio::TurnFailureCode::EmptyResponse.into())
     )));
     assert!(effects.iter().any(|effect| matches!(
         effect,
@@ -517,7 +519,7 @@ fn terminal_provider_paths_emit_only_visible_prose() {
         let effects = drain_effects(&mut machine);
         assert!(effects.iter().any(|effect| matches!(
             effect,
-            Effect::Emit(SessionStreamEvent::TextDelta { content, .. })
+            Effect::Emit(SessionStreamEvent::StreamBlock(StreamBlockEvent::Delta { kind: StreamBlockKind::AssistantText,text: content, .. }))
                 if content == "Visible plan."
         )));
         assert!(effects.iter().any(|effect| matches!(
@@ -527,7 +529,7 @@ fn terminal_provider_paths_emit_only_visible_prose() {
         )));
         assert!(!effects.iter().any(|effect| matches!(
             effect,
-            Effect::Emit(SessionStreamEvent::TextDelta { content, .. })
+            Effect::Emit(SessionStreamEvent::StreamBlock(StreamBlockEvent::Delta { kind: StreamBlockKind::AssistantText,text: content, .. }))
                 | Effect::Emit(SessionStreamEvent::LlmResponse { content, .. })
                 if content.contains("<typescript>")
         )));

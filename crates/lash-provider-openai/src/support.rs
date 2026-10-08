@@ -1,4 +1,5 @@
 pub(crate) use async_trait::async_trait;
+use lash_sansio::llm::types::StreamBlockKind;
 pub(crate) use serde::Deserialize;
 pub(crate) use serde_json::{Value, json};
 pub(crate) use std::collections::HashMap;
@@ -57,9 +58,7 @@ pub(crate) use crate::responses_shared::{ResponsesStreamState, role_name, tool_c
 pub(crate) fn is_reasoning_block_event(event: &LlmStreamEvent) -> bool {
     matches!(
         event,
-        LlmStreamEvent::ReasoningBlockStart { .. }
-            | LlmStreamEvent::ReasoningDelta { .. }
-            | LlmStreamEvent::ReasoningBlockEnd { .. }
+        LlmStreamEvent::Block(block) if block.kind() == StreamBlockKind::Reasoning
     )
 }
 

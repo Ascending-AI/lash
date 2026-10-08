@@ -1,5 +1,6 @@
 use super::transport::execute_script;
 use super::*;
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::time::Duration;
 
 use lash_core::llm::transport::ProviderFailureKind;
@@ -612,7 +613,11 @@ fn text_deltas(events: &Arc<Mutex<Vec<LlmStreamEvent>>>) -> Vec<String> {
         .lock_recover()
         .iter()
         .filter_map(|event| match event {
-            LlmStreamEvent::Delta { text, .. } => Some(text.clone()),
+            LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
+                text,
+                ..
+            }) => Some(text.clone()),
             _ => None,
         })
         .collect()

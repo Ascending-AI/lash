@@ -9,6 +9,7 @@
 //! key of its own, which the store never takes for a redelivery of an
 //! earlier attempt's activity (FIG-5098).
 
+use crate::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::sync::Arc;
 
 use crate::{SessionObservationEvent, SessionObservationEventPayload, TurnActivityId, TurnEvent};
@@ -52,8 +53,14 @@ pub(super) fn attempt_reset(
             continue;
         }
         let retracted = match &activity.event {
-            TurnEvent::AssistantProseDelta { .. } => &mut prose,
-            TurnEvent::ReasoningDelta { .. } => &mut reasoning,
+            TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
+                ..
+            }) => &mut prose,
+            TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::Reasoning,
+                ..
+            }) => &mut reasoning,
             _ => continue,
         };
         if !retracted.contains(&activity.correlation_id) {

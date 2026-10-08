@@ -6,6 +6,7 @@ use crate::support::{
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::ResponseTextMeta;
 use lash_core::{SessionId, TurnId};
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 
 use tokio::sync::{Mutex as TokioMutex, oneshot};
 
@@ -49,7 +50,11 @@ fn assistant_prose(events: &[TurnActivity]) -> String {
     events
         .iter()
         .filter_map(|activity| match &activity.event {
-            lash_core::TurnEvent::AssistantProseDelta { text, .. } => Some(text.as_ref()),
+            lash_core::TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
+                text,
+                ..
+            }) => Some(text.as_str()),
             _ => None,
         })
         .collect()

@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use lash_sansio::sync::MutexExt;
 
 /// The seed of the fixed runtime proofs' server doubles.
@@ -487,7 +488,13 @@ impl RuntimeProofRecordingEvents {
             .await
             .iter()
             .filter(|activity| {
-                matches!(activity.event, lash::TurnEvent::AssistantProseDelta { .. })
+                matches!(
+                    activity.event,
+                    lash::TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                        kind: StreamBlockKind::AssistantText,
+                        ..
+                    })
+                )
             })
             .count()
     }
@@ -657,10 +664,11 @@ pub(super) fn rlm_final_value_provider() -> ProviderHandle {
                 LlmTransportError::new("rlm final-value proof requires provider streaming")
             })?;
             for chunk in CHUNKS {
-                stream.send(LlmStreamEvent::Delta {
+                stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::AssistantText,
                     block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
                     text: (*chunk).to_string(),
-                });
+                }));
             }
             let response = text_llm_response(RAW_FINAL);
             if response.full_text() != RAW_FINAL || response_text_part(&response) != Some(RAW_FINAL)

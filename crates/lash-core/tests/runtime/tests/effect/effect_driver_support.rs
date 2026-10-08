@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::ReportedFailure;
 
 pub(super) struct EffectControllerTestProtocolFactory {
     pub(super) code_executor: Option<Arc<dyn lash_core::plugin::CodeExecutorPlugin>>,
@@ -234,10 +235,10 @@ impl lash_sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol> for EffectCo
                 // The failure as the driver received it, so a test can read
                 // every field the host handed over.
                 lash_core::DriverAction::Emit(
-                    lash_core::facade_support::SessionStreamEvent::Error {
+                    lash_core::facade_support::SessionStreamEvent::Error(ReportedFailure {
                         message: serde_json::to_string(&error).expect("an exec failure serializes"),
                         envelope: None,
-                    },
+                    }),
                 ),
                 lash_core::DriverAction::Finish(TurnOutcome::Stopped(TurnStop::RuntimeError)),
             ],

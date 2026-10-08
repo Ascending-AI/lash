@@ -7,6 +7,7 @@
 //! awaits `ext_echo` `cell_calls` times, keeping each answer (its padding
 //! included) in its heap, and its second with a text answer.
 
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -164,10 +165,11 @@ fn model(scripts: Arc<Scripts>, recorder: Arc<Recorder>) -> ProviderHandle {
 /// A text answer, streamed as one delta.
 fn streamed(request: &LlmRequest, text: &str) -> LlmResponse {
     if let Some(stream) = request.stream_events.as_ref() {
-        stream.send(LlmStreamEvent::Delta {
+        stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+            kind: StreamBlockKind::AssistantText,
             block: StreamBlockIdentity::new("text:0", 0),
             text: text.to_owned(),
-        });
+        }));
     }
     LlmResponse {
         parts: vec![LlmOutputPart::Text {

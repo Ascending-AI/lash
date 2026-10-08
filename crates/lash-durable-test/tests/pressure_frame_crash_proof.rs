@@ -65,6 +65,7 @@ mod sim;
 #[path = "support/matrix.rs"]
 mod matrix;
 
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use matrix::MatrixTestExt as _;
 
 use std::num::{NonZeroU32, NonZeroU64};
@@ -124,10 +125,11 @@ fn actor() -> ActorKey {
 /// A text answer, streamed as one delta when the request streams.
 fn text(request: &LlmRequest, text: &str) -> LlmResponse {
     if let Some(stream) = request.stream_events.as_ref() {
-        stream.send(LlmStreamEvent::Delta {
+        stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+            kind: StreamBlockKind::AssistantText,
             block: StreamBlockIdentity::new("text:0", 0),
             text: text.to_owned(),
-        });
+        }));
     }
     LlmResponse {
         parts: vec![LlmOutputPart::Text {

@@ -20,6 +20,7 @@
 //! mailbox, the shift-attach wake and the 25 ms→1 s poll each contribute
 //! to; the `poll`/`grace` cases isolate those contributions.
 
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -187,9 +188,15 @@ impl lash::TurnActivitySink for TimingSink {
         let mut state = self.state.lock_recover();
         state.first_activity_ms.get_or_insert(now);
         match activity.event {
-            lash_core::TurnEvent::AssistantProseDelta { .. }
-            | lash_core::TurnEvent::ReasoningDelta { .. }
-            | lash_core::TurnEvent::StreamBlockStarted { .. }
+            lash_core::TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
+                ..
+            })
+            | lash_core::TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::Reasoning,
+                ..
+            })
+            | lash_core::TurnEvent::StreamBlock(StreamBlockEvent::Started { .. })
             | lash_core::TurnEvent::ToolCallStarted { .. }
             | lash_core::TurnEvent::FinalValue { .. } => {
                 state.first_delta_ms.get_or_insert(now);

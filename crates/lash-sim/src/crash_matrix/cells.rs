@@ -9,6 +9,7 @@
 //! world's ledger before anything else; under [`TurnScript::CellKilled`] its
 //! first entry holds forever, and the host kills the node that runs it.
 
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
@@ -188,10 +189,11 @@ fn model() -> ProviderHandle {
 /// A text answer, streamed as one delta.
 fn streamed(request: &LlmRequest, text: &str) -> LlmResponse {
     if let Some(stream) = request.stream_events.as_ref() {
-        stream.send(LlmStreamEvent::Delta {
+        stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+            kind: StreamBlockKind::AssistantText,
             block: StreamBlockIdentity::new("text:0", 0),
             text: text.to_owned(),
-        });
+        }));
     }
     LlmResponse {
         parts: vec![LlmOutputPart::Text {

@@ -2,6 +2,7 @@
 //! durable backend over a SQLite memory store set serves each turn on its
 //! own node, and the host sees each reasoning part once, in its place.
 
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::collections::VecDeque;
 use std::sync::Arc;
 
@@ -159,7 +160,11 @@ async fn google_streaming_runtime_preserves_tool_interleaved_reasoning_boundarie
         .activities
         .iter()
         .filter_map(|activity| match &activity.event {
-            lash::TurnEvent::ReasoningDelta { text, .. } => Some(text.as_ref()),
+            lash::TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::Reasoning,
+                text,
+                ..
+            }) => Some(text.as_str()),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -246,7 +251,11 @@ async fn google_streaming_runtime_does_not_republish_reasoning_after_signature_o
         .activities
         .iter()
         .filter_map(|activity| match &activity.event {
-            lash::TurnEvent::ReasoningDelta { text, .. } => Some(text.as_ref()),
+            lash::TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::Reasoning,
+                text,
+                ..
+            }) => Some(text.as_str()),
             _ => None,
         })
         .collect::<Vec<_>>();

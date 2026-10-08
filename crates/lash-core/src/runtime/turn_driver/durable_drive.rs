@@ -248,7 +248,7 @@ impl TurnDrive for RuntimeDrive {
             Effect::Emit(event) => {
                 // A finished machine's `Error` is its stop's terminal: it
                 // publishes after the commit (ADR 0122).
-                if machine.is_done() && matches!(event, SessionStreamEvent::Error { .. }) {
+                if machine.is_done() && matches!(event, SessionStreamEvent::Error(_)) {
                     observer.hold_terminal();
                 }
                 driver.emit_recorded(observer, event);

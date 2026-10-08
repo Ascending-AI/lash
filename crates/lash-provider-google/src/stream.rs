@@ -3,6 +3,7 @@
 //! `finishReason` to a normalized terminal reason.
 
 use crate::support::*;
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 
 struct ReasoningPieceUpdate {
     opened_part: Option<usize>,
@@ -414,9 +415,9 @@ pub(crate) struct GoogleStreamState {
 }
 
 /// What one [`GoogleStreamState::push_event`] call produced: the event's own
-/// visible and reasoning deltas, the text stream emissions (a `TextBlockStart`
-/// and `Delta`s), the reasoning stream emissions (`ReasoningBlockStart`/`End`,
-/// `ReasoningDelta`s, and a `Part` close), and how many tool-call parts the
+/// visible and reasoning deltas, the text stream emissions (a block start
+/// and deltas), the reasoning stream emissions (block start/end, deltas, and
+/// a `Part` close), and how many tool-call parts the
 /// event appended to the state's `tool_call_parts`.
 #[derive(Default)]
 pub(crate) struct EventDeltas {
@@ -498,11 +499,12 @@ impl GoogleStreamState {
                             .get_or_insert_with(ProviderReasoningReplay::default)
                             .item_id = block.item_id.clone();
                     }
-                    deltas
-                        .reasoning_events
-                        .push(LlmStreamEvent::ReasoningBlockStart {
+                    deltas.reasoning_events.push(LlmStreamEvent::Block(
+                        StreamBlockEvent::Started {
+                            kind: StreamBlockKind::Reasoning,
                             block: block.clone(),
-                        });
+                        },
+                    ));
                     self.open_reasoning_block = Some(block);
                 }
                 if let Some(delta) = update.delta
@@ -510,10 +512,11 @@ impl GoogleStreamState {
                 {
                     deltas
                         .reasoning_events
-                        .push(LlmStreamEvent::ReasoningDelta {
+                        .push(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                            kind: StreamBlockKind::Reasoning,
                             block: block.clone(),
                             text: delta,
-                        });
+                        }));
                 }
                 saw_thought_in_event = true;
                 continue;
@@ -526,17 +529,23 @@ impl GoogleStreamState {
             };
             if self.text_block.is_none() {
                 let block = self.mint_block("text");
-                deltas.text_events.push(LlmStreamEvent::TextBlockStart {
-                    block: block.clone(),
-                });
+                deltas
+                    .text_events
+                    .push(LlmStreamEvent::Block(StreamBlockEvent::Started {
+                        kind: StreamBlockKind::AssistantText,
+                        block: block.clone(),
+                    }));
                 self.text_block = Some(block);
             }
             if let Some(block) = self.text_block.as_ref() {
                 self.open_text_run.push_str(&delta);
-                deltas.text_events.push(LlmStreamEvent::Delta {
-                    block: block.clone(),
-                    text: delta.clone(),
-                });
+                deltas
+                    .text_events
+                    .push(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                        kind: StreamBlockKind::AssistantText,
+                        block: block.clone(),
+                        text: delta.clone(),
+                    }));
             }
             self.output_parts.push(LlmOutputPart::Text {
                 text: delta,
@@ -570,7 +579,7 @@ impl GoogleStreamState {
         StreamBlockIdentity::new(format!("{prefix}:{ordinal}"), ordinal)
     }
 
-    /// Emit the still-open reasoning block's `ReasoningBlockEnd` and its part
+    /// Emit the still-open reasoning block's completion and its part
     /// as a `Part` event, then clear both. Stream finalization calls this
     /// once more so a block left open by the last event reaches the host.
     pub(crate) fn flush_open_reasoning_part(&mut self) -> Vec<LlmStreamEvent> {
@@ -585,10 +594,11 @@ impl GoogleStreamState {
         let Some(block) = self.text_block.take() else {
             return;
         };
-        events.push(LlmStreamEvent::TextBlockEnd {
+        events.push(LlmStreamEvent::Block(StreamBlockEvent::Completed {
+            kind: StreamBlockKind::AssistantText,
             block,
             text: std::mem::take(&mut self.open_text_run),
-        });
+        }));
     }
 
     /// Seal the assistant-text block, if one was minted, with the open run's
@@ -605,10 +615,11 @@ impl GoogleStreamState {
         };
         if let Some(part @ LlmOutputPart::Reasoning { text, .. }) = self.output_parts.get(index) {
             if let Some(block) = self.open_reasoning_block.take() {
-                events.push(LlmStreamEvent::ReasoningBlockEnd {
+                events.push(LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                    kind: StreamBlockKind::Reasoning,
                     block,
                     text: text.clone(),
-                });
+                }));
             }
             events.push(LlmStreamEvent::Part(part.clone()));
         }

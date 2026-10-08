@@ -3,6 +3,7 @@
 //! interrupted by reasoning or a tool call must close and re-open as a new
 //! block — never merge into one id.
 
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, Mutex};
 
@@ -106,14 +107,21 @@ fn text_runs_around_a_tool_call_get_distinct_sealed_blocks() {
     let started: Vec<String> = events
         .iter()
         .filter_map(|event| match event {
-            LlmStreamEvent::TextBlockStart { block } => Some(block.id.clone()),
+            LlmStreamEvent::Block(StreamBlockEvent::Started {
+                kind: StreamBlockKind::AssistantText,
+                block,
+            }) => Some(block.id.clone()),
             _ => None,
         })
         .collect();
     let ended: Vec<(String, String)> = events
         .iter()
         .filter_map(|event| match event {
-            LlmStreamEvent::TextBlockEnd { block, text } => Some((block.id.clone(), text.clone())),
+            LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                kind: StreamBlockKind::AssistantText,
+                block,
+                text,
+            }) => Some((block.id.clone(), text.clone())),
             _ => None,
         })
         .collect();

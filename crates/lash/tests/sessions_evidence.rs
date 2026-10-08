@@ -12,6 +12,9 @@
 #![allow(dead_code, unreachable_code, unused_variables, unused_imports)]
 #![allow(clippy::all)]
 
+use lash_sansio::RetryProgress;
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+
 fn type_witness<T>() {}
 fn member_witness<T>(_: T) {}
 fn field_witness<T>(_: impl FnOnce(&T)) {}
@@ -946,43 +949,65 @@ fn drain_area_witnesses() {
             let _ = protocol_iteration;
         }
     });
-    // W0348: lash_core::facade_support::SessionStreamEvent::ReasoningDelta::content [field]
+    // W0348: lash_core::facade_support::SessionStreamEvent::StreamBlock -> StreamBlockEvent::Delta::text [field]
     field_witness(|value: &lash_core::facade_support::SessionStreamEvent| {
-        if let lash_core::facade_support::SessionStreamEvent::ReasoningDelta { content, .. } = value
+        if let lash_core::facade_support::SessionStreamEvent::StreamBlock(
+            StreamBlockEvent::Delta {
+                kind: StreamBlockKind::Reasoning,
+                text: content,
+                ..
+            },
+        ) = value
         {
             let _ = content;
         }
     });
-    // W0349: lash_core::facade_support::SessionStreamEvent::RetryStatus::attempt [field]
+    // W0349: lash_core::facade_support::SessionStreamEvent::RetryStatus -> RetryProgress::attempt [field]
     field_witness(|value: &lash_core::facade_support::SessionStreamEvent| {
-        if let lash_core::facade_support::SessionStreamEvent::RetryStatus { attempt, .. } = value {
+        if let lash_core::facade_support::SessionStreamEvent::RetryStatus(RetryProgress {
+            attempt,
+            ..
+        }) = value
+        {
             let _ = attempt;
         }
     });
-    // W0350: lash_core::facade_support::SessionStreamEvent::RetryStatus::envelope [field]
+    // W0350: lash_core::facade_support::SessionStreamEvent::RetryStatus -> RetryProgress::envelope [field]
     field_witness(|value: &lash_core::facade_support::SessionStreamEvent| {
-        if let lash_core::facade_support::SessionStreamEvent::RetryStatus { envelope, .. } = value {
+        if let lash_core::facade_support::SessionStreamEvent::RetryStatus(RetryProgress {
+            envelope,
+            ..
+        }) = value
+        {
             let _ = envelope;
         }
     });
-    // W0351: lash_core::facade_support::SessionStreamEvent::RetryStatus::max_attempts [field]
+    // W0351: lash_core::facade_support::SessionStreamEvent::RetryStatus -> RetryProgress::max_attempts [field]
     field_witness(|value: &lash_core::facade_support::SessionStreamEvent| {
-        if let lash_core::facade_support::SessionStreamEvent::RetryStatus { max_attempts, .. } =
-            value
+        if let lash_core::facade_support::SessionStreamEvent::RetryStatus(RetryProgress {
+            max_attempts,
+            ..
+        }) = value
         {
             let _ = max_attempts;
         }
     });
-    // W0352: lash_core::facade_support::SessionStreamEvent::RetryStatus::reason [field]
+    // W0352: lash_core::facade_support::SessionStreamEvent::RetryStatus -> RetryProgress::reason [field]
     field_witness(|value: &lash_core::facade_support::SessionStreamEvent| {
-        if let lash_core::facade_support::SessionStreamEvent::RetryStatus { reason, .. } = value {
+        if let lash_core::facade_support::SessionStreamEvent::RetryStatus(RetryProgress {
+            reason,
+            ..
+        }) = value
+        {
             let _ = reason;
         }
     });
-    // W0353: lash_core::facade_support::SessionStreamEvent::RetryStatus::wait_seconds [field]
+    // W0353: lash_core::facade_support::SessionStreamEvent::RetryStatus -> RetryProgress::wait_seconds [field]
     field_witness(|value: &lash_core::facade_support::SessionStreamEvent| {
-        if let lash_core::facade_support::SessionStreamEvent::RetryStatus { wait_seconds, .. } =
-            value
+        if let lash_core::facade_support::SessionStreamEvent::RetryStatus(RetryProgress {
+            wait_seconds,
+            ..
+        }) = value
         {
             let _ = wait_seconds;
         }

@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 
 pub(super) fn observation_assistant_delta(
     event: &lash_core::SessionObservationEvent,
@@ -6,7 +7,11 @@ pub(super) fn observation_assistant_delta(
     match &event.payload {
         lash_core::SessionObservationEventPayload::TurnActivity(activity) => {
             match &activity.event {
-                TurnEvent::AssistantProseDelta { text, .. } => Some(text.to_string()),
+                TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::AssistantText,
+                    text,
+                    ..
+                }) => Some(text.to_string()),
                 _ => None,
             }
         }
@@ -91,5 +96,110 @@ async fn invalidated_live_observation_recovers_with_an_authoritative_snapshot() 
             break;
         }
     }
+    Ok(())
+}
+
+const QUOTA_CODE: &str = "insufficient_quota";
+
+fn quota_refused_provider() -> ProviderHandle {
+    crate::testing::TestProvider::builder()
+        .kind("quota-refused")
+        .requires_streaming(true)
+        .complete(|_request| async move {
+            Err(LlmTransportError::new("You exceeded your current quota.")
+                .with_kind(lash_core::ProviderFailureKind::Quota)
+                .with_code(lash_core::FailureCode::provider(QUOTA_CODE))
+                .with_retry_verdict(lash_core::llm::transport::TransportRetryVerdict::NotRetryable))
+        })
+        .build()
+        .into_handle()
+}
+
+/// The failure envelopes a feed of turn activities carries.
+fn reported_failures<'a>(
+    activities: impl IntoIterator<Item = &'a lash_core::TurnActivity>,
+) -> Vec<&'a lash_sansio::ErrorEnvelope> {
+    activities
+        .into_iter()
+        .filter_map(|activity| match &activity.event {
+            TurnEvent::Error(failure) => failure.envelope.as_ref(),
+            _ => None,
+        })
+        .collect()
+}
+
+/// FIG-5526: a provider failure with a structured vendor code reaches a
+/// host's turn-activity feed with its kind, code and retryability, and the
+/// live replay hands a reopened session the same typed payload — a host
+/// never parses the message to classify the failure.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_provider_failure_reaches_the_activity_feed_typed_and_reads_back_after_a_reopen()
+-> Result<()> {
+    let replay = Arc::new(lash_core::facade_support::InMemoryLiveReplayStore::new(
+        lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard(),
+    ));
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        sqlite_memory_store_backend().await,
+    ))
+    .serve_test_llm_profile(quota_refused_provider(), mock_llm_profile_spec())
+    .live_replay_store(replay.clone())
+    .build(crate::testing::runtime_lease_owner())?;
+    let session_id = SessionId::from("typed-failure-activity");
+    let session = core
+        .session(session_id.clone())
+        .created()
+        .await
+        .open()
+        .await?;
+    let before = session.observe().snapshot().await?;
+    let output = session.send(TurnInput::text("hello")).output().await?;
+
+    let assert_typed = |envelopes: Vec<&lash_sansio::ErrorEnvelope>, feed: &str| {
+        let [envelope] = envelopes.as_slice() else {
+            panic!("{feed} carries exactly one reported failure: {envelopes:?}");
+        };
+        assert_eq!(
+            envelope.kind,
+            lash_sansio::TurnFailureKind::LlmProvider,
+            "{feed}"
+        );
+        assert_eq!(
+            envelope.code,
+            Some(lash_core::FailureCode::provider(QUOTA_CODE)),
+            "{feed}"
+        );
+        assert_eq!(envelope.retryable, Some(false), "{feed}");
+        assert_eq!(
+            envelope.provider_failure_kind,
+            Some(lash_core::ProviderFailureKind::Quota),
+            "{feed}"
+        );
+    };
+    assert_typed(
+        reported_failures(&output.activities),
+        "the turn's activities",
+    );
+
+    drop(session);
+    let reopened = core.session(session_id).open().await?;
+    let lash_core::facade_support::SessionResume::Replayed { events } = reopened
+        .observe()
+        .resume_from_cursor(&before.cursor)
+        .await?
+    else {
+        panic!("the live replay continues the cursor taken before the turn");
+    };
+    let replayed = events
+        .iter()
+        .filter_map(|event| match &event.payload {
+            lash_core::SessionObservationEventPayload::TurnActivity(activity) => Some(activity),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_typed(
+        reported_failures(replayed),
+        "the live replay after a reopen",
+    );
+    core.shutdown().await?;
     Ok(())
 }

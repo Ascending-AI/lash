@@ -223,7 +223,7 @@ impl AttemptStreamBuilder {
     /// Appends a delta to the channel's previous event when both are deltas
     /// of the same kind for the same block.
     fn coalesce(&mut self, channel: AttemptStreamChannel, payload: &Value) -> bool {
-        let Some((text_field, delta)) = delta_text(payload) else {
+        let Some(delta) = delta_text(payload) else {
             return false;
         };
         let Some(previous) = self
@@ -235,13 +235,14 @@ impl AttemptStreamBuilder {
         else {
             return false;
         };
-        let same_block = previous.payload.get("type") == payload.get("type")
-            && previous.payload.get("block") == payload.get("block")
-            && previous.payload.get("correlation_id") == payload.get("correlation_id");
+        let same_block = delta_text(&previous.payload).is_some()
+            && ["kind", "block", "correlation_id"]
+                .iter()
+                .all(|field| previous.payload.get(field) == payload.get(field));
         if !same_block || self.bytes + delta.len() > self.limit {
             return false;
         }
-        let Some(Value::String(text)) = previous.payload.get_mut(text_field) else {
+        let Some(Value::String(text)) = previous.payload.get_mut("text") else {
             return false;
         };
         text.push_str(delta);
@@ -341,18 +342,13 @@ fn call_id(payload: &Value) -> Option<&str> {
     payload.get("call_id").and_then(Value::as_str)
 }
 
-/// The text field and text of a streamed delta: a session event's `content`
-/// or an activity's `text`.
-fn delta_text(payload: &Value) -> Option<(&'static str, &str)> {
-    match payload.get("type").and_then(Value::as_str)? {
-        "text_delta" | "reasoning_delta" if payload.get("content").is_some() => {
-            Some(("content", payload.get("content")?.as_str()?))
-        }
-        "assistant_prose_delta" | "reasoning_delta" => {
-            Some(("text", payload.get("text")?.as_str()?))
-        }
-        _ => None,
-    }
+/// The text of a streamed block delta. Both channels carry the one
+/// stream-block payload, so one spelling reads either.
+fn delta_text(payload: &Value) -> Option<&str> {
+    let field = |name: &str| payload.get(name).and_then(Value::as_str);
+    (field("type")? == "stream_block" && field("phase")? == "delta")
+        .then(|| field("text"))
+        .flatten()
 }
 
 fn payload_bytes(payload: &Value) -> usize {

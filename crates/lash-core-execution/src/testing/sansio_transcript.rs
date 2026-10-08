@@ -18,6 +18,7 @@
 //!   protocol iteration and would double every transcript's length while saying
 //!   nothing the checkpoint and outcome lines do not.
 
+use crate::{ReportedFailure, RetryProgress};
 use lash_sansio::{Effect, TurnProtocol};
 
 use super::behavior_transcript::{Actor, Attr, Entry, IdKind, Kind, Transcript};
@@ -124,12 +125,12 @@ fn record_stream_event(transcript: &mut Transcript, actor: &str, event: &Session
                 .attr(Attr::text("text", text)),
             );
         }
-        SessionStreamEvent::RetryStatus {
+        SessionStreamEvent::RetryStatus(RetryProgress {
             attempt,
             max_attempts,
             reason,
             ..
-        } => {
+        }) => {
             transcript.record(
                 Entry::new(Kind::Fault, session(), "provider.retry")
                     .attr(Attr::int("attempt", *attempt as u64))
@@ -137,7 +138,7 @@ fn record_stream_event(transcript: &mut Transcript, actor: &str, event: &Session
                     .attr(Attr::text("reason", reason)),
             );
         }
-        SessionStreamEvent::Error { message, .. } => {
+        SessionStreamEvent::Error(ReportedFailure { message, .. }) => {
             transcript.record(
                 Entry::new(Kind::Fault, session(), "turn.error").attr(Attr::text("error", message)),
             );
@@ -152,10 +153,7 @@ fn record_stream_event(transcript: &mut Transcript, actor: &str, event: &Session
         SessionStreamEvent::TurnOutcome { outcome } => {
             transcript.record(outcome_entry(session(), outcome));
         }
-        SessionStreamEvent::TextDelta { .. }
-        | SessionStreamEvent::ReasoningDelta { .. }
-        | SessionStreamEvent::StreamBlockStarted { .. }
-        | SessionStreamEvent::StreamBlockCompleted { .. }
+        SessionStreamEvent::StreamBlock(_)
         | SessionStreamEvent::ToolCallStart { .. }
         | SessionStreamEvent::LlmRequest { .. }
         | SessionStreamEvent::LlmResponse { .. }

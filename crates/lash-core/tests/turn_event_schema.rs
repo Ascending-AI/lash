@@ -14,6 +14,11 @@
 
 use lash_core::SessionId;
 use lash_core::TurnId;
+use lash_core::llm::types::{LlmTerminalReason, ProviderFailureKind};
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_sansio::{
+    ErrorEnvelope, FailureCode, ReportedFailure, RetryProgress, SessionStreamEvent, TurnFailureKind,
+};
 use std::collections::BTreeSet;
 
 use lash_core::{
@@ -47,10 +52,7 @@ turn_event_tags! {
     ToolRestoreReported => "tool_restore_reported",
     ModelRequestStarted => "model_request_started",
     CheckpointRecorded => "checkpoint_recorded",
-    AssistantProseDelta => "assistant_prose_delta",
-    ReasoningDelta => "reasoning_delta",
-    StreamBlockStarted => "stream_block_started",
-    StreamBlockCompleted => "stream_block_completed",
+    StreamBlock => "stream_block",
     ModelAttemptReset => "model_attempt_reset",
     ModelCallRecorded => "model_call_recorded",
     CodeBlockStarted => "code_block_started",
@@ -153,53 +155,18 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
             json!({ "type": "checkpoint_recorded", "protocol_iteration": 2 }),
         ),
         (
-            "assistant_prose_delta",
-            TurnEvent::AssistantProseDelta {
-                text: "hi".into(),
-                block: block_identity("msg-1:0", 0, Some("msg-1")),
-            },
-            json!({
-                "type": "assistant_prose_delta",
-                "text": "hi",
-                "block": { "id": "msg-1:0", "ordinal": 0, "item_id": "msg-1" },
-            }),
-        ),
-        (
-            "reasoning_delta",
-            TurnEvent::ReasoningDelta {
-                text: "thinking".into(),
+            "stream_block",
+            TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::Reasoning,
                 block: block_identity("rs-1:summary:0", 1, Some("rs-1")),
-            },
-            json!({
-                "type": "reasoning_delta",
-                "text": "thinking",
-                "block": { "id": "rs-1:summary:0", "ordinal": 1, "item_id": "rs-1" },
+                text: "thinking".into(),
             }),
-        ),
-        (
-            "stream_block_started",
-            TurnEvent::StreamBlockStarted {
-                kind: lash_core::llm::types::StreamBlockKind::Reasoning,
-                block: block_identity("rs-1:summary:1", 2, Some("rs-1")),
-            },
             json!({
-                "type": "stream_block_started",
+                "type": "stream_block",
+                "phase": "delta",
                 "kind": "reasoning",
-                "block": { "id": "rs-1:summary:1", "ordinal": 2, "item_id": "rs-1" },
-            }),
-        ),
-        (
-            "stream_block_completed",
-            TurnEvent::StreamBlockCompleted {
-                kind: lash_core::llm::types::StreamBlockKind::AssistantText,
-                block: block_identity("msg-1:0", 3, None),
-                text: "done".into(),
-            },
-            json!({
-                "type": "stream_block_completed",
-                "kind": "assistant_text",
-                "block": { "id": "msg-1:0", "ordinal": 3 },
-                "text": "done",
+                "block": { "id": "rs-1:summary:0", "ordinal": 1, "item_id": "rs-1" },
+                "text": "thinking",
             }),
         ),
         (
@@ -492,12 +459,13 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
         ),
         (
             "retry_status",
-            TurnEvent::RetryStatus {
+            TurnEvent::RetryStatus(RetryProgress {
                 wait_seconds: 3,
                 attempt: 1,
                 max_attempts: 5,
                 reason: "rate_limited".to_string(),
-            },
+                envelope: None,
+            }),
             json!({
                 "type": "retry_status",
                 "wait_seconds": 3,
@@ -551,10 +519,15 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
         ),
         (
             "error",
-            TurnEvent::Error {
+            TurnEvent::Error(ReportedFailure {
                 message: "boom".to_string(),
-            },
-            json!({ "type": "error", "message": "boom" }),
+                envelope: Some(provider_failure_envelope()),
+            }),
+            json!({
+                "type": "error",
+                "message": "boom",
+                "envelope": provider_failure_envelope_json(),
+            }),
         ),
     ]
 }
@@ -604,9 +577,10 @@ fn turn_activity_envelope_flattens_event() {
     let activity = TurnActivity {
         id: TurnActivityId::new("act-1"),
         correlation_id: TurnActivityId::new("corr-1"),
-        event: TurnEvent::Error {
+        event: TurnEvent::Error(ReportedFailure {
             message: "boom".to_string(),
-        },
+            envelope: None,
+        }),
     };
 
     let json = serde_json::to_value(&activity).expect("serialize activity");
@@ -628,4 +602,101 @@ fn turn_activity_envelope_flattens_event() {
 
     let round_trip: TurnActivity = serde_json::from_value(json.clone()).expect("deserialize");
     assert_eq!(serde_json::to_value(&round_trip).unwrap(), json);
+}
+
+fn provider_failure_envelope() -> ErrorEnvelope {
+    ErrorEnvelope {
+        kind: TurnFailureKind::LlmProvider,
+        code: Some(FailureCode::provider("insufficient_quota")),
+        terminal_reason: Some(LlmTerminalReason::ProviderError),
+        user_message: "provider call failed".to_string(),
+        raw: None,
+        retryable: Some(false),
+        provider_failure_kind: Some(ProviderFailureKind::Quota),
+    }
+}
+
+fn provider_failure_envelope_json() -> serde_json::Value {
+    json!({
+        "kind": "llm_provider",
+        "code": "provider:insufficient_quota",
+        "terminal_reason": "provider_error",
+        "user_message": "provider call failed",
+        "retryable": false,
+        "provider_failure_kind": "quota",
+    })
+}
+
+/// One fact, one payload: every step of a block's lifecycle, a reported
+/// failure and a retry serialize to the same fields on the turn-activity lane
+/// and on the session stream, so one host decoder reads both.
+#[test]
+fn session_stream_and_turn_activity_carry_one_payload_per_fact() {
+    let block = block_identity("rs-1:summary:1", 2, Some("rs-1"));
+    let lifecycle = [
+        (
+            StreamBlockEvent::started(StreamBlockKind::Reasoning, block.clone()),
+            json!({
+                "type": "stream_block",
+                "phase": "started",
+                "kind": "reasoning",
+                "block": { "id": "rs-1:summary:1", "ordinal": 2, "item_id": "rs-1" },
+            }),
+        ),
+        (
+            StreamBlockEvent::delta(StreamBlockKind::Reasoning, block.clone(), "th"),
+            json!({
+                "type": "stream_block",
+                "phase": "delta",
+                "kind": "reasoning",
+                "block": { "id": "rs-1:summary:1", "ordinal": 2, "item_id": "rs-1" },
+                "text": "th",
+            }),
+        ),
+        (
+            StreamBlockEvent::completed(StreamBlockKind::Reasoning, block, "thought"),
+            json!({
+                "type": "stream_block",
+                "phase": "completed",
+                "kind": "reasoning",
+                "block": { "id": "rs-1:summary:1", "ordinal": 2, "item_id": "rs-1" },
+                "text": "thought",
+            }),
+        ),
+    ];
+    for (event, expected) in lifecycle {
+        let activity = serde_json::to_value(TurnEvent::StreamBlock(event.clone())).unwrap();
+        let session = serde_json::to_value(SessionStreamEvent::StreamBlock(event.clone())).unwrap();
+        assert_eq!(activity, expected);
+        assert_eq!(session, expected);
+        let TurnEvent::StreamBlock(decoded) = serde_json::from_value(activity).unwrap() else {
+            panic!("a stream block decodes as a stream block");
+        };
+        assert_eq!(decoded, event);
+    }
+
+    let failure = ReportedFailure {
+        message: "LLM error: quota".to_string(),
+        envelope: Some(provider_failure_envelope()),
+    };
+    let activity = serde_json::to_value(TurnEvent::Error(failure.clone())).unwrap();
+    assert_eq!(
+        activity,
+        serde_json::to_value(SessionStreamEvent::Error(failure)).unwrap()
+    );
+    assert_eq!(activity["envelope"]["kind"], "llm_provider");
+    assert_eq!(activity["envelope"]["code"], "provider:insufficient_quota");
+    assert_eq!(activity["envelope"]["retryable"], false);
+
+    let retry = RetryProgress {
+        wait_seconds: 3,
+        attempt: 1,
+        max_attempts: 5,
+        reason: "rate_limited".to_string(),
+        envelope: Some(provider_failure_envelope()),
+    };
+    assert_eq!(
+        serde_json::to_value(TurnEvent::RetryStatus(retry.clone())).unwrap(),
+        serde_json::to_value(SessionStreamEvent::RetryStatus(retry)).unwrap()
+    );
 }

@@ -383,7 +383,9 @@ pub mod facade_support {
     pub use lash_sansio::ModelToolReturn;
     pub use lash_sansio::ModelToolReturnPart;
     pub use lash_sansio::ProviderSchemaCapabilities;
+    pub use lash_sansio::ReportedFailure;
     pub use lash_sansio::ResolvedSchema;
+    pub use lash_sansio::RetryProgress;
     pub use lash_sansio::SchemaPurpose;
     pub use lash_sansio::SchemaResolutionError;
     pub use lash_sansio::SchemaResolutionRequest;
@@ -533,7 +535,7 @@ pub use lash_trace::{
     TraceLlmMessage, TraceLlmRequest, TraceLlmResponse, TracePromptComponent,
     TraceProviderBodyOmission, TraceProviderEvent, TraceProviderReplayDropEvent,
     TraceProviderReplayDropReason, TraceProviderReplayKind, TraceProviderRouteIdentity,
-    TraceRuntimeStreamEvent, TraceToolResultBlock, TraceToolSpec,
+    TraceRuntimeStreamEvent, TraceRuntimeStreamPayload, TraceToolResultBlock, TraceToolSpec,
 };
 pub use llm::transport::ProviderFailureKind;
 pub use llm_profile::{

@@ -10,6 +10,7 @@
 /// version_guard(items(LASH_PROVIDER_CALL_CORRELATION_DOMAIN_VERSION, repair_tool_call_ids))
 const LASH_PROVIDER_CALL_CORRELATION_DOMAIN_VERSION: &str = "lash-provider-call-correlation/v1";
 
+use crate::llm::types::StreamBlockEvent;
 use std::collections::HashSet;
 use std::time::Instant;
 
@@ -150,32 +151,6 @@ pub(super) struct LlmStreamDebugState {
     pub(super) summary: LlmStreamSummary,
 }
 
-#[derive(Clone, Copy)]
-pub(super) struct LlmDebugText<'a> {
-    pub(super) raw: Option<&'a str>,
-    pub(super) visible: Option<&'a str>,
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct LlmDebugToolCall<'a> {
-    pub(super) call_id: &'a str,
-    pub(super) tool_name: &'a str,
-    pub(super) input_json: &'a str,
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct LlmStreamEventLog<'a> {
-    pub(super) protocol_iteration: usize,
-    pub(super) event_type: &'a str,
-    pub(super) text: LlmDebugText<'a>,
-    pub(super) item_id: Option<&'a str>,
-    /// The streamed block's own identity — distinct blocks can share one
-    /// provider `item_id`, so traces need both to keep sub-blocks apart.
-    pub(super) block_id: Option<&'a str>,
-    pub(super) usage: Option<&'a LlmUsage>,
-    pub(super) tool_call: Option<LlmDebugToolCall<'a>>,
-}
-
 pub(super) struct LlmStreamState<'a> {
     pub(super) text_streamed: &'a mut bool,
     pub(super) streamed_usage: &'a mut LlmUsage,
@@ -197,7 +172,7 @@ pub(super) struct LlmStreamState<'a> {
     /// synthesizing a response from the already-streamed parts.
     pub(super) abort_requested: &'a mut bool,
     /// Pre-transform text accumulated per streamed block id. The
-    /// authoritative `TextBlockEnd` payload is reconciled against this raw
+    /// authoritative block-completion payload is reconciled against this raw
     /// accumulation: a prefix-extending completion forwards only the unseen
     /// tail through the plugin transform, while a non-prefix correction seals
     /// with the provider's text verbatim.
@@ -670,23 +645,14 @@ pub(super) fn fold_llm_stream_event(
             *accumulator = LlmStreamAccumulator::default();
             *usage = LlmUsage::default();
         }
-        LlmStreamEvent::TextBlockStart { block } => {
-            accumulator.open_block(block, StreamBlockKind::AssistantText);
+        LlmStreamEvent::Block(StreamBlockEvent::Started { kind, block }) => {
+            accumulator.open_block(block, *kind);
         }
-        LlmStreamEvent::ReasoningBlockStart { block } => {
-            accumulator.open_block(block, StreamBlockKind::Reasoning);
+        LlmStreamEvent::Block(StreamBlockEvent::Delta { kind, block, text }) => {
+            accumulator.push_block_piece(block, *kind, text, false);
         }
-        LlmStreamEvent::Delta { block, text } => {
-            accumulator.push_block_piece(block, StreamBlockKind::AssistantText, text, false);
-        }
-        LlmStreamEvent::ReasoningDelta { block, text } => {
-            accumulator.push_block_piece(block, StreamBlockKind::Reasoning, text, false);
-        }
-        LlmStreamEvent::TextBlockEnd { block, text } => {
-            accumulator.push_block_piece(block, StreamBlockKind::AssistantText, text, true);
-        }
-        LlmStreamEvent::ReasoningBlockEnd { block, text } => {
-            accumulator.push_block_piece(block, StreamBlockKind::Reasoning, text, true);
+        LlmStreamEvent::Block(StreamBlockEvent::Completed { kind, block, text }) => {
+            accumulator.push_block_piece(block, *kind, text, true);
         }
         LlmStreamEvent::Part(LlmOutputPart::Text {
             text,

@@ -29,12 +29,12 @@ pub use lash_core::{
     TraceEffectEnvelopeDiffValue, TraceError, TraceEvent, TraceLlmMessage, TraceLlmRequest,
     TraceLlmResponse, TracePromptComponent, TraceProviderBodyOmission, TraceProviderEvent,
     TraceProviderReplayDropEvent, TraceProviderReplayDropReason, TraceProviderReplayKind,
-    TraceProviderRouteIdentity, TraceRuntimeStreamEvent, TraceToolResultBlock, TraceToolSpec,
-    facade_support::JsonlTraceReadError, facade_support::JsonlTraceSink,
-    facade_support::TraceBranchSelection, facade_support::TraceLabelMetadata,
-    facade_support::TraceRecord, facade_support::TraceRuntimeScope,
-    facade_support::TraceRuntimeSubject, facade_support::TraceSinkError,
-    facade_support::parse_jsonl_records,
+    TraceProviderRouteIdentity, TraceRuntimeStreamEvent, TraceRuntimeStreamPayload,
+    TraceToolResultBlock, TraceToolSpec, facade_support::JsonlTraceReadError,
+    facade_support::JsonlTraceSink, facade_support::TraceBranchSelection,
+    facade_support::TraceLabelMetadata, facade_support::TraceRecord,
+    facade_support::TraceRuntimeScope, facade_support::TraceRuntimeSubject,
+    facade_support::TraceSinkError, facade_support::parse_jsonl_records,
 };
 pub use lash_sansio::ExecutionNodeKind;
 #[cfg(feature = "otel-trace")]

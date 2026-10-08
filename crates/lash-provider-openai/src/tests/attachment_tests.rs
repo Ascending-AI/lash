@@ -3,6 +3,7 @@ use lash_core::llm::types::{AttachmentSlot, SlotCodec};
 use lash_sansio::llm::attachment_delivery::{
     AttachmentPosition, Delivery, DeliverySecret, ProviderFileScope,
 };
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 
 // DELIVERY-SCOPE: Chat has no Files namespace, even when the host permits one.
 #[test]
@@ -156,12 +157,12 @@ async fn url_attachment_calls_stream_deltas_and_provider_traces() {
         assert!(
             events
                 .iter()
-                .any(|e| matches!(e, LlmStreamEvent::Delta { text, .. } if text == URL)),
+                .any(|e| matches!(e, LlmStreamEvent::Block(StreamBlockEvent::Delta { kind: StreamBlockKind::AssistantText,text, .. }) if text == URL)),
             "adapter {adapter} lost its delta: {events:?}"
         );
         if adapter == 0 {
             assert!(events.iter().any(
-                |e| matches!(e, LlmStreamEvent::ReasoningDelta { text, .. } if text == "thinking")
+                |e| matches!(e, LlmStreamEvent::Block(StreamBlockEvent::Delta { kind: StreamBlockKind::Reasoning,text, .. }) if text == "thinking")
             ));
         }
         assert!(

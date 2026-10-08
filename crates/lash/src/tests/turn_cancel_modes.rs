@@ -7,6 +7,7 @@ use super::*;
 use crate::{TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnEvent, TurnInput};
 use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::TurnCancelOutcome;
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::sync::atomic::AtomicBool;
 
 /// How long a cancelled turn may take to end.
@@ -679,10 +680,11 @@ async fn immediate_stop_after_a_checkpoint(id: &str) -> Result<ImmediateTail> {
                 requests.lock_recover().push(request.messages.clone());
                 let call = calls.fetch_add(1, Ordering::SeqCst);
                 async move {
-                    let delta = |block: &str, text: &str| LlmStreamEvent::Delta {
+                    let delta = |block: &str, text: &str| LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                        kind: StreamBlockKind::AssistantText,
                         block: lash_core::llm::types::StreamBlockIdentity::new(block, 0),
                         text: text.to_string(),
-                    };
+                    });
                     match call {
                         0 => Ok(LlmResponse {
                             parts: vec![
@@ -735,7 +737,7 @@ async fn immediate_stop_after_a_checkpoint(id: &str) -> Result<ImmediateTail> {
         while let Some(activity) = events.next_activity().await {
             let activity = activity?;
             let tail = matches!(&activity.event,
-                TurnEvent::AssistantProseDelta { text, .. } if &**text == TAIL);
+                TurnEvent::StreamBlock(StreamBlockEvent::Delta { kind: StreamBlockKind::AssistantText,text, .. }) if &**text == TAIL);
             host.push(activity);
             if tail {
                 return Result::Ok(());
@@ -804,7 +806,7 @@ async fn immediate_stop_tail_after_checkpoint_is_absent_from_next_turn_context()
         next_prompt,
     } = immediate_stop_after_a_checkpoint("immediate-tail").await?;
     assert_eq!(evidence.mode, TurnCancelMode::Immediate);
-    let prose = |activity: &crate::TurnActivity, wanted: &str| matches!(&activity.event, TurnEvent::AssistantProseDelta { text, .. } if &**text == wanted);
+    let prose = |activity: &crate::TurnActivity, wanted: &str| matches!(&activity.event, TurnEvent::StreamBlock(StreamBlockEvent::Delta { kind: StreamBlockKind::AssistantText,text, .. }) if &**text == wanted);
     let checkpoint = host
         .iter()
         .rposition(|activity| matches!(activity.event, TurnEvent::CheckpointRecorded { .. }))
@@ -833,11 +835,11 @@ async fn immediate_stop_tail_after_checkpoint_is_absent_from_next_turn_context()
     let tail: String = host[checkpoint + 1..]
         .iter()
         .filter_map(|activity| match &activity.event {
-            TurnEvent::AssistantProseDelta { text, .. }
-                if !reset.contains(&activity.correlation_id) =>
-            {
-                Some(text.as_ref())
-            }
+            TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
+                text,
+                ..
+            }) if !reset.contains(&activity.correlation_id) => Some(text.as_str()),
             _ => None,
         })
         .collect();

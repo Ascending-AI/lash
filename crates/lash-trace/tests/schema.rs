@@ -1,4 +1,6 @@
-use lash_sansio::llm::types::{LlmProviderTraceDirection, LlmUsage};
+use lash_sansio::llm::types::{
+    LlmProviderTraceDirection, LlmUsage, StreamBlockEvent, StreamBlockIdentity, StreamBlockKind,
+};
 use lash_trace::{
     TraceBranchSelection, TraceContext, TraceDurableTimerStatus, TraceDurableWaitResolution,
     TraceEffectEnvelopeDiffEntry, TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue,
@@ -8,8 +10,8 @@ use lash_trace::{
     TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceLlmRequest, TraceLlmResponse,
     TraceProviderEvent, TraceProviderReplayDropEvent, TraceProviderReplayDropReason,
     TraceProviderReplayKind, TraceProviderRouteIdentity, TraceRecord, TraceRuntimeScope,
-    TraceRuntimeStreamEvent, TraceRuntimeSubject, TraceToolCallOutcome, TraceToolCallOutput,
-    TraceToolCallStatus, TraceTurnCompletionReason, TraceTurnOutcome,
+    TraceRuntimeStreamEvent, TraceRuntimeStreamPayload, TraceRuntimeSubject, TraceToolCallOutcome,
+    TraceToolCallOutput, TraceToolCallStatus, TraceTurnCompletionReason, TraceTurnOutcome,
 };
 use serde_json::json;
 
@@ -358,16 +360,27 @@ fn event_samples() -> Vec<TraceEvent> {
             event: TraceRuntimeStreamEvent {
                 sequence: 1,
                 elapsed_ms: 0,
-                event_name: "delta".to_string(),
-                raw_text: None,
-                visible_text: None,
-                item_id: None,
-                block_id: None,
-                output_index: None,
-                call_id: None,
-                tool_name: None,
-                input_json: None,
-                usage: None,
+                payload: TraceRuntimeStreamPayload::Block {
+                    event: StreamBlockEvent::delta(
+                        StreamBlockKind::Reasoning,
+                        StreamBlockIdentity::new("rs_1:summary:1", 1)
+                            .with_item_id(Some("rs_1".to_string())),
+                        "thinking",
+                    ),
+                    raw_text: None,
+                },
+            },
+        },
+        TraceEvent::RuntimeStreamEvent {
+            event: TraceRuntimeStreamEvent {
+                sequence: 2,
+                elapsed_ms: 1,
+                payload: TraceRuntimeStreamPayload::ToolCallPart {
+                    call_id: "call-1".to_string(),
+                    tool_name: "search".to_string(),
+                    input_json: json!({ "q": "x" }),
+                    item_id: None,
+                },
             },
         },
         TraceEvent::ToolReceipt {

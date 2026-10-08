@@ -6,6 +6,8 @@ use super::*;
 use lash_core::llm::transport::{LlmTransportError, TransportRetryVerdict};
 use lash_core::llm::types::{LlmUsage, StreamBlockIdentity};
 use lash_core::{MessageRole, TurnEvent};
+use lash_sansio::ReportedFailure;
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 
 /// Every committed part's content of `output`'s session.
 fn committed_contents(output: &crate::TurnOutput) -> Vec<String> {
@@ -61,10 +63,11 @@ async fn cancelled_provider_stream_does_not_commit_partial_output() {
             let stream = request
                 .stream_events
                 .expect("a streaming turn requests provider stream events");
-            stream.send(LlmStreamEvent::Delta {
+            stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
                 block: StreamBlockIdentity::new("text:0", 0),
                 text: PARTIAL.to_string(),
-            });
+            }));
             std::future::pending::<std::result::Result<LlmResponse, LlmTransportError>>().await
         })
         .build()
@@ -87,7 +90,7 @@ async fn cancelled_provider_stream_does_not_commit_partial_output() {
             .expect("the live activity reads");
         if matches!(
             &activity.event,
-            TurnEvent::AssistantProseDelta { text, .. } if text.as_ref() == PARTIAL
+            TurnEvent::StreamBlock(StreamBlockEvent::Delta { kind: StreamBlockKind::AssistantText,text, .. }) if text.as_str() == PARTIAL
         ) {
             break;
         }
@@ -101,14 +104,14 @@ async fn cancelled_provider_stream_does_not_commit_partial_output() {
     assert!(
         output.activities.iter().all(|activity| !matches!(
             &activity.event,
-            TurnEvent::Error { message } if message == "LLM error: cancelled"
+            TurnEvent::Error(ReportedFailure { message, .. }) if message == "LLM error: cancelled"
         )),
         "a requested cancellation emits no user-visible model error"
     );
     assert!(
         output.activities.iter().any(|activity| matches!(
             &activity.event,
-            TurnEvent::AssistantProseDelta { text, .. } if text.as_ref() == PARTIAL
+            TurnEvent::StreamBlock(StreamBlockEvent::Delta { kind: StreamBlockKind::AssistantText,text, .. }) if text.as_str() == PARTIAL
         )),
         "the partial text stays observable as live activity"
     );
@@ -168,10 +171,11 @@ async fn truncated_retry_resets_partial_tool_calls_and_retains_failed_attempt_us
                                 ..LlmResponse::default()
                             }));
                     }
-                    stream.send(LlmStreamEvent::Delta {
+                    stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                        kind: StreamBlockKind::AssistantText,
                         block: StreamBlockIdentity::new("text:0", 0),
                         text: "success".to_string(),
-                    });
+                    }));
                     Ok(LlmResponse {
                         parts: vec![LlmOutputPart::Text {
                             text: "success".to_string(),
@@ -234,10 +238,11 @@ async fn courtesy_retry_after_regeneration_emits_one_host_visible_attempt_reset(
                     request
                         .stream_events
                         .expect("stream events")
-                        .send(LlmStreamEvent::Delta {
+                        .send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                            kind: StreamBlockKind::AssistantText,
                             block: StreamBlockIdentity::new("text:0", 0),
                             text: "success".to_string(),
-                        });
+                        }));
                     Ok(LlmResponse {
                         parts: vec![LlmOutputPart::Text {
                             text: "success".to_string(),
@@ -308,10 +313,11 @@ async fn retryable_mid_stream_failure_preserves_durable_charge_safety_evidence()
                 async move {
                     let stream = request.stream_events.expect("stream events");
                     if call == 1 {
-                        stream.send(LlmStreamEvent::Delta {
+                        stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                            kind: StreamBlockKind::AssistantText,
                             block: StreamBlockIdentity::new("text:0", 0),
                             text: lost_text.clone(),
-                        });
+                        }));
                         let usage = LlmUsage {
                             input_tokens: 32,
                             output_tokens: 256,
@@ -360,7 +366,7 @@ async fn retryable_mid_stream_failure_preserves_durable_charge_safety_evidence()
     ));
     assert!(output.activities.iter().any(|activity| matches!(
         &activity.event,
-        TurnEvent::AssistantProseDelta { text, .. } if text.as_ref() == lost_text
+        TurnEvent::StreamBlock(StreamBlockEvent::Delta { kind: StreamBlockKind::AssistantText,text, .. }) if text.as_str() == lost_text
     )));
     assert!(
         output

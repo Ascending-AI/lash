@@ -5,6 +5,7 @@
 //! nothing run twice.
 
 use super::*;
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 
 use std::future::Future;
 use std::task::Poll;
@@ -120,10 +121,11 @@ fn texts_of(message: &lash_core::llm::types::LlmMessage) -> Vec<String> {
 
 fn streamed_text(request: &LlmRequest, reply: String) -> LlmResponse {
     if let Some(events) = request.stream_events.as_ref() {
-        events.send(LlmStreamEvent::Delta {
+        events.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+            kind: StreamBlockKind::AssistantText,
             block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
             text: reply.clone(),
-        });
+        }));
     }
     text_response(&reply)
 }

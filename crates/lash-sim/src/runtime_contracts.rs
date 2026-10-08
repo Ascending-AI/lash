@@ -2,6 +2,7 @@ const RUNTIME_TURN_CONTRACT_ORACLE: crate::trace::OracleId<'static> =
     crate::trace::OracleId::real("runtime.turn_contract");
 use lash_core::facade_support::SessionGraphFacadeOps;
 use lash_sansio::SessionId;
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize, ser::SerializeStruct};
@@ -610,7 +611,15 @@ pub fn runtime_final_value_invariant_facts(
         .count();
     let assistant_prose_delta_count = activities
         .iter()
-        .filter(|activity| matches!(activity.event, lash::TurnEvent::AssistantProseDelta { .. }))
+        .filter(|activity| {
+            matches!(
+                activity.event,
+                lash::TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::AssistantText,
+                    ..
+                })
+            )
+        })
         .count();
     let semantic_channel_observed = semantic_value.is_some()
         && terminal_event_count > 0
@@ -852,10 +861,11 @@ mod tests {
         let failed = runtime_final_value_invariant_facts(
             &prose_only,
             &[lash::TurnActivity::independent(
-                lash::TurnEvent::AssistantProseDelta {
+                lash::TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::AssistantText,
                     text: "looks final".into(),
                     block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
-                },
+                }),
             )],
         );
         assert!(!failed.passed());

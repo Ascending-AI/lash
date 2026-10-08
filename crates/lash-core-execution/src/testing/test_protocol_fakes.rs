@@ -1,5 +1,6 @@
 //! Minimal protocol-plugin fakes shared by Lash tests.
 
+use crate::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -324,23 +325,26 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
                                 item_id,
                             };
                             next_block_ordinal += 1;
-                            actions.push(DriverAction::Emit(
-                                SessionStreamEvent::StreamBlockStarted {
+                            actions.push(DriverAction::Emit(SessionStreamEvent::StreamBlock(
+                                StreamBlockEvent::Started {
                                     kind: lash_sansio::llm::types::StreamBlockKind::AssistantText,
                                     block: block.clone(),
                                 },
-                            ));
-                            actions.push(DriverAction::Emit(SessionStreamEvent::TextDelta {
-                                content: text.clone(),
-                                block: block.clone(),
-                            }));
-                            actions.push(DriverAction::Emit(
-                                SessionStreamEvent::StreamBlockCompleted {
+                            )));
+                            actions.push(DriverAction::Emit(SessionStreamEvent::StreamBlock(
+                                StreamBlockEvent::Delta {
+                                    kind: StreamBlockKind::AssistantText,
+                                    text: text.clone(),
+                                    block: block.clone(),
+                                },
+                            )));
+                            actions.push(DriverAction::Emit(SessionStreamEvent::StreamBlock(
+                                StreamBlockEvent::Completed {
                                     kind: lash_sansio::llm::types::StreamBlockKind::AssistantText,
                                     block,
-                                    content: text.clone(),
+                                    text: text.clone(),
                                 },
-                            ));
+                            )));
                         }
                     }
                 }

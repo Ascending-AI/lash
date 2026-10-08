@@ -1,5 +1,4 @@
 //! FIG-3371 review regressions: reasoning visibility gating and the
-/// content-block identity unsigned thinking parts must still carry.
 use crate::AnthropicProvider;
 use lash_core::llm::types::{
     LlmEventSender, LlmMessage, LlmOutputPart, LlmRequest, LlmRole, LlmStreamEvent, LlmToolChoice,
@@ -7,6 +6,8 @@ use lash_core::llm::types::{
 };
 use lash_core::provider::Provider;
 use lash_core::sync::MutexExt;
+/// content-block identity unsigned thinking parts must still carry.
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -108,16 +109,22 @@ async fn hidden_thinking_stream_emits_no_reasoning_events() {
     assert!(
         events.iter().all(|event| !matches!(
             event,
-            LlmStreamEvent::ReasoningBlockStart { .. }
-                | LlmStreamEvent::ReasoningDelta { .. }
-                | LlmStreamEvent::ReasoningBlockEnd { .. }
-                | LlmStreamEvent::Part(LlmOutputPart::Reasoning { .. })
+            LlmStreamEvent::Block(StreamBlockEvent::Started {
+                kind: StreamBlockKind::Reasoning,
+                ..
+            }) | LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::Reasoning,
+                ..
+            }) | LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                kind: StreamBlockKind::Reasoning,
+                ..
+            }) | LlmStreamEvent::Part(LlmOutputPart::Reasoning { .. })
         )),
         "hidden thinking must not republish reasoning to the host: {events:?}"
     );
     assert!(
         events.iter().any(
-            |event| matches!(event, LlmStreamEvent::Delta { text, .. } if text == "public answer")
+            |event| matches!(event, LlmStreamEvent::Block(StreamBlockEvent::Delta { kind: StreamBlockKind::AssistantText,text, .. }) if text == "public answer")
         ),
         "visible text still streams: {events:?}"
     );
@@ -157,7 +164,7 @@ async fn unsigned_thinking_part_carries_content_block_item_id() {
     assert!(
         streamed.iter().any(|event| matches!(
             event,
-            LlmStreamEvent::ReasoningBlockStart { block }
+            LlmStreamEvent::Block(StreamBlockEvent::Started { kind: StreamBlockKind::Reasoning,block })
                 if block.item_id.as_deref() == Some("content_block:0")
         )),
         "the live block carries the same identity the completed part joins on: {streamed:?}"

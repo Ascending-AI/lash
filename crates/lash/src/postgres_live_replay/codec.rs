@@ -291,3 +291,80 @@ pub(super) fn unpack_doorbells(payload: &str) -> Vec<Doorbell> {
         Vec::new()
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use lash_core::llm::types::{StreamBlockEvent, StreamBlockIdentity, StreamBlockKind};
+    use lash_core::{ProviderFailureKind, TurnActivityId, TurnEvent};
+    use lash_sansio::{ErrorEnvelope, FailureCode, ReportedFailure, TurnFailureKind};
+
+    use super::*;
+
+    fn stored(event: TurnEvent) -> (serde_json::Value, TurnEvent) {
+        let session = SessionId::from("codec");
+        let activity = TurnActivity::new(TurnActivityId::new("activity"), event);
+        let draft = LiveReplayEventDraft::new(
+            None::<TurnId>,
+            SessionObservationEventPayload::TurnActivity(activity),
+        );
+        let encoded = encode(&session, draft).expect("the activity encodes");
+        let row = serde_json::from_slice(&encoded.bytes).expect("a stored payload is JSON");
+        let cursor = SessionCursor::new("incarnation", &session, SessionRevision::new(1), 1);
+        let decoded = decode(cursor, None, &encoded.bytes).expect("the stored payload decodes");
+        let SessionObservationEventPayload::TurnActivity(activity) = &decoded.payload else {
+            panic!("a turn activity decodes as a turn activity");
+        };
+        (row, activity.event.clone())
+    }
+
+    /// FIG-5526: a stored turn activity holds the failure's typed envelope
+    /// and the stream block's full lifecycle payload, and reads them back.
+    #[test]
+    fn a_stored_turn_activity_keeps_its_typed_failure_and_stream_block() {
+        let (row, read) = stored(TurnEvent::Error(ReportedFailure {
+            message: "LLM error: quota".to_string(),
+            envelope: Some(ErrorEnvelope {
+                kind: TurnFailureKind::LlmProvider,
+                code: Some(FailureCode::provider("insufficient_quota")),
+                terminal_reason: None,
+                user_message: "provider call failed".to_string(),
+                raw: None,
+                retryable: Some(false),
+                provider_failure_kind: Some(ProviderFailureKind::Quota),
+            }),
+        }));
+        let envelope = &row["activity"]["envelope"];
+        assert_eq!(envelope["kind"], "llm_provider");
+        assert_eq!(envelope["code"], "provider:insufficient_quota");
+        assert_eq!(envelope["retryable"], false);
+        let TurnEvent::Error(ReportedFailure {
+            envelope: Some(envelope),
+            ..
+        }) = read
+        else {
+            panic!("the stored failure reads back with its envelope");
+        };
+        assert_eq!(
+            envelope.code,
+            Some(FailureCode::provider("insufficient_quota"))
+        );
+        assert_eq!(envelope.retryable, Some(false));
+        assert_eq!(
+            envelope.provider_failure_kind,
+            Some(ProviderFailureKind::Quota)
+        );
+
+        let block = StreamBlockEvent::completed(
+            StreamBlockKind::Reasoning,
+            StreamBlockIdentity::new("rs_1:summary:1", 1).with_item_id(Some("rs_1".to_string())),
+            "thought",
+        );
+        let (row, read) = stored(TurnEvent::StreamBlock(block.clone()));
+        assert_eq!(row["activity"]["type"], "stream_block");
+        assert_eq!(row["activity"]["phase"], "completed");
+        let TurnEvent::StreamBlock(read) = read else {
+            panic!("the stored stream block reads back as a stream block");
+        };
+        assert_eq!(read, block);
+    }
+}

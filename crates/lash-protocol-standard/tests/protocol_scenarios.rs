@@ -1,4 +1,6 @@
+use lash_sansio::ReportedFailure;
 use lash_sansio::TurnId;
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::sync::Arc;
 
 use lash_core::sansio::{self, ChatContextProjector, ProtocolDriverHandle, Response};
@@ -474,10 +476,14 @@ impl StandardProtocolRun {
                         }));
                 }
                 Effect::Checkpoint { checkpoint, .. } => self.checkpoints.push(*checkpoint),
-                Effect::Emit(SessionStreamEvent::TextDelta { content, .. }) => {
+                Effect::Emit(SessionStreamEvent::StreamBlock(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::AssistantText,
+                    text: content,
+                    ..
+                })) => {
                     self.text_deltas.push(content.clone());
                 }
-                Effect::Emit(SessionStreamEvent::Error { message, .. }) => {
+                Effect::Emit(SessionStreamEvent::Error(ReportedFailure { message, .. })) => {
                     self.errors.push(message.clone());
                 }
                 Effect::Emit(SessionStreamEvent::TurnOutcome { outcome }) => {

@@ -1,4 +1,5 @@
 use lash_core::plugin::PluginSessionRequest;
+use lash_sansio::ReportedFailure;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 pub(crate) use std::sync::Arc;
@@ -395,7 +396,7 @@ pub(crate) fn effects_include_runtime_error(effects: &[Effect], message_fragment
     let has_error = effects.iter().any(|effect| {
         matches!(
             effect,
-            Effect::Emit(SessionStreamEvent::Error { message, .. })
+            Effect::Emit(SessionStreamEvent::Error(ReportedFailure { message, .. }))
                 if message.contains(message_fragment)
         )
     });

@@ -9,6 +9,7 @@
 
 use super::*;
 use lash_llm_transport::{LlmByteStream, LlmHttpResponse, run_with_timeout};
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 
 #[tokio::test]
 async fn unsuccessful_http_response_emits_no_response_establishment_marker() {
@@ -72,7 +73,11 @@ fn reasoning_deltas(output: &lash::TurnOutput) -> Vec<&str> {
         .activities
         .iter()
         .filter_map(|activity| match &activity.event {
-            lash::TurnEvent::ReasoningDelta { text, .. } => Some(text.as_ref()),
+            lash::TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::Reasoning,
+                text,
+                ..
+            }) => Some(text.as_str()),
             _ => None,
         })
         .collect()
@@ -636,7 +641,11 @@ async fn responses_handle_resumes_after_the_last_sequence_without_duplicate_outp
     let deltas = events
         .iter()
         .filter_map(|event| match event {
-            LlmStreamEvent::Delta { text: delta, .. } => Some(delta.as_str()),
+            LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
+                text: delta,
+                ..
+            }) => Some(delta.as_str()),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -1031,14 +1040,21 @@ async fn buffered_responses_emits_each_message_item_as_its_own_block() {
     let started = events
         .iter()
         .filter_map(|event| match event {
-            LlmStreamEvent::TextBlockStart { block } => Some(block.id.clone()),
+            LlmStreamEvent::Block(StreamBlockEvent::Started {
+                kind: StreamBlockKind::AssistantText,
+                block,
+            }) => Some(block.id.clone()),
             _ => None,
         })
         .collect::<Vec<_>>();
     let ended = events
         .iter()
         .filter_map(|event| match event {
-            LlmStreamEvent::TextBlockEnd { block, text } => Some((block.id.clone(), text.clone())),
+            LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                kind: StreamBlockKind::AssistantText,
+                block,
+                text,
+            }) => Some((block.id.clone(), text.clone())),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -1079,12 +1095,24 @@ async fn completed_responses_stream_seals_every_open_block() {
     let events = events.lock_recover().clone();
     let reasoning_ends = events
         .iter()
-        .filter(|event| matches!(event, LlmStreamEvent::ReasoningBlockEnd { .. }))
+        .filter(|event| {
+            matches!(
+                event,
+                LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                    kind: StreamBlockKind::Reasoning,
+                    ..
+                })
+            )
+        })
         .count();
     let text_ends = events
         .iter()
         .filter_map(|event| match event {
-            LlmStreamEvent::TextBlockEnd { block, text } => Some((block.id.clone(), text.clone())),
+            LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                kind: StreamBlockKind::AssistantText,
+                block,
+                text,
+            }) => Some((block.id.clone(), text.clone())),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -1098,7 +1126,7 @@ async fn completed_responses_stream_seals_every_open_block() {
 }
 
 /// Regression for FIG-3371 review: a mid-stream abort used to leave an open
-/// `ReasoningBlockStart` unpaired. The error path seals open blocks before
+/// reasoning block start unpaired. The error path seals open blocks before
 /// surfacing the failure.
 #[tokio::test]
 async fn aborted_responses_stream_seals_the_open_reasoning_block() {
@@ -1129,14 +1157,24 @@ async fn aborted_responses_stream_seals_the_open_reasoning_block() {
     let events = events.lock_recover().clone();
     let starts = events
         .iter()
-        .filter(|event| matches!(event, LlmStreamEvent::ReasoningBlockStart { .. }))
+        .filter(|event| {
+            matches!(
+                event,
+                LlmStreamEvent::Block(StreamBlockEvent::Started {
+                    kind: StreamBlockKind::Reasoning,
+                    ..
+                })
+            )
+        })
         .count();
     let ends = events
         .iter()
         .filter_map(|event| match event {
-            LlmStreamEvent::ReasoningBlockEnd { block, text } => {
-                Some((block.id.clone(), text.clone()))
-            }
+            LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                kind: StreamBlockKind::Reasoning,
+                block,
+                text,
+            }) => Some((block.id.clone(), text.clone())),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -1171,11 +1209,27 @@ async fn aborted_chat_stream_seals_the_open_reasoning_block() {
     let events = events.lock_recover().clone();
     let starts = events
         .iter()
-        .filter(|event| matches!(event, LlmStreamEvent::ReasoningBlockStart { .. }))
+        .filter(|event| {
+            matches!(
+                event,
+                LlmStreamEvent::Block(StreamBlockEvent::Started {
+                    kind: StreamBlockKind::Reasoning,
+                    ..
+                })
+            )
+        })
         .count();
     let ends = events
         .iter()
-        .filter(|event| matches!(event, LlmStreamEvent::ReasoningBlockEnd { .. }))
+        .filter(|event| {
+            matches!(
+                event,
+                LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                    kind: StreamBlockKind::Reasoning,
+                    ..
+                })
+            )
+        })
         .count();
 
     assert_eq!(starts, 1);

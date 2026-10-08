@@ -1299,6 +1299,124 @@
         }
       ]
     },
+    "StreamBlockEvent": {
+      "description": "One step of a streamed output block's lifecycle: the single payload every\nlane carries for it \u2014 the provider stream, the session stream, turn\nactivity and the trace. A lane adds its own envelope (observation\nidentity, correlation, sequence, elapsed time) around this payload and\nnever redefines it.",
+      "oneOf": [
+        {
+          "description": "A provider-minted block opened. Blocks are the unit hosts render;\nmerging adjacent blocks is the host's choice \u2014 Lash injects no\nseparators.",
+          "properties": {
+            "block": {
+              "$ref": "#/$defs/StreamBlockIdentity"
+            },
+            "kind": {
+              "$ref": "#/$defs/StreamBlockKind"
+            },
+            "phase": {
+              "const": "started",
+              "type": "string"
+            }
+          },
+          "required": [
+            "phase",
+            "kind",
+            "block"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The next suffix of `block`'s text.",
+          "properties": {
+            "block": {
+              "$ref": "#/$defs/StreamBlockIdentity"
+            },
+            "kind": {
+              "$ref": "#/$defs/StreamBlockKind"
+            },
+            "phase": {
+              "const": "delta",
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "phase",
+            "kind",
+            "block",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "`block` closed. `text` is the block's authoritative text, so a\nconsumer can correct drift from accumulated deltas.",
+          "properties": {
+            "block": {
+              "$ref": "#/$defs/StreamBlockIdentity"
+            },
+            "kind": {
+              "$ref": "#/$defs/StreamBlockKind"
+            },
+            "phase": {
+              "const": "completed",
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "phase",
+            "kind",
+            "block",
+            "text"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StreamBlockIdentity": {
+      "description": "Provider-minted identity of one streamed output block.\n\nMinted by the provider adapter from provider facts: OpenAI\n`(item_id, summary_index)`, Anthropic content-block index, or a\ndeterministic per-attempt ordinal for providers with no native notion.\nThe id is opaque to hosts; ordering comes from `ordinal`, never from\nparsing `id`. Live and replayed streams emit identical identities.",
+      "properties": {
+        "id": {
+          "description": "Opaque provider-minted block key, stable within one response attempt.",
+          "type": "string"
+        },
+        "item_id": {
+          "description": "The reasoning or message item this block belongs to, when the provider\nhas one. N blocks may share one item's replay material.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ordinal": {
+          "description": "Per-attempt block ordinal assigned by the provider adapter.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "ordinal"
+      ],
+      "type": "object"
+    },
+    "StreamBlockKind": {
+      "description": "Which render lane a streamed output block belongs to.\n\nA *block* is the unit a host renders: one OpenAI reasoning summary part,\none Anthropic `thinking`/`text` content block, or one ordinal run of\nthought/text for providers with no native notion. Blocks name their owning\nreasoning item or message item when the provider has one; several blocks\nmay share one item's replay material.",
+      "oneOf": [
+        {
+          "const": "assistant_text",
+          "description": "Visible assistant prose.",
+          "type": "string"
+        },
+        {
+          "const": "reasoning",
+          "description": "Reasoning summary (\"thinking\") text, kept separate from assistant\nresponse text.",
+          "type": "string"
+        }
+      ]
+    },
     "TextProjectionMetadata": {
       "properties": {
         "limit_chars": {
@@ -3185,82 +3303,149 @@
       "type": "object"
     },
     "TraceRuntimeStreamEvent": {
+      "description": "One decoded provider stream event, in the order the runtime folded it.",
       "properties": {
-        "block_id": {
-          "description": "The streamed block's own identity. Several blocks can share one\n`item_id` (OpenAI summary parts of one reasoning item), so block-level\ngranularity needs this field.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "call_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "elapsed_ms": {
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
         },
-        "event_name": {
-          "type": "string"
-        },
-        "input_json": true,
-        "item_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "output_index": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "raw_text": {
-          "type": [
-            "string",
-            "null"
-          ]
+        "payload": {
+          "$ref": "#/$defs/TraceRuntimeStreamPayload"
         },
         "sequence": {
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
-        },
-        "tool_name": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "usage": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/LlmUsage"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "visible_text": {
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [
         "sequence",
         "elapsed_ms",
-        "event_name"
+        "payload"
       ],
       "type": "object"
+    },
+    "TraceRuntimeStreamPayload": {
+      "description": "What a [`TraceRuntimeStreamEvent`] reports.",
+      "oneOf": [
+        {
+          "description": "One step of a streamed block's lifecycle, as hosts saw it: the same\npayload the session stream and turn activity carry, with the block's\nfull identity. Several blocks can share one item (OpenAI summary parts\nof one reasoning item); the block's `ordinal` orders them.",
+          "properties": {
+            "event": {
+              "$ref": "#/$defs/StreamBlockEvent"
+            },
+            "raw_text": {
+              "description": "The provider's text before stream transforms rewrote it, when it\nwas observed apart from the event's own text.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "block",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "event"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A completed assistant-text part of the response.",
+          "properties": {
+            "item_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "text_part",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A completed reasoning item of the response.",
+          "properties": {
+            "item_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "reasoning_part",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A completed tool call of the response.",
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "input_json": true,
+            "item_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tool_name": {
+              "type": "string"
+            },
+            "type": {
+              "const": "tool_call_part",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "call_id",
+            "tool_name",
+            "input_json"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Usage the provider reported mid-stream.",
+          "properties": {
+            "type": {
+              "const": "usage",
+              "type": "string"
+            },
+            "usage": {
+              "$ref": "#/$defs/LlmUsage"
+            }
+          },
+          "required": [
+            "type",
+            "usage"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "TraceRuntimeSubject": {
       "oneOf": [

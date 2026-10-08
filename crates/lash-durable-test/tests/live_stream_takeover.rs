@@ -22,6 +22,7 @@ mod served;
 #[path = "support/sim.rs"]
 mod sim;
 
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -141,7 +142,11 @@ fn followed_prose(events: &[Arc<SessionObservationEvent>]) -> String {
             continue;
         };
         match &activity.event {
-            TurnEvent::AssistantProseDelta { text, .. } => {
+            TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
+                text,
+                ..
+            }) => {
                 deltas.push((activity.correlation_id.clone(), text.to_string()));
             }
             TurnEvent::ModelAttemptReset {
@@ -159,7 +164,7 @@ fn streamed(events: &[Arc<SessionObservationEvent>], text: &str) -> bool {
         matches!(
             &event.payload,
             SessionObservationEventPayload::TurnActivity(TurnActivity {
-                event: TurnEvent::AssistantProseDelta { text: streamed, .. },
+                event: TurnEvent::StreamBlock(StreamBlockEvent::Delta { kind: StreamBlockKind::AssistantText,text: streamed, .. }),
                 ..
             }) if &**streamed == text
         )
@@ -344,9 +349,12 @@ async fn a_second_model_call_reset_preserves_the_first_calls_blocks_on_sqlite_me
             async move {
                 let stream = request.stream_events.as_ref().expect("the call streams");
                 let block = StreamBlockIdentity::new("content_block:0", 0);
-                let delta = |text: &str| LlmStreamEvent::Delta {
-                    block: block.clone(),
-                    text: text.to_owned(),
+                let delta = |text: &str| {
+                    LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                        kind: StreamBlockKind::AssistantText,
+                        block: block.clone(),
+                        text: text.to_owned(),
+                    })
                 };
                 let text = if call == 0 { "Let me check." } else { "Done." };
                 if call == 1 {
@@ -649,10 +657,11 @@ fn activity(label: &str) -> LiveReplayEventDraft {
     LiveReplayEventDraft::new(
         None::<lash_core::TurnId>,
         SessionObservationEventPayload::TurnActivity(TurnActivity::independent(
-            TurnEvent::AssistantProseDelta {
+            TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
                 text: label.into(),
                 block: StreamBlockIdentity::new("text:0", 0),
-            },
+            }),
         )),
     )
 }

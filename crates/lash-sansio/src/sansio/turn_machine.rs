@@ -1,4 +1,6 @@
 use super::*;
+use crate::ReportedFailure;
+use crate::llm::types::{StreamBlockEvent, StreamBlockKind};
 
 impl<M: TurnProtocol> TurnMachine<M> {
     /// Restore only the Prompt View retained by the environment prelude.
@@ -266,20 +268,20 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 .iter()
                 .cloned()
                 .map(|effect| match effect {
-                    Effect::Emit(SessionStreamEvent::Error {
+                    Effect::Emit(SessionStreamEvent::Error(ReportedFailure {
                         message: _,
                         envelope: Some(mut envelope),
-                    }) if matches!(
+                    })) if matches!(
                         envelope.kind,
                         crate::session_model::TurnFailureKind::LlmProvider
                     ) =>
                     {
                         envelope.raw = None;
                         envelope.user_message = "provider call failed".to_string();
-                        Effect::Emit(SessionStreamEvent::Error {
+                        Effect::Emit(SessionStreamEvent::Error(ReportedFailure {
                             message: envelope.user_message.clone(),
                             envelope: Some(envelope),
-                        })
+                        }))
                     }
                     effect => effect,
                 })
@@ -868,19 +870,22 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 format!("completed:{}:text", self.protocol_iteration),
                 0,
             );
-            self.emit(SessionStreamEvent::StreamBlockStarted {
+            self.emit(SessionStreamEvent::StreamBlock(StreamBlockEvent::Started {
                 kind: crate::llm::types::StreamBlockKind::AssistantText,
                 block: block.clone(),
-            });
-            self.emit(SessionStreamEvent::TextDelta {
-                content: visible_text.clone(),
+            }));
+            self.emit(SessionStreamEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
+                text: visible_text.clone(),
                 block: block.clone(),
-            });
-            self.emit(SessionStreamEvent::StreamBlockCompleted {
-                kind: crate::llm::types::StreamBlockKind::AssistantText,
-                block,
-                content: visible_text.clone(),
-            });
+            }));
+            self.emit(SessionStreamEvent::StreamBlock(
+                StreamBlockEvent::Completed {
+                    kind: crate::llm::types::StreamBlockKind::AssistantText,
+                    block,
+                    text: visible_text.clone(),
+                },
+            ));
         }
         self.emit(SessionStreamEvent::LlmResponse {
             protocol_iteration: self.protocol_iteration,
@@ -903,10 +908,10 @@ impl<M: TurnProtocol> TurnMachine<M> {
         // (overflow, filter, cancellation): replaying the identical request
         // reproduces it, so the source knows it is not retryable.
         envelope.retryable = Some(false);
-        self.emit(SessionStreamEvent::Error {
+        self.emit(SessionStreamEvent::Error(ReportedFailure {
             message: diagnostic,
             envelope: Some(envelope),
-        });
+        }));
         self.finish(outcome);
         true
     }
@@ -984,10 +989,10 @@ impl<M: TurnProtocol> TurnMachine<M> {
         envelope.retryable = Some(error.retryable);
         envelope.provider_failure_kind =
             (error.kind != crate::llm::types::ProviderFailureKind::Unknown).then_some(error.kind);
-        self.emit(SessionStreamEvent::Error {
+        self.emit(SessionStreamEvent::Error(ReportedFailure {
             message: format!("LLM error: {}", error.message),
             envelope: Some(envelope),
-        });
+        }));
         // A failed call whose terminal reason is a context-window overflow stops
         // as the overflow, not as an undifferentiated provider error: the two
         // classifier entry points (`is_context_overflow_text` and the OpenAI

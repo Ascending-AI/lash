@@ -16,6 +16,7 @@
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -164,10 +165,11 @@ fn model(protocol: Protocol, seen: Arc<Mutex<Vec<String>>>) -> ProviderHandle {
 /// A text answer, streamed as one delta.
 fn text(request: &LlmRequest, text: &str) -> LlmResponse {
     if let Some(stream) = request.stream_events.as_ref() {
-        stream.send(LlmStreamEvent::Delta {
+        stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+            kind: StreamBlockKind::AssistantText,
             block: StreamBlockIdentity::new("text:0", 0),
             text: text.to_owned(),
-        });
+        }));
     }
     LlmResponse {
         parts: vec![LlmOutputPart::Text {

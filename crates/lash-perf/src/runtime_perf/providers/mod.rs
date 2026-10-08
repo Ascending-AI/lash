@@ -1,4 +1,5 @@
 use lash_sansio::SessionId;
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::{
     collections::HashMap,
     sync::{
@@ -228,10 +229,11 @@ pub(crate) fn benchmark_provider_with_control(
                         }
                     } else {
                         for delta in &profile.deltas {
-                            tx.send(LlmStreamEvent::Delta {
+                            tx.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                                kind: StreamBlockKind::AssistantText,
                                 block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
                                 text: delta.clone(),
-                            });
+                            }));
                         }
                     }
                     tx.send(LlmStreamEvent::Usage(usage.clone()));

@@ -43,6 +43,7 @@ mod sim;
 #[path = "support/matrix.rs"]
 mod matrix;
 
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use matrix::MatrixTestExt as _;
 
 use std::collections::BTreeMap;
@@ -366,10 +367,11 @@ fn model(cell: Cell, requests: Arc<Mutex<Vec<String>>>) -> ProviderHandle {
                     cell.source()
                 };
                 if let Some(stream) = request.stream_events.as_ref() {
-                    stream.send(LlmStreamEvent::Delta {
+                    stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                        kind: StreamBlockKind::AssistantText,
                         block: StreamBlockIdentity::new("text:0", 0),
                         text: answer.clone(),
-                    });
+                    }));
                 }
                 Ok(LlmResponse {
                     parts: vec![LlmOutputPart::Text {

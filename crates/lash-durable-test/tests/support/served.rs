@@ -11,6 +11,7 @@
 
 #![allow(dead_code)]
 
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -245,10 +246,11 @@ pub fn model(scripts: Arc<Scripts>) -> ProviderHandle {
 /// A text answer, streamed as one delta when the request streams.
 pub fn text(request: &LlmRequest, text: &str) -> LlmResponse {
     if let Some(stream) = request.stream_events.as_ref() {
-        stream.send(LlmStreamEvent::Delta {
+        stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+            kind: StreamBlockKind::AssistantText,
             block: StreamBlockIdentity::new("text:0", 0),
             text: text.to_owned(),
-        });
+        }));
     }
     LlmResponse {
         parts: vec![LlmOutputPart::Text {

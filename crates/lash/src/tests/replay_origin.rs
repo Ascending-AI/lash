@@ -11,6 +11,7 @@ use crate::support::TurnOutcome;
 use lash_core::FailureCode;
 use lash_core::facade_support::LlmTransportError;
 use lash_core::plugin::AssistantStreamTransform;
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 
 fn foreign_route() -> lash_core::ProviderRouteIdentity {
     lash_core::ProviderRouteIdentity::for_endpoint(
@@ -228,10 +229,11 @@ async fn caller_shaped_protocol_abort_rejects_foreign_stream_and_emits_drop() ->
                     ..Default::default()
                 }),
             }));
-            events.send(LlmStreamEvent::Delta {
+            events.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
                 block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
                 text: "complete block".to_string(),
-            });
+            }));
             std::future::pending::<std::result::Result<LlmResponse, LlmTransportError>>().await
         })
         .build();
@@ -277,10 +279,11 @@ async fn caller_shaped_cancellation_preserves_drop_sideband_without_provider_tra
                 request
                     .stream_events
                     .expect("streaming driver sender")
-                    .send(LlmStreamEvent::Delta {
+                    .send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                        kind: StreamBlockKind::AssistantText,
                         block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
                         text: "partial output".to_string(),
-                    });
+                    }));
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                 provider_started.notify_one();
                 std::future::pending::<std::result::Result<LlmResponse, LlmTransportError>>().await
@@ -320,10 +323,11 @@ async fn confirm2_protocol_abort_conflict_retains_a_racing_provider_failure() ->
         .requires_streaming(true)
         .complete(|request| async move {
             let events = request.stream_events.expect("streaming driver sender");
-            events.send(LlmStreamEvent::Delta {
+            events.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
                 block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
                 text: "abort now".to_string(),
-            });
+            }));
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             Err(LlmTransportError::new("confirm2 original provider failure")
                 .with_kind(lash_core::ProviderFailureKind::Stream)
@@ -397,10 +401,11 @@ async fn protocol_abort_commits_a_complete_cell_despite_a_conflict_free_tail_fai
             request
                 .stream_events
                 .expect("streaming driver sender")
-                .send(LlmStreamEvent::Delta {
+                .send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::AssistantText,
                     block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
                     text: "complete cell".to_string(),
-                });
+                }));
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             Err(LlmTransportError::new("tail transport failure")
                 .with_kind(lash_core::ProviderFailureKind::Stream)

@@ -1250,11 +1250,12 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
     if (event.type === "model_request_started" && rows.has(`retry:${turnId}`)) {
       liveRow(turnId, `retry:${turnId}`, "retry", () => ({ event: null }));
     }
-    if (event.type === "assistant_prose_delta") appendChunk(turnId, `reply:${turnId}`, "reply", event.text, event.correlation_id);
+    const delta = event.type === "stream_block" && event.phase === "delta" ? event.kind : null;
+    if (delta === "assistant_text") appendChunk(turnId, `reply:${turnId}`, "reply", event.text, event.correlation_id);
     if (event.type === "final_value" || event.type === "tool_value") {
       appendChunk(turnId, `reply:${turnId}`, "reply", renderTerminalValue(event.value), null);
     }
-    if (event.type === "reasoning_delta") {
+    if (delta === "reasoning") {
       appendChunk(turnId, thinkingKey(turnId, event.correlation_id), "thinking", event.text, event.correlation_id);
     }
     if (event.type === "model_attempt_reset") {

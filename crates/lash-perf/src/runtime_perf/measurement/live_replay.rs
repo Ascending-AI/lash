@@ -1,6 +1,7 @@
 use super::*;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
+use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 
 const LIVE_REPLAY_EVENTS_PER_TURN: usize = 96;
 const LIVE_REPLAY_MAIN_CAPACITY: usize = 256;
@@ -444,10 +445,11 @@ pub(super) async fn run_once_trace_jsonl(
 
 fn live_replay_text_payload(text: impl Into<String>) -> SessionObservationEventPayload {
     SessionObservationEventPayload::TurnActivity(lash_core::TurnActivity::independent(
-        lash_core::TurnEvent::AssistantProseDelta {
-            text: text.into().into(),
+        lash_core::TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+            kind: StreamBlockKind::AssistantText,
+            text: text.into(),
             block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
-        },
+        }),
     ))
 }
 

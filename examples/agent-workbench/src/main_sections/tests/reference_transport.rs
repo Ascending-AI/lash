@@ -44,6 +44,7 @@ use lash::provider::{
     GenerationRetryGuarantee, LlmRequest, LlmTransportError, ProviderFailureKind, ProviderOptions,
     ProviderReliability, TransportRetryVerdict,
 };
+use lash::{StreamBlockEvent, StreamBlockKind};
 
 use lash::TurnEvent;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -279,7 +280,11 @@ impl ReferenceTransport {
                 // canonical word until the next refetch.
                 row.provisional_prose.clear();
             }
-            TurnEvent::AssistantProseDelta { text, .. } => {
+            TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
+                text,
+                ..
+            }) => {
                 row.provisional_prose
                     .entry(activity.correlation_id.clone())
                     .or_default()
@@ -427,10 +432,11 @@ fn prose_provider(answers: &[&str]) -> ProviderHandle {
 /// runtime records as streamed activity for the in-flight attempt.
 fn send_delta(request: &LlmRequest, text: &str) {
     if let Some(events) = request.stream_events.as_ref() {
-        events.send(LlmStreamEvent::Delta {
+        events.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+            kind: StreamBlockKind::AssistantText,
             block: StreamBlockIdentity::new("text:0", 0),
             text: text.to_string(),
-        });
+        }));
     }
 }
 

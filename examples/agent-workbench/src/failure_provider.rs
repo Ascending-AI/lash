@@ -1,5 +1,6 @@
 //! Explicitly opt-in, development-only LLM Provider scenarios for failure UX.
 
+use lash::{StreamBlockEvent, StreamBlockKind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -505,19 +506,21 @@ fn next_replay_route_turn(messages: &[LlmMessage]) -> usize {
 
 fn send_delta(request: &LlmRequest, text: &str) {
     if let Some(events) = request.stream_events.as_ref() {
-        events.send(LlmStreamEvent::Delta {
+        events.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+            kind: StreamBlockKind::AssistantText,
             block: lash::direct::StreamBlockIdentity::new("text:0", 0),
             text: text.to_string(),
-        });
+        }));
     }
 }
 
 fn send_reasoning(request: &LlmRequest, text: &str) {
     if let Some(events) = request.stream_events.as_ref() {
-        events.send(LlmStreamEvent::ReasoningDelta {
+        events.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+            kind: StreamBlockKind::Reasoning,
             block: lash::direct::StreamBlockIdentity::new("reasoning:0", 0),
             text: text.to_string(),
-        });
+        }));
     }
 }
 

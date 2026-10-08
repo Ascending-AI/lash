@@ -1,37 +1,4 @@
-use std::sync::Arc;
-
 use super::*;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-// Tool-argument wire fragments are assembled inside provider transports and
-// reach this module only as semantic `Part(ToolCall)` events.
-pub(super) enum ProviderDeltaClass {
-    AssistantProse,
-    Reasoning,
-}
-
-impl ProviderDeltaClass {
-    fn block_kind(self) -> StreamBlockKind {
-        match self {
-            Self::AssistantProse => StreamBlockKind::AssistantText,
-            Self::Reasoning => StreamBlockKind::Reasoning,
-        }
-    }
-
-    fn session_event(self, content: String, block: StreamBlockIdentity) -> SessionStreamEvent {
-        match self {
-            Self::AssistantProse => SessionStreamEvent::TextDelta { content, block },
-            Self::Reasoning => SessionStreamEvent::ReasoningDelta { content, block },
-        }
-    }
-
-    fn turn_event(self, text: Arc<str>, block: StreamBlockIdentity) -> TurnEvent {
-        match self {
-            Self::AssistantProse => TurnEvent::AssistantProseDelta { text, block },
-            Self::Reasoning => TurnEvent::ReasoningDelta { text, block },
-        }
-    }
-}
 
 /// One provider call's stream, projected onto both host lanes.
 ///
@@ -59,78 +26,25 @@ impl<'a> ProviderHostForwarder<'a> {
         self.cursor.key().as_str()
     }
 
-    pub(super) fn forward_delta(
-        &mut self,
-        class: ProviderDeltaClass,
-        block: StreamBlockIdentity,
-        content: String,
-    ) {
-        if content.is_empty() || self.event_tx.is_closed() {
+    /// Publish one step of a streamed block's lifecycle: the same payload
+    /// on both projections, correlated by the block's activity id. An empty
+    /// delta carries nothing and is not published.
+    pub(super) fn forward_block(&mut self, event: StreamBlockEvent) {
+        if let Some(text) = event.delta_text()
+            && (text.is_empty() || self.event_tx.is_closed())
+        {
             return;
         }
-        let correlation_id = TurnActivityId::stream_block(self.stream_key(), &block);
-        let text = Arc::from(content.as_str());
+        let correlation_id = TurnActivityId::stream_block(self.stream_key(), event.block());
         self.cursor.observe(
             self.event_tx,
-            crate::engine::ObservedEvent::Session(class.session_event(content, block.clone())),
+            crate::engine::ObservedEvent::Session(SessionStreamEvent::StreamBlock(event.clone())),
         );
         self.cursor.observe(
             self.event_tx,
             crate::engine::ObservedEvent::Activity {
                 correlation_id: Some(correlation_id),
-                event: class.turn_event(text, block),
-            },
-        );
-    }
-
-    /// A provider-minted block opened: emit the boundary on both projections.
-    pub(super) fn forward_block_start(
-        &mut self,
-        class: ProviderDeltaClass,
-        block: StreamBlockIdentity,
-    ) {
-        let kind = class.block_kind();
-        self.cursor.observe(
-            self.event_tx,
-            crate::engine::ObservedEvent::Session(SessionStreamEvent::StreamBlockStarted {
-                kind,
-                block: block.clone(),
-            }),
-        );
-        self.cursor.observe(
-            self.event_tx,
-            crate::engine::ObservedEvent::Activity {
-                correlation_id: Some(TurnActivityId::stream_block(self.stream_key(), &block)),
-                event: TurnEvent::StreamBlockStarted { kind, block },
-            },
-        );
-    }
-
-    /// A provider-minted block closed; `text` is its authoritative text.
-    pub(super) fn forward_block_end(
-        &mut self,
-        class: ProviderDeltaClass,
-        block: StreamBlockIdentity,
-        text: String,
-    ) {
-        let kind = class.block_kind();
-        self.cursor.observe(
-            self.event_tx,
-            crate::engine::ObservedEvent::Session(SessionStreamEvent::StreamBlockCompleted {
-                kind,
-                block: block.clone(),
-                content: text.clone(),
-            }),
-        );
-        self.cursor.observe(
-            self.event_tx,
-            crate::engine::ObservedEvent::Activity {
-                correlation_id: Some(TurnActivityId::stream_block(self.stream_key(), &block)),
-                event: TurnEvent::StreamBlockCompleted {
-                    kind,
-                    block,
-                    text: text.into(),
-                },
+                event: TurnEvent::StreamBlock(event),
             },
         );
     }
