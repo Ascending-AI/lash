@@ -265,7 +265,8 @@ impl Matrix {
     }
 
     /// Bound the number of cells running at once. By default, use
-    /// the available CPUs. Hosts can pass their environment override here.
+    /// `LASH_MATRIX_THREADS`, else the available CPUs. An explicit bound
+    /// overrides that default.
     pub fn parallelism(mut self, parallelism: NonZeroUsize) -> Self {
         self.parallelism = Some(parallelism);
         self
@@ -437,10 +438,7 @@ impl Matrix {
         make: &impl Fn() -> S,
         jobs: Vec<Job>,
     ) -> Vec<(Job, Run, Duration)> {
-        let width = self
-            .parallelism
-            .unwrap_or_else(|| std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN))
-            .get();
+        let width = self.parallelism.unwrap_or_else(parallelism_from_env).get();
         std::thread::scope(|scope| {
             let (completed, ready) = std::sync::mpsc::channel();
             let mut jobs = jobs.into_iter();
@@ -465,11 +463,17 @@ impl Matrix {
                                 .enable_all()
                                 .build()
                                 .unwrap_or_else(|error| panic!("a matrix cell runtime: {error}"));
-                            runtime.block_on(async {
+                            let finished = runtime.block_on(async {
                                 let point = cut.as_ref().map(|(point, fault)| (point, *fault));
                                 let run = self.run_one(&scenario, point).await;
                                 (cut, run, factory)
-                            })
+                            });
+                            // A finished run still owns its isolated database.
+                            // Finish teardown before releasing cell admission,
+                            // so a replacement cannot overlap its connections.
+                            drop(runtime);
+                            drop(scenario);
+                            finished
                         }));
                         // Send a panic too, so a failed run cannot strand
                         // the receiver waiting for its result.
@@ -708,6 +712,23 @@ struct Run {
     failover_wait: Duration,
 }
 
+/// The host's cell budget, else the CPUs available to this action.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test host bounds simultaneous isolated cells against its service connection budget (FIG-5340)"
+)]
+fn parallelism_from_env() -> NonZeroUsize {
+    match std::env::var("LASH_MATRIX_THREADS") {
+        Ok(value) => value.parse().unwrap_or_else(|error| {
+            panic!("LASH_MATRIX_THREADS must be a positive integer: {error}")
+        }),
+        Err(std::env::VarError::NotPresent) => {
+            std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN)
+        }
+        Err(error) => panic!("read LASH_MATRIX_THREADS: {error}"),
+    }
+}
+
 /// `LASH_MATRIX_CENSUS_RUNS`, else one.
 #[expect(
     clippy::disallowed_methods,
@@ -809,9 +830,21 @@ mod tests {
         CommitLabel::new("matrix.x"),
     ];
 
+    struct CellLease(Arc<AtomicUsize>);
+
+    impl Drop for CellLease {
+        fn drop(&mut self) {
+            // Model synchronous database teardown: its connections remain
+            // live until the cell's scenario has finished dropping.
+            std::thread::sleep(Duration::from_millis(25));
+            self.0.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
     struct MailScenario {
         active: Arc<AtomicUsize>,
         peak: Arc<AtomicUsize>,
+        _cell: Option<CellLease>,
     }
 
     #[async_trait::async_trait]
@@ -846,6 +879,7 @@ mod tests {
             Arc::new(Self {
                 active: Arc::clone(&self.active),
                 peak: Arc::clone(&self.peak),
+                _cell: None,
             })
         }
 
@@ -892,6 +926,54 @@ mod tests {
         }
     }
 
+    /// FIG-5340: a serial law's internal cells must obey the host's
+    /// connection admission, rather than fan out over all available CPUs.
+    #[tokio::test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the witness sets its child process's host budget without mutating the test process's environment"
+    )]
+    async fn default_matrix_cells_obey_the_host_thread_budget() {
+        const NAME: &str = "matrix::tests::default_matrix_cells_obey_the_host_thread_budget";
+        if std::env::var("LASH_MATRIX_BUDGET_WITNESS").as_deref() != Ok("1") {
+            let result = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", NAME, "--nocapture"])
+                .env("LASH_MATRIX_BUDGET_WITNESS", "1")
+                .env("LASH_MATRIX_THREADS", "1")
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&result.stdout),
+                String::from_utf8_lossy(&result.stderr)
+            );
+            return;
+        }
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let live = Arc::new(AtomicUsize::new(0));
+        let live_peak = Arc::new(AtomicUsize::new(0));
+        let report = Matrix::new()
+            .faults(&[Fault::LostWake, Fault::FailBefore])
+            .run(|| {
+                let cells = live.fetch_add(1, Ordering::SeqCst) + 1;
+                live_peak.fetch_max(cells, Ordering::SeqCst);
+                MailScenario {
+                    active: Arc::clone(&active),
+                    peak: Arc::clone(&peak),
+                    _cell: Some(CellLease(Arc::clone(&live))),
+                }
+            })
+            .await;
+        report.assert_held();
+        assert_eq!(
+            live_peak.load(Ordering::SeqCst),
+            1,
+            "LASH_MATRIX_THREADS must bound live cells through database teardown"
+        );
+    }
+
     /// FIG-5278: scheduling changes neither a matrix's verdicts nor its
     /// traces, and at most the requested number of isolated cells run.
     #[tokio::test]
@@ -901,6 +983,7 @@ mod tests {
         let make = || MailScenario {
             active: Arc::clone(&active),
             peak: Arc::clone(&peak),
+            _cell: None,
         };
         let matrix = || Matrix::new().faults(&[Fault::LostWake, Fault::FailBefore]);
         let serial = matrix()

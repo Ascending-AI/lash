@@ -110,8 +110,11 @@ service_run_spec() {
       )
       # pg_stat_statements is what the statement-count tests measure through.
       # The default 100 connections and lock table fit one test process; the
-      # store job runs POSTGRES_SLOT_COUNT at once, each with its own pools and
-      # each applying the whole DDL artifact in one transaction.
+      # shared-server gate admits POSTGRES_SLOT_COUNT actions, each running one
+      # libtest case and at most four matrix cells (postgres_slot_runner.sh).
+      # A cell may reopen storage with several role pools; the 100 sessions
+      # per slot leave headroom
+      # for those pools and fixture creation/teardown.
       RUN_COMMAND=(
         -c shared_preload_libraries=pg_stat_statements
         -c "max_connections=$((100 * POSTGRES_SLOT_COUNT))"

@@ -17,6 +17,7 @@ rather than asserted about the source.
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import re
@@ -207,6 +208,100 @@ class WithServiceContract(unittest.TestCase):
                     self.assertTrue((ROOT / recipe.split()[1]).is_file())
                 else:
                     self.assertTrue(recipe.startswith("cargo "))
+
+
+class PostgresSlotBudgetTests(unittest.TestCase):
+    """FIG-5340: slot admission must bound libtest's connection multiplier."""
+
+    def test_shared_server_admits_one_test_thread_per_slot(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            directory = pathlib.Path(raw)
+            runner = directory / "postgres_slot_runner.sh"
+            runner.write_text(
+                (ROOT / "tools/buck2/postgres_slot_runner.sh").read_text(),
+                encoding="utf-8",
+            )
+            # The final executor reports the admitted process's environment.
+            # It stays alive so four owners compete with a fifth action.
+            (directory / "test_xml_runner.sh").write_text(
+                'exec "$@"\n', encoding="utf-8"
+            )
+            probe = directory / "probe.py"
+            probe.write_text(
+                "import json, os, pathlib, time\n"
+                "work = pathlib.Path(os.environ['PROBE_DIR'])\n"
+                "(work / (os.environ['PROBE_ID'] + '.json')).write_text(json.dumps({\n"
+                " 'threads': int(os.environ.get('RUST_TEST_THREADS', '32')),\n"
+                " 'matrix': int(os.environ.get('LASH_MATRIX_THREADS', '32')),\n"
+                " 'url': os.environ['LASH_POSTGRES_DATABASE_URL']}))\n"
+                "while not (work / 'release').exists(): time.sleep(.01)\n",
+                encoding="utf-8",
+            )
+            environment = os.environ | {
+                "LASH_POSTGRES_SLOT_DIR": raw,
+                "LASH_POSTGRES_SLOT_COUNT": "4",
+                "LASH_POSTGRES_DATABASE_URL": "postgres://localhost/lash?application_name=law",
+                "RUST_TEST_THREADS": "32",
+                "LASH_MATRIX_THREADS": "32",
+                "PROBE_DIR": raw,
+            }
+            children = []
+            try:
+                for index in range(5):
+                    children.append(subprocess.Popen(
+                        ["bash", str(runner), sys.executable, str(probe)],
+                        env=environment | {"PROBE_ID": str(index)},
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                    ))
+                deadline = time.monotonic() + 10
+                while len(list(directory.glob("*.json"))) < 4 and time.monotonic() < deadline:
+                    time.sleep(.01)
+                owners = [json.loads(path.read_text()) for path in directory.glob("*.json")]
+                self.assertEqual(4, len(owners), "one action must own each of four slots")
+                self.assertEqual(4, len({owner["url"] for owner in owners}))
+                self.assertTrue(all(owner["url"].endswith("?application_name=law") for owner in owners))
+                # Four slots with the old 32 threads and seven measured
+                # connections per cell demand 896 sessions from a 400-session
+                # server. Serial libtest leaves capacity for reopened stores,
+                # node/listener connections and fixture maintenance.
+                self.assertEqual(4, sum(owner["threads"] for owner in owners),
+                                 "shared-server slots multiply unbounded libtest concurrency")
+                self.assertEqual(16, sum(owner["threads"] * owner["matrix"] for owner in owners),
+                                 "serial libtest must also bound the cells inside a matrix law")
+            finally:
+                (directory / "release").touch()
+                for child in children:
+                    try:
+                        stdout, stderr = child.communicate(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        child.kill()
+                        child.communicate()
+                        raise
+                    self.assertEqual(0, child.returncode, stdout + stderr)
+
+    def test_explicit_threads_cannot_overdraw_the_shared_server(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            directory = pathlib.Path(raw)
+            runner = directory / "postgres_slot_runner.sh"
+            runner.write_text(
+                (ROOT / "tools/buck2/postgres_slot_runner.sh").read_text(),
+                encoding="utf-8",
+            )
+            (directory / "test_xml_runner.sh").write_text('exec "$@"\n', encoding="utf-8")
+            for arguments in (("--test-threads=8",), ("--test-threads", "8")):
+                with self.subTest(arguments=arguments):
+                    result = subprocess.run(
+                        ["bash", str(runner), "/bin/true", *arguments],
+                        env=os.environ | {
+                            "LASH_POSTGRES_SLOT_DIR": raw,
+                            "LASH_POSTGRES_SLOT_COUNT": "4",
+                            "LASH_POSTGRES_DATABASE_URL": "postgres://localhost/lash",
+                            "XML_OUTPUT_FILE": str(pathlib.Path(raw) / "result.xml"),
+                        },
+                        capture_output=True, text=True, timeout=10,
+                    )
+                    self.assertEqual(2, result.returncode, result.stdout + result.stderr)
+                    self.assertIn("one libtest thread per PostgreSQL slot", result.stderr)
 
 
 def terminal_signals() -> None:
