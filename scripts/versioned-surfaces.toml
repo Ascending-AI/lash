@@ -81,14 +81,9 @@ constant_path = "crates/lash-core-execution/src/plugin/actions.rs"
 reason = "plugin-owned per-operation error codec version supplied by each PluginOperation implementation, not a lash surface counter"
 
 [[unregistered]]
-constant = "ERROR_VERSION"
-constant_path = "crates/lash-conformance/src/conformance/frame_open_redrive/host_commands.rs"
-reason = "test-only operation error codec versions for the frame-open redrive conformance laws"
-
-[[unregistered]]
-constant = "ERROR_VERSION"
-constant_path = "crates/lash-conformance/src/conformance/shift_admission.rs"
-reason = "test-only operation error codec version for the shift-admission conformance laws"
+constant = "FAKE_STATE_FORMAT"
+constant_path = "crates/lash-vm-broker/src/testing/worker.rs"
+reason = "the scripted fake worker's state format; a test double's contract versions no durable format"
 
 [[unregistered]]
 constant = "MIN_SUPPORTED_WORKER_PROTOCOL_VERSION"
