@@ -474,10 +474,13 @@ pub async fn run_phases(
                 // revoked and its first batch of `Until` children marked; the
                 // next pass marks the rest.
                 end_turn_scope(cx, &mut tx, &session, &run).await?;
-                // A head commit the session store refuses for one of its own
-                // rules (a node id the session already holds) is refused
-                // again on every pass: it is the turn's runtime refusal, and
-                // a terminal one ends the run (FIG-5352).
+                // A head commit whose content the session store refuses (a
+                // node id the session already holds) is refused again on
+                // every pass: it is the turn's runtime refusal, and a
+                // terminal one ends the run (FIG-5352). One the store refuses
+                // for the deployment or the state it holds is the pass's
+                // failure: the session parks at the activation-loop budget
+                // with the turn and its input kept (FIG-5398).
                 cx.commit(tx, CommitLabel::TURN_COMMIT)
                     .await
                     .map_err(|error| {

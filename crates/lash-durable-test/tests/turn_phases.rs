@@ -30,6 +30,11 @@
 //! - **Colliding commit (FIG-5352):** a turn whose head commit the store
 //!   refuses for a node id collision, on every pass alike, ends its run
 //!   with that refusal and leaves the head where it was.
+//! - **Deployment refusal (FIG-5398):** a turn whose head commit the store
+//!   refuses for the deployment (a plugin writer format past the fleet
+//!   record's range, before `lashctl finalize`) fails every pass alike; the
+//!   session parks at the activation-loop budget with the turn still open,
+//!   and the run does not end refused.
 //! - **Owner-cached head (FIG-5207):** when another writer moves the session
 //!   head while the turn runs, the head commit over the head the owner
 //!   cached is refused once, the cache is evicted, and the turn commits over
@@ -62,6 +67,9 @@ mod sim;
 
 #[path = "support/matrix.rs"]
 mod matrix;
+
+#[path = "turn_phases/parks.rs"]
+mod parks;
 
 use matrix::MatrixTestExt as _;
 
@@ -161,6 +169,11 @@ enum Mode {
     /// frame's one node id, so the session store refuses the commit with a
     /// node id collision on every pass (FIG-5352).
     CollidingCommit,
+    /// The turn's head commit publishes a plugin's config at a writer
+    /// format past the range the fleet record permits, as a build of a
+    /// rolling deploy does before `lashctl finalize`: the store refuses it
+    /// with `PluginWriterOutsideRange` on every pass (FIG-5398).
+    OutsideWriterRange,
 }
 
 const QUEUED_RUN: &str = "l3-queued-turn";
@@ -400,7 +413,8 @@ impl TurnServices for L3Services {
             | Mode::QueuedCancel
             | Mode::CancelAtAdmission
             | Mode::MaterialLost
-            | Mode::CollidingCommit => ExecutionBudgets::default(),
+            | Mode::CollidingCommit
+            | Mode::OutsideWriterRange => ExecutionBudgets::default(),
         }
     }
 
@@ -756,10 +770,11 @@ impl TurnDrive for L3Drive {
             .told
             .push(format!("{:?}", done.outcome));
         let commit = head.commit(&self.run, done, commit_budget()).await?;
-        if self.services.mode == Mode::CollidingCommit {
-            return colliding(commit);
+        match self.services.mode {
+            Mode::CollidingCommit => colliding(commit),
+            Mode::OutsideWriterRange => outside_writer_range(commit),
+            _ => Ok(commit),
         }
-        Ok(commit)
     }
 
     /// No cell runs, so none is stopped.
@@ -804,6 +819,35 @@ fn colliding(commit: TurnCommit) -> Result<TurnCommit, TurnError> {
         };
     }
     second.parent_node_id = Some(frame);
+    Ok(TurnCommit {
+        expected_head: commit.expected_head,
+        commit_json: lash_core_store::store::encode_session_commit(&runtime).map_err(store)?,
+    })
+}
+
+/// The plugin [`Mode::OutsideWriterRange`]'s head commit stamps.
+const WRITER_PLUGIN: &str = "l3-plugin";
+
+/// [`Mode::OutsideWriterRange`]'s head commit: `commit` recording
+/// [`WRITER_PLUGIN`]'s config at its first format, run under that plugin's
+/// config at format 2. The first stamp provisions the plugin's range
+/// `[1, 1]`, so the store refuses the second as outside it.
+fn outside_writer_range(commit: TurnCommit) -> Result<TurnCommit, TurnError> {
+    let store = |error: lash_core_store::store::StoreError| TurnError::Exec(error.to_string());
+    let mut runtime =
+        lash_core_store::store::decode_session_commit(&commit.commit_json).map_err(store)?;
+    let mut execution = runtime.config.clone();
+    runtime.config.plugin_config.insert_versioned(
+        WRITER_PLUGIN,
+        lash_core_ids::FormatVersion::ONE,
+        serde_json::json!({}),
+    );
+    execution.plugin_config.insert_versioned(
+        WRITER_PLUGIN,
+        lash_core_ids::FormatVersion::new(2).expect("2 is a format version"),
+        serde_json::json!({}),
+    );
+    runtime.execution_config = Some(Box::new(execution));
     Ok(TurnCommit {
         expected_head: commit.expected_head,
         commit_json: lash_core_store::store::encode_session_commit(&runtime).map_err(store)?,
@@ -1101,6 +1145,8 @@ impl Scenario for L3 {
                 let backend = self.backend.lock_recover().clone().expect("the backend");
                 violations.extend(colliding_commit_laws(&backend, database.as_ref(), &trace).await);
             }
+            // Its own scenario checks it: the turn never ends.
+            Mode::OutsideWriterRange => {}
         }
 
         if self.mode == Mode::HeadMovesUnderTheTurn {
@@ -1480,7 +1526,8 @@ fn cut_laws(mode: Mode, cut: &Cut, seen: &Seen) -> Vec<String> {
         | Mode::QueuedCancel
         | Mode::CancelAtAdmission
         | Mode::MaterialLost
-        | Mode::CollidingCommit => {}
+        | Mode::CollidingCommit
+        | Mode::OutsideWriterRange => {}
     }
     violations
 }
@@ -1794,199 +1841,6 @@ async fn a_turn_whose_commit_collides_ends_refused_instead_of_looping() {
         .run_test(|| L3::new(Mode::CollidingCommit, Dialect::SqliteMemory, None))
         .await
         .assert_held();
-}
-
-/// C1 (FIG-5230): a session whose unfinished turn names a checkpoint no
-/// build decodes. Its first claim leaves that row, as a defect would; from
-/// then on every pass of the production activation fails restoring it.
-struct Poisoned {
-    dialect: Dialect,
-    postgres_url: Option<String>,
-    tripwire: Arc<Tripwire>,
-    backend: Arc<Mutex<Option<Backend>>>,
-    keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
-}
-
-impl Poisoned {
-    fn new(dialect: Dialect, postgres_url: Option<String>) -> Self {
-        Self {
-            dialect,
-            postgres_url,
-            tripwire: Arc::default(),
-            backend: Arc::default(),
-            keep: Mutex::default(),
-        }
-    }
-
-    fn backend(&self) -> Backend {
-        self.backend
-            .lock_recover()
-            .clone()
-            .expect("the database is built first")
-    }
-}
-
-/// The session activation, after the first claim writes the poisoned row.
-struct PoisonFirst {
-    poisoned: std::sync::atomic::AtomicBool,
-    session: SessionActivation,
-}
-
-#[async_trait::async_trait]
-impl Activation for PoisonFirst {
-    async fn activate(&self, owned: lash_durable::runner::Owned) -> lash_durable::runner::Exit {
-        if !self
-            .poisoned
-            .swap(true, std::sync::atomic::Ordering::SeqCst)
-        {
-            let mut tx = owned
-                .begin()
-                .await
-                .expect("the first claim reads its actor");
-            tx.write(DomainWrite::Turn(TurnWrite::Admit {
-                session: session(),
-                run: run(),
-                admission: RunAdmissionRecord::Turn {
-                    took: AdmittedTurnRows::Batch {
-                        id: lash_core::BatchId::from("poisoned-batch"),
-                    },
-                },
-                turn_deadline: None,
-            }));
-            tx.write(DomainWrite::Turn(TurnWrite::Advance {
-                session: session(),
-                run: run(),
-                phase: UnfinishedPhase::Tools {
-                    run: lash_durable::domain::RunSeq(1),
-                    checkpoint: "not a turn checkpoint".to_owned(),
-                },
-                iteration: 0,
-            }));
-            owned
-                .commit(tx, CommitLabel::TURN_ADMIT)
-                .await
-                .expect("the poisoned row commits");
-        }
-        self.session.activate(owned).await
-    }
-}
-
-#[async_trait::async_trait]
-impl Scenario for Poisoned {
-    async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
-        let (stores, database) = dialect::open(
-            self.dialect,
-            self.postgres_url.as_deref(),
-            clock,
-            &self.keep,
-        )
-        .await;
-        *self.backend.lock_recover() = Some(Backend::for_testing(stores));
-        database
-    }
-
-    fn config(&self) -> SimNodesConfig {
-        SimNodesConfig {
-            lease: Matrix::test_lease(),
-            decodes: self.backend().formats().decodes(),
-            max_active: 4,
-        }
-    }
-
-    fn activation(&self) -> Arc<dyn Activation> {
-        Arc::new(PoisonFirst {
-            poisoned: std::sync::atomic::AtomicBool::new(false),
-            session: SessionActivation::new(
-                self.backend(),
-                Arc::new(L3Services {
-                    mode: Mode::Plain,
-                    seen: Arc::default(),
-                    backend: Arc::clone(&self.backend),
-                }),
-                Arc::clone(&self.tripwire) as _,
-            ),
-        })
-    }
-
-    async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
-        seed::send_turn(&self.backend(), &session(), &run(), "never runs").await?;
-        nodes.start("a");
-        Ok(())
-    }
-
-    fn actors(&self) -> Vec<ActorKey> {
-        vec![actor()]
-    }
-
-    async fn done(&self, nodes: &SimNodes) -> bool {
-        matches!(
-            nodes.database().actor(&actor()).await,
-            Ok(Some(snapshot)) if snapshot.state == ActorState::Parked
-        )
-    }
-
-    async fn check(&self, nodes: &SimNodes, _cut: Option<&Cut>) -> Vec<String> {
-        let budget = self.backend().config().settings().activation_loop_budget;
-        let snapshot = match nodes.database().actor(&actor()).await {
-            Ok(Some(snapshot)) => snapshot,
-            other => return vec![format!("the session's actor is gone: {other:?}")],
-        };
-        let mut violations = Vec::new();
-        if snapshot.state != ActorState::Parked {
-            violations.push(format!("the session is {:?}, not parked", snapshot.state));
-        }
-        let reason = snapshot
-            .park
-            .as_deref()
-            .map(serde_json::from_str::<SessionParkReason>);
-        match reason {
-            Some(Ok(SessionParkReason::PassLoop {
-                failed_passes,
-                error,
-            })) if failed_passes == budget && error.contains("does not decode") => {}
-            other => violations.push(format!(
-                "the session parked for {other:?}, not after {budget} undecodable restores"
-            )),
-        }
-        violations
-    }
-}
-
-/// C1 (FIG-5230): a session whose checkpoint does not decode fails every
-/// pass, and parks at the activation-loop budget instead of looping on its
-/// claim.
-async fn prove_poisoned(dialect: Dialect) {
-    let postgres_url = match dialect {
-        Dialect::Postgres => match dialect::postgres_url() {
-            Some(url) => Some(url),
-            None => {
-                eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
-                return;
-            }
-        },
-        Dialect::SqliteMemory | Dialect::SqliteFile => None,
-    };
-    let report = Matrix::new()
-        .faults(&[])
-        .horizon(Duration::from_secs(600))
-        .run_test(|| Poisoned::new(dialect, postgres_url.clone()))
-        .await;
-    report.assert_held();
-}
-
-#[tokio::test]
-async fn an_undecodable_checkpoint_parks_the_session_after_the_budget() {
-    prove_poisoned(Dialect::SqliteMemory).await;
-}
-
-#[tokio::test]
-async fn an_undecodable_checkpoint_parks_the_session_after_the_budget_on_sqlite_file() {
-    prove_poisoned(Dialect::SqliteFile).await;
-}
-
-#[tokio::test]
-async fn an_undecodable_checkpoint_parks_the_session_after_the_budget_on_postgres() {
-    prove_poisoned(Dialect::Postgres).await;
 }
 
 /// A message of the scenario's session.

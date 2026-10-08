@@ -22,11 +22,13 @@ pub(crate) enum HeadCommitError {
     /// The session store refused it, with its own typed refusal; nothing was
     /// written.
     Store(StoreError),
-    /// The session store refused it for one of its own rules, under the
-    /// code and cause it carries the refusal with; nothing was written.
+    /// The session store refused its content for one of its own rules,
+    /// under the code and cause it carries the refusal with; nothing was
+    /// written.
     Refused(RuntimeError),
     /// The owner's transaction failed: ownership lost (nothing was written),
-    /// the store failed, or the acknowledgement was lost.
+    /// the store failed or refused it for the deployment or the state it
+    /// holds (FIG-5398), or the acknowledgement was lost.
     Owner(DurableError),
 }
 
@@ -51,8 +53,8 @@ impl HeadCommitError {
 ///
 /// [`HeadCommitError::Store`] with the store's refusal (a withdrawn
 /// command, a moved head, a stale append's ancestor, the budget);
-/// [`HeadCommitError::Refused`] when the store refused it for another of
-/// its rules;
+/// [`HeadCommitError::Refused`] when the store refused its content for
+/// another of its rules;
 /// [`HeadCommitError::Owner`] when the transaction failed.
 pub(crate) async fn commit(
     owner: &ActorContext,

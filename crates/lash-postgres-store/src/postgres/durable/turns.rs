@@ -191,12 +191,8 @@ pub(super) async fn apply_session_commit(
     commit: &Committing<'_>,
     write: &SessionCommitWrite,
 ) -> Result<(), DurableError> {
-    use lash_core_execution::StoreError;
-    let refused = |error: &StoreError| {
-        DurableError::Domain(DomainRefusal::session_commit_refused(
-            write.session.clone(),
-            error,
-        ))
+    let refused = |error: &lash_core_execution::StoreError| {
+        DurableError::session_commit(write.session.clone(), error)
     };
     let runtime_commit = lash_core_execution::store::decode_session_commit(&write.commit_json)
         .map_err(|error| refused(&error))?;
@@ -221,30 +217,10 @@ pub(super) async fn apply_session_commit(
             .map_err(|error| refused(&error))?;
     let now = integer::<u64>(commit.now.0)?;
     let writer = head_writer(commit.actor, &write.session);
-    match crate::runtime_persistence::apply_runtime_commit_tx(tx, &planner, writer, now).await {
-        Ok(_) => Ok(()),
-        Err(StoreError::HeadRevisionConflict { expected, actual }) => {
-            Err(DurableError::Domain(DomainRefusal::HeadMoved {
-                session: write.session.clone(),
-                expected,
-                found: Some(actual),
-            }))
-        }
-        Err(StoreError::SessionCommandWithdrawn { batch_id, .. }) => Err(DurableError::Domain(
-            DomainRefusal::SessionCommandWithdrawn {
-                session: write.session.clone(),
-                batch: batch_id,
-            },
-        )),
-        Err(StoreError::AppendAncestorNotActive { required_node_id }) => Err(DurableError::Domain(
-            DomainRefusal::AppendAncestorNotActive {
-                session: write.session.clone(),
-                required: required_node_id,
-            },
-        )),
-        Err(error @ StoreError::Contended) => Err(super::store_failure(error)),
-        Err(error) => Err(refused(&error)),
-    }
+    crate::runtime_persistence::apply_runtime_commit_tx(tx, &planner, writer, now)
+        .await
+        .map(drop)
+        .map_err(|error| refused(&error))
 }
 
 /// Who writes a session head commit fenced by `actor`: the session's own

@@ -300,9 +300,11 @@ pub enum DomainRefusal {
         /// The history node the append requires.
         required: lash_sansio::NodeId,
     },
-    /// The session store refused a head commit for a reason other than a
-    /// moved head, a settled command or a stale append: the session is gone,
-    /// or the commit breaks one of the store's own rules.
+    /// The session store refused a head commit's content: it breaks one of
+    /// the store's own rules (a node id the session already holds, a reused
+    /// identity, a budget), so the identical commit is refused alike on every
+    /// pass and under any deployment
+    /// ([`StoreError::refuses_request_content`](lash_core_store::store::StoreError::refuses_request_content)).
     #[error("session {session} refused the head commit: {reason}")]
     SessionCommitRefused {
         /// The session.
@@ -310,6 +312,24 @@ pub enum DomainRefusal {
         /// The code the store's refusal is carried under past the store
         /// (`StoreError::runtime_code`): whether retrying the commit can
         /// succeed is read from it, never from `reason`.
+        code: lash_core_store::runtime_error::RuntimeErrorCode,
+        /// The typed cause beside `code`, when the refusal has one.
+        cause: Option<lash_core_store::runtime_error::RuntimeErrorCause>,
+        /// The store's refusal, as it reads.
+        reason: String,
+    },
+    /// The session store refused a head commit for the deployment or the
+    /// state it holds, not for the commit's content: a writer format past
+    /// the fleet record's range, a fence, a session state version this build
+    /// does not read, unreadable rows, a session gone (FIG-5398). Every
+    /// commit is refused alike until an operator's finalize, rollback or
+    /// repair, so the commit's input is kept for the pass after it.
+    #[error("session {session} cannot take a head commit: {reason}")]
+    SessionCommitBlocked {
+        /// The session.
+        session: SessionId,
+        /// The code the store's refusal is carried under past the store
+        /// (`StoreError::runtime_code`).
         code: lash_core_store::runtime_error::RuntimeErrorCode,
         /// The typed cause beside `code`, when the refusal has one.
         cause: Option<lash_core_store::runtime_error::RuntimeErrorCause>,
@@ -341,23 +361,9 @@ pub enum DomainRefusal {
 }
 
 impl DomainRefusal {
-    /// The session store's refusal `error` of `session`'s head commit, under
-    /// the code and cause the store carries it with past the store.
-    #[must_use]
-    pub fn session_commit_refused(
-        session: SessionId,
-        error: &lash_core_store::store::StoreError,
-    ) -> Self {
-        Self::SessionCommitRefused {
-            session,
-            code: error.runtime_code(),
-            cause: error.runtime_cause(),
-            reason: error.to_string(),
-        }
-    }
-
-    /// The store's refusal of a head commit, as the runtime error it is
-    /// carried as past the store; `None` for every other refusal.
+    /// The store's refusal of a head commit's content, as the runtime error
+    /// it is carried as past the store; `None` for every other refusal, a
+    /// [`Self::SessionCommitBlocked`] among them.
     #[must_use]
     pub fn session_commit_refusal(&self) -> Option<lash_core_store::runtime_error::RuntimeError> {
         let Self::SessionCommitRefused {
@@ -374,6 +380,63 @@ impl DomainRefusal {
             Some(cause) => refusal.with_cause(cause.clone()),
             None => refusal,
         })
+    }
+}
+
+impl DurableError {
+    /// The session store's refusal `error` of `session`'s head commit, as the
+    /// durable port reports it (FIG-5398): a moved head, a settled command
+    /// and a stale append as their own refusals; a refusal of the commit's
+    /// content as [`DomainRefusal::SessionCommitRefused`]; a fault of the
+    /// substrate as the store failure a retry clears; and every other
+    /// refusal, the deployment's or the stored state's, as
+    /// [`DomainRefusal::SessionCommitBlocked`]. Both carry the code and cause
+    /// the store carries the refusal with past the store.
+    #[must_use]
+    pub fn session_commit(session: SessionId, error: &lash_core_store::store::StoreError) -> Self {
+        use lash_core_store::store::StoreError;
+        let refusal = match error {
+            StoreError::HeadRevisionConflict { expected, actual } => DomainRefusal::HeadMoved {
+                session,
+                expected: *expected,
+                found: Some(*actual),
+            },
+            StoreError::SessionCommandWithdrawn { batch_id, .. } => {
+                DomainRefusal::SessionCommandWithdrawn {
+                    session,
+                    batch: batch_id.clone(),
+                }
+            }
+            StoreError::AppendAncestorNotActive { required_node_id } => {
+                DomainRefusal::AppendAncestorNotActive {
+                    session,
+                    required: required_node_id.clone(),
+                }
+            }
+            error if error.is_transient() => {
+                return Self::Store(crate::error::StoreFailure {
+                    kind: if matches!(error, StoreError::Contended) {
+                        crate::error::StoreFailureKind::Contended
+                    } else {
+                        crate::error::StoreFailureKind::Unavailable
+                    },
+                    message: error.to_string(),
+                });
+            }
+            error if error.refuses_request_content() => DomainRefusal::SessionCommitRefused {
+                session,
+                code: error.runtime_code(),
+                cause: error.runtime_cause(),
+                reason: error.to_string(),
+            },
+            error => DomainRefusal::SessionCommitBlocked {
+                session,
+                code: error.runtime_code(),
+                cause: error.runtime_cause(),
+                reason: error.to_string(),
+            },
+        };
+        Self::Domain(refusal)
     }
 }
 

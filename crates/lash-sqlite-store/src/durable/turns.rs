@@ -245,12 +245,11 @@ pub(super) fn apply_session_commit(
     commit: &Committing<'_>,
     write: &SessionCommitWrite,
 ) -> Answer<()> {
-    use lash_core_execution::StoreError;
-    let refused = |error: &StoreError| {
-        refuse(DomainRefusal::session_commit_refused(
+    let refused = |error: &lash_core_execution::StoreError| {
+        Ok(Err(DurableError::session_commit(
             write.session.clone(),
             error,
-        ))
+        )))
     };
     let runtime_commit = match lash_core_execution::store::decode_session_commit(&write.commit_json)
     {
@@ -288,29 +287,6 @@ pub(super) fn apply_session_commit(
         now,
     ) {
         Ok(_) => Ok(Ok(())),
-        Err(StoreError::HeadRevisionConflict { expected, actual }) => {
-            refuse(DomainRefusal::HeadMoved {
-                session: write.session.clone(),
-                expected,
-                found: Some(actual),
-            })
-        }
-        Err(StoreError::SessionCommandWithdrawn { batch_id, .. }) => {
-            refuse(DomainRefusal::SessionCommandWithdrawn {
-                session: write.session.clone(),
-                batch: batch_id,
-            })
-        }
-        Err(StoreError::AppendAncestorNotActive { required_node_id }) => {
-            refuse(DomainRefusal::AppendAncestorNotActive {
-                session: write.session.clone(),
-                required: required_node_id,
-            })
-        }
-        Err(StoreError::Contended) => Ok(Err(DurableError::Store(lash_durable::StoreFailure {
-            kind: lash_durable::StoreFailureKind::Contended,
-            message: "the session head commit contended".to_owned(),
-        }))),
         Err(error) => refused(&error),
     }
 }

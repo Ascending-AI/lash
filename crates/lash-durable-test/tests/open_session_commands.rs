@@ -325,10 +325,12 @@ async fn a_terminally_refused_command_commit_settles_and_the_lane_continues() {
                 return None;
             }
             *refused_attempts.lock_recover() += 1;
-            Some(DomainRefusal::session_commit_refused(
-                write.session.clone(),
-                &refusal,
-            ))
+            Some(DomainRefusal::SessionCommitRefused {
+                session: write.session.clone(),
+                code: refusal.runtime_code(),
+                cause: refusal.runtime_cause(),
+                reason: refusal.to_string(),
+            })
         })
     });
     for _ in 0..100 {

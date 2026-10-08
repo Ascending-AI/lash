@@ -259,7 +259,9 @@ pub struct SessionCommitWrite {
     /// The session store's commit, encoded by its owner (lash-core-store's
     /// `encode_session_commit`). Refused with
     /// [`DomainRefusal::SessionCommitRefused`](super::DomainRefusal::SessionCommitRefused)
-    /// when the session store refuses it.
+    /// when the session store refuses its content, and
+    /// [`DomainRefusal::SessionCommitBlocked`](super::DomainRefusal::SessionCommitBlocked)
+    /// when it refuses it for the deployment or the state it holds.
     pub commit_json: String,
 }
 

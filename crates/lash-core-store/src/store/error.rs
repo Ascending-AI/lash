@@ -1169,6 +1169,125 @@ impl StoreError {
         }
     }
 
+    /// Whether this refuses the content of the request itself, so the
+    /// identical request is refused alike under any deployment and over any
+    /// state its session can reach: a node id the session already holds, an
+    /// identity reused for other content, a commit past its budget. Only
+    /// such a refusal of a turn's head commit is the turn's own refusal and
+    /// ends its run (FIG-5398).
+    ///
+    /// A refusal for the deployment (an incompatible or fenced writer, a
+    /// state or record version this build does not read), for the state the
+    /// store holds (unreadable rows, a session gone, closing or not
+    /// materialized), for a superseded attempt, or a fault of the substrate
+    /// is not: an operator's finalize, rollback or repair, a redrive or a
+    /// retry clears it, and the input that met it is kept for that.
+    ///
+    /// The match is exhaustive: a new variant does not compile until it is
+    /// classified.
+    pub fn refuses_request_content(&self) -> bool {
+        match self {
+            Self::TurnOutcomeMaterializationRefused { .. }
+            | Self::CommitNodeBudgetExceeded { .. }
+            | Self::CommitByteBudgetExceeded { .. }
+            | Self::QueuedWorkActionReserveExhaustsContext { .. }
+            | Self::QueuedWorkRowExceedsContextWindow { .. }
+            | Self::SessionRelationMismatch { .. }
+            | Self::ForeignSessionRequest { .. }
+            | Self::HistoryNodeTooLarge { .. }
+            | Self::CursorForeignSession { .. }
+            | Self::InvalidSessionId { .. }
+            | Self::BlankIdentity(_)
+            | Self::RuntimeTurnCommitConflict { .. }
+            | Self::AppendOperationIdentityConflict { .. }
+            | Self::SemanticBoundaryIdentityConflict { .. }
+            | Self::TokenUsageAccountingOverflow { .. }
+            | Self::NodeIdDerivationMismatch { .. }
+            | Self::NodeIdCollision { .. }
+            | Self::GraphGenerationCollision { .. }
+            | Self::InvalidGraphLeaf { .. }
+            | Self::InvalidGraphParent { .. }
+            | Self::MissingFrameOpenAncestor { .. }
+            | Self::ForkSessionAlreadyExists { .. }
+            | Self::IngressRowNotAdmitted { .. }
+            | Self::IngressSettlementDuplicate { .. }
+            | Self::IngressAndSessionCommandRun { .. }
+            | Self::ControlIntentUnknown { .. }
+            | Self::IngressTurnAddressUnknown { .. }
+            | Self::IngressReservedSourceKey { .. }
+            | Self::PendingTurnInputSourceKeyConflict { .. }
+            | Self::QueuedWorkSourceKeyConflict { .. }
+            | Self::PendingTurnInputIdConflict { .. }
+            | Self::PendingTurnInputBatchDuplicate { .. }
+            | Self::PendingTurnInputBatchForeignSession { .. }
+            | Self::RunSpecHashCollision { .. }
+            | Self::PendingTurnInputRunSpecMismatch { .. }
+            | Self::IncompleteCheckpointComponentSet
+            | Self::RecordEncodingFailed { .. } => true,
+
+            // The substrate, or another holder: a retry clears it.
+            Self::PreparedProcessRegistrationStale { .. }
+            | Self::Contended
+            | Self::MigrationOpenElsewhere { .. }
+            | Self::StorageFailure { .. }
+            | Self::Backend(_)
+            | Self::SessionHeadOwned { .. }
+            | Self::UnfinishedRunConflict { .. }
+            // A superseded attempt: a redrive clears it.
+            | Self::ExecutionStateCaptureFailed { .. }
+            | Self::HeadRevisionConflict { .. }
+            | Self::SessionCommandWithdrawn { .. }
+            | Self::AppendAncestorNotActive { .. }
+            | Self::CheckpointRootMissing { .. }
+            | Self::StaleWritePermit { .. }
+            | Self::SessionExecutionLeaseExpired { .. }
+            // The deployment: a finalize, rollback or another build clears it.
+            | Self::Incompatible { .. }
+            | Self::WriterFenced { .. }
+            | Self::SessionStateVersionNewerThanRuntime { .. }
+            | Self::SessionStateVersionUnsupported { .. }
+            | Self::UnsupportedStoreOperation { .. }
+            | Self::UnsupportedRecordSchemaVersion { .. }
+            | Self::MissingRecordSchemaVersion { .. }
+            | Self::InvalidRecordSchemaVersion { .. }
+            | Self::CheckpointComponentEncodingVersionMismatch { .. }
+            | Self::ReferrerKindRefused { .. }
+            | Self::UnfencedHeadPublication { .. }
+            // The state the store holds: a repair, or the session's own
+            // lifecycle, settles it.
+            | Self::StoreSessionMismatch { .. }
+            | Self::StoredDataCorrupt { .. }
+            | Self::MonotonicCounterOverflow { .. }
+            | Self::AppendReceiptRequestedNodeCountCorrupt { .. }
+            | Self::CheckpointTurnIndexOutOfRange { .. }
+            | Self::CheckpointTokenUsageOutOfRange { .. }
+            | Self::CheckpointComponentMissing { .. }
+            | Self::ExecutionStateBodiesReleased
+            | Self::SessionNotFound { .. }
+            | Self::SessionBindingNotMaterialized { .. }
+            | Self::SessionDeleted { .. }
+            | Self::SessionClosing { .. }
+            | Self::InvalidWindowAnchor { .. }
+            | Self::HistoryAnchorUnavailable { .. }
+            | Self::HistoryCursorLineageChanged { .. }
+            | Self::UnknownAttachment { .. }
+            | Self::IncompleteEnumeration { .. }
+            | Self::ForkTargetPending { .. }
+            | Self::ForkTargetUnavailable { .. }
+            | Self::ForkTargetPruned { .. }
+            | Self::TurnBaseNotRetained { .. }
+            | Self::RunAlreadyTerminal { .. }
+            | Self::RunInputWithdrawn { .. }
+            | Self::RunSpecMissing { .. }
+            | Self::ArtifactReferrerEnded { .. }
+            | Self::ArtifactMissing { .. }
+            | Self::ArtifactCarryMissing { .. }
+            | Self::TurnChangeCursorPruned { .. }
+            | Self::TurnChangeCursorAhead { .. }
+            | Self::ParkFeedCursorCompacted { .. } => false,
+        }
+    }
+
     /// The typed cause this error carries beside [`Self::runtime_code`], when
     /// it has fields a caller past the store reads.
     pub fn runtime_cause(&self) -> Option<crate::RuntimeErrorCause> {
