@@ -1265,6 +1265,7 @@ fn tool_step(step: &str, tool: &str, label: &str) -> lash_core_execution::StepRe
         step: lash_core_execution::StepName(step.to_owned()),
         tool: lash_sansio::ToolId::new(format!("tool:{tool}")),
         input: serde_json::json!({ "label": label }),
+        site: None,
     }
 }
 

@@ -1253,6 +1253,7 @@ impl crate::ProcessEngine for LawEngine {
                     step: crate::StepName("forever".into()),
                     tool: lash_sansio::ToolId::new(HANGING_TOOL),
                     input: serde_json::Value::Null,
+                    site: None,
                 }]),
             )),
             // It ignores its cancel: only lash's forced terminal, at its

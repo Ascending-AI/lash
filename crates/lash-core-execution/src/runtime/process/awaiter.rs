@@ -28,6 +28,9 @@ struct WatchedProcessRegistry {
     hub: ProcessChangeHub,
     sinks: Arc<Mutex<Vec<Arc<dyn ProcessEventSink>>>>,
     event_paths: Mutex<HashMap<ProcessId, Weak<tokio::sync::Mutex<()>>>>,
+    /// The last sequence emitted to the sinks per live process, shared by
+    /// every path that emits, so no event reaches a sink twice.
+    emitted: Mutex<HashMap<ProcessId, u64>>,
 }
 
 /// A process registry paired with the change hub published by its decorator.
@@ -37,6 +40,7 @@ struct WatchedProcessRegistry {
 #[derive(Clone)]
 pub struct WatchedRegistry {
     registry: Arc<dyn ProcessRegistry>,
+    watched: Arc<WatchedProcessRegistry>,
     hub: ProcessChangeHub,
     sinks: Arc<Mutex<Vec<Arc<dyn ProcessEventSink>>>>,
 }
@@ -58,17 +62,20 @@ impl Drop for ProcessEventSinkRegistration {
 }
 
 impl WatchedRegistry {
-    fn new(inner: Arc<dyn ProcessRegistry>, sink: Option<Arc<dyn ProcessEventSink>>) -> Self {
+    fn new(inner: Arc<dyn ProcessRegistry>) -> Self {
         let hub = ProcessChangeHub::new();
-        let sinks = Arc::new(Mutex::new(sink.into_iter().collect()));
-        let registry: Arc<dyn ProcessRegistry> = Arc::new(WatchedProcessRegistry {
+        let sinks = Arc::new(Mutex::new(Vec::new()));
+        let watched = Arc::new(WatchedProcessRegistry {
             inner: Arc::clone(&inner),
             hub: hub.clone(),
             sinks: Arc::clone(&sinks),
             event_paths: Mutex::new(HashMap::new()),
+            emitted: Mutex::new(HashMap::new()),
         });
+        let registry: Arc<dyn ProcessRegistry> = watched.clone();
         Self {
             registry,
+            watched,
             hub,
             sinks,
         }
@@ -99,21 +106,30 @@ impl WatchedRegistry {
             sink,
         }
     }
+
+    /// Publish what durable commits appended to `process_id`'s log, which
+    /// reach the store without passing this registry: a change tick, and to
+    /// the sinks, in sequence order, every event no path emitted on this
+    /// node yet. `first_after` is where the first emission for the process
+    /// starts, once this node emitted nothing of it. Answers the last
+    /// sequence read, where the caller's next `first_after` stands, or
+    /// `first_after` when nothing was read.
+    pub async fn publish_committed(&self, process_id: &ProcessId, first_after: u64) -> u64 {
+        let event_path = self.watched.event_path(process_id);
+        let _guard = event_path.lock().await;
+        self.hub.notify(process_id);
+        self.watched
+            .emit_event_pages_since(process_id, Some(first_after))
+            .await
+            .unwrap_or(first_after)
+    }
 }
 
 /// The decorated handle publishes change ticks to the returned
-/// [`ProcessChangeHub`]. Use [`watch_process_registry_with_sink`] to also feed a
+/// [`ProcessChangeHub`]; [`WatchedRegistry::add_event_sink`] also feeds a
 /// host-facing [`ProcessEventSink`].
 pub fn watch_process_registry(inner: Arc<dyn ProcessRegistry>) -> WatchedRegistry {
-    watch_process_registry_with_sink(inner, None)
-}
-
-/// The sink is best-effort freshness, not truth — see [`ProcessEventSink`].
-pub fn watch_process_registry_with_sink(
-    inner: Arc<dyn ProcessRegistry>,
-    sink: Option<Arc<dyn ProcessEventSink>>,
-) -> WatchedRegistry {
-    WatchedRegistry::new(inner, sink)
+    WatchedRegistry::new(inner)
 }
 
 impl crate::FleetFormatStore for WatchedProcessRegistry {
@@ -205,6 +221,7 @@ impl super::registry::ProcessClockRebind for WatchedProcessRegistry {
                 hub: self.hub.clone(),
                 sinks: Arc::clone(&self.sinks),
                 event_paths: Mutex::new(HashMap::new()),
+                emitted: Mutex::new(HashMap::new()),
             }) as Arc<dyn ProcessRegistry>
         })
     }

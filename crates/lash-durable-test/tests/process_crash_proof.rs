@@ -105,6 +105,7 @@ fn step(name: &str, tool: &str) -> StepRequest {
         step: StepName(name.to_owned()),
         tool: ToolId::new(tool),
         input: json!({ "step": name }),
+        site: None,
     }
 }
 

@@ -52,6 +52,7 @@ fn step(name: &str) -> StepRequest {
         step: StepName(name.to_owned()),
         tool: ToolId::new(name),
         input: json!({ "step": name }),
+        site: None,
     }
 }
 

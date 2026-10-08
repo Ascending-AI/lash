@@ -358,7 +358,6 @@ pub mod facade_support {
     pub use crate::runtime::validate_generic_process_event_append;
     pub use crate::runtime::validate_replayed_effect_envelope;
     pub use crate::runtime::watch_process_registry;
-    pub use crate::runtime::watch_process_registry_with_sink;
     pub use crate::runtime::{ParkRefused, ParkedSession};
     pub use crate::runtime::{ProcessChangeHub, ProcessChangeSubscription};
     pub use crate::runtime::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
@@ -731,9 +730,9 @@ pub use runtime::{
     SessionObservationEventPayload, SessionProcessEventKind, SessionQueueEventKind,
     SessionRelationKind, SessionRevision, SessionScope, SessionStateVersionRefusal,
     SessionStoreCreateRequest, SessionView, SleepSpec, SlotId, StagedProcessStart, StartCx,
-    StartCxError, StartKey, StepName, StepRequest, StoreRealization, StoredDataCorruption, Target,
-    ToolAttemptLaunch, TurnActivity, TurnActivityId, TurnCancelAffectedInput,
-    TurnCancelAffectedWake, TurnCancelInputOutcome, TurnCancelMode,
+    StartCxError, StartKey, StepEffectSite, StepName, StepRequest, StoreRealization,
+    StoredDataCorruption, Target, ToolAttemptLaunch, TurnActivity, TurnActivityId,
+    TurnCancelAffectedInput, TurnCancelAffectedWake, TurnCancelInputOutcome, TurnCancelMode,
     TurnCancelUndeliveredInputPolicy, TurnCancelWait, TurnContext, TurnEvent, TurnFailureCause,
     TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnInput,
     TurnInputAdmissionMode, TurnInputApplication, TurnInputCheckpointBoundary, TurnInputCompletion,

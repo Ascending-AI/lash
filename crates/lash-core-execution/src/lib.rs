@@ -334,7 +334,6 @@ pub mod facade_support {
     pub use crate::runtime::validate_generic_process_event_append;
     pub use crate::runtime::validate_replayed_effect_envelope;
     pub use crate::runtime::watch_process_registry;
-    pub use crate::runtime::watch_process_registry_with_sink;
     pub use crate::runtime::{ProcessChangeHub, ProcessChangeSubscription};
     pub use crate::session::InjectedTurnInput;
     pub use crate::session::ToolInvocation;
@@ -816,16 +815,17 @@ pub use runtime::{
     SessionEntry, SessionId, SessionListFilter, SessionRelationKind, SessionScope,
     SessionStateVersionRefusal, SessionStoreCreateRequest, SessionView, SettledOutput,
     SettledOutputRefusal, SleepSpec, SlotId, StagedProcessStart, StartCx, StartCxError, StartKey,
-    StepName, StepRequest, StoreRealization, StoredDataCorruption, Target, ToolAttemptLaunch,
-    TurnActivity, TurnActivityId, TurnCancelAffectedInput, TurnCancelAffectedWake,
-    TurnCancelInputOutcome, TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnContext,
-    TurnEvent, TurnFailureCause, TurnFailureEvidence, TurnFailurePartialOutput,
-    TurnFailureSettlement, TurnInput, TurnInputAdmissionMode, TurnInputApplication,
-    TurnInputCheckpointBoundary, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
-    TurnInputState, TurnLaneAdmissionPolicy, TurnPrelude, TurnPreludeRef, TurnPreludeStore,
-    WaitKind, WaitState, WakeId, WatchedRegistry, WeakProcessEngineRegistry, WorkCadenceError,
-    WorkCadencePolicy, admit_session_state_generation, admit_session_view, artifact_referrer_ended,
-    lifetime, live_session_view, mint_process_id, session_is_live,
+    StepEffectSite, StepName, StepRequest, StoreRealization, StoredDataCorruption, Target,
+    ToolAttemptLaunch, TurnActivity, TurnActivityId, TurnCancelAffectedInput,
+    TurnCancelAffectedWake, TurnCancelInputOutcome, TurnCancelMode,
+    TurnCancelUndeliveredInputPolicy, TurnContext, TurnEvent, TurnFailureCause,
+    TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnInput,
+    TurnInputAdmissionMode, TurnInputApplication, TurnInputCheckpointBoundary, TurnInputCompletion,
+    TurnInputCompletionData, TurnInputIngress, TurnInputState, TurnLaneAdmissionPolicy,
+    TurnPrelude, TurnPreludeRef, TurnPreludeStore, WaitKind, WaitState, WakeId, WatchedRegistry,
+    WeakProcessEngineRegistry, WorkCadenceError, WorkCadencePolicy, admit_session_state_generation,
+    admit_session_view, artifact_referrer_ended, lifetime, live_session_view, mint_process_id,
+    session_is_live,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{

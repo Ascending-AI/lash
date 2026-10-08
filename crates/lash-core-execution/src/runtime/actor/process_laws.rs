@@ -219,6 +219,7 @@ fn law_step(step: &str, tool: &str) -> EngineAction {
         step: StepName(step.to_owned()),
         tool: lash_sansio::ToolId::new(tool),
         input: json!({}),
+        site: None,
     }])
 }
 
@@ -284,6 +285,7 @@ impl ProcessEngine for LawEngine {
                     step: StepName("stuck".to_owned()),
                     tool: lash_sansio::ToolId::new("law_stuck"),
                     input: json!({}),
+                    site: None,
                 }]),
                 "await" => await_action(&script)?,
                 "complete" => ended(json!({"real_terminal": true})),

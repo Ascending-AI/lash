@@ -178,6 +178,7 @@ impl WorkbenchBuilder {
             WorkbenchTracing {
                 trace_sink: Arc::clone(&trace_sink),
                 lashlang_execution_sink: Arc::clone(&lashlang_execution) as Arc<dyn TraceSink>,
+                process_events: None,
             },
             self.provider,
             lash::persistence::LeaseOwnerIdentity::opaque(

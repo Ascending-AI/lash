@@ -95,6 +95,7 @@ fn tool(name: &str) -> IssuedLeaf {
     IssuedLeaf::Tool {
         tool: lash_core::ToolId::from(name),
         input: serde_json::json!({"leaf": name}),
+        site: None,
     }
 }
 
@@ -235,7 +236,7 @@ fn a_parked_operation_is_one_step_and_its_outcome_feeds_the_next_vm_run() {
     assert!(
         matches!(
             steps.as_slice(),
-            [StepRequest::Tool { step, tool, input }]
+            [StepRequest::Tool { step, tool, input, .. }]
                 if step.0 == "op.0.0"
                     && tool.as_str() == "lookup"
                     && *input == serde_json::json!({"leaf": "lookup"})
@@ -554,7 +555,9 @@ fn a_signal_is_kept_until_its_wait_and_answers_it_in_arrival_order() {
                 },
             ),
         )),
-        EngineAction::Idle
+        EngineAction::AwaitSignal {
+            name: "ready".to_owned()
+        }
     );
     assert!(matches!(
         injected(&driven.on(signal("ready", "s-4", serde_json::json!(4)))),

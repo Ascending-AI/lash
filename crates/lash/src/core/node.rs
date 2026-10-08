@@ -213,7 +213,8 @@ impl LashCore {
                     lash_core_worker::process_steps(&worker),
                     probe,
                 )
-                .with_session_turns(worker),
+                .with_session_turns(worker)
+                .with_process_events(self.substrate_slot.setup.process.watched().clone()),
             ) as Arc<dyn Activation>
         });
         NodeActivations {

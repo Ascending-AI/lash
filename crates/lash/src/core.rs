@@ -38,8 +38,9 @@ pub struct LashCore {
     pub(crate) live_replay_store: Arc<dyn LiveReplayStore>,
     pub(crate) process_observation_hub: Arc<crate::process_observation::ProcessObservationHub>,
     pub(crate) process_lifecycle_feed: Arc<crate::process_lifecycle::ProcessLifecycleFeed>,
-    pub(crate) _process_lifecycle_registration:
-        Option<Arc<facade_support::ProcessEventSinkRegistration>>,
+    /// The core's process event sinks, its own lifecycle feed first: each
+    /// stays attached while any clone of the core lives.
+    pub(crate) _process_event_registrations: Arc<Vec<facade_support::ProcessEventSinkRegistration>>,
     /// Whether process lifecycle is available; threaded into rebuilt session plugin hosts.
     pub(crate) process_lifecycle_available: bool,
     /// Base plugin-contributed engines available to host-level process APIs.
@@ -648,6 +649,7 @@ pub struct LashCoreBuilder {
     recovery_pass: lash_core::engine::RecoveryPassBudget,
     process_tool_visibility_filter: Option<Arc<dyn facade_support::ProcessToolVisibilityFilter>>,
     live_replay_store: Option<Arc<dyn LiveReplayStore>>,
+    process_event_sinks: Vec<Arc<dyn facade_support::ProcessEventSink>>,
     process_observation_config: crate::process_observation::ProcessObservationConfig,
     trigger_route_restorer: Option<Arc<dyn lash_core::TriggerRouteRestorer>>,
     trigger_schedules: lash_core::TriggerSchedules,
@@ -683,6 +685,7 @@ impl LashCoreBuilder {
             recovery_pass: lash_core::engine::RecoveryPassBudget::default(),
             process_tool_visibility_filter: None,
             live_replay_store: None,
+            process_event_sinks: Vec::new(),
             process_observation_config: Default::default(),
             trigger_route_restorer: None,
             trigger_schedules: lash_core::TriggerSchedules::default(),
@@ -973,6 +976,17 @@ impl LashCoreBuilder {
         self
     }
 
+    /// Add a host sink for process events. Every event appended to a
+    /// process's durable log, through the registry or by a commit of a
+    /// process this core's node runs, reaches it after the commit: once
+    /// each, in sequence order per process. It is a freshness feed, never
+    /// truth: [`crate::process::Processes::events`] pages the log, which
+    /// keeps whatever a sink misses.
+    pub fn process_event_sink(mut self, sink: Arc<dyn facade_support::ProcessEventSink>) -> Self {
+        self.process_event_sinks.push(sink);
+        self
+    }
+
     /// Build a core under the host's stable worker identity.
     ///
     /// The owner id is stable for the worker or process and never scoped to a
@@ -1014,13 +1028,14 @@ impl LashCoreBuilder {
             Arc::clone(&live_replay_store),
             Arc::clone(&process_observation_hub),
         ));
-        let process_event_sink: Arc<dyn facade_support::ProcessEventSink> =
+        let process_lifecycle_sink: Arc<dyn facade_support::ProcessEventSink> =
             process_lifecycle_feed.clone();
-        let process_lifecycle_registration = Some(Arc::new(
-            process_work
-                .watched()
-                .add_event_sink(Arc::clone(&process_event_sink)),
-        ));
+        let process_event_registrations = Arc::new(
+            std::iter::once(process_lifecycle_sink)
+                .chain(std::mem::take(&mut self.process_event_sinks))
+                .map(|sink| process_work.watched().add_event_sink(sink))
+                .collect::<Vec<_>>(),
+        );
         let mut plugin_factories = Vec::new();
         if !self.tool_providers.is_empty() {
             let spec = self
@@ -1093,7 +1108,7 @@ impl LashCoreBuilder {
             live_replay_store,
             process_observation_hub,
             process_lifecycle_feed,
-            _process_lifecycle_registration: process_lifecycle_registration,
+            _process_event_registrations: process_event_registrations,
             protocol_factory,
             process_lifecycle_available,
             host_process_engines,

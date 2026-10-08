@@ -85,6 +85,9 @@ pub struct ProcessActivation {
     probe: Arc<dyn DurableProbe>,
     /// What runs `SessionTurn` processes; a node given none parks them.
     pub(super) session_turns: Option<Arc<dyn SessionTurns>>,
+    /// The watched registry whose sinks and change hub hear what this node's
+    /// process commits appended; a node given none publishes nothing.
+    events: Option<crate::WatchedRegistry>,
 }
 
 impl ProcessActivation {
@@ -101,6 +104,7 @@ impl ProcessActivation {
             steps,
             probe,
             session_turns: None,
+            events: None,
         }
     }
 
@@ -109,6 +113,20 @@ impl ProcessActivation {
     pub fn with_session_turns(mut self, turns: Arc<dyn SessionTurns>) -> Self {
         self.session_turns = Some(turns);
         self
+    }
+
+    /// This activation publishing every process event its commits append
+    /// to `watched`'s sinks and change hub, after the commit: the host's
+    /// view of a durable process's lifecycle and effects.
+    #[must_use]
+    pub fn with_process_events(mut self, watched: crate::WatchedRegistry) -> Self {
+        self.events = Some(watched);
+        self
+    }
+
+    /// The fleet format the registry's records are written in.
+    fn fleet(&self) -> crate::FleetFormat {
+        crate::FleetFormatStore::fleet_format(self.backend.process_registry().as_ref())
     }
 }
 
@@ -147,6 +165,9 @@ pub(super) struct Live {
     first_pass: bool,
     /// Whether this activation ended the process for a corrupt refusal.
     ended_refused: bool,
+    /// Where publication starts when this node published nothing of the
+    /// process yet, once known.
+    publish_from: Option<u64>,
 }
 
 pub(super) fn corrupt(what: &str, error: impl std::fmt::Display) -> DurableError {
@@ -205,9 +226,13 @@ impl Activation for ProcessActivation {
             failed_activations,
             first_pass: true,
             ended_refused: false,
+            publish_from: None,
         };
+        live.publish_from = self.publish_from(&owned, &process).await;
         loop {
-            match self.pass(&owned, &process, &mut live).await {
+            let passed = self.pass(&owned, &process, &mut live).await;
+            self.publish(&process, &mut live).await;
+            match passed {
                 Ok(Pass::Again) => {}
                 Ok(Pass::Wait(idle, due)) => match self.wait(&owned, &mut live, &idle, due).await {
                     Err(DurableError::OwnershipLost(_)) => return Exit::Released,
@@ -244,6 +269,44 @@ impl Activation for ProcessActivation {
 }
 
 impl ProcessActivation {
+    /// Where publication starts when this node published nothing of the
+    /// process yet: the start of the log for a process no transition has
+    /// advanced, so its registration reaches the host too; otherwise the log
+    /// as it stands, since the owner that committed the rest published it.
+    /// `None` when nothing publishes, or the rows could not be read: the
+    /// first publication reads the log's end.
+    async fn publish_from(&self, owned: &Owned, process: &ProcessId) -> Option<u64> {
+        self.events.as_ref()?;
+        let row = owned.store().process(process).await.ok()??;
+        if row.state_rev == 0 && !row.terminal {
+            return Some(0);
+        }
+        self.backend
+            .process_registry()
+            .get_process(process)
+            .await
+            .ok()?
+            .map(|record| record.last_event_sequence)
+    }
+
+    /// Hand the host every event appended to `process`'s log that this node
+    /// has not published: only what committed, each once, in sequence
+    /// order. It is a freshness feed: a node that dies before publishing
+    /// loses nothing the log does not keep.
+    async fn publish(&self, process: &ProcessId, live: &mut Live) {
+        let Some(watched) = &self.events else {
+            return;
+        };
+        let from = match live.publish_from {
+            Some(from) => from,
+            None => match self.backend.process_registry().get_process(process).await {
+                Ok(Some(record)) => *live.publish_from.insert(record.last_event_sequence),
+                Ok(None) | Err(_) => return,
+            },
+        };
+        live.publish_from = Some(watched.publish_committed(process, from).await);
+    }
+
     /// The context the steps' lifecycle commits and runs bodies under. Its
     /// token is never cancelled: a cancel reaches the steps through the
     /// lifecycle, and the bodies end with the activation that holds them.
@@ -382,6 +445,7 @@ impl ProcessActivation {
             // The grace ran out: lash ends the process, whatever its steps
             // are doing, and never claims they physically stopped.
             live.lifecycle.abandon();
+            record_omitted_effects(&mut tx, process, &driver, self.fleet());
             record_terminal(&mut tx, process, &cancelled(origin, true))?;
             tx.ack_seen();
             owned.commit(tx, CommitLabel::PROCESS_TERMINAL).await?;
@@ -416,6 +480,7 @@ impl ProcessActivation {
         let event = match self
             .next_event(
                 &mut tx,
+                process,
                 reads,
                 row.state_rev,
                 &mut driver,
@@ -496,6 +561,7 @@ impl ProcessActivation {
             )
             .await?;
         if let Some(outcome) = applied {
+            record_omitted_effects(&mut tx, process, &driver, self.fleet());
             record_terminal(&mut tx, process, &outcome)?;
             tx.ack_seen();
             owned.commit(tx, CommitLabel::PROCESS_TERMINAL).await?;
@@ -738,6 +804,7 @@ impl ProcessActivation {
     async fn next_event(
         &self,
         tx: &mut ActorTx,
+        process: &ProcessId,
         reads: &dyn DurableReads,
         state_rev: u64,
         driver: &mut Driver,
@@ -787,8 +854,12 @@ impl ProcessActivation {
                 Immediate::Emitted => EngineEvent::Emitted,
             }));
         }
-        if let Some(event) = settled_event(driver, fold) {
-            return Ok(Next::Event(event));
+        if let Some((step, outcome)) = settled_step(driver, fold) {
+            record_effect(tx, process, driver, &step, &outcome, self.fleet());
+            return Ok(Next::Event(EngineEvent::StepSettled {
+                step: step.request.step().clone(),
+                outcome,
+            }));
         }
         if let Some(mail) = tx
             .mail()
@@ -799,6 +870,10 @@ impl ProcessActivation {
             let signal: ProcessSignal = serde_json::from_str(&mail.body)
                 .map_err(|error| corrupt("a process signal", error))?;
             tx.ack_through(mail.seq);
+            *driver
+                .delivered_signals
+                .entry(signal.identity.signal_name().to_owned())
+                .or_default() += 1;
             return Ok(Next::Event(EngineEvent::Signal(signal)));
         }
         let mut due = driver
@@ -1084,6 +1159,39 @@ impl ProcessActivation {
                 driver.blocked = Some(Blocked::Sleep { until: until.0 });
             }
             EngineAction::Idle => driver.blocked = Some(Blocked::Idle),
+            EngineAction::AwaitSignal { name } => {
+                let event_type = match crate::process_signal_event_type(&name) {
+                    Ok(event_type) => event_type,
+                    Err(error) => return Ok(Some(refused(error.to_string()))),
+                };
+                let ordinal = driver
+                    .delivered_signals
+                    .get(&name)
+                    .copied()
+                    .unwrap_or_default()
+                    .saturating_add(1);
+                let key = crate::process_signal_wait_key(process, &name, ordinal);
+                driver.blocked = Some(Blocked::Idle);
+                // A standing wait is entered once: an unrelated event that
+                // leaves the engine waiting on it records nothing.
+                if record.wait().is_none_or(|wait| wait.key() != key) {
+                    let wait = crate::WaitState {
+                        kind: crate::WaitKind::Signal {
+                            name,
+                            event_type,
+                            key,
+                            ordinal,
+                        },
+                        since_ms: millis(now),
+                    };
+                    append_event(
+                        tx,
+                        process,
+                        crate::ProcessEventAppendRequest::wait_entered(process, &wait),
+                    );
+                }
+                return Ok(None);
+            }
             EngineAction::Emit {
                 event_type,
                 payload,
@@ -1098,6 +1206,14 @@ impl ProcessActivation {
                 driver.immediate = Some(Immediate::Emitted);
             }
             EngineAction::Terminal(outcome) => return Ok(Some(outcome)),
+        }
+        // Any other transition ends a signal wait the record shows.
+        if let Some(wait) = record.wait() {
+            append_event(
+                tx,
+                process,
+                crate::ProcessEventAppendRequest::wait_cleared(process, wait),
+            );
         }
         Ok(None)
     }
@@ -1146,10 +1262,10 @@ fn refused(message: String) -> crate::ProcessOutcome {
 }
 
 /// The engine-event adapter: the first in-flight step whose call the fold
-/// settled, as its `StepSettled` event, with its payload as the fold
-/// checked it. Its lifecycle recorded the outcome; the step leaves the
-/// driver with the transition that hands it over.
-fn settled_event(driver: &mut Driver, fold: &RunFold) -> Option<EngineEvent> {
+/// settled, with its payload as the fold checked it, for its `StepSettled`
+/// event. Its lifecycle recorded the outcome; the step leaves the driver
+/// with the transition that hands it over.
+fn settled_step(driver: &mut Driver, fold: &RunFold) -> Option<(InFlight, SettledOutput)> {
     let (name, outcome) = driver.steps.iter().find_map(|(name, step)| {
         let outcome = fold
             .round(RunSeq(step.run))?
@@ -1158,11 +1274,117 @@ fn settled_event(driver: &mut Driver, fold: &RunFold) -> Option<EngineEvent> {
             .outcome()?;
         Some((name.clone(), outcome.clone()))
     })?;
-    driver.steps.remove(&name);
-    Some(EngineEvent::StepSettled {
-        step: name,
-        outcome,
+    let step = driver.steps.remove(&name)?;
+    Some((step, outcome))
+}
+
+/// Record `step`'s settled `outcome` on `tx` as an occurrence of the effect
+/// node it runs for, in the transaction that hands it to the engine: once,
+/// under its call, so a recomputed pass appends nothing new. An occurrence
+/// past the per-node cap is counted instead, and the counts are recorded
+/// with the terminal. A step that names no node records nothing.
+fn record_effect(
+    tx: &mut ActorTx,
+    process: &ProcessId,
+    driver: &mut Driver,
+    step: &InFlight,
+    outcome: &SettledOutput,
+    fleet: crate::FleetFormat,
+) {
+    let Some(site) = step.request.site() else {
+        return;
+    };
+    let Some((class, code)) = effect_class(outcome) else {
+        return;
+    };
+    if !crate::runtime::process::ProcessEffectOccurrence::is_within_cap(site.occurrence) {
+        driver
+            .omitted_effects
+            .entry(site.node_id.clone())
+            .or_default()
+            .record(class);
+        return;
+    }
+    let operation = match &step.request {
+        StepRequest::Tool { tool, .. } => tool.as_str().to_owned(),
+        StepRequest::Host { operation, .. } => operation.clone(),
+        StepRequest::Engine { kind, .. } => kind.0.clone(),
+    };
+    let occurrence = crate::runtime::process::ProcessEffectOccurrence::new(
+        site.node_id.clone(),
+        site.occurrence,
+        operation,
+        class,
+        code,
+        format!("process:{process}:effect:{}", step.call),
+        fleet,
+    );
+    append_event(tx, process, occurrence.append_request());
+}
+
+/// How a settled step's effect ended, by the tool output it settled with or
+/// the answer every reader gives a stopped step; `None` for a park, which
+/// settles nothing.
+fn effect_class(
+    outcome: &SettledOutput,
+) -> Option<(
+    crate::runtime::process::ProcessEffectOutcomeClass,
+    Option<crate::FailureCode>,
+)> {
+    use crate::runtime::process::ProcessEffectOutcomeClass as Class;
+    let output = match outcome {
+        SettledOutput::Waiting(_) => return None,
+        SettledOutput::Completed(output) => {
+            serde_json::from_str::<crate::ToolCallOutput>(output.payload()).ok()
+        }
+        SettledOutput::Failed(failure) => {
+            serde_json::from_str::<crate::ToolCallOutput>(failure.payload()).ok()
+        }
+        stopped => stopped.stopped_answer(),
+    };
+    Some(match output.map(|output| output.outcome) {
+        Some(crate::ToolCallOutcome::Success(_)) => (Class::Success, None),
+        Some(crate::ToolCallOutcome::Failure(failure)) => (
+            Class::Failure,
+            Some(crate::runtime::process::tool_failure_code(&failure)),
+        ),
+        Some(crate::ToolCallOutcome::Cancelled(_)) => (Class::Cancelled, None),
+        // A payload that is no tool output still says which way it went.
+        None if matches!(outcome, SettledOutput::Completed(_)) => (Class::Success, None),
+        None => (Class::Failure, None),
     })
+}
+
+/// Append `request` to `process`'s event log on `tx`, exactly once under
+/// its replay key: it commits with the transaction, or not at all.
+fn append_event(tx: &mut ActorTx, process: &ProcessId, request: crate::ProcessEventAppendRequest) {
+    tx.write(DomainWrite::Process(ProcessWrite::Emit {
+        process: process.clone(),
+        event_type: request.event_type,
+        payload_json: request.payload.to_string(),
+        replay_key: request.replay.map(|replay| replay.key).unwrap_or_default(),
+        wake_suppressed: request.wake_suppressed,
+    }));
+}
+
+/// Record the effect occurrences `driver` counted past the per-node cap on
+/// `tx`, the process's terminal transaction, before its terminal.
+fn record_omitted_effects(
+    tx: &mut ActorTx,
+    process: &ProcessId,
+    driver: &Driver,
+    fleet: crate::FleetFormat,
+) {
+    if driver.omitted_effects.is_empty() {
+        return;
+    }
+    let omissions =
+        crate::runtime::process::ProcessEffectOmissions::new(driver.omitted_effects.clone(), fleet);
+    append_event(
+        tx,
+        process,
+        omissions.append_request(format!("process:{process}:effect-omissions")),
+    );
 }
 
 /// A steps' lifecycle failure as the activation reports it: a store

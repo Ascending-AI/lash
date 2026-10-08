@@ -121,7 +121,7 @@ pub use process::{
     ProcessWorkSnapshot, ProjectionWatermark, ResolvedProcessDefinition, RetiredProcessStatus,
     SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError, SessionId,
     SessionObserverIntentSource, SessionScope, SessionScopeId, SettledOutput, SettledOutputRefusal,
-    StartCx, StartCxError, StartKey, StepName, StepRequest, StoreRealization,
+    StartCx, StartCxError, StartKey, StepEffectSite, StepName, StepRequest, StoreRealization,
     TerminalProcessStatus, UnavailableProcessService, WaitKind, WaitState, WakeId, WatchedRegistry,
     WeakProcessEngineRegistry, abandoned_consumer_refusal, admit_process_signal_append,
     admitted_signal_wait, allocate_process_event_sequence, apply_process_event_projection,
@@ -135,7 +135,7 @@ pub use process::{
     reconcile_session_process_observer_intents, release_process_event_payload,
     require_event_replay, restore_released_process_event_payload, terminal_append_request,
     terminal_event_type_name, validate_generic_process_event_append, validate_process_signal_name,
-    watch_process_registry, watch_process_registry_with_sink,
+    watch_process_registry,
 };
 pub use process::{
     ArtifactReferrerPorts, HostStartAdmission, PreparedProcessStart, ProcessStartStores,

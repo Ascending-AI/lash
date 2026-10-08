@@ -12,7 +12,7 @@ mod tests {
     use crate::{
         ProcessEventAppendRequest, ProcessEventSink, ProcessExternalRef, ProcessInput,
         ProcessProvenance, ProcessRegistration, ProcessStarted, TestProcessRegistryWriteExt,
-        WaitState, WatchedRegistry, watch_process_registry, watch_process_registry_with_sink,
+        WaitState, WatchedRegistry, watch_process_registry,
     };
 
     async fn memory_registry() -> Arc<dyn ProcessRegistry> {
@@ -321,10 +321,9 @@ mod tests {
     async fn sink_receives_complete_process_terminal_append() {
         let raw = memory_registry().await;
         let sink = CollectingSink::default();
-        let (registry, _hub) = watched_parts(watch_process_registry_with_sink(
-            raw,
-            Some(Arc::new(sink.clone())),
-        ));
+        let watched = watch_process_registry(raw);
+        let _sink = watched.add_event_sink(Arc::new(sink.clone()));
+        let (registry, _hub) = watched_parts(watched);
         let proc_record = registry
             .register_process(registration_with_events(&["producer.a"]))
             .await
@@ -364,10 +363,9 @@ mod tests {
     async fn sink_receives_runtime_lifecycle_events_in_order() {
         let raw = memory_registry().await;
         let sink = CollectingSink::default();
-        let (registry, _hub) = watched_parts(watch_process_registry_with_sink(
-            raw,
-            Some(Arc::new(sink.clone())),
-        ));
+        let watched = watch_process_registry(raw);
+        let _sink = watched.add_event_sink(Arc::new(sink.clone()));
+        let (registry, _hub) = watched_parts(watched);
         let mut lifecycle_registration = ProcessRegistration::new(
             ProcessInput::Engine {
                 kind: "test".to_string(),

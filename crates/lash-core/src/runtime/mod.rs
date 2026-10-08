@@ -309,8 +309,8 @@ pub use process::{
     ProcessWorkSnapshot, ProjectionWatermark, ResolvedProcessDefinition, RetiredProcessStatus,
     SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError, SessionId,
     SessionObserverIntentSource, SessionScope, SessionScopeId, StagedProcessStart, StartCx,
-    StartCxError, StartKey, StepName, StepRequest, StoreRealization, TerminalProcessStatus,
-    UnavailableProcessService, WaitKind, WaitState, WakeId, WatchedRegistry,
+    StartCxError, StartKey, StepEffectSite, StepName, StepRequest, StoreRealization,
+    TerminalProcessStatus, UnavailableProcessService, WaitKind, WaitState, WakeId, WatchedRegistry,
     WeakProcessEngineRegistry, admitted_signal_wait, allocate_process_event_sequence,
     apply_process_event_projection, artifact_store_plugin_error, check_retained_start,
     current_epoch_ms, fold_process_record, lifetime, load_process_execution_env,
@@ -322,7 +322,7 @@ pub use process::{
     publish_process_execution_env, reconcile_pruned_trigger_deliveries,
     reconcile_session_process_observer_intents, require_event_replay, terminal_append_request,
     terminal_event_type_name, tool_failure_code, validate_generic_process_event_append,
-    validate_process_signal_name, watch_process_registry, watch_process_registry_with_sink,
+    validate_process_signal_name, watch_process_registry,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use process::{

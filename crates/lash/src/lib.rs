@@ -1028,7 +1028,8 @@ pub mod plugins {
     pub use lash_core::{
         EngineAction, EngineEvent, EngineHostSteps, EngineState, EngineStateFormat, EngineStepKind,
         EngineStepRefusal, EngineStepRun, EngineSteps, HostStepRun, HostWaitKind, KeyName,
-        Material, NamesMaterial, SettledOutput, SettledOutputRefusal, StepName, StepRequest,
+        Material, NamesMaterial, SettledOutput, SettledOutputRefusal, StepEffectSite, StepName,
+        StepRequest,
     };
     /// Executable identity and terminal rendering returned by protocol integrators.
     pub use lash_core::{ExecutableGeneration, RecordedRender};
@@ -1199,8 +1200,7 @@ pub mod process {
         facade_support::ProcessEventSink, facade_support::ProcessRuntimeHost,
         facade_support::ProcessToolVisibilityFilter, facade_support::ProcessWake,
         facade_support::ProcessWorkObserver, facade_support::ProcessWorkSnapshot,
-        facade_support::SessionScopeId, facade_support::watch_process_registry,
-        facade_support::watch_process_registry_with_sink, lifetime,
+        facade_support::SessionScopeId, facade_support::watch_process_registry, lifetime,
     };
     /// Test-only registry probes and the conformance-suite registry type that
     /// carries them (`testing` feature only; no production trait requires them).

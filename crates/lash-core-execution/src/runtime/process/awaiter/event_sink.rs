@@ -10,9 +10,11 @@ use crate::ProcessEvent;
 /// # Contract
 ///
 /// - **Best-effort freshness, never truth.** The decorator installed by
-///   [`super::watch_process_registry_with_sink`] or attached through
-///   [`super::WatchedRegistry::add_event_sink`] calls [`emit`](Self::emit)
-///   after a successful `append_event`, in that pod's per-process append order.
+///   attached through [`super::WatchedRegistry::add_event_sink`] calls
+///   [`emit`](Self::emit) after a successful `append_event`, and after a
+///   durable commit that appended to the log on that pod
+///   ([`super::WatchedRegistry::publish_committed`]), in per-process sequence
+///   order, each event once.
 ///   There is no buffering, no retry, and no delivery guarantee across pod
 ///   crashes or restarts: an event that was appended durably may never reach
 ///   the sink. Consumers that need completeness reconcile through `event_page`.

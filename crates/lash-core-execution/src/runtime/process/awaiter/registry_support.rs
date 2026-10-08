@@ -25,16 +25,24 @@ impl WatchedProcessRegistry {
         }
     }
 
-    pub(super) async fn emit_event_pages_since(&self, process_id: &ProcessId, cursor: Option<u64>) {
+    /// Emit to the sinks every event of `process_id`'s log after the last one
+    /// any path emitted on this node, or after `cursor` when none did yet.
+    /// Answers the last sequence read, or `None` when nothing was read: no
+    /// cursor, no sink, or no page.
+    pub(super) async fn emit_event_pages_since(
+        &self,
+        process_id: &ProcessId,
+        cursor: Option<u64>,
+    ) -> Option<u64> {
         let sinks = self.sinks.lock_recover().clone();
-        let Some(cursor) = cursor else {
-            return;
-        };
+        let cursor = cursor?;
         if sinks.is_empty() {
-            return;
+            return None;
         }
+        let emitted = self.emitted.lock_recover().get(process_id).copied();
+        let mut after_sequence = emitted.unwrap_or(cursor);
+        let mut terminal = false;
         let limit = std::num::NonZeroUsize::new(128).unwrap_or(std::num::NonZeroUsize::MIN);
-        let mut after_sequence = cursor;
         loop {
             let Ok(crate::ProcessEventReadOutcome::Retained(page)) = self
                 .inner
@@ -46,20 +54,33 @@ impl WatchedProcessRegistry {
                 )
                 .await
             else {
-                return;
+                break;
             };
             let crate::ProcessEventPageEvents::Full(events) = page.events else {
-                return;
+                break;
             };
             for event in events {
                 for sink in &sinks {
                     sink.emit(&event).await;
                 }
+                after_sequence = after_sequence.max(event.sequence);
+                terminal |= event.semantics.terminal.is_some();
             }
-            after_sequence = match page.more {
-                crate::ProcessEventPageMore::Complete => return,
-                crate::ProcessEventPageMore::More { after_sequence } => after_sequence,
-            };
+            match page.more {
+                crate::ProcessEventPageMore::Complete => break,
+                crate::ProcessEventPageMore::More {
+                    after_sequence: more,
+                } => after_sequence = after_sequence.max(more),
+            }
         }
+        // An ended process's mark is dropped with it: a later append's path
+        // reads its own cursor, past everything emitted.
+        let mut marks = self.emitted.lock_recover();
+        if terminal {
+            marks.remove(process_id);
+        } else {
+            marks.insert(process_id.clone(), after_sequence);
+        }
+        Some(after_sequence)
     }
 }

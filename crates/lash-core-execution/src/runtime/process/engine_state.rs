@@ -94,6 +94,11 @@ pub enum StepRequest {
         tool: lash_sansio::ToolId,
         /// The tool's input.
         input: serde_json::Value,
+        /// The effect node it runs for, when the engine's execution map
+        /// names one: its committed outcome is recorded as that node's
+        /// `process.effect_outcome`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        site: Option<StepEffectSite>,
     },
     /// A body of the process's own engine, run through the [`EngineSteps`]
     /// its registration declares, under a pinned `Repeatable` policy. It is
@@ -120,7 +125,22 @@ pub enum StepRequest {
         operation: String,
         /// The operation's input.
         input: serde_json::Value,
+        /// The effect node it runs for, as for a tool step.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        site: Option<StepEffectSite>,
     },
+}
+
+/// The effect node of an engine's execution map that a step runs for, and
+/// which occurrence of that node it is: what the step's committed outcome
+/// is recorded under (`process.effect_outcome`).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StepEffectSite {
+    /// The node's id in the engine's execution map.
+    pub node_id: String,
+    /// Which occurrence of the node this is, from 1.
+    pub occurrence: u64,
 }
 
 impl StepRequest {
@@ -139,6 +159,15 @@ impl StepRequest {
             Self::Tool { input, .. } | Self::Engine { input, .. } | Self::Host { input, .. } => {
                 input
             }
+        }
+    }
+
+    /// The effect node the step runs for, if its engine named one.
+    #[must_use]
+    pub fn site(&self) -> Option<&StepEffectSite> {
+        match self {
+            Self::Tool { site, .. } | Self::Host { site, .. } => site.as_ref(),
+            Self::Engine { .. } => None,
         }
     }
 
@@ -319,6 +348,14 @@ pub enum EngineAction {
     /// mailbox event (a signal, `Cancelled`, a resolved wait or a settled
     /// step) reaches `advance`.
     Idle,
+    /// Wait for the signal named `name`: as [`Idle`](Self::Idle), the
+    /// process waits for its next mailbox event, and its record shows it
+    /// waiting on the signal (`process.waiting`) until a transition asks for
+    /// anything else (`process.resumed`).
+    AwaitSignal {
+        /// The signal's name.
+        name: String,
+    },
     /// Append a process event, exactly once, in the transaction that
     /// commits this state; `advance` then receives [`EngineEvent::Emitted`]
     /// at once.

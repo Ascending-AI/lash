@@ -180,9 +180,13 @@ fn standing(state: &LashlangEngineState) -> Result<EngineAction, ProcessInfraErr
         },
         Phase::Running { .. }
         | Phase::Parked {
-            wait: Wait::Leaves { .. } | Wait::Signal { .. } | Wait::Emitted,
+            wait: Wait::Leaves { .. } | Wait::Emitted,
             ..
         } => EngineAction::Idle,
+        Phase::Parked {
+            wait: Wait::Signal { name },
+            ..
+        } => EngineAction::AwaitSignal { name: name.clone() },
         Phase::Ended => return Err(infra("an ended process has no standing action")),
     })
 }
@@ -313,11 +317,12 @@ fn park(
                 .map(|(index, leaf)| {
                     let step = StepName(format!("op.{operation}.{index}"));
                     match leaf {
-                        IssuedLeaf::Tool { tool, input } => {
+                        IssuedLeaf::Tool { tool, input, site } => {
                             steps.push(StepRequest::Tool {
                                 step: step.clone(),
                                 tool,
                                 input,
+                                site,
                             });
                             Ok(Leaf::Step {
                                 step,
@@ -325,11 +330,16 @@ fn park(
                                 outcome: None,
                             })
                         }
-                        IssuedLeaf::Host { operation, input } => {
+                        IssuedLeaf::Host {
+                            operation,
+                            input,
+                            site,
+                        } => {
                             steps.push(StepRequest::Host {
                                 step: step.clone(),
                                 operation,
                                 input,
+                                site,
                             });
                             Ok(Leaf::Step {
                                 step,
@@ -423,7 +433,7 @@ fn park(
                 operation,
                 wait: Wait::Signal { name },
             };
-            Ok(EngineAction::Idle)
+            standing(state)
         }
         IssuedOperation::Emit {
             event_type,

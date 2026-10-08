@@ -622,8 +622,12 @@ impl QuietPointHost {
             receiver,
             operation,
             args,
-            ..
+            call_site,
         } = operation;
+        let site = call_site.map(|call_site| lash_core::StepEffectSite {
+            node_id: call_site.site.node_id,
+            occurrence: call_site.occurrence,
+        });
         let Value::Resource(receiver) = &receiver else {
             return Err(LashlangHostError::ModuleAuthorityRequired { operation }.into());
         };
@@ -635,6 +639,7 @@ impl QuietPointHost {
             return Ok(IssuedLeaf::Host {
                 operation: host_operation,
                 input: resource_payload(&args)?,
+                site,
             });
         }
         let tool = lash_core::ToolId::from(host_operation.as_str());
@@ -653,6 +658,7 @@ impl QuietPointHost {
         Ok(IssuedLeaf::Tool {
             tool,
             input: resource_payload(&args)?,
+            site,
         })
     }
 

@@ -35,7 +35,7 @@ mod wake;
 pub use super::actor::round::{Material, NamesMaterial, SettledOutput, SettledOutputRefusal};
 pub use awaiter::{
     ProcessChangeHub, ProcessChangeSubscription, ProcessEventSink, ProcessEventSinkRegistration,
-    WatchedRegistry, watch_process_registry, watch_process_registry_with_sink,
+    WatchedRegistry, watch_process_registry,
 };
 pub use declared_start::{
     DeclaredStartObligation, DeclaredStartObligationRefusal, DeclaredStartPhase,
@@ -65,8 +65,8 @@ pub use engine::{
 };
 pub use engine_state::{
     EngineAction, EngineEvent, EngineHostSteps, EngineState, EngineStateFormat, EngineStepKind,
-    EngineStepRefusal, EngineStepRun, EngineSteps, HostStepRun, HostWaitKind, KeyName, StepName,
-    StepRequest,
+    EngineStepRefusal, EngineStepRun, EngineSteps, HostStepRun, HostWaitKind, KeyName,
+    StepEffectSite, StepName, StepRequest,
 };
 pub use events::{
     AbandonEvidence, AbandonWriter, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessAwaitOutput,

@@ -47,7 +47,6 @@ use lash::process::{
     ProcessWorkWiring, Processes, ProjectionWatermark, ScopeGrant, ScopeId, ScopeRef,
     SessionProcessAdmin, SessionScope, SessionScopeId, StartCx, StartCxError, WaitKind, WaitState,
     WatchedRegistry, lifetime, process_wake_source_key, watch_process_registry,
-    watch_process_registry_with_sink,
 };
 // FIG-4656: the lifecycle state a record holds, the outcome a terminal state
 // owns, the statuses derived from them, and the start target a request names.

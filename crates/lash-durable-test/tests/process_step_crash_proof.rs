@@ -302,11 +302,13 @@ impl ProcessEngine for WriteEngine {
                         step,
                         tool: lash_sansio::ToolId::new(TOOL),
                         input: payload,
+                        site: None,
                     },
                     StepKind::Host => lash_core_execution::StepRequest::Host {
                         step,
                         operation: HOST_WRITE.to_owned(),
                         input: payload,
+                        site: None,
                     },
                 }])
             }

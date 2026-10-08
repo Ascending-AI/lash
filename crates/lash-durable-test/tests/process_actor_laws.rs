@@ -180,6 +180,7 @@ impl ProcessEngine for LawEngine {
                     step: StepName("refused".to_owned()),
                     tool: ToolId::new(REFUSED_TOOL),
                     input: json!({}),
+                    site: None,
                 }])
             }
             ("refused_step", EngineEvent::StepSettled { .. }) => success(json!({ "ran": true })),

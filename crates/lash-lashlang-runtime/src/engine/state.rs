@@ -247,12 +247,18 @@ pub(crate) enum IssuedLeaf {
     Tool {
         tool: lash_core::ToolId,
         input: serde_json::Value,
+        /// The call's node and occurrence, when the VM tracks it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        site: Option<lash_core::StepEffectSite>,
     },
     /// A host operation no catalog tool answers (a trigger command), with
     /// its input: run as a host step.
     Host {
         operation: String,
         input: serde_json::Value,
+        /// The call's node and occurrence, when the VM tracks it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        site: Option<lash_core::StepEffectSite>,
     },
     /// A timer that settles at `until_ms`.
     Timer { until_ms: i64 },

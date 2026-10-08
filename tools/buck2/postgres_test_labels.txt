@@ -10,6 +10,7 @@
 //crates/lash-durable-test:drain_by_release__test
 //crates/lash-durable-test:frame_switch_laws__test
 //crates/lash-durable-test:plugin_state_storage_laws__test
+//crates/lash-durable-test:process_lifecycle_events__test
 //crates/lash-durable-test:process_tool_call_crash_laws__test
 //crates/lash-durable-test:process_tool_calls__test
 //crates/lash-durable-test:recorded_behaviour_laws__test

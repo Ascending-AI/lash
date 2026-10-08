@@ -372,11 +372,13 @@ pub(crate) fn workbench_session_defaults(
     .attachment_acceptance(Arc::new(workbench_attachment_acceptance()))
 }
 
-/// Where a workbench core reports: its trace sink, and the sink its trace
-/// runtime's product observer feeds the Lashlang execution graphs through.
+/// Where a workbench core reports: its trace sink, the sink its trace
+/// runtime's product observer feeds the Lashlang execution graphs through,
+/// and the host's process event feed, when it keeps one.
 pub(crate) struct WorkbenchTracing {
     pub(crate) trace_sink: Arc<dyn TraceSink>,
     pub(crate) lashlang_execution_sink: Arc<dyn TraceSink>,
+    pub(crate) process_events: Option<Arc<dyn lash::process::ProcessEventSink>>,
 }
 
 /// The workbench core over `stores`: the durable backend over the store set
@@ -396,8 +398,12 @@ pub(crate) async fn build_workbench_core(
         .context("build the durable backend")?;
     let trace_runtime = lash::runtime::TraceRuntime::new(host_backend.clock())
         .with_product_observer(tracing.lashlang_execution_sink);
-    workbench_core_builder(host_backend, rlm_channel, context_window_tokens, plugins)
-        .await?
+    let mut builder =
+        workbench_core_builder(host_backend, rlm_channel, context_window_tokens, plugins).await?;
+    if let Some(process_events) = tracing.process_events {
+        builder = builder.process_event_sink(process_events);
+    }
+    builder
         .trace_runtime(trace_runtime)
         .trace_sink(tracing.trace_sink)
         .trace_level(TraceLevel::Extended)
@@ -618,9 +624,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             }
         }
     });
-    // For I0 (FIG-5194): the durable builder takes no process event sink
-    // yet, so the freshness feed above has no producer until it does.
-    let _process_event_sink = Arc::new(ChannelProcessEventSink::new(process_event_tx))
+    let process_event_sink = Arc::new(ChannelProcessEventSink::new(process_event_tx))
         as Arc<dyn lash::process::ProcessEventSink>;
     // FIG-1407: the workbench used to run `TurnBudget::Unbounded` with no
     // second bound, so a turn whose cells never committed re-called the
@@ -707,6 +711,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         WorkbenchTracing {
             trace_sink: Arc::clone(&trace_sink),
             lashlang_execution_sink,
+            process_events: Some(process_event_sink),
         },
         provider.clone(),
         lash::persistence::LeaseOwnerIdentity::opaque("agent-workbench", process_incarnation_id()),
