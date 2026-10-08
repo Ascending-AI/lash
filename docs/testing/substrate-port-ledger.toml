@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1648 rows over 873 files, 4021 laws.
-# By class: mechanical 184, semantic 128, delete 871, replace 465.
-# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 87, L9c 352, L9d 89, L9e 134, L9f 125, L9g 98, L9h 106, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
-# By status: todo 360, ported 105, deleted 1183.
+# 1654 rows over 873 files, 4027 laws.
+# By class: mechanical 184, semantic 128, delete 871, replace 471.
+# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 87, L9c 352, L9d 91, L9e 138, L9f 125, L9g 98, L9h 106, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
+# By status: todo 353, ported 105, deleted 1196.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -27,8 +27,6 @@
 #   a session actor runs every open item once, in arrival order and one at a time; a repeated request id is one drive; a crash at any commit label consumes each item once
 # - L9c: crates/lash-restate/src/tests/otel_laws.rs::golden_tree_survives_replay_and_redrive
 #   a turn's span tree is the golden tree after a kill and resume on another node
-# - L9c: crates/lash-restate/src/tests/run_control_witnesses.rs::a_handle_naming_another_sessions_run_is_refused_for_good_with_its_code
-#   a run handle naming another session's run is refused for good with its code
 # - L9c: crates/lash-restate/src/tests/run_coordinator_on_the_double.rs
 #   the RunCoordinator's round laws on phase rows: every admitted body enters before any completes, a committed final drains every lower rank first at every cut, a cancel during backoff starts no next body, the stream publishes only after presentation acceptance, admission ignores live isolation drift, Once never repeats, Repeatable admits only bounded ordinals after a known failure or slice timeout, and a current Once vetoes without upgrading stored Once
 # - L9c: crates/lash-restate/src/tests/run_coordinator_on_the_double/aggregate.rs
@@ -185,10 +183,6 @@
 #   remote reset and transcript projection agree
 # - L9c: crates/lash/tests/facade_host_wrappers.rs
 #   a facade host wraps the rlm factory and its stores on sqlite memory; and 2 more law(s) of the file, by test name
-# - L9c: runbooks/session-binding/runbook.md
-#   a session-binding runbook selects the session binding, catalog acquisition, deletion and fork laws once they run on the durable harness
-# - L9c: runbooks/workbench-session-config/runbook.md
-#   a session-config runbook selects the recorded-config, stale-revision, redrive and tool-call-limit laws once they run on the durable harness
 # - L9d: crates/lash-protocol-rlm/src/executor/tests/per_process_surface.rs
 #   trigger fired process runs under session contributed event type
 # - L9d: crates/lash-restate-test/tests/crash_windows/attachment_delivery.rs
@@ -197,8 +191,6 @@
 #   process and session lifecycles release their native resources when they end
 # - L9d: crates/lash-restate/src/tests/process_session_turn_laws.rs
 #   a session-turn process (subagent) crashed at create, acceptance or final commit resumes once from its recorded creation config, keeps its durable rows when cancelled, and a child panic is typed while the parent lives
-# - L9d: crates/lash-restate/src/tests/run_control_witnesses/process_run.rs
-#   a live process keeps its child run, and a run admitted ahead of its own, until it is terminal; a terminal process releases them
 # - L9d: crates/lash/src/tests/agent_scenarios/cases.rs
 #   agent scenario awaited process attachment is a parent commit gc root; and 3 more law(s) of the file, by test name
 # - L9d: crates/lash/src/tests/agent_scenarios/plugin_operations.rs
@@ -213,10 +205,6 @@
 #   every session observes what node observes
 # - L9e: crates/lash-protocol-rlm/src/testing/cell_conformance/node_oracle/generated.rs::every_value_type_round_trips_or_is_refused
 #   every value type round trips or is refused
-# - L9e: crates/lash-restate-test/tests/crash_windows/worker_crashes.rs
-#   a VM worker crash during source analysis or compilation is never recorded as the cell's failure
-# - L9e: crates/lash-restate-test/tests/crash_windows/worker_verdicts.rs
-#   a refused cell reservation is never the cell's recorded result, and a spent worker CPU budget is never the process's terminal
 # - L9e: crates/lash-restate/src/tests/process_recovery.rs
 #   a process resumed on another node after its worker and registry reopen keeps its snapshot plugin options, lashlang admission codes and trigger binding, and a TypeScript artifact runs to its terminal
 # - L9e: crates/lash-restate/src/tests/tool_context_conformance.rs
@@ -459,8 +447,6 @@
 #   operation catalog and fragment validation match the editor contract; and 20 more law(s) of the file, by test name
 # - L9h: examples/workflow-graph-roundtrip/tests/type_facets.rs
 #   type facets are projected and client echoes are ignored on save; and 1 more law(s) of the file, by test name
-# - L9h: runbooks/workbench-cron-schedule/runbook.md
-#   a recurring schedule registered from a Workbench chat turn fires one turn per tick; disable, re-enable and delete take effect at the next boundary (judged runbook)
 # END SUMMARY
 #
 # Every test that uses the Restate server double (`lash_restate_test`), every
@@ -630,6 +616,10 @@ path = "crates/lash-durable-test/tests/trigger_start_proof.rs::an_occurrence_sta
 owner = "L6"
 law = "a process commit the store refuses as corrupt ends the process Failed on the first refusal, its failure naming the refusal, with no retry"
 path = "crates/lash-durable-test/tests/process_actor_laws.rs::an_emit_the_registry_refuses_ends_the_process_failed_with_the_refusal"
+
+[planned."CRON1"]
+owner = "FIG-5348"
+law = "a cron.Schedule registered from a turn fires one occurrence, one wake delivery and one completed turn per tick; a disabled schedule stays silent at its next boundary, re-enabling resumes ticks without a second subscription, and a deleted one stays silent"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/executor/process_local.rs"
@@ -4275,10 +4265,40 @@ laws = [
   "a_source_analysis_worker_crash_is_never_a_recorded_host_cell_failure",
   "a_compilation_worker_crash_is_never_a_recorded_host_cell_failure",
 ]
-disposition = "owed"
-status = "todo"
-note = "blocked: fig-5172-prod (L3, FIG-5172): no production TurnServices runs a facade turn (the only impls are lash-durable-test's and lash-postgres-workers'), so a facade session opens on SQLite memory but its send never completes: a probe that builds a standard core over sqlite_memory_store_backend, opens a session and sends one text input times out after 20 s with the provider never called (L3s's session mail, FIG-5196, has landed); the law is not written yet"
+disposition = "replaced-by:crates/lash-durable-test/tests/worker_crashes.rs"
+status = "deleted"
 owed = "a VM worker crash during source analysis or compilation is never recorded as the cell's failure"
+note = "the file went with Restate (FIG-5190, 5ad9641f9e); each law has a row of its own"
+
+[[row]]
+path = "crates/lash-restate-test/tests/crash_windows/worker_crashes.rs"
+test = "a_source_analysis_worker_crash_is_never_a_recorded_host_cell_failure"
+area = "vm-worker"
+needs = ["cell"]
+class = "replace"
+lane = "L9e"
+laws = [
+  "a_source_analysis_worker_crash_is_never_a_recorded_host_cell_failure",
+]
+disposition = "replaced-by:crates/lash-durable-test/tests/worker_crashes.rs::a_source_analysis_worker_crash_is_never_a_recorded_host_cell_failure"
+status = "deleted"
+owed = "a source analysis worker crash is never a recorded host cell failure"
+note = "FIG-5309 re-wrote the law through a host's send() of an RLM turn on the core's node: the pool's one worker is SIGKILLed before the cell's named request, the attempt fails retryably, and a replacement worker runs the cell; the model is asked once, the tool runs once, and no cell failure is recorded. The worker-recovery reservation the old law counted went with FIG-5198 (96558d9d7b)"
+
+[[row]]
+path = "crates/lash-restate-test/tests/crash_windows/worker_crashes.rs"
+test = "a_compilation_worker_crash_is_never_a_recorded_host_cell_failure"
+area = "vm-worker"
+needs = ["cell"]
+class = "replace"
+lane = "L9e"
+laws = [
+  "a_compilation_worker_crash_is_never_a_recorded_host_cell_failure",
+]
+disposition = "replaced-by:crates/lash-durable-test/tests/worker_crashes.rs::a_compilation_worker_crash_is_never_a_recorded_host_cell_failure"
+status = "deleted"
+owed = "a compilation worker crash is never a recorded host cell failure"
+note = "FIG-5309 re-wrote the law through a host's send() of an RLM turn on the core's node: the pool's one worker is SIGKILLed before the cell's named request, the attempt fails retryably, and a replacement worker runs the cell; the model is asked once, the tool runs once, and no cell failure is recorded. The worker-recovery reservation the old law counted went with FIG-5198 (96558d9d7b)"
 
 [[row]]
 path = "crates/lash-restate-test/tests/crash_windows/worker_crashes.rs"
@@ -4317,10 +4337,40 @@ laws = [
   "a_refused_cell_reservation_is_never_the_cells_recorded_result",
   "a_spent_worker_cpu_budget_is_never_the_process_terminal",
 ]
-disposition = "owed"
-status = "todo"
-note = "blocked: fig-5172-prod (L3, FIG-5172): no production TurnServices runs a facade turn (the only impls are lash-durable-test's and lash-postgres-workers'), so a facade session opens on SQLite memory but its send never completes: a probe that builds a standard core over sqlite_memory_store_backend, opens a session and sends one text input times out after 20 s with the provider never called (L3s's session mail, FIG-5196, has landed); the law is not written yet; the process half is also blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition"
+disposition = "replaced-by:crates/lash-durable-test/tests/worker_crashes.rs"
+status = "deleted"
 owed = "a refused cell reservation is never the cell's recorded result, and a spent worker CPU budget is never the process's terminal"
+note = "the file went with Restate (FIG-5190, 5ad9641f9e); each law has a row of its own"
+
+[[row]]
+path = "crates/lash-restate-test/tests/crash_windows/worker_verdicts.rs"
+test = "a_refused_cell_reservation_is_never_the_cells_recorded_result"
+area = "vm-worker"
+needs = ["cell", "process"]
+class = "replace"
+lane = "L9e"
+laws = [
+  "a_refused_cell_reservation_is_never_the_cells_recorded_result",
+]
+disposition = "replaced-by:crates/lash-durable-test/tests/worker_crashes.rs::a_source_analysis_worker_crash_is_never_a_recorded_host_cell_failure"
+status = "deleted"
+owed = "a refused cell reservation is never the cells recorded result"
+note = "the host's durable worker-recovery reservations went with FIG-5198 (96558d9d7b): an execution's attempts and CPU now count from zero per run, so no reservation is refused. What stays is that a host verdict fails the cell's attempt and is never its recorded result (the RLM executor's fail_attempt_on_host_verdict); the worker-crash laws pin it through send() on the core's node"
+
+[[row]]
+path = "crates/lash-restate-test/tests/crash_windows/worker_verdicts.rs"
+test = "a_spent_worker_cpu_budget_is_never_the_process_terminal"
+area = "vm-worker"
+needs = ["cell", "process"]
+class = "replace"
+lane = "L9e"
+laws = [
+  "a_spent_worker_cpu_budget_is_never_the_process_terminal",
+]
+disposition = "covered-by:crates/lash-lashlang-runtime/src/process/opaque_state_tests.rs::only_a_refusal_or_a_run_limit_ends_the_process"
+status = "deleted"
+owed = "a spent worker cpu budget is never the process terminal"
+note = "a spent CPU budget is WorkerLimitExceeded{Deadline} at checkout (lash-vm-worker pool_laws), and the law pins that it is retryable and redriven, never a process terminal code; the segment replay onto another host went with FIG-5198"
 
 [[row]]
 path = "crates/lash-restate-test/tests/crash_windows/worker_verdicts.rs"
@@ -7278,10 +7328,10 @@ lane = "L9c"
 laws = [
   "a_handle_naming_another_sessions_run_is_refused_for_good_with_its_code",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "subject-deleted"
+status = "deleted"
 owed = "a run handle naming another session's run is refused for good with its code"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "the handle was Restate's own engine handle on a paused invocation (EnginePark), which a resume or release verb could pair with another session's run; the verbs, the paused-work listing and the control relay went with Restate (FIG-5190, 5ad9641f9e). A durable run handle is its session's own (DurableSession::run, attach_id and cancel key the run under the handle's session), so no verb can name another session's run. EngineHandleMismatch is left declared with no producer"
 
 [[row]]
 path = "crates/lash-restate/src/tests/run_control_witnesses.rs"
@@ -7320,10 +7370,40 @@ laws = [
   "a_live_process_keeps_its_child_run_and_a_terminal_one_releases_it",
   "a_live_process_keeps_a_run_admitted_ahead_of_its_own_and_a_terminal_one_releases_it",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:crates/lash-durable-test/tests/child_turn_crash_proof.rs::a_child_session_turn_killed_at_every_label_resumes_and_ends_its_process_once"
+status = "deleted"
 owed = "a live process keeps its child run, and a run admitted ahead of its own, until it is terminal; a terminal process releases them"
-note = "its runs are a SessionTurn process's: owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail; ProcessActivation releases a kernel (session-turn) process idle without running it (runtime/actor/process/activation.rs pass)"
+note = "the file went with Restate (FIG-5190, 5ad9641f9e); each law has a row of its own"
+
+[[row]]
+path = "crates/lash-restate/src/tests/run_control_witnesses/process_run.rs"
+test = "a_live_process_keeps_its_child_run_and_a_terminal_one_releases_it"
+area = "run-control"
+needs = ["process"]
+class = "replace"
+lane = "L9d"
+laws = [
+  "a_live_process_keeps_its_child_run_and_a_terminal_one_releases_it",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/child_turn_crash_proof.rs::a_child_session_turn_killed_at_every_label_resumes_and_ends_its_process_once"
+status = "deleted"
+owed = "a live process keeps its child run and a terminal one releases it"
+note = "since FIG-5208 (bbffe67d98) a SessionTurn process never executes its child's run: it mails the turn to the child session's actor, which owns the run, and parks on a child_session wait; no recovery pass ends a run SubstrateLost any more (end_lost_run has no caller). The process ends only from the child turn's committed end, or at once when its cancel withdraws an input no run has taken. The law pins that a child turn cut at every label resumes on another owner and its process commits exactly one terminal; declared_start.rs::declared_start_cancel_at_each_point pins the cancel of a parked child"
+
+[[row]]
+path = "crates/lash-restate/src/tests/run_control_witnesses/process_run.rs"
+test = "a_live_process_keeps_a_run_admitted_ahead_of_its_own_and_a_terminal_one_releases_it"
+area = "run-control"
+needs = ["process"]
+class = "replace"
+lane = "L9d"
+laws = [
+  "a_live_process_keeps_a_run_admitted_ahead_of_its_own_and_a_terminal_one_releases_it",
+]
+disposition = "subject-deleted"
+status = "deleted"
+owed = "a live process keeps a run admitted ahead of its own and a terminal one releases it"
+note = "a SessionTurn process's shift no longer admits runs in its child session: since FIG-5208 (bbffe67d98) the child session's own actor admits every input of its queue, an earlier one included, and the process only waits on its own turn's end"
 
 [[row]]
 path = "crates/lash-restate/src/tests/run_control_witnesses/process_run.rs"
@@ -19308,10 +19388,10 @@ laws = [
   "re-enabling resumes ticks without a second subscription",
   "a deleted schedule stays silent",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:planned:CRON1"
+status = "deleted"
 owed = "a recurring schedule registered from a Workbench chat turn fires one turn per tick; disable, re-enable and delete take effect at the next boundary (judged runbook)"
-note = "FIG-5190 follow-up deleted the runbook: every phase reads the Restate cron object and its trace spans."
+note = "FIG-5190 follow-up (5a64db23e0) deleted the runbook: every phase read the Restate cron object and its trace spans. Nothing fires a cron.Schedule on the durable substrate: the Restate cron workflow was the only driver, and the workbench still declares the source and prompts the model to register it. FIG-5348 owns the driver and the planned law CRON1"
 
 [[row]]
 path = "runbooks/process-operations/runbook.md"
@@ -19487,10 +19567,10 @@ laws = [
   "delete retries through its obligation and the installed administration",
   "a retained fork point outlives its source session",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:row:crates/lash/src/tests/core_session_builder/session_lifecycle/session_binding.rs"
+status = "deleted"
 owed = "a session-binding runbook selects the session binding, catalog acquisition, deletion and fork laws once they run on the durable harness"
-note = "its laws are blocked first: blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "the runbook was a developer checklist with no scenario: it ran a selection of facade laws and two live Restate geometries. Each selected law keeps its own ledger row, which owes or records its port: session_binding.rs (owners, parent relation, delete retry), durable_session.rs (catalog acquisition, failing lookups, absence and tombstones), adr_claims.rs, control_admin.rs and the forks' rows. The Restate geometries, the installed Restate administration and turn_work_driver went with FIG-5190 (5a64db23e0)"
 
 [[row]]
 path = "runbooks/workbench-session-config/runbook.md"
@@ -19506,10 +19586,10 @@ laws = [
   "host prompt context changes through the RLM owner's command",
   "a recorded tool-call limit produces a typed program failure and the session stays usable",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:L3S-TURN"
+status = "deleted"
 owed = "a session-config runbook selects the recorded-config, stale-revision, redrive and tool-call-limit laws once they run on the durable harness"
-note = "its laws are blocked first: blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "the runbook was a deterministic workbench rehearsal over named companion laws. Its recorded-config, run-boundary and redrive laws are the turn_config rows owed to L3S-TURN; a stale revision publishing nothing is recorded_plugin_config.rs's row; the tool-call limit is crates/lash-durable-test/tests/tool_batches.rs; the page half is the workbench rows FIG-5316 ports. Its Restate preflight went with FIG-5190 (5a64db23e0)"
 
 [[row]]
 path = "runbooks/workbench-trigger-retention/runbook.md"
