@@ -568,6 +568,13 @@ table lash_turn_change_clock
   column retention_horizon bigint not-null
   column singleton integer not-null
   primary-key (singleton)
+table lash_turn_namespaces
+  column body bytea nullable
+  column entry text not-null
+  column plugin text not-null
+  column run text not-null
+  column session_id text not-null
+  primary-key (session_id, run, plugin)
 table lash_turn_phases
   column checkpoint_ref text nullable
   column iteration bigint not-null
