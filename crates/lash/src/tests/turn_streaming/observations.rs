@@ -1246,6 +1246,127 @@ async fn snapshot_subscribe_has_only_two_histories() -> Result<()> {
     Ok(())
 }
 
+/// The same cut over a commit that switches frames (FIG-5532): the snapshot
+/// holds the frame the commit switched to, so the commit's publication,
+/// its `AgentFrameSwitched` included, is no news to its subscriber.
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn snapshot_subscribe_has_only_two_histories_across_a_frame_switch() -> Result<()> {
+    for boundary in [
+        PublicationBoundary::BeforePublish,
+        PublicationBoundary::BeforeNotification,
+    ] {
+        let replay_store = Arc::new(PausedCommitReplayStore::at(boundary));
+        let core =
+            explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
+                .serve_test_llm_profile(
+                    queued_text_provider(vec![
+                        typescript_block(
+                            r#"await control.continue_as({ task: "finish in a fresh frame" });"#,
+                        ),
+                        typescript_block(r#"finish("done after continue_as");"#),
+                    ]),
+                    mock_llm_profile_spec(),
+                )
+                .live_replay_store(replay_store.clone())
+                .build(crate::testing::runtime_lease_owner())?;
+        let session_id = SessionId::fixture(format!("two-histories-switch-{boundary:?}"));
+        let session = core
+            .session(session_id.clone())
+            .created()
+            .await
+            .open()
+            .await?;
+        let before = session
+            .observe()
+            .snapshot()
+            .await
+            .expect("durable snapshot");
+        let turn_session = session.clone();
+        let turn = tokio::spawn(async move {
+            turn_session
+                .send(TurnInput::text("switch frames"))
+                .output()
+                .await
+        });
+
+        replay_store.wait_for_commit_append().await;
+        let snapshot = session
+            .observe()
+            .snapshot()
+            .await
+            .expect("durable snapshot");
+        let revision_of = |cursor: &lash_core::SessionCursor| {
+            cursor
+                .parse_for_session(&session_id)
+                .expect("the session's cursor")
+                .revision
+        };
+        let held = revision_of(&snapshot.cursor);
+        assert!(
+            held > revision_of(&before.cursor),
+            "{boundary:?}: the snapshot is the durable head, which commits before it publishes"
+        );
+        let mut stream = session.observe().subscribe_and_recover(snapshot.cursor);
+        replay_store.release_commit_install();
+        let switched = turn.await.expect("join publishing turn")?;
+        let lash_core::facade_support::TurnOutcome::AgentFrameSwitch { frame_key, .. } =
+            &switched.result.outcome
+        else {
+            panic!("the switch answers its send: {:?}", switched.result.outcome);
+        };
+        // The frame's task runs next as its own run (FIG-5232); its commit
+        // is news to the subscriber, and switches nothing.
+        session
+            .attach_id(lash_core::runtime::durable::session_mail::frame_task_run(
+                frame_key,
+            ))
+            .output()
+            .await?;
+
+        let lash_core::LiveReplayOutcome::Replayed(published) =
+            lash_core::LiveReplayStore::replay_after_cursor(replay_store.as_ref(), &before.cursor)
+                .await
+                .expect("read the published history")
+        else {
+            panic!("{boundary:?}: the published history is retained");
+        };
+        let switch = published
+            .iter()
+            .find_map(|event| match &event.payload {
+                lash_core::SessionObservationEventPayload::AgentFrameSwitched {
+                    commit, ..
+                } => Some((*commit, event.revision())),
+                _ => None,
+            })
+            .expect("the switching commit publishes its frame switch");
+        assert_eq!(
+            switch.0,
+            Some(switch.1),
+            "{boundary:?}: a commit's frame switch names the commit"
+        );
+        assert!(
+            switch.1 <= held,
+            "{boundary:?}: the snapshot holds the switching commit"
+        );
+
+        while let Ok(Some(item)) =
+            tokio::time::timeout(std::time::Duration::from_millis(200), stream.next()).await
+        {
+            if let crate::observe::SessionObservationStreamItem::Event(event) = item? {
+                assert!(
+                    !matches!(
+                        &event.payload,
+                        lash_core::SessionObservationEventPayload::AgentFrameSwitched { .. }
+                    ),
+                    "{boundary:?}: a snapshot of the durable head must not redeliver its frame switch"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn incarnation_change_invalidates_cursor() {
     let original = crate::observe::InMemoryLiveReplayStore::default();

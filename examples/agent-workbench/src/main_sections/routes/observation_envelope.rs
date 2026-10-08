@@ -80,7 +80,7 @@ impl ObservationEvent {
                 rows: crate::ChatRow::all(entries),
             },
             SessionObservationEventPayload::ResidentChanged => ObservationPayload::ResidentChanged,
-            SessionObservationEventPayload::AgentFrameSwitched { frame_id } => {
+            SessionObservationEventPayload::AgentFrameSwitched { frame_id, .. } => {
                 ObservationPayload::AgentFrameSwitched {
                     frame_id: frame_id.clone(),
                 }

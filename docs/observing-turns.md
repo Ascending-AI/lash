@@ -57,7 +57,9 @@ activity, covering a context-pressure frame its preparation opened under
 `pressure.frame`, and a session command's or compaction's `session.command`,
 each with an `AgentFrameSwitched` ahead of it when the commit left the
 session's frame for another; the commit that opens a session's initial frame
-switches nothing.
+switches nothing. The switch names its commit's revision in `commit`, and the
+feed delivers it only to a consumer that does not yet hold that revision: a
+snapshot taken after the commit already stands on the frame.
 An owner that lost a commit's acknowledgement, or a node lost before it
 published, is covered by the next pass over the session: it announces the
 durable head as a `Committed` whose `base_revision` is the head itself and

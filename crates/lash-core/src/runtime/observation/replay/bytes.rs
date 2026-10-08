@@ -27,8 +27,8 @@ pub(super) fn event_bytes(
             entries,
         } => counter.count(&(base_revision, entries))?,
         SessionObservationEventPayload::ResidentChanged => {}
-        SessionObservationEventPayload::AgentFrameSwitched { frame_id } => {
-            counter.count(frame_id)?
+        SessionObservationEventPayload::AgentFrameSwitched { frame_id, commit } => {
+            counter.count(&(frame_id, commit))?
         }
         SessionObservationEventPayload::QueueChanged { batch_ids, .. } => {
             counter.count(batch_ids)?

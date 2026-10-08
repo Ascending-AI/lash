@@ -6,11 +6,11 @@
 //! them) is published to the live replay store once the owner's commit is
 //! acknowledged, by the node that made it: `Committed { base_revision, entries }`
 //! at the head's revision, carrying the transcript entries the commit added to
-//! what the session's subscribers held, after an `AgentFrameSwitched` when
-//! it left the frame they held for another. A head no commit has given a
-//! graph stands on the session's initial frame, so the commit that opens
-//! that frame switches nothing. Only `Committed` settles the provisional
-//! activity the turn streamed before it.
+//! what the session's subscribers held, after an `AgentFrameSwitched` naming
+//! the commit when it left the frame they held for another. A head no
+//! commit has given a graph stands on the session's initial frame, so the
+//! commit that opens that frame switches nothing. Only `Committed` settles
+//! the provisional activity the turn streamed before it.
 //!
 //! A turn's own activity is published before its commit (FIG-5507); only
 //! the commit's observation follows it, so an owner lost between the two,
@@ -140,6 +140,7 @@ impl CommitBase {
                 None::<TurnId>,
                 SessionObservationEventPayload::AgentFrameSwitched {
                     frame_id: frame_id.into_inner(),
+                    commit: Some(revision),
                 },
             ));
         }

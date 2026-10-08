@@ -1149,7 +1149,7 @@ fn live_replay_event_label(event: &SessionObservationEvent) -> String {
         },
         SessionObservationEventPayload::Committed { .. } => "committed".to_string(),
         SessionObservationEventPayload::ResidentChanged => "resident_changed".to_string(),
-        SessionObservationEventPayload::AgentFrameSwitched { frame_id } => {
+        SessionObservationEventPayload::AgentFrameSwitched { frame_id, .. } => {
             format!("frame:{frame_id}")
         }
         SessionObservationEventPayload::QueueChanged { kind, batch_ids } => {

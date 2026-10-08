@@ -513,6 +513,7 @@ impl RuntimeHandle {
                 None::<TurnId>,
                 SessionObservationEventPayload::AgentFrameSwitched {
                     frame_id: frame_id.into_inner(),
+                    commit: (previous.revision < revision).then_some(revision),
                 },
             ));
         }

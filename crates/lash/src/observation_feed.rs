@@ -12,7 +12,10 @@
 //! A `Committed` event carries the commit's entries delta, not the session's
 //! read view: the feed delivers it only to a consumer that holds the
 //! revision the delta extends, and rebuilds from the durable head when the
-//! consumer holds any other.
+//! consumer holds any other. An `AgentFrameSwitched` names the commit that
+//! made the switch, and the feed leaves it out for a consumer that holds
+//! that commit: a snapshot taken between a commit and its publication
+//! already stands on the frame.
 //!
 //! Delivery is at least once, and every event carries a redelivery identity
 //! ([`SessionObservationEventId`]). A stream drops an identity it already
@@ -454,7 +457,7 @@ impl Stream for SessionObservationStream {
 /// What the feed does with one live event.
 enum Delivery {
     Item(SessionObservationStreamItem),
-    /// A commit the consumer already holds.
+    /// A commit the consumer already holds, or that commit's frame switch.
     Skipped,
     /// A commit whose entries extend a revision the consumer does not hold:
     /// the consumer rebuilds from the durable head.
@@ -558,10 +561,20 @@ impl FeedState {
     }
 
     /// Deliver one live event. A `Committed` at or below the revision the
-    /// consumer holds is a redelivery; one whose delta extends a revision
+    /// consumer holds is a redelivery, and so is the frame switch of a
+    /// commit at or below it; a `Committed` whose delta extends a revision
     /// the consumer does not hold diverged from it.
     fn deliver(&mut self, event: Arc<SessionObservationEvent>) -> Delivery {
         let delivered = self.delivered.unwrap_or(SessionRevision::new(0));
+        if let SessionObservationEventPayload::AgentFrameSwitched {
+            commit: Some(commit),
+            ..
+        } = &event.payload
+            && *commit <= delivered
+        {
+            self.advance_past(&event, delivered);
+            return Delivery::Skipped;
+        }
         if let SessionObservationEventPayload::Committed { base_revision, .. } = &event.payload {
             let revision = event.revision();
             if revision <= delivered {

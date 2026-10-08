@@ -25,6 +25,7 @@ enum StoredPayload {
     ResidentChanged,
     AgentFrameSwitched {
         frame_id: String,
+        commit: Option<SessionRevision>,
     },
     QueueChanged {
         queue: SessionQueueEventKind,
@@ -80,9 +81,10 @@ pub(super) fn encode(
             entries: entries.clone(),
         },
         SessionObservationEventPayload::ResidentChanged => StoredPayload::ResidentChanged,
-        SessionObservationEventPayload::AgentFrameSwitched { frame_id } => {
+        SessionObservationEventPayload::AgentFrameSwitched { frame_id, commit } => {
             StoredPayload::AgentFrameSwitched {
                 frame_id: frame_id.clone(),
+                commit: *commit,
             }
         }
         SessionObservationEventPayload::QueueChanged { kind, batch_ids } => {
@@ -145,8 +147,8 @@ pub(super) fn decode(
             entries,
         },
         StoredPayload::ResidentChanged => SessionObservationEventPayload::ResidentChanged,
-        StoredPayload::AgentFrameSwitched { frame_id } => {
-            SessionObservationEventPayload::AgentFrameSwitched { frame_id }
+        StoredPayload::AgentFrameSwitched { frame_id, commit } => {
+            SessionObservationEventPayload::AgentFrameSwitched { frame_id, commit }
         }
         StoredPayload::QueueChanged { queue, batch_ids } => {
             SessionObservationEventPayload::QueueChanged {

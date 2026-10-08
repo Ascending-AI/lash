@@ -318,8 +318,14 @@ pub enum SessionObservationEventPayload {
     /// A revision-stable change to resident authority, by reference: a
     /// consumer that needs the resident view reads it again.
     ResidentChanged,
+    /// The session's current frame changed to `frame_id`. `commit` names
+    /// the durable commit that made the switch, published ahead of that
+    /// commit's `Committed`: a consumer holding that revision or a later
+    /// one already holds the frame. A switch no commit made (a resident
+    /// change at a stable revision) names none.
     AgentFrameSwitched {
         frame_id: String,
+        commit: Option<SessionRevision>,
     },
     QueueChanged {
         kind: SessionQueueEventKind,
