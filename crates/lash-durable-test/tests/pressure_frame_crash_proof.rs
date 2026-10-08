@@ -97,7 +97,7 @@ const NEXT: &str = "now answer briefly";
 const SUMMARY: &str = "the user asked to read the repository";
 /// What the second turn answers.
 const FINAL: &str = "a brief answer";
-/// What marks the compaction summarizer's request.
+/// What marks the compaction summarizer's body.
 const SUMMARIZER: &str = "Provide a detailed summary of the conversation above";
 /// A prompt usage over the 200 000-token window's compaction threshold.
 const OVER_THRESHOLD: i64 = 190_000;
@@ -199,20 +199,22 @@ fn cell(code: &str) -> String {
     format!("<typescript>\n{code}\n</typescript>")
 }
 
-/// The scripted model: the summarizer's request gets the summary, and every
+/// The scripted model: the summarizer's body gets the summary, and every
 /// turn request `script`'s answer. Every turn request it saw is rendered
-/// into `seen`.
+/// into `seen`. The summary instruction is a prompt section (FIG-5432),
+/// composed into the request once at admission: a resend's request is the
+/// caller's own, and only the admitted body it sends carries the instruction.
 fn model(script: Script, seen: Arc<Mutex<Vec<String>>>) -> ProviderHandle {
     lash_core::testing::TestProvider::builder()
         .kind("pressure-frame-scripted")
         .requires_streaming(true)
-        .complete(move |request: LlmRequest| {
+        .send(move |request: LlmRequest, body| {
             let seen = Arc::clone(&seen);
             async move {
-                let rendered = serde_json::to_string(&request.messages).expect("a request encodes");
-                if rendered.contains(SUMMARIZER) {
+                if body.body.contains(SUMMARIZER) {
                     return Ok(text(&request, SUMMARY));
                 }
+                let rendered = serde_json::to_string(&request.messages).expect("a request encodes");
                 seen.lock_recover().push(rendered.clone());
                 Ok(script.answer(&request, &rendered))
             }

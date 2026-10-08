@@ -46,9 +46,9 @@ fn cut(prompt: &WorkbenchPrompt, history_messages: u32) -> PromptCut {
 
 /// The workbench's model-facing text is prompt sections (FIG-5258, ADR 0133),
 /// replacing its context transform and its protocol prompt config. Its
-/// standing instructions and the connected accounts render from the
-/// workbench's own recorded config, which a run is admitted under, in the
-/// instructions; the context budget states the call's projected history
+/// identity is its own section, not a protocol's; its standing instructions
+/// and the connected accounts render from the workbench's own recorded
+/// config, which a run is admitted under, in the instructions; the context budget states the call's projected history
 /// late, outside the conversation; and a recorded prompt with no context
 /// omits the accounts section instead of rendering an empty one.
 #[test]
@@ -74,6 +74,11 @@ fn workbench_prompt_sections_render_its_recorded_host_text_and_the_context_budge
             ))
             .collect::<Vec<_>>(),
         vec![
+            (
+                "agent_workbench/intro".to_owned(),
+                PromptPlacement::InitialInstructions,
+                PlacementSource::PluginDefault
+            ),
             (
                 format!("agent_workbench/{WORKBENCH_INSTRUCTIONS_SECTION}"),
                 PromptPlacement::InitialInstructions,
@@ -111,6 +116,7 @@ fn workbench_prompt_sections_render_its_recorded_host_text_and_the_context_budge
     assert_eq!(
         rendered(&recorded),
         vec![
+            SectionText::text(WORKBENCH_INTRO),
             SectionText::Text(format!(
                 "{}\n\n{}",
                 workbench_prompt().trim(),
@@ -124,7 +130,7 @@ fn workbench_prompt_sections_render_its_recorded_host_text_and_the_context_budge
         context: Vec::new(),
         ..recorded
     };
-    assert_eq!(rendered(&without_context)[1], SectionText::Omit);
+    assert_eq!(rendered(&without_context)[2], SectionText::Omit);
 }
 
 /// The workbench's sections shape the prompt the provider receives (ADR

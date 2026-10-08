@@ -12,7 +12,11 @@
 //!
 //! The model's builder lowers every request to a body of its own
 //! generation, so a summary body lowered twice is told apart from one
-//! lowered once. Each summary lowering and send is noted in the world.
+//! lowered once. Each summary lowering and send is noted in the world. The
+//! model answers a send from the body it is sent: the summary instruction is
+//! a prompt section (FIG-5432), composed into the request once at admission,
+//! so a resend's request is the caller's own and only its admitted body
+//! says it is the summary.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
@@ -124,8 +128,8 @@ fn metadata() -> Result<lash_core::LlmProfileMetadata, String> {
         .map_err(|error| error.to_string())
 }
 
-/// Whether `request` is the compaction's summary request: it ends asking
-/// for the summary of the conversation above.
+/// Whether `request`, as composed at admission, is the compaction's summary
+/// request: it ends asking for the summary of the conversation above.
 fn summarizes(request: &LlmRequest) -> bool {
     request
         .messages
@@ -165,7 +169,8 @@ fn model(world: Weak<World>) -> ProviderHandle {
         .send(move |request: LlmRequest, body| {
             let world = world.clone();
             async move {
-                let summary = summarizes(&request);
+                let summary = serde_json::from_str::<serde_json::Value>(&body.body)
+                    .is_ok_and(|body| body["summary"] == true);
                 if summary && let Some(world) = world.upgrade() {
                     world.note(format!(
                         "{SENT} {} :: {}",

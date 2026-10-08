@@ -74,13 +74,10 @@ fn snapshot_plan() -> PromptPlan {
         )
     };
     PromptPlan {
-        placements: ["intro", "execution", "guidance"]
-            .into_iter()
-            .map(|key| lash::prompt::PromptSectionPlacement {
-                section: standard(key),
-                placement: PromptPlacement::Excluded,
-            })
-            .collect(),
+        placements: vec![lash::prompt::PromptSectionPlacement {
+            section: standard(lash::standard::standard_section_keys::EXECUTION),
+            placement: PromptPlacement::Excluded,
+        }],
         ..PromptPlan::default()
     }
 }

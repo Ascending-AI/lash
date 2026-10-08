@@ -357,9 +357,9 @@ fn parent_prompt_plan() -> lash::prompt::PromptPlan {
     let section =
         |key| PromptSectionId::new("standard_protocol", PromptSectionKey::new(key).unwrap());
     PromptPlan {
-        order: vec![section("guidance"), section("execution")],
+        order: vec![section("execution")],
         placements: vec![PromptSectionPlacement {
-            section: section("intro"),
+            section: section("execution"),
             placement: PromptPlacement::CurrentContext,
         }],
         limits: lash::prompt::PromptLimits {
@@ -378,7 +378,8 @@ async fn assert_child_creation_plan(
     explicit: Option<lash::prompt::PromptPlan>,
 ) {
     const CHILD_INPUT: &str = "prompt-plan child call";
-    const INTRO: &str = "You are an assistant operating the lash harness.";
+    // The protocol's one section; a host's sections are its own (ADR 0133).
+    const EXECUTION: &str = "## Execution";
     let requests = Arc::new(Mutex::new(Vec::new()));
     let model = {
         let requests = Arc::clone(&requests);
@@ -529,15 +530,17 @@ async fn assert_child_creation_plan(
             "the child's first model call is observed"
         );
         let (instructions, context) = &requests[0];
-        let instructions = instructions.as_deref().unwrap();
+        let instructions = instructions.as_deref().unwrap_or_default();
         if expected.placements == plan.placements {
-            assert!(instructions.starts_with("## Guidance"));
-            assert!(!instructions.contains(INTRO));
-            assert!(context.contains(INTRO));
+            assert!(
+                !instructions.contains(EXECUTION),
+                "the plan moves the section out of the instructions: {instructions}"
+            );
+            assert!(context.contains(EXECUTION), "{context}");
         } else {
             assert!(
-                instructions.starts_with(INTRO),
-                "the child uses default section ordering and placement: {instructions}"
+                instructions.contains(EXECUTION) && !context.contains(EXECUTION),
+                "the child uses the section's default placement: {instructions}"
             );
         }
     }

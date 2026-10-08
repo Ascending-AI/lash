@@ -246,24 +246,6 @@ fn the_declarations_describe_exactly_the_offered_callable_tools() {
         assert!(!rendered.contains("A tool found by search."));
     }
 
-    let mut hidden_ask = tool("ask", "user", "ask", "Ask the user.");
-    hidden_ask.manifest.inline = false;
-    let asking = lash_core::ToolCatalog::from_tool_definitions(vec![
-        tool("search_tools", "tools", "search", "Find tools."),
-        hidden_ask,
-    ]);
-    let composed = compose_rlm(
-        RlmSections {
-            discovery: Some(lash_core::ToolDiscovery {
-                operation: "tools.search".to_string(),
-            }),
-            ..sections(&asking)
-        },
-        turn(asking.clone()),
-    );
-    assert!(initial(&composed).contains("Ask only when progress is blocked."));
-    assert!(!initial(&composed).contains("`user.ask("));
-
     let plugins: [Arc<dyn SessionPlugin>; 2] = [
         Arc::new(sections(&full)),
         Arc::new(HostWrappers(vec![(

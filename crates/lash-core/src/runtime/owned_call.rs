@@ -62,7 +62,8 @@ pub(in crate::runtime) struct OwnedCall<'a> {
 pub(in crate::runtime) enum OwnedAdmission {
     /// Send the admitted body.
     Send {
-        /// The request the body was lowered from, which reads the response.
+        /// The request that reads the response: the one the body was lowered
+        /// from, or on a resend the caller's own, with no prompt composed.
         request: Box<LlmRequest>,
         admitted: AdmittedDirectSend,
     },
