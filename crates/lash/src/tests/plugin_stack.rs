@@ -417,21 +417,24 @@ fn facade_compact_and_catalogue_policies_change_the_rendered_view() {
         contract.compact_contract_with_presentation(&manifest, "display", &selected),
         compact
     );
-    let preview = crate::tools::catalogue_preview(
-        [crate::tools::CataloguePreviewEntry::new(
-            ["tools", "hidden_module"],
-            "hidden_call",
-        )],
-        &crate::tools::CataloguePreviewOptions {
-            title: "Host catalogue".into(),
-            search_call_path: "tools.find".into(),
-            module_limit: 0,
-            call_name_limit: 0,
-        },
-    )
-    .expect("nonempty catalogue");
-    assert!(preview.contains("Host catalogue") && preview.contains("tools.find"));
-    assert!(!preview.contains("hidden_module") && !preview.contains("hidden_call"));
+    #[cfg(feature = "rlm")]
+    {
+        let preview = crate::tools::catalogue_preview(
+            [crate::tools::CataloguePreviewEntry::new(
+                ["tools", "hidden_module"],
+                "hidden_call",
+            )],
+            &crate::tools::CataloguePreviewOptions {
+                title: "Host catalogue".into(),
+                search_call_path: "tools.find".into(),
+                module_limit: 0,
+                call_name_limit: 0,
+            },
+        )
+        .expect("nonempty catalogue");
+        assert!(preview.contains("Host catalogue") && preview.contains("tools.find"));
+        assert!(!preview.contains("hidden_module") && !preview.contains("hidden_call"));
+    }
 }
 
 /// D-DEFAULTS2: the facade's RLM presentation reaches the running worker and

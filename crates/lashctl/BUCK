@@ -161,10 +161,10 @@ lash_rust_feature_binary(
     exec_properties = sized_exec_properties("lashctl", "lashctl"),
     extra_compile_data = [],
     extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin__fv_56d24aae",
+        "//crates/lash-vm-worker:lash-vm-worker__bin__fv_4dd92f22",
     ],
     include_dev_deps = False,
-    run_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin__fv_56d24aae)"},
+    run_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin__fv_4dd92f22)"},
     library = None,
     library_crate_name = None,
     manifest_dir = "crates/lashctl",
@@ -217,9 +217,9 @@ lash_rust_feature_test(
     exec_properties = sized_exec_properties("lashctl", "lashctl", "//crates/lashctl:lashctl__unit_test__fv_b166f8eb"),
     extra_compile_data = [],
     extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin__fv_56d24aae",
+        "//crates/lash-vm-worker:lash-vm-worker__bin__fv_4dd92f22",
     ],
-    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin__fv_56d24aae)"},
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin__fv_4dd92f22)"},
     library = None,
     library_crate_name = None,
     manifest_dir = "crates/lashctl",
@@ -277,7 +277,7 @@ lash_rust_feature_test(
         ":lashctl__fv_b166f8eb",
     ],
     extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin__fv_56d24aae",
+        "//crates/lash-vm-worker:lash-vm-worker__bin__fv_4dd92f22",
     ],
     library = None,
     library_crate_name = None,
@@ -285,7 +285,7 @@ lash_rust_feature_test(
     package_name = "lashctl",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
     rustc_env = {"CARGO_BIN_EXE_lashctl": "$(location :lashctl__fv_b166f8eb)"},
-    test_env = {"CARGO_BIN_EXE_lashctl": "$(location :lashctl__fv_b166f8eb)", "LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin__fv_56d24aae)"},
+    test_env = {"CARGO_BIN_EXE_lashctl": "$(location :lashctl__fv_b166f8eb)", "LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin__fv_4dd92f22)"},
     tags = [
         "feature-lane",
         "manual",

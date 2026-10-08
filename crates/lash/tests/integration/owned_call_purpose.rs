@@ -274,10 +274,14 @@ async fn compaction_and_direct_calls_compose_only_their_own_purpose() {
             )
             .await
             .expect("the compaction settles")
-            .settle_with(
-                &session.admin().commands(),
-                lash::testing::admin_fixture_outcome
-            )
+            .settle_with(&session.admin().commands(), |outcome| {
+                Ok(matches!(
+                    outcome,
+                    lash::SessionCommandOutcome::CompactContext {
+                        outcome: lash::CompactContextOutcome::Opened { .. }
+                    }
+                ))
+            })
             .await
             .expect("fixture mutation settled"),
         "the compaction opened a frame"

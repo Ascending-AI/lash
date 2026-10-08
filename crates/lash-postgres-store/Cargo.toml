@@ -51,7 +51,7 @@ uuid = { workspace = true, features = ["v4"] }
 [dev-dependencies]
 lash-durable = { workspace = true, features = ["testing"] }
 lash-lashlang-runtime = { workspace = true, features = ["testing"] }
-lash.workspace = true
+lash = { workspace = true, features = ["postgres"] }
 lash-conformance = { workspace = true, features = ["lashlang"] }
 lash-core = { workspace = true, features = ["testing"] }
 # The process worker a turn runner lends the tier's process workflow.

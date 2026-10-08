@@ -823,6 +823,7 @@ PACKAGE_DEPS = {
         "build": {},
         "dev": {
             "jsonschema": "//third-party/rust:p0184",
+            "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "opentelemetry_sdk": "//third-party/rust:p0223"
         },
         "normal": {
@@ -933,6 +934,7 @@ PACKAGE_DEPS = {
         "build": {},
         "dev": {
             "async_trait": "//third-party/rust:p0015",
+            "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
             "lash_durable": "//crates/lash-durable:lash-durable",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",

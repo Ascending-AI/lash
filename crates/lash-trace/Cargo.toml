@@ -36,5 +36,6 @@ thiserror = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
+lash-sansio = { workspace = true, features = ["testing"] }
 jsonschema = { workspace = true, default-features = false }
 opentelemetry_sdk = { version = "0.33", features = ["metrics", "testing"] }

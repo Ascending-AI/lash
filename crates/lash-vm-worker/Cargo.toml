@@ -48,8 +48,9 @@ libc = { workspace = true }
 
 [dev-dependencies]
 async-trait = { workspace = true }
+lash-core-execution = { workspace = true, features = ["testing"] }
 lash-durable = { workspace = true }
-lash-sansio = { workspace = true }
+lash-sansio = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { workspace = true }
 lash-vm-broker = { workspace = true, features = ["testing"] }
 lash-vm-worker = { package = "lash-internal-vm-worker", path = ".", features = ["testing"] }

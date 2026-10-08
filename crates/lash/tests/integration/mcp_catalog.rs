@@ -805,7 +805,7 @@ async fn mcp_call_policy_controls_attempts_and_recorded_bindings() {
             .call_tool(
                 tool.name(),
                 &serde_json::json!({}),
-                &lash::testing::mock_attempt_context(),
+                &lash_core::testing::mock_attempt_context(),
             )
             .await;
         let output = result.as_done_output().expect("inline attempt");
