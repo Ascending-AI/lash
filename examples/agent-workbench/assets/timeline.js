@@ -96,7 +96,7 @@ function payloadSummaryLabel(kind, body) {
 /* Long payloads — wake inputs, event bodies, raw errors — collapse to one
    summary line. The body is a real, selectable, copyable block. */
 function payloadDisclosure(kind, text, opts = {}) {
-  const body = looksLikeJson(text) ? prettyJson(text) : String(text ?? "");
+  const body = !opts.verbatim && looksLikeJson(text) ? prettyJson(text) : String(text ?? "");
   const details = el("details", "payload");
   details.open = Boolean(opts.open);
   const summary = el("summary", "", payloadSummaryLabel(kind, body));
@@ -177,7 +177,9 @@ function fillEventLane(node, body, kind, text, at) {
     return;
   }
   const rest = raw.split("\n").slice(1).join("\n");
-  if (rest.trim()) body.appendChild(payloadDisclosure("detail", rest));
+  /* Committed event text is canonical prose, including JSON detail lines.
+     Reformatting it would change what the transcript row says. */
+  if (rest.trim()) body.appendChild(payloadDisclosure("detail", rest, { verbatim: true }));
 }
 
 function renderInlineMarkdown(value) {
@@ -532,14 +534,17 @@ function committedRowEntries(rows, seen, counters) {
       assigned = { thinking, key };
       seen.set(row.row_id, assigned);
     }
+    const kind = row.kind === "user" ? "input"
+      : row.kind === "assistant_reply" ? "reply"
+      : row.kind === "code_block" ? "code"
+      : row.kind === "reasoning" ? "thinking"
+      : "event";
+    /* Reasoning carried by a call or reply belongs beside that row, in
+       commit order, rather than ahead of every tool round in the turn. */
     assigned.thinking.forEach((key, index) => entries.push({
-      key, kind: "thinking", turnId, rowId: row.row_id, row, text: content.reasoning[index]
+      key, kind: "thinking", laneKind: kind, turnId, rowId: row.row_id, row, text: content.reasoning[index]
     }));
     if (assigned.key) {
-      const kind = row.kind === "user" ? "input"
-        : row.kind === "assistant_reply" ? "reply"
-        : row.kind === "code_block" ? "code"
-        : "event";
       entries.push({ key: assigned.key, kind, turnId, rowId: row.row_id, row });
     }
   }
@@ -641,7 +646,7 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
   function upsert(key, kind, source, payload, order) {
     let row = rows.get(key);
     if (!row) {
-      row = { key, kind, order: placeInTurn(order(), kind, payload?.turnId), sources: {}, stamps: {}, turnId: null, view: null, dirty: true };
+      row = { key, kind, order: placeInTurn(order(), payload?.laneKind || kind, payload?.turnId), sources: {}, stamps: {}, turnId: null, view: null, dirty: true };
       rows.set(key, row);
       insertOrdered(row);
     }

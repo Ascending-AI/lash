@@ -194,3 +194,7 @@ vm.runInContext('async function submit(event) {' + submit + '\n}', context);
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[cfg(test)]
+#[path = "tests/standard_transcript.rs"]
+mod standard_transcript_tests;

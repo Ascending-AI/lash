@@ -946,7 +946,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                         id: asst_id,
                         role: MessageRole::Assistant,
                         parts: shared_parts(assistant_parts),
-                        origin: None,
+                        origin: Some(standard_message_origin(ctx.turn_id())),
                         reply_marker: None,
                     },
                 )]));
@@ -968,7 +968,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                     id: asst_id,
                     role: MessageRole::Assistant,
                     parts: shared_parts(assistant_parts),
-                    origin: None,
+                    origin: Some(standard_message_origin(ctx.turn_id())),
                     reply_marker: None,
                 },
             )]));
@@ -1088,7 +1088,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                     id: message_id,
                     role: MessageRole::User,
                     parts: shared_parts(parts),
-                    origin: None,
+                    origin: Some(standard_message_origin(ctx.turn_id())),
                     reply_marker: None,
                 },
             )]));
@@ -1142,7 +1142,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                     id: user_id,
                     role: MessageRole::User,
                     parts: shared_parts(result_parts),
-                    origin: None,
+                    origin: Some(standard_message_origin(ctx.turn_id())),
                     reply_marker: None,
                 },
             )]));
@@ -1181,6 +1181,17 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
         _result: Result<lash_core::ExecResponse, lash_core::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         Vec::new()
+    }
+}
+
+/// Every Standard conversation message belongs to its producing turn,
+/// including results represented as user messages for provider replay.
+fn standard_message_origin(turn_id: &TurnId) -> lash_core::MessageOrigin {
+    lash_core::MessageOrigin::TurnOutput {
+        turn_id: turn_id.clone(),
+        source: lash_core::TurnOutputSource::Plugin {
+            plugin_id: STANDARD_PROTOCOL_PLUGIN_ID.to_string(),
+        },
     }
 }
 
