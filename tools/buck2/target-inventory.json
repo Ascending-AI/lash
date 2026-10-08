@@ -42036,6 +42036,7 @@
       ],
       "dependencies": [
         "async-trait",
+        "base64",
         "chrono",
         "futures-util",
         "lash-internal-core-ids",

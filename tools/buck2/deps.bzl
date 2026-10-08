@@ -247,6 +247,7 @@ PACKAGE_DEPS = {
         },
         "normal": {
             "async_trait": "//third-party/rust:p0015",
+            "base64": "//third-party/rust:p0024",
             "chrono": "//third-party/rust:p0044",
             "futures_util": "//third-party/rust:p0127",
             "lash_core_ids": "//crates/lash-core-ids:lash-core-ids",
