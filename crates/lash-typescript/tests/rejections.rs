@@ -119,20 +119,6 @@ fn an_unawaited_sleep_is_a_pending_timer() {
 }
 
 #[test]
-fn await_permission_stops_at_nested_function_boundaries() {
-    let operations = ["waitSignal('ready')"];
-    for operation in operations {
-        for source in [
-            format!("await (async () => {{ {operation}; }})();"),
-            format!("await Promise.all([1].map(async (item) => {{ {operation}; return item; }}));"),
-        ] {
-            let error = lash_typescript::validate(&source).expect_err(&source);
-            assert_eq!(error.code, Code::AwaitRequired, "{source}: {error}");
-        }
-    }
-}
-
-#[test]
 fn nested_async_shapes_accept_locally_awaited_effects() {
     for source in [
         "await (async () => { await sleep(1); })();",

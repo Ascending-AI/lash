@@ -176,7 +176,7 @@ fn validate_process_claims<'a>(
                     )))
                 }
             }
-            lashlang::TypeExpr::TriggerHandle(_) | lashlang::TypeExpr::Ref(_) => Ok(()),
+            lashlang::TypeExpr::Ref(_) => Ok(()),
         }
     })
 }

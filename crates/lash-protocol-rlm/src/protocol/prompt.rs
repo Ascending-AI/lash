@@ -33,22 +33,10 @@ fn module_is_runtime_internal(path: &[String]) -> bool {
         .is_some_and(|segment| segment.starts_with("__"))
 }
 
-/// The host surface a dialect has to describe, walked once.
-///
-/// Every dialect advertises the same inventory and spells it through the
-/// shared shape model, so the walk lives here, carries `SchemaShape`, and
-/// leaves only spelling to the dialect. A TypeScript session used to receive
-/// no inventory at all: its execution section rendered tool signatures and
-/// nothing else, so the trigger sources, their event types and the
-/// `triggers.*` operations were invisible — while the host prompt told the
-/// model to use them. A judged row watched a model search for `cron.Schedule`,
-/// find nothing, and conclude the trigger APIs did not exist.
 pub(crate) struct HostSurfaceInventory {
     pub(crate) operations: Vec<HostSurfaceOperation>,
     pub(crate) data_types: Vec<(String, lash_sansio::SchemaShape)>,
     pub(crate) constructors: Vec<HostSurfaceConstructor>,
-    /// `(trigger source type, event type name)`.
-    pub(crate) trigger_sources: Vec<(String, String)>,
 }
 
 pub(crate) struct HostSurfaceOperation {
@@ -64,22 +52,14 @@ pub(crate) struct HostSurfaceConstructor {
     pub(crate) output: HostSurfaceConstructorOutput,
 }
 
-/// What a value constructor hands back.
-///
-/// A trigger-source constructor answers a nominal application —
-/// `TriggerSource<cron.Tick>` — which stays as its two names here: the
-/// wrapper is a bare identifier every dialect spells alike, and the argument
-/// is a host type's real dotted name for the dialect's own name speller.
-/// Anything else is an ordinary shape.
 pub(crate) enum HostSurfaceConstructorOutput {
-    Nominal { wrapper: String, argument: String },
     Shape(Box<lash_sansio::SchemaShape>),
 }
 
 pub(crate) fn host_surface_inventory(
     surface: &lashlang::LashlangHostEnvironment,
 ) -> HostSurfaceInventory {
-    // Operations with real Lashlang types (trigger and other host primitives)
+    // Operations with real Lashlang types (host primitives)
     // are listed here. Tool-catalog operations are bridged with placeholder
     // `any` types and documented in full under **Tools**, so they are skipped to
     // avoid an uninformative `any -> any` duplicate of that section.
@@ -131,139 +111,28 @@ pub(crate) fn host_surface_inventory(
         .resources
         .value_constructors()
         .filter(|(_, constructor)| !module_is_runtime_internal(&constructor.path))
-        .map(|(_, constructor)| {
-            let output = match &constructor.output_ty {
-                lashlang::TypeExpr::Ref(name) => surface
-                    .resources
-                    .resolve_trigger_source(name.as_str())
-                    .map(|binding| HostSurfaceConstructorOutput::Nominal {
-                        wrapper: "TriggerSource".to_string(),
-                        argument: binding.event_type_name().to_string(),
-                    })
-                    .unwrap_or_else(|| {
-                        HostSurfaceConstructorOutput::Shape(Box::new(
-                            lashlang::type_expr_to_schema_shape(&constructor.output_ty),
-                        ))
-                    }),
-                other => HostSurfaceConstructorOutput::Shape(Box::new(
-                    lashlang::type_expr_to_schema_shape(other),
-                )),
-            };
-            HostSurfaceConstructor {
-                path: constructor.path.join("."),
-                input: lashlang::type_expr_to_schema_shape(&constructor.input_ty),
-                output,
-            }
+        .map(|(_, constructor)| HostSurfaceConstructor {
+            path: constructor.path.join("."),
+            input: lashlang::type_expr_to_schema_shape(&constructor.input_ty),
+            output: HostSurfaceConstructorOutput::Shape(Box::new(
+                lashlang::type_expr_to_schema_shape(&constructor.output_ty),
+            )),
         })
-        .collect();
-    let trigger_sources = surface
-        .resources
-        .trigger_sources()
-        .filter(|(source, _)| !source.starts_with("__"))
-        .map(|(source_ty, binding)| (source_ty.to_string(), binding.event_type_name().to_string()))
         .collect();
     HostSurfaceInventory {
         operations,
         data_types,
         constructors,
-        trigger_sources,
     }
 }
 
-/// Operation-owned lifecycle and trigger guidance shared by both prompt dialects.
+/// Operation-owned lifecycle guidance shared by both prompt dialects.
 pub(crate) fn host_operation_description(module: &str, operation: &str) -> Option<&'static str> {
     match (module, operation) {
         ("processes", "list") => Some(
             "List visible process runs. Empty arguments select running runs; `definition` selects a definition and `status: \"any\"` includes visible run history.",
         ),
-        ("triggers", "register") => Some(
-            "Register a source value and process definition with every parameter supplied exactly once in inputs. `subscription_key` is stable within the caller's owner scope; supply it or omit it to have a stable key derived from the source and target. A different definition at an existing key conflicts. The source-owning host/plugin emits occurrences; constructors build source values.",
-        ),
-        ("triggers", "list") => Some(
-            "List visible registrations; filter by target, name, source_type or enabled. Each row carries registrant provenance. Registrations remain until an explicit mutation or owner-lifecycle cleanup removes them.",
-        ),
-        ("triggers", "prune") => Some(
-            "Remove selected subscriptions by subscription_keys. Prune is restricted to the acting owner namespace.",
-        ),
-        ("triggers", "disable") => Some(
-            "Pause future deliveries. Supply subscription_key and expected_revision from the current receipt; mutations are revision-checked.",
-        ),
-        ("triggers", "enable") => Some(
-            "Resume future deliveries. Supply subscription_key and expected_revision from the current receipt; mutations are revision-checked.",
-        ),
-        ("triggers", "delete") => Some(
-            "Tombstone the subscription. Supply subscription_key and expected_revision from the current receipt; mutations are revision-checked.",
-        ),
+
         _ => None,
-    }
-}
-
-#[cfg(test)]
-mod inventory_tests {
-    use super::*;
-    use lashlang::{
-        LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, NamedDataType, TypeExpr,
-    };
-
-    #[test]
-    fn reserved_namespace_is_hidden_from_every_prompt_inventory() {
-        let mut catalog = LashlangHostCatalog::new();
-        for namespace in ["visible", "__private", "__lashlang_runtime"] {
-            catalog
-                .add_module_operation(
-                    [namespace],
-                    format!("{namespace}.Module"),
-                    "probe",
-                    format!("{namespace}.probe"),
-                    TypeExpr::Str,
-                    TypeExpr::Bool,
-                )
-                .expect("operation");
-            catalog
-                .add_named_data_type(
-                    NamedDataType::object(format!("{namespace}.Data"), vec![]).expect("data type"),
-                )
-                .expect("register data");
-            catalog
-                .add_value_constructor([namespace, "Make"], TypeExpr::Str, TypeExpr::Bool)
-                .expect("constructor");
-            catalog
-                .add_trigger_source_constructor(
-                    [namespace, "Tick"],
-                    TypeExpr::Str,
-                    NamedDataType::object(format!("{namespace}.Event"), vec![]).expect("event"),
-                )
-                .expect("trigger constructor");
-        }
-        let environment = LashlangHostEnvironment::new(catalog, LashlangAbilities::all());
-        let inventory = host_surface_inventory(&environment);
-        assert_eq!(
-            inventory
-                .operations
-                .iter()
-                .map(|row| row.alias.as_str())
-                .collect::<Vec<_>>(),
-            ["visible"]
-        );
-        assert_eq!(
-            inventory
-                .data_types
-                .iter()
-                .map(|(name, _)| name.as_str())
-                .collect::<Vec<_>>(),
-            ["visible.Data", "visible.Event"]
-        );
-        assert_eq!(
-            inventory
-                .constructors
-                .iter()
-                .map(|row| row.path.as_str())
-                .collect::<Vec<_>>(),
-            ["visible.Make", "visible.Tick"]
-        );
-        assert_eq!(
-            inventory.trigger_sources,
-            [("visible.Tick".into(), "visible.Event".into())]
-        );
     }
 }

@@ -292,9 +292,7 @@ pub enum EffectKind {
     Print,
     Finish,
     Fail,
-    ProcessEvent,
     Sleep,
-    WaitSignal,
     /// The run reached a cancel checkpoint; the parent answers with its
     /// journaled observation of cancellation.
     CancelCheckpoint,
@@ -310,7 +308,7 @@ impl EffectKind {
     /// Whether the parent may answer a request of this kind with
     /// [`ParentMessage::Park`] instead of a response (FIG-4159, FIG-4275): a
     /// resource operation, a resource-operation batch, a process await, a
-    /// sleep or a signal wait, which a continuation can issue again, and a
+    /// sleep or an await, which a continuation can issue again, and a
     /// process boundary. It mirrors the VM's `VmRequest::parkable` and grants
     /// nothing.
     pub fn parkable(self) -> bool {
@@ -320,7 +318,6 @@ impl EffectKind {
                 | Self::ResourceOperationBatch
                 | Self::Await
                 | Self::Sleep
-                | Self::WaitSignal
                 | Self::ProcessBoundary
         )
     }
@@ -342,7 +339,7 @@ pub enum EffectOutcome {
     Cancelled,
     Value(EncodedPayload),
     Unit,
-    /// The parent handed a signal wait to a successor segment.
+    /// The parent handed an operation to a successor segment.
     HandedOver,
     /// The effect failed; the payload is the host error the guest may catch.
     Failed(EncodedPayload),

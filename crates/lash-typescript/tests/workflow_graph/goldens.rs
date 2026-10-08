@@ -11,14 +11,14 @@
     reason = "each including binary reads the constants it pins"
 )]
 
-/// The lens-law fixture: a lifted process with a loop and a signal wait, a
+/// The lens-law fixture: a lifted process with a loop and a tool await, a
 /// collection pipeline, a branch and a finish.
 pub(crate) const REPRESENTATIVE: &str = r#"const child = async (input: unknown) => {
     let total = 0;
     for (const value of input.values) {
       await sleep(1);
     }
-    const signal = await waitSignal("refresh");
+    const refreshed = await tools.echo({value:"refresh"});
     return total;
   };
 const items = [1, 2, 3].filter((value) => value > 1).map((value) => value * 2);
@@ -40,9 +40,7 @@ pub(crate) const WITH_FACETS: &str =
 /// The canonical-span golden with named, nested and repeated statements.
 pub(crate) const SPAN_NAMED_NESTED_REPEATED: &str = r#"const worker=async()=>{await tools.echo({value:"same"});await tools.echo({value:"same"});if(true){for(const value of [1]){while(false){await sleep(value);}}}return "done";};"#;
 
-/// The canonical-span golden whose process literal lifts inline. Its source
-/// is a registered trigger source constructor, so a host admits it.
-pub(crate) const SPAN_LIFTED_INLINE: &str = r#"await triggers.register({source:timer.Schedule({expr:"0 8 * * *"}),target:{definition:async(event)=>{await tools.echo({value:"inline"});return event;}}});"#;
+pub(crate) const SPAN_LIFTED_INLINE: &str = r#"await processes.start({definition:async(event)=>{await tools.echo({value:"inline"});return event;},args:{event:"inline"}});"#;
 
 /// FIG-3635's shape: top-level `var` declarations hoisted ahead of the
 /// hoisted function declarations, so the round trip only holds when the

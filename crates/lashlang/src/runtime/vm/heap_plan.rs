@@ -173,7 +173,6 @@ pub(super) fn instruction_heap_plan(
         | I::AwaitHandleUnwrap
         | I::WrapHostDescriptor(_)
         | I::ProcessFail => InstructionHeapPlan::stack(Top(1)),
-        I::ProcessWaitSignal { .. } => InstructionHeapPlan::stack(Top(0)),
 
         // Slot readers. The fused format opcodes belong here: they read a slot
         // and stringify it, so a heap reference in that slot has to be exported

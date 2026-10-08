@@ -49,7 +49,7 @@ pub(super) enum VmOutcome {
     ProcessFinished(Value),
     ProcessFailed(Value),
     /// The host kept the operation open without completing it: a process's
-    /// signal wait handed over to a successor segment, or an operation the
+    /// operation handed over to a successor segment, or an operation the
     /// host parked the run on (FIG-4159). The instruction pointer stands on
     /// the operation again.
     HandedOver,
@@ -57,12 +57,10 @@ pub(super) enum VmOutcome {
     Suspended,
 }
 
-/// A whole-run executor has no successor segment to hand a signal wait to:
-/// only a run that stops after each effect can capture the continuation.
 fn handed_over_outside_a_segment() -> RuntimeError {
-    RuntimeError::WaitSignalFailed {
+    RuntimeError::OperationParkFailed {
         source: ExecutionHostError::new(
-            "wait_signal was handed over outside a segmented process run",
+            "operation was handed over outside a segmented process run",
         ),
     }
 }

@@ -31,7 +31,6 @@ scenarios! {
         ToolControlHostEnvironment => "tool_control_host_environment",
         SnapshotProjectedState => "snapshot_projected_state",
         ContinueAsSeedHostEnvironment => "continue_as_seed_host_environment",
-        TriggerRegistryHostEnvironment => "trigger_registry_host_environment",
         SyntaxTextHostEnvironment => "syntax_text_host_environment",
         IntegerRangeHostEnvironment => "integer_range_host_environment",
         FanoutExpressionHostEnvironment => "fanout_expression_host_environment",

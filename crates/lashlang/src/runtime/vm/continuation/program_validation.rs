@@ -315,14 +315,6 @@ pub(super) fn validate_resume_point(
         program.chunk.code.get(continuation.instruction_pointer),
     ) {
         (
-            VmSuspendedOperation::WaitSignal { name },
-            Some(Instruction::ProcessWaitSignal { name: index }),
-        ) => program
-            .chunk
-            .names
-            .get(*index)
-            .is_some_and(|candidate| candidate.text.as_ref() == name.as_str()),
-        (
             VmSuspendedOperation::ResourceOperation { operation: name },
             Some(
                 Instruction::ResourceCall {

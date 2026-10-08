@@ -157,9 +157,8 @@ fn op_name(op: &AbilityOp) -> &'static str {
         AbilityOp::Print(_) => "a print",
         AbilityOp::Finish(_) => "a finish",
         AbilityOp::Fail(_) => "a fail",
-        AbilityOp::ProcessEvent(_) => "an event",
+
         AbilityOp::Sleep(_) => "a sleep",
-        AbilityOp::WaitSignal { .. } => "a signal wait",
     }
 }
 
@@ -172,8 +171,6 @@ fn injection_name(inject: &Injection) -> &'static str {
         Injection::Leaves { .. } => "an aggregate",
         Injection::Woke { .. } => "a sleep",
         Injection::ProcessEnded { .. } => "an await",
-        Injection::Signal { .. } => "a signal wait",
-        Injection::Emitted { .. } => "an event",
     }
 }
 
@@ -211,10 +208,7 @@ pub(crate) fn answer(
             process_value(&outcome, cancellation).map(AbilityOutcome::Value)
         }
         (AbilityOp::Sleep(_), Injection::Woke { .. }) => Ok(AbilityOutcome::Value(Value::Null)),
-        (AbilityOp::WaitSignal { .. }, Injection::Signal { payload, .. }) => {
-            Ok(AbilityOutcome::Value(lashlang::from_json(payload)))
-        }
-        (AbilityOp::ProcessEvent(_), Injection::Emitted { .. }) => Ok(AbilityOutcome::Unit),
+
         (_, inject) => return Err(mismatch(&inject)),
     })
 }

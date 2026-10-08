@@ -10,8 +10,7 @@ use crate::artifact::{
 };
 use crate::ast::{
     AssignPathStep, AstPath, AstString, Declaration, Expr, ProcessDecl, ProcessOrigin,
-    ProcessParam, ProcessSignalDecl, Program, ResourceRefExpr, TypeExpr, TypeField,
-    format_type_expr,
+    ProcessParam, Program, ResourceRefExpr, TypeExpr, TypeField, format_type_expr,
 };
 use crate::span::Span;
 
@@ -23,7 +22,7 @@ pub use host::{
     LashlangAbilities, LashlangHostCatalogError, LashlangHostEnvironment, LashlangLanguageFeatures,
     LinkedModule, ModuleInstanceCatalog, ModuleOperationBinding, NamedDataType, NamedDataTypeError,
     OutputFromInputBinding, ResolvedOperation, ResourceOperationBinding, ResourceTypeCatalog,
-    TriggerSourceBinding, ValueConstructorBinding,
+    ValueConstructorBinding,
 };
 mod errors;
 pub use errors::LinkError;
@@ -37,26 +36,18 @@ mod open_shapes;
 use open_shapes::OpenPlaces;
 mod pass_validation;
 mod process_literal;
-use pass_validation::{
-    TriggerRegistrationOperation, validate_register_tool_subscription_key,
-    validate_trigger_operation_subscription_key,
-};
 mod type_helpers;
 use type_helpers::{
     Completion, Scope, any_binding, binding_type, call_input_type, direct_call_input_field,
-    expected_call_arg_type, expr_has_label_annotation, field_type, index_type,
-    is_trigger_event_expr, is_trigger_event_placeholder_expr, is_trigger_event_projection_expr,
-    iterable_item_type, label_annotation_path, literal_type, module_path_for_expr,
-    process_input_record_type, process_input_type, process_type_for_decl, process_unknown_type,
-    shaping_builtin_return_type, shaping_comparable_type, shaping_list_item, shaping_number_type,
-    shaping_record_type, shaping_text_type, strip_label_annotation, trigger_target_process_label,
-    union_type,
+    expected_call_arg_type, expr_has_label_annotation, field_type, index_type, iterable_item_type,
+    label_annotation_path, literal_type, module_path_for_expr, process_input_record_type,
+    process_input_type, process_type_for_decl, process_unknown_type, shaping_builtin_return_type,
+    shaping_comparable_type, shaping_list_item, shaping_number_type, shaping_record_type,
+    shaping_text_type, strip_label_annotation, union_type,
 };
 mod facets;
 pub use facets::analyze_workflow_program;
-use facets::{
-    child_ast_path, declaration_span, recover_workflow_binding, workflow_diagnostic_owner_key,
-};
+use facets::{declaration_span, recover_workflow_binding, workflow_diagnostic_owner_key};
 #[cfg(test)]
 mod tests;
 

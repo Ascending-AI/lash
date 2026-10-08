@@ -17,8 +17,8 @@ use lash_core::{
 
 use super::state::{
     BatchShape, Decision, Injection, IssuedLeaf, IssuedOperation, LASHLANG_SEGMENT_STATE_VERSION,
-    LashlangEngineState, Leaf, Phase, QueuedSignal, TIMER_STEP, TimerInput, VM_RUN_STEP,
-    VmRunInput, VmRunOutput, Wait,
+    LashlangEngineState, Leaf, Phase, TIMER_STEP, TimerInput, VM_RUN_STEP, VmRunInput, VmRunOutput,
+    Wait,
 };
 use crate::{LASHLANG_ENGINE_KIND, LashlangProcessFailureCode};
 
@@ -74,7 +74,6 @@ pub(crate) fn advance(
             runs: 0,
             operations: 0,
             faults: 0,
-            signals: Default::default(),
             phase: Phase::Ended,
         };
         let action = run_vm(&mut state, None)?;
@@ -109,16 +108,7 @@ fn transition(
             }
             _ => standing(state),
         },
-        EngineEvent::Emitted => match &state.phase {
-            Phase::Parked {
-                operation,
-                wait: Wait::Emitted,
-            } => {
-                let operation = *operation;
-                run_vm(state, Some(Injection::Emitted { operation }))
-            }
-            _ => Err(infra("an append the engine never asked for was reported")),
-        },
+
         EngineEvent::ProcessEnded { process, outcome } => match &state.phase {
             Phase::Parked {
                 operation,
@@ -135,23 +125,7 @@ fn transition(
             }
             _ => standing(state),
         },
-        EngineEvent::Signal(signal) => {
-            let name = signal.identity.signal_name().to_owned();
-            let payload = signal.payload;
-            match &state.phase {
-                Phase::Parked {
-                    operation,
-                    wait: Wait::Signal { name: awaited },
-                } if *awaited == name => {
-                    let operation = *operation;
-                    run_vm(state, Some(Injection::Signal { operation, payload }))
-                }
-                _ => {
-                    state.signals.push_back(QueuedSignal { name, payload });
-                    standing(state)
-                }
-            }
-        }
+
         EngineEvent::ProcessWaitTimedOut { .. } => standing(state),
         EngineEvent::KeyPinned { .. }
         | EngineEvent::ExternalResolved { .. }
@@ -182,13 +156,10 @@ fn standing(state: &LashlangEngineState) -> Result<EngineAction, ProcessInfraErr
         },
         Phase::Running { .. }
         | Phase::Parked {
-            wait: Wait::Leaves { .. } | Wait::Emitted,
+            wait: Wait::Leaves { .. },
             ..
         } => EngineAction::Idle,
-        Phase::Parked {
-            wait: Wait::Signal { name },
-            ..
-        } => EngineAction::AwaitSignal { name: name.clone() },
+
         Phase::Ended => return Err(infra("an ended process has no standing action")),
     })
 }
@@ -338,25 +309,7 @@ fn park(
                                 outcome: None,
                             })
                         }
-                        IssuedLeaf::Host {
-                            operation,
-                            input,
-                            site,
-                            language_execution,
-                        } => {
-                            steps.push(StepRequest::Host {
-                                language_execution,
-                                step: step.clone(),
-                                operation,
-                                input,
-                                site,
-                            });
-                            Ok(Leaf::Step {
-                                step,
-                                timer: false,
-                                outcome: None,
-                            })
-                        }
+
                         IssuedLeaf::Timer { until_ms } => {
                             steps.push(StepRequest::Engine {
                                 step: step.clone(),
@@ -427,40 +380,6 @@ fn park(
                 wait: Wait::Process { process },
             };
             standing(state)
-        }
-        IssuedOperation::WaitSignal { name } => {
-            if let Some(index) = state.signals.iter().position(|signal| signal.name == name) {
-                let signal = state.signals.remove(index).ok_or_else(|| infra("queue"))?;
-                return run_vm(
-                    state,
-                    Some(Injection::Signal {
-                        operation,
-                        payload: signal.payload,
-                    }),
-                );
-            }
-            state.phase = Phase::Parked {
-                operation,
-                wait: Wait::Signal { name },
-            };
-            standing(state)
-        }
-        IssuedOperation::Emit {
-            event_type,
-            payload,
-        } => {
-            let event_type = crate::lashlang_process_event_types()
-                .into_iter()
-                .find(|declared| declared.name == event_type)
-                .ok_or_else(|| infra(format!("`{event_type}` is no lashlang event type")))?;
-            state.phase = Phase::Parked {
-                operation,
-                wait: Wait::Emitted,
-            };
-            Ok(EngineAction::Emit {
-                event_type,
-                payload,
-            })
         }
     }
 }

@@ -1,6 +1,73 @@
 use super::*;
 use crate::{WorkflowDiagnosticKind, WorkflowNodeId, projected_node_type_facets};
 
+fn assert_classified_producer(recovered: bool, with_owner: bool) {
+    let fixtures = errors();
+    assert_eq!(fixtures.len(), WorkflowDiagnosticKind::ALL.len());
+    let expected_kinds = WorkflowDiagnosticKind::ALL
+        .into_iter()
+        .map(WorkflowDiagnosticKind::as_str)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        fixtures
+            .iter()
+            .map(|(kind, _)| *kind)
+            .collect::<BTreeSet<_>>(),
+        expected_kinds
+    );
+    let mut program = Program::block(vec![Expr::Null]);
+    program
+        .spans
+        .insert(AstPath::main(vec![0]), Span { start: 1, end: 3 });
+    let environment =
+        LashlangHostEnvironment::new(LashlangHostCatalog::new(), LashlangAbilities::all());
+    let path = AstPath::main(Vec::new());
+    let owner = AstPath::main(vec![0]);
+    let id: WorkflowNodeId =
+        serde_json::from_value(serde_json::json!("node-fixture")).expect("node id");
+    for (kind, error) in fixtures {
+        let mut linker = Linker::new(&program, &environment).with_workflow_analysis();
+        let expected_span = if with_owner {
+            *linker.workflow_diagnostic_owner.borrow_mut() = Some(owner.clone());
+            program.spans.get(&owner).copied().or_else(|| error.span())
+        } else {
+            error.span()
+        };
+        let message = error.to_string();
+        if recovered {
+            linker.record_recovered_workflow_error(&program.main, &path, error);
+        } else {
+            linker.record_workflow_error(&program.main, &path, error);
+        }
+        let analysis = linker.take_workflow_analysis();
+        let facets = projected_node_type_facets(
+            Some(&analysis),
+            if with_owner { &owner } else { &path },
+            &[],
+            &id,
+        )
+        .expect("producer records node facts");
+        assert_eq!(facets.diagnostics.len(), 1, "{kind}");
+        let diagnostic = &facets.diagnostics[0];
+        assert_eq!(diagnostic.kind.as_str(), kind);
+        assert_eq!(diagnostic.node_id, id);
+        assert_eq!(diagnostic.message, message);
+        assert_eq!(diagnostic.span, expected_span);
+        let wire = serde_json::to_value(diagnostic).expect("diagnostic encodes");
+        assert_eq!(wire["classification"], "definite", "{kind}");
+    }
+}
+
+#[test]
+fn recorded_workflow_diagnostics_are_definite_for_every_kind() {
+    assert_classified_producer(false, false);
+}
+
+#[test]
+fn recovered_workflow_diagnostics_are_definite_for_every_kind() {
+    assert_classified_producer(true, true);
+}
+
 fn errors() -> Vec<(&'static str, LinkError)> {
     vec![
         (
@@ -19,13 +86,6 @@ fn errors() -> Vec<(&'static str, LinkError)> {
         (
             "duplicate_process_param",
             LinkError::DuplicateProcessParam {
-                name: "fixture".to_string(),
-                span: Some(Span { start: 4, end: 9 }),
-            },
-        ),
-        (
-            "duplicate_process_signal",
-            LinkError::DuplicateProcessSignal {
                 name: "fixture".to_string(),
                 span: Some(Span { start: 4, end: 9 }),
             },
@@ -165,121 +225,9 @@ fn errors() -> Vec<(&'static str, LinkError)> {
             },
         ),
         (
-            "invalid_trigger_registration",
-            LinkError::InvalidTriggerRegistration {
-                span: Some(Span { start: 4, end: 9 }),
-            },
-        ),
-        (
-            "invalid_trigger_subscription_key",
-            LinkError::InvalidTriggerSubscriptionKey {
-                span: Some(Span { start: 4, end: 9 }),
-            },
-        ),
-        (
             "process_literal_outside_process_slot",
             LinkError::ProcessLiteralOutsideProcessSlot {
                 expected: "fixture".to_string(),
-                span: Some(Span { start: 4, end: 9 }),
-            },
-        ),
-        (
-            "conflicting_signal_payload",
-            LinkError::ConflictingSignalPayload {
-                name: "fixture".to_string(),
-                first: "fixture".to_string(),
-                second: "fixture".to_string(),
-                span: Some(Span { start: 4, end: 9 }),
-            },
-        ),
-        (
-            "invalid_trigger_inputs",
-            LinkError::InvalidTriggerInputs {
-                span: Some(Span { start: 4, end: 9 }),
-            },
-        ),
-        (
-            "duplicate_trigger_input",
-            LinkError::DuplicateTriggerInput {
-                input: "fixture".to_string(),
-                span: Some(Span { start: 4, end: 9 }),
-            },
-        ),
-        (
-            "missing_trigger_input",
-            LinkError::MissingTriggerInput {
-                process: "fixture".to_string(),
-                input: "fixture".to_string(),
-                span: Some(Span { start: 4, end: 9 }),
-            },
-        ),
-        (
-            "unknown_trigger_input",
-            LinkError::UnknownTriggerInput {
-                process: "fixture".to_string(),
-                input: "fixture".to_string(),
-                span: Some(Span { start: 4, end: 9 }),
-            },
-        ),
-        (
-            "missing_trigger_event_input",
-            LinkError::MissingTriggerEventInput {
-                span: Some(Span { start: 4, end: 9 }),
-            },
-        ),
-        (
-            "trigger_target_takes_no_event",
-            LinkError::TriggerTargetTakesNoEvent {
-                process: "fixture".to_string(),
-                span: Some(Span { start: 4, end: 9 }),
-            },
-        ),
-        (
-            "ambiguous_omitted_trigger_inputs",
-            LinkError::AmbiguousOmittedTriggerInputs {
-                process: "fixture".to_string(),
-                params: 1,
-                span: Some(Span { start: 4, end: 9 }),
-            },
-        ),
-        (
-            "trigger_event_outside_inputs",
-            LinkError::TriggerEventOutsideInputs {
-                span: Some(Span { start: 4, end: 9 }),
-            },
-        ),
-        (
-            "trigger_event_projection",
-            LinkError::TriggerEventProjection {
-                span: Some(Span { start: 4, end: 9 }),
-            },
-        ),
-        (
-            "invalid_trigger_list",
-            LinkError::InvalidTriggerList {
-                span: Some(Span { start: 4, end: 9 }),
-            },
-        ),
-        (
-            "unknown_trigger_event_type",
-            LinkError::UnknownTriggerEventType {
-                source_ty: "fixture".to_string(),
-                span: Some(Span { start: 4, end: 9 }),
-            },
-        ),
-        (
-            "invalid_trigger_target",
-            LinkError::InvalidTriggerTarget {
-                actual: "fixture".to_string(),
-                span: Some(Span { start: 4, end: 9 }),
-            },
-        ),
-        (
-            "trigger_event_mismatch",
-            LinkError::TriggerEventMismatch {
-                event: "fixture".to_string(),
-                input_name: "fixture".to_string(),
-                input: "fixture".to_string(),
                 span: Some(Span { start: 4, end: 9 }),
             },
         ),
@@ -380,71 +328,4 @@ fn errors() -> Vec<(&'static str, LinkError)> {
             },
         ),
     ]
-}
-
-fn assert_classified_producer(recovered: bool, with_owner: bool) {
-    let fixtures = errors();
-    assert_eq!(fixtures.len(), WorkflowDiagnosticKind::ALL.len());
-    let expected_kinds = WorkflowDiagnosticKind::ALL
-        .into_iter()
-        .map(WorkflowDiagnosticKind::as_str)
-        .collect::<BTreeSet<_>>();
-    assert_eq!(
-        fixtures
-            .iter()
-            .map(|(kind, _)| *kind)
-            .collect::<BTreeSet<_>>(),
-        expected_kinds
-    );
-    let mut program = Program::block(vec![Expr::Null]);
-    program
-        .spans
-        .insert(AstPath::main(vec![0]), Span { start: 1, end: 3 });
-    let environment =
-        LashlangHostEnvironment::new(LashlangHostCatalog::new(), LashlangAbilities::all());
-    let path = AstPath::main(Vec::new());
-    let owner = AstPath::main(vec![0]);
-    let id: WorkflowNodeId =
-        serde_json::from_value(serde_json::json!("node-fixture")).expect("node id");
-    for (kind, error) in fixtures {
-        let mut linker = Linker::new(&program, &environment).with_workflow_analysis();
-        let expected_span = if with_owner {
-            *linker.workflow_diagnostic_owner.borrow_mut() = Some(owner.clone());
-            program.spans.get(&owner).copied().or_else(|| error.span())
-        } else {
-            error.span()
-        };
-        let message = error.to_string();
-        if recovered {
-            linker.record_recovered_workflow_error(&program.main, &path, error);
-        } else {
-            linker.record_workflow_error(&program.main, &path, error);
-        }
-        let analysis = linker.take_workflow_analysis();
-        let facets = projected_node_type_facets(
-            Some(&analysis),
-            if with_owner { &owner } else { &path },
-            &[],
-            &id,
-        )
-        .expect("producer records node facts");
-        assert_eq!(facets.diagnostics.len(), 1, "{kind}");
-        let diagnostic = &facets.diagnostics[0];
-        assert_eq!(diagnostic.kind.as_str(), kind);
-        assert_eq!(diagnostic.node_id, id);
-        assert_eq!(diagnostic.message, message);
-        assert_eq!(diagnostic.span, expected_span);
-        let wire = serde_json::to_value(diagnostic).expect("diagnostic encodes");
-        assert_eq!(wire["classification"], "definite", "{kind}");
-    }
-}
-
-#[test]
-fn recorded_workflow_diagnostics_are_definite_for_every_kind() {
-    assert_classified_producer(false, false);
-}
-
-#[test]
-fn recovered_workflow_diagnostics_are_definite_for_every_kind() {
-    assert_classified_producer(true, true);
 }

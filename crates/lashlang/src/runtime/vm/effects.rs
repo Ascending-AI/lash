@@ -32,7 +32,7 @@ pub(super) enum VmEffect {
     ResourceOperationBatch(usize),
     AwaitHandle,
     Sleep(SleepKind),
-    WaitSignal { name: usize },
+
     AwaitHandleUnwrap,
     Print,
     Finish,
@@ -319,34 +319,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 self.last_value = Some(Value::Null);
                 self.stack.push(Value::Null);
             }
-            VmEffect::WaitSignal { name } => {
-                let result = self
-                    .host
-                    .perform(AbilityOp::WaitSignal {
-                        name: self.chunk.names[name].text.to_string(),
-                        call_site: active.map(lashlang_execution_call_site),
-                    })
-                    .await;
-                if matches!(result, Ok(AbilityOutcome::HandedOver)) {
-                    // The wait moved to a successor segment without
-                    // completing. The instruction takes no operand, so
-                    // standing on it again is the whole rewind: a
-                    // continuation captured now names the wait and issues it
-                    // again.
-                    self.ip = instruction_ip;
-                    self.resume_point = super::VmResumePoint::ReissueOperation {
-                        operation: super::VmSuspendedOperation::WaitSignal {
-                            name: self.chunk.names[name].text.to_string(),
-                        },
-                        loop_phase: None,
-                    };
-                    return Ok(Some(VmOutcome::HandedOver));
-                }
-                let value = result
-                    .and_then(|result| result.into_value("wait_signal"))
-                    .map_err(|source| RuntimeError::WaitSignalFailed { source })?;
-                self.stack.push(value);
-            }
+
             VmEffect::AwaitHandleUnwrap => {
                 let settled = self.take_settled_await_results(reissued)?;
                 let handle = self.pop_stack()?;

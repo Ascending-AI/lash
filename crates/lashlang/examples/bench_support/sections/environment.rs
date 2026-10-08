@@ -9,66 +9,6 @@ pub fn benchmark_host_environment() -> &'static LashlangHostEnvironment {
 )]
 fn build_benchmark_host_environment() -> LashlangHostEnvironment {
     let mut resources = LashlangHostCatalog::tool_default(["echo", "boom", "missing_tool"]);
-    lashlang::add_trigger_resource_operations(&mut resources)
-        .expect("trigger resource operations are unique");
-    lashlang::add_trigger_register_tool_binding(&mut resources)
-        .expect("trigger register tool binding is unique");
-    resources
-        .add_trigger_source_constructor(
-            ["cron", "Schedule"],
-            TypeExpr::Object(vec![
-                TypeField {
-                    name: "expr".into(),
-                    ty: TypeExpr::Str,
-                    optional: false,
-                },
-                TypeField {
-                    name: "tz".into(),
-                    ty: TypeExpr::Str,
-                    optional: true,
-                },
-            ]),
-            lashlang::NamedDataType::object(
-                "cron.Tick",
-                vec![TypeField {
-                    name: "fired_at".into(),
-                    ty: TypeExpr::Str,
-                    optional: false,
-                }],
-            )
-            .expect("valid cron tick type"),
-        )
-        .expect("valid cron trigger source");
-    resources
-        .add_trigger_source_constructor(
-            ["ui", "button", "pressed"],
-            TypeExpr::Object(Vec::new()),
-            lashlang::NamedDataType::object(
-                "ui.button.Pressed",
-                vec![
-                    TypeField {
-                        name: "button".into(),
-                        ty: TypeExpr::union(vec![
-                            TypeExpr::Enum(vec!["Red".into()]),
-                            TypeExpr::Enum(vec!["Blue".into()]),
-                        ]),
-                        optional: false,
-                    },
-                    TypeField {
-                        name: "message".into(),
-                        ty: TypeExpr::Str,
-                        optional: false,
-                    },
-                    TypeField {
-                        name: "pressed_at".into(),
-                        ty: TypeExpr::Str,
-                        optional: false,
-                    },
-                ],
-            )
-            .expect("valid button event type"),
-        )
-        .expect("valid button trigger source");
     resources
         .add_module_operation(
             ["jobs"],

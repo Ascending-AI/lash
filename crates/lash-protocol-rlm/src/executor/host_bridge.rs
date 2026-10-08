@@ -24,8 +24,6 @@ use crate::projection::flow_to_json_value;
 
 mod resource_operations;
 
-pub(super) use resource_operations::CellTriggers;
-
 pub(super) struct HostBridge<'run> {
     ctx: RuntimeExecutionContext<'run>,
     /// The cell's replay run — the identities it mints and its command
@@ -666,16 +664,7 @@ impl HostBridge<'_> {
                 Ok(AbilityOutcome::Unit)
             }),
             AbilityOp::Sleep(sleep) => Box::pin(async move { self.sleep(sleep).await }),
-            AbilityOp::ProcessEvent(_) => Box::pin(async {
-                self.refused_in_cell(
-                    "process events are only available inside lashlang process bodies",
-                )
-            }),
-            AbilityOp::WaitSignal { .. } => Box::pin(async {
-                self.refused_in_cell(
-                    "`wait_signal` is only available inside lashlang process bodies",
-                )
-            }),
+
             AbilityOp::Finish(value) | AbilityOp::Fail(value) => {
                 Box::pin(async move { Ok(AbilityOutcome::Value(value)) })
             }

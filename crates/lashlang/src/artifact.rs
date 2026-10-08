@@ -563,9 +563,7 @@ fn resolve_artifact_type(
                 .expect("resolved checked process signature remains valid"),
             )),
         },
-        TypeExpr::TriggerHandle(event) => {
-            TypeExpr::TriggerHandle(Box::new(resolve_artifact_type(event, resources, seen)))
-        }
+
         _ => ty.clone(),
     }
 }
@@ -578,12 +576,7 @@ fn reject_future_shape(raw: &serde_json::Value) -> Result<(), ModuleArtifactErro
     if contains_obsolete_process_type(raw) {
         return Err(ModuleArtifactError::ObsoleteProcessTypeShape);
     }
-    if raw.get("trigger_key_manifest").is_some() {
-        return Err(ModuleArtifactError::FutureShape {
-            field: "trigger_key_manifest",
-            value: "obsolete current-trigger manifest artifact field".to_string(),
-        });
-    }
+
     if raw.get("compilation_dialect").is_some() {
         return Err(ModuleArtifactError::RetiredCompilationDialect);
     }
@@ -1120,12 +1113,6 @@ fn write_host_requirements(writer: &mut HashWriter, requirements: &HostRequireme
         write_type(writer, &constructor.input_ty);
         write_type(writer, &constructor.output_ty);
     }
-    writer.atom("trigger-sources");
-    writer.usize(requirements.resources.trigger_sources().count());
-    for (source_ty, binding) in requirements.resources.trigger_sources() {
-        writer.atom(source_ty);
-        writer.atom(binding.event_type_name());
-    }
 }
 
 fn write_program(writer: &mut HashWriter, program: &Program) {
@@ -1170,12 +1157,7 @@ fn write_process(writer: &mut HashWriter, process: &ProcessDecl) {
         writer.atom(param.name.as_str());
         write_type(writer, &param.ty);
     }
-    writer.atom("signals");
-    writer.usize(process.signals.len());
-    for signal in &process.signals {
-        writer.atom(signal.name.as_str());
-        write_type(writer, &signal.ty);
-    }
+
     match &process.return_ty {
         Some(ty) => {
             writer.atom("return");
@@ -1236,10 +1218,7 @@ fn write_type(writer: &mut HashWriter, ty: &TypeExpr) {
             }
             write_type(writer, signature.output());
         }
-        TypeExpr::TriggerHandle(event) => {
-            writer.atom("type:trigger-handle");
-            write_type(writer, event);
-        }
+
         TypeExpr::Union(items) => {
             writer.atom("type:union");
             writer.usize(items.len());
@@ -1411,10 +1390,7 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr) {
         }
         Expr::Await(expr) => write_unary_expr(writer, "await", expr),
         Expr::SleepFor(expr) => write_unary_expr(writer, "sleep-for", expr),
-        Expr::WaitSignal { name } => {
-            writer.atom("wait-signal");
-            writer.atom(name.as_str());
-        }
+
         Expr::ResultUnwrap(expr) => write_unary_expr(writer, "unwrap", expr),
         Expr::Print(expr) => write_unary_expr(writer, "print", expr),
         Expr::Finish(expr) => write_unary_expr(writer, "finish", expr),

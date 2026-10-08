@@ -202,8 +202,7 @@ where
         | Expr::Variable(_)
         | Expr::Break
         | Expr::Continue
-        | Expr::ResourceRef(_)
-        | Expr::WaitSignal { .. }) => leaf,
+        | Expr::ResourceRef(_)) => leaf,
     }
 }
 

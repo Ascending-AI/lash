@@ -113,9 +113,6 @@ pub fn type_expr_to_json_schema(ty: &TypeExpr) -> Value {
             };
             lash_type_schema(&declaration)
         }
-        TypeExpr::TriggerHandle(payload) => lash_type_schema(&XLashType::Handle {
-            payload: Box::new(type_expr_to_json_schema(payload)),
-        }),
     }
 }
 
@@ -176,9 +173,7 @@ pub fn type_expr_to_schema_shape(ty: &TypeExpr) -> lash_sansio::SchemaShape {
                 output: Box::new(type_expr_to_schema_shape(signature.output())),
             }
         })),
-        TypeExpr::TriggerHandle(payload) => {
-            ShapeKind::Handle(Box::new(type_expr_to_schema_shape(payload)))
-        }
+
         TypeExpr::Union(members) => ShapeKind::Union(
             members
                 .as_slice()
@@ -313,11 +308,7 @@ impl SchemaImporter<'_> {
             })?;
         match declaration {
             XLashType::ProcessUnknown => Ok(TypeExpr::Process(ProcessType::unknown())),
-            XLashType::Handle { payload } => Ok(TypeExpr::TriggerHandle(Box::new(self.import(
-                &payload,
-                depth + 1,
-                child(path, "x-lash/payload"),
-            )?))),
+
             XLashType::Process { signature } => {
                 let mut params = Vec::new();
                 for (index, param) in signature.params.iter().enumerate() {
@@ -698,41 +689,6 @@ mod tests {
     }
 
     #[test]
-    fn imports_the_lash_only_types_from_the_x_lash_keyword() {
-        assert_eq!(
-            import_schema(&json!({ "x-lash": { "kind": "process_unknown" } })),
-            TypeExpr::Process(ProcessType::unknown())
-        );
-        assert_eq!(
-            import_schema(&json!({
-                "x-lash": { "kind": "handle", "payload": { "type": "string" } }
-            })),
-            TypeExpr::TriggerHandle(Box::new(TypeExpr::Str))
-        );
-        assert_eq!(
-            import_schema(&json!({
-                "x-lash": {
-                    "kind": "process",
-                    "signature": {
-                        "params": [{ "name": "event", "schema": { "type": "string" } }],
-                        "output": { "type": "integer" }
-                    }
-                }
-            })),
-            TypeExpr::Process(ProcessType::known(
-                ProcessSignature::try_new(
-                    vec![ProcessParam {
-                        name: "event".into(),
-                        ty: TypeExpr::Str,
-                    }],
-                    TypeExpr::Int,
-                )
-                .expect("signature")
-            ))
-        );
-    }
-
-    #[test]
     fn a_malformed_x_lash_keyword_refuses_the_whole_schema() {
         let unknown_kind = json_schema_to_type_expr(&json!({
             "type": "object",
@@ -803,12 +759,12 @@ mod tests {
     #[test]
     fn named_data_types_ride_in_a_plain_ref() {
         assert_eq!(
-            type_expr_to_json_schema(&TypeExpr::Ref("lash.TriggerRegistration".into())),
-            json!({ "$ref": "lash.TriggerRegistration" })
+            type_expr_to_json_schema(&TypeExpr::Ref("host.Descriptor".into())),
+            json!({ "$ref": "host.Descriptor" })
         );
         assert_eq!(
-            import_schema(&json!({ "$ref": "lash.TriggerRegistration" })),
-            TypeExpr::Ref("lash.TriggerRegistration".into())
+            import_schema(&json!({ "$ref": "host.Descriptor" })),
+            TypeExpr::Ref("host.Descriptor".into())
         );
     }
 
@@ -878,9 +834,6 @@ mod tests {
                 inner
                     .clone()
                     .prop_map(|item| TypeExpr::List(Box::new(item))),
-                inner
-                    .clone()
-                    .prop_map(|payload| TypeExpr::TriggerHandle(Box::new(payload))),
                 proptest::collection::vec(("[a-z][a-z0-9_]{0,6}", inner), 0..3).prop_filter_map(
                     "a parameter name the language cannot spell",
                     |params| {

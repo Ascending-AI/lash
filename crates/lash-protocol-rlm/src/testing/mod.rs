@@ -64,15 +64,8 @@ pub(crate) fn sqlite_memory_artifact_store_blocking() -> lashlang::LashlangArtif
     lashlang::LashlangArtifacts::of_backend(&sqlite_recording_backend_blocking())
 }
 
-/// A fresh SQLite memory store set's process registry, for a trigger router
-/// whose deliveries no law inspects.
 pub(crate) async fn sqlite_memory_process_registry() -> Arc<dyn lash_core::ProcessRegistry> {
     lash_core::StoreSet::process_registry(sqlite_memory_store_set().await.as_ref())
-}
-
-/// A fresh SQLite memory store set's trigger store.
-pub(crate) async fn sqlite_memory_trigger_store() -> Arc<dyn lash_core::TriggerStore> {
-    lash_core::StoreSet::trigger_store(sqlite_memory_store_set().await.as_ref())
 }
 
 /// The scope a context built with no parent invocation claims: the builder's
@@ -119,22 +112,19 @@ pub(crate) async fn execute_code_with_channel_and_bounds(
         Some(trace) => ctx.with_trace_standing(trace.into_standing()),
         None => ctx,
     };
-    Box::pin(
-        crate::executor::execute_code_with_channel_and_bounds_with_trigger_resolver(
-            &crate::dialect::TypescriptDialect,
-            state,
-            ctx,
-            request,
-            artifact_store,
-            lashlang_surface,
-            deferred_tool_resolver,
-            None,
-            session_projected_bindings,
-            execution_bounds,
-            channel,
-            code_renderer,
-        ),
-    )
+    Box::pin(crate::executor::execute_code_with_channel_and_bounds(
+        &crate::dialect::TypescriptDialect,
+        state,
+        ctx,
+        request,
+        artifact_store,
+        lashlang_surface,
+        deferred_tool_resolver,
+        session_projected_bindings,
+        execution_bounds,
+        channel,
+        code_renderer,
+    ))
     .await
 }
 

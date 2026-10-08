@@ -1,5 +1,96 @@
 use super::*;
 
+#[test]
+fn awaited_settled_value_survives_a_finally_origin_wire_roundtrip() {
+    let origin = VmPendingErrorOriginContinuation {
+        error: RuntimeError::AwaitExpectsHandle {
+            found: "number at `orders[0]`".into(),
+        },
+        instruction_pointer: 0,
+        span: None,
+    };
+    let mut continuation = empty_continuation(Heap::default());
+    continuation.finally_stack.push(VmFinallyContinuation {
+        completion: VmFinallyCompletionContinuation::Throw {
+            value: Value::Null,
+            origin: Some(origin),
+        },
+        handler_stack_depth: 0,
+        frame_depth: 0,
+        frame_function: None,
+        operand_stack_depth: 0,
+    });
+    validate_continuation(&continuation).unwrap();
+    let wire = serde_json::to_value(&continuation).unwrap();
+    assert_eq!(
+        wire["finally_stack"][0]["completion"]["origin"]["error"],
+        serde_json::json!({
+            "AwaitExpectsHandle": { "found": "number at `orders[0]`" }
+        })
+    );
+    let decoded = serde_json::from_value::<VmContinuation>(wire).unwrap();
+    validate_continuation(&decoded).unwrap();
+    assert_eq!(decoded.finally_stack, continuation.finally_stack);
+}
+
+// Pins N's version and bytes; the synthetic N+1 moves them.
+#[cfg(not(feature = "synthetic-next"))]
+#[test]
+fn structured_tool_failure_survives_a_finally_origin_wire_roundtrip() {
+    let source = crate::ExecutionHostError::from_tool_failure(
+        &lash_sansio::ToolFailure {
+            cause: None,
+            class: lash_sansio::ToolFailureClass::PermissionDenied,
+            code: "approval_denied".to_string(),
+            message: "approval was denied".to_string(),
+            source: lash_sansio::ToolFailureSource::Policy,
+            suggested_delay_ms: None,
+            raw: None,
+        },
+        "test-effect-key",
+    );
+    let origin = VmPendingErrorOriginContinuation {
+        error: RuntimeError::UnwrappedHostToolResultFailed { source },
+        instruction_pointer: 0,
+        span: None,
+    };
+    let mut continuation = empty_continuation(Heap::default());
+    continuation.finally_stack.push(VmFinallyContinuation {
+        completion: VmFinallyCompletionContinuation::Throw {
+            value: Value::Null,
+            origin: Some(origin),
+        },
+        handler_stack_depth: 0,
+        frame_depth: 0,
+        frame_function: None,
+        operand_stack_depth: 0,
+    });
+    validate_continuation(&continuation).unwrap();
+
+    let wire = serde_json::to_value(&continuation).unwrap();
+    assert_eq!(wire["format_version"], serde_json::json!(1));
+    assert_eq!(
+        wire["finally_stack"][0]["completion"]["origin"]["error"],
+        serde_json::json!({
+            "UnwrappedHostToolResultFailed": {
+                "source": {
+                    "message": "approval was denied",
+                    "tool_failure": {
+                        "class": "permission_denied",
+                        "code": "approval_denied",
+                        "source": "policy",
+                        "suggested_delay_ms": null,
+                        "replay_key": "test-effect-key"
+                    }
+                }
+            }
+        })
+    );
+    let decoded = serde_json::from_value::<VmContinuation>(wire).unwrap();
+    validate_continuation(&decoded).unwrap();
+    assert_eq!(decoded.finally_stack, continuation.finally_stack);
+}
+
 /// Serde supplies its complete accepted variant vocabulary to deserialize_enum.
 /// Keep this independent pin: a new error can reach a suspended finally's origin
 /// even when none of the continuation structs change.
@@ -127,10 +218,8 @@ fn continuation_runtime_error_wire_variants_are_pinned() {
                     "LinkedProcessNotExported",
                     "ProcessStartFailed",
                     "SleepFailed",
-                    "WaitSignalFailed",
-                    "SignalRunFailed",
                     "CancelFailed",
-                    "ProcessEventFailed",
+                    "OperationParkFailed",
                     "PrintFailed",
                     "FinishFailed",
                     "FailFailed",
@@ -165,95 +254,4 @@ fn continuation_runtime_error_wire_variants_are_pinned() {
     }
     let error = RuntimeError::deserialize(VariantProbe).unwrap_err();
     assert_eq!(error.to_string(), "variant vocabulary checked");
-}
-
-#[test]
-fn awaited_settled_value_survives_a_finally_origin_wire_roundtrip() {
-    let origin = VmPendingErrorOriginContinuation {
-        error: RuntimeError::AwaitExpectsHandle {
-            found: "number at `orders[0]`".into(),
-        },
-        instruction_pointer: 0,
-        span: None,
-    };
-    let mut continuation = empty_continuation(Heap::default());
-    continuation.finally_stack.push(VmFinallyContinuation {
-        completion: VmFinallyCompletionContinuation::Throw {
-            value: Value::Null,
-            origin: Some(origin),
-        },
-        handler_stack_depth: 0,
-        frame_depth: 0,
-        frame_function: None,
-        operand_stack_depth: 0,
-    });
-    validate_continuation(&continuation).unwrap();
-    let wire = serde_json::to_value(&continuation).unwrap();
-    assert_eq!(
-        wire["finally_stack"][0]["completion"]["origin"]["error"],
-        serde_json::json!({
-            "AwaitExpectsHandle": { "found": "number at `orders[0]`" }
-        })
-    );
-    let decoded = serde_json::from_value::<VmContinuation>(wire).unwrap();
-    validate_continuation(&decoded).unwrap();
-    assert_eq!(decoded.finally_stack, continuation.finally_stack);
-}
-
-// Pins N's version and bytes; the synthetic N+1 moves them.
-#[cfg(not(feature = "synthetic-next"))]
-#[test]
-fn structured_tool_failure_survives_a_finally_origin_wire_roundtrip() {
-    let source = crate::ExecutionHostError::from_tool_failure(
-        &lash_sansio::ToolFailure {
-            cause: None,
-            class: lash_sansio::ToolFailureClass::PermissionDenied,
-            code: "approval_denied".to_string(),
-            message: "approval was denied".to_string(),
-            source: lash_sansio::ToolFailureSource::Policy,
-            suggested_delay_ms: None,
-            raw: None,
-        },
-        "test-effect-key",
-    );
-    let origin = VmPendingErrorOriginContinuation {
-        error: RuntimeError::UnwrappedHostToolResultFailed { source },
-        instruction_pointer: 0,
-        span: None,
-    };
-    let mut continuation = empty_continuation(Heap::default());
-    continuation.finally_stack.push(VmFinallyContinuation {
-        completion: VmFinallyCompletionContinuation::Throw {
-            value: Value::Null,
-            origin: Some(origin),
-        },
-        handler_stack_depth: 0,
-        frame_depth: 0,
-        frame_function: None,
-        operand_stack_depth: 0,
-    });
-    validate_continuation(&continuation).unwrap();
-
-    let wire = serde_json::to_value(&continuation).unwrap();
-    assert_eq!(wire["format_version"], serde_json::json!(1));
-    assert_eq!(
-        wire["finally_stack"][0]["completion"]["origin"]["error"],
-        serde_json::json!({
-            "UnwrappedHostToolResultFailed": {
-                "source": {
-                    "message": "approval was denied",
-                    "tool_failure": {
-                        "class": "permission_denied",
-                        "code": "approval_denied",
-                        "source": "policy",
-                        "suggested_delay_ms": null,
-                        "replay_key": "test-effect-key"
-                    }
-                }
-            }
-        })
-    );
-    let decoded = serde_json::from_value::<VmContinuation>(wire).unwrap();
-    validate_continuation(&decoded).unwrap();
-    assert_eq!(decoded.finally_stack, continuation.finally_stack);
 }

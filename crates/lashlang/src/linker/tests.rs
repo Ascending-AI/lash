@@ -9,164 +9,12 @@ mod identity_tests;
 mod module_link_tests;
 mod open_shape_tests;
 mod process_literal_tests;
-mod process_signature_tests;
 mod schema_witness_tests;
-mod trigger_tests;
 mod type_flow_tests;
 mod workflow_classification_tests;
 
-fn resources() -> LashlangHostCatalog {
-    let mut catalog = LashlangHostCatalog::new();
-    catalog
-        .add_module_operation(
-            ["tools"],
-            "Tools",
-            "read_file",
-            "read_file",
-            TypeExpr::Object(vec![TypeField {
-                name: "path".into(),
-                ty: TypeExpr::Str,
-                optional: false,
-            }]),
-            TypeExpr::Str,
-        )
-        .expect("host catalog operation must not conflict");
-    catalog
-        .add_module_operation(
-            ["tools"],
-            "Tools",
-            "echo",
-            "echo",
-            TypeExpr::Any,
-            TypeExpr::Any,
-        )
-        .expect("host catalog operation must not conflict");
-    for (operation, input_ty) in [
-        ("accept_str", TypeExpr::Str),
-        ("accept_int", TypeExpr::Int),
-        ("accept_float", TypeExpr::Float),
-        (
-            "accept_mode",
-            TypeExpr::Enum(vec!["default".into(), "careful".into()]),
-        ),
-    ] {
-        catalog
-            .add_module_operation(
-                ["tools"],
-                "Tools",
-                operation,
-                operation,
-                input_ty,
-                TypeExpr::Null,
-            )
-            .expect("host catalog operation must not conflict");
-    }
-    catalog
-        .add_module_operation(
-            ["tools"],
-            "Tools",
-            "accept_config",
-            "accept_config",
-            TypeExpr::Object(vec![TypeField {
-                name: "mode".into(),
-                ty: TypeExpr::Enum(vec!["default".into()]),
-                optional: false,
-            }]),
-            TypeExpr::Null,
-        )
-        .expect("host catalog operation must not conflict");
-    crate::add_trigger_resource_operations(&mut catalog)
-        .expect("trigger resource operations are unique");
-    crate::add_trigger_register_tool_binding(&mut catalog)
-        .expect("trigger register tool binding is unique");
-    // The process control surface is a set of leaf tools now (FIG-2999), so a
-    // fixture that starts, signals or cancels a process calls them like any
-    // other module operation.
-    for operation in ["start", "signal", "cancel"] {
-        catalog
-            .add_module_operation(
-                ["processes"],
-                "Processes",
-                operation,
-                operation,
-                TypeExpr::Any,
-                TypeExpr::Any,
-            )
-            .expect("host catalog operation must not conflict");
-    }
-    // The FIG-2997 lift fixture: a leaf tool whose `program` slot is typed
-    // `Process` through the `x-lash` keyword (FIG-2993), the way real process
-    // controls declare a target. The lift is type-directed on exactly this
-    // contract shape.
-    catalog
-        .add_module_operation_contract(
-            ["crew"],
-            "Crew",
-            "run",
-            "crew.run",
-            &crate::OperationContract::new(
-                serde_json::json!({
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                        "program": { "x-lash": { "kind": "process_unknown" } },
-                        "inputs": { "type": "object" }
-                    },
-                    "required": ["program", "inputs"]
-                }),
-                serde_json::json!({ "x-lash": { "kind": "handle", "payload": {} } }),
-            ),
-        )
-        .expect("process-slot fixture operation");
-    catalog
-        .add_trigger_source_constructor(
-            ["timer", "Schedule"],
-            TypeExpr::Object(vec![
-                TypeField {
-                    name: "expr".into(),
-                    ty: TypeExpr::Str,
-                    optional: false,
-                },
-                TypeField {
-                    name: "tz".into(),
-                    ty: TypeExpr::Str,
-                    optional: true,
-                },
-            ]),
-            NamedDataType::object(
-                "timer.Tick",
-                vec![TypeField {
-                    name: "fired_at".into(),
-                    ty: TypeExpr::Str,
-                    optional: false,
-                }],
-            )
-            .expect("valid timer tick type"),
-        )
-        .expect("valid timer trigger source");
-    catalog
-}
-
 fn full_host_environment() -> LashlangHostEnvironment {
     LashlangHostEnvironment::new(resources(), LashlangAbilities::all())
-}
-/// `timer.Schedule({ expr: <expr> })` — the timer trigger source constructor.
-fn timer_schedule(expr: &str) -> Expr {
-    builders::receiver_call(
-        builders::resource(&["timer"]),
-        "Schedule",
-        vec![builders::record(vec![("expr", builders::string(expr))])],
-    )
-}
-
-/// `trigger.event` — the placeholder bound to a trigger target parameter.
-fn trigger_event() -> Expr {
-    builders::resource(&["trigger", "event"])
-}
-
-/// `await triggers.<operation>({ <fields> })?`
-fn triggers_call(operation: &str, fields: Vec<(&str, Expr)>) -> Expr {
-    builders::module_call(&["triggers"], operation, vec![builders::record(fields)])
 }
 
 fn full_label_environment() -> LashlangHostEnvironment {
@@ -288,26 +136,6 @@ fn timer_tick_type_with_field(field: &'static str) -> NamedDataType {
     .expect("valid timer tick type")
 }
 
-fn resources_with_timer_event(event_type: NamedDataType) -> LashlangHostCatalog {
-    let mut catalog = LashlangHostCatalog::new();
-    crate::add_trigger_resource_operations(&mut catalog)
-        .expect("trigger resource operations are unique");
-    crate::add_trigger_register_tool_binding(&mut catalog)
-        .expect("trigger register tool binding is unique");
-    catalog
-        .add_trigger_source_constructor(
-            ["timer", "Schedule"],
-            TypeExpr::Object(vec![TypeField {
-                name: "expr".into(),
-                ty: TypeExpr::Str,
-                optional: false,
-            }]),
-            event_type,
-        )
-        .expect("valid timer trigger source");
-    catalog
-}
-
 #[test]
 fn named_host_data_type_validation_rejects_invalid_shapes() {
     let duplicate_field = NamedDataType::object(
@@ -364,74 +192,6 @@ fn named_host_data_type_validation_rejects_invalid_shapes() {
     ));
 }
 
-/// A named data type names a *value* shape.
-///
-/// A process and a trigger handle are host-held callables, not values the host
-/// can hand back inside a record, so they stay refused — including now that a
-/// named data type can be declared from a schema and a schema can spell them.
-#[test]
-fn named_host_data_types_refuse_processes_and_handles() {
-    let process_field = NamedDataType::object(
-        "lash.Registration",
-        vec![TypeField {
-            name: "target".into(),
-            ty: TypeExpr::Process(crate::ProcessType::unknown()),
-            optional: false,
-        }],
-    )
-    .expect_err("a process is not a named data shape");
-    assert!(matches!(
-        process_field,
-        NamedDataTypeError::UnsupportedType { ty: "process" }
-    ));
-
-    let handle_field = NamedDataType::object(
-        "lash.Registration",
-        vec![TypeField {
-            name: "handle".into(),
-            ty: TypeExpr::TriggerHandle(Box::new(TypeExpr::Any)),
-            optional: false,
-        }],
-    )
-    .expect_err("a trigger handle is not a named data shape");
-    assert!(matches!(
-        handle_field,
-        NamedDataTypeError::UnsupportedType {
-            ty: "trigger handle"
-        }
-    ));
-
-    let from_schema = NamedDataType::from_schema(
-        "lash.Registration",
-        &serde_json::json!({
-            "type": "object",
-            "additionalProperties": false,
-            "properties": { "target": { "x-lash": { "kind": "process_unknown" } } },
-            "required": ["target"]
-        }),
-    )
-    .expect_err("a schema-declared process is refused just the same");
-    assert!(matches!(
-        from_schema,
-        NamedDataTypeError::UnsupportedType { ty: "process" }
-    ));
-
-    let malformed = NamedDataType::from_schema(
-        "lash.Registration",
-        &serde_json::json!({
-            "type": "object",
-            "additionalProperties": false,
-            "properties": { "target": { "x-lash": { "kind": "nonsense" } } },
-            "required": ["target"]
-        }),
-    )
-    .expect_err("a malformed lash type is refused before the shape check");
-    assert!(matches!(
-        malformed,
-        NamedDataTypeError::UnreadableSchema { .. }
-    ));
-}
-
 #[test]
 fn resource_catalog_rejects_conflicting_named_host_data_type_definitions() {
     let mut catalog = LashlangHostCatalog::new();
@@ -446,4 +206,106 @@ fn resource_catalog_rejects_conflicting_named_host_data_type_definitions() {
         err,
         LashlangHostCatalogError::ConflictingNamedDataType { .. }
     ));
+}
+
+fn resources() -> LashlangHostCatalog {
+    let mut catalog = LashlangHostCatalog::new();
+    catalog
+        .add_module_operation(
+            ["tools"],
+            "Tools",
+            "read_file",
+            "read_file",
+            TypeExpr::Object(vec![TypeField {
+                name: "path".into(),
+                ty: TypeExpr::Str,
+                optional: false,
+            }]),
+            TypeExpr::Str,
+        )
+        .expect("host catalog operation must not conflict");
+    catalog
+        .add_module_operation(
+            ["tools"],
+            "Tools",
+            "echo",
+            "echo",
+            TypeExpr::Any,
+            TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
+    for (operation, input_ty) in [
+        ("accept_str", TypeExpr::Str),
+        ("accept_int", TypeExpr::Int),
+        ("accept_float", TypeExpr::Float),
+        (
+            "accept_mode",
+            TypeExpr::Enum(vec!["default".into(), "careful".into()]),
+        ),
+    ] {
+        catalog
+            .add_module_operation(
+                ["tools"],
+                "Tools",
+                operation,
+                operation,
+                input_ty,
+                TypeExpr::Null,
+            )
+            .expect("host catalog operation must not conflict");
+    }
+    catalog
+        .add_module_operation(
+            ["tools"],
+            "Tools",
+            "accept_config",
+            "accept_config",
+            TypeExpr::Object(vec![TypeField {
+                name: "mode".into(),
+                ty: TypeExpr::Enum(vec!["default".into()]),
+                optional: false,
+            }]),
+            TypeExpr::Null,
+        )
+        .expect("host catalog operation must not conflict");
+    // The process control surface is a set of leaf tools now (FIG-2999), so a
+    // fixture that starts or cancels a process calls them like any
+    // other module operation.
+    for operation in ["start", "cancel"] {
+        catalog
+            .add_module_operation(
+                ["processes"],
+                "Processes",
+                operation,
+                operation,
+                TypeExpr::Any,
+                TypeExpr::Any,
+            )
+            .expect("host catalog operation must not conflict");
+    }
+    // The FIG-2997 lift fixture: a leaf tool whose `program` slot is typed
+    // `Process` through the `x-lash` keyword (FIG-2993), the way real process
+    // controls declare a target. The lift is type-directed on exactly this
+    // contract shape.
+    catalog
+        .add_module_operation_contract(
+            ["crew"],
+            "Crew",
+            "run",
+            "crew.run",
+            &crate::OperationContract::new(
+                serde_json::json!({
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "program": { "x-lash": { "kind": "process_unknown" } },
+                        "inputs": { "type": "object" }
+                    },
+                    "required": ["program", "inputs"]
+                }),
+                serde_json::json!({ "x-lash": { "kind": "process_unknown" } }),
+            ),
+        )
+        .expect("process-slot fixture operation");
+    catalog
 }

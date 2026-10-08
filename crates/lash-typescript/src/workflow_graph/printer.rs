@@ -1,61 +1,3 @@
-//! The workflow lens's canonical TypeScript printer.
-//!
-//! TypeScript is the only cell language, so the lens's canonical text is
-//! TypeScript: this module turns a lowered [`Program`] — or one expression of
-//! it — back into source a user would have authored.
-//!
-//! Printing is not a straight walk of the IR. The lowerer desugars the authored
-//! surface, so the printer re-sugars the shapes it generates before falling
-//! back to the structural spelling:
-//!
-//! * A process body in the process-wrapper role prints back as
-//!   `const <name> = async (..) => { .. };`.
-//! * `Print(__lashlang_stdlib("__consoleObservationText", ..))` prints back
-//!   as `console.log(..)`, with however many arguments were authored.
-//! * `__lashlang_await_array([..], "all")` prints back as
-//!   `await Promise.all([..])`, and likewise for `allSettled`, `race` and
-//!   `any`; `__lashlang_pending_timer(ms)` prints back as `sleep(ms)`. The
-//!   map intrinsic folding `"allSettled"` outcomes into settled records
-//!   prints back as `await Promise.allSettled([..])`.
-//! * A collection-transform role prints back as `receiver.<operation>(fn,
-//!   ..)`: the role's operands are the authored arguments after the
-//!   callback, so `reduce`'s initial value and a `thisArg` keep their call.
-//! * A bare `Map` intrinsic — AST-only, never the lowerer's own output for
-//!   an authored call — prints back as `items.map(fn)`, evaluation-equal but
-//!   not canonical.
-//! * A `ThisCall` — an explicit-receiver invocation the lowerer emits inside
-//!   generated shapes — prints back as `fn["call"](this, ..)`.
-//! * A `HostDescriptorConstructor` whose type name is a registered dotted
-//!   path prints back as `owner.Constructor(input)`, the source spelling the
-//!   path was admitted through.
-//! * A trigger registration's `inputs` prints back as the erased arrow
-//!   template `(event) => ({ .. })`, each event-marker entry read back as
-//!   the parameter — and is omitted entirely when it is the default a
-//!   one-parameter target's omitted `inputs` stands for.
-//! * A function signature's generated prologue prints back as the authored
-//!   parameters: a cell-boxed parameter, a destructured `[a, b = d, ..,
-//!   ...rest]` or `{k, ..}` pattern, and the `arguments` snapshot bind.
-//! * A role carries no semantics of its own: a role a specialized
-//!   recognizer did not claim, and a label annotation, print as the
-//!   expression they wrap.
-//! * An attribute-assignment role prints back as `object.field = value`.
-//! * `__lashlang_stdlib("<method>", receiver, ..)`, for a method of the
-//!   instance standard-library surface, prints back as
-//!   `receiver.<method>(..)`.
-//! * `__lashlang_stdlib("Lash.SparseArray", values, holes)` prints back as
-//!   an array literal with elisions at the recorded hole positions.
-//! * The default JSON traversal prints back as `JSON.stringify(value)`.
-//! * An iteration whose bind copies the element into one authored binding
-//!   prints back as `for (const x of source)` or `for (const x in source)`.
-//!
-//! Structure is read off IR forms and structural roles only; no generated
-//! name is ever inspected to decide what a shape is.
-//!
-//! A generated `__lashlang_*` binding that reaches the printer without being
-//! re-sugared is a defect, not a rendering choice: it has no authored spelling,
-//! so it is refused with [`TypeScriptSourceError::GeneratedBinding`] rather than
-//! surfaced to a user.
-
 use lashlang::{
     AssignPathStep, AssignTarget, CoercingBinaryOp, CoercingUnaryOp, Declaration, Expr,
     FunctionDecl, MethodKey, OperandLogicalOp, ProcessDecl, Program, StructuralRole,
@@ -852,11 +794,6 @@ impl<'p> Printer<'p> {
                 None => self.identifier("process", process.as_str()),
             },
             Expr::ResourceRef(resource) => self.resource_ref(resource),
-            // A host constructor keeps only its *type* name after the link:
-            // for a trigger source that name is the constructor's own dotted
-            // path, so `timer.Schedule(..)` spells it back and re-links the
-            // same constructor. A name that is not such a path carries no
-            // constructor path the printer can spell.
             Expr::HostDescriptorConstructor { type_name, input } => {
                 let path = type_name.split('.').collect::<Vec<_>>();
                 if path.len() >= 2
@@ -877,18 +814,6 @@ impl<'p> Printer<'p> {
                 operation,
                 args,
             } => {
-                // A trigger registration's `inputs` is the erased
-                // `(event) => ({ .. })` template: each entry holding the
-                // event marker is the arrow's parameter read back, and the
-                // default the linker writes for a one-parameter target omits
-                // the field entirely.
-                if let Expr::ResourceRef(resource) = receiver.as_ref()
-                    && lashlang::is_trigger_resource_type(resource.resource_type.as_str())
-                    && matches!(operation.as_str(), "register" | "update" | "revive")
-                    && let [Expr::Record(entries)] = args.as_slice()
-                {
-                    return self.trigger_registration(receiver, operation, entries);
-                }
                 let args = self.arguments(args)?;
                 Ok(format!(
                     "{}.{}({})",
@@ -899,10 +824,7 @@ impl<'p> Printer<'p> {
             }
             Expr::Await(value) => Ok(format!("await {}", self.unary_operand(value)?)),
             Expr::SleepFor(value) => Ok(format!("await sleep({})", self.expression(value)?)),
-            Expr::WaitSignal { name } => Ok(format!(
-                "await waitSignal({})",
-                string_literal(name.as_str())
-            )),
+
             Expr::Print(value) => Ok(format!("print({})", self.expression(value)?)),
             Expr::Finish(value) => Ok(format!("finish({})", self.expression(value)?)),
             Expr::Fail(value) => Ok(format!("fail({})", self.expression(value)?)),

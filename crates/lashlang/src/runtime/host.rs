@@ -23,12 +23,8 @@ pub enum AbilityOp {
     Print(#[serde(with = "super::effect_value")] Value),
     Finish(#[serde(with = "super::effect_value")] Value),
     Fail(#[serde(with = "super::effect_value")] Value),
-    ProcessEvent(ProcessEvent),
+
     Sleep(Sleep),
-    WaitSignal {
-        name: String,
-        call_site: Option<LashlangExecutionCallSite>,
-    },
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -36,11 +32,8 @@ pub enum AbilityOutcome {
     Value(#[serde(with = "super::effect_value")] Value),
     ResourceOperationBatch(ResourceOperationBatchOutcome),
     Unit,
-    /// The host handed a process's pending `wait_signal` to a successor
-    /// segment instead of completing it: the wait is still open, and the VM
-    /// stops with [`VmRunOutcome::HandedOver`](crate::VmRunOutcome::HandedOver)
-    /// positioned to issue the same wait again when a continuation of it
-    /// resumes. Only a signal wait answers this.
+    /// The host parked an operation without completing it. A suspended VM
+    /// reissues that operation when its continuation resumes.
     HandedOver,
 }
 
@@ -49,7 +42,7 @@ impl AbilityOutcome {
     /// as a data key.
     ///
     /// A host result is the second way such a key can enter — a tool result, an
-    /// awaited process result, a signal payload — and this is the seam every
+    /// awaited process result — and this is the seam every
     /// ability's value passes through. See
     /// `access::prototype_chain_data_key_error` for why entry rather than the
     /// first read is where it is refused.
@@ -66,7 +59,7 @@ impl AbilityOutcome {
             ))),
             Self::Unit => Err(ExecutionHostError::new(format!("{op} returned no value"))),
             Self::HandedOver => Err(ExecutionHostError::new(format!(
-                "{op} returned a hand-over, which only a signal wait may answer"
+                "{op} parked without returning a value"
             ))),
         }
     }
@@ -276,19 +269,6 @@ impl ResourceOperationOutcome {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum ProcessEventKind {
-    Yield,
-    Wake,
-}
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct ProcessEvent {
-    pub kind: ProcessEventKind,
-    #[serde(with = "super::effect_value")]
-    pub value: Value,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SleepKind {
     For,
     Until,
@@ -300,13 +280,6 @@ pub struct Sleep {
     #[serde(with = "super::effect_value")]
     pub value: Value,
     pub call_site: Option<LashlangExecutionCallSite>,
-}
-
-#[derive(Clone, Debug)]
-pub struct ProcessSignal {
-    pub run: Value,
-    pub name: String,
-    pub payload: Value,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

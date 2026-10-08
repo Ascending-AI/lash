@@ -140,49 +140,6 @@ fn try_extend_refuses_a_duplicate_value_constructor() {
 }
 
 #[test]
-fn try_extend_refuses_a_duplicate_trigger_source() {
-    let mut catalog = LashlangHostCatalog::new();
-    catalog
-        .add_trigger_source_constructor(
-            ["timer", "Schedule"],
-            TypeExpr::Any,
-            NamedDataType::object("timer.Tick", vec![]).expect("valid event type"),
-        )
-        .expect("first trigger source is valid");
-    let mut incoming = LashlangHostCatalog::new();
-    incoming
-        .add_trigger_source_constructor(
-            ["timer", "Schedule"],
-            TypeExpr::Any,
-            NamedDataType::object("timer.Alarm", vec![]).expect("valid event type"),
-        )
-        .expect("incoming trigger source is valid in isolation");
-    let direct_error = catalog
-        .clone()
-        .add_trigger_source_constructor(
-            ["timer", "Schedule"],
-            TypeExpr::Any,
-            NamedDataType::object("timer.Alarm", vec![]).expect("valid event type"),
-        )
-        .expect_err("direct registration must refuse the duplicate");
-
-    assert_eq!(
-        catalog
-            .try_extend(incoming)
-            .expect_err("trigger source composition must refuse the duplicate"),
-        direct_error
-    );
-    assert_eq!(
-        direct_error,
-        LashlangHostCatalogError::ConflictingTriggerSource {
-            source_type: "timer.Schedule".to_string(),
-            existing: "timer.Tick".to_string(),
-            incoming: "timer.Alarm".to_string(),
-        }
-    );
-}
-
-#[test]
 fn try_extend_refuses_an_identical_named_data_type() {
     let mut catalog = LashlangHostCatalog::new();
     catalog

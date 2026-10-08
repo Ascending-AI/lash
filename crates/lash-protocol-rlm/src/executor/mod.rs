@@ -54,7 +54,7 @@ fn set_execution_bound_exhaustion_loud(loud: bool) -> bool {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
+pub(crate) async fn execute_code_with_channel_and_bounds(
     dialect: &dyn crate::dialect::Dialect,
     state: &mut RlmExecutionState,
     ctx: RuntimeExecutionContext<'_>,
@@ -62,7 +62,6 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
     artifact_store: lashlang::LashlangArtifacts,
     lashlang_surface: LashlangSurface,
     deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
-    deferred_trigger_resolver: Option<lash_lashlang_runtime::SharedDeferredTriggerResolver>,
     session_projected_bindings: RlmProjectedBindings,
     execution_bounds: lashlang::ExecutionBounds,
     channel: crate::plugin::RlmChannel,
@@ -142,7 +141,6 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
         artifact_store,
         lashlang_surface,
         deferred_tool_resolver,
-        deferred_trigger_resolver,
         session_projected_bindings,
         execution_bounds,
         channel,
@@ -284,14 +282,13 @@ impl RlmCheckpointPerfFixture {
             "x".repeat(self.payload_bytes),
             "y".repeat(self.payload_bytes / 8)
         );
-        let response = execute_code_with_channel_and_bounds_with_trigger_resolver(
+        let response = execute_code_with_channel_and_bounds(
             self.dialect.as_ref(),
             &mut self.state,
             ctx,
             ExecRequest { code },
             self.artifact_store.clone(),
             LashlangSurface::default(),
-            None,
             None,
             RlmProjectedBindings::default(),
             lashlang::ExecutionBounds::unbounded(),
@@ -347,7 +344,6 @@ async fn execute_code_inner(
     artifact_store: lashlang::LashlangArtifacts,
     lashlang_surface: LashlangSurface,
     deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
-    deferred_trigger_resolver: Option<lash_lashlang_runtime::SharedDeferredTriggerResolver>,
     session_projected_bindings: RlmProjectedBindings,
     execution_bounds: lashlang::ExecutionBounds,
     channel: crate::plugin::RlmChannel,
@@ -369,7 +365,6 @@ async fn execute_code_inner(
         artifact_store,
         lashlang_surface,
         deferred_tool_resolver,
-        deferred_trigger_resolver,
         session_projected_bindings,
         execution_bounds,
         channel,
@@ -393,7 +388,6 @@ async fn execute_code_in_worker_scope(
     artifact_store: lashlang::LashlangArtifacts,
     lashlang_surface: LashlangSurface,
     deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
-    deferred_trigger_resolver: Option<lash_lashlang_runtime::SharedDeferredTriggerResolver>,
     session_projected_bindings: RlmProjectedBindings,
     execution_bounds: lashlang::ExecutionBounds,
     channel: crate::plugin::RlmChannel,
@@ -484,35 +478,6 @@ async fn execute_code_in_worker_scope(
         // preempt recorded authority. Unrelated catalog errors remain ordinary host
         // failures.
         let mut effective_surface = lashlang_surface;
-        if !referenced.is_empty() && state.deferred_trigger_resolutions.link_key.is_some() {
-            let _phase = ctx.named_phase("rlm_lashlang.deferred_trigger_resolve");
-            match lash_lashlang_runtime::resolve_and_fold_deferred_triggers(
-                &referenced,
-                effective_surface,
-                deferred_trigger_resolver.as_ref(),
-                &state.deferred_trigger_resolutions,
-                &ctx,
-            )
-            .await
-            {
-                Ok((surface, record)) => {
-                    effective_surface = surface;
-                    state.deferred_trigger_resolutions = record;
-                }
-                Err(error) => {
-                    ctx.record_nested_runtime_effect_error(cell_run::setup_effect_error(
-                        &cell,
-                        error.runtime_effect_error(),
-                    ));
-                    return exec_setup_failure_or_stop(
-                        state,
-                        &ctx,
-                        lash_core::CellFailureKind::Host,
-                        error.to_string(),
-                    );
-                }
-            }
-        }
 
         // The cell's ambient binding set is journaled before its first effect
         // and a redrive links against the recorded set, not the live registry
@@ -784,24 +749,18 @@ async fn execute_code_in_worker_scope(
     // Every call the cell makes is its own admitted execution, run from
     // these bodies (ADR 0132 §5): a resumed cell knows each call its
     // snapshot holds open, so a call still running settles on this owner.
-    let members = match lash_core::tool_dispatch::CellMembers::new(
-        &ctx,
-        identities.opener().clone(),
-        Arc::new(host_bridge::CellTriggers {
-            workers: workers.clone(),
-            artifact_store: artifact_store.clone(),
-        }),
-    ) {
-        Ok(members) => Arc::new(members),
-        Err(error) => {
-            return exec_setup_failure_or_stop(
-                state,
-                &ctx,
-                lash_core::CellFailureKind::Host,
-                error.to_string(),
-            );
-        }
-    };
+    let members =
+        match lash_core::tool_dispatch::CellMembers::new(&ctx, identities.opener().clone()) {
+            Ok(members) => Arc::new(members),
+            Err(error) => {
+                return exec_setup_failure_or_stop(
+                    state,
+                    &ctx,
+                    lash_core::CellFailureKind::Host,
+                    error.to_string(),
+                );
+            }
+        };
     if let Some(resumed) = &resumed {
         for open in resumed.from.ledger.operations.values() {
             match lash_core::tool_dispatch::CellMember::decode(&open.request.0) {
@@ -1369,14 +1328,12 @@ fn select_deferred_resolution_link(
 ) {
     let Some(invocation) = ctx.parent_invocation() else {
         state.deferred_link = None;
-        state.deferred_trigger_resolutions.clear_link();
         return;
     };
     let Some(link_key) =
         lash_lashlang_runtime::DeferredResolutionLinkKey::from_exec_code_invocation(invocation)
     else {
         state.deferred_link = None;
-        state.deferred_trigger_resolutions.clear_link();
         return;
     };
 
@@ -1386,7 +1343,6 @@ fn select_deferred_resolution_link(
             state.deferred_link = Some(lash_lashlang_runtime::DeferredLink::new(link_key.clone()));
         }
     }
-    state.deferred_trigger_resolutions.select_link(link_key);
 }
 
 fn deferred_execution_grants(

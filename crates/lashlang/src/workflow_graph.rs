@@ -24,8 +24,7 @@ use lash_sansio::WorkflowExecutionSite;
 use lash_sansio::core_support::Blake3DomainHasher;
 
 use crate::ast::{
-    AssignTarget, AstString, Expr, FunctionDecl, ProcessOrigin, ProcessParam, ProcessSignalDecl,
-    TypeExpr,
+    AssignTarget, AstString, Expr, FunctionDecl, ProcessOrigin, ProcessParam, TypeExpr,
 };
 use crate::span::Span;
 
@@ -641,9 +640,6 @@ pub struct WorkflowProcess {
     #[serde(default)]
     #[serde(deserialize_with = "deserialize_strict")]
     pub params: Vec<ProcessParam>,
-    #[serde(default)]
-    #[serde(deserialize_with = "deserialize_strict")]
-    pub signals: Vec<ProcessSignalDecl>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "deserialize_strict")]
     pub return_ty: Option<TypeExpr>,
@@ -832,10 +828,7 @@ pub fn workflow_effect_from_ir(
     let (effect, result_steps) = peel_result_steps(expression);
     let (kind, args) = match effect {
         Expr::Await(value) => (WorkflowEffectKind::AwaitJoin, vec![value.as_ref().clone()]),
-        Expr::WaitSignal { name } => (
-            WorkflowEffectKind::WaitSignal,
-            vec![Expr::String(name.clone())],
-        ),
+
         Expr::SleepFor(value) => (WorkflowEffectKind::SleepFor, vec![value.as_ref().clone()]),
         Expr::Print(value) => (WorkflowEffectKind::Print, vec![value.as_ref().clone()]),
         Expr::Break => (WorkflowEffectKind::Break, Vec::new()),
@@ -861,9 +854,7 @@ pub fn workflow_effect_to_ir(
         .collect::<Vec<_>>();
     let expression = match (effect, values.as_slice()) {
         (WorkflowEffectKind::AwaitJoin, [value]) => Expr::Await(Box::new(value.clone())),
-        (WorkflowEffectKind::WaitSignal, [Expr::String(name)]) => {
-            Expr::WaitSignal { name: name.clone() }
-        }
+
         (WorkflowEffectKind::SleepFor, [value]) => Expr::SleepFor(Box::new(value.clone())),
         (WorkflowEffectKind::Print, [value]) => Expr::Print(Box::new(value.clone())),
         (WorkflowEffectKind::Break, []) => Expr::Break,
@@ -943,7 +934,7 @@ fn apply_result_steps(mut expression: Expr, result_steps: &[WorkflowResultStep])
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowEffectKind {
     AwaitJoin,
-    WaitSignal,
+
     SleepFor,
     Print,
     Break,

@@ -592,58 +592,6 @@ async fn stale_and_repeated_worker_messages_are_never_applied() {
     }
 }
 
-/// A run that cannot be captured where it issues an operation has no
-/// snapshot to admit it with: the operation is refused to the guest, typed,
-/// whatever its family, and nothing is admitted or dispatched for it.
-#[tokio::test]
-async fn a_declined_park_refuses_the_operation_without_admitting_it() {
-    let compile = || Invocation {
-        binding: "tools".into(),
-        operation: "compile".into(),
-        arguments: serde_json::json!({ "source": "x" }),
-    };
-    let wait_signal = Step::Raw {
-        kind: EffectKind::WaitSignal,
-        payload: OperationRequest::WaitSignal {
-            name: "go".into(),
-            call_site: None,
-        }
-        .encode()
-        .0,
-    };
-    let families = [
-        ("resource operation", Step::Invoke(compile())),
-        (
-            "resource operation batch",
-            Step::Aggregate(vec![compile(), compile()]),
-        ),
-        ("sleep", Step::Sleep(5)),
-        ("signal wait", wait_signal),
-    ];
-    for envelopes in [false, true] {
-        for (family, step) in &families {
-            let case = format!("{family}, envelopes: {envelopes}");
-            let fixture = Fixture::with_envelopes(1, envelopes);
-            fixture.pool.plan(Some(Fault::DeclinePark));
-            let end = fixture
-                .run(&ScriptedProgram::new(vec![step.clone()]))
-                .await
-                .unwrap_or_else(|failure| panic!("{case}: {failure}"));
-            let results = results(&end);
-            assert_eq!(
-                results[0]["failed"]["refusal"]["refusal"], "not_capturable",
-                "{case}: {results:?}"
-            );
-            assert!(fixture.host.dispatches().is_empty(), "{case}");
-            assert!(
-                fixture.checkpoints.commits().is_empty(),
-                "{case}: nothing admitted, so no snapshot and no end over one"
-            );
-            assert_eq!(fixture.pool.stats().checkouts, 1, "{case}");
-        }
-    }
-}
-
 #[tokio::test]
 async fn an_unobserved_stop_interrupts_and_an_observed_one_cancels() {
     let fixture = Fixture::new(1);

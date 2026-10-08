@@ -12,8 +12,7 @@ pub enum LinkError {
     DuplicateDeclaration { name: String, span: Option<Span> },
     #[error("duplicate process parameter `{name}`")]
     DuplicateProcessParam { name: String, span: Option<Span> },
-    #[error("duplicate process signal `{name}`")]
-    DuplicateProcessSignal { name: String, span: Option<Span> },
+
     #[error("unknown process `{name}`")]
     UnknownProcess { name: String, span: Option<Span> },
     #[error("unknown name `{name}`")]
@@ -91,12 +90,7 @@ pub enum LinkError {
     FunctionNameIsNotAValue { name: String, span: Option<Span> },
     #[error("function `{name}` cannot reuse the name of a builtin")]
     FunctionShadowsBuiltin { name: String, span: Option<Span> },
-    #[error("trigger registration requires {{ source, target, inputs?, name? }}")]
-    InvalidTriggerRegistration { span: Option<Span> },
-    #[error(
-        "trigger subscription_key must be a non-empty string literal and must not use the reserved `lash.internal/` prefix"
-    )]
-    InvalidTriggerSubscriptionKey { span: Option<Span> },
+
     #[error(
         "a process literal is only legal where the expected type is a process; this slot expects {expected}"
     )]
@@ -104,69 +98,7 @@ pub enum LinkError {
         expected: String,
         span: Option<Span>,
     },
-    #[error(
-        "wait sites for signal `{name}` disagree on the payload: one awaits {first}, another {second}; make them agree or use distinct signal names"
-    )]
-    ConflictingSignalPayload {
-        name: String,
-        first: String,
-        second: String,
-        span: Option<Span>,
-    },
-    #[error("trigger registration `inputs` must be a literal record")]
-    InvalidTriggerInputs { span: Option<Span> },
-    #[error("trigger registration input `{input}` is duplicated")]
-    DuplicateTriggerInput { input: String, span: Option<Span> },
-    #[error("trigger target `{process}` input `{input}` is not mapped")]
-    MissingTriggerInput {
-        process: String,
-        input: String,
-        span: Option<Span>,
-    },
-    #[error("trigger target `{process}` has no input `{input}`")]
-    UnknownTriggerInput {
-        process: String,
-        input: String,
-        span: Option<Span>,
-    },
-    #[error("trigger registration `inputs` must map at least one param to `trigger.event`")]
-    MissingTriggerEventInput { span: Option<Span> },
-    #[error(
-        "trigger target `{process}` takes no parameters, so the fired event has nowhere to go; give the process an event parameter"
-    )]
-    TriggerTargetTakesNoEvent { process: String, span: Option<Span> },
-    #[error(
-        "trigger target `{process}` takes {params} parameters, so an omitted `inputs` cannot say which one receives the event; map every parameter explicitly"
-    )]
-    AmbiguousOmittedTriggerInputs {
-        process: String,
-        params: usize,
-        span: Option<Span>,
-    },
-    #[error("`trigger.event` is only valid as a direct value inside trigger definition `inputs`")]
-    TriggerEventOutsideInputs { span: Option<Span> },
-    #[error(
-        "`trigger.event` represents the whole event; projections such as `trigger.event.field` are not supported"
-    )]
-    TriggerEventProjection { span: Option<Span> },
-    #[error("trigger listing requires {{ target }}")]
-    InvalidTriggerList { span: Option<Span> },
-    #[error("trigger source type `{source_ty}` is not registered as a TriggerSource")]
-    UnknownTriggerEventType {
-        source_ty: String,
-        span: Option<Span>,
-    },
-    #[error(
-        "trigger target must select one definition as `{{ definition: <process> }}` or `{{ definition_id: <id> }}`, got {actual}"
-    )]
-    InvalidTriggerTarget { actual: String, span: Option<Span> },
-    #[error("trigger source emits {event}, but target input `{input_name}` expects {input}")]
-    TriggerEventMismatch {
-        event: String,
-        input_name: String,
-        input: String,
-        span: Option<Span>,
-    },
+
     #[error("receiver for operation `{operation}` is not a module authority")]
     UnresolvedReceiver {
         operation: String,
@@ -244,7 +176,6 @@ impl LinkError {
         match self {
             Self::DuplicateDeclaration { span, .. }
             | Self::DuplicateProcessParam { span, .. }
-            | Self::DuplicateProcessSignal { span, .. }
             | Self::UnknownProcess { span, .. }
             | Self::UnknownName { span, .. }
             | Self::UnknownBuiltin { span, .. }
@@ -262,23 +193,7 @@ impl LinkError {
             | Self::ForbiddenInFunction { span, .. }
             | Self::FunctionNameIsNotAValue { span, .. }
             | Self::FunctionShadowsBuiltin { span, .. }
-            | Self::InvalidTriggerRegistration { span }
-            | Self::InvalidTriggerSubscriptionKey { span }
             | Self::ProcessLiteralOutsideProcessSlot { span, .. }
-            | Self::ConflictingSignalPayload { span, .. }
-            | Self::InvalidTriggerInputs { span }
-            | Self::DuplicateTriggerInput { span, .. }
-            | Self::MissingTriggerInput { span, .. }
-            | Self::UnknownTriggerInput { span, .. }
-            | Self::MissingTriggerEventInput { span }
-            | Self::TriggerTargetTakesNoEvent { span, .. }
-            | Self::AmbiguousOmittedTriggerInputs { span, .. }
-            | Self::TriggerEventOutsideInputs { span }
-            | Self::TriggerEventProjection { span }
-            | Self::InvalidTriggerList { span }
-            | Self::UnknownTriggerEventType { span, .. }
-            | Self::InvalidTriggerTarget { span, .. }
-            | Self::TriggerEventMismatch { span, .. }
             | Self::UnresolvedReceiver { span, .. }
             | Self::UnknownResourceOperation { span, .. }
             | Self::AmbiguousModuleOperation { span, .. }

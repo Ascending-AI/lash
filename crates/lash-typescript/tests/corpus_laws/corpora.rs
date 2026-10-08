@@ -38,53 +38,6 @@ impl CorpusProgram {
             globals: BTreeSet::new(),
         }
     }
-
-    /// The host every corpus links against: the harness's catalogue, the
-    /// operations the goldens and the host-flow cells call, and the program's
-    /// session globals.
-    pub(crate) fn environment(&self) -> LashlangHostEnvironment {
-        let mut environment = lashlang::testing::harness::test_environment();
-        for (module, type_name, operation) in
-            [("tools", "Tools", "lookup"), ("web", "Web", "fetch")]
-        {
-            environment
-                .resources
-                .add_module_operation(
-                    [module],
-                    type_name,
-                    operation,
-                    operation,
-                    TypeExpr::Any,
-                    TypeExpr::Any,
-                )
-                .expect("the corpus catalogue has no conflicting operation");
-        }
-        lashlang::add_trigger_resource_operations(&mut environment.resources)
-            .expect("the corpus catalogue has no conflicting trigger operation");
-        lashlang::add_trigger_register_tool_binding(&mut environment.resources)
-            .expect("the corpus catalogue has no conflicting trigger register binding");
-        environment
-            .resources
-            .add_trigger_source_constructor(
-                ["timer", "Schedule"],
-                TypeExpr::Object(vec![lashlang::TypeField {
-                    name: "expr".into(),
-                    ty: TypeExpr::Str,
-                    optional: false,
-                }]),
-                lashlang::NamedDataType::object(
-                    "timer.Tick",
-                    vec![lashlang::TypeField {
-                        name: "fired_at".into(),
-                        ty: TypeExpr::Str,
-                        optional: false,
-                    }],
-                )
-                .expect("a valid timer tick type"),
-            )
-            .expect("the corpus catalogue has one timer trigger source");
-        environment.with_globals(self.globals.iter().cloned())
-    }
 }
 
 /// Every program of every corpus.
@@ -349,5 +302,32 @@ fn every_accepted_census_capability_has_a_teaching_witness() {
         );
         lash_typescript::link(&witness.source, &witness.environment())
             .unwrap_or_else(|error| panic!("{}: {error}", witness.id));
+    }
+}
+
+impl CorpusProgram {
+    /// The host every corpus links against: the harness's catalogue, the
+    /// operations the goldens and the host-flow cells call, and the program's
+    /// session globals.
+    pub(crate) fn environment(&self) -> LashlangHostEnvironment {
+        let mut environment = lashlang::testing::harness::test_environment();
+        for (module, type_name, operation) in [
+            ("tools", "Tools", "lookup"),
+            ("web", "Web", "fetch"),
+            ("host", "Host", "approval"),
+        ] {
+            environment
+                .resources
+                .add_module_operation(
+                    [module],
+                    type_name,
+                    operation,
+                    operation,
+                    TypeExpr::Any,
+                    TypeExpr::Any,
+                )
+                .expect("the corpus catalogue has no conflicting operation");
+        }
+        environment.with_globals(self.globals.iter().cloned())
     }
 }

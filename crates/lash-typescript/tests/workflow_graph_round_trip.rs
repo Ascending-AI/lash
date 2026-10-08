@@ -470,10 +470,10 @@ fn opaque_statements_reject_globals_the_program_cannot_see() {
 #[test]
 fn host_descriptor_constructors_spell_registered_paths() {
     use lashlang::Expr;
-    // A trigger-source constructor keeps its module path as its type name,
-    // so `timer.Schedule(..)` spells it and re-links the same constructor.
+    // A host descriptor constructor keeps its module path as its type name,
+    // so `host.Timer(..)` spells it and re-links the same constructor.
     let constructor = Expr::HostDescriptorConstructor {
-        type_name: "timer.Schedule".into(),
+        type_name: "host.Timer".into(),
         input: Box::new(Expr::Record(vec![(
             "expr".into(),
             Expr::String("*".into()),
@@ -481,7 +481,7 @@ fn host_descriptor_constructors_spell_registered_paths() {
     };
     assert_eq!(
         typescript_expression_source(&constructor).expect("path-named constructor prints"),
-        "timer.Schedule({ expr: \"*\" })"
+        "host.Timer({ expr: \"*\" })"
     );
     // A constructor whose type name is not a module path keeps its typed
     // refusal: the link resolved the path and the IR does not keep it.
@@ -617,63 +617,6 @@ fn promise_all_settled_round_trips() {
     // prints back as the authored call.
     assert_json_round_trip("const v = await Promise.allSettled([tools.lookup({key: \"x\"})]);");
     assert_json_round_trip("finish(await Promise.allSettled([tools.lookup({key: \"x\"})]));");
-}
-
-#[test]
-fn trigger_registration_inputs_round_trip() {
-    // A trigger registration's `inputs` is the erased arrow template: the
-    // default for a one-parameter target prints omitted, an explicit mapping
-    // prints back as `(event) => ({ .. })`.
-    let mut environment = lashlang::testing::harness::test_environment();
-    lashlang::add_trigger_resource_operations(&mut environment.resources)
-        .expect("the catalogue has no conflicting trigger operation");
-    lashlang::add_trigger_register_tool_binding(&mut environment.resources)
-        .expect("the catalogue has no conflicting register binding");
-    environment
-        .resources
-        .add_trigger_source_constructor(
-            ["timer", "Schedule"],
-            lashlang::TypeExpr::Object(vec![lashlang::TypeField {
-                name: "expr".into(),
-                ty: lashlang::TypeExpr::Str,
-                optional: false,
-            }]),
-            lashlang::NamedDataType::object(
-                "timer.Tick",
-                vec![lashlang::TypeField {
-                    name: "fired_at".into(),
-                    ty: lashlang::TypeExpr::Str,
-                    optional: false,
-                }],
-            )
-            .expect("a valid timer tick type"),
-        )
-        .expect("the catalogue has one timer trigger source");
-    let cases = [
-        // The default: the target takes the event alone, so `inputs` is
-        // omitted and the linker supplies `{event: <fired event>}`.
-        "await triggers.register({source:timer.Schedule({expr:\"0 8 * * *\"}),target:{definition:async(event)=>{await tools.echo({value:\"inline\"});return event;}}});",
-        // An explicit mapping: two parameters, one bound to the fired event.
-        "await triggers.register({source:timer.Schedule({expr:\"0 8 * * *\"}),target:{definition:async(tick,fixed)=>{await tools.echo({value:tick});return fixed;}},inputs:(e)=>({tick:e,fixed:\"inline\"})});",
-    ];
-    for source in cases {
-        let linked = lash_typescript::link(source, &environment).expect("fixture links");
-        let printed = typescript_program_source(linked.artifact.ir()).expect("registration prints");
-        let relinked =
-            lash_typescript::link(&printed, &environment).expect("the spelling re-admits");
-        assert_eq!(
-            relinked.artifact.module_ref(),
-            linked.artifact.module_ref(),
-            "the spelling re-admits to the same module: {printed}"
-        );
-    }
-    // The one-parameter default omits the field entirely.
-    let linked = lash_typescript::link(cases[0], &environment).expect("fixture links");
-    let printed = typescript_program_source(linked.artifact.ir()).expect("registration prints");
-    assert!(
-        !printed.contains("inputs"),
-        "the default `inputs` prints omitted: {printed}"
-    );
 }
 
 #[test]

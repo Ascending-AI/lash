@@ -58,9 +58,7 @@ pub(super) struct Linker<'module> {
     /// recovered error in the current top-level workflow node.
     pub(super) workflow_diagnostic_owner: RefCell<Option<AstPath>>,
     pub(super) workflow_error_path: RefCell<Option<AstPath>>,
-    /// Wait-site payloads for the literal currently being lifted. Nested lifts
-    /// replace this collector and restore their enclosing literal's collector.
-    pub(super) signal_collector: RefCell<Option<BTreeMap<String, TypeExpr>>>,
+
     /// Process declarations lifted from `Expr::ProcessLiteral` during the
     /// lowering walk, in lift order, with the span to record for each.
     pub(super) lifted_declarations: RefCell<Vec<(Declaration, Option<Span>, AstPath)>>,
@@ -97,7 +95,7 @@ impl<'module> Linker<'module> {
             recover_workflow_errors: Cell::new(false),
             workflow_diagnostic_owner: RefCell::new(None),
             workflow_error_path: RefCell::new(None),
-            signal_collector: RefCell::new(None),
+
             lifted_declarations: RefCell::new(Vec::new()),
             lifted_process_aliases: RefCell::new(BTreeMap::new()),
             open_places: OpenPlaces::of(program),
@@ -108,12 +106,6 @@ impl<'module> Linker<'module> {
     /// carries one.
     pub(super) fn expression_span(&self, path: &AstPath) -> Option<Span> {
         self.program.spans.get(path).copied()
-    }
-
-    /// The RLM language's spelling of the process-only signal receiver, for
-    /// link diagnostics, which are model-facing text.
-    pub(super) fn wait_signal_keyword(&self) -> &'static str {
-        "waitSignal"
     }
 
     pub(super) fn with_expected_type_facts(mut self) -> Self {
@@ -234,9 +226,7 @@ impl<'module> Linker<'module> {
                     for param in &process.params {
                         self.validate_type_refs(&param.ty, None)?;
                     }
-                    for signal in &process.signals {
-                        self.validate_type_refs(&signal.ty, None)?;
-                    }
+
                     if let Some(return_ty) = &process.return_ty {
                         self.validate_type_refs(return_ty, None)?;
                     }
@@ -441,9 +431,7 @@ impl<'module> Linker<'module> {
                     .expect("resolved checked process signature remains valid"),
                 )),
             },
-            TypeExpr::TriggerHandle(event) => {
-                TypeExpr::TriggerHandle(Box::new(self.resolve_type_aliases_inner(event, seen)))
-            }
+
             TypeExpr::Any
             | TypeExpr::Str
             | TypeExpr::Int
@@ -458,10 +446,6 @@ impl<'module> Linker<'module> {
     pub(super) fn is_type_assignable(&self, source: &TypeExpr, target: &TypeExpr) -> bool {
         let source = self.resolve_type_aliases(source);
         let target = self.resolve_type_aliases(target);
-        // A host descriptor is a record-shaped value: the constructor wraps its
-        // payload in a typed record, so it reaches a gradual dict slot. This is
-        // what lets a trigger registration's `source` lower through the
-        // operation contract like any other argument.
         if matches!(&target, TypeExpr::Dict)
             && let TypeExpr::Ref(name) = &source
             && self
@@ -471,7 +455,7 @@ impl<'module> Linker<'module> {
         {
             return true;
         }
-        crate::trigger::is_resolved_type_assignable(&source, &target)
+        crate::is_resolved_type_assignable(&source, &target)
     }
 
     pub(super) fn validate_expected_literals(
@@ -659,7 +643,7 @@ impl<'module> Linker<'module> {
                 }
                 self.validate_type_refs(signature.output(), span)
             }
-            TypeExpr::TriggerHandle(event) => self.validate_type_refs(event, span),
+
             TypeExpr::Any
             | TypeExpr::Str
             | TypeExpr::Int
@@ -767,15 +751,7 @@ impl<'module> Linker<'module> {
                     }
                     scope.declare(param.name.as_str(), self.binding_for_type(&param.ty));
                 }
-                let mut seen_signals = BTreeSet::new();
-                for signal in &process.signals {
-                    if !seen_signals.insert(signal.name.to_string()) {
-                        return Err(LinkError::DuplicateProcessSignal {
-                            name: signal.name.to_string(),
-                            span,
-                        });
-                    }
-                }
+
                 scope.declare("input", Binding::Value(process_input_type(process)));
                 scope.declare("inputs", Binding::Value(process_input_record_type(process)));
                 let body = self.lower_expr(&process.body, path, &mut scope)?.0;
@@ -793,7 +769,7 @@ impl<'module> Linker<'module> {
                 Declaration::Process(ProcessDecl {
                     name: process.name.clone(),
                     params: process.params.clone(),
-                    signals: process.signals.clone(),
+
                     // Linked artifacts carry the inferred result explicitly so an
                     // immutable process identity resolves to one complete signature.
                     return_ty: Some(return_ty),
@@ -940,7 +916,7 @@ fn forbidden_function_construct(expr: &Expr) -> Option<&'static str> {
         Expr::ReceiverCall { .. } => Some("a module operation call"),
         Expr::Await(_) => Some("await"),
         Expr::SleepFor(_) => Some("sleep for"),
-        Expr::WaitSignal { .. } => Some("wait_signal"),
+
         Expr::ProcessRef { .. } => Some("a process reference"),
         Expr::ProcessLiteral(_) => Some("a process literal"),
         Expr::Print(_) => Some("print"),

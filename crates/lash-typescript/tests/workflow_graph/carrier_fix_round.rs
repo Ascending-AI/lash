@@ -33,7 +33,7 @@ fn artifact_projection_spans_a_literal_lifted_from_a_declared_process() {
         .push(lashlang::Declaration::Process(lashlang::ProcessDecl {
             name: "worker".into(),
             params: Vec::new(),
-            signals: Vec::new(),
+
             return_ty: None,
             label: None,
             origin: lashlang::ProcessOrigin::Declared,

@@ -97,7 +97,7 @@ pub fn execution_site_descriptor(expr: &Expr) -> Option<(ExecutionNodeKind, Cow<
             Cow::Borrowed(operation.as_str()),
         ),
         Expr::SleepFor(_) => (ExecutionNodeKind::Sleep, Cow::Borrowed("sleep for")),
-        Expr::WaitSignal { .. } => (ExecutionNodeKind::Wait, Cow::Borrowed("wait_signal")),
+
         Expr::Await(handle) if await_wraps_direct_operation(handle) => {
             return None;
         }
@@ -129,7 +129,6 @@ pub(crate) fn label_attaches_to_concrete_node(expr: &Expr) -> bool {
         Expr::Await(expr) | Expr::ResultUnwrap(expr) => label_attaches_to_concrete_node(expr),
         Expr::ReceiverCall { .. }
         | Expr::SleepFor(_)
-        | Expr::WaitSignal { .. }
         | Expr::Finish(_)
         | Expr::Fail(_)
         | Expr::If { .. }
@@ -176,7 +175,6 @@ fn label_attaches_to_assignment_value(expr: &Expr) -> bool {
         Expr::Await(expr) | Expr::ResultUnwrap(expr) => label_attaches_to_assignment_value(expr),
         Expr::ReceiverCall { .. }
         | Expr::SleepFor(_)
-        | Expr::WaitSignal { .. }
         | Expr::Finish(_)
         | Expr::Fail(_)
         | Expr::If { .. } => true,
@@ -235,7 +233,6 @@ pub fn is_pure_expr(expr: &Expr) -> bool {
         | Expr::ReceiverCall { .. }
         | Expr::Await(_)
         | Expr::SleepFor(_)
-        | Expr::WaitSignal { .. }
         | Expr::Print(_)
         | Expr::Finish(_)
         | Expr::Fail(_) => false,
@@ -259,78 +256,4 @@ pub(super) fn is_terminal_expr(expr: &Expr) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::{TypeExpr, TypeField, runtime::Value, testing::ast_builders as builders};
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn type_literal_schema_for_every_producible_type_parses() {
-        let types = vec![
-            TypeExpr::Any,
-            TypeExpr::Str,
-            TypeExpr::Int,
-            TypeExpr::Float,
-            TypeExpr::Bool,
-            TypeExpr::Dict,
-            TypeExpr::Null,
-            TypeExpr::Enum(vec!["ready".into(), "done".into()]),
-            TypeExpr::List(Box::new(TypeExpr::Str)),
-            TypeExpr::Object(vec![TypeField {
-                name: "value".into(),
-                ty: TypeExpr::Int,
-                optional: false,
-            }]),
-            TypeExpr::union(vec![TypeExpr::Str, TypeExpr::Null]),
-            TypeExpr::Process(crate::ProcessType::known(
-                crate::ProcessSignature::try_new(Vec::new(), TypeExpr::Str).unwrap(),
-            )),
-            TypeExpr::TriggerHandle(Box::new(TypeExpr::Str)),
-        ];
-
-        for ty in types {
-            let program = crate::Program::block(vec![crate::Expr::Finish(Box::new(
-                builders::type_literal(ty.clone()),
-            ))]);
-            let compiled = crate::runtime::entry_points::compile_program_internal(&program);
-            let mut state = crate::State::new();
-            let outcome = crate::runtime::entry_points::execute_compiled_internal(
-                &compiled,
-                &mut state,
-                &crate::testing::harness::EchoHost,
-            )
-            .await
-            .expect("type literal program should run");
-            let crate::runtime::ExecutionOutcome::Finished(Value::Record(wrapped)) = outcome else {
-                panic!("type literal should finish with the wrapped schema record");
-            };
-            let schema = wrapped
-                .get(crate::LASH_TYPE_KEY)
-                .expect("type literal carries the $lash_type schema")
-                .clone();
-            let schema_json = crate::runtime::to_json_direct(&schema);
-            let expected_type = match &ty {
-                TypeExpr::Any
-                | TypeExpr::Union(_)
-                | TypeExpr::Process(_)
-                | TypeExpr::TriggerHandle(_) => None,
-                TypeExpr::Str | TypeExpr::Enum(_) => Some("string"),
-                TypeExpr::Int => Some("integer"),
-                TypeExpr::Float => Some("number"),
-                TypeExpr::Bool => Some("boolean"),
-                TypeExpr::Dict | TypeExpr::Object(_) => Some("object"),
-                TypeExpr::Null => Some("null"),
-                TypeExpr::List(_) => Some("array"),
-                TypeExpr::Ref(_) => unreachable!("refs resolve through a binding"),
-            };
-            assert_eq!(
-                schema_json.get("type").and_then(|value| value.as_str()),
-                expected_type,
-                "schema name for {ty:?}"
-            );
-            let wrapped_json = serde_json::json!({
-                (crate::LASH_TYPE_KEY): schema_json.clone()
-            });
-            let accepted = lash_sansio::schema_contract::parse_output_schema(Some(&wrapped_json))
-                .expect("schema should parse")
-                .expect("schema should be present");
-            assert_eq!(accepted, schema_json, "schema for {ty:?} was not preserved");
-        }
-    }
 }

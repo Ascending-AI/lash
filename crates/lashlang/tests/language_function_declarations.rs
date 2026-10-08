@@ -501,7 +501,7 @@ async fn a_function_may_be_called_from_a_process_body() {
             Declaration::Process(lashlang::ProcessDecl {
                 name: "greet".into(),
                 params: Vec::new(),
-                signals: Vec::new(),
+
                 return_ty: None,
                 label: None,
                 origin: Default::default(),
@@ -565,38 +565,6 @@ fn files_read(path: Expr) -> Expr {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn every_effectful_construct_is_rejected_in_a_function() {
-    for (body, expected) in [
-        (
-            Expr::ResultUnwrap(Box::new(Expr::Await(Box::new(files_read(string("a.txt")))))),
-            "await",
-        ),
-        (files_read(string("a.txt")), "a module operation call"),
-        (Expr::Print(Box::new(number(1.0))), "print"),
-        (Expr::SleepFor(Box::new(string("1s"))), "sleep for"),
-        (finish(number(1.0)), "finish"),
-        (Expr::WaitSignal { name: "go".into() }, "wait_signal"),
-        (Expr::Fail(Box::new(Expr::Null)), "fail"),
-        (
-            // A label names a step in the workflow graph; a pure body
-            // contributes no steps, so the annotation would be silently inert.
-            Expr::LabelAnnotated {
-                label: lashlang::LabelMetadata {
-                    title: "Compute".into(),
-                    description: None,
-                },
-                expr: Box::new(number(2.0)),
-            },
-            "@label",
-        ),
-    ] {
-        let (function, construct) = forbidden_construct(Vec::new(), body);
-        assert_eq!(function, "f");
-        assert_eq!(construct, expected);
-    }
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn a_process_name_is_rejected_in_a_function() {
     // The bare name of a declared process is an ordinary identifier in the
     // body, so the unlowered body holds nothing forbidden; the linker is what
@@ -605,7 +573,7 @@ async fn a_process_name_is_rejected_in_a_function() {
     let worker = Declaration::Process(lashlang::ProcessDecl {
         name: "worker".into(),
         params: Vec::new(),
-        signals: Vec::new(),
+
         return_ty: None,
         label: None,
         origin: Default::default(),

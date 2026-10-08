@@ -11,9 +11,7 @@ impl ExecutionHost for ContainerHost {
             AbilityOp::ResourceOperation(call) if call.operation == "start" => {
                 Ok(AbilityOutcome::Value(process_handle("container-child")))
             }
-            AbilityOp::ResourceOperation(call)
-                if matches!(call.operation.as_str(), "signal" | "await") =>
-            {
+            AbilityOp::ResourceOperation(call) if call.operation == "await" => {
                 let [Value::Record(args)] = call.args.as_slice() else {
                     panic!("process control receives record arguments: {:?}", call.args);
                 };
@@ -46,11 +44,6 @@ fn environment() -> lashlang::LashlangHostEnvironment {
             handle.clone(),
         ),
         (
-            "signal",
-            serde_json::json!({"type":"object", "additionalProperties":false, "properties":{"handle":handle,"signal":{"type":"string"},"payload":{}}, "required":["handle"]}),
-            serde_json::json!({}),
-        ),
-        (
             "await",
             serde_json::json!({"type":"object", "additionalProperties":false, "properties":{"handle":handle}, "required":["handle"]}),
             serde_json::json!({}),
@@ -78,13 +71,63 @@ fn environment() -> lashlang::LashlangHostEnvironment {
     lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::all())
 }
 
+const LIST: &str = "const handles=[]; for(let i=0;i<1;i=i+1){handles.push(await processes.start({definition:child}));}";
+const OBJECT: &str = "const handles={child:await processes.start({definition:child})};";
+
+#[test]
+fn list_storage_preserves_process_handles() {
+    for (storage, access) in [
+        (LIST, "handles[0]"),
+        (
+            "const handles=[]; handles[0]=await processes.start({definition:child});",
+            "handles[0]",
+        ),
+        (
+            "const handles=[null]; handles.push(await processes.start({definition:child}));",
+            "handles[1]",
+        ),
+        (
+            "const handles=[]; const alias=handles; alias.push(await processes.start({definition:child}));",
+            "handles[0]",
+        ),
+        (
+            "const box={handles:[]}; box.handles.push(await processes.start({definition:child}));",
+            "box.handles[0]",
+        ),
+    ] {
+        law(storage, access, "", false);
+    }
+}
+
+#[test]
+fn durable_replay_preserves_process_handles_in_containers() {
+    law(LIST, "handles[0]", "await sleep(1);", true);
+    law(OBJECT, "handles.child", "await sleep(1);", true);
+}
+
+#[test]
+fn closed_null_container_elements_still_refuse_process_controls() {
+    for source in [
+        "const handles = [null]; await processes.await({handle:handles[0]});",
+        "const handles = {child:null}; await processes.await({handle:handles.child});",
+        "const handles = [null]; for (const handle of handles) { await processes.await({handle:handle}); }",
+    ] {
+        let error = lash_typescript::link(source, &environment())
+            .expect_err("closed null is not a process handle");
+        assert!(
+            error.message.contains("expects { handle: Process }"),
+            "{error}"
+        );
+        assert!(error.message.contains("got { handle: null }"), "{error}");
+    }
+}
+
 fn law(storage: &str, access: &str, suspension: &str, replay: bool) {
     let source = format!(
         r#"
         const child = async () => {{ return "joined"; }};
         {storage}
         {suspension}
-        await processes.signal({{handle: {access}, signal: "ready", payload: 1}});
         const joined = await processes.await({{handle: {access}}});
         finish({{handle: {access}, joined: joined}});
     "#
@@ -146,60 +189,9 @@ fn law(storage: &str, access: &str, suspension: &str, replay: bool) {
         );
     }
     let expected_calls = if replay {
-        vec!["signal", "await", "signal", "await"]
+        vec!["await", "await"]
     } else {
-        vec!["signal", "await"]
+        vec!["await"]
     };
     assert_eq!(*host.calls.lock().expect("calls lock"), expected_calls);
-}
-
-const LIST: &str = "const handles=[]; for(let i=0;i<1;i=i+1){handles.push(await processes.start({definition:child}));}";
-const OBJECT: &str = "const handles={child:await processes.start({definition:child})};";
-
-#[test]
-fn list_storage_preserves_process_handles() {
-    for (storage, access) in [
-        (LIST, "handles[0]"),
-        (
-            "const handles=[]; handles[0]=await processes.start({definition:child});",
-            "handles[0]",
-        ),
-        (
-            "const handles=[null]; handles.push(await processes.start({definition:child}));",
-            "handles[1]",
-        ),
-        (
-            "const handles=[]; const alias=handles; alias.push(await processes.start({definition:child}));",
-            "handles[0]",
-        ),
-        (
-            "const box={handles:[]}; box.handles.push(await processes.start({definition:child}));",
-            "box.handles[0]",
-        ),
-    ] {
-        law(storage, access, "", false);
-    }
-}
-
-#[test]
-fn durable_replay_preserves_process_handles_in_containers() {
-    law(LIST, "handles[0]", "await sleep(1);", true);
-    law(OBJECT, "handles.child", "await sleep(1);", true);
-}
-
-#[test]
-fn closed_null_container_elements_still_refuse_process_controls() {
-    for source in [
-        "const handles = [null]; await processes.await({handle:handles[0]});",
-        "const handles = {child:null}; await processes.await({handle:handles.child});",
-        "const handles = [null]; for (const handle of handles) { await processes.await({handle:handle}); }",
-    ] {
-        let error = lash_typescript::link(source, &environment())
-            .expect_err("closed null is not a process handle");
-        assert!(
-            error.message.contains("expects { handle: Process }"),
-            "{error}"
-        );
-        assert!(error.message.contains("got { handle: null }"), "{error}");
-    }
 }

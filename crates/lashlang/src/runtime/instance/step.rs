@@ -96,7 +96,7 @@ impl VmRunConfig {
 #[derive(Debug)]
 pub enum VmRequest {
     /// An ability operation: a resource operation, an await, a print, a
-    /// sleep, a signal wait, a process event, a finish or a fail.
+    /// sleep, a finish or a fail.
     Effect(AbilityOp),
     /// The run's executed-instruction count reached cancel checkpoint `n`;
     /// the host answers with its journaled observation of cancellation.
@@ -112,7 +112,7 @@ pub enum VmRequest {
 impl VmRequest {
     /// Whether [`VmResume::Park`] may answer this request: an effect the run
     /// can stand on again — a resource operation, a resource-operation batch,
-    /// a sleep, a signal wait, or the await of a process handle (alone or as
+    /// a sleep or the await of a process handle (alone or as
     /// the next pending leaf of a tuple, list or record of them, FIG-4275) —
     /// so the host can park the run awaiting it and answer the operation when
     /// a continuation issues it again. A print or a terminal is answered in
@@ -125,7 +125,6 @@ impl VmRequest {
                     | AbilityOp::ResourceOperationBatch(_)
                     | AbilityOp::Await(_)
                     | AbilityOp::Sleep(_)
-                    | AbilityOp::WaitSignal { .. }
             )
         )
     }
@@ -214,7 +213,7 @@ pub struct VmSuspended {
 pub enum VmParkReason {
     /// The host asked to park at a boundary.
     Boundary,
-    /// The host handed the pending signal wait to a successor; the
+    /// The host handed the pending operation to a successor; the
     /// continuation re-issues it.
     HandedOver,
     /// The host parked the run on the effect it awaits (FIG-4159); the
@@ -728,9 +727,9 @@ async fn run_process(
                         None,
                     ),
                     Err(error) => (
-                        RunEnd::Failed(failure(RuntimeError::WaitSignalFailed {
+                        RunEnd::Failed(failure(RuntimeError::OperationParkFailed {
                             source: ExecutionHostError::new(format!(
-                                "the handed-over signal wait could not be parked: {error}"
+                                "the parked operation could not be parked: {error}"
                             )),
                         })),
                         None,

@@ -117,7 +117,7 @@ impl<'program> RequirementsCollector<'program> {
                     self.collect_type(signature.output());
                 }
             }
-            TypeExpr::TriggerHandle(event) => self.collect_type(event),
+
             TypeExpr::Ref(name) if self.is_host_data_type_name(name) => {
                 let data_type = self
                     .resource_catalog
@@ -160,7 +160,7 @@ impl<'program> RequirementsCollector<'program> {
 
     #[expect(
         clippy::expect_used,
-        reason = "the value constructor and trigger source binding above were each just resolved from the same catalog, so requirement recording cannot conflict with a fresh requirements set"
+        reason = "the value constructor above were each just resolved from the same catalog, so requirement recording cannot conflict with a fresh requirements set"
     )]
     fn collect_expr(
         &mut self,
@@ -268,14 +268,6 @@ impl<'program> RequirementsCollector<'program> {
                         .require_value_constructor(constructor.clone())
                         .expect("constructor requirement is collected once");
                 }
-                if let Some(catalog) = self.resource_catalog
-                    && let Some(binding) = catalog.resolve_trigger_source(type_name.as_str())
-                {
-                    self.requirements
-                        .resources
-                        .require_trigger_source_binding(type_name.to_string(), binding.clone())
-                        .expect("trigger source requirement came from host catalog");
-                }
                 self.collect_expr(input, scope);
                 Some(RequirementBinding::Value)
             }
@@ -309,7 +301,7 @@ impl<'program> RequirementsCollector<'program> {
                 self.collect_expr(expr, scope);
                 Some(RequirementBinding::Value)
             }
-            Expr::WaitSignal { .. } => Some(RequirementBinding::Value),
+
             Expr::Await(expr) | Expr::ResultUnwrap(expr) | Expr::Print(expr) | Expr::Fail(expr) => {
                 self.collect_expr(expr, scope);
                 Some(RequirementBinding::Value)

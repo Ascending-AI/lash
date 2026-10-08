@@ -109,19 +109,8 @@ impl<'module> Linker<'module> {
             process_scope.declare(param.name.as_str(), self.binding_for_type(&param.ty));
         }
         let previous_completion = self.collect_completion.replace(true);
-        let previous_signals = self.signal_collector.replace(Some(BTreeMap::new()));
         let lowered = self.lower_expr(&literal.body, &path.child(0), &mut process_scope);
         self.collect_completion.set(previous_completion);
-        let signals = self
-            .signal_collector
-            .replace(previous_signals)
-            .into_iter()
-            .flatten()
-            .map(|(name, ty)| ProcessSignalDecl {
-                name: name.into(),
-                ty,
-            })
-            .collect::<Vec<_>>();
         let body = lowered?.0;
         let completion = self
             .completion_facts
@@ -164,7 +153,6 @@ impl<'module> Linker<'module> {
                     linked.extend(hidden_args.clone());
                     linked
                 },
-                signals,
                 return_ty: Some(output),
                 label: None,
                 origin: ProcessOrigin::Lifted {

@@ -232,7 +232,7 @@ impl ProcessTrace {
         });
     }
 
-    /// The host emits timer and signal wait boundaries; the shared VM
+    /// The host emits timer boundaries; the shared VM
     /// observation adapter emits child-process wait boundaries.
     pub(super) fn waiting(&self, op: &lashlang::AbilityOp, now_ms: i64, resumed: bool) {
         let (site, awaited) = match op {
@@ -249,16 +249,7 @@ impl ProcessTrace {
                         });
                 (site, crate::TraceNodeAwaited::Sleep { deadline_ms })
             }
-            lashlang::AbilityOp::WaitSignal {
-                name,
-                call_site: Some(site),
-            } => (
-                site,
-                crate::TraceNodeAwaited::Signal {
-                    name: name.clone(),
-                    key: format!("{}:{name}", self.identity.graph_key()),
-                },
-            ),
+
             _ => return,
         };
         let payload = if resumed {

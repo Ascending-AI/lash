@@ -16,10 +16,10 @@ use std::sync::Mutex;
 mod deferred_and_processes;
 mod frame_referrers;
 mod lifecycle_and_diagnostics;
+mod observations;
 mod one_slot_process_await;
 mod output_retention;
 mod projections_and_snapshots;
-mod triggers;
 mod typescript_cells;
 
 fn test_render_context(ctx: RuntimeExecutionContext<'_>) -> RuntimeExecutionContext<'_> {
@@ -79,42 +79,6 @@ async fn execute_code_unbounded_with_test_render(
         execution_trace,
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
-    )
-    .await
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn execute_code_with_trigger_test_render(
-    state: &mut RlmExecutionState,
-    ctx: RuntimeExecutionContext<'_>,
-    request: ExecRequest,
-    artifact_store: lashlang::LashlangArtifacts,
-    lashlang_surface: LashlangSurface,
-    deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
-    deferred_trigger_resolver: Option<lash_lashlang_runtime::SharedDeferredTriggerResolver>,
-    session_projected_bindings: RlmProjectedBindings,
-    execution_trace: Option<lash_core::plugin::PluginExecutionTrace>,
-    execution_bounds: lashlang::ExecutionBounds,
-    channel: crate::plugin::RlmChannel,
-    code_renderer: crate::render::CodeRendererSlot,
-) -> ExecResponse {
-    let ctx = match execution_trace {
-        Some(trace) => ctx.with_trace_standing(trace.into_standing()),
-        None => ctx,
-    };
-    super::execute_code_with_channel_and_bounds_with_trigger_resolver(
-        &crate::dialect::TypescriptDialect,
-        state,
-        test_render_context(ctx),
-        request,
-        artifact_store,
-        lashlang_surface,
-        deferred_tool_resolver,
-        deferred_trigger_resolver,
-        session_projected_bindings,
-        execution_bounds,
-        channel,
-        code_renderer,
     )
     .await
 }

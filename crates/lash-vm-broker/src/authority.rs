@@ -52,9 +52,8 @@ impl OperationRequestCodec for OperationRequest {
             Self::Print(_) => EffectKind::Print,
             Self::Finish(_) => EffectKind::Finish,
             Self::Fail(_) => EffectKind::Fail,
-            Self::ProcessEvent(_) => EffectKind::ProcessEvent,
+
             Self::Sleep(_) => EffectKind::Sleep,
-            Self::WaitSignal { .. } => EffectKind::WaitSignal,
         }
     }
     fn encode(&self) -> EncodedPayload {

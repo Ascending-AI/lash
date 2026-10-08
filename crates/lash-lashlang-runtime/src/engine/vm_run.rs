@@ -29,7 +29,7 @@ use tokio_util::sync::CancellationToken;
 use super::injection;
 use super::state::{BatchShape, EncodedOutcome, Injection, IssuedLeaf, IssuedOperation};
 use super::state::{TimerInput, VmRunInput, VmRunOutput};
-use crate::bridge::{ExecutionCancellation, lashlang_value_to_json, process_event_payload};
+use crate::bridge::{ExecutionCancellation, lashlang_value_to_json};
 use crate::process::{
     lashlang_program_hash, process_lashlang_execution_result, process_lashlang_failure,
     process_worker_failure, retired_generation_at, segment_continuation_expectation,
@@ -570,19 +570,7 @@ impl QuietPointHost {
                 };
                 Issue::Park(IssuedOperation::Sleep { until_ms })
             }
-            AbilityOp::WaitSignal { name, .. } => {
-                lash_core::facade_support::process_signal_event_type(&name)
-                    .map_err(|error| ExecutionHostError::new(error.to_string()))?;
-                Issue::Park(IssuedOperation::WaitSignal { name })
-            }
-            AbilityOp::ProcessEvent(event) => Issue::Park(IssuedOperation::Emit {
-                event_type: match event.kind {
-                    lashlang::ProcessEventKind::Yield => "process.yield",
-                    lashlang::ProcessEventKind::Wake => "process.wake",
-                }
-                .to_owned(),
-                payload: process_event_payload(&event.value)?,
-            }),
+
             AbilityOp::Finish(_) | AbilityOp::Fail(_) | AbilityOp::Print(_) => {
                 return Err(ExecutionHostError::new("answered before issue"));
             }
@@ -594,9 +582,6 @@ impl QuietPointHost {
             .saturating_add(i64::try_from(duration_ms).unwrap_or(i64::MAX))
     }
 
-    /// One resource operation as a leaf: a catalog tool or a trigger command
-    /// to run as a step, or settled in place when it needs none (a language
-    /// runtime value) or is refused before dispatch.
     fn leaf(
         &self,
         operation: lashlang::ResourceOperation,
@@ -635,16 +620,6 @@ impl QuietPointHost {
         };
         let host_operation =
             crate::resolve_lashlang_module_operation(&self.environment, receiver, &operation)?;
-        // A trigger command is a host step, whose trigger write is its
-        // store-local effect; every other host operation is a catalog tool.
-        if lashlang::TriggerHostOperation::from_host_operation(&host_operation).is_some() {
-            return Ok(IssuedLeaf::Host {
-                operation: host_operation,
-                input: resource_payload(&args)?,
-                site,
-                language_execution: self.language_execution(call_site.as_ref()),
-            });
-        }
         let tool = lash_core::ToolId::from(host_operation.as_str());
         if !self
             .catalog

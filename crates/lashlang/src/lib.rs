@@ -17,9 +17,12 @@ mod json_schema;
 mod linker;
 mod runtime;
 pub use runtime::effect_value;
+mod host_descriptor;
 mod span;
 mod tracking;
-mod trigger;
+mod type_assignability;
+pub use host_descriptor::{HostDescriptor, HostDescriptorError};
+pub use type_assignability::is_resolved_type_assignable;
 mod value_refs;
 mod vm_contract;
 /// The VM-protocol vocabulary [`vm_contract_reads`] and
@@ -47,10 +50,10 @@ pub use ast::{
     CoercingBinaryOp, CoercingUnaryOp, Declaration, Expr, ExprFolder, ExprVisitor, FunctionDecl,
     FunctionExpr, FunctionParam, InvalidAst, LIFTED_PROCESS_NAME_PREFIX, LabelMetadata,
     MAX_AST_NESTING_DEPTH, MethodKey, NestingTooDeep, OperandLogicalOp, ProcessDecl,
-    ProcessLiteralExpr, ProcessOrigin, ProcessParam, ProcessSignalDecl, ProcessSignature,
-    ProcessSignatureError, ProcessType, Program, ResourceRefExpr, StructuralRole, TryExpr,
-    TypeExpr, TypeField, UnionMembers, check_ast_nesting_depth, fold_expr_children,
-    format_type_expr, lifted_process_identity, process_wrapper_run_path, validate_ast, walk_expr,
+    ProcessLiteralExpr, ProcessOrigin, ProcessParam, ProcessSignature, ProcessSignatureError,
+    ProcessType, Program, ResourceRefExpr, StructuralRole, TryExpr, TypeExpr, TypeField,
+    UnionMembers, check_ast_nesting_depth, fold_expr_children, format_type_expr,
+    lifted_process_identity, process_wrapper_run_path, validate_ast, walk_expr,
 };
 pub use ast::{
     AttributeAssignParts, AttributeStep, AttributeUpdate, CollectionTransformParts, ExprChildren,
@@ -72,9 +75,8 @@ pub use identity::{ProcessDefinitionIdentity, ProcessDefinitionIdentityError};
 pub use introspection::{
     ModuleInstanceIntrospection, ModuleIntrospection, ModuleIntrospectionError,
     ModuleOperationIntrospection, NamedDataTypeIntrospection, ProcessInputIntrospection,
-    ProcessIntrospection, ProcessSignalIntrospection, ResourceOperationIntrospection,
-    ResourceTypeIntrospection, TriggerSourceIntrospection, TypeView, ValueConstructorIntrospection,
-    referenced_module_call_paths, referenced_receiver_call_paths,
+    ProcessIntrospection, ResourceOperationIntrospection, ResourceTypeIntrospection, TypeView,
+    ValueConstructorIntrospection, referenced_module_call_paths, referenced_receiver_call_paths,
 };
 pub use json_schema::{
     JsonSchemaError, X_LASH_KEYWORD, XLashParam, XLashSignature, XLashType,
@@ -86,7 +88,7 @@ pub use linker::{
     LashlangLanguageFeatures, LinkError, LinkedModule, ModuleInstanceCatalog,
     ModuleOperationBinding, NamedDataType, NamedDataTypeError, OperationContract,
     OutputFromInputBinding, ResolvedOperation, ResourceOperationBinding, ResourceTypeCatalog,
-    TriggerSourceBinding, ValueConstructorBinding,
+    ValueConstructorBinding,
 };
 #[cfg(test)]
 pub(crate) use runtime::compile_ast;
@@ -102,20 +104,20 @@ pub use runtime::{
     LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY,
     LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY, LASH_TYPE_KEY, LASHLANG_SNAPSHOT_VERSION,
     LinkedProgramCache, LinkedProgramCacheError, ListValue, PendingOperation, PendingOperationMap,
-    ProcessEvent, ProcessEventKind, ProcessSignal, ProcessStart, ProfileReport, ProfileStat,
-    ProjectedBindingError, ProjectedBindings, ProjectedReadRequest, ProjectedReadResponse,
-    ProjectedValue, ProjectionCatalog, ProjectionError, ProjectionProvider, ProjectionReadError,
-    ProjectionReader, ProjectionRefusal, ProjectionType, Record, ResourceHandle, ResourceOperation,
-    ResourceOperationBatch, ResourceOperationBatchLeaf, ResourceOperationBatchOutcome,
-    ResourceOperationOutcome, ResourceRef, RuntimeError, RuntimeFailure, Sleep, SleepKind,
-    Snapshot, SnapshotDecodeError, State, StringValue, UnawaitedToolCall,
-    VM_CONTINUATION_FORMAT_VERSION, Value, Vm, VmComplete, VmContinuation, VmExecutionStart,
-    VmFinallyCompletionContinuation, VmFinallyContinuation, VmGuestError, VmHandlerContinuation,
-    VmHeapContinuation, VmInstance, VmInterrupt, VmIteratorContinuation, VmIteratorCursor,
-    VmLoopPhase, VmParkReason, VmParked, VmPendingErrorOriginContinuation, VmProfileContinuation,
-    VmRequest, VmResume, VmResumePoint, VmRunConfig, VmRunOutcome, VmStep, VmStepError,
-    VmSuspended, VmSuspendedOperation, cancel_checkpoint_reached, compile, execute, from_json,
-    is_javascript_builtin_global, is_process_handle, unwrap_type_value, with_projection_reader,
+    ProcessStart, ProfileReport, ProfileStat, ProjectedBindingError, ProjectedBindings,
+    ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, ProjectionCatalog,
+    ProjectionError, ProjectionProvider, ProjectionReadError, ProjectionReader, ProjectionRefusal,
+    ProjectionType, Record, ResourceHandle, ResourceOperation, ResourceOperationBatch,
+    ResourceOperationBatchLeaf, ResourceOperationBatchOutcome, ResourceOperationOutcome,
+    ResourceRef, RuntimeError, RuntimeFailure, Sleep, SleepKind, Snapshot, SnapshotDecodeError,
+    State, StringValue, UnawaitedToolCall, VM_CONTINUATION_FORMAT_VERSION, Value, Vm, VmComplete,
+    VmContinuation, VmExecutionStart, VmFinallyCompletionContinuation, VmFinallyContinuation,
+    VmGuestError, VmHandlerContinuation, VmHeapContinuation, VmInstance, VmInterrupt,
+    VmIteratorContinuation, VmIteratorCursor, VmLoopPhase, VmParkReason, VmParked,
+    VmPendingErrorOriginContinuation, VmProfileContinuation, VmRequest, VmResume, VmResumePoint,
+    VmRunConfig, VmRunOutcome, VmStep, VmStepError, VmSuspended, VmSuspendedOperation,
+    cancel_checkpoint_reached, compile, execute, from_json, is_javascript_builtin_global,
+    is_process_handle, unwrap_type_value, with_projection_reader,
 };
 pub use runtime::{
     CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment,
@@ -214,19 +216,7 @@ pub use tracking::{
     LashlangExecutionFailure, LashlangExecutionObservation, LashlangExecutionSite,
     ProcessBranchSelection, process_ref_key,
 };
-pub use trigger::{
-    HostDescriptor, HostDescriptorError, LASH_TRIGGER_EVENT_KEY, REGISTER_TRIGGER_TOOL_ID,
-    TRIGGER_MODULE_ALIAS, TRIGGER_REGISTRATION_TYPE_NAME, TriggerCallShapeError,
-    TriggerCompatibility, TriggerCompatibilityError, TriggerCompatibilityRequest,
-    TriggerHostOperation, TriggerInputBinding, TriggerInputTemplate, TriggerListCall,
-    TriggerListRequest, TriggerPruneRequest, TriggerRegistrationCall, TriggerRegistrationRequest,
-    TriggerRequestDecodeError, add_trigger_register_tool_binding, add_trigger_resource_operations,
-    check_trigger_compatibility, event_type_for_source, is_resolved_type_assignable,
-    is_trigger_resource_type, list_call_args, register_call_args,
-    register_trigger_tool_input_schema, register_trigger_tool_output_schema,
-    register_trigger_tool_output_ty, trigger_event_placeholder_expr,
-    with_trigger_resource_operations,
-};
+
 pub use workflow_graph::{
     ListedStatement, NoStatementText, WorkflowBody, WorkflowBodySlot, WorkflowGraphProjector,
     WorkflowStatement, WorkflowStatementText, else_if_chain, statement_list,

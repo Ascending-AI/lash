@@ -10,8 +10,6 @@ pub struct LashlangHostCatalog {
     pub(super) named_data_types: BTreeMap<String, NamedDataType>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(super) value_constructors: BTreeMap<String, ValueConstructorBinding>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub(super) trigger_sources: BTreeMap<String, TriggerSourceBinding>,
 }
 
 /// A host operation's types as JSON Schema, mirroring a tool contract.
@@ -478,72 +476,6 @@ impl LashlangHostCatalog {
         Ok(())
     }
 
-    pub fn add_trigger_source_constructor(
-        &mut self,
-        path: impl IntoIterator<Item = impl Into<String>>,
-        input_ty: TypeExpr,
-        event_ty: NamedDataType,
-    ) -> Result<(), LashlangHostCatalogError> {
-        self.add_resolved_trigger_source_constructor(path, input_ty, event_ty, None, None)
-    }
-
-    /// Folds a trigger-source constructor admitted by a deferred trigger
-    /// provider, keeping that provider's identity and opaque authorized route
-    /// with the binding so a registration can capture them.
-    pub fn add_resolved_trigger_source_constructor(
-        &mut self,
-        path: impl IntoIterator<Item = impl Into<String>>,
-        input_ty: TypeExpr,
-        event_ty: NamedDataType,
-        provider_id: Option<String>,
-        route: Option<String>,
-    ) -> Result<(), LashlangHostCatalogError> {
-        let path = path.into_iter().map(Into::into).collect::<Vec<_>>();
-        assert!(!path.is_empty(), "constructor path must not be empty");
-        let source_type = module_path_key(&path);
-        let mut extended = self.clone();
-        extended.insert_resolved_trigger_source(
-            source_type.clone(),
-            event_ty.clone(),
-            provider_id,
-            route,
-        )?;
-        extended.add_value_constructor(
-            path,
-            input_ty,
-            TypeExpr::Ref(source_type.clone().into()),
-        )?;
-        extended.add_named_data_type(event_ty)?;
-        *self = extended;
-        Ok(())
-    }
-
-    /// The provider identity and authorized route ride along deliberately: a
-    /// registration executed from a durable process reads its source contract
-    /// and route out of these captured requirements, long after the link
-    /// environment that admitted them is gone.
-    pub(crate) fn require_trigger_source_binding(
-        &mut self,
-        source_type: impl Into<String>,
-        binding: TriggerSourceBinding,
-    ) -> Result<(), LashlangHostCatalogError> {
-        let source_type = source_type.into();
-        let event_type = binding.event_type().clone();
-        if let Some(existing) = self.trigger_sources.get(&source_type) {
-            if existing == &binding {
-                return self.require_named_data_type(event_type);
-            }
-            return Err(LashlangHostCatalogError::ConflictingTriggerSource {
-                source_type,
-                existing: existing.event_type().name().to_string(),
-                incoming: event_type.name().to_string(),
-            });
-        }
-        self.require_named_data_type(event_type)?;
-        self.trigger_sources.insert(source_type, binding);
-        Ok(())
-    }
-
     pub fn try_extend(&mut self, other: Self) -> Result<(), LashlangHostCatalogError> {
         *self = self.clone().try_merged(other)?;
         Ok(())
@@ -558,7 +490,6 @@ impl LashlangHostCatalog {
             resource_types,
             named_data_types,
             value_constructors,
-            trigger_sources,
         } = other;
         let mut linked_resource_operations = BTreeSet::new();
         for incoming in module_instances.into_values() {
@@ -611,9 +542,7 @@ impl LashlangHostCatalog {
                 merged.add_operation_binding(resource_type.clone(), operation, binding)?;
             }
         }
-        for (source_type, incoming) in trigger_sources {
-            merged.insert_trigger_source_binding(source_type, incoming)?;
-        }
+
         for (path, incoming) in value_constructors {
             merged.insert_value_constructor(path, incoming)?;
         }
@@ -660,11 +589,7 @@ impl LashlangHostCatalog {
                 return false;
             }
         }
-        for (source_type, required_binding) in &required.trigger_sources {
-            if self.trigger_sources.get(source_type) != Some(required_binding) {
-                return false;
-            }
-        }
+
         true
     }
 
@@ -677,8 +602,7 @@ impl LashlangHostCatalog {
     }
 
     pub fn is_known_opaque_value_type(&self, name: &str) -> bool {
-        self.trigger_sources.contains_key(name)
-            || self.value_constructors.values().any(|constructor| {
+        self.value_constructors.values().any(|constructor| {
                 matches!(&constructor.output_ty, TypeExpr::Ref(type_name) if type_name == name)
             })
     }
@@ -723,18 +647,8 @@ impl LashlangHostCatalog {
             .map(|(path, constructor)| (path.as_str(), constructor))
     }
 
-    pub fn trigger_sources(&self) -> impl Iterator<Item = (&str, &TriggerSourceBinding)> {
-        self.trigger_sources
-            .iter()
-            .map(|(source_type, binding)| (source_type.as_str(), binding))
-    }
-
     pub fn resolve_named_data_type(&self, name: &str) -> Option<&NamedDataType> {
         self.named_data_types.get(name)
-    }
-
-    pub fn resolve_trigger_source(&self, source_ty: &str) -> Option<&TriggerSourceBinding> {
-        self.trigger_sources.get(source_ty)
     }
 
     pub fn resolve_module_path(&self, path: &[impl AsRef<str>]) -> Option<ResourceRefExpr> {
@@ -851,35 +765,6 @@ impl LashlangHostCatalog {
     /// constructors authoritative.
     pub fn provides_value_constructor(&self, path: &str) -> bool {
         self.value_constructors.contains_key(path)
-    }
-
-    /// Replay uses this to ensure a recorded result wins over a later ambient definition for
-    /// the same constructor path.
-    pub fn mask_trigger_source_constructor(&mut self, path: &str) {
-        let event_name = self
-            .trigger_sources
-            .remove(path)
-            .map(|binding| binding.event_type_name().to_string());
-        self.value_constructors.remove(path);
-        let Some(event_name) = event_name else {
-            return;
-        };
-        let event_still_used = self
-            .trigger_sources
-            .values()
-            .any(|binding| binding.event_type_name() == event_name);
-        if !event_still_used {
-            self.named_data_types.remove(&event_name);
-        }
-    }
-
-    pub fn trigger_source_event(&self, source_ty: &TypeExpr) -> Option<TypeExpr> {
-        let TypeExpr::Ref(name) = source_ty else {
-            return None;
-        };
-        self.trigger_sources
-            .get(name.as_str())
-            .map(|binding| binding.event_type().to_ref_ty())
     }
 
     pub fn operation_suggestions_for_host(&self, host_operation: &str) -> Vec<String> {
@@ -1021,35 +906,6 @@ impl LashlangHostCatalog {
             return Err(LashlangHostCatalogError::ConflictingValueConstructor { path });
         }
         self.value_constructors.insert(path, binding);
-        Ok(())
-    }
-
-    pub(super) fn insert_resolved_trigger_source(
-        &mut self,
-        source_type: String,
-        event_type: NamedDataType,
-        provider_id: Option<String>,
-        route: Option<String>,
-    ) -> Result<(), LashlangHostCatalogError> {
-        self.insert_trigger_source_binding(
-            source_type,
-            TriggerSourceBinding::resolved(event_type, provider_id, route),
-        )
-    }
-
-    pub(super) fn insert_trigger_source_binding(
-        &mut self,
-        source_type: String,
-        binding: TriggerSourceBinding,
-    ) -> Result<(), LashlangHostCatalogError> {
-        if let Some(existing) = self.trigger_sources.get(&source_type) {
-            return Err(LashlangHostCatalogError::ConflictingTriggerSource {
-                source_type,
-                existing: existing.event_type().name().to_string(),
-                incoming: binding.event_type().name().to_string(),
-            });
-        }
-        self.trigger_sources.insert(source_type, binding);
         Ok(())
     }
 }

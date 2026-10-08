@@ -74,8 +74,6 @@ mod spread_calls;
 mod string_add_assign;
 #[path = "structural_contract.rs"]
 mod structural_contract;
-#[path = "trigger_inputs.rs"]
-mod trigger_inputs;
 #[path = "url_runtime.rs"]
 mod url_runtime;
 #[path = "url_wpt.rs"]

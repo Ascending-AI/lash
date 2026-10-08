@@ -604,34 +604,6 @@ pub(super) fn module_path_for_expr(expr: &Expr) -> Option<Vec<AstString>> {
     }
 }
 
-pub(super) fn is_trigger_event_expr(expr: &Expr) -> bool {
-    matches!(
-        module_path_for_expr(expr).as_deref(),
-        Some([trigger, event]) if trigger.as_str() == "trigger" && event.as_str() == "event"
-    )
-}
-
-pub(super) fn is_trigger_event_projection_expr(expr: &Expr) -> bool {
-    module_path_for_expr(expr).is_some_and(|path| {
-        path.len() > 2 && path[0].as_str() == "trigger" && path[1].as_str() == "event"
-    })
-}
-
-pub(super) fn trigger_target_process_name(expr: &Expr) -> Option<String> {
-    match expr {
-        Expr::LabelAnnotated { expr, .. } => trigger_target_process_name(expr),
-        Expr::Record(fields) if fields.len() == 1 && fields[0].0.as_str() == "definition" => {
-            trigger_target_process_name(&fields[0].1)
-        }
-        Expr::Variable(name) | Expr::ProcessRef { process: name } => Some(name.to_string()),
-        _ => None,
-    }
-}
-
-pub(super) fn trigger_target_process_label(expr: &Expr) -> String {
-    trigger_target_process_name(expr).unwrap_or_else(|| "target".to_string())
-}
-
 pub(super) fn expr_has_label_annotation(expr: &Expr) -> bool {
     match expr {
         Expr::LabelAnnotated { .. } => true,
@@ -662,16 +634,4 @@ pub(super) fn label_annotation_path(expr: &Expr) -> Option<Vec<u32>> {
 /// The contract type of a slot that accepts any process.
 pub(super) fn process_unknown_type() -> TypeExpr {
     TypeExpr::Process(crate::ProcessType::unknown())
-}
-
-/// Whether an expression is already the canonical whole-fired-event marker
-/// record — `{"$lash.trigger.event": true}` — that a dialect lowerer emits
-/// from the `inputs` arrow template (FIG-2997).
-pub(super) fn is_trigger_event_placeholder_expr(expr: &Expr) -> bool {
-    matches!(
-        expr,
-        Expr::Record(entries) if entries.len() == 1
-            && entries[0].0.as_str() == crate::LASH_TRIGGER_EVENT_KEY
-            && entries[0].1 == Expr::Bool(true)
-    )
 }

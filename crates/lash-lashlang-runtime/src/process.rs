@@ -122,10 +122,6 @@ pub(crate) fn segment_continuation_expectation<'a>(
     }
 }
 
-#[path = "process/event_types.rs"]
-mod event_types;
-pub use event_types::{lashlang_process_event_types, lashlang_process_signal_event_types};
-
 #[path = "process/schema.rs"]
 mod schema;
 pub use schema::lashlang_type_expr_schema;

@@ -109,7 +109,6 @@ async fn failed_vm_effect_without_tool_fact_is_a_runtime_failure() {
 
 #[derive(Default)]
 struct RecordingProcessHost {
-    events: Mutex<Vec<ProcessEvent>>,
     sleeps: Mutex<Vec<Sleep>>,
 }
 
@@ -119,20 +118,12 @@ impl ExecutionHost for RecordingProcessHost {
             AbilityOp::ResourceOperation(_) | AbilityOp::ResourceOperationBatch(_) => Err(
                 ExecutionHostError::new("module operations are not supported by this host"),
             ),
-            AbilityOp::ProcessEvent(event) => {
-                self.events.lock_recover().push(event);
-                Ok(AbilityOutcome::Unit)
-            }
+
             AbilityOp::Sleep(sleep) => {
                 self.sleeps.lock_recover().push(sleep);
                 Ok(AbilityOutcome::Value(Value::Null))
             }
-            AbilityOp::WaitSignal { name, .. } => {
-                assert_eq!(name, "ready");
-                Ok(AbilityOutcome::Value(Value::String(
-                    "signal-payload".into(),
-                )))
-            }
+
             AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unsupported host ability")),
         }
@@ -536,9 +527,7 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
         }
         Instruction::AwaitHandle => "await_handle".to_string(),
         Instruction::SleepFor => "sleep_for".to_string(),
-        Instruction::ProcessWaitSignal { name } => {
-            format!("process_wait_signal {}", name_text(chunk, name))
-        }
+
         Instruction::AwaitHandleUnwrap => "await_handle_unwrap".to_string(),
         Instruction::Intrinsic(op) => intrinsic_snapshot(chunk, op),
         Instruction::CoercingAddAssign(slot) => {

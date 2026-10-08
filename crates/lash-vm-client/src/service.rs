@@ -23,13 +23,6 @@ pub enum Request {
         #[serde(with = "serde_bytes")]
         bytes: Vec<u8>,
     },
-    TriggerCompatibility {
-        #[serde(with = "serde_bytes")]
-        bytes: Vec<u8>,
-        definition: lashlang::ProcessDefinitionIdentity,
-        source_type: String,
-        inputs: lashlang::TriggerInputTemplate,
-    },
     CompileAst {
         source: String,
         program: lashlang::Program,
@@ -129,7 +122,6 @@ pub enum Response {
     Definition(CreatedDefinition),
     Artifact(crate::InspectedArtifact),
     ArtifactRefused(lashlang::ModuleArtifactRefusal),
-    TriggerCompatibility(lashlang::TriggerCompatibility),
     CompileRefused {
         error: lashlang::ModuleCompileError,
         policy: bool,
@@ -532,9 +524,9 @@ pub mod runtime_ops {
                     | Request::CompileAst { .. }
                     | Request::LinkAst { .. } => WorkerPath::Compile,
                     Request::CreateDefinition { .. } => WorkerPath::CreateDefinition,
-                    Request::InspectArtifact { .. }
-                    | Request::VerifyArtifact { .. }
-                    | Request::TriggerCompatibility { .. } => WorkerPath::Artifact,
+                    Request::InspectArtifact { .. } | Request::VerifyArtifact { .. } => {
+                        WorkerPath::Artifact
+                    }
                     _ => WorkerPath::State,
                 },
                 &worker,

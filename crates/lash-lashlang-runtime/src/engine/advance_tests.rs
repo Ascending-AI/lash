@@ -502,93 +502,11 @@ fn an_await_stands_until_its_process_ends() {
     ));
 }
 
-fn signal(name: &str, id: &str, value: serde_json::Value) -> EngineEvent {
-    EngineEvent::Signal(lash_core::ProcessSignal::new(
-        lash_core::ProcessSignalIdentity::new(process(), name, id).expect("a signal identity"),
-        value,
-    ))
-}
 
-/// A signal that arrives before its wait is kept, in arrival order, and
-/// answers the wait the moment the VM asks; a wait with nothing kept is idle
-/// until its signal arrives.
-#[test]
-fn a_signal_is_kept_until_its_wait_and_answers_it_in_arrival_order() {
-    let (mut driven, _) = Driven::parked_on(IssuedOperation::Sleep { until_ms: 10 });
-    driven.on(signal("ready", "s-1", serde_json::json!(1)));
-    driven.on(signal("other", "s-2", serde_json::json!("other")));
-    driven.on(signal("ready", "s-3", serde_json::json!(3)));
-    driven.on(EngineEvent::Woke);
 
-    let first = driven.on(step(
-        "vm_run.1",
-        parked(
-            "wait",
-            IssuedOperation::WaitSignal {
-                name: "ready".to_owned(),
-            },
-        ),
-    ));
-    assert!(matches!(
-        injected(&first),
-        Injection::Signal { operation: 1, payload } if payload == serde_json::json!(1)
-    ));
-    let second = driven.on(step(
-        "vm_run.2",
-        parked(
-            "wait",
-            IssuedOperation::WaitSignal {
-                name: "ready".to_owned(),
-            },
-        ),
-    ));
-    assert!(matches!(
-        injected(&second),
-        Injection::Signal { operation: 2, payload } if payload == serde_json::json!(3)
-    ));
-    assert_eq!(
-        driven.on(step(
-            "vm_run.3",
-            parked(
-                "wait",
-                IssuedOperation::WaitSignal {
-                    name: "ready".to_owned(),
-                },
-            ),
-        )),
-        EngineAction::AwaitSignal {
-            name: "ready".to_owned()
-        }
-    );
-    assert!(matches!(
-        injected(&driven.on(signal("ready", "s-4", serde_json::json!(4)))),
-        Injection::Signal { operation: 3, payload } if payload == serde_json::json!(4)
-    ));
-}
 
-/// An event the VM appends is the activation's `Emit`, appended in the same
-/// transaction; `Emitted` resumes the VM, and an `Emitted` the engine never
-/// asked for is refused.
-#[test]
-fn an_emitted_event_resumes_the_vm_once_it_is_appended() {
-    let (mut driven, action) = Driven::parked_on(IssuedOperation::Emit {
-        event_type: "process.yield".to_owned(),
-        payload: serde_json::json!({"value": 1}),
-    });
-    assert!(
-        matches!(
-            &action,
-            EngineAction::Emit { event_type, payload }
-                if event_type.name == "process.yield" && *payload == serde_json::json!({"value": 1})
-        ),
-        "{action:?}"
-    );
-    assert!(matches!(
-        injected(&driven.on(EngineEvent::Emitted)),
-        Injection::Emitted { operation: 0 }
-    ));
-    driven.refuses(EngineEvent::Emitted);
-}
+
+
 
 /// A `vm_run` that reached no quiet point left nothing: the same run is
 /// asked again from the same snapshot with the same injection, up to the
@@ -659,36 +577,7 @@ fn the_vms_end_is_the_processs_terminal() {
     assert_eq!(driven.phase(), Phase::Ended);
 }
 
-/// Cancellation ends the process at once with its origin, whatever it
-/// waits on.
-#[test]
-fn a_cancelled_process_ends_with_its_origin() {
-    for issued in [
-        IssuedOperation::Sleep { until_ms: 10 },
-        IssuedOperation::WaitSignal {
-            name: "ready".to_owned(),
-        },
-        batch(AggregateConsumer::All, vec![tool("a")]),
-    ] {
-        let (mut driven, _) = Driven::parked_on(issued);
-        let EngineAction::Terminal(outcome) = driven.on(EngineEvent::Cancelled {
-            origin: lash_sansio::CancelOrigin::OperatorRequested,
-            grace_until: lash_core::durable_port::DurableInstant(0),
-        }) else {
-            panic!("the process ends");
-        };
-        assert!(
-            matches!(
-                &outcome,
-                lash_core::ProcessAwaitOutput::Settled { output }
-                    if matches!(&output.outcome, lash_core::ToolCallOutcome::Cancelled(cancellation)
-                        if cancellation.origin == Some(lash_sansio::CancelOrigin::OperatorRequested))
-            ),
-            "{outcome:?}"
-        );
-        assert_eq!(driven.phase(), Phase::Ended);
-    }
-}
+
 
 /// A lashlang process pins no host key; a pinned or resolved key is a
 /// corrupt mailbox, not an event to fold.
@@ -879,26 +768,7 @@ async fn a_resumed_vm_run_is_answered_from_its_injection_and_reissues_nothing() 
     }
 }
 
-/// A snapshot whose injection answers another kind of operation than the
-/// one the VM reissues is a state that disagrees with its snapshot: the
-/// process ends with a typed failure rather than answering the guest.
-#[tokio::test(flavor = "current_thread")]
-async fn an_injection_that_does_not_answer_the_reissued_operation_ends_the_process() {
-    let fixture = vm_fixture().await;
-    let (hash, vm, _) = parked_sleep(fixture.run(fixture.first()).await);
-    let output = fixture
-        .run(VmRunInput {
-            payload: fixture.payload.clone(),
-            program_hash: Some(hash),
-            vm: Some(vm),
-            inject: Some(Injection::Emitted { operation: 0 }),
-        })
-        .await;
-    let VmRunOutput::Ended { outcome } = output else {
-        panic!("the process ends, got {output:?}");
-    };
-    assert_eq!(failure_code(&outcome), "process_segment_resume_failed");
-}
+
 
 /// A snapshot captured under another program identity is refused before it
 /// resumes, naming the identity it recorded.

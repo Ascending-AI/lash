@@ -1888,7 +1888,6 @@ fn drive_rlm_to_second_llm_request(
         lash_core::ProtocolBuildInput {
             tool_catalog: Arc::new(lash_core::ToolCatalog::from_tool_definitions(Vec::new())),
             plugin_extensions: Default::default(),
-            trigger_events: Default::default(),
             writer_formats: lash_core::build_newest_writer_formats(),
         },
         lash_protocol_rlm::RlmProjectorConfig::new(Arc::new(lash_protocol_rlm::TypescriptDialect)),
@@ -1967,7 +1966,6 @@ fn answer_one_cell(
         lash_core::ProtocolBuildInput {
             tool_catalog: Arc::new(lash_core::ToolCatalog::from_tool_definitions(Vec::new())),
             plugin_extensions: Default::default(),
-            trigger_events: Default::default(),
             writer_formats: lash_core::build_newest_writer_formats(),
         },
         lash_protocol_rlm::RlmProjectorConfig::new(Arc::new(lash_protocol_rlm::TypescriptDialect)),

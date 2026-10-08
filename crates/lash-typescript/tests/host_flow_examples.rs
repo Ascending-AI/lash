@@ -2,11 +2,8 @@
 //!
 //! The cells are the public surface's worked examples, so they are the one
 //! place a retired spelling is most expensive and least visible: nothing
-//! executes a `.ts` file on disk. Linking them here means a deleted form
-//! (`defineProcess`, bare `start`, `wake`, `registerTrigger`, a `signals:`
-//! block) fails this target rather than surviving in documentation.
-
-use std::collections::BTreeSet;
+//! executes a `.ts` file on disk. Linking these cells checks that their calls
+//! and process definitions match the host catalogue.
 
 const DURABLE_PROCESS: &str =
     include_str!("../../../examples/typescript-host-flows/durable-process.ts");
@@ -37,21 +34,21 @@ fn host_environment() -> lashlang::LashlangHostEnvironment {
         .expect("process start operation");
     catalog
         .add_module_operation_contract(
-            ["processes"],
-            "Processes",
-            "emit",
-            "tool:processes/emit",
+            ["host"],
+            "Host",
+            "approval",
+            "tool:host/approval",
             &lashlang::OperationContract::new(
                 serde_json::json!({
                     "type": "object",
                     "additionalProperties": false,
-                    "properties": { "value": {} },
-                    "required": ["value"]
+                    "properties": { "request": {} },
+                    "required": ["request"]
                 }),
                 serde_json::json!({}),
             ),
         )
-        .expect("process emit operation");
+        .expect("host approval operation");
     catalog
         .add_module_operation_contract(
             ["web"],
@@ -99,15 +96,5 @@ fn the_durable_process_example_links_and_lifts_one_process() {
             .map(|param| param.name.to_string())
             .collect::<Vec<_>>(),
         vec!["request".to_string()],
-    );
-    // The signal set is inferred from the `waitSignal` the body reaches, not
-    // declared: there is no `signals:` block to carry it any more.
-    assert_eq!(
-        approval
-            .signals
-            .iter()
-            .map(|signal| signal.name.to_string())
-            .collect::<BTreeSet<_>>(),
-        BTreeSet::from(["approved".to_string()]),
     );
 }

@@ -18,7 +18,7 @@
 //!
 //! The analysis is flow-insensitive, like the ruling it implements: a binding
 //! whose object escapes or takes a computed write anywhere in the program is
-//! open everywhere, including before the trigger and on the first pass of a
+//! open everywhere, including before the mutation and on the first pass of a
 //! loop whose later iterations run after it. It is conservative: an escape
 //! opens everything the escaping value reaches, and an element read (`o[k]`)
 //! stands for every field of `o`.

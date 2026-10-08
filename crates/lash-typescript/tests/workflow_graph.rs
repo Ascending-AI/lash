@@ -1014,64 +1014,6 @@ fn source_slice<'a>(source: &'a str, node: &WorkflowNode) -> &'a str {
 }
 
 #[test]
-fn canonical_source_spans_cover_bound_and_inline_process_bodies_without_shape_matching() {
-    let authored = r#"const worker=async()=>{await tools.echo({value:"same"});await tools.echo({value:"same"});return "done";};
-await triggers.register({source:{expr:"0 8 * * *"},target:{definition:async(event)=>{await tools.echo({value:"inline"});return event;}}});
-"#;
-    let canonical = canonical(authored);
-    let graph = workflow_graph_from_source(authored).expect("formatted source projects");
-    assert_eq!(
-        graph,
-        workflow_graph_from_source(&canonical).expect("canonical source projects"),
-        "formatting-only changes resolve to the same canonical spans"
-    );
-    let mut processes = graph.declarations.iter().filter_map(|declaration| {
-        let WorkflowDeclaration::Process(process) = declaration else {
-            return None;
-        };
-        Some(process)
-    });
-    let bound = processes.next().expect("the bound process projects");
-    let inline = processes.next().expect("the inline process projects");
-    assert!(processes.next().is_none(), "exactly two processes project");
-
-    let repeated = &bound.body.nodes[..2];
-    assert_eq!(
-        repeated
-            .iter()
-            .map(|node| source_slice(&canonical, node))
-            .collect::<Vec<_>>(),
-        [
-            "await (tools.echo({ value: \"same\" }))",
-            "await (tools.echo({ value: \"same\" }))",
-        ]
-    );
-    assert!(
-        repeated[0].source_span.expect("first span").start
-            < repeated[1].source_span.expect("second span").start,
-        "identical expressions retain their distinct canonical positions"
-    );
-    assert_eq!(
-        source_slice(
-            &canonical,
-            bound.body.nodes.last().expect("bound return node")
-        ),
-        "return \"done\";"
-    );
-    assert_eq!(
-        source_slice(&canonical, &inline.body.nodes[0]),
-        "await (tools.echo({ value: \"inline\" }))"
-    );
-    assert_eq!(
-        source_slice(
-            &canonical,
-            inline.body.nodes.last().expect("inline return node")
-        ),
-        "return event;"
-    );
-}
-
-#[test]
 fn cloned_do_while_conditions_keep_provenance_for_every_destination_path() {
     for (source, expected_condition_paths) in [
         ("do { continue; } while (false);", 2),
@@ -1141,64 +1083,6 @@ fn artifact_projection_rebuilds_canonical_spans_for_lifted_processes() {
             .collect::<Vec<_>>(),
         "the runnable view carries the draft's canonical provenance"
     );
-}
-
-#[test]
-fn canonical_span_goldens_cover_every_textual_node() {
-    let fixtures: Vec<(&str, &str, &[&str])> = vec![
-        (
-            "named-nested-repeated",
-            goldens::SPAN_NAMED_NESTED_REPEATED,
-            &[
-                r#"const worker = async () => {
-  await (tools.echo({ value: "same" }));
-  await (tools.echo({ value: "same" }));
-  if (true) {
-    for (const value of [1]) {
-      while (false) {
-        await sleep(value);
-      }
-    }
-  }
-  return "done";
-};"#,
-                r#"await (tools.echo({ value: "same" }))"#,
-                r#"await (tools.echo({ value: "same" }))"#,
-                "if (true) {\n    for (const value of [1]) {\n      while (false) {\n        await sleep(value);\n      }\n    }\n  }",
-                "for (const value of [1]) {\n      while (false) {\n        await sleep(value);\n      }\n    }",
-                "while (false) {\n        await sleep(value);\n      }",
-                "sleep(value)",
-                r#"return "done";"#,
-            ],
-        ),
-        (
-            "lifted-inline",
-            goldens::SPAN_LIFTED_INLINE,
-            &[
-                "await (triggers.register({ source: timer.Schedule({ expr: \"0 8 * * *\" }), target: { definition: async (event) => {\n  await (tools.echo({ value: \"inline\" }));\n  return event;\n} } }))",
-                r#"await (tools.echo({ value: "inline" }))"#,
-                "return event;",
-            ],
-        ),
-    ];
-    assert!(
-        !fixtures.is_empty(),
-        "the span golden corpus must not be empty"
-    );
-
-    for (name, source, expected) in fixtures {
-        assert!(
-            !expected.is_empty(),
-            "the `{name}` oracle must not be empty"
-        );
-        let canonical = canonical(source);
-        let graph = workflow_graph_from_source(source).expect("span golden projects");
-        let actual = graph
-            .nodes()
-            .map(|node| source_slice(&canonical, node))
-            .collect::<Vec<_>>();
-        assert_eq!(actual, expected, "exact canonical slices for `{name}`");
-    }
 }
 
 fn facet_environment() -> LashlangHostEnvironment {

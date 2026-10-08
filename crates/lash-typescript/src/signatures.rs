@@ -74,7 +74,7 @@ pub fn render_schema_shape(shape: &SchemaShape) -> String {
                 .join(", "),
             render_schema_shape(&signature.output)
         ),
-        ShapeKind::Handle(payload) => format!("TriggerHandle<{}>", render_schema_shape(payload)),
+
         // `ShapeKind` is non-exhaustive: a kind this dialect has no spelling
         // for yet is shown as the widest type rather than guessed at.
         _ => "unknown".to_string(),

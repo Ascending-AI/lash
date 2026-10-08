@@ -7,8 +7,6 @@
 //! is admitted in the same `process.advance` transaction that commits the
 //! snapshot naming it.
 
-use std::collections::VecDeque;
-
 use lash_core::{ProcessId, SettledOutput, StepName};
 use lash_vm_protocol::OpaqueVmState;
 use serde::{Deserialize, Serialize};
@@ -52,19 +50,8 @@ pub(crate) struct LashlangEngineState {
     pub(crate) operations: u64,
     /// How many `vm_run` steps in a row failed without a quiet point.
     pub(crate) faults: u32,
-    /// Signals that arrived while the VM waited on nothing of their name,
-    /// in arrival order.
-    pub(crate) signals: VecDeque<QueuedSignal>,
     /// What the process is doing.
     pub(crate) phase: Phase,
-}
-
-/// A signal kept for the VM's next wait on its name.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct QueuedSignal {
-    pub(crate) name: String,
-    pub(crate) payload: serde_json::Value,
 }
 
 /// What the process is doing.
@@ -97,10 +84,6 @@ pub(crate) enum Wait {
     Sleep { until_ms: i64 },
     /// Another process's terminal.
     Process { process: ProcessId },
-    /// A signal of this name.
-    Signal { name: String },
-    /// An event append; answered by `Emitted`.
-    Emitted,
 }
 
 /// How an aggregate consumes its leaves.
@@ -163,13 +146,6 @@ pub(crate) enum Injection {
         operation: u64,
         outcome: Box<lash_core::ProcessOutcome>,
     },
-    /// The awaited signal arrived.
-    Signal {
-        operation: u64,
-        payload: serde_json::Value,
-    },
-    /// The event was appended.
-    Emitted { operation: u64 },
 }
 
 /// How a parked resource operation or aggregate was decided.
@@ -230,13 +206,6 @@ pub(crate) enum IssuedOperation {
     Sleep { until_ms: i64 },
     /// An await of another process's terminal.
     AwaitProcess { process: ProcessId },
-    /// A wait for a signal named `name`.
-    WaitSignal { name: String },
-    /// An append to the process's event feed.
-    Emit {
-        event_type: String,
-        payload: serde_json::Value,
-    },
 }
 
 /// One leaf of an issued resource operation or aggregate.
@@ -252,16 +221,7 @@ pub(crate) enum IssuedLeaf {
         site: Option<lash_core::StepEffectSite>,
         language_execution: Option<Box<lash_trace::TraceLanguageExecution>>,
     },
-    /// A host operation no catalog tool answers (a trigger command), with
-    /// its input: run as a host step.
-    Host {
-        operation: String,
-        input: serde_json::Value,
-        /// The call's node and occurrence, when the VM tracks it.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<lash_core::StepEffectSite>,
-        language_execution: Option<Box<lash_trace::TraceLanguageExecution>>,
-    },
+
     /// A timer that settles at `until_ms`.
     Timer { until_ms: i64 },
     /// Settled at issue: refused before dispatch, or a runtime value.

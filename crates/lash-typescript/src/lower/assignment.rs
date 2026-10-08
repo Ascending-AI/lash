@@ -9,7 +9,6 @@ use crate::adapter::{AssignTarget as TsAssignTarget, Expr, MemberProperty};
 use crate::{Diagnostic, DiagnosticCode};
 
 use super::stdlib::builtin_constant;
-use super::triggers::{names_the_retired_trigger_event, retired_trigger_event_diagnostic};
 use super::{BindingKind, Lowerer};
 
 impl Lowerer {
@@ -217,9 +216,7 @@ impl Lowerer {
         }
         // The retired global, named and refused rather than left to reject as
         // an unknown binding, which said nothing about where the event went.
-        if names_the_retired_trigger_event(object, property) && !self.has_binding("trigger") {
-            return Err(retired_trigger_event_diagnostic());
-        }
+
         let target = Box::new(self.lower_expr(object)?);
         Ok(match property {
             MemberProperty::Field(field) => LashExpr::Field {

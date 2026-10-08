@@ -648,14 +648,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::SleepFor => {
                 return Ok(Some(VmStep::Effect(VmEffect::Sleep(SleepKind::For))));
             }
-            Instruction::ProcessWaitSignal { name } => {
-                if self.mode != VmMode::Process {
-                    return Err(RuntimeError::SessionProcessAdminOutsideProcess {
-                        keyword: "wait_signal".into(),
-                    });
-                }
-                return Ok(Some(VmStep::Effect(VmEffect::WaitSignal { name })));
-            }
+
             Instruction::ProcessFail => {
                 if self.mode != VmMode::Process {
                     return Err(RuntimeError::SessionProcessAdminOutsideProcess {
@@ -1003,7 +996,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             | Instruction::ResultUnwrap
             | Instruction::Finish
             | Instruction::SleepFor
-            | Instruction::ProcessWaitSignal { .. }
             | Instruction::ProcessFail
             | Instruction::ObserveStep
             | Instruction::Pop

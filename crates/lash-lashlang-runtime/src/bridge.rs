@@ -100,15 +100,6 @@ fn cancelled_tool_terminal(
     .into()
 }
 
-pub fn process_event_payload(
-    value: &LashlangValue,
-) -> Result<serde_json::Value, ExecutionHostError> {
-    Ok(serde_json::json!({
-        "value": lashlang_value_to_json(value)?,
-        "text": value.to_string(),
-    }))
-}
-
 /// Resolves a guest sleep into a durable intent without sampling the clock.
 ///
 /// `until` keeps its absolute deadline; the effect seam derives the wait from

@@ -38,27 +38,7 @@ pub(crate) fn perform(
                 Err(error) => Response::ArtifactRefused(error.into()),
             }
         }
-        Request::TriggerCompatibility {
-            bytes,
-            definition,
-            source_type,
-            inputs,
-        } => {
-            let artifact =
-                lashlang::ModuleArtifact::from_store_bytes(&bytes).map_err(undecodable_artifact)?;
-            match lashlang::check_trigger_compatibility(lashlang::TriggerCompatibilityRequest {
-                artifact: &artifact,
-                definition: &definition,
-                source_type: &source_type,
-                inputs: &inputs,
-            }) {
-                Ok(compatibility) => Response::TriggerCompatibility(compatibility),
-                Err(error) => Response::Refused {
-                    message: error.to_string(),
-                    policy: false,
-                },
-            }
-        }
+
         Request::CreateDefinition {
             source,
             environment,
@@ -318,7 +298,6 @@ fn linked_module(
                     | lashlang::LinkError::FeatureDisabled { .. }
                     | lashlang::LinkError::OpaqueHostDescriptorAccess { .. }
                     | lashlang::LinkError::ProcessLifecycleOutsideProcess { .. }
-                    | lashlang::LinkError::TriggerEventOutsideInputs { .. }
             );
             let mut diagnostic = lashlang::format_link_diagnostic(source, &error);
             if cell && let lashlang::LinkError::BareToolCall { suggestion, .. } = &error {
@@ -422,27 +401,6 @@ fn inspect(
             .ir()
             .process(name)
             .ok_or_else(|| inconsistent_artifact("missing artifact export"))?;
-        let signals = process
-            .signals
-            .iter()
-            .map(|signal| {
-                Ok(lash_core_execution::ProcessEventType {
-                    name: lash_core_execution::facade_support::process_signal_event_type(
-                        signal.name.as_str(),
-                    )
-                    .map_err(inconsistent_artifact)?,
-                    payload_schema: lash_core_execution::JsonSchema::admit(
-                        lashlang::type_expr_to_json_schema(&artifact.resolve_type(&signal.ty)),
-                    )
-                    .map_err(|source| {
-                        PoolError::refused(RunRefusal::UnusableSchema {
-                            source: Box::new(source),
-                        })
-                    })?,
-                    semantics: Default::default(),
-                })
-            })
-            .collect::<Result<Vec<_>, PoolError>>()?;
         processes.insert(
             name.clone(),
             lash_vm_client::ProcessMetadata {
@@ -452,7 +410,6 @@ fn inspect(
                     .iter()
                     .map(|param| (param.name.to_string(), artifact.resolve_type(&param.ty)))
                     .collect(),
-                signals,
                 process_type: artifact.process_type(name),
             },
         );

@@ -253,7 +253,7 @@ fn test_host_environment() -> lashlang::LashlangHostEnvironment {
             TypeExpr::Any,
         )
         .expect("host catalog operation must not conflict");
-    // FIG-2999: starting, signalling and yielding are leaf tools now. `start`
+    // FIG-2999: starting and cancelling are leaf tools now. `start`
     // types its `definition` slot as a process, and that expected type is what
     // lifts a process literal out of the argument.
     resources
@@ -270,7 +270,7 @@ fn test_host_environment() -> lashlang::LashlangHostEnvironment {
             TypeExpr::Any,
         )
         .expect("host catalog operation must not conflict");
-    for operation in ["signal", "cancel", "emit"] {
+    for operation in ["cancel"] {
         resources
             .add_module_operation(
                 ["processes"],

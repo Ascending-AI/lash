@@ -346,14 +346,7 @@ impl Compiler {
                     self.mark_lashlang_execution_site(instruction, site);
                 }
             }
-            Expr::WaitSignal { name } => {
-                let name = self.push_name(name);
-                let instruction = self.code.len();
-                self.code.push(Instruction::ProcessWaitSignal { name });
-                if let Some(site) = self.lashlang_execution_site_for_expr(expr, path) {
-                    self.mark_lashlang_execution_site(instruction, site);
-                }
-            }
+
             Expr::ResultUnwrap(inner) => {
                 if self.compile_awaitable_effect_expr(expr, None, path) {
                     return;

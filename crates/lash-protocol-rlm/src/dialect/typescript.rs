@@ -115,38 +115,11 @@ const TYPESCRIPT_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocab
     field_miss_rule: "Never write a field name you haven't seen in the key sets below — guessed field names silently produce zeros rather than errors. If a name is not listed, it does not exist on that value.",
 };
 
-/// The host surface, in this dialect's spelling.
-///
-/// A TypeScript session used to receive no inventory at all: the section
-/// rendered tool signatures and stopped, so the trigger sources, their
-/// event types and the `triggers.*` operations were invisible — while the
-/// host's own prompt told the model to use them. A judged row watched a
-/// model search for `cron.Schedule`, find nothing, and conclude the trigger
-/// APIs did not exist.
-///
-/// Every row spells the inventory's `SchemaShape` through the same
-/// [`lash_typescript::render_schema_shape`] the tool declarations use, so a
-/// named host type reads the same in its `type … =` declaration and in every
-/// reference — `TriggerSource<cron.Tick>` renders `TriggerSource<cron_Tick>`
-/// — and no row can arrive in Lashlang notation (FIG-4673).
 fn render_host_surface_section(
     tool_catalog: &lash_core::ToolCatalog,
     host_environment: &lashlang::LashlangHostEnvironment,
 ) -> String {
-    let mut inventory = crate::protocol::prompt::host_surface_inventory(host_environment);
-    // FIG-2999: the trigger operations are no longer gated by an ability,
-    // so the prompt gates them on there being something to register. With
-    // no declared trigger source a cell cannot build a `source` value, and
-    // the whole `triggers.*` block — with the registration row type it
-    // returns — is prose the model can never act on.
-    if inventory.trigger_sources.is_empty() {
-        inventory
-            .operations
-            .retain(|operation| operation.alias != lashlang::TRIGGER_MODULE_ALIAS);
-        inventory
-            .data_types
-            .retain(|(name, _)| name != lashlang::TRIGGER_REGISTRATION_TYPE_NAME);
-    }
+    let inventory = crate::protocol::prompt::host_surface_inventory(host_environment);
     // Catalog tools already have a fully typed declaration under **Tools**,
     // rendered from the same contract; repeating them here would be a
     // second, weaker copy of the same signature.
@@ -166,10 +139,7 @@ fn render_host_surface_section(
             !documented_tools.contains(&format!("{}.{}", operation.alias, operation.operation))
         })
         .collect::<Vec<_>>();
-    if operations.is_empty()
-        && inventory.data_types.is_empty()
-        && inventory.constructors.is_empty()
-        && inventory.trigger_sources.is_empty()
+    if operations.is_empty() && inventory.data_types.is_empty() && inventory.constructors.is_empty()
     {
         return String::new();
     }
@@ -223,10 +193,6 @@ fn render_host_surface_section(
             .iter()
             .map(|constructor| {
                 let output = match &constructor.output {
-                    crate::protocol::prompt::HostSurfaceConstructorOutput::Nominal {
-                        wrapper,
-                        argument,
-                    } => format!("{wrapper}<{}>", lash_typescript::render_type_name(argument)),
                     crate::protocol::prompt::HostSurfaceConstructorOutput::Shape(shape) => {
                         lash_typescript::render_schema_shape(shape)
                     }
@@ -244,20 +210,7 @@ fn render_host_surface_section(
                 "\n\nPure value constructors. Never `await` these; use them wherever an expression is allowed:\n\n    {lines}"
             ));
     }
-    if !inventory.trigger_sources.is_empty() {
-        let lines = inventory
-            .trigger_sources
-            .iter()
-            .map(|(source_ty, event)| {
-                format!(
-                    "- `{source_ty}` is a `triggers.register` `source` and emits `{}`",
-                    lash_typescript::render_type_name(event)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        section.push_str(&format!("\n\nTrigger source protocol metadata:\n\n{lines}"));
-    }
+
     section
 }
 
@@ -275,15 +228,13 @@ pub(crate) fn catalogue_has_process_surface(tool_catalog: &lash_core::ToolCatalo
 ///
 /// `processes.*` renders from the catalogue like any other tool, so this block
 /// carries only what a signature cannot: that a process is a literal value,
-/// that its captures are copied by value, and that the signal a `run` body
-/// waits for is typed where it is awaited.
+/// and that its captures are copied by value.
 pub(crate) fn typescript_process_prompt(process_surface: bool) -> String {
     if !process_surface {
         return String::new();
     }
     r#"A process is an `async` arrow the cell never calls: `const review = async (request: string) => { ... };`, or one written inline in a process tool's argument. Its name is the `const` it is bound to, and start arguments key by the arrow's parameter names. Returning from it succeeds; throwing fails.
 Captures are by value: a name the body reads from the surrounding cell is copied when the process starts, so a later assignment is not seen, and a name that is not a durable `const` value is refused as a non-liftable capture.
-`waitSignal(name: string): Promise<unknown>` is run-only: it suspends the process until that signal arrives. The signal set is inferred from the literal names waited for, and the payload is typed at the await site: `const go = (await waitSignal("go")) as { at: string };`.
 A started handle outlives the turn; Stop cancels only the awaited handle; cancel is a request the child sees at its next step or wake."#
         .to_string()
 }
@@ -436,257 +387,6 @@ mod tests {
 
     use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
 
-    /// A TypeScript session must be told what it may register a trigger on.
-    ///
-    /// The section used to render tool signatures and stop, so a host that
-    /// declared `cron.Schedule` left the `triggers.*` operations out of the
-    /// substrate's prompt while the host prompt copy advertised them. A judged
-    /// row watched a model search for `cron.Schedule`, find nothing, and
-    /// conclude the trigger APIs did not exist — a VOID row produced by a
-    /// prompt that denied a capability the session actually had.
-    #[test]
-    fn the_execution_section_declares_the_hosts_trigger_surface() {
-        let mut resources = lashlang::LashlangHostCatalog::new();
-        resources
-            .add_trigger_source_constructor(
-                ["cron", "Schedule"],
-                lashlang::TypeExpr::Object(vec![
-                    lashlang::TypeField {
-                        name: "expr".into(),
-                        ty: lashlang::TypeExpr::Str,
-                        optional: false,
-                    },
-                    lashlang::TypeField {
-                        name: "tz".into(),
-                        ty: lashlang::TypeExpr::Str,
-                        optional: true,
-                    },
-                ]),
-                lashlang::NamedDataType::object(
-                    "cron.Tick",
-                    vec![lashlang::TypeField {
-                        name: "fired_at".into(),
-                        ty: lashlang::TypeExpr::Str,
-                        optional: false,
-                    }],
-                )
-                .expect("valid tick type"),
-            )
-            .expect("cron trigger source");
-        let dialect = SessionDialect::new(
-            std::sync::Arc::new(crate::dialect::TypescriptDialect),
-            lash_lashlang_runtime::LashlangSurface {
-                abilities: lashlang::LashlangAbilities::all(),
-                language_features: Default::default(),
-                resources,
-            },
-            RlmDialectServices {
-                workers: lash_vm_client::service::Service::default(),
-                artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
-                deferred_tool_resolver: None,
-                deferred_trigger_resolver: None,
-
-                execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
-                code_renderer: Default::default(),
-                channel: crate::plugin::RlmChannel::Cell,
-            },
-        );
-        let section = dialect
-            .render_execution_section(
-                crate::protocol::RlmPromptFeatures::default(),
-                &lash_core::ToolCatalog::from_tool_definitions(vec![]),
-                crate::plugin::RlmChannel::Cell,
-                None,
-            )
-            .expect("render execution section");
-
-        assert!(section.contains("### Host Surface"), "{section}");
-        assert!(
-            section.contains(
-                "cron.Schedule(input: { expr: string; tz?: string }): TriggerSource<cron_Tick>"
-            ),
-            "the constructor must be declared in TypeScript's own type spelling: {section}"
-        );
-        // The reference and the declaration must agree: a dotted name is a
-        // valid Lashlang reference and not a TypeScript identifier, so the
-        // model would otherwise be shown a type it cannot resolve against the
-        // declaration directly above it.
-        assert!(section.contains("type cron_Tick ="), "{section}");
-        // Every *reference* agrees with the declaration. The host's real dotted
-        // name survives only in the comment above each declaration, which is
-        // the bridge to the name the host's own errors and docs use.
-        let code_lines = section
-            .lines()
-            .filter(|line| !line.trim_start().starts_with("//"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(
-            !code_lines.contains("cron.Tick"),
-            "no reference may keep the dotted spelling: {section}"
-        );
-        assert!(
-            section.contains("`cron.Schedule` is a `triggers.register` `source`"),
-            "the trigger source names the tool that consumes it: {section}"
-        );
-        // Host Surface operations spell the call the model actually types —
-        // `module.operation(input): Promise<…>`, the same form the **Tools**
-        // section uses — with the lashlang identifier demoted to a comment.
-        assert!(
-            section.contains("triggers.register(input:"),
-            "the callable signature leads: {section}"
-        );
-        assert!(section.contains("triggers.list(input:"), "{section}");
-        assert!(
-            !code_lines.contains("triggers_register("),
-            "the internal `triggers_register` name must not be the signature: {section}"
-        );
-        // Skipped blocks join out cleanly: no run of blank lines where an
-        // absent `### Processes` (or empty Tools/Host Surface) would leave a
-        // gap.
-        assert!(
-            !section.contains("\n\n\n"),
-            "a skipped block must not leave blank residue: {section}"
-        );
-        // The process surface is the catalogue now (FIG-2999): an empty
-        // catalogue renders no process vocabulary at all.
-        assert!(!section.contains("defineProcess"), "{section}");
-        assert!(!section.contains("### Processes"), "{section}");
-        assert!(!section.contains("ProcessDefinition"), "{section}");
-        // And none of it may arrive in Lashlang's type syntax (ADR 0063).
-        for leak in ["list[", "-> str", ": str`", "float`", "trigger.register("] {
-            assert!(!section.contains(leak), "`{leak}` leaked: {section}");
-        }
-    }
-
-    /// Every type the section shows is spelled by the dialect's one
-    /// renderer, so a named host type reads the same in its declaration and
-    /// in every reference.
-    ///
-    /// The host surface used to spell types from `TypeExpr` text of its own:
-    /// a union — `triggers.list`'s `target` filter — arrived in Lashlang
-    /// notation (`str`, `enum[...]`), and a catalog tool's `$ref` to a host
-    /// data type rendered as `__lash_tool_<hex>`, a name no declaration
-    /// defines. Both rows now read the same `SchemaShape` the tool
-    /// signatures use (FIG-4673).
-    #[test]
-    fn host_surface_types_are_spelled_by_the_dialects_one_renderer() {
-        let mut resources = lashlang::LashlangHostCatalog::new();
-        resources
-            .add_trigger_source_constructor(
-                ["cron", "Schedule"],
-                lashlang::TypeExpr::Object(vec![lashlang::TypeField {
-                    name: "expr".into(),
-                    ty: lashlang::TypeExpr::Str,
-                    optional: false,
-                }]),
-                lashlang::NamedDataType::object(
-                    "cron.Tick",
-                    vec![lashlang::TypeField {
-                        name: "fired_at".into(),
-                        ty: lashlang::TypeExpr::Str,
-                        optional: false,
-                    }],
-                )
-                .expect("valid tick type"),
-            )
-            .expect("cron trigger source");
-        let dialect = SessionDialect::new(
-            std::sync::Arc::new(crate::dialect::TypescriptDialect),
-            lash_lashlang_runtime::LashlangSurface {
-                abilities: lashlang::LashlangAbilities::all(),
-                language_features: Default::default(),
-                resources,
-            },
-            RlmDialectServices {
-                workers: lash_vm_client::service::Service::default(),
-                artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
-                deferred_tool_resolver: None,
-                deferred_trigger_resolver: None,
-
-                execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
-                code_renderer: Default::default(),
-                channel: crate::plugin::RlmChannel::Cell,
-            },
-        );
-        // A catalog tool whose contract names the host's data type: its row
-        // is rendered from the tool's schema and the declaration from the
-        // host catalog, and the model resolves the reference only when the
-        // two spellings agree.
-        let tick_schema = serde_json::json!({
-            "$id": "cron.Tick",
-            "type": "object",
-            "properties": { "fired_at": { "type": "string" } },
-            "required": ["fired_at"],
-            "additionalProperties": false
-        });
-        let tool = lash_core::ToolDefinition::raw(
-            "tool:probe/read_tick",
-            "read_tick",
-            "Read a tick",
-            serde_json::json!({
-                "type": "object",
-                "properties": { "tick": { "$ref": "cron.Tick" } },
-                "required": ["tick"],
-                "additionalProperties": false,
-                "definitions": { "Tick": tick_schema.clone() }
-            }),
-            serde_json::json!({ "$ref": "cron.Tick", "definitions": { "Tick": tick_schema } }),
-        )
-        .expect("valid declared tool schemas")
-        .with_execution(std::time::Duration::from_secs(120))
-        .with_tool_binding(ToolBinding::new(["probe"], "read"));
-        let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool]);
-        let section = dialect
-            .render_execution_section(
-                crate::protocol::RlmPromptFeatures::default(),
-                &catalog,
-                crate::plugin::RlmChannel::Cell,
-                None,
-            )
-            .expect("render execution section");
-
-        assert!(section.contains("type cron_Tick ="), "{section}");
-        assert!(
-            section.contains("probe.read({ tick: cron_Tick }): Promise<cron_Tick>"),
-            "a tool row spells a named host type the way its declaration does: {section}"
-        );
-        assert!(
-            !section.contains("__lash_tool_"),
-            "no reference may spell a name no declaration defines: {section}"
-        );
-
-        // `triggers.list`'s `target` filter is a union of records; it used
-        // to arrive in Lashlang notation — `enum[...]` and `str` — a syntax
-        // no TypeScript cell can write.
-        let host_surface = section
-            .split_once("### Host Surface")
-            .expect("host surface")
-            .1;
-        assert!(
-            host_surface.contains("triggers.list(input:"),
-            "{host_surface}"
-        );
-        for leak in ["enum[", "list[", "dict", "->"] {
-            assert!(
-                !host_surface.contains(leak),
-                "Lashlang notation `{leak}` reached the TypeScript prompt: {host_surface}"
-            );
-        }
-        assert!(
-            host_surface.contains("$lash_definition_id: string"),
-            "the union's fields render as TypeScript properties: {host_surface}"
-        );
-    }
-
-    /// The process section is gated by the catalogue, not by an ability.
-    ///
-    /// FIG-2999 deleted `LashlangAbilities.{processes, process_signals,
-    /// triggers}`: whether a session can run processes is whether the host
-    /// rendered the `processes.*` tools, so the authoring block appears with
-    /// them and disappears without them. It carries only what a tool signature
-    /// cannot say — that the body is an uncalled `async` arrow whose parameter
-    /// names are the start argument keys, that captures are copied by value,
-    /// and where the awaited signal payload is typed.
     #[test]
     fn the_process_section_follows_the_catalogue_and_teaches_the_argument_convention() {
         let dialect = SessionDialect::new(
@@ -696,7 +396,6 @@ mod tests {
                 workers: lash_vm_client::service::Service::default(),
                 artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
-                deferred_trigger_resolver: None,
 
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 code_renderer: Default::default(),
@@ -750,10 +449,6 @@ mod tests {
             with.contains("Captures are by value"),
             "capture-by-value is prompt-only knowledge: {with}"
         );
-        assert!(
-            with.contains("typed at the await site"),
-            "signal typing belongs at the await site: {with}"
-        );
         // None of the deleted special forms may come back as prose.
         for retired in [
             "defineProcess",
@@ -763,112 +458,6 @@ mod tests {
         ] {
             assert!(!with.contains(retired), "`{retired}` survived: {with}");
         }
-    }
-
-    /// The second, structural check on prompt honesty: the diagnostics the
-    /// prompt's own primitives can emit must be spelled in this dialect.
-    ///
-    /// `every_diagnostic_code_named_in_the_prompt_exists` walks `TS_` tokens,
-    /// so it can only see *codes*. It cannot see an identifier leak, and one
-    /// shipped: misusing `waitSignal` rejected with ``` `wait_signal` can only
-    /// be used inside a process body ``` — a Lashlang identifier that appears
-    /// nowhere in the TypeScript prompt, handed to a model that has no way to
-    /// map it back. This walks the other direction: every primitive the prompt
-    /// declares is misused on purpose, and the resulting model-facing message
-    /// must not name a Lashlang-only spelling.
-    #[test]
-    fn no_diagnostic_from_a_prompt_primitive_names_a_lashlang_identifier() {
-        // The catalog carries a real trigger source so the registration misuse
-        // below reaches the target: with no declared source, every trigger
-        // registration fails on its `source` first and the fixture proves
-        // nothing about dynamic targets.
-        let mut resources = lashlang::LashlangHostCatalog::default();
-        resources
-            .add_trigger_source_constructor(
-                ["timer", "Schedule"],
-                lashlang::TypeExpr::Object(vec![lashlang::TypeField {
-                    name: "expr".into(),
-                    ty: lashlang::TypeExpr::Str,
-                    optional: false,
-                }]),
-                lashlang::NamedDataType::object(
-                    "timer.Tick",
-                    vec![lashlang::TypeField {
-                        name: "fired_at".into(),
-                        ty: lashlang::TypeExpr::Str,
-                        optional: false,
-                    }],
-                )
-                .expect("valid timer tick type"),
-            )
-            .expect("valid timer trigger source");
-        // ... and the trigger operations themselves. Without them `triggers`
-        // is an unknown module, every registration misuse below rejects with
-        // `TS_LINK_ERROR: unknown module 'triggers'`, and the fixture proves
-        // nothing about the shapes it names.
-        lashlang::add_trigger_resource_operations(&mut resources)
-            .expect("valid trigger operations");
-        lashlang::add_trigger_register_tool_binding(&mut resources)
-            .expect("trigger register tool binding is unique");
-        let host =
-            lashlang::LashlangHostEnvironment::new(resources, lashlang::LashlangAbilities::all());
-        // Identifiers that exist only in Lashlang's surface. A model reading
-        // the TypeScript prompt has never seen any of them.
-        let lashlang_only = [
-            "wait_signal",
-            "signal_run",
-            "define_process",
-            "register_trigger",
-            lashlang::LANGUAGE_RUNTIME_MODULE_PATH,
-        ];
-        // Misuse shapes for the primitives the Host API block declares. Each
-        // must reject, and reject in TypeScript's own vocabulary.
-        let misuses = [
-            ("waitSignal at top level", "await waitSignal(\"go\");"),
-            (
-                "waitSignal inside a plain function",
-                "function f(): unknown { return waitSignal(\"go\"); } finish(f());",
-            ),
-            (
-                "a process body capturing a mutable binding",
-                "let counter = 1; const p = async (a: unknown) => { return counter; }; finish(1);",
-            ),
-            (
-                "a trigger registration whose `inputs` is not the erased arrow",
-                "const p = async (a: unknown) => { return a; }; finish(await triggers.register({ source: timer.Schedule({ expr: \"0 8 * * *\" }), target: { definition: p }, inputs: { a: 1 } }));",
-            ),
-            (
-                "an unknown binding",
-                "finish(await nowhere.fetch({ url: \"x\" }));",
-            ),
-        ];
-
-        let mut leaks = Vec::new();
-        for (label, source) in misuses {
-            let message = match lash_typescript::link(source, &host) {
-                Ok(_) => {
-                    leaks.push(format!("{label}: linked, so it is not a misuse at all"));
-                    continue;
-                }
-                Err(error) => error.to_string(),
-            };
-            for identifier in lashlang_only {
-                if message.contains(identifier) {
-                    leaks.push(format!("{label}: names `{identifier}` — {message}"));
-                }
-            }
-        }
-        assert!(
-            leaks.is_empty(),
-            "model-facing TypeScript diagnostics leak Lashlang identifiers: {leaks:#?}"
-        );
-
-        // The process authoring block is catalogue-gated, so the prompt text
-        // itself is asserted directly rather than through a rendered section.
-        let prompt = typescript_process_prompt(true);
-        assert!(prompt.contains("`waitSignal(name: string): Promise<unknown>` is run-only"));
-        lash_typescript::link("await sleep(1); finish(1);", &host)
-            .expect("the prompt says sleep is also valid in a cell");
     }
 
     /// Every identifier the rendered catalog advertises must link to a binding.

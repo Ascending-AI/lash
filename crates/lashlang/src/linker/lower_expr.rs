@@ -79,7 +79,6 @@ impl<'module> Linker<'module> {
         scope: &mut Scope,
         expected: Option<&TypeExpr>,
     ) -> Result<(Expr, Binding), LinkError> {
-        self.reject_trigger_event_special_form(expr, scope.span)?;
         self.validate_expected_literals(expr, expected, scope.span)?;
         if let Expr::ProcessLiteral(literal) = expr {
             return self.lower_process_literal(literal, path, scope, expected);
@@ -159,7 +158,7 @@ impl<'module> Linker<'module> {
             } => self.lower_receiver_call(receiver, operation, args, path, scope),
             Expr::Await(inner) => self.lower_await(inner, path, scope, expected),
             Expr::SleepFor(inner) => self.lower_sleep_for(inner, path, scope),
-            Expr::WaitSignal { name } => self.lower_wait_signal(name, scope, expected),
+
             Expr::ResultUnwrap(inner) => self.lower_result_unwrap(inner, path, scope, expected),
             Expr::Print(inner) => self.lower_print(inner, path, scope),
             Expr::Finish(inner) => self.lower_finish(path, inner, scope),
@@ -867,59 +866,6 @@ impl<'module> Linker<'module> {
                 span: scope.span,
             });
         };
-        let trigger_operation = if crate::is_trigger_resource_type(&resource_type) {
-            crate::TriggerHostOperation::from_receiver_method(operation.as_str())
-        } else {
-            None
-        };
-        if let Some(trigger_operation) = trigger_operation {
-            validate_trigger_operation_subscription_key(trigger_operation, args, scope.span)?;
-        }
-        // `triggers.register` is an ordinary catalog tool (FIG-3116); the
-        // module binding points at it by tool id. Its arguments still lower
-        // through the shared registration path so the link-time checks
-        // (source event type, target lift, inputs defaulting) hold.
-        let registration_operation = match resolved_module_operation {
-            Some(resolved) if resolved.host_operation == crate::REGISTER_TRIGGER_TOOL_ID => {
-                validate_register_tool_subscription_key(args, scope.span)?;
-                Some(TriggerRegistrationOperation::Register)
-            }
-            _ => match trigger_operation {
-                Some(crate::TriggerHostOperation::Update) => {
-                    Some(TriggerRegistrationOperation::Update)
-                }
-                Some(crate::TriggerHostOperation::Revive) => {
-                    Some(TriggerRegistrationOperation::Revive)
-                }
-                _ => None,
-            },
-        };
-        if let Some(registration_operation) = registration_operation {
-            let (lowered_args, output_ty) =
-                self.lower_trigger_registration_args(registration_operation, args, path, scope)?;
-            return Ok((
-                Expr::ReceiverCall {
-                    receiver: Box::new(lowered_receiver),
-                    operation: operation.clone(),
-                    args: lowered_args,
-                },
-                Binding::Value(output_ty),
-            ));
-        }
-        if let Some(trigger_operation) = trigger_operation
-            .filter(|operation| matches!(operation, crate::TriggerHostOperation::List))
-        {
-            let (lowered_args, output_ty) =
-                self.lower_trigger_operation_args(trigger_operation, args, path, scope)?;
-            return Ok((
-                Expr::ReceiverCall {
-                    receiver: Box::new(lowered_receiver),
-                    operation: operation.clone(),
-                    args: lowered_args,
-                },
-                Binding::Value(output_ty),
-            ));
-        }
         let mut lowered_args = Vec::with_capacity(args.len());
         let mut arg_types = Vec::with_capacity(args.len());
         for (index, arg) in args.iter().enumerate() {
@@ -993,66 +939,6 @@ impl<'module> Linker<'module> {
             Expr::SleepFor(Box::new(self.lower_expr(inner, &path.child(0), scope)?.0)),
             Binding::Value(TypeExpr::Null),
         ))
-    }
-
-    pub(super) fn lower_wait_signal(
-        &self,
-        name: &AstString,
-        scope: &mut Scope,
-        expected: Option<&TypeExpr>,
-    ) -> Result<(Expr, Binding), LinkError> {
-        if !scope.process_body {
-            return Err(LinkError::ProcessLifecycleOutsideProcess {
-                keyword: self.wait_signal_keyword(),
-                span: scope.span,
-            });
-        }
-        self.record_signal_payload(name.as_str(), expected, scope.span)?;
-        Ok((
-            Expr::WaitSignal { name: name.clone() },
-            Binding::Value(TypeExpr::Any),
-        ))
-    }
-
-    /// A second site for the same name must agree: sites whose resolved
-    /// types are mutually unassignable conflict and the link is refused; the
-    /// set is structural, so an unreached branch's wait sites count.
-    pub(super) fn record_signal_payload(
-        &self,
-        name: &str,
-        expected: Option<&TypeExpr>,
-        span: Option<Span>,
-    ) -> Result<(), LinkError> {
-        let mut collector = self.signal_collector.borrow_mut();
-        let Some(signals) = collector.as_mut() else {
-            return Ok(());
-        };
-        let payload = expected
-            .map(|expected| self.resolve_type_aliases(expected))
-            .unwrap_or(TypeExpr::Any);
-        match signals.get(name).cloned() {
-            None => {
-                signals.insert(name.to_owned(), payload);
-                Ok(())
-            }
-            Some(existing) => {
-                // Equality is the fast path of mutual assignability, so the
-                // two agree-cases share one arm.
-                if existing == payload
-                    || (self.is_type_assignable(&existing, &payload)
-                        && self.is_type_assignable(&payload, &existing))
-                {
-                    Ok(())
-                } else {
-                    Err(LinkError::ConflictingSignalPayload {
-                        name: name.to_owned(),
-                        first: format_type_expr(&existing),
-                        second: format_type_expr(&payload),
-                        span,
-                    })
-                }
-            }
-        }
     }
 
     pub(super) fn lower_result_unwrap(

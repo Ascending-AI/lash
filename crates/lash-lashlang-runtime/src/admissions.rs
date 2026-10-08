@@ -26,7 +26,7 @@ pub trait MemberAdmissions: Send + Sync {
 
 /// The admissions of one run's operations. Every tool call an operation
 /// makes, alone or in an aggregate, is its own admitted execution, as its
-/// host declares it (ADR 0132 §5). A wait (an await, a sleep, a signal wait)
+/// host declares it (ADR 0132 §5). A wait (an await, a sleep)
 /// is admitted as no execution: a restore performs it again. A sleep pins
 /// its timer with its admission, due at the absolute deadline it was
 /// admitted with, and so does each timer leaf of an aggregate, in leaf

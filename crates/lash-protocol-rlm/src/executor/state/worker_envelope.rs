@@ -9,7 +9,7 @@
 //!   [`RlmWorkerCapture`] (worker to parent).
 //! - **Authority**, the parent's: the deferred tool resolutions with their
 //!   [`ToolGrant`](lash_lashlang_runtime::ToolGrant)s and host-owned
-//!   `execution_binding`s, and the deferred trigger resolutions with their
+//!   `execution_binding`s, and the deferred tool resolutions with their
 //!   routes. They never cross, in either direction.
 //!
 //! Both envelope types deny unknown fields, so bytes a worker returns cannot

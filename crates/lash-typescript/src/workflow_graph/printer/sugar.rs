@@ -165,119 +165,6 @@ impl<'p> Printer<'p> {
         Ok(args.join(", "))
     }
 
-    /// A `triggers.register`/`update`/`revive` config record: every field
-    /// prints as written except `inputs`, which is the record the erased
-    /// `(event) => ({ .. })` arrow template left.
-    pub(super) fn trigger_registration(
-        &self,
-        receiver: &Expr,
-        operation: &str,
-        entries: &[(lashlang::AstString, Expr)],
-    ) -> Printed {
-        let mut fields = Vec::with_capacity(entries.len());
-        for (name, value) in entries {
-            if name.as_str() == "inputs" {
-                if let Some(spelling) = self.trigger_inputs(value, entries)? {
-                    fields.push(format!("inputs: {spelling}"));
-                }
-                continue;
-            }
-            fields.push(format!(
-                "{}: {}",
-                key(name.as_str()),
-                self.expression(value)?
-            ));
-        }
-        Ok(format!(
-            "{}.{}({{ {} }})",
-            self.member_target(receiver)?,
-            self.identifier("operation", operation)?,
-            fields.join(", ")
-        ))
-    }
-
-    /// The `inputs` template's spelling: `(event) => ({ .. })` where each
-    /// event-marker entry is the parameter read back. `Ok(None)` omits the
-    /// field: a target taking exactly one parameter gets `{param: event}`
-    /// from the linker by default, and the authored form drops it.
-    pub(super) fn trigger_inputs(
-        &self,
-        inputs: &Expr,
-        entries: &[(lashlang::AstString, Expr)],
-    ) -> Result<Option<String>, TypeScriptSourceError> {
-        let Expr::Record(mappings) = unmarked(inputs) else {
-            return Err(TypeScriptSourceError::Unrepresentable {
-                kind: "a trigger registration `inputs` that is not a record",
-            });
-        };
-        // Omitted `inputs` defaults to `{param: event}` when the target
-        // definition takes exactly one parameter. The definition is the
-        // literal itself before the link and a lifted `ProcessRef` after.
-        let target = entries
-            .iter()
-            .find(|(name, _)| name.as_str() == "target")
-            .map(|(_, value)| unmarked(value));
-        if let Some(Expr::Record(target_fields)) = target {
-            let definition = target_fields
-                .iter()
-                .find(|(name, _)| name.as_str() == "definition")
-                .map(|(_, value)| unmarked(value));
-            let parameters = match definition {
-                Some(Expr::ProcessLiteral(literal)) => Some(
-                    literal
-                        .params
-                        .iter()
-                        .map(|param| param.name.to_string())
-                        .collect::<Vec<_>>(),
-                ),
-                Some(Expr::ProcessRef { process }) => {
-                    self.lifted.get(process.as_str()).map(|declaration| {
-                        authored_params(declaration)
-                            .iter()
-                            .map(|param| param.name.to_string())
-                            .collect::<Vec<_>>()
-                    })
-                }
-                _ => None,
-            };
-            if let Some(parameters) = parameters
-                && let [parameter] = parameters.as_slice()
-                && let [(name, value)] = mappings.as_slice()
-                && name.as_str() == parameter.as_str()
-                && is_trigger_event_marker(value)
-            {
-                return Ok(None);
-            }
-        }
-        // The arrow's parameter is any name the config does not read.
-        let parameter = ["event", "trigger_event"]
-            .into_iter()
-            .find(|candidate| {
-                !entries.iter().any(|(name, value)| {
-                    name.as_str() != "inputs" && mentions_variable(value, candidate)
-                }) && !mappings.iter().any(|(_, value)| {
-                    !is_trigger_event_marker(value) && mentions_variable(value, candidate)
-                })
-            })
-            .unwrap_or("trigger_event_");
-        let mut properties = Vec::with_capacity(mappings.len());
-        for (name, value) in mappings {
-            if is_trigger_event_marker(value) {
-                properties.push(format!("{}: {parameter}", key(name.as_str())));
-            } else {
-                properties.push(format!(
-                    "{}: {}",
-                    key(name.as_str()),
-                    self.expression(value)?
-                ));
-            }
-        }
-        Ok(Some(format!(
-            "({parameter}) => ({{ {} }})",
-            properties.join(", ")
-        )))
-    }
-
     pub(super) fn resource_ref(&self, resource: &ResourceRefExpr) -> Printed {
         let path = if resource.path.is_empty() {
             resource
@@ -424,14 +311,6 @@ fn all_settled_results_source<'a>(items: &'a Expr, function: &'a Expr) -> Option
                                 && field(&cause[0].1, "cause")))
     });
     (fields.len() == 2 && has_status && has_reason).then_some(source)
-}
-
-/// The `{"$lash.trigger.event": true}` record the fired event reads back as.
-fn is_trigger_event_marker(expression: &Expr) -> bool {
-    matches!(unmarked(expression), Expr::Record(fields)
-        if fields.len() == 1
-            && fields[0].0.as_str() == lashlang::LASH_TRIGGER_EVENT_KEY
-            && matches!(fields[0].1, Expr::Bool(true)))
 }
 
 /// Whether a `Variable` named `name` occurs under `expression` — the IR

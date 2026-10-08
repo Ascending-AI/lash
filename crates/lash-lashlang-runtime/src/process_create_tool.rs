@@ -32,7 +32,7 @@ pub fn process_create_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:create_process",
         "create_process",
-        "Create a process definition from source text and return it. The source defines exactly one process; the returned definition can be passed to `processes.start` or a trigger target, and it lasts as long as the variable that holds it.",
+        "Create a process definition from source text and return it. The source defines exactly one process; the returned definition can be passed to `processes.start`, and it lasts as long as the variable that holds it.",
         serde_json::json!({
             "type": "object",
             "properties": {

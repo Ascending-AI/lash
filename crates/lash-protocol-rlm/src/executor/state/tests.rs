@@ -142,45 +142,6 @@ async fn old_json_snapshot_is_typed_format_rejection_with_cutover_remedy() {
     assert!(message.contains("recreate development/test stores"));
 }
 
-#[test]
-fn canonical_resolution_field_order_is_independent_of_key_shape() {
-    // Hand-written MessagePack pins ordering independently of serde's encoder.
-    fn string(bytes: &mut Vec<u8>, value: &str) {
-        assert!(value.len() < 32);
-        bytes.push(0xa0 | u8::try_from(value.len()).expect("fixstr length"));
-        bytes.extend_from_slice(value.as_bytes());
-    }
-    for key in ["module.operation", "bare", "x].y", "schema"] {
-        for reversed in [false, true] {
-            let mut bytes = vec![0x81];
-            string(&mut bytes, "deferred_trigger_resolutions");
-            bytes.push(0x81);
-            string(&mut bytes, "resolutions");
-            bytes.push(0x81);
-            string(&mut bytes, key);
-            bytes.push(0x82);
-            let fields = if reversed {
-                ["provider_id", "kind"]
-            } else {
-                ["kind", "provider_id"]
-            };
-            for field in fields {
-                string(&mut bytes, field);
-                string(&mut bytes, "value");
-            }
-            let result = validate_canonical_root(&bytes);
-            if reversed {
-                assert!(
-                    matches!(result, Err(RlmSnapshotError::NonCanonicalEnvelope { ref reason, .. }) if reason.contains("canonical declaration order")),
-                    "key {key}"
-                );
-            } else {
-                result.expect("declared resolution order must be accepted for every key shape");
-            }
-        }
-    }
-}
-
 #[tokio::test]
 async fn rlm_snapshot_accepts_inline_global_named_schema() {
     let mut state = RlmExecutionState::new();
@@ -276,76 +237,6 @@ async fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
 /// version freeze, regenerate this witness from the encoder after an intended
 /// shape change; the version stays fixed.
 // The golden pins N's encoding; the synthetic N+1 moves the root's stamps.
-#[cfg(not(feature = "synthetic-next"))]
-#[test]
-fn the_1_0_root_encodes_to_golden_bytes() {
-    const GOLDEN: &str = concat!(
-        "85a776657273696f6e01a6656e67696e65a86c6173686c616e67ac73746174655f686561646572c40a81a776657273696f6e",
-        "01a7676c6f62616c7382ad696e6c696e655f7363616c617282a46b696e64a6696e6c696e65a4626f6479c42982a576616c75",
-        "6582a46b696e64a6737472696e67a576616c7565a5736d616c6ca76f626a6563747390b06c65616665645f636f6d706f7369",
-        "746582a46b696e64a46c656166a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f626c616b65332f6366",
-        "3737383234633263313231663030663133626563343139626164306464663766653930646639313730653732303139643938",
-        "633732356164653966363561bc64656665727265645f747269676765725f7265736f6c7574696f6e7381ab7265736f6c7574",
-        "696f6e7380",
-    );
-
-    let prior_leaf_keys = BTreeSet::new();
-    let mut changed_leaves = BTreeMap::new();
-    let inline_global = persist_value_body(
-        fragment_body(FlowValue::String("small".into())),
-        &prior_leaf_keys,
-        &mut changed_leaves,
-    );
-    assert!(matches!(inline_global, PersistedValue::Inline { .. }));
-    let leaf_global = persist_value_body(
-        canonical_string_global_body(512),
-        &prior_leaf_keys,
-        &mut changed_leaves,
-    );
-    assert!(matches!(leaf_global, PersistedValue::Leaf { .. }));
-    assert_eq!(changed_leaves.len(), 1);
-    let mut globals = BTreeMap::new();
-    globals.insert("inline_scalar".to_string(), inline_global);
-    globals.insert("leafed_composite".to_string(), leaf_global);
-    let root = RlmSnapshotRoot {
-        version: RLM_SNAPSHOT_VERSION,
-        engine: "lashlang".to_string(),
-        state_header: FlowState::new()
-            .durable_parts(
-                &DurableBaseline::default(),
-                lash_core::FleetFormat::current(),
-            )
-            .expect("encode the plain state's header")
-            .header,
-        globals,
-        deferred_trigger_resolutions:
-            lash_lashlang_runtime::DeferredTriggerResolutionRecord::default(),
-    };
-
-    let encoded = rmp_serde::to_vec_named(&root).expect("encode the golden root");
-    validate_canonical_root(&encoded).expect("the golden root is canonical");
-    let hex = encoded
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    println!("RLM_ROOT_GOLDEN_HEX={hex}");
-    assert_eq!(
-        hex, GOLDEN,
-        "the 1.0 root encoding changed; regenerate the golden for an intended shape change"
-    );
-
-    let decoded: RlmSnapshotRoot =
-        rmp_serde::from_slice(&encoded).expect("the golden root round-trips");
-    assert_eq!(decoded.version, RLM_SNAPSHOT_VERSION);
-    assert_eq!(
-        root_leaf_keys(&decoded),
-        [ExecutionLeafName::new(
-            "blake3/cf77824c2c121f00f13bec419bad0ddf7fe90df9170e72019d98c725ade9f65a"
-        ),]
-        .into_iter()
-        .collect()
-    );
-}
 
 /// A real version-22 capture, written by the build before the durable-heap
 /// cutover (FIG-3605) for the cell
@@ -679,4 +570,72 @@ async fn excludes_custom_projected_globals_without_rendering_or_materializing() 
     assert!(vars.is_empty(), "{vars:?}");
     assert_eq!(projected.render_count.load(Ordering::SeqCst), 0);
     assert_eq!(projected.materialize_count.load(Ordering::SeqCst), 0);
+}
+
+#[cfg(not(feature = "synthetic-next"))]
+#[test]
+fn the_1_0_root_encodes_to_golden_bytes() {
+    const GOLDEN: &str = concat!(
+        "84a776657273696f6e01a6656e67696e65a86c6173686c616e67ac73746174655f686561646572c40a81a77665727369",
+        "6f6e01a7676c6f62616c7382ad696e6c696e655f7363616c617282a46b696e64a6696e6c696e65a4626f6479c42982a5",
+        "76616c756582a46b696e64a6737472696e67a576616c7565a5736d616c6ca76f626a6563747390b06c65616665645f63",
+        "6f6d706f7369746582a46b696e64a46c656166a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f62",
+        "6c616b65332f636637373832346332633132316630306631336265633431396261643064646637666539306466393137",
+        "30653732303139643938633732356164653966363561",
+    );
+
+    let prior_leaf_keys = BTreeSet::new();
+    let mut changed_leaves = BTreeMap::new();
+    let inline_global = persist_value_body(
+        fragment_body(FlowValue::String("small".into())),
+        &prior_leaf_keys,
+        &mut changed_leaves,
+    );
+    assert!(matches!(inline_global, PersistedValue::Inline { .. }));
+    let leaf_global = persist_value_body(
+        canonical_string_global_body(512),
+        &prior_leaf_keys,
+        &mut changed_leaves,
+    );
+    assert!(matches!(leaf_global, PersistedValue::Leaf { .. }));
+    assert_eq!(changed_leaves.len(), 1);
+    let mut globals = BTreeMap::new();
+    globals.insert("inline_scalar".to_string(), inline_global);
+    globals.insert("leafed_composite".to_string(), leaf_global);
+    let root = RlmSnapshotRoot {
+        version: RLM_SNAPSHOT_VERSION,
+        engine: "lashlang".to_string(),
+        state_header: FlowState::new()
+            .durable_parts(
+                &DurableBaseline::default(),
+                lash_core::FleetFormat::current(),
+            )
+            .expect("encode the plain state's header")
+            .header,
+        globals,
+    };
+
+    let encoded = rmp_serde::to_vec_named(&root).expect("encode the golden root");
+    validate_canonical_root(&encoded).expect("the golden root is canonical");
+    let hex = encoded
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    println!("RLM_ROOT_GOLDEN_HEX={hex}");
+    assert_eq!(
+        hex, GOLDEN,
+        "the 1.0 root encoding changed; regenerate the golden for an intended shape change"
+    );
+
+    let decoded: RlmSnapshotRoot =
+        rmp_serde::from_slice(&encoded).expect("the golden root round-trips");
+    assert_eq!(decoded.version, RLM_SNAPSHOT_VERSION);
+    assert_eq!(
+        root_leaf_keys(&decoded),
+        [ExecutionLeafName::new(
+            "blake3/cf77824c2c121f00f13bec419bad0ddf7fe90df9170e72019d98c725ade9f65a"
+        ),]
+        .into_iter()
+        .collect()
+    );
 }

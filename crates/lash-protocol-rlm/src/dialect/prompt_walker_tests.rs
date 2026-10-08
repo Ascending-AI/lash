@@ -33,32 +33,6 @@
 use super::*;
 use lash_lashlang_runtime::ToolDefinitionBindingExt as _;
 
-/// The authored example corpus, as tool authors spell it.
-///
-/// Copied deliberately rather than read from a live catalog: this is the shape
-/// authors write, and the rewriter has to survive every one of them. The set
-/// spans the current first-party plugins (process controls, the standard
-/// protocol, the MCP web tools) plus retired tool families the rewriter must
-/// still accept verbatim.
-fn authored_tool_examples() -> Vec<&'static str> {
-    vec![
-        r#"await parallel.web_search_57jmhsdk2uvtc7o55qwq73syq({ query: "latest Rust release notes", limit: 5 })?"#,
-        r#"await files.read({ path: "src/main.rs", offset: 1, limit: 120 })?"#,
-        r#"await files.edit({ path: "src/main.rs", edits: [{ oldText: "old();", newText: "new();" }] })?"#,
-        r#"await files.glob({ pattern: "**/*.rs", path: "crates/lash/src", limit: 50 })?"#,
-        r#"await files.write({ path: "hello.txt", content: "hello\n" })?"#,
-        r#"await jobs.run({ target: "//crates/lash-protocol-rlm:protocol_drivers__test", timeout_ms: 600000 })?"#,
-        "probe = await files.stat({ path: \"Cargo.lock\" })?\nfinish probe.size > 0",
-        r#"await jobs.start({ name: "daemon", args: ["--serve"], detach: true })?"#,
-        r#"await jobs.send({ process_id: "call-job-1", message: "", close: true })?"#,
-        r#"await processes.list({ status: "any" })?"#,
-        r#"await processes.cancel({ process_id: "tool:call-01JZK7G4QP9Q4J7W3Q2E1H6M9C" })?"#,
-        r#"await tools.batch({ tool_calls: [{ tool: "read_file", parameters: { path: "src/main.rs" } }] })?"#,
-        r#"await tools.search({ query: "text checksum", limit: 3 })?"#,
-        r#"await workbench_deferred.stats({ /* matching arguments */ })?"#,
-    ]
-}
-
 /// Text that names the retired surface, with the reason each token is a defect.
 ///
 /// A TypeScript session must never see the retired cell tag, its language name
@@ -133,6 +107,159 @@ fn strip_carve_outs(text: &str) -> String {
 
 async fn assembled_prompt_fragments(dialect: &SessionDialect) -> Vec<(&'static str, String)> {
     assembled_prompt_fragments_with_projection(dialect, serde_json::json!("src/lib.rs")).await
+}
+
+#[tokio::test]
+async fn no_assembled_prompt_fragment_carries_the_retired_surfaces_words() {
+    let dialect = crate::dialect::typescript_test_dialect();
+    let mut violations = Vec::new();
+    for (name, fragment) in assembled_prompt_fragments(&dialect).await {
+        let haystack = strip_carve_outs(&fragment).to_lowercase();
+        for marker in RETIRED_SURFACE_MARKERS {
+            if haystack.contains(&marker.to_lowercase()) {
+                violations.push(format!("prompt fragment `{name}` contains `{marker}`"));
+            }
+        }
+        for word in retired_type_words(&fragment) {
+            violations.push(format!(
+                "prompt fragment `{name}` spells a type as `{word}`"
+            ));
+        }
+    }
+    violations.sort();
+    let residuals = KNOWN_TYPE_SYNTAX_RESIDUALS
+        .iter()
+        .map(|residual| (*residual).to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        violations, residuals,
+        "the assembled prompt carries retired-surface words, or a known residual changed. \
+         Fixing one means deleting its row from KNOWN_TYPE_SYNTAX_RESIDUALS."
+    );
+}
+
+// FIG-4544 closes the last of them: tool rows, the required-output block, the
+// history definition and inferred value shapes are all spelled by the dialect.
+const KNOWN_TYPE_SYNTAX_RESIDUALS: &[&str] = &[];
+
+/// The retired surface's type words, where a fragment uses one as a type.
+///
+/// `RETIRED_SURFACE_MARKERS` pins a few whole tokens (`list[`, `: str,`). A
+/// type can follow any of `:`, `|`, `<`, `[` or `=`, and end at any
+/// punctuation, so this reads the word after each of those instead. None of
+/// these words is a TypeScript type, so a match is the retired spelling.
+fn retired_type_words(text: &str) -> Vec<String> {
+    const WORDS: &[&str] = &[
+        "str", "int", "float", "bool", "record", "list", "enum", "dict",
+    ];
+    let mut found = Vec::new();
+    for (index, opener) in text.char_indices() {
+        if !matches!(opener, ':' | '|' | '<' | '[' | '=') {
+            continue;
+        }
+        let rest = text[index + opener.len_utf8()..].trim_start_matches(' ');
+        let word = rest
+            .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+            .next()
+            .unwrap_or_default();
+        if WORDS.contains(&word) && !found.iter().any(|seen| seen == word) {
+            found.push(word.to_string());
+        }
+    }
+    found
+}
+
+/// The walker only measures if its marker list can fire, and only proves
+/// anything if a rendered example is *parseable* TypeScript.
+#[test]
+fn the_marker_list_and_the_example_rewriter_are_not_vacuous() {
+    // RV-3: a rendered example must be *parseable* TypeScript, not merely free
+    // of retired markers. The marker walk cannot tell "reads like TypeScript"
+    // from "is a syntax error", and a syntax error in an example is exactly the
+    // defect the examples fix exists to close. Parsed rather than linked: an
+    // example names host modules and free identifiers that no isolated
+    // environment has, so `TS_UNKNOWN_BINDING` is expected and a *syntax* error
+    // is not.
+    let typescript = crate::dialect::TypescriptDialect;
+    let mut unparseable = Vec::new();
+    for example in authored_tool_examples() {
+        let rendered = typescript
+            .render_tool_example(example)
+            .expect("TypeScript spells every authored example");
+        if let Err(error) = lash_typescript::parse(&rendered) {
+            let code = format!("{:?}", error.code);
+            if code.contains("UnknownBinding") || code.contains("LinkError") {
+                continue;
+            }
+            unparseable.push(format!("`{example}` → `{rendered}`: {error}"));
+        }
+    }
+    assert!(
+        unparseable.is_empty(),
+        "rendered examples that are not TypeScript: {unparseable:#?}"
+    );
+
+    // Non-vacuity for the example surface: the *authored* corpus really does
+    // carry the try-operator, so the marker has something to catch.
+    assert!(
+        authored_tool_examples()
+            .iter()
+            .any(|example| example.contains(")?")),
+        "the authored corpus must carry the try-operator"
+    );
+
+    // The rewriter itself: a reader must be shown the examples rewritten.
+    assert_eq!(
+        typescript
+            .render_tool_example(r#"await web.fetch({ url: "https://example.test/" })?"#)
+            .as_deref(),
+        Some(r#"await web.fetch({ url: "https://example.test/" });"#)
+    );
+    assert_eq!(
+        typescript
+            .render_tool_example("page = await web.fetch({ url: \"u\" })?\nfinish page")
+            .as_deref(),
+        Some("const page = await web.fetch({ url: \"u\" });\nfinish(page);")
+    );
+
+    // And the markers themselves must be present in the retired surface's real
+    // copy, or the walker is looking for strings nothing ever emitted.
+    assert!(RETIRED_SURFACE_MARKERS.contains(&"<lashlang>"));
+    assert!(RETIRED_SURFACE_MARKERS.contains(&"finish <value>"));
+    assert_ne!(
+        crate::dialect::TypescriptDialect
+            .prompt_vocabulary()
+            .cell_tags
+            .open,
+        "<lashlang>",
+        "the sole vocabulary must not be the retired one"
+    );
+}
+
+/// The authored example corpus, as tool authors spell it.
+///
+/// Copied deliberately rather than read from a live catalog: this is the shape
+/// authors write, and the rewriter has to survive every one of them. The set
+/// spans the current first-party plugins (process controls, the standard
+/// protocol, the MCP web tools) plus retired tool families the rewriter must
+/// still accept verbatim.
+fn authored_tool_examples() -> Vec<&'static str> {
+    vec![
+        r#"await parallel.web_search_57jmhsdk2uvtc7o55qwq73syq({ query: "latest Rust release notes", limit: 5 })?"#,
+        r#"await files.read({ path: "src/main.rs", offset: 1, limit: 120 })?"#,
+        r#"await files.edit({ path: "src/main.rs", edits: [{ oldText: "old();", newText: "new();" }] })?"#,
+        r#"await files.glob({ pattern: "**/*.rs", path: "crates/lash/src", limit: 50 })?"#,
+        r#"await files.write({ path: "hello.txt", content: "hello\n" })?"#,
+        r#"await jobs.run({ target: "//crates/lash-protocol-rlm:protocol_drivers__test", timeout_ms: 600000 })?"#,
+        "probe = await files.stat({ path: \"Cargo.lock\" })?\nfinish probe.size > 0",
+        r#"await jobs.start({ name: "daemon", args: ["--serve"], detach: true })?"#,
+        r#"await jobs.send({ process_id: "call-job-1", message: "", close: true })?"#,
+        r#"await processes.list({ status: "any" })?"#,
+        r#"await processes.cancel({ process_id: "tool:call-01JZK7G4QP9Q4J7W3Q2E1H6M9C" })?"#,
+        r#"await tools.batch({ tool_calls: [{ tool: "read_file", parameters: { path: "src/main.rs" } }] })?"#,
+        r#"await tools.search({ query: "text checksum", limit: 3 })?"#,
+        r#"await workbench_deferred.stats({ /* matching arguments */ })?"#,
+    ]
 }
 
 async fn assembled_prompt_fragments_with_projection(
@@ -482,131 +609,4 @@ async fn assembled_prompt_fragments_with_projection(
         crate::protocol::finish::output_limit_retry_copy(vocabulary, Some(2_048)),
     ));
     fragments
-}
-
-#[tokio::test]
-async fn no_assembled_prompt_fragment_carries_the_retired_surfaces_words() {
-    let dialect = crate::dialect::typescript_test_dialect();
-    let mut violations = Vec::new();
-    for (name, fragment) in assembled_prompt_fragments(&dialect).await {
-        let haystack = strip_carve_outs(&fragment).to_lowercase();
-        for marker in RETIRED_SURFACE_MARKERS {
-            if haystack.contains(&marker.to_lowercase()) {
-                violations.push(format!("prompt fragment `{name}` contains `{marker}`"));
-            }
-        }
-        for word in retired_type_words(&fragment) {
-            violations.push(format!(
-                "prompt fragment `{name}` spells a type as `{word}`"
-            ));
-        }
-    }
-    violations.sort();
-    let residuals = KNOWN_TYPE_SYNTAX_RESIDUALS
-        .iter()
-        .map(|residual| (*residual).to_string())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        violations, residuals,
-        "the assembled prompt carries retired-surface words, or a known residual changed. \
-         Fixing one means deleting its row from KNOWN_TYPE_SYNTAX_RESIDUALS."
-    );
-}
-
-// FIG-4544 closes the last of them: tool rows, the required-output block, the
-// history definition and inferred value shapes are all spelled by the dialect.
-const KNOWN_TYPE_SYNTAX_RESIDUALS: &[&str] = &[];
-
-/// The retired surface's type words, where a fragment uses one as a type.
-///
-/// `RETIRED_SURFACE_MARKERS` pins a few whole tokens (`list[`, `: str,`). A
-/// type can follow any of `:`, `|`, `<`, `[` or `=`, and end at any
-/// punctuation, so this reads the word after each of those instead. None of
-/// these words is a TypeScript type, so a match is the retired spelling.
-fn retired_type_words(text: &str) -> Vec<String> {
-    const WORDS: &[&str] = &[
-        "str", "int", "float", "bool", "record", "list", "enum", "dict",
-    ];
-    let mut found = Vec::new();
-    for (index, opener) in text.char_indices() {
-        if !matches!(opener, ':' | '|' | '<' | '[' | '=') {
-            continue;
-        }
-        let rest = text[index + opener.len_utf8()..].trim_start_matches(' ');
-        let word = rest
-            .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
-            .next()
-            .unwrap_or_default();
-        if WORDS.contains(&word) && !found.iter().any(|seen| seen == word) {
-            found.push(word.to_string());
-        }
-    }
-    found
-}
-
-/// The walker only measures if its marker list can fire, and only proves
-/// anything if a rendered example is *parseable* TypeScript.
-#[test]
-fn the_marker_list_and_the_example_rewriter_are_not_vacuous() {
-    // RV-3: a rendered example must be *parseable* TypeScript, not merely free
-    // of retired markers. The marker walk cannot tell "reads like TypeScript"
-    // from "is a syntax error", and a syntax error in an example is exactly the
-    // defect the examples fix exists to close. Parsed rather than linked: an
-    // example names host modules and free identifiers that no isolated
-    // environment has, so `TS_UNKNOWN_BINDING` is expected and a *syntax* error
-    // is not.
-    let typescript = crate::dialect::TypescriptDialect;
-    let mut unparseable = Vec::new();
-    for example in authored_tool_examples() {
-        let rendered = typescript
-            .render_tool_example(example)
-            .expect("TypeScript spells every authored example");
-        if let Err(error) = lash_typescript::parse(&rendered) {
-            let code = format!("{:?}", error.code);
-            if code.contains("UnknownBinding") || code.contains("LinkError") {
-                continue;
-            }
-            unparseable.push(format!("`{example}` → `{rendered}`: {error}"));
-        }
-    }
-    assert!(
-        unparseable.is_empty(),
-        "rendered examples that are not TypeScript: {unparseable:#?}"
-    );
-
-    // Non-vacuity for the example surface: the *authored* corpus really does
-    // carry the try-operator, so the marker has something to catch.
-    assert!(
-        authored_tool_examples()
-            .iter()
-            .any(|example| example.contains(")?")),
-        "the authored corpus must carry the try-operator"
-    );
-
-    // The rewriter itself: a reader must be shown the examples rewritten.
-    assert_eq!(
-        typescript
-            .render_tool_example(r#"await web.fetch({ url: "https://example.test/" })?"#)
-            .as_deref(),
-        Some(r#"await web.fetch({ url: "https://example.test/" });"#)
-    );
-    assert_eq!(
-        typescript
-            .render_tool_example("page = await web.fetch({ url: \"u\" })?\nfinish page")
-            .as_deref(),
-        Some("const page = await web.fetch({ url: \"u\" });\nfinish(page);")
-    );
-
-    // And the markers themselves must be present in the retired surface's real
-    // copy, or the walker is looking for strings nothing ever emitted.
-    assert!(RETIRED_SURFACE_MARKERS.contains(&"<lashlang>"));
-    assert!(RETIRED_SURFACE_MARKERS.contains(&"finish <value>"));
-    assert_ne!(
-        crate::dialect::TypescriptDialect
-            .prompt_vocabulary()
-            .cell_tags
-            .open,
-        "<lashlang>",
-        "the sole vocabulary must not be the retired one"
-    );
 }

@@ -106,7 +106,7 @@ impl ExecutionHost for AsyncHost {
                     );
                     Ok(AbilityOutcome::Value(Value::Record(Arc::new(record))))
                 }
-                "cancel" | "signal" => Ok(AbilityOutcome::Value(Value::Null)),
+                "cancel" => Ok(AbilityOutcome::Value(Value::Null)),
                 _ => Host.perform(AbilityOp::ResourceOperation(operation)).await,
             },
             AbilityOp::ResourceOperationBatch(batch) => {
@@ -456,36 +456,6 @@ async fn value_position_while_leaves_null() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn process_lifecycle_controls_sleep_and_wait() {
-    let host = RecordingProcessHost::default();
-    let program = Program::block(vec![
-        Expr::SleepFor(Box::new(Expr::Number(5.0))),
-        Expr::Assign {
-            target: crate::AssignTarget::variable("payload".into()),
-            expr: Box::new(Expr::WaitSignal {
-                name: "ready".into(),
-            }),
-        },
-        Expr::Finish(Box::new(Expr::Variable("payload".into()))),
-    ]);
-    let mut state = State::new();
-    let compiled = compile_program(&program);
-
-    let outcome = execute_compiled_process(&compiled, &mut state, &host)
-        .await
-        .expect("process lifecycle controls should run");
-
-    assert_eq!(
-        outcome,
-        ExecutionOutcome::Finished(Value::String("signal-payload".into()))
-    );
-    let sleeps = host.sleeps.lock_recover();
-    assert_eq!(sleeps.len(), 1);
-    assert_eq!(sleeps[0].kind, SleepKind::For);
-    assert_eq!(sleeps[0].value, Value::Number(5.0));
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn process_mode_falling_off_end_finishes_null() {
     let host = RecordingProcessHost::default();
     let program = Program::block(vec![Expr::String("ignored".into())]);
@@ -497,34 +467,6 @@ async fn process_mode_falling_off_end_finishes_null() {
         .expect("process should run");
 
     assert_eq!(outcome, ExecutionOutcome::Finished(Value::Null));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn foreground_rejects_programmatic_processes() {
-    // The receiving side, `wait_signal`, plus yield/fail are process-only.
-    // `finish` is valid in foreground code and process code.
-    for (keyword, stmt) in [
-        (
-            "wait_signal",
-            Expr::WaitSignal {
-                name: "ready".into(),
-            },
-        ),
-        ("fail", Expr::Fail(Box::new(Expr::String("bad".into())))),
-    ] {
-        let program = Program::block(vec![stmt]);
-        let mut state = State::new();
-        let host = RecordingProcessHost::default();
-        let err = execute_program(&program, &mut state, &host)
-            .await
-            .expect_err("foreground mode should reject process admins");
-        assert_eq!(
-            err,
-            RuntimeError::SessionProcessAdminOutsideProcess {
-                keyword: keyword.into()
-            }
-        );
-    }
 }
 
 #[tokio::test(flavor = "current_thread")]

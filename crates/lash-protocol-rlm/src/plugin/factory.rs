@@ -10,7 +10,7 @@ use lash_core::plugin::{
 };
 use lash_lashlang_runtime::{
     LashlangArtifacts, LashlangHostEnvironment, LashlangProcessEngine, LashlangSurface,
-    SharedDeferredToolResolver, SharedDeferredTriggerResolver,
+    SharedDeferredToolResolver,
 };
 
 use super::registration::register_rlm_protocol_plugin;
@@ -20,7 +20,7 @@ use super::{
 use crate::dialect::{Dialect, RlmDialectServices, SessionDialect};
 
 /// Apply the RLM protocol config transformation: enable, when process lifecycle
-/// is available, the process/sleep/signal abilities.
+/// is available, the process and sleep abilities.
 ///
 /// This is protocol logic; it lives here rather than in the facade because both
 /// the plugin surface and the contributed Lashlang process engine derive from
@@ -66,7 +66,6 @@ pub struct RlmProtocolPluginFactory {
     dialect: Arc<dyn Dialect>,
     workers: lash_vm_client::service::Service,
     deferred_tool_resolver: Option<SharedDeferredToolResolver>,
-    deferred_trigger_resolver: Option<SharedDeferredTriggerResolver>,
     artifact_store: LashlangArtifacts,
     /// The binding identity of the backend `artifact_store` belongs to: a
     /// runtime over any other backend refuses this factory.
@@ -109,7 +108,6 @@ impl RlmProtocolPluginFactory {
             dialect,
             workers,
             deferred_tool_resolver: None,
-            deferred_trigger_resolver: None,
             artifact_store: LashlangArtifacts::of_backend(backend),
             artifact_backend: Arc::from(backend.binding_identity().as_str()),
             process_lifecycle: Arc::new(OnceLock::new()),
@@ -132,16 +130,6 @@ impl RlmProtocolPluginFactory {
     /// Most hosts ship none.
     pub fn with_deferred_tool_resolver(mut self, resolver: SharedDeferredToolResolver) -> Self {
         self.deferred_tool_resolver = Some(resolver);
-        self
-    }
-
-    /// Wire a dedicated trigger-definition resolver. Discovery is link-only:
-    /// registration remains the first operation allowed to activate a route.
-    pub fn with_deferred_trigger_resolver(
-        mut self,
-        resolver: SharedDeferredTriggerResolver,
-    ) -> Self {
-        self.deferred_trigger_resolver = Some(resolver);
         self
     }
 
@@ -402,7 +390,6 @@ impl PluginFactory for RlmProtocolPluginFactory {
             code_renderer: config.code_renderer.clone(),
             artifact_store: self.artifact_store.clone(),
             deferred_tool_resolver: self.deferred_tool_resolver.clone(),
-            deferred_trigger_resolver: self.deferred_trigger_resolver.clone(),
             execution_bounds: config.execution_bounds(),
             channel: config.channel,
         };

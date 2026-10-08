@@ -785,9 +785,8 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                             AbilityOp::Print(_) => EffectKind::Print,
                             AbilityOp::Finish(_) => EffectKind::Finish,
                             AbilityOp::Fail(_) => EffectKind::Fail,
-                            AbilityOp::ProcessEvent(_) => EffectKind::ProcessEvent,
+
                             AbilityOp::Sleep(_) => EffectKind::Sleep,
-                            AbilityOp::WaitSignal { .. } => EffectKind::WaitSignal,
                         };
                         // A request rebuilt from the continuation need not be
                         // byte-for-byte the one already issued: resume reads

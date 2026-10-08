@@ -182,7 +182,7 @@ pub(super) fn mint_execution_nonce(seed: u64) -> u64 {
 pub enum VmRunOutcome {
     EffectCompleted,
     Complete(ExecutionOutcome),
-    /// The host handed the process's pending signal wait to a successor
+    /// The host handed the process's pending operation to a successor
     /// segment ([`AbilityOutcome::HandedOver`](crate::AbilityOutcome::HandedOver)).
     /// The VM stands on the wait instruction, which has not completed:
     /// [`Vm::suspend`] captures a continuation that issues the wait again.

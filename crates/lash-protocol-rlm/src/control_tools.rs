@@ -406,45 +406,6 @@ mod tests {
             ))
         }
 
-        async fn signal_possessed(
-            &self,
-            _owner: &lash_core::RuntimeOwner,
-            _process_id: &ProcessId,
-            _signal_name: String,
-            _signal_id: String,
-            _payload: serde_json::Value,
-            _scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<lash_core::ProcessEvent, PluginError> {
-            Err(PluginError::Session(
-                "process signalling is unavailable in this test".to_string(),
-            ))
-        }
-
-        async fn stage_recorded_signal(
-            &self,
-            _owner: &lash_core::RuntimeOwner,
-            _signal: &lash_core::ProcessSignal,
-            _scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<lash_core::StoreLocalEffect, PluginError> {
-            Err(PluginError::Session(
-                "recorded process signalling is unavailable in this test".to_string(),
-            ))
-        }
-
-        async fn emit_event_recorded_intent(
-            &self,
-            _owner: &lash_core::RuntimeOwner,
-            _process_id: &ProcessId,
-            _event_type: String,
-            _replay_key: String,
-            _payload: serde_json::Value,
-            _scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<lash_core::ProcessEvent, PluginError> {
-            Err(PluginError::Session(
-                "recorded process event emission is unavailable in this test".to_string(),
-            ))
-        }
-
         async fn transfer(
             &self,
             _from_session_id: &SessionId,

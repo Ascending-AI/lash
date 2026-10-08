@@ -224,9 +224,7 @@ fn check_program_process_types(program: &Program) -> Result<(), InvalidAst> {
                 for param in &process.params {
                     check_process_type(&param.ty)?;
                 }
-                for signal in &process.signals {
-                    check_process_type(&signal.ty)?;
-                }
+
                 // A process's output is not an authored signature position: the
                 // linker infers it from the `finish` types the body reaches, and
                 // since ADR 0095 `processes.start` answers the one process type
@@ -234,7 +232,7 @@ fn check_program_process_types(program: &Program) -> Result<(), InvalidAst> {
                 // A start handle may be bound, awaited and finished like any
                 // other value, so an unknown signature is legal wherever such a
                 // value flows. The refusal stays on what an author *declares*:
-                // params, signals, type declarations and type literals.
+                // params, type declarations and type literals.
                 check_expr_process_types(&process.body)?;
             }
             Declaration::Function(function) => {
@@ -258,7 +256,7 @@ fn check_expr_process_types(expr: &Expr) -> Result<(), InvalidAst> {
 
 fn check_process_type(ty: &TypeExpr) -> Result<(), InvalidAst> {
     match ty {
-        TypeExpr::List(item) | TypeExpr::TriggerHandle(item) => check_process_type(item),
+        TypeExpr::List(item) => check_process_type(item),
         TypeExpr::Object(fields) => {
             for field in fields {
                 check_process_type(&field.ty)?;
@@ -417,8 +415,6 @@ pub enum Declaration {
 pub struct ProcessDecl {
     pub name: AstString,
     pub params: Vec<ProcessParam>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub signals: Vec<ProcessSignalDecl>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub return_ty: Option<TypeExpr>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -457,12 +453,6 @@ pub struct FunctionDecl {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct FunctionParam {
-    pub name: AstString,
-    pub ty: TypeExpr,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct ProcessSignalDecl {
     pub name: AstString,
     pub ty: TypeExpr,
 }
@@ -581,9 +571,7 @@ pub enum Expr {
     },
     Await(Box<Expr>),
     SleepFor(Box<Expr>),
-    WaitSignal {
-        name: AstString,
-    },
+
     ResultUnwrap(Box<Expr>),
     Print(Box<Expr>),
     Finish(Box<Expr>),
@@ -754,7 +742,7 @@ impl Expr {
     /// needs to recurse into the sub-expressions of a node (without caring
     /// about the node's own kind) can fold over `children()` instead of
     /// re-spelling the full `match`. Leaf nodes (`Null`, `Bool`, `Number`,
-    /// `String`, `Variable`, `Break`, `Continue`, `WaitSignal`,
+    /// `String`, `Variable`, `Break`, `Continue`,
     /// `ResourceRef`, and `ProcessRef`) yield nothing.
     ///
     /// `Assign` includes any dynamic index expressions in its `target` path
@@ -771,7 +759,6 @@ impl Expr {
             | Expr::Variable(_)
             | Expr::Break
             | Expr::Continue
-            | Expr::WaitSignal { .. }
             | Expr::ProcessRef { .. }
             | Expr::ResourceRef(_) => {}
             Expr::Block(expressions) | Expr::List(expressions) => {
@@ -909,7 +896,6 @@ impl Expr {
             | Expr::Variable(_)
             | Expr::Break
             | Expr::Continue
-            | Expr::WaitSignal { .. }
             | Expr::ProcessRef { .. }
             | Expr::ResourceRef(_) => {}
             Expr::Block(expressions) | Expr::List(expressions) => {
@@ -1124,7 +1110,7 @@ pub enum TypeExpr {
     Object(Vec<TypeField>),
     Ref(AstString),
     Process(ProcessType),
-    TriggerHandle(Box<TypeExpr>),
+
     /// Union of alternative type shapes, e.g. `str | int | null`.
     Union(UnionMembers),
 }
@@ -1465,9 +1451,7 @@ pub fn format_type_expr(ty: &TypeExpr) -> String {
             ),
             None => "Process".to_string(),
         },
-        TypeExpr::TriggerHandle(event) => {
-            format!("TriggerHandle<{}>", format_type_expr(event))
-        }
+
         TypeExpr::Union(items) => items
             .iter()
             .map(format_type_expr)

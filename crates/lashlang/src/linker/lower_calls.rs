@@ -44,7 +44,7 @@ impl<'module> Linker<'module> {
             // reassigned between the closure's construction and its call, so
             // the type it had at construction proves nothing. A process value
             // is the exception — it is immutable by construction and its slot
-            // type is what a trigger target and a start slot are checked
+            // type is what a process start slot is checked
             // against — so that one type survives the boundary.
             let binding = match scope.get(capture) {
                 Some(binding) if matches!(binding_type(&binding), TypeExpr::Process(_)) => binding,

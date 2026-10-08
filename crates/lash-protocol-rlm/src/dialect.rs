@@ -6,16 +6,14 @@ use std::sync::Arc;
 use lash_core::{ExecRequest, ExecResponse, RuntimeExecutionContext, SessionError};
 use lash_lashlang_runtime::{
     LashlangArtifacts, LashlangHostEnvironment, LashlangSurface, ResolvedToolBinding,
-    SharedDeferredToolResolver, SharedDeferredTriggerResolver,
+    SharedDeferredToolResolver,
 };
 use lash_rlm_types::RlmGlobalsPatchPluginBody;
 use lash_sansio::{SchemaShape, ShapeRow};
 
 pub use typescript::TypescriptDialect;
 
-use crate::executor::{
-    RlmExecutionState, execute_code_with_channel_and_bounds_with_trigger_resolver,
-};
+use crate::executor::{RlmExecutionState, execute_code_with_channel_and_bounds};
 use crate::rlm_support::{BoundVariableRenderCache, render_bound_variables};
 
 /// The language a code-mode session's model writes: one front end over the
@@ -208,7 +206,6 @@ pub(crate) struct RlmDialectServices {
     pub(crate) code_renderer: crate::render::CodeRendererSlot,
     pub(crate) artifact_store: LashlangArtifacts,
     pub(crate) deferred_tool_resolver: Option<SharedDeferredToolResolver>,
-    pub(crate) deferred_trigger_resolver: Option<SharedDeferredTriggerResolver>,
     pub(crate) execution_bounds: crate::plugin::ExecutionBounds,
     /// The session-pinned transport programs arrive on. Carried with the
     /// services because the executor needs it to decide whether cell-delimiter
@@ -273,7 +270,6 @@ impl SessionDialect {
                 workers,
                 artifact_store: lashlang::LashlangArtifacts::new(Arc::new(PromptOnlyArtifactStore)),
                 deferred_tool_resolver: None,
-                deferred_trigger_resolver: None,
 
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 code_renderer: Default::default(),
@@ -286,8 +282,6 @@ impl SessionDialect {
         self.services.code_renderer.clone()
     }
 
-    /// The module-artifact store the session's tools resolve trigger targets
-    /// and process definitions against.
     pub(crate) fn artifact_store(&self) -> lashlang::LashlangArtifacts {
         self.services.artifact_store.clone()
     }
@@ -744,7 +738,7 @@ impl DialectSession {
         self.state
             .prepare_runtime_code_execution()
             .map_err(|error| SessionError::Protocol(error.to_string()))?;
-        let response = execute_code_with_channel_and_bounds_with_trigger_resolver(
+        let response = execute_code_with_channel_and_bounds(
             self.dialect.as_ref(),
             &mut self.state,
             ctx,
@@ -752,7 +746,6 @@ impl DialectSession {
             self.services.artifact_store.clone(),
             self.surface.clone(),
             self.services.deferred_tool_resolver.clone(),
-            self.services.deferred_trigger_resolver.clone(),
             session_projected_bindings,
             self.services.execution_bounds.into_engine(),
             self.services.channel,
@@ -1120,7 +1113,6 @@ pub(crate) fn test_dialect_services() -> RlmDialectServices {
         workers: lash_vm_client::service::Service::default(),
         artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
         deferred_tool_resolver: None,
-        deferred_trigger_resolver: None,
 
         execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
         code_renderer: Default::default(),

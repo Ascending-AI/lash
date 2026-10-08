@@ -49,7 +49,6 @@ impl GlobalBuiltin {
             "finish" => Some(Self::AgentPrimitive(AgentPrimitive::Finish)),
             "print" => Some(Self::AgentPrimitive(AgentPrimitive::Print)),
             "sleep" => Some(Self::AgentPrimitive(AgentPrimitive::Sleep)),
-            "waitSignal" => Some(Self::AgentPrimitive(AgentPrimitive::WaitSignal)),
             _ => None,
         }
     }
@@ -171,7 +170,6 @@ enum AgentPrimitive {
     Finish,
     Print,
     Sleep,
-    WaitSignal,
 }
 
 impl AgentPrimitive {
@@ -180,7 +178,6 @@ impl AgentPrimitive {
             Self::Finish => "finish",
             Self::Print => "print",
             Self::Sleep => "sleep",
-            Self::WaitSignal => "waitSignal",
         }
     }
 }
@@ -530,18 +527,7 @@ impl Lowerer {
                 name: "__lashlang_pending_timer".into(),
                 args: vec![self.lower_expr(milliseconds)?],
             }),
-            (AgentPrimitive::WaitSignal, [Expr::String(name)]) if self.position.await_depth > 0 => {
-                Ok(LashExpr::WaitSignal {
-                    name: name.as_str().into(),
-                })
-            }
-            (AgentPrimitive::WaitSignal, _) if self.position.await_depth == 0 => {
-                Err(Diagnostic::new(
-                    DiagnosticCode::AwaitRequired,
-                    format!("agent primitive `{}` requires await", primitive.name()),
-                    None,
-                ))
-            }
+
             _ => Err(Diagnostic::defect(
                 DiagnosticCode::UnsupportedExpression,
                 format!(
@@ -1325,26 +1311,13 @@ impl Lowerer {
         } else {
             self.lower_expr(object)?
         };
-        // `registerTrigger` was the retired global spelling of
-        // `triggers.register`, and `update`/`revive` take the same registration
-        // record, so the `inputs` template is erased on all three remaining
-        // paths. Retiring the event binding for one of them would strand the
-        // other two.
-        let lowered_args = if receiver_is_module_authority
-            && matches!(object, Expr::Ident(root, _) if root == "triggers")
-            && is_trigger_registration_operation(method)
-            && let [config] = args
-        {
-            vec![self.lower_trigger_config(config)?]
-        } else {
-            args.iter()
-                .map(|arg| self.lower_call_argument(arg))
-                .collect::<Result<_, _>>()?
-        };
         let call = LashExpr::ReceiverCall {
             receiver: Box::new(receiver),
             operation: method.into(),
-            args: lowered_args,
+            args: args
+                .iter()
+                .map(|arg| self.lower_call_argument(arg))
+                .collect::<Result<_, _>>()?,
         };
         Ok(if self.position.await_depth == 0 {
             LashExpr::BuiltinCall {

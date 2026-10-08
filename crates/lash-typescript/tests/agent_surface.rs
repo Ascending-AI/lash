@@ -27,7 +27,7 @@ impl ExecutionHost for Host {
 ///
 /// FIG-2999 deleted `defineProcess`, `start` and `wake`: a process is an
 /// uncalled top-level `const` async arrow, and the controls are leaf tools, so
-/// a fixture starts and signals one through `processes.*`. The `process` slot
+/// a fixture starts one through `processes.*`. The `process` slot
 /// is typed `Process` through `x-lash`, which is what the linker lifts the
 /// literal into.
 fn process_environment() -> lashlang::LashlangHostEnvironment {
@@ -50,22 +50,11 @@ fn process_environment_with(
                     "properties": { "definition": { "x-lash": { "kind": "process_unknown" } } },
                     "required": ["definition"]
                 }),
-                serde_json::json!({ "x-lash": { "kind": "handle", "payload": {} } }),
+                serde_json::json!({ "x-lash": { "kind": "process_unknown" } }),
             ),
         )
         .expect("process start operation");
-    catalog
-        .add_module_operation_contract(
-            ["processes"],
-            "Processes",
-            "signal",
-            "tool:processes/signal",
-            &lashlang::OperationContract::new(
-                serde_json::json!({ "type": "object", "additionalProperties": true }),
-                serde_json::json!({}),
-            ),
-        )
-        .expect("process signal operation");
+
     lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::all())
 }
 
@@ -77,32 +66,6 @@ pub(super) fn finished(source: &str) -> Value {
         ExecutionOutcome::Finished(value) => value,
         other => panic!("expected finish, got {other:?}"),
     }
-}
-
-#[test]
-fn signalling_a_run_links_and_process_finish_is_rejected() {
-    let source = r#"
-        const worker = async () => await waitSignal("ready");
-        const handle = await processes.start({ definition: worker });
-        await processes.signal({ handle: handle, signal: "ready", payload: { ok: true } });
-        finish(await handle);
-        "#;
-    lash_typescript::link(source, &process_environment())
-        .expect("a foreground signal links through the tool surface");
-
-    let error = lash_typescript::parse(
-        r#"
-        const worker = async () => { try { finish(1); } finally { console.log("cleanup"); } };
-        const handle = await processes.start({ definition: worker });
-        finish(handle);
-        "#,
-    )
-    .expect_err("finish inside run must not bypass finally");
-    assert_eq!(
-        error.code,
-        lash_typescript::DiagnosticCode::UnsupportedExpression
-    );
-    assert!(error.message.contains("cell-only"));
 }
 
 #[test]
@@ -123,66 +86,6 @@ fn process_membership_reaches_functions_nested_inside_run() {
         lash_typescript::DiagnosticCode::UnsupportedExpression
     );
     assert!(error.message.contains("cell-only"));
-}
-
-#[derive(Default)]
-struct SignalHost {
-    signal: std::sync::Mutex<Option<lashlang::Record>>,
-}
-
-impl ExecutionHost for SignalHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
-        match op {
-            AbilityOp::ResourceOperation(call) => match call.operation.as_str() {
-                "start" => Ok(AbilityOutcome::Value(lashlang::from_json(
-                    process_handle_json("run-1"),
-                ))),
-                "signal" => {
-                    let [Value::Record(fields)] = call.args.as_slice() else {
-                        return Err(ExecutionHostError::new("expected record args"));
-                    };
-                    *self.signal.lock().expect("signal lock") = Some((**fields).clone());
-                    Ok(AbilityOutcome::Value(Value::Null))
-                }
-                other => Err(ExecutionHostError::new(format!(
-                    "unexpected process operation: {other}"
-                ))),
-            },
-            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
-            _ => Err(ExecutionHostError::new("unexpected signal ability")),
-        }
-    }
-}
-
-#[test]
-fn a_foreground_signal_delivers_a_named_process_signal() {
-    let source = r#"
-        const worker = async () => await waitSignal("ready");
-        const handle = await processes.start({ definition: worker });
-        await processes.signal({ handle: handle, signal: "ready", payload: { ok: true } });
-        finish(handle);
-    "#;
-    let linked =
-        lash_typescript::link(source, &process_environment()).expect("signal program links");
-    let host = SignalHost::default();
-    let outcome = futures::executor::block_on(lashlang::execute(
-        &lashlang::testing::harness::compile_linked_main(&linked),
-        &mut State::new(),
-        &host,
-    ))
-    .expect("signal program executes");
-    assert!(matches!(outcome, ExecutionOutcome::Finished(_)));
-    let signal = host
-        .signal
-        .lock()
-        .expect("signal lock")
-        .clone()
-        .expect("signal delivered");
-    assert_eq!(signal.get("signal"), Some(&Value::String("ready".into())));
-    assert_eq!(
-        signal.get("payload").cloned(),
-        Some(lashlang::from_json(serde_json::json!({ "ok": true })))
-    );
 }
 
 /// The JSON handle record a real host mints for the process a fixture labels.
@@ -867,12 +770,9 @@ impl ExecutionHost for ProcessDurabilityHost {
                         .collect(),
                 ),
             )),
-            AbilityOp::WaitSignal { name, .. } => {
-                assert_eq!(name, "ready");
-                Ok(AbilityOutcome::Value(Value::String("signalled".into())))
-            }
+
             AbilityOp::Sleep(_) => Ok(AbilityOutcome::Value(Value::Null)),
-            AbilityOp::ProcessEvent(event) => Ok(AbilityOutcome::Value(event.value)),
+
             // A start names the process it is asked to start: the fixture's
             // process values carry a `name`, so a handle minted here can be
             // told apart from a handle minted for another process.
@@ -983,52 +883,11 @@ fn suspend_and_resume_process(
                 .expect("complete resumed process")
             {
                 VmRunOutcome::EffectCompleted => {}
-                VmRunOutcome::HandedOver => panic!("this host never hands a signal wait over"),
+                VmRunOutcome::HandedOver => panic!("this host never hands an effect over"),
                 VmRunOutcome::Complete(outcome) => break outcome,
             }
         }
     })
-}
-
-#[test]
-fn durable_processes_resume_across_await_signal_sleep_and_pending_finally() {
-    let cases = [
-        (
-            r#"
-            const worker = async () => await waitSignal("ready");
-            finish(await processes.start({ definition: worker }));
-            "#,
-            serde_json::json!({}),
-            0,
-            Value::String("signalled".into()),
-        ),
-        (
-            r#"
-            const worker = async (input: unknown) => { await sleep(5); return input; };
-            finish(await processes.start({ definition: worker }));
-            "#,
-            serde_json::json!({ "input": 7 }),
-            1,
-            Value::Number(7.0),
-        ),
-        (
-            r#"
-            const worker = async (input: unknown) => {
-              try { return input; } finally { await sleep(5); }
-            };
-            finish(await processes.start({ definition: worker }));
-            "#,
-            serde_json::json!({ "input": 9 }),
-            1,
-            Value::Number(9.0),
-        ),
-    ];
-    for (source, globals, params, expected) in cases {
-        assert_eq!(
-            suspend_and_resume_process(source, globals, params),
-            ExecutionOutcome::Finished(expected)
-        );
-    }
 }
 
 #[test]
@@ -1056,7 +915,7 @@ fn uncaught_throw_fails_a_durable_process() {
         {
             VmRunOutcome::Complete(outcome) => outcome,
             VmRunOutcome::EffectCompleted => panic!("process failure should be terminal"),
-            VmRunOutcome::HandedOver => panic!("this host never hands a signal wait over"),
+            VmRunOutcome::HandedOver => panic!("this host never hands an effect over"),
         };
         assert_eq!(
             outcome,

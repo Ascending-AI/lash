@@ -57,24 +57,6 @@ fn benchmark_declarations() -> Vec<Declaration> {
 /// Declarations a single scenario adds on top of the shared three.
 fn scenario_declarations(scenario: Scenario) -> Vec<Declaration> {
     match scenario {
-        Scenario::TriggerRegistryHostEnvironment => vec![
-            b::process(
-                "daily_digest",
-                vec![b::param("tick", TypeExpr::Ref("cron.Tick".into()))],
-                b::block(vec![b::finish(b::record(vec![
-                    ("kind", b::string("daily_digest")),
-                    ("fired_at", b::field(b::var("tick"), "fired_at")),
-                ]))]),
-            ),
-            b::process(
-                "on_button",
-                vec![b::param("event", TypeExpr::Ref("ui.button.Pressed".into()))],
-                b::block(vec![b::finish(b::record(vec![
-                    ("kind", b::string("button")),
-                    ("button", b::field(b::var("event"), "button")),
-                ]))]),
-            ),
-        ],
         _ => Vec::new(),
     }
 }
@@ -263,13 +245,7 @@ Scenario::Baseline => vec![
             b::assign("frame", b::await_expr(b::unwrap(b::receiver_call(b::var("control"), "continue_as", vec![b::record(vec![("task", b::string("continue from compact state")), ("seed", b::record(vec![("projected_problem", b::field(b::var("proj"), "text")), ("nested_projected", b::record(vec![("body", b::field(b::var("proj"), "json"))])), ("computed_summary", b::builtin("format", vec![b::string("{0}:{1}"), b::field(b::var("ctx"), "user"), b::builtin("len", vec![b::var("history")])])), ("live_agent", b::index(b::var("handles"), b::num(0.0))), ("started_agent", b::var("agent"))]))])])))),
             b::finish(b::record(vec![("frame_key", b::field(b::var("frame"), "frame_key")), ("task", b::field(b::var("frame"), "task")), ("seed_keys", b::field(b::var("frame"), "seed_keys")), ("projected_count", b::field(b::var("frame"), "projected_count")), ("global_count", b::field(b::var("frame"), "global_count"))])),
         ],
-        Scenario::TriggerRegistryHostEnvironment => vec![
-            b::assign("daily_handle", b::await_expr(b::unwrap(b::receiver_call(b::var("triggers"), "register", vec![b::record(vec![("source", b::receiver_call(b::var("cron"), "Schedule", vec![b::record(vec![("expr", b::string("0 8 * * *")), ("tz", b::string("UTC"))])])), ("target", b::record(vec![("definition", b::var("daily_digest"))])), ("inputs", b::record(vec![("tick", b::field(b::var("trigger"), "event"))])), ("name", b::string("daily_digest")), ("subscription_key", b::string("daily-digest"))])])))),
-            b::assign("button_handle", b::await_expr(b::unwrap(b::receiver_call(b::var("triggers"), "register", vec![b::record(vec![("source", b::receiver_call(b::field(b::var("ui"), "button"), "pressed", vec![b::record(vec![])])), ("target", b::record(vec![("definition", b::var("on_button"))])), ("inputs", b::record(vec![("event", b::field(b::var("trigger"), "event"))])), ("name", b::string("button watcher")), ("subscription_key", b::string("button-watcher"))])])))),
-            b::assign("registrations", b::await_expr(b::unwrap(b::receiver_call(b::var("triggers"), "list", vec![b::record(vec![("target", b::record(vec![("definition", b::var("daily_digest"))])), ("name", b::string("daily_digest"))])])))),
-            b::assign("disabled", b::await_expr(b::unwrap(b::receiver_call(b::var("triggers"), "disable", vec![b::record(vec![("subscription_key", b::string("daily-digest")), ("expected_revision", b::field(b::var("daily_handle"), "revision"))])])))),
-            b::finish(b::record(vec![("daily_handle", b::field(b::var("daily_handle"), "id")), ("button_handle", b::field(b::var("button_handle"), "id")), ("registration_count", b::builtin("len", vec![b::var("registrations")])), ("listed_name", b::field(b::index(b::var("registrations"), b::num(0.0)), "name")), ("listed_source", b::field(b::index(b::var("registrations"), b::num(0.0)), "source_type")), ("disabled", b::field(b::var("disabled"), "enabled"))])),
-        ],
+
         Scenario::SyntaxTextHostEnvironment => vec![
             b::assign("patch", b::string("*** Begin Patch\n*** Update File: crates/lashlang/src/lib.rs\n@@\n-old\n+new\n\\n { braces stay raw }\n*** End Patch")),
             b::assign("script", b::string("python3 - <<'PY'\nprint(\"\"\"double quotes are preserved\"\"\")\n\\n { braces stay raw }\nPY")),

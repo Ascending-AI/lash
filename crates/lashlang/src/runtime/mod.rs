@@ -67,10 +67,9 @@ pub use heap::{
 pub use host::{
     AbilityOp, AbilityOutcome, AggregateConsumer, DEFAULT_HOST_MEMORY_LIMIT_BYTES,
     DEFAULT_MAX_VM_FRAME_DEPTH, ExecutionBound, ExecutionBounds, ExecutionEnvironment,
-    ExecutionHost, ExecutionHostError, ExecutionMode, ProcessEvent, ProcessEventKind,
-    ProcessSignal, ProcessStart, ResourceOperation, ResourceOperationBatch,
-    ResourceOperationBatchLeaf, ResourceOperationBatchOutcome, ResourceOperationOutcome, Sleep,
-    SleepKind,
+    ExecutionHost, ExecutionHostError, ExecutionMode, ProcessStart, ResourceOperation,
+    ResourceOperationBatch, ResourceOperationBatchLeaf, ResourceOperationBatchOutcome,
+    ResourceOperationOutcome, Sleep, SleepKind,
 };
 pub use instance::{
     VmComplete, VmExecutionStart, VmGuestError, VmInstance, VmInterrupt, VmParkReason, VmParked,

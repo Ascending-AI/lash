@@ -210,7 +210,7 @@ impl Session<'_, '_> {
             description,
             name_source,
             params: process.params.clone(),
-            signals: process.signals.clone(),
+
             return_ty: process.return_ty.clone(),
             origin: process.origin.clone(),
             body: self.project_body(
@@ -246,7 +246,7 @@ impl Session<'_, '_> {
             description: None,
             name_source: WorkflowNodeNameSource::Derived,
             params: literal.params.clone(),
-            signals: Vec::new(),
+
             return_ty: literal.return_ty.clone(),
             origin: ProcessOrigin::Lifted {
                 site,
@@ -996,7 +996,7 @@ fn effect_name(expression: &Expr, effect: &WorkflowEffectKind) -> String {
         WorkflowEffectKind::Break => "break",
         WorkflowEffectKind::Continue => "continue",
         // The remaining effects all carry a compiler execution-site descriptor.
-        WorkflowEffectKind::WaitSignal | WorkflowEffectKind::SleepFor => {
+        WorkflowEffectKind::SleepFor => {
             unreachable!("execution-site effects must have a compiler descriptor")
         }
     }

@@ -12,6 +12,55 @@ fn var(name: &str) -> Expr {
     Expr::Variable(name.into())
 }
 
+/// Every node reachable from `expr`, in `children` pre-order.
+fn walk_shared(expr: &Expr, into: &mut Vec<Expr>) {
+    into.push(expr.clone());
+    for child in expr.children() {
+        walk_shared(child, into);
+    }
+}
+
+/// Every node reachable from `expr`, in `children_mut` pre-order.
+fn walk_mut(expr: &mut Expr, into: &mut Vec<Expr>) {
+    into.push(expr.clone());
+    for child in expr.children_mut() {
+        walk_mut(child, into);
+    }
+}
+
+#[test]
+fn children_mut_walks_a_whole_program_in_the_same_order_as_children() {
+    // The whole corpus as one tree, so the parity holds recursively and
+    // not only one level down: the lens's splice recurses.
+    let mut program = Expr::Block(every_expr_variant());
+    let mut shared = Vec::new();
+    walk_shared(&program, &mut shared);
+    let mut mutable = Vec::new();
+    walk_mut(&mut program, &mut mutable);
+    assert_eq!(shared.len(), mutable.len());
+    assert_eq!(shared, mutable);
+}
+
+#[test]
+fn children_mut_edits_reach_the_expression() {
+    let mut expr = Expr::If {
+        condition: Box::new(var("cond")),
+        then_block: Box::new(var("then")),
+        else_block: Box::new(var("else")),
+    };
+    for child in expr.children_mut() {
+        *child = Expr::Null;
+    }
+    assert_eq!(
+        expr,
+        Expr::If {
+            condition: Box::new(Expr::Null),
+            then_block: Box::new(Expr::Null),
+            else_block: Box::new(Expr::Null),
+        }
+    );
+}
+
 /// One expression per `Expr` variant, each composite carrying distinct
 /// `Variable` children so a walk's order is readable off the names.
 ///
@@ -41,9 +90,6 @@ fn every_expr_variant() -> Vec<Expr> {
         var("leaf"),
         Expr::Break,
         Expr::Continue,
-        Expr::WaitSignal {
-            name: "ready".into(),
-        },
         Expr::ProcessRef {
             process: "proc".into(),
         },
@@ -169,53 +215,4 @@ fn every_expr_variant() -> Vec<Expr> {
             right: Box::new(var("js_log_right")),
         },
     ]
-}
-
-/// Every node reachable from `expr`, in `children` pre-order.
-fn walk_shared(expr: &Expr, into: &mut Vec<Expr>) {
-    into.push(expr.clone());
-    for child in expr.children() {
-        walk_shared(child, into);
-    }
-}
-
-/// Every node reachable from `expr`, in `children_mut` pre-order.
-fn walk_mut(expr: &mut Expr, into: &mut Vec<Expr>) {
-    into.push(expr.clone());
-    for child in expr.children_mut() {
-        walk_mut(child, into);
-    }
-}
-
-#[test]
-fn children_mut_walks_a_whole_program_in_the_same_order_as_children() {
-    // The whole corpus as one tree, so the parity holds recursively and
-    // not only one level down: the lens's splice recurses.
-    let mut program = Expr::Block(every_expr_variant());
-    let mut shared = Vec::new();
-    walk_shared(&program, &mut shared);
-    let mut mutable = Vec::new();
-    walk_mut(&mut program, &mut mutable);
-    assert_eq!(shared.len(), mutable.len());
-    assert_eq!(shared, mutable);
-}
-
-#[test]
-fn children_mut_edits_reach_the_expression() {
-    let mut expr = Expr::If {
-        condition: Box::new(var("cond")),
-        then_block: Box::new(var("then")),
-        else_block: Box::new(var("else")),
-    };
-    for child in expr.children_mut() {
-        *child = Expr::Null;
-    }
-    assert_eq!(
-        expr,
-        Expr::If {
-            condition: Box::new(Expr::Null),
-            then_block: Box::new(Expr::Null),
-            else_block: Box::new(Expr::Null),
-        }
-    );
 }

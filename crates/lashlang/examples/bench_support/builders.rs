@@ -15,8 +15,7 @@
 use lashlang::{
     AssignPathStep, AssignTarget, AstString, CatchClause, CoercingBinaryOp, CoercingUnaryOp,
     Declaration, Expr, FunctionDecl, FunctionExpr, FunctionParam, LabelMetadata, OperandLogicalOp,
-    ProcessDecl, ProcessParam, ProcessSignalDecl, Program, ResourceRefExpr, TryExpr, TypeExpr,
-    TypeField,
+    ProcessDecl, ProcessParam, Program, ResourceRefExpr, TryExpr, TypeExpr, TypeField,
 };
 
 // ---------------------------------------------------------------------------
@@ -38,12 +37,12 @@ pub fn module(declarations: Vec<Declaration>, expressions: Vec<Expr>) -> Program
     }
 }
 
-/// `process <name>(<params>) { <body> }`, with no signals, return type or label.
+/// `process <name>(<params>) { <body> }`, with no return type or label.
 pub fn process(name: &str, params: Vec<ProcessParam>, body: Expr) -> Declaration {
     Declaration::Process(ProcessDecl {
         name: name.into(),
         params,
-        signals: Vec::new(),
+
         return_ty: None,
         label: None,
         origin: Default::default(),
@@ -61,26 +60,8 @@ pub fn process_returning(
     Declaration::Process(ProcessDecl {
         name: name.into(),
         params,
-        signals: Vec::new(),
-        return_ty: Some(return_ty),
-        label: None,
-        origin: Default::default(),
-        body,
-    })
-}
 
-/// `process <name>(<params>) signals { <signals> } { <body> }`.
-pub fn process_with_signals(
-    name: &str,
-    params: Vec<ProcessParam>,
-    signals: Vec<ProcessSignalDecl>,
-    body: Expr,
-) -> Declaration {
-    Declaration::Process(ProcessDecl {
-        name: name.into(),
-        params,
-        signals,
-        return_ty: None,
+        return_ty: Some(return_ty),
         label: None,
         origin: Default::default(),
         body,
@@ -97,7 +78,7 @@ pub fn labelled_process(
     Declaration::Process(ProcessDecl {
         name: name.into(),
         params,
-        signals: Vec::new(),
+
         return_ty: None,
         label: Some(label),
         origin: Default::default(),
@@ -107,13 +88,6 @@ pub fn labelled_process(
 
 pub fn param(name: &str, ty: TypeExpr) -> ProcessParam {
     ProcessParam {
-        name: name.into(),
-        ty,
-    }
-}
-
-pub fn signal(name: &str, ty: TypeExpr) -> ProcessSignalDecl {
-    ProcessSignalDecl {
         name: name.into(),
         ty,
     }
@@ -203,9 +177,7 @@ fn type_schema(ty: &TypeExpr) -> Expr {
         )])
     };
     match ty {
-        TypeExpr::Any | TypeExpr::Process(_) | TypeExpr::TriggerHandle(_) => {
-            Expr::Record(Vec::new())
-        }
+        TypeExpr::Any | TypeExpr::Process(_) => Expr::Record(Vec::new()),
         TypeExpr::Str => scalar("string"),
         TypeExpr::Int => scalar("integer"),
         TypeExpr::Float => scalar("number"),
@@ -450,10 +422,6 @@ pub fn cancel(expr: Expr) -> Expr {
 
 pub fn sleep_for(expr: Expr) -> Expr {
     Expr::SleepFor(Box::new(expr))
-}
-
-pub fn wait_signal(name: &str) -> Expr {
-    Expr::WaitSignal { name: name.into() }
 }
 
 pub fn builtin(name: &str, args: Vec<Expr>) -> Expr {

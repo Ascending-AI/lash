@@ -2,7 +2,7 @@
 //! admitted and when it is performed, and answered from the committed
 //! outcome of the member its admission made of it (ADR 0132 §5, §8).
 
-use lash_core::tool_dispatch::{CellCall, CellMember, HostCall};
+use lash_core::tool_dispatch::{CellCall, CellMember};
 use lash_lashlang_runtime::{AggregateAnswer, LeafStanding};
 use lash_vm_broker::{Decide, MemberEnd, SettledMember};
 
@@ -56,89 +56,6 @@ struct MemberSlot {
     member: CellMember,
 }
 
-/// A trigger command's answer, as its member's outcome carries it.
-#[derive(serde::Serialize, serde::Deserialize)]
-enum TriggerAnswer {
-    /// The value, as the effect wire encodes it.
-    Value(#[serde(with = "serde_bytes")] Vec<u8>),
-    Error(ExecutionHostError),
-}
-
-impl TriggerAnswer {
-    fn of(result: Result<FlowValue, ExecutionHostError>) -> serde_json::Value {
-        let answer = match result {
-            Ok(value) => match rmp_serde::to_vec_named(&AbilityOutcome::Value(value)) {
-                Ok(bytes) => Self::Value(bytes),
-                Err(error) => Self::Error(ExecutionHostError::new(error.to_string())),
-            },
-            Err(error) => Self::Error(error),
-        };
-        serde_json::to_value(answer).unwrap_or(Value::Null)
-    }
-
-    fn result(reply: &ToolInvocationReply) -> Result<FlowValue, ExecutionHostError> {
-        let value = match &reply.output.outcome {
-            lash_core::ToolCallOutcome::Success(value) => value,
-            lash_core::ToolCallOutcome::Failure(failure) => {
-                return Err(ExecutionHostError::new(failure.message.clone()));
-            }
-            lash_core::ToolCallOutcome::Cancelled(_) => {
-                return Err(ExecutionHostError::new("the trigger command was cancelled"));
-            }
-        };
-        match serde_json::from_value::<Self>(value.to_json_value()) {
-            Ok(Self::Value(bytes)) => match rmp_serde::from_slice::<AbilityOutcome>(&bytes) {
-                Ok(AbilityOutcome::Value(value)) => Ok(value),
-                Ok(_) => Err(ExecutionHostError::new(
-                    "a trigger command answered something other than a value",
-                )),
-                Err(error) => Err(ExecutionHostError::new(error.to_string())),
-            },
-            Ok(Self::Error(error)) => Err(error),
-            Err(error) => Err(ExecutionHostError::new(error.to_string())),
-        }
-    }
-}
-
-/// The calls of the cell's host: its trigger commands, each run once as an
-/// admitted member.
-pub(in crate::executor) struct CellTriggers {
-    pub workers: lash_vm_client::service::Service,
-    pub artifact_store: lashlang::LashlangArtifacts,
-}
-
-impl lash_core::tool_dispatch::CellHostCalls for CellTriggers {
-    fn run(
-        &self,
-        context: RuntimeExecutionContext<'static>,
-        call: HostCall,
-    ) -> std::pin::Pin<Box<dyn Future<Output = Value> + Send>> {
-        let workers = self.workers.clone();
-        let artifact_store = self.artifact_store.clone();
-        Box::pin(async move {
-            let result = match lashlang::TriggerHostOperation::from_host_operation(&call.operation)
-            {
-                Some(operation) => {
-                    lash_lashlang_runtime::execute_trigger_operation(
-                        &workers,
-                        &context,
-                        &artifact_store,
-                        operation,
-                        call.payload,
-                        call.id.to_string(),
-                    )
-                    .await
-                }
-                None => Err(ExecutionHostError::new(format!(
-                    "`{}` is not a trigger command",
-                    call.operation
-                ))),
-            };
-            TriggerAnswer::of(result)
-        })
-    }
-}
-
 /// The settled member of `ends` that answers `member`, if it settled.
 fn settled<'a>(ends: &'a [MemberEnd], member: &CellMember) -> Option<&'a SettledMember> {
     ends.iter()
@@ -187,17 +104,7 @@ impl HostBridge<'_> {
             call_site,
             logical_call_id,
         };
-        if lashlang::TriggerHostOperation::from_host_operation(&host_operation).is_some() {
-            return Ok(ResolvedLeaf::Member(Box::new(ResolvedMember {
-                member: CellMember::Host(HostCall {
-                    id: call.logical_call_id.clone(),
-                    operation: host_operation,
-                    payload,
-                }),
-                call,
-                drift: None,
-            })));
-        }
+
         let mut invocation = self.tool_invocation(
             call.logical_call_id.clone(),
             &host_operation,
@@ -369,9 +276,6 @@ impl HostBridge<'_> {
         let reply = self.members.reply(member, &settled.output);
         match member {
             CellMember::Tool(_) => self.consume_resource_reply(dispatched, reply, replay_key),
-            CellMember::Host(_) => {
-                self.consume_resource_trigger(dispatched, TriggerAnswer::result(&reply))
-            }
         }
     }
 
@@ -381,7 +285,6 @@ impl HostBridge<'_> {
         let reply = self.members.reply(member, &settled.output);
         match member {
             CellMember::Tool(_) => reply.output.is_success(),
-            CellMember::Host(_) => TriggerAnswer::result(&reply).is_ok(),
         }
     }
 
@@ -403,25 +306,6 @@ impl HostBridge<'_> {
             dispatched.call.source_operation.clone(),
             outcome,
             host_record,
-        )
-        .and(result)
-    }
-
-    fn consume_resource_trigger(
-        &self,
-        dispatched: &DispatchedCall,
-        result: Result<FlowValue, ExecutionHostError>,
-    ) -> Result<FlowValue, ExecutionHostError> {
-        let outcome = if result.is_ok() {
-            lash_core::ExecutedCallOutcome::Ok
-        } else {
-            lash_core::ExecutedCallOutcome::Err
-        };
-        self.record_executed_call(
-            dispatched.execution_index,
-            dispatched.call.source_operation.clone(),
-            outcome,
-            None,
         )
         .and(result)
     }
@@ -476,7 +360,6 @@ impl HostBridge<'_> {
         };
         let shape = match member {
             CellMember::Tool(_) => CommandShape::ToolCall,
-            CellMember::Host(_) => CommandShape::Value,
         };
         let in_flight = commands.enter_bound(command, shape, drift).await?;
         let key = in_flight.command.key.to_string();

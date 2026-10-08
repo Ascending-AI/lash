@@ -414,28 +414,15 @@ fn raw_artifact_builder_refuses_an_incomplete_process_output() {
     ));
 }
 
-#[test]
-fn artifact_with_obsolete_trigger_manifest_field_is_explicitly_rejected() {
-    let error = ModuleArtifact::from_store_bytes(
-        include_str!("../../tests/fixtures/module-artifact-old.json").as_bytes(),
-    )
-    .expect_err("an artifact carrying current-trigger manifest state must be refused");
-    assert!(matches!(error, ModuleArtifactError::FutureShape { .. }));
-    assert!(error.to_string().contains("trigger_key_manifest"));
-}
-
 /// TypeScript is the sole RLM language (ADR 0096), so an artifact that
 /// still records a compilation dialect was published by a pre-cutover build
 /// and is refused as an incompatible format rather than read with a default.
 #[test]
 fn a_recorded_compilation_dialect_is_refused_as_a_retired_field() {
-    let mut raw: serde_json::Value = serde_json::from_str(include_str!(
+    let raw: serde_json::Value = serde_json::from_str(include_str!(
         "../../tests/fixtures/module-artifact-old.json"
     ))
     .expect("frozen fixture should be JSON");
-    raw.as_object_mut()
-        .expect("artifact is an object")
-        .remove("trigger_key_manifest");
     assert!(
         raw.get("compilation_dialect").is_some(),
         "the frozen fixture must still carry the retired field"

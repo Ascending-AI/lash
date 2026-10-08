@@ -3,7 +3,6 @@
 //!
 //! Process parameter and settled return annotations survive lowering:
 //! each becomes a type in the process signature,
-//! which a trigger registration is checked against before any foreground
 //! effect runs. That makes the subset it accepts a durable decision, so the
 //! conversion refuses rather than widens — an annotation the runtime cannot
 //! carry would otherwise silently become `Any` and let a mismatched

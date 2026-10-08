@@ -39,7 +39,6 @@ mod regex;
 mod spans;
 mod spread_calls;
 mod statements;
-mod triggers;
 pub(crate) use attribute_update::attribute_update;
 use binding::*;
 use captures::{CaptureLedger, Site};
@@ -49,7 +48,6 @@ use graph::{shortest_cycle_through, strongly_connected_components};
 use param_types::process_param_type;
 pub(crate) use process_wrapper::{process_run_wrapper, wrapped_run_body};
 use statements::*;
-use triggers::is_trigger_registration_operation;
 
 pub(crate) fn accepts_instance_method(method: &str) -> bool {
     stdlib::is_instance_stdlib_method(method)

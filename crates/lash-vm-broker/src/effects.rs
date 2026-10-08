@@ -208,8 +208,6 @@ pub trait ParentEffects: Send + Sync {
 pub fn waits_only(request: &crate::OperationRequest) -> bool {
     matches!(
         request,
-        crate::OperationRequest::Await(_)
-            | crate::OperationRequest::Sleep(_)
-            | crate::OperationRequest::WaitSignal { .. }
+        crate::OperationRequest::Await(_) | crate::OperationRequest::Sleep(_)
     )
 }

@@ -343,9 +343,7 @@ pub(crate) enum Instruction {
     ResourceOperationBatch(usize),
     AwaitHandle,
     SleepFor,
-    ProcessWaitSignal {
-        name: usize,
-    },
+
     AwaitHandleUnwrap,
     Intrinsic(IntrinsicOp),
     MakeClosure {
@@ -522,9 +520,10 @@ impl Instruction {
             | Instruction::AwaitArray { .. }
             | Instruction::AwaitPending
             | Instruction::ResourceOperationBatch(_) => InstructionProfileTag::ResourceCall,
-            Instruction::AwaitHandle
-            | Instruction::AwaitHandleUnwrap
-            | Instruction::ProcessWaitSignal { .. } => InstructionProfileTag::AwaitHandle,
+            Instruction::AwaitHandle | Instruction::AwaitHandleUnwrap => {
+                InstructionProfileTag::AwaitHandle
+            }
+
             Instruction::SleepFor => InstructionProfileTag::Sleep,
             Instruction::Intrinsic(_) => InstructionProfileTag::Intrinsic,
             Instruction::MakeClosure { .. } => InstructionProfileTag::MakeClosure,

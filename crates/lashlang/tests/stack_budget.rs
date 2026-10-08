@@ -54,7 +54,7 @@ finish({
                             },
                             "required": ["definition"]
                         }),
-                        serde_json::json!({ "x-lash": { "kind": "handle", "payload": {} } }),
+                        serde_json::json!({ "x-lash": { "kind": "process_unknown" } }),
                     ),
                 )
                 .expect("process start operation");

@@ -409,7 +409,7 @@ async fn resident_restored_and_replayed(source: &str) -> Value {
                 .unwrap_or_else(|error| panic!("{source}: {error}"))
             {
                 VmRunOutcome::EffectCompleted => parked = true,
-                VmRunOutcome::HandedOver => panic!("this host never hands a signal wait over"),
+                VmRunOutcome::HandedOver => panic!("this host never hands an operation over"),
                 VmRunOutcome::Complete(_) => {
                     parked = false;
                     break;
@@ -436,7 +436,7 @@ async fn resident_restored_and_replayed(source: &str) -> Value {
                 .unwrap_or_else(|error| panic!("{source}: resumed: {error}"))
             {
                 VmRunOutcome::EffectCompleted => {}
-                VmRunOutcome::HandedOver => panic!("this host never hands a signal wait over"),
+                VmRunOutcome::HandedOver => panic!("this host never hands an operation over"),
                 VmRunOutcome::Complete(ExecutionOutcome::Finished(value)) => break value,
                 VmRunOutcome::Complete(other) => {
                     panic!("{source}: expected finish, got {other:?}")

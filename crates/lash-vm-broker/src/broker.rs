@@ -13,7 +13,7 @@
 //!   operation makes) takes an [`OperationId`](crate::OperationId) minted
 //!   when it commits, stored in the snapshot.
 //! - **Quiet points.** A request the VM blocks on (a resource operation, a
-//!   batch, an await, a sleep, a signal wait) parks the worker first: the
+//!   batch, an await or a sleep) parks the worker first: the
 //!   parent takes the VM's continuation and commits it, with the ledger that
 //!   matches it, the admission of the operation's member executions and its
 //!   waits, in one transaction ([`SnapshotStore::commit_quiet_point`]). Only

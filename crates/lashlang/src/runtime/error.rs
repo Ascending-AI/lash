@@ -462,18 +462,13 @@ pub enum RuntimeError {
     /// Sleeping through the execution host failed.
     #[error("sleep failed: {source}")]
     SleepFailed { source: ExecutionHostError },
-    /// Waiting for a process signal through the execution host failed.
-    #[error("wait_signal failed: {source}")]
-    WaitSignalFailed { source: ExecutionHostError },
-    /// Sending a process signal through the execution host failed.
-    #[error("signal_run failed: {source}")]
-    SignalRunFailed { source: ExecutionHostError },
+
     /// Cancelling a process through the execution host failed.
     #[error("cancel failed: {source}")]
     CancelFailed { source: ExecutionHostError },
-    /// Appending a process event through the execution host failed.
-    #[error("process event failed: {source}")]
-    ProcessEventFailed { source: ExecutionHostError },
+    /// An operation could not be parked at a continuation boundary.
+    #[error("operation park failed: {source}")]
+    OperationParkFailed { source: ExecutionHostError },
     /// Printing through the execution host failed.
     #[error("print failed: {source}")]
     PrintFailed { source: ExecutionHostError },
@@ -715,10 +710,8 @@ impl RuntimeError {
             Self::LinkedProcessNotExported { .. } => ErrorTaxonomy::Catchable,
             Self::ProcessStartFailed { .. } => ErrorTaxonomy::EffectFailure,
             Self::SleepFailed { .. } => ErrorTaxonomy::EffectFailure,
-            Self::WaitSignalFailed { .. } => ErrorTaxonomy::EffectFailure,
-            Self::SignalRunFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::OperationParkFailed { .. } => ErrorTaxonomy::EffectFailure,
             Self::CancelFailed { .. } => ErrorTaxonomy::EffectFailure,
-            Self::ProcessEventFailed { .. } => ErrorTaxonomy::EffectFailure,
             Self::PrintFailed { .. } => ErrorTaxonomy::EffectFailure,
             Self::FinishFailed { .. } => ErrorTaxonomy::EffectFailure,
             Self::FailFailed { .. } => ErrorTaxonomy::EffectFailure,
@@ -852,10 +845,8 @@ impl RuntimeError {
             Self::LinkedProcessNotExported { .. } => "LinkedProcessNotExported",
             Self::ProcessStartFailed { .. } => "ProcessStartFailed",
             Self::SleepFailed { .. } => "SleepFailed",
-            Self::WaitSignalFailed { .. } => "WaitSignalFailed",
-            Self::SignalRunFailed { .. } => "SignalRunFailed",
+            Self::OperationParkFailed { .. } => "OperationParkFailed",
             Self::CancelFailed { .. } => "CancelFailed",
-            Self::ProcessEventFailed { .. } => "ProcessEventFailed",
             Self::PrintFailed { .. } => "PrintFailed",
             Self::FinishFailed { .. } => "FinishFailed",
             Self::FailFailed { .. } => "FailFailed",
@@ -1001,10 +992,8 @@ impl RuntimeError {
             | Self::UnwrappedModuleOperationFailed { source }
             | Self::ProcessStartFailed { source }
             | Self::SleepFailed { source }
-            | Self::WaitSignalFailed { source }
-            | Self::SignalRunFailed { source }
+            | Self::OperationParkFailed { source }
             | Self::CancelFailed { source }
-            | Self::ProcessEventFailed { source }
             | Self::PrintFailed { source }
             | Self::FinishFailed { source }
             | Self::FailFailed { source }

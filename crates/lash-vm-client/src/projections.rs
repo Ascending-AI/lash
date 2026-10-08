@@ -103,9 +103,8 @@ fn operation_values(op: &mut lashlang::AbilityOp) -> Vec<&mut Value> {
         | AbilityOp::Print(argument)
         | AbilityOp::Finish(argument)
         | AbilityOp::Fail(argument) => values.push(argument),
-        AbilityOp::ProcessEvent(event) => values.push(&mut event.value),
+
         AbilityOp::Sleep(sleep) => values.push(&mut sleep.value),
-        AbilityOp::WaitSignal { .. } => {}
     }
     values
 }

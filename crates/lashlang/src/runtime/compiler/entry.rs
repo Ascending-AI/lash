@@ -969,7 +969,6 @@ impl Compiler {
             | Expr::ReceiverCall { .. }
             | Expr::Await(_)
             | Expr::SleepFor(_)
-            | Expr::WaitSignal { .. }
             | Expr::ResultUnwrap(_)
             | Expr::Print(_)
             | Expr::Finish(_)

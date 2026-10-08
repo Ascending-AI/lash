@@ -40,14 +40,7 @@ mod trace_waits;
 pub use process_create_tool::{
     ProcessCreateTools, process_create_tool_definition, process_create_tool_provider,
 };
-mod trigger_commands;
-mod trigger_tools;
 pub use trace_waits::TraceWaitBookkeeping;
-pub use trigger_commands::execute_trigger_operation;
-pub use trigger_tools::{
-    RegisterTriggerTools, execute_register_trigger_tool_call, register_trigger_tool_definition,
-    register_trigger_tool_provider,
-};
 mod language_runtime;
 pub use language_runtime::{
     is_language_runtime_receiver, journaled_language_runtime_value, language_runtime_operation,
@@ -457,8 +450,6 @@ fn lashlang_host_environment_from_resources(
             ),
         )?;
     }
-    let mut resources = lashlang::with_trigger_resource_operations(resources)?;
-    lashlang::add_trigger_register_tool_binding(&mut resources)?;
     Ok(
         LashlangHostEnvironment::new(resources, abilities)
             .with_language_features(language_features),
@@ -622,19 +613,6 @@ pub fn lashlang_host_environment_satisfies_requirements(
         if current_binding.output_ty != required_binding.output_ty {
             return Err(LashlangRuntimeError::ValueConstructorOutputMismatch {
                 path: path.to_string(),
-            });
-        }
-    }
-    for (source_ty, required_binding) in required.resources.trigger_sources() {
-        let current_binding = current
-            .resources
-            .resolve_trigger_source(source_ty)
-            .ok_or_else(|| LashlangRuntimeError::TriggerSourceUnavailable {
-                source_type: source_ty.to_string(),
-            })?;
-        if current_binding != required_binding {
-            return Err(LashlangRuntimeError::TriggerSourceMismatch {
-                source_type: source_ty.to_string(),
             });
         }
     }
@@ -869,7 +847,6 @@ pub async fn prepare_lashlang_process_start(
         }
         source => LashlangRuntimeError::CheckProcessArgs { source },
     })?;
-    let signal_event_types = process.signals.clone();
     let process_input = LashlangProcessInput {
         module_ref: start.module_ref,
         process_ref: start.process_ref,
@@ -884,11 +861,6 @@ pub async fn prepare_lashlang_process_start(
     if let Some(host_start_key) = host_start_key {
         request = request.with_host_start_key(host_start_key);
     }
-    let request = request.with_extra_event_types(
-        lashlang_process_event_types()
-            .into_iter()
-            .chain(signal_event_types),
-    );
     Ok(PreparedLashlangProcessStart {
         request,
         label: display_name,
@@ -1105,29 +1077,8 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
         let process_type = artifact
             .process_type(&identity)
             .map_err(|error| unresolvable(error.to_string()))?;
-        // The engine's own lifecycle events ride with the declaration's signals.
-        // A leaf `processes.start` (ADR 0095) reaches the registry only through
-        // admission, so this resolution is the sole place the child's row can
-        // learn them; the in-engine start and trigger-registration paths chain
-        // the same two sets (`prepare_lashlang_process_start`,
-        // `trigger_commands`). Without the base set a started child's first
-        // `process.yield` is refused as an undeclared event type.
-        let signals = lashlang_process_event_types()
-            .into_iter()
-            .chain(
-                artifact
-                    .process(
-                        artifact
-                            .process_name_for_ref(&identity.process_ref)
-                            .unwrap_or(""),
-                    )
-                    .map(|process| process.signals.clone())
-                    .unwrap_or_default(),
-            )
-            .collect::<Vec<_>>();
         Ok(lash_core::ProcessDefinitionResolution::new(
             lash_core::ProcessSignature::known(lashlang_type_expr_schema(&process_type)),
-            signals,
         ))
     }
 
@@ -1229,21 +1180,19 @@ pub fn lashlang_process_engine_registration(
     )
     .expect("lashlang engine and admission share a fixed kind")
     .with_engine_steps(Arc::new(LashlangEngineSteps::new(Arc::clone(&engine))))
-    .with_host_steps(Arc::new(LashlangHostSteps::new(engine)))
 }
 
 mod bridge;
 #[cfg(test)]
 mod catalog_tests;
 pub mod engine;
-pub use engine::{LashlangEngineSteps, LashlangHostSteps};
+pub use engine::LashlangEngineSteps;
 mod catalogue_preview;
 mod deferred;
-mod deferred_triggers;
 mod process;
 
 pub use bridge::{
-    ExecutionCancellation, lashlang_value_to_json, process_event_payload, process_sleep,
+    ExecutionCancellation, lashlang_value_to_json, process_sleep,
     protocol_tool_output_to_lashlang_value, protocol_tool_reply_to_lashlang_value,
 };
 pub use catalogue_preview::{
@@ -1259,15 +1208,9 @@ pub use deferred::{
     resolve_and_build_deferred_environment, resolve_and_build_deferred_environment_from_references,
     resolve_and_fold_deferred,
 };
-pub use deferred_triggers::{
-    DeferredTriggerProvider, DeferredTriggerProviderRegistry, DeferredTriggerResolutionError,
-    DeferredTriggerResolutionRecord, DeferredTriggerResolver, SharedDeferredTriggerResolver,
-    TriggerGrant, TriggerResolution, resolve_and_fold_deferred_triggers,
-};
 pub use engine::LASHLANG_SEGMENT_STATE_VERSION;
 pub use process::{
-    TraceLanguageExecutionMapError, lashlang_process_event_types,
-    lashlang_process_signal_event_types, lashlang_program_hash, lashlang_type_expr_schema,
+    TraceLanguageExecutionMapError, lashlang_program_hash, lashlang_type_expr_schema,
     trace_lashlang_main_map, trace_lashlang_process_map, trace_lashlang_process_map_snapshot,
 };
 

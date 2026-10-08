@@ -61,8 +61,7 @@ TypeScript-only rulings beside the official ECMAScript inventory.
 
 Cells are scripts and may use top-level `await` for tools, process handles,
 `sleep`, `Promise.all`, `Promise.allSettled`, `Promise.race`, and `Promise.any`;
-`waitSignal` is
-process-only and rejects at the cell top level by name. Async functions and arrows
+Async functions and arrows
 are accepted when every awaited value is transitively grounded in this agent surface;
 `await Promise.all(xs.map(async x => ...))` and its `Promise.allSettled`
 counterpart use the durable sequential async-map driver. The all-settled form
@@ -75,13 +74,11 @@ in the executor's deferred tool-resolution path.
 
 Durable work is an ordinary value: a process is a top-level `const`-bound
 uncalled `async` arrow — `const worker = async (...) => { ... }` — that the
-linker lifts wherever a `Process` is expected. Starting, awaiting, signalling
+linker lifts wherever a `Process` is expected. Starting, awaiting
 and cancelling one are catalogue tools rather than language constructs:
 `await processes.start({ definition: worker, args: { ...args } })` returns a handle,
-`await handle` its result, `await processes.emit({ value })` emits progress
-from a run and `await processes.signal({ handle, name, payload })` sends a
-declared signal to another run. `waitSignal`, `sleep` and `finish` remain
-constructs; `finish` is cell-only. A process return annotation declares its
+`await handle` its result, and `await processes.cancel({ handle })` cancels
+a run. `sleep` and `finish` remain constructs; `finish` is cell-only. A process return annotation declares its
 settled output type: `Promise<boolean>` and `boolean` both carry `boolean` in
 the signature, schema and retained artifact. Without an annotation, the linker
 infers the output from returns, including awaited results and a possible null
@@ -90,24 +87,6 @@ A normal return from the arrow finishes the
 process only after all enclosing `finally` blocks execute; an uncaught throw
 fails it. A capture the lift cannot carry by value rejects as a non-liftable
 capture.
-
-A trigger target uses `{ definition: worker }` or `{ definition_id: id }`
-(ADR 0095). The definition can also be an inline async arrow:
-`target: { definition: async (event) => { return event; } }`.
-A trigger registration binds the fired event through the `inputs` arrow:
-`inputs: (event) => ({ tick: event })`, on `triggers.register` / `update` /
-`revive` alike. The arrow is a template the
-compiler erases, not a callback: exactly one plain parameter, no `async`, an
-object-expression body with static unique keys, and the parameter usable only
-as a whole, direct property value — never projected, nested, called or
-captured. Every other value is an ordinary expression evaluated once, in the
-enclosing scope, when the registration runs. `inputs` may be omitted when the
-target's signature has exactly one parameter and the event type is assignable
-to it; a zero-parameter target is refused and told to take an event parameter.
-Writing `.event` on a source descriptor, the retired `trigger.event` global, or
-an object-valued `inputs` each reject by name with
-`TS_TRIGGER_SOURCE_EVENT_ACCESS`, `TS_TRIGGER_EVENT_REMOVED` and
-`TS_TRIGGER_INPUTS_LITERAL_REQUIRED`.
 
 Every `Promise` aggregate evaluates any array-valued expression and aggregates
 its pending handles and already-settled values in one Run-owned aggregate.
@@ -351,8 +330,7 @@ no probe that fires it fails that test.
   operand and answers `true`. `delete` of a bare identifier stays the early
   `SyntaxError` strict code makes it.
 - Await permission stops at every function boundary: an async IIFE or async
-  `map` callback must await its own tool calls, `sleep`, `waitSignal`, and
-  `triggers.register` operations.
+  `map` callback must await its own tool calls and `sleep`.
 - Durable state is a value *tree*. A cycle is usable inside a cell —
   `JSON.stringify` throws Node's catchable
   `TypeError: Converting circular structure to JSON` — but a durable binding

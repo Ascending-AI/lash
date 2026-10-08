@@ -72,7 +72,7 @@ A `Declaration` is one of:
 
 | variant | meaning |
 |---|---|
-| `Process` | A `ProcessDecl`: a named durable process with `params` (each a `ProcessParam` of `name` and `ty`), optional `signals` (each a `ProcessSignalDecl` of `name` and `ty`), an optional `return_ty` inferred by the linker when unwritten, an optional `label` (`LabelMetadata`: `title` plus optional `description`), an `origin` (`ProcessOrigin`), and a `body`. |
+| `Process` | A `ProcessDecl`: a named durable process with `params` (each a `ProcessParam` of `name` and `ty`), an optional `return_ty` inferred by the linker when unwritten, an optional `label` (`LabelMetadata`: `title` plus optional `description`), an `origin` (`ProcessOrigin`), and a `body`. |
 | `Function` | A `FunctionDecl`: a named pure synchronous function with `params` (each a `FunctionParam`), a mandatory `return_ty`, and a `body`. The linker rejects every effect inside the body. |
 
 A `ProcessOrigin` records where a process declaration came from:
@@ -115,7 +115,6 @@ resource catalogs and validation:
 | `Object` | A record with named `TypeField`s (each `name`, `ty`, `optional`). |
 | `Ref` | A named host data type, resolved against the artifact's requirements. |
 | `Process` | A `ProcessType`: `Unknown` (host schemas only), or `Known` with a checked `ProcessSignature` of ordered params and one output. |
-| `TriggerHandle` | A handle for a trigger delivering the member event type. |
 | `Union` | Two or more alternative member types; `UnionMembers` makes smaller unions unrepresentable — construction deduplicates, flattens nested unions and refuses a remainder under two members, and `TypeExpr::union` collapses one member to itself and zero to `Null`. |
 
 `ResourceRefExpr` names a host resource: a `path` of segments plus the
@@ -179,7 +178,6 @@ every operand is evaluated left to right.
 | `ReceiverCall` | Evaluates `receiver`, then `args`, then calls the named host `operation` on the receiver. Produces the operation's result record (see `ResultUnwrap`). |
 | `Await` | Evaluates its operand and waits for the pending value it names. |
 | `SleepFor` | Evaluates its operand as a duration and suspends the process for it. |
-| `WaitSignal` | Suspends the process until the named `signal` arrives. |
 | `ResultUnwrap` | Evaluates its operand and unwraps a host result record: `{ok: true, value}` produces `value`; `{ok: false, error, cause}` raises the recorded failure. Nested `ResultUnwrap(Await(x))` and `ResultUnwrap(ReceiverCall)` are fused by the compiler into single await/unwrap sites. |
 | `Print` | Evaluates its operand and emits it as an observation to the host. |
 | `Finish` | Evaluates its operand and settles the process successfully with it. |
@@ -452,7 +450,7 @@ The host-requirements preimage is `atom(family)`,
 `atom("host-requirements")`, then `abilities`, the language features
 (`label-annotations`), `globals`, and `resources` (module instances with
 their operations, resource types with their operation signatures,
-named data types, value constructors, and trigger sources), every collection
+named data types and value constructors), every collection
 prefixed by its count and every entry sorted.
 
 Inside a program, each node writes its variant atom then its fields in
@@ -483,7 +481,6 @@ declaration order:
 | `ReceiverCall` | `receiver-call` |
 | `Await` | `await` |
 | `SleepFor` | `sleep-for` |
-| `WaitSignal` | `wait-signal` |
 | `ResultUnwrap` | `unwrap` |
 | `Print` | `print` |
 | `Finish` | `finish` |
@@ -506,12 +503,12 @@ declaration order:
 | `OperandLogical` | `ir:operand-logical` (the operator's `Debug` name) |
 
 Declarations write `process-decl` or `function-decl` followed by name,
-params, (for a process) `signals`, `return`/`no-return` type, label,
+params, `return`/`no-return` type, label,
 `ProcessOrigin` and body; a function writes `return` type then body. A
 `TypeExpr` writes a `type:*` atom per variant (`type:any`, `type:str`,
 `type:int`, `type:float`, `type:bool`, `type:dict`, `type:null`, `type:enum`,
 `type:list`, `type:object`, `type:ref`, `type:process-signature`,
-`type:process-unknown`, `type:trigger-handle`, `type:union`) then its
+`type:process-unknown`, `type:union`) then its
 members.
 
 Two programs that differ only in a binding's spelling are two modules: names
@@ -543,7 +540,7 @@ The stored bytes are a JSON `ModuleArtifactEnvelope`:
 (the N+1 upgrade build, ADR 0115 §6) the constant is `3` but that build
 still writes `2` and admits both, so a module published during a roll forward
 reads after a rollback. Decoding refuses an unknown family or encoding,
-obsolete shapes (`trigger_key_manifest`, the retired `compilation_dialect`,
+obsolete shapes (the retired `compilation_dialect`,
 the old anonymous process-type shape), IR that fails admission, and content
 whose re-derived refs do not match the recorded ones — the decode verifies
 `module_ref`, `host_requirements_ref` and `exports` against the artifact's

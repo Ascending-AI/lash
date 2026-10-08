@@ -129,12 +129,7 @@ pub enum LashlangRuntimeError {
     /// A value constructor's output type is incompatible with Lashlang.
     #[error("value constructor `{path}` has incompatible output type")]
     ValueConstructorOutputMismatch { path: String },
-    /// A required trigger source type is absent from the host catalogue.
-    #[error("trigger source type `{source_type}` is not available")]
-    TriggerSourceUnavailable { source_type: String },
-    /// A trigger source's event type is incompatible with Lashlang.
-    #[error("trigger source type `{source_type}` has incompatible event type")]
-    TriggerSourceMismatch { source_type: String },
+
     /// Loading the Lashlang module artifact from storage failed.
     #[error("failed to load lashlang module artifact: {source}")]
     LoadArtifact {
@@ -182,18 +177,9 @@ pub enum LashlangRuntimeError {
 /// The process host operation at a failed boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProcessHostOp {
-    /// Append a yield or wake event.
-    AppendProcessEvent,
     /// Await a durable sleep.
     SleepProcess,
-    /// Resolve a signal event type.
-    ValidateSignalName,
-    /// Persist signal-wait state.
-    SetSignalWait,
-    /// Await a durable signal.
-    AwaitSignal,
-    /// Clear signal-wait state.
-    ClearSignalWait,
+
     /// Read a journaled clock or random value.
     LanguageRuntimeValue,
 }
@@ -201,12 +187,7 @@ pub enum ProcessHostOp {
 impl std::fmt::Display for ProcessHostOp {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::AppendProcessEvent => "append process event",
             Self::SleepProcess => "sleep process",
-            Self::ValidateSignalName => "validate signal name",
-            Self::SetSignalWait => "set signal wait",
-            Self::AwaitSignal => "await signal",
-            Self::ClearSignalWait => "clear signal wait",
             Self::LanguageRuntimeValue => "read language runtime value",
         })
     }
@@ -284,12 +265,6 @@ pub enum LashlangHostError {
     /// `print` was invoked from a process body where it is unavailable.
     #[error("`print` is not available inside lashlang process bodies")]
     PrintUnavailable,
-    /// `signal_run` received a value that is not a process handle.
-    #[error("signal_run expects a process handle")]
-    InvalidProcessHandle,
-    /// A `signal_run` process handle omitted its identifier.
-    #[error("signal_run process handle is missing `id`")]
-    ProcessHandleMissingId,
     /// A module resource does not expose the requested operation.
     #[error("module `{module}` of type `{resource_type}` does not expose operation `{operation}`")]
     ModuleOperationUnavailable {

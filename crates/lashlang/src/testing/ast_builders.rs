@@ -19,8 +19,8 @@
 use crate::ast::{
     AssignPathStep, AssignTarget, AstPath, AstString, CatchClause, CoercingBinaryOp,
     CoercingUnaryOp, Declaration, Expr, FunctionDecl, FunctionExpr, FunctionParam, LabelMetadata,
-    OperandLogicalOp, ProcessDecl, ProcessParam, ProcessSignalDecl, ProcessSignature, ProcessType,
-    Program, ResourceRefExpr, TryExpr, TypeExpr, TypeField,
+    OperandLogicalOp, ProcessDecl, ProcessParam, ProcessSignature, ProcessType, Program,
+    ResourceRefExpr, TryExpr, TypeExpr, TypeField,
 };
 use crate::span::Span;
 
@@ -103,12 +103,12 @@ pub fn with_declaration_spans(mut program: Program, spans: &[(usize, usize)]) ->
     program
 }
 
-/// `process <name>(<params>) { <body> }`, with no signals, return type or label.
+/// `process <name>(<params>) { <body> }`, with no return type or label.
 pub fn process(name: &str, params: Vec<ProcessParam>, body: Expr) -> Declaration {
     Declaration::Process(ProcessDecl {
         name: name.into(),
         params,
-        signals: Vec::new(),
+
         return_ty: None,
         label: None,
         origin: crate::ProcessOrigin::Declared,
@@ -139,26 +139,8 @@ pub fn process_returning(
     Declaration::Process(ProcessDecl {
         name: name.into(),
         params,
-        signals: Vec::new(),
-        return_ty: Some(return_ty),
-        label: None,
-        origin: crate::ProcessOrigin::Declared,
-        body,
-    })
-}
 
-/// `process <name>(<params>) signals { <signals> } { <body> }`.
-pub fn process_with_signals(
-    name: &str,
-    params: Vec<ProcessParam>,
-    signals: Vec<ProcessSignalDecl>,
-    body: Expr,
-) -> Declaration {
-    Declaration::Process(ProcessDecl {
-        name: name.into(),
-        params,
-        signals,
-        return_ty: None,
+        return_ty: Some(return_ty),
         label: None,
         origin: crate::ProcessOrigin::Declared,
         body,
@@ -175,7 +157,7 @@ pub fn labelled_process(
     Declaration::Process(ProcessDecl {
         name: name.into(),
         params,
-        signals: Vec::new(),
+
         return_ty: None,
         label: Some(label),
         origin: crate::ProcessOrigin::Declared,
@@ -185,13 +167,6 @@ pub fn labelled_process(
 
 pub fn param(name: &str, ty: TypeExpr) -> ProcessParam {
     ProcessParam {
-        name: name.into(),
-        ty,
-    }
-}
-
-pub fn signal(name: &str, ty: TypeExpr) -> ProcessSignalDecl {
-    ProcessSignalDecl {
         name: name.into(),
         ty,
     }
@@ -301,9 +276,7 @@ fn type_schema(ty: &TypeExpr) -> Expr {
         )])
     };
     match ty {
-        TypeExpr::Any | TypeExpr::Process(_) | TypeExpr::TriggerHandle(_) => {
-            Expr::Record(Vec::new())
-        }
+        TypeExpr::Any | TypeExpr::Process(_) => Expr::Record(Vec::new()),
         TypeExpr::Str => scalar("string"),
         TypeExpr::Int => scalar("integer"),
         TypeExpr::Float => scalar("number"),
@@ -537,10 +510,6 @@ pub fn sleep_for(expr: Expr) -> Expr {
     Expr::SleepFor(Box::new(expr))
 }
 
-pub fn wait_signal(name: &str) -> Expr {
-    Expr::WaitSignal { name: name.into() }
-}
-
 pub fn builtin(name: &str, args: Vec<Expr>) -> Expr {
     Expr::BuiltinCall {
         name: name.into(),
@@ -624,20 +593,6 @@ pub fn module_call(path: &[&str], operation: &str, args: Vec<Expr>) -> Expr {
 pub fn start(process: &str, args: Vec<(&str, Expr)>) -> Expr {
     let fields = vec![("definition", process_ref(process)), ("args", record(args))];
     module_call(&["processes"], "start", vec![record(fields)])
-}
-
-/// `await processes.signal({ handle, signal, payload })?` — the tool spelling
-/// that replaced the retired `signal_run` form (FIG-2999).
-pub fn signal_run(run: Expr, name: &str, payload: Expr) -> Expr {
-    module_call(
-        &["processes"],
-        "signal",
-        vec![record(vec![
-            ("handle", run),
-            ("signal", string(name)),
-            ("payload", payload),
-        ])],
-    )
 }
 
 /// `await processes.cancel({ handle })?` — the tool spelling that replaced the

@@ -51,77 +51,6 @@ fn parse_root(bytes: &[u8]) -> RlmSnapshotRoot {
     rmp_serde::from_slice(bytes).expect("decode the RLM root")
 }
 
-#[tokio::test]
-async fn rlm_worker_envelope_carries_no_grant_or_binding() {
-    let fleet_format = lash_core::FleetFormat::current();
-    let session = session_with_sentinel_grant().await;
-    let hydrated = session
-        .hydrated_execution_state(fleet_format)
-        .await
-        .expect("capture the session");
-
-    assert!(
-        !contains(&hydrated.root, SENTINEL_SECRET),
-        "the journal owns the grant's execution binding"
-    );
-
-    // The worker-bound envelope carries the guest state and nothing else.
-    let root = parse_root(&hydrated.root);
-    let envelope = worker_bound_envelope(&hydrated, &root)
-        .expect("assemble the worker-bound envelope")
-        .encode();
-    assert!(
-        !contains(&envelope, SENTINEL_SECRET),
-        "a grant's execution binding crossed to the worker"
-    );
-    for authority in [
-        "deferred_resolutions",
-        "deferred_trigger_resolutions",
-        "vault.read",
-    ] {
-        assert!(
-            !contains(&envelope, authority),
-            "the worker-bound envelope names `{authority}`"
-        );
-    }
-    let decoded: RlmWorkerEnvelope =
-        rmp_serde::from_slice(&envelope).expect("the envelope decodes as guest state");
-    assert_eq!(
-        decoded.globals.keys().collect::<Vec<_>>(),
-        vec!["greeting"],
-        "the envelope carries exactly the guest bindings"
-    );
-
-    // What the worker returns carries no authority either.
-    let (capture, _) = worker_capture(&session, fleet_format)
-        .await
-        .expect("the worker captures its guest state");
-    assert!(
-        !contains(&capture, SENTINEL_SECRET),
-        "a grant's execution binding appeared in the worker's capture"
-    );
-
-    // A restore installs guest state. Re-execution recovers grants from
-    // the journal on the parent side.
-    let mut restored = RlmExecutionState::new();
-    restored
-        .restore_execution_state(&hydrated, fleet_format)
-        .await
-        .expect("restore the session");
-    assert!(
-        restored
-            .vm
-            .state()
-            .binding_names()
-            .any(|name| name == "greeting"),
-        "the guest binding must be restored on the worker side"
-    );
-    assert!(
-        restored.deferred_link.is_none(),
-        "restore clears the transient link"
-    );
-}
-
 /// What a compromised worker might return: a well-formed capture with a
 /// forged grant appended.
 #[derive(Serialize)]
@@ -242,4 +171,71 @@ async fn worker_capture(
         }
     }
     Ok((capture.encode(), ()))
+}
+
+#[tokio::test]
+async fn rlm_worker_envelope_carries_no_grant_or_binding() {
+    let fleet_format = lash_core::FleetFormat::current();
+    let session = session_with_sentinel_grant().await;
+    let hydrated = session
+        .hydrated_execution_state(fleet_format)
+        .await
+        .expect("capture the session");
+
+    assert!(
+        !contains(&hydrated.root, SENTINEL_SECRET),
+        "the journal owns the grant's execution binding"
+    );
+
+    // The worker-bound envelope carries the guest state and nothing else.
+    let root = parse_root(&hydrated.root);
+    let envelope = worker_bound_envelope(&hydrated, &root)
+        .expect("assemble the worker-bound envelope")
+        .encode();
+    assert!(
+        !contains(&envelope, SENTINEL_SECRET),
+        "a grant's execution binding crossed to the worker"
+    );
+    for authority in ["deferred_resolutions", "vault.read"] {
+        assert!(
+            !contains(&envelope, authority),
+            "the worker-bound envelope names `{authority}`"
+        );
+    }
+    let decoded: RlmWorkerEnvelope =
+        rmp_serde::from_slice(&envelope).expect("the envelope decodes as guest state");
+    assert_eq!(
+        decoded.globals.keys().collect::<Vec<_>>(),
+        vec!["greeting"],
+        "the envelope carries exactly the guest bindings"
+    );
+
+    // What the worker returns carries no authority either.
+    let (capture, _) = worker_capture(&session, fleet_format)
+        .await
+        .expect("the worker captures its guest state");
+    assert!(
+        !contains(&capture, SENTINEL_SECRET),
+        "a grant's execution binding appeared in the worker's capture"
+    );
+
+    // A restore installs guest state. Re-execution recovers grants from
+    // the journal on the parent side.
+    let mut restored = RlmExecutionState::new();
+    restored
+        .restore_execution_state(&hydrated, fleet_format)
+        .await
+        .expect("restore the session");
+    assert!(
+        restored
+            .vm
+            .state()
+            .binding_names()
+            .any(|name| name == "greeting"),
+        "the guest binding must be restored on the worker side"
+    );
+    assert!(
+        restored.deferred_link.is_none(),
+        "restore clears the transient link"
+    );
 }

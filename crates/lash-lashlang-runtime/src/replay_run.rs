@@ -180,7 +180,7 @@ pub enum CommandShape {
     /// (`{command}:process:subscribe-terminal:{id}:{key}`).
     ToolCall,
     /// A journaled value at the command's own key: a runtime value
-    /// (`Date.now()`, `Math.random()`) or a trigger operation.
+    /// (`Date.now()`, `Math.random()`) or another host effect.
     Value,
     /// A sleep: `{command}:sleep`.
     Sleep,

@@ -188,7 +188,7 @@ pub enum WorkflowDiagnosticClassification {
 pub enum WorkflowDiagnosticKind {
     DuplicateDeclaration,
     DuplicateProcessParam,
-    DuplicateProcessSignal,
+
     UnknownProcess,
     UnknownName,
     UnknownBuiltin,
@@ -206,23 +206,9 @@ pub enum WorkflowDiagnosticKind {
     ForbiddenInFunction,
     FunctionNameIsNotAValue,
     FunctionShadowsBuiltin,
-    InvalidTriggerRegistration,
-    InvalidTriggerSubscriptionKey,
+
     ProcessLiteralOutsideProcessSlot,
-    ConflictingSignalPayload,
-    InvalidTriggerInputs,
-    DuplicateTriggerInput,
-    MissingTriggerInput,
-    UnknownTriggerInput,
-    MissingTriggerEventInput,
-    TriggerTargetTakesNoEvent,
-    AmbiguousOmittedTriggerInputs,
-    TriggerEventOutsideInputs,
-    TriggerEventProjection,
-    InvalidTriggerList,
-    UnknownTriggerEventType,
-    InvalidTriggerTarget,
-    TriggerEventMismatch,
+
     UnresolvedReceiver,
     UnknownResourceOperation,
     AmbiguousModuleOperation,
@@ -239,10 +225,9 @@ pub enum WorkflowDiagnosticKind {
 }
 
 impl WorkflowDiagnosticKind {
-    pub const ALL: [Self; 50] = [
+    pub const ALL: [Self; 33] = [
         Self::DuplicateDeclaration,
         Self::DuplicateProcessParam,
-        Self::DuplicateProcessSignal,
         Self::UnknownProcess,
         Self::UnknownName,
         Self::UnknownBuiltin,
@@ -260,23 +245,7 @@ impl WorkflowDiagnosticKind {
         Self::ForbiddenInFunction,
         Self::FunctionNameIsNotAValue,
         Self::FunctionShadowsBuiltin,
-        Self::InvalidTriggerRegistration,
-        Self::InvalidTriggerSubscriptionKey,
         Self::ProcessLiteralOutsideProcessSlot,
-        Self::ConflictingSignalPayload,
-        Self::InvalidTriggerInputs,
-        Self::DuplicateTriggerInput,
-        Self::MissingTriggerInput,
-        Self::UnknownTriggerInput,
-        Self::MissingTriggerEventInput,
-        Self::TriggerTargetTakesNoEvent,
-        Self::AmbiguousOmittedTriggerInputs,
-        Self::TriggerEventOutsideInputs,
-        Self::TriggerEventProjection,
-        Self::InvalidTriggerList,
-        Self::UnknownTriggerEventType,
-        Self::InvalidTriggerTarget,
-        Self::TriggerEventMismatch,
         Self::UnresolvedReceiver,
         Self::UnknownResourceOperation,
         Self::AmbiguousModuleOperation,
@@ -300,7 +269,6 @@ impl WorkflowDiagnosticKind {
         match self {
             Self::DuplicateDeclaration
             | Self::DuplicateProcessParam
-            | Self::DuplicateProcessSignal
             | Self::UnknownProcess
             | Self::UnknownName
             | Self::UnknownBuiltin
@@ -318,23 +286,7 @@ impl WorkflowDiagnosticKind {
             | Self::ForbiddenInFunction
             | Self::FunctionNameIsNotAValue
             | Self::FunctionShadowsBuiltin
-            | Self::InvalidTriggerRegistration
-            | Self::InvalidTriggerSubscriptionKey
             | Self::ProcessLiteralOutsideProcessSlot
-            | Self::ConflictingSignalPayload
-            | Self::InvalidTriggerInputs
-            | Self::DuplicateTriggerInput
-            | Self::MissingTriggerInput
-            | Self::UnknownTriggerInput
-            | Self::MissingTriggerEventInput
-            | Self::TriggerTargetTakesNoEvent
-            | Self::AmbiguousOmittedTriggerInputs
-            | Self::TriggerEventOutsideInputs
-            | Self::TriggerEventProjection
-            | Self::InvalidTriggerList
-            | Self::UnknownTriggerEventType
-            | Self::InvalidTriggerTarget
-            | Self::TriggerEventMismatch
             | Self::UnresolvedReceiver
             | Self::UnknownResourceOperation
             | Self::AmbiguousModuleOperation
@@ -355,7 +307,6 @@ impl WorkflowDiagnosticKind {
         match self {
             Self::DuplicateDeclaration => "duplicate_declaration",
             Self::DuplicateProcessParam => "duplicate_process_param",
-            Self::DuplicateProcessSignal => "duplicate_process_signal",
             Self::UnknownProcess => "unknown_process",
             Self::UnknownName => "unknown_name",
             Self::UnknownBuiltin => "unknown_builtin",
@@ -373,23 +324,7 @@ impl WorkflowDiagnosticKind {
             Self::ForbiddenInFunction => "forbidden_in_function",
             Self::FunctionNameIsNotAValue => "function_name_is_not_a_value",
             Self::FunctionShadowsBuiltin => "function_shadows_builtin",
-            Self::InvalidTriggerRegistration => "invalid_trigger_registration",
-            Self::InvalidTriggerSubscriptionKey => "invalid_trigger_subscription_key",
             Self::ProcessLiteralOutsideProcessSlot => "process_literal_outside_process_slot",
-            Self::ConflictingSignalPayload => "conflicting_signal_payload",
-            Self::InvalidTriggerInputs => "invalid_trigger_inputs",
-            Self::DuplicateTriggerInput => "duplicate_trigger_input",
-            Self::MissingTriggerInput => "missing_trigger_input",
-            Self::UnknownTriggerInput => "unknown_trigger_input",
-            Self::MissingTriggerEventInput => "missing_trigger_event_input",
-            Self::TriggerTargetTakesNoEvent => "trigger_target_takes_no_event",
-            Self::AmbiguousOmittedTriggerInputs => "ambiguous_omitted_trigger_inputs",
-            Self::TriggerEventOutsideInputs => "trigger_event_outside_inputs",
-            Self::TriggerEventProjection => "trigger_event_projection",
-            Self::InvalidTriggerList => "invalid_trigger_list",
-            Self::UnknownTriggerEventType => "unknown_trigger_event_type",
-            Self::InvalidTriggerTarget => "invalid_trigger_target",
-            Self::TriggerEventMismatch => "trigger_event_mismatch",
             Self::UnresolvedReceiver => "unresolved_receiver",
             Self::UnknownResourceOperation => "unknown_resource_operation",
             Self::AmbiguousModuleOperation => "ambiguous_module_operation",
@@ -410,7 +345,6 @@ impl WorkflowDiagnosticKind {
         match error {
             LinkError::DuplicateDeclaration { .. } => Self::DuplicateDeclaration,
             LinkError::DuplicateProcessParam { .. } => Self::DuplicateProcessParam,
-            LinkError::DuplicateProcessSignal { .. } => Self::DuplicateProcessSignal,
             LinkError::UnknownProcess { .. } => Self::UnknownProcess,
             LinkError::UnknownName { .. } => Self::UnknownName,
             LinkError::UnknownBuiltin { .. } => Self::UnknownBuiltin,
@@ -428,25 +362,9 @@ impl WorkflowDiagnosticKind {
             LinkError::ForbiddenInFunction { .. } => Self::ForbiddenInFunction,
             LinkError::FunctionNameIsNotAValue { .. } => Self::FunctionNameIsNotAValue,
             LinkError::FunctionShadowsBuiltin { .. } => Self::FunctionShadowsBuiltin,
-            LinkError::InvalidTriggerRegistration { .. } => Self::InvalidTriggerRegistration,
-            LinkError::InvalidTriggerSubscriptionKey { .. } => Self::InvalidTriggerSubscriptionKey,
             LinkError::ProcessLiteralOutsideProcessSlot { .. } => {
                 Self::ProcessLiteralOutsideProcessSlot
             }
-            LinkError::ConflictingSignalPayload { .. } => Self::ConflictingSignalPayload,
-            LinkError::InvalidTriggerInputs { .. } => Self::InvalidTriggerInputs,
-            LinkError::DuplicateTriggerInput { .. } => Self::DuplicateTriggerInput,
-            LinkError::MissingTriggerInput { .. } => Self::MissingTriggerInput,
-            LinkError::UnknownTriggerInput { .. } => Self::UnknownTriggerInput,
-            LinkError::MissingTriggerEventInput { .. } => Self::MissingTriggerEventInput,
-            LinkError::TriggerTargetTakesNoEvent { .. } => Self::TriggerTargetTakesNoEvent,
-            LinkError::AmbiguousOmittedTriggerInputs { .. } => Self::AmbiguousOmittedTriggerInputs,
-            LinkError::TriggerEventOutsideInputs { .. } => Self::TriggerEventOutsideInputs,
-            LinkError::TriggerEventProjection { .. } => Self::TriggerEventProjection,
-            LinkError::InvalidTriggerList { .. } => Self::InvalidTriggerList,
-            LinkError::UnknownTriggerEventType { .. } => Self::UnknownTriggerEventType,
-            LinkError::InvalidTriggerTarget { .. } => Self::InvalidTriggerTarget,
-            LinkError::TriggerEventMismatch { .. } => Self::TriggerEventMismatch,
             LinkError::UnresolvedReceiver { .. } => Self::UnresolvedReceiver,
             LinkError::UnknownResourceOperation { .. } => Self::UnknownResourceOperation,
             LinkError::AmbiguousModuleOperation { .. } => Self::AmbiguousModuleOperation,

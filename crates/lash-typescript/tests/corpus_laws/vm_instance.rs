@@ -14,7 +14,7 @@
 //! * [`effect_park_matches_straight_through_for_every_corpus_program`]
 //!   (FIG-4159, FIG-4275): a run of either mode parked on every operation it
 //!   awaits (resource operations and their batches, process awaits, sleeps
-//!   and signal waits), reopened from its bytes on a fresh instance and
+//!   and process awaits), reopened from its bytes on a fresh instance and
 //!   answered there with the outcome its host held, matches the same program
 //!   run straight through:
 //!   the same requests, the same cancel checkpoints, the same end and state.
@@ -170,143 +170,6 @@ fn stepped(
     boundaries: Boundaries,
 ) -> Run {
     stepped_within(instance, program, mode, boundaries, bounds())
-}
-
-fn stepped_within(
-    instance: &mut VmInstance,
-    program: &std::sync::Arc<CompiledProgram>,
-    mode: ExecutionMode,
-    boundaries: Boundaries,
-    bounds: ExecutionBounds,
-) -> Run {
-    let config = VmRunConfig::new(mode, bounds);
-    let mut transcript = Vec::new();
-    let mut parks = 0_usize;
-    let mut owner = None::<VmInstance>;
-    // The operation a parked run awaits and the outcome its host holds.
-    let mut held = None::<(String, Result<lashlang::AbilityOutcome, ExecutionHostError>)>;
-    let mut effect_parks = 0_usize;
-    let mut declined_parks = Vec::new();
-    let mut step = instance
-        .start(program.clone(), VmExecutionStart::Session, config.clone())
-        .unwrap_or_else(|error| panic!("the run starts: {error}"));
-    let end = loop {
-        let current = owner.as_mut().unwrap_or(&mut *instance);
-        step = match step {
-            VmStep::Suspended(suspended) => {
-                let parkable = suspended.request.parkable();
-                let resume = match suspended.request {
-                    VmRequest::Effect(op) if held.is_some() => {
-                        let (issued, outcome) = held.take().expect("checked above");
-                        assert_eq!(
-                            format!("{op:?}"),
-                            issued,
-                            "a resumed run issues the operation it parked on again"
-                        );
-                        VmResume::Effect(outcome)
-                    }
-                    VmRequest::Effect(op)
-                        if parkable && boundaries == Boundaries::ParkEveryEffectAndReopen =>
-                    {
-                        let issued = format!("{op:?}");
-                        transcript.push(format!("effect {issued}"));
-                        held = Some((issued, answer(op)));
-                        VmResume::Park
-                    }
-                    VmRequest::Effect(op) => {
-                        transcript.push(format!("effect {op:?}"));
-                        VmResume::Effect(answer(op))
-                    }
-                    VmRequest::CancelCheckpoint(checkpoint) => {
-                        transcript.push(format!("checkpoint {checkpoint}"));
-                        VmResume::CancelCheckpoint { cancelled: false }
-                    }
-                    VmRequest::Boundary => match boundaries {
-                        Boundaries::RunOn | Boundaries::ParkEveryEffectAndReopen => {
-                            VmResume::Continue
-                        }
-                        Boundaries::ParkAndReopen => VmResume::Park,
-                    },
-                    VmRequest::ParkDeclined(error) => {
-                        if held.is_some() {
-                            declined_parks.push(error.to_string());
-                        }
-                        VmResume::Continue
-                    }
-                };
-                current
-                    .resume(resume)
-                    .unwrap_or_else(|error| panic!("the resume answers its request: {error}"))
-            }
-            VmStep::Parked(parked) => {
-                parks += 1;
-                if parked.reason == lashlang::VmParkReason::AwaitingEffect {
-                    effect_parks += 1;
-                    assert!(held.is_some(), "a run parks on an effect only when asked");
-                }
-                let bytes = parked
-                    .continuation
-                    .to_bytes()
-                    .expect("a parked continuation encodes");
-                let mut successor = VmInstance::pristine();
-                let continuation = successor
-                    .open_continuation(&bytes)
-                    .expect("a parked continuation reopens on a fresh instance");
-                let next = successor
-                    .start(
-                        program.clone(),
-                        VmExecutionStart::Continuation(Box::new(continuation)),
-                        config.clone(),
-                    )
-                    .unwrap_or_else(|error| panic!("the continuation resumes: {error}"));
-                owner = Some(successor);
-                next
-            }
-            VmStep::Complete(complete) => break format!("complete {:?}", complete.outcome),
-            VmStep::GuestError(error) => break format!("guest error {:?}", error.failure.error),
-        };
-    };
-    assert!(
-        held.is_none(),
-        "every operation a run parked on was issued again"
-    );
-    if boundaries == Boundaries::ParkEveryEffectAndReopen {
-        let parkable = transcript
-            .iter()
-            .filter(|entry| {
-                entry.starts_with("effect ResourceOperation(")
-                    || entry.starts_with("effect ResourceOperationBatch(")
-                    || entry.starts_with("effect Await(")
-                    || entry.starts_with("effect Sleep")
-                    || entry.starts_with("effect WaitSignal")
-            })
-            .count();
-        assert_eq!(
-            effect_parks + declined_parks.len(),
-            parkable,
-            "the run parked on every parkable operation it issued, or declined it: {declined_parks:?}; {mode:?} transcript {transcript:?}, end {end}"
-        );
-        for reason in &declined_parks {
-            eprintln!("declined park: {reason}");
-        }
-    }
-    if boundaries == Boundaries::ParkAndReopen {
-        let effects = transcript
-            .iter()
-            .filter(|entry| entry.starts_with("effect"))
-            .count();
-        assert!(parks <= effects, "a run parks at most once per effect");
-    }
-    let finished = owner.as_ref().unwrap_or(&*instance);
-    assert!(
-        !finished.is_running(),
-        "an ended run leaves nothing in flight"
-    );
-    Run {
-        transcript,
-        end,
-        state: (mode == ExecutionMode::Foreground).then(|| encoded(finished.state())),
-    }
 }
 
 /// A corpus program compiled, with its session globals bound. A program's
@@ -792,4 +655,140 @@ finish(pendingEcho);
         format!("{:?}", VmInstance::pristine()),
         "opening a continuation installs nothing"
     );
+}
+
+fn stepped_within(
+    instance: &mut VmInstance,
+    program: &std::sync::Arc<CompiledProgram>,
+    mode: ExecutionMode,
+    boundaries: Boundaries,
+    bounds: ExecutionBounds,
+) -> Run {
+    let config = VmRunConfig::new(mode, bounds);
+    let mut transcript = Vec::new();
+    let mut parks = 0_usize;
+    let mut owner = None::<VmInstance>;
+    // The operation a parked run awaits and the outcome its host holds.
+    let mut held = None::<(String, Result<lashlang::AbilityOutcome, ExecutionHostError>)>;
+    let mut effect_parks = 0_usize;
+    let mut declined_parks = Vec::new();
+    let mut step = instance
+        .start(program.clone(), VmExecutionStart::Session, config.clone())
+        .unwrap_or_else(|error| panic!("the run starts: {error}"));
+    let end = loop {
+        let current = owner.as_mut().unwrap_or(&mut *instance);
+        step = match step {
+            VmStep::Suspended(suspended) => {
+                let parkable = suspended.request.parkable();
+                let resume = match suspended.request {
+                    VmRequest::Effect(op) if held.is_some() => {
+                        let (issued, outcome) = held.take().expect("checked above");
+                        assert_eq!(
+                            format!("{op:?}"),
+                            issued,
+                            "a resumed run issues the operation it parked on again"
+                        );
+                        VmResume::Effect(outcome)
+                    }
+                    VmRequest::Effect(op)
+                        if parkable && boundaries == Boundaries::ParkEveryEffectAndReopen =>
+                    {
+                        let issued = format!("{op:?}");
+                        transcript.push(format!("effect {issued}"));
+                        held = Some((issued, answer(op)));
+                        VmResume::Park
+                    }
+                    VmRequest::Effect(op) => {
+                        transcript.push(format!("effect {op:?}"));
+                        VmResume::Effect(answer(op))
+                    }
+                    VmRequest::CancelCheckpoint(checkpoint) => {
+                        transcript.push(format!("checkpoint {checkpoint}"));
+                        VmResume::CancelCheckpoint { cancelled: false }
+                    }
+                    VmRequest::Boundary => match boundaries {
+                        Boundaries::RunOn | Boundaries::ParkEveryEffectAndReopen => {
+                            VmResume::Continue
+                        }
+                        Boundaries::ParkAndReopen => VmResume::Park,
+                    },
+                    VmRequest::ParkDeclined(error) => {
+                        if held.is_some() {
+                            declined_parks.push(error.to_string());
+                        }
+                        VmResume::Continue
+                    }
+                };
+                current
+                    .resume(resume)
+                    .unwrap_or_else(|error| panic!("the resume answers its request: {error}"))
+            }
+            VmStep::Parked(parked) => {
+                parks += 1;
+                if parked.reason == lashlang::VmParkReason::AwaitingEffect {
+                    effect_parks += 1;
+                    assert!(held.is_some(), "a run parks on an effect only when asked");
+                }
+                let bytes = parked
+                    .continuation
+                    .to_bytes()
+                    .expect("a parked continuation encodes");
+                let mut successor = VmInstance::pristine();
+                let continuation = successor
+                    .open_continuation(&bytes)
+                    .expect("a parked continuation reopens on a fresh instance");
+                let next = successor
+                    .start(
+                        program.clone(),
+                        VmExecutionStart::Continuation(Box::new(continuation)),
+                        config.clone(),
+                    )
+                    .unwrap_or_else(|error| panic!("the continuation resumes: {error}"));
+                owner = Some(successor);
+                next
+            }
+            VmStep::Complete(complete) => break format!("complete {:?}", complete.outcome),
+            VmStep::GuestError(error) => break format!("guest error {:?}", error.failure.error),
+        };
+    };
+    assert!(
+        held.is_none(),
+        "every operation a run parked on was issued again"
+    );
+    if boundaries == Boundaries::ParkEveryEffectAndReopen {
+        let parkable = transcript
+            .iter()
+            .filter(|entry| {
+                entry.starts_with("effect ResourceOperation(")
+                    || entry.starts_with("effect ResourceOperationBatch(")
+                    || entry.starts_with("effect Await(")
+                    || entry.starts_with("effect Sleep")
+            })
+            .count();
+        assert_eq!(
+            effect_parks + declined_parks.len(),
+            parkable,
+            "the run parked on every parkable operation it issued, or declined it: {declined_parks:?}; {mode:?} transcript {transcript:?}, end {end}"
+        );
+        for reason in &declined_parks {
+            eprintln!("declined park: {reason}");
+        }
+    }
+    if boundaries == Boundaries::ParkAndReopen {
+        let effects = transcript
+            .iter()
+            .filter(|entry| entry.starts_with("effect"))
+            .count();
+        assert!(parks <= effects, "a run parks at most once per effect");
+    }
+    let finished = owner.as_ref().unwrap_or(&*instance);
+    assert!(
+        !finished.is_running(),
+        "an ended run leaves nothing in flight"
+    );
+    Run {
+        transcript,
+        end,
+        state: (mode == ExecutionMode::Foreground).then(|| encoded(finished.state())),
+    }
 }

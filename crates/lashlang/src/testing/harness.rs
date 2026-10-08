@@ -92,7 +92,7 @@ impl ExecutionHost for EchoHost {
     }
 }
 
-/// FIG-2999: starting, signalling, cancelling and yielding are leaf tools, not
+/// FIG-2999: starting and cancelling are leaf tools, not
 /// special forms, so a fixture that drives a process needs them in its
 /// catalogue.
 #[expect(
@@ -117,7 +117,7 @@ pub fn add_process_control_operations(resources: &mut LashlangHostCatalog) {
             TypeExpr::Any,
         )
         .expect("host catalog operation must not conflict");
-    for operation in ["signal", "cancel", "emit"] {
+    for operation in ["cancel"] {
         resources
             .add_module_operation(
                 ["processes"],

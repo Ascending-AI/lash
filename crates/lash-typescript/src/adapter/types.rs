@@ -2,8 +2,7 @@
 //! process signature.
 //!
 //! Process-literal parameters and returns declare the process's durable
-//! signature. A trigger registration is checked against its input shape
-//! before any foreground effect runs (FIG-3071). Everywhere else the dialect stays
+//! signature. Everywhere else the dialect stays
 //! structurally typed and an annotation is ignored, so this module only
 //! *records* what was written and never refuses on its own — the refusal is
 //! raised at the process, where the parameter has a name to blame.

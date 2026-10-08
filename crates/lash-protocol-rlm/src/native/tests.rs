@@ -31,7 +31,6 @@ pub(super) fn config(native: bool, termination: RlmTermination) -> TurnMachineCo
         .build_preamble(lash_core::ProtocolBuildInput {
             tool_catalog: session.resolved_tool_catalog().unwrap(),
             plugin_extensions: Default::default(),
-            trigger_events: Default::default(),
             writer_formats: lash_core::build_newest_writer_formats(),
         });
     TurnMachineConfig {
@@ -767,7 +766,6 @@ async fn factory_selects_native_abi_and_completed_cell_events() {
         .build_preamble(lash_core::ProtocolBuildInput {
             tool_catalog: catalog,
             plugin_extensions: Default::default(),
-            trigger_events: Default::default(),
             writer_formats: lash_core::build_newest_writer_formats(),
         });
     assert_eq!(preamble.tool_specs.len(), 1);

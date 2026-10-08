@@ -104,54 +104,6 @@ fn system_with(
 }
 
 #[test]
-fn typescript_capabilities_gate_in_both_assembled_channels() {
-    for native in [false, true] {
-        for sleep in [false, true] {
-            for process_surface in [false, true] {
-                let dialect = crate::dialect::SessionDialect::prompt_only(
-                    std::sync::Arc::new(crate::dialect::TypescriptDialect),
-                    LashlangSurface {
-                        abilities: lashlang::LashlangAbilities { sleep },
-                        ..Default::default()
-                    },
-                );
-                let catalog = if process_surface {
-                    process_catalog()
-                } else {
-                    catalog()
-                };
-                let prompt = system_with(&dialect, native, false, catalog);
-                for (needle, enabled) in [
-                    ("### Processes", process_surface),
-                    ("Captures are by value", process_surface),
-                    ("waitSignal", process_surface),
-                    ("await sleep(ms)", sleep),
-                ] {
-                    assert_eq!(
-                        prompt.contains(needle),
-                        enabled,
-                        "sleep={sleep}, process_surface={process_surface}, native={native}, {needle}"
-                    );
-                }
-                // These retired surface syntaxes must never enter TypeScript
-                // copy, and neither may the deleted special forms (FIG-2999).
-                for needle in [
-                    "@label",
-                    "Type {",
-                    "### Type literals",
-                    "sleep for",
-                    "wait_signal",
-                    "defineProcess",
-                    "registerTrigger",
-                ] {
-                    assert!(!prompt.contains(needle), "{needle}: {prompt}");
-                }
-            }
-        }
-    }
-}
-
-#[test]
 fn the_native_prompt_names_its_transport_and_carries_no_cell_syntax() {
     // FIG-2881: semantic guard for the authored native copy. The prompt must
     // teach the `execute_code` transport itself, and no cell-channel tag
@@ -173,6 +125,53 @@ fn the_native_prompt_names_its_transport_and_carries_no_cell_syntax() {
                     !prompt.contains(needle),
                     "native prompt leaks cell syntax `{needle}`: {prompt}"
                 );
+            }
+        }
+    }
+}
+
+#[test]
+fn typescript_capabilities_gate_in_both_assembled_channels() {
+    for native in [false, true] {
+        for sleep in [false, true] {
+            for process_surface in [false, true] {
+                let dialect = crate::dialect::SessionDialect::prompt_only(
+                    std::sync::Arc::new(crate::dialect::TypescriptDialect),
+                    LashlangSurface {
+                        abilities: lashlang::LashlangAbilities { sleep },
+                        ..Default::default()
+                    },
+                );
+                let catalog = if process_surface {
+                    process_catalog()
+                } else {
+                    catalog()
+                };
+                let prompt = system_with(&dialect, native, false, catalog);
+                for (needle, enabled) in [
+                    ("### Processes", process_surface),
+                    ("Captures are by value", process_surface),
+                    ("await sleep(ms)", sleep),
+                ] {
+                    assert_eq!(
+                        prompt.contains(needle),
+                        enabled,
+                        "sleep={sleep}, process_surface={process_surface}, native={native}, {needle}"
+                    );
+                }
+                // These retired surface syntaxes must never enter TypeScript
+                // copy, and neither may the deleted special forms (FIG-2999).
+                for needle in [
+                    "@label",
+                    "Type {",
+                    "### Type literals",
+                    "sleep for",
+                    "wait_signal",
+                    "defineProcess",
+                    "registerTrigger",
+                ] {
+                    assert!(!prompt.contains(needle), "{needle}: {prompt}");
+                }
             }
         }
     }

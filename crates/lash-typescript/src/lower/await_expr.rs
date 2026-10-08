@@ -94,10 +94,7 @@ impl Lowerer {
         }
         if matches!(
             spans::unmarked(&lowered),
-            LashExpr::SleepFor(_)
-                | LashExpr::WaitSignal { .. }
-                | LashExpr::Finish(_)
-                | LashExpr::Fail(_)
+            LashExpr::SleepFor(_) | LashExpr::Finish(_) | LashExpr::Fail(_)
         ) {
             return Ok(lowered);
         }

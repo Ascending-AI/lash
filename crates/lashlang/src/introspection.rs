@@ -4,7 +4,7 @@ use thiserror::Error;
 use crate::artifact::{HostRequirements, HostRequirementsRef, ModuleArtifact, ModuleRef};
 use crate::ast::{LabelMetadata, TypeExpr, format_type_expr};
 use crate::identity::ProcessDefinitionIdentity;
-use crate::linker::{ModuleInstanceCatalog, ResourceTypeCatalog, TriggerSourceBinding};
+use crate::linker::{ModuleInstanceCatalog, ResourceTypeCatalog};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ModuleIntrospection {
@@ -16,7 +16,6 @@ pub struct ModuleIntrospection {
     pub required_resource_types: Vec<ResourceTypeIntrospection>,
     pub named_data_types: Vec<NamedDataTypeIntrospection>,
     pub value_constructors: Vec<ValueConstructorIntrospection>,
-    pub trigger_source_requirements: Vec<TriggerSourceIntrospection>,
 }
 
 impl ModuleIntrospection {
@@ -42,14 +41,6 @@ impl ModuleIntrospection {
                     .map(|param| ProcessInputIntrospection {
                         name: param.name.to_string(),
                         ty: TypeView::new(param.ty.clone()),
-                    })
-                    .collect(),
-                signals: process
-                    .signals
-                    .iter()
-                    .map(|signal| ProcessSignalIntrospection {
-                        name: signal.name.to_string(),
-                        ty: TypeView::new(signal.ty.clone()),
                     })
                     .collect(),
                 return_type: process.return_ty.clone().map(TypeView::new),
@@ -84,12 +75,6 @@ impl ModuleIntrospection {
                     output_type: TypeView::new(constructor.output_ty.clone()),
                 })
                 .collect(),
-            trigger_source_requirements: artifact
-                .host_requirements()
-                .resources
-                .trigger_sources()
-                .map(trigger_source)
-                .collect(),
         })
     }
 }
@@ -101,20 +86,12 @@ pub struct ProcessIntrospection {
     pub label: Option<LabelMetadata>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub params: Vec<ProcessInputIntrospection>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub signals: Vec<ProcessSignalIntrospection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub return_type: Option<TypeView>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessInputIntrospection {
-    pub name: String,
-    pub ty: TypeView,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ProcessSignalIntrospection {
     pub name: String,
     pub ty: TypeView,
 }
@@ -165,13 +142,6 @@ pub struct ValueConstructorIntrospection {
     pub type_name: String,
     pub input_type: TypeView,
     pub output_type: TypeView,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct TriggerSourceIntrospection {
-    pub source_type: String,
-    pub event_type_name: String,
-    pub event_type: TypeView,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -261,16 +231,6 @@ fn resource_type(
     }
 }
 
-fn trigger_source(
-    (source_type, binding): (&str, &TriggerSourceBinding),
-) -> TriggerSourceIntrospection {
-    TriggerSourceIntrospection {
-        source_type: source_type.to_string(),
-        event_type_name: binding.event_type_name().to_string(),
-        event_type: TypeView::new(binding.event_ty().clone()),
-    }
-}
-
 /// This is the "gather" step of deferred tool resolution: the host resolver is asked to
 /// resolve any returned path that the link-time host environment does not already provide.
 pub fn referenced_module_call_paths(
@@ -279,8 +239,6 @@ pub fn referenced_module_call_paths(
     referenced_receiver_call_paths(program)
 }
 
-/// Deferred tools and deferred trigger constructors deliberately share this collector while
-/// retaining separate provider and replay state.
 pub fn referenced_receiver_call_paths(
     program: &crate::ast::Program,
 ) -> std::collections::BTreeSet<String> {

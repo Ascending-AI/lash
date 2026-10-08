@@ -34,18 +34,4 @@ impl<'module> Linker<'module> {
         )?;
         Some(resource)
     }
-
-    pub(super) fn reject_trigger_event_special_form(
-        &self,
-        expr: &Expr,
-        span: Option<Span>,
-    ) -> Result<(), LinkError> {
-        if is_trigger_event_projection_expr(expr) {
-            return Err(LinkError::TriggerEventProjection { span });
-        }
-        if is_trigger_event_expr(expr) {
-            return Err(LinkError::TriggerEventOutsideInputs { span });
-        }
-        Ok(())
-    }
 }

@@ -461,7 +461,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             | Instruction::AwaitHandleUnwrap
             | Instruction::AwaitPending => Some("await".to_string()),
             Instruction::SleepFor => Some("sleep_for".to_string()),
-            Instruction::ProcessWaitSignal { .. } => Some("wait_signal".to_string()),
+
             Instruction::Print => Some("print".to_string()),
             Instruction::Finish => Some("finish".to_string()),
             Instruction::ProcessFail => Some("fail".to_string()),

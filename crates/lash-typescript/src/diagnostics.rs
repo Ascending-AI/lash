@@ -61,9 +61,6 @@ pub enum DiagnosticCode {
     NonLiftableCapture,
     ProcessParamTypeUnsupported,
     ProcessReturnTypeUnsupported,
-    TriggerSourceEventAccess,
-    TriggerEventRemoved,
-    TriggerInputsLiteralRequired,
     MethodUnsupported,
     DateImmutable,
     DeleteNonReferenceUnsupported,
@@ -144,9 +141,6 @@ impl DiagnosticCode {
         Self::NonLiftableCapture,
         Self::ProcessParamTypeUnsupported,
         Self::ProcessReturnTypeUnsupported,
-        Self::TriggerSourceEventAccess,
-        Self::TriggerEventRemoved,
-        Self::TriggerInputsLiteralRequired,
         Self::MethodUnsupported,
         Self::DateImmutable,
         Self::DeleteNonReferenceUnsupported,
@@ -233,7 +227,7 @@ impl DiagnosticCode {
             }
             Self::ForOfUnsupported => "iterate a materialized array with plain `for...of`",
             Self::AwaitUnsupported => {
-                "await tool calls, process handles, `sleep`, `waitSignal`, or `Promise.all`/`allSettled`/`race`/`any` — nothing else is awaitable"
+                "await tool calls, process handles, `sleep`, or `Promise.all`/`allSettled`/`race`/`any` — nothing else is awaitable"
             }
             Self::AwaitRequired => "add `await` — the call returns a promise",
             Self::UnawaitedTool => {
@@ -298,11 +292,6 @@ impl DiagnosticCode {
             Self::SourceNestingLimit => "name intermediate values instead of nesting expressions",
             Self::SourceTooLarge => "split the work across several cells",
             Self::ReservedIdentifier => "choose a different name",
-            Self::TriggerSourceEventAccess
-            | Self::TriggerEventRemoved
-            | Self::TriggerInputsLiteralRequired => {
-                "bind the fired event through the `inputs` arrow: `inputs: (event) => ({ tick: event })`"
-            }
             _ => return None,
         })
     }
@@ -385,10 +374,7 @@ impl DiagnosticCode {
             | Self::SourceTooLarge
             | Self::ReservedIdentifier
             | Self::ProcessParamTypeUnsupported
-            | Self::ProcessReturnTypeUnsupported
-            | Self::TriggerSourceEventAccess
-            | Self::TriggerEventRemoved
-            | Self::TriggerInputsLiteralRequired => CodeClassification::AlwaysRefusal,
+            | Self::ProcessReturnTypeUnsupported => CodeClassification::AlwaysRefusal,
 
             // Both families, decided per site.
             Self::MethodUnsupported
@@ -474,9 +460,6 @@ impl DiagnosticCode {
             Self::NonLiftableCapture => "TS_NON_LIFTABLE_CAPTURE",
             Self::ProcessParamTypeUnsupported => "TS_PROCESS_PARAM_TYPE_UNSUPPORTED",
             Self::ProcessReturnTypeUnsupported => "TS_PROCESS_RETURN_TYPE_UNSUPPORTED",
-            Self::TriggerSourceEventAccess => "TS_TRIGGER_SOURCE_EVENT_ACCESS",
-            Self::TriggerEventRemoved => "TS_TRIGGER_EVENT_REMOVED",
-            Self::TriggerInputsLiteralRequired => "TS_TRIGGER_INPUTS_LITERAL_REQUIRED",
             Self::MethodUnsupported => "TS_METHOD_UNSUPPORTED",
             Self::DateImmutable => "TS_DATE_IMMUTABLE",
             Self::DeleteNonReferenceUnsupported => "TS_DELETE_NON_REFERENCE_UNSUPPORTED",
@@ -796,7 +779,6 @@ mod tests {
                 "lower/process_wrapper.rs",
                 include_str!("lower/process_wrapper.rs"),
             ),
-            ("lower/triggers.rs", include_str!("lower/triggers.rs")),
             ("lower/cells.rs", include_str!("lower/cells.rs")),
             ("lower/param_types.rs", include_str!("lower/param_types.rs")),
             ("adapter/types.rs", include_str!("adapter/types.rs")),
