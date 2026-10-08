@@ -1,5 +1,6 @@
+use std::collections::HashMap;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::SystemTime;
 
 use lash_core::provider::{TokenError, TokenErrorKind};
@@ -163,4 +164,213 @@ async fn a_host_reauth_failure_surfaces_as_its_typed_code() {
     );
     assert_eq!(error.kind, lash_core::ProviderFailureKind::Auth);
     assert!(!error.is_retryable());
+}
+
+/// A host source that keeps one credential per route (named after the route's
+/// model), rotates it on an `Expiring`/`Rejected` ask whose stale token is
+/// still that route's current one, and records every ask with its route.
+#[derive(Debug, Default)]
+struct RoutedSource {
+    generations: Mutex<HashMap<Box<str>, u32>>,
+    asks: Mutex<Vec<(Box<str>, TokenRequestReason)>>,
+    /// The next `Current` ask snapshots its answer, then waits for `release`.
+    hold_next_current: AtomicBool,
+    hold_replacements: bool,
+    held: AtomicUsize,
+    release: tokio::sync::Notify,
+}
+
+impl RoutedSource {
+    fn token(model: &str, generation: u32) -> ProviderToken {
+        ProviderToken::new(format!("{model}-{generation}"))
+    }
+
+    fn asks(&self) -> Vec<(Box<str>, TokenRequestReason)> {
+        self.asks.lock_recover().clone()
+    }
+
+    fn held(&self) -> usize {
+        self.held.load(Ordering::SeqCst)
+    }
+
+    async fn until_held(&self, asks: usize) {
+        for _ in 0..1_000 {
+            if self.held() == asks {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+        panic!("{} asks reached the source, expected {asks}", self.held());
+    }
+}
+
+#[async_trait::async_trait]
+impl TokenSource for RoutedSource {
+    async fn token(&self, request: TokenRequest<'_>) -> Result<ProviderToken, TokenError> {
+        let model = request.route.model.clone();
+        self.asks
+            .lock_recover()
+            .push((model.clone(), request.reason));
+        if request.reason == TokenRequestReason::Current {
+            let generation = *self
+                .generations
+                .lock_recover()
+                .entry(model.clone())
+                .or_insert(1);
+            if self.hold_next_current.swap(false, Ordering::SeqCst) {
+                self.held.fetch_add(1, Ordering::SeqCst);
+                self.release.notified().await;
+            }
+            return Ok(Self::token(&model, generation));
+        }
+        if self.hold_replacements {
+            self.held.fetch_add(1, Ordering::SeqCst);
+            self.release.notified().await;
+        }
+        let mut generations = self.generations.lock_recover();
+        let generation = generations.entry(model.clone()).or_insert(1);
+        if request
+            .stale
+            .is_some_and(|stale| stale.same_secret(&Self::token(&model, *generation)))
+        {
+            *generation += 1;
+        }
+        Ok(Self::token(&model, *generation))
+    }
+}
+
+fn route_for(model: &str) -> ProviderRouteIdentity {
+    ProviderRouteIdentity::for_endpoint("test", "https://provider.test", model)
+}
+
+fn secret(lease: &TokenLease) -> &str {
+    lease.token.secret().expose_secret()
+}
+
+/// A rejection on one route asks the source for that route, whatever token
+/// another route obtained in between.
+#[tokio::test]
+async fn a_rejection_is_replaced_with_its_own_routes_token() {
+    let source = Arc::new(RoutedSource::default());
+    let gate = TokenGate::new(source.clone(), "test");
+    let (a, b) = (route_for("a"), route_for("b"));
+    let lease_a = gate.current(&a).await.expect("a's token");
+    let lease_b = gate.current(&b).await.expect("b's token");
+    assert_eq!((secret(&lease_a), secret(&lease_b)), ("a-1", "b-1"));
+
+    let replaced = gate
+        .replace(&a, &lease_a, TokenRequestReason::Rejected)
+        .await
+        .expect("replacement succeeds")
+        .expect("a newer token");
+    assert_eq!(secret(&replaced), "a-2");
+    assert_eq!(
+        source.asks().last(),
+        Some(&("a".into(), TokenRequestReason::Rejected))
+    );
+    assert_eq!(
+        secret(&gate.current(&b).await.expect("b's token")),
+        "b-1",
+        "a's replacement leaves b's credential alone"
+    );
+}
+
+/// Rejections on two routes are two flights: both reach the source at once,
+/// and each caller gets the replacement for its own route.
+#[tokio::test]
+async fn concurrent_rejections_on_two_routes_each_ask_for_their_own_route() {
+    let source = Arc::new(RoutedSource {
+        hold_replacements: true,
+        ..RoutedSource::default()
+    });
+    let gate = Arc::new(TokenGate::new(source.clone(), "test"));
+    let mut callers = Vec::new();
+    for model in ["a", "b"] {
+        let route = route_for(model);
+        let lease = gate.current(&route).await.expect("current token");
+        let gate = Arc::clone(&gate);
+        callers.push(tokio::spawn(async move {
+            gate.replace(&route, &lease, TokenRequestReason::Rejected)
+                .await
+        }));
+    }
+    source.until_held(2).await;
+    source.release.notify_waiters();
+    let mut replaced = Vec::new();
+    for caller in callers {
+        let lease = caller
+            .await
+            .expect("caller joins")
+            .expect("replacement succeeds")
+            .expect("a newer token");
+        replaced.push(secret(&lease).to_owned());
+    }
+    assert_eq!(replaced, ["a-2", "b-2"]);
+}
+
+/// A `Current` answer the source snapshotted before a replacement, and
+/// delivered after it, is not published: the replacement stays the route's
+/// newest epoch, so later rejections are answered from it and never with the
+/// token it replaced.
+async fn a_current_answer_older_than_a_replacement_is_not_republished(reason: TokenRequestReason) {
+    let source = Arc::new(RoutedSource::default());
+    let gate = Arc::new(TokenGate::new(source.clone(), "test"));
+    let route = route_for("a");
+    let first = gate.current(&route).await.expect("current token");
+    assert_eq!((secret(&first), first.epoch), ("a-1", 1));
+
+    source.hold_next_current.store(true, Ordering::SeqCst);
+    let delayed = tokio::spawn({
+        let (gate, route) = (Arc::clone(&gate), route.clone());
+        async move { gate.current(&route).await }
+    });
+    source.until_held(1).await;
+
+    let second = gate
+        .replace(&route, &first, reason)
+        .await
+        .expect("replacement succeeds")
+        .expect("a newer token");
+    assert_eq!((secret(&second), second.epoch), ("a-2", 2));
+
+    source.release.notify_waiters();
+    let delayed = delayed.await.expect("caller joins").expect("current token");
+    assert_eq!((secret(&delayed), delayed.epoch), ("a-2", 2));
+
+    let replacement_asks = || {
+        source
+            .asks()
+            .iter()
+            .filter(|(_, reason)| *reason != TokenRequestReason::Current)
+            .count()
+    };
+    // A rejection queued with the replaced token takes the replacement.
+    let queued = gate
+        .replace(&route, &first, TokenRequestReason::Rejected)
+        .await
+        .expect("replacement succeeds")
+        .expect("the replacement");
+    assert_eq!((secret(&queued), queued.epoch), ("a-2", 2));
+    assert_eq!(replacement_asks(), 1);
+
+    // A rejection of the replacement asks the source and never gets a-1 back.
+    let third = gate
+        .replace(&route, &second, TokenRequestReason::Rejected)
+        .await
+        .expect("replacement succeeds")
+        .expect("a newer token");
+    assert_eq!((secret(&third), third.epoch), ("a-3", 3));
+    assert_eq!(replacement_asks(), 2);
+}
+
+#[tokio::test]
+async fn a_current_answer_older_than_a_rejection_replacement_is_not_republished() {
+    a_current_answer_older_than_a_replacement_is_not_republished(TokenRequestReason::Rejected)
+        .await;
+}
+
+#[tokio::test]
+async fn a_current_answer_older_than_an_expiry_replacement_is_not_republished() {
+    a_current_answer_older_than_a_replacement_is_not_republished(TokenRequestReason::Expiring)
+        .await;
 }
