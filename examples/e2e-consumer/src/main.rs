@@ -523,3 +523,89 @@ async fn shutdown() {
         let _ = tokio::signal::ctrl_c().await;
     }
 }
+
+#[cfg(test)]
+mod commit_cut_laws {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use lash::durable::{ActorKey, CommitLabel, FormatSet, MailTx, NodeId, NodeSpec};
+
+    use super::commit_ledger::{CommitLedger, Cut, ledger_stores};
+
+    async fn line(path: &std::path::Path, key: &str) -> serde_json::Value {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let text = std::fs::read_to_string(path).unwrap();
+                if let Some(line) = text.lines().find_map(|line| {
+                    let value: serde_json::Value = serde_json::from_str(line).unwrap();
+                    (value[key] == "turn.commit").then_some(value)
+                }) {
+                    return line;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the held request must reach the ledger")
+    }
+
+    /// An issued store request survives its caller's cancellation, so a
+    /// resumed stale request actually reaches the store's epoch fence.
+    #[tokio::test]
+    async fn an_in_flight_cut_survives_caller_cancellation_and_is_fenced() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("commits.jsonl");
+        let ledger = CommitLedger::open(
+            &path,
+            "node-a",
+            vec![Cut {
+                label: "turn.commit".into(),
+                nth: 1,
+                before: true,
+                actor: None,
+            }],
+        )
+        .unwrap();
+        let stores = ledger_stores(
+            Arc::new(lash::sqlite::SqliteStoreSet::memory().await.unwrap()),
+            Arc::clone(&ledger),
+        );
+        let store = stores.durable_store();
+        let actor = ActorKey::session("held-publication").unwrap();
+        let formats = FormatSet::unstarted_session();
+        let mut mail = MailTx::new();
+        mail.create_actor(actor.clone(), formats.clone());
+        store
+            .commit_mail(mail, CommitLabel::TURN_ADMIT)
+            .await
+            .unwrap();
+        let spec = NodeSpec {
+            node: NodeId::new("node-a"),
+            decodes: vec![formats],
+            ttl_millis: 15_000,
+        };
+        let a = store.register_node(&spec).await.unwrap();
+        let claimed = store.claim(&a, 1).await.unwrap();
+        let tx = store.begin(&actor, claimed[0].epoch).await.unwrap();
+        let caller_store = Arc::clone(&store);
+        let caller =
+            tokio::spawn(async move { caller_store.commit(tx, CommitLabel::TURN_COMMIT).await });
+        line(&path, "held").await;
+        caller.abort();
+        assert!(caller.await.unwrap_err().is_cancelled());
+        // A new boot fences the first one while its store request is held.
+        let b = store.register_node(&spec).await.unwrap();
+        let successor = store.claim(&b, 1).await.unwrap();
+        assert!(successor[0].epoch > claimed[0].epoch);
+        ledger.release("turn.commit");
+        line(&path, "released").await;
+        let refused = line(&path, "label").await;
+        assert_eq!(refused["applied"], false, "{refused}");
+        assert!(refused["error"].as_str().unwrap().contains("OwnershipLost"));
+        assert_eq!(
+            store.actor(&actor).await.unwrap().unwrap().epoch,
+            successor[0].epoch
+        );
+    }
+}

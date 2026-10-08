@@ -299,9 +299,9 @@ async fn published_once(case: &mut Case, successor: &str, turn: &support::Turn) 
 /// The old boot is held at publication when its successor fences it: on
 /// the live leg a new boot of its name, which fences every earlier boot at
 /// registration; on the resume leg another node, after the old one is
-/// frozen until its lease lapses and node-b reaps it, then killed frozen.
-/// Live, the released stale publication is refused; either way the
-/// successor publishes once.
+/// frozen until its lease lapses and node-b reaps it. The frozen boot then
+/// thaws and releases its in-flight publication. Both legs require the
+/// epoch fence to refuse it and the successor to publish exactly once.
 async fn s16_terminal(case: &mut Case) -> Result<()> {
     let (options, turn) = held_at_publication(case).await?;
     let old = case.node("node-a")?.pid();
@@ -316,37 +316,12 @@ async fn s16_terminal(case: &mut Case) -> Result<()> {
                     .then_some(()))
             })
             .await?;
-            // The old boot still serves until its next heartbeat finds it
-            // fenced: release its held publication now.
-            let stale = case
-                .boot_at(index - 1)?
-                .post("/control/cuts/release", &json!("turn.commit"))
-                .await?;
-            case.evidence
-                .faults
-                .push(json!({"fault": "stale publication released", "boot": old, "answer": stale}));
-            case.until("the stale publication answered", || async {
-                Ok(ledger(case, "node-a")?
-                    .into_iter()
-                    .find(|line| line["label"] == "turn.commit" && line["boot"] == old))
-            })
-            .await
-            .and_then(|line| {
-                ensure!(
-                    line["applied"] == false
-                        && line["error"]
-                            .as_str()
-                            .is_some_and(|error| error.contains("OwnershipLost")),
-                    "the stale publication was not refused by the fence: {line}"
-                );
-                Ok(())
-            })?;
+            refused_publication(case, index - 1, "node-a").await?;
             "node-a"
         }
         lash_e2e::Leg::Resume => {
-            // Partitioning node-a's own connections needs it behind a proxy
-            // from boot; this leg fences it by stopping its process instead,
-            // so its lease lapses without a release, and node-b reaps it.
+            // Hold A's sockets and in-flight publication while its lease
+            // lapses. B takes the actor's epoch and publishes first.
             case.node("node-a")?.freeze()?;
             case.evidence
                 .faults
@@ -354,15 +329,69 @@ async fn s16_terminal(case: &mut Case) -> Result<()> {
             case.boot(Host::Consumer, "node-b", options).await?;
             applied(case, "node-b", "reap", 1).await?;
             applied(case, "node-b", "turn.commit", 1).await?;
-            // The reaped node never wakes: it dies frozen, its held
-            // publication unsent.
-            case.kill("node-a", "frozen and reaped, its publication held")
-                .await?;
+            case.node("node-a")?.thaw()?;
+            case.evidence
+                .faults
+                .push(json!({"fault": "SIGCONT", "node": "node-a", "boot": old}));
+            // Self-stop may already have dropped A's actor on thaw. Its
+            // issued store request survives that cancellation at the cut.
+            refused_publication(case, 0, "node-b").await?;
             "node-b"
         }
     };
     published_once(case, successor, &turn).await?;
+    if case.leg == lash_e2e::Leg::Resume {
+        case.kill(
+            "node-a",
+            "thawed, stale publication refused by the epoch fence",
+        )
+        .await?;
+    }
     case.stop(successor).await?;
+    Ok(())
+}
+
+/// Release the old boot's issued publication and require an epoch refusal
+/// under the same actor a successor actually published, after a release log.
+async fn refused_publication(case: &mut Case, boot: usize, successor: &str) -> Result<()> {
+    let old = case.boot_at(boot)?.pid();
+    let answer = case
+        .boot_at(boot)?
+        .post("/control/cuts/release", &json!("turn.commit"))
+        .await?;
+    case.evidence
+        .faults
+        .push(json!({"fault": "stale publication released", "boot": old, "answer": answer}));
+    let refused = case
+        .until("the stale publication answered", || async {
+            Ok(ledger(case, "node-a")?
+                .into_iter()
+                .find(|line| line["label"] == "turn.commit" && line["boot"] == old))
+        })
+        .await?;
+    ensure!(
+        refused["applied"] == false
+            && refused["error"]
+                .as_str()
+                .is_some_and(|error| error.contains("OwnershipLost")),
+        "the stale publication was not refused by the fence: {refused}"
+    );
+    ensure!(
+        ledger(case, "node-a")?
+            .iter()
+            .any(|line| line["released"] == "turn.commit" && line["boot"] == old),
+        "the old boot never logged its released publication"
+    );
+    applied(case, successor, "turn.commit", 1).await?;
+    let winner = ledger(case, successor)?;
+    let winner = under(&winner, "turn.commit", true);
+    ensure!(
+        winner.len() == 1
+            && winner[0]["actor"] == refused["actor"]
+            && winner[0]["epoch"].as_i64() > refused["epoch"].as_i64(),
+        "the successor did not publish under a newer epoch: {winner:?}; stale: {refused}"
+    );
+    case.record_barrier(json!({"barrier": "stale publication refused", "commit": refused}));
     Ok(())
 }
 

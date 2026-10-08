@@ -9,6 +9,8 @@
 //! label, held before or after the store applies it. A held commit's caller
 //! never gets an answer until the controller releases the cut, so the
 //! controller kills the node, or partitions it, at an exact committed phase.
+//! A before-commit cut retains an issued request independently of its
+//! caller: cancelling an actor cannot recall an in-flight store request.
 //! Each line is synced before the next step is observable.
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -484,7 +486,19 @@ impl DurableStore for LedgerStore {
         let epoch = tx.epoch();
         let cut = self.ledger.reached(label, &actor);
         if let Some(index) = cut.filter(|index| self.ledger.cuts[*index].before) {
-            self.ledger.hold(index, &actor).await;
+            let ledger = Arc::clone(&self.ledger);
+            let inner = Arc::clone(&self.inner);
+            // The request has crossed the store port. Keep it alive when
+            // lease loss drops the actor awaiting its answer, as a database
+            // request already in flight can outlive its client future.
+            return tokio::spawn(async move {
+                ledger.hold(index, &actor).await;
+                let answer = inner.commit(tx, label).await;
+                ledger.record(label, Some(&actor), Some(epoch), answer.as_ref().err());
+                answer
+            })
+            .await
+            .unwrap_or(Err(DurableError::AckLost { label }));
         }
         let answer = self.inner.commit(tx, label).await;
         self.ledger
