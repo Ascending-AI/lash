@@ -60,32 +60,35 @@ share the ceiling check and refuse `UnsafeRetriesAboveCeiling` before
 publishing a configuration. The provider handle applies the admitted retry
 limit without a separate clamp (FIG-4480).
 
-The system prompt is recorded the same way as the rest of the configuration.
-It is the protocol plugin's: core has no prompt type. A session's protocol
-namespace records its prompt config when the session is created, from the
-plugin creation options of the session's `SessionSpec` over the plugin's own
-built-in defaults, and the protocol's prompt commands change it for the
-runs after them (ADR 0126). The protocol renders the system prompt from the
-namespace the running run was admitted under, and the render commits with the
-run's admission: a resumed run loads the recorded text and renders nothing. A child
-created by its parent copies the parent's recorded prompt config, and a
-process carries the recorded plugin config of its starter. A run's options
-cannot state a prompt: a run-options payload that carries one is refused,
-typed (FIG-4589).
+The host's `PromptPlan` is core recorded configuration, separate from the
+plugin namespaces. Creation states the plan; an omitted plan uses the neutral
+empty plan, for a root or a related session. The core `SetPromptPlan` command
+replaces it through a revision-checked `ConfigTransaction` for subsequent runs
+(ADR 0126). Protocols and other plugins contribute keyed sections; the plan
+orders and places those sections and bounds composition (ADR 0133).
 
-A compaction's summarizer call carries the prompt the same protocol renders
-for it, without tool or execution prose since the call ships no tools. That
-text is recorded before the call on every compaction path (commanded,
-context pressure and overflow recovery), so a re-sent call carries the same
-text.
+Composition runs at each new model-call admission, including another call
+within the same run. Admission records the composed text, request template
+and response contract. Redrive of that admitted call reuses its composition
+and template without rendering again, filling attachment slots afresh per
+attempt (ADR 0135). `RunSpec` has no prompt override.
+
+A compaction call selects `PromptPurpose::Compaction` sections through the
+same composer. The standard compaction plugin supplies its configured summary
+or update instructions and the requested focus as derived section input.
+The owned call admits that composition and template before sending, on
+commanded, context-pressure and overflow-recovery paths. A resend reuses the
+admission; it does not render the summarizer prompt again.
 
 The opener owns only the session binding: the store and the node wiring
 it runs on. An open, including the engine's own reopen, overrides no recorded
-fact. A session-turn process's child is created from its starter's recorded
-facts: the start captures its starter's recorded configuration, admits the
-child's complete facts against it before the handoff, and the worker creates
-the child from that captured environment. A worker names no configuration of
-its own (ADR 0088).
+fact. A child records the configuration its creator supplies; parentage
+copies none. A fork copies its fork point's recorded configuration in full.
+An engine or tool-call process captures its starter's execution environment.
+A session-turn start instead states the child's policy and model, tool
+authority and plugin creation options. The start resolves those facts with
+the installed plugin set and records the child's new environment before the
+handoff; the worker uses that record (ADR 0088).
 
 The recorded model is bound to its transport lazily. Only a model call or
 direct completion whose result has not committed asks the host's models for
@@ -106,8 +109,8 @@ proceed (FIG-4404).
 
 Input admission does not select a model. Child-session execution and direct
 LLM requests have explicit model selection at their own boundaries. An input
-may carry a `RunSpec` whose recorded overrides — route, model, generation,
-prompt layer, protocol turn options, tool access — run that input's run under them without
+may carry a `RunSpec` whose recorded overrides — model, reasoning, generation,
+protocol turn options, tool access — run that input's run under them without
 changing the session's recorded configuration (ADR 0101 §A5): the override is
 durable input data the run's admission fixes, not a mutable overlay on
 session policy.

@@ -43,8 +43,9 @@ Evidence: `crates/lash-sansio/src/core_support.rs:23`,
 `APPEND_REQUEST_IDENTITY_ENCODING_VERSION` is 7. The discriminator sits beside
 the digest in the receipt, separately from the unframed envelope and hash label.
 `append_request_identity_v7.hex` pins the grammar. Plugin messages encode id,
-role, origin, and ordered parts; attachment sources stay inside attachment
-parts. Replay routes and response metadata have explicit projections.
+role, origin, and ordered parts; attachment parts encode the durable ref's
+id, media type, byte length, optional type metadata and optional label, never
+a delivery URL or provider-file id. Replay routes and response metadata have explicit projections.
 
 The commit intent has distinct completed input and completed queue-batch lists.
 It includes persisted config, including `config_revision`. These are typed

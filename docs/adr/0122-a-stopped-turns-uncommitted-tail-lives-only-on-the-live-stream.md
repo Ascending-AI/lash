@@ -40,7 +40,8 @@ and bounded live replay follows [ADR 0002](0002-session-observation-uses-cursors
 
 4. **Keeping up is the host's job.** A host follows the session observation
    stream by cursor within the live replay window (ADR 0002: 2,048 events or
-   120 seconds per session by default, both configurable), on the replay of
+   120 seconds per session in `DataRetention::standard().live_replay`; the
+   required host retention choice may state other bounds), on the replay of
    the process the turn runs in. A `Gap`, a lagged follower that jumps to the
    head, a follower's pre-adoption buffer that evicts its oldest activity
    past 4,096, or a turn that runs on another process without a shared live

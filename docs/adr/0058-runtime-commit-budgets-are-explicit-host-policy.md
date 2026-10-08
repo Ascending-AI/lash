@@ -79,8 +79,10 @@ backend work. This is a separate payload limit, not a third commit dimension.
 ### Attachment read and materialization budgets
 
 `AttachmentReadPolicy` is independent of put admission and history retention.
-The default is 32 MiB per blob and 128 MiB per request; hosts can configure it
-through `LashCoreBuilder::attachment_read_policy`. Session rebuilds, backend
+The host states it in `AttachmentPolicy::read` through the required
+`LashCoreBuilder::data_retention` choice (`DataRetention::attachments`).
+`AttachmentPolicy::standard()` selects 32 MiB per blob and 128 MiB per request;
+host-selected bounds may differ. Session rebuilds, backend
 replacement and process runtimes keep the configured policy.
 
 `AttachmentStore::get` requires an actual-byte limit. File reads use bounded
@@ -88,13 +90,16 @@ scratch buffers; S3 consumes chunks and checks before copying them into retained
 storage. Buffer growth is geometric and capped by the read limit. Neither relies on reported object size. SQLite returns the actual
 length and conditionally projects the BLOB only when it fits, within one query.
 
-Before an attempt is sent, its slot delivery (ADR 0135 §5) charges each unique
-retained blob buffer capacity once and every attachment occurrence for
-encoding. Each occurrence reserves four base64-sized copies plus JSON
-envelope and escaped MIME/label bytes. Delivered URL and provider-file
-strings also reserve escaped copies. Repeated IDs share retained bytes while
-each provider occurrence still has its encoding charge. The remaining budget,
-including expansion, determines the limit passed into each backend read.
+Before an attempt is sent, its slot delivery (ADR 0135 §5) reserves an
+envelope and escaped MIME/label allowance per occurrence. Deliveries group by
+content id, media type and effective acceptance after narrowing to the live
+file scope. A byte delivery charges retained buffer capacity once per group
+and four base64-sized encoding allowances per occurrence. A URL charges its
+escaped-length allowance per occurrence. A provider file charges its escaped
+id allowance per occurrence, plus upload scratch only when uploaded; a cache
+hit reads no scratch and incurs no base64 charge. Remaining request budget
+and the per-blob bound determine the separate byte-read and upload limits
+passed to the backend.
 
 These are attachment payload-work bounds, not a claim about whole-process RSS,
 allocator bookkeeping, a backend's network chunk, or non-attachment prompt

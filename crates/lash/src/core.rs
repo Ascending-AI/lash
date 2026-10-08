@@ -473,8 +473,9 @@ impl LashCore {
     /// revision and records the config it was created with.
     ///
     /// The fork is taken only if the revision is still retained. Under the
-    /// default [`Retention::UntilGc`](lash_core::Retention::UntilGc) every
-    /// past turn is, until the host collects; a pin keeps one through
+    /// [`Retention::UntilGc`](lash_core::Retention::UntilGc), as chosen by
+    /// [`DataRetention::standard`](crate::DataRetention::standard), every past
+    /// turn is, until the host collects; a pin keeps one through
     /// collections. A target that names no retained state refuses with a
     /// typed `EmbedError::Store`, and Lash never substitutes another state:
     ///
@@ -944,9 +945,10 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Required host choice of every execution bound the runtime enforces: the tool default and
-    /// inline ceiling, the model call's hard total, the control-phase bound,
-    /// the stop grace, the wait bounds and the provider attempt limits. The
+    /// Required host choice of the shared execution bounds: the model call's
+    /// hard total, the control-phase bound, stop grace, provider attempt limits
+    /// and agent frame-switch limit. Tool and engine body bounds and park
+    /// bounds belong to their own execution contracts. The
     /// stop grace also bounds how long a protocol-owned stream abort (an RLM
     /// cell boundary ending the model's turn) keeps draining the provider
     /// stream, so a cooperative provider's trailing usage lands on the

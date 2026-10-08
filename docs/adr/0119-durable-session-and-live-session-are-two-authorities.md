@@ -43,24 +43,26 @@ soft-warning threshold and render; the standard protocol's discovery
 operation, `batch` choice and maximum and render — is a creation default. The
 session records it in its protocol namespace at creation, and every open,
 resume, redrive and process of that session runs under the recorded value, whatever
-the opening deployment's factory states (FIG-4398). A child session records
-its parent's, and a process started outside any session records the creating
-deployment's with its row (FIG-4527). What a factory supplies live is physical: the
-dialect and code or output renderer implementations, the worker service, the
+the opening deployment's factory states (FIG-4398). A child records its
+creator-supplied configuration and plugin creation options; parentage copies
+none. A fork copies its fork point's recorded configuration. A session-turn
+process records its explicitly supplied child environment; an engine or
+tool-call process captures its starter's environment (ADR 0088). What a factory
+supplies live is physical: the dialect and code or output renderer implementations, the worker service, the
 artifact store, deferred-grant resolvers and trace sinks. Each serves the
 identity the session recorded or refuses.
 
 The same holds for the core. No open-time option and no core setting is a
-behaviour layer over a created session: the protocol's prompt config is
-recorded at creation (ADR 0030), and what a call asks for and captures — reasoning
-publication, the fallback output cap, the cache hint and the
+behaviour layer over a created session: the core `PromptPlan` is recorded at
+creation, and plugins contribute keyed sections (ADRs 0030 and 0133). What a
+call asks for and captures — reasoning publication, the fallback output cap, the cache hint and the
 response-metadata allowlists — is recorded with the session's model binding
 and carried on every request (ADR 0074). The transport an open resolves keeps
-only its connection, retry and byte guards. The host's attachment source
-policy and process-tool visibility filter stay live services: they are
-host-implemented authority, lash keeps no access or visibility default of its
-own beyond open and unfiltered, and it records no access policy for them
-because lash makes no authorization decision.
+only its connection, retry and byte guards. Attachment acceptance is
+recorded in each admitted slot; the host store supplies a transient delivery
+in an accepted form for each attempt (ADR 0135). The process-tool visibility
+filter remains a live host service, separate from attachment acceptance and
+delivery. Lash makes no product authorization decision.
 
 An open session's `session.durable()` reuses the Session Binding's store and
 owner-issued ports. Catalog-derived and binding-derived handles share
@@ -161,7 +163,9 @@ Source: `crates/lash-core/src/runtime/tool_restore.rs`.
 
 ### Tool-source policy
 
-`ToolSourcePolicy::Tolerate` is the default. Under `Require`, a turn run,
+The host must choose `ToolSourcePolicy::Tolerate` or `ToolSourcePolicy::Require`
+through `LashCoreBuilder::tool_source_policy`; a builder installs neither by
+default. Under `Require`, a turn run,
 fresh or resumed, previews the restore over the plugins it materialized
 before it installs the session's tool state, and refuses when it would lose
 a member (FIG-5325). The refusal is the run's typed terminal,

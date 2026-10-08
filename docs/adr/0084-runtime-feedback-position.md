@@ -10,8 +10,11 @@ position.
 ## Decision
 
 `LlmRequest.instructions` carries initial instructions separately from
-`messages`. Projectors trim configured prompts and map whitespace-only prompts
-to `None`. Explicit request instructions and feedback retain their text bytes.
+`messages`. Prompt sections retain their text bytes, including whitespace-only
+text; empty section text is omitted. A placement with no composed sections
+yields `None`. Initial placement replaces the instruction field; current
+context continues the dedicated User prefix or becomes a trailing User message
+(ADR 0133). Runtime feedback retains its text bytes.
 Direct calls expose the same field and refuse a leading System message with
 `DirectLlmError::LeadingSystemMessage` instead of inferring caller intent.
 

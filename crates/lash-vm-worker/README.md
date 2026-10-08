@@ -54,7 +54,7 @@ pause execution deadlines. CPU and retry totals remain in the parent budget.
 
 `Checkout::park` parks the run on its pending request: a process-mode
 `ProcessBoundary`, or an effect the run can issue again (a resource operation,
-a sleep or a signal wait, FIG-4159). The worker serializes its VM, and
+a durable sleep or a deferred host-tool wait, FIG-4159). The worker serializes its VM, and
 `release` resets the process, so the parent can admit nested compilation on a
 one-worker pool and then resume the continuation with `Start`; a run parked on
 an effect issues that request again. A run that cannot be captured where it

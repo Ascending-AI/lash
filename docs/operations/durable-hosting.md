@@ -73,9 +73,10 @@ let backend = DurableBackendBuilder::new(stores)
     .build()?;
 // Each policy value below is chosen by the host.
 let core = lash::LashCore::builder(backend)
-    .commit_budget(commit_budget)
-    .queued_work_batching(queued_work_batching)
-    .tool_source_policy(tool_source_policy)
+    // Example host limits; measure and select them for the deployment.
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .tool_source_policy(lash::tools::ToolSourcePolicy::Require)
     .execution_budgets(budgets)
     .delta_coalescing(lash::DeltaCoalescing::recommended())
     .data_retention(lash::DataRetention {
@@ -90,7 +91,14 @@ let core = lash::LashCore::builder(backend)
 
 The core requires all six policy inputs below. A named preset is a host's
 explicit choice of values, not an implicit policy or a measured deployment
-recommendation. The same applies to session, model, RLM and store choices.
+recommendation. `build` refuses a missing core choice. The same applies to
+session, model, RLM and store choices.
+
+The example selects a 1,024-token action reserve for queued work and refuses
+missing persisted tool sources. The reserve is advisory data for a custom
+drain policy; the shipped drain modes do no token arithmetic. Tool and engine
+body bounds and park bounds belong to their execution contracts, separately
+from the shared model, control and provider budgets.
 
 | Boundary | Required host choices | Current owner |
 | --- | --- | --- |
@@ -922,7 +930,7 @@ table. A later duplicate consults the host's saved binding.
 
 The process lifecycle log has a closed vocabulary: started, waiting with
 `call_id` and `tool_id`, resumed, effect outcome, effect omissions, cancel
-requested, observer added and removed, external reference set, and succeeded,
+requested, observer added and removed, external reference set, and completed,
 failed, cancelled or abandoned. Waiting facts carry no completion key. Hosts
 reconcile retained process and turn cursors, acknowledging a page only after
 recording it or completing its idempotent actions. Best-effort observation is
@@ -949,9 +957,9 @@ provider-side caches such as Google uploads. `ProviderToken` has no
 `TokenRequestReason::Current`. Answer from the host's own cache; it must be
 cheap and safe to call concurrently. When the answer expires within the
 provider's selected `TokenPolicy::expiry_skew`, lash asks once more with
-`Expiring`. `TokenPolicy::standard()` selects 30 s; the host may choose another
-skew. When the provider answers 401 before any
-output, lash asks once with `Rejected` and `stale` set to the token it sent,
+`Expiring`. `TokenPolicy::standard()` selects 30 s; the provider constructor's
+`with_token_policy` selects a different skew. When the provider answers 401
+before any output, lash asks once with `Rejected` and `stale` set to the token it sent,
 then resends the admitted body once. A 401 after output started is surfaced,
 never retried, and 403 is never retried.
 

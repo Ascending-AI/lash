@@ -2,13 +2,9 @@
 
 ## Status
 
-Accepted. Implementing it is open work that this decision depends on: the
-ref and the store's delivery (FIG-5443), provider acceptance and slot codecs
-(FIG-5444), request templates and live slot filling (FIG-5445), producers and
-history (FIG-5446), and the remote shapes (FIG-5447), integrated as one series
-by FIG-5448. Until FIG-5448 lands, `AttachmentSource`
-(`crates/lash-sansio/src/llm/types.rs`) and the exact-body admission of
-ADR 0133 §6 are on main.
+Accepted. The durable `AttachmentRef`, host-store delivery and
+`RecordedRequestTemplate` cutover is on main. Admission records literals and
+typed slots; each attempt fills those slots live (WIRE-SLOTS, ADR 0133 §6).
 
 ## Context
 
@@ -134,12 +130,13 @@ None of these changes history or degrades an attachment to a notice.
 
 ### 5. Budgets stay an engine bound
 
-`AttachmentReadPolicy` keeps its 32 MiB per-blob and 128 MiB per-request
-bounds (ADR 0058). Each attempt reserves one request budget across its slots
-before any backend call: a per-occurrence envelope for MIME and label, and
-then what each delivered form costs. Bytes cost the blob's retained buffer
-once and its base64 expansion for every occurrence. A URL costs its escaped
-length for every occurrence. A provider file costs its escaped id for every
+The host states `AttachmentReadPolicy` through `DataRetention::attachments`.
+`AttachmentPolicy::standard()` selects 32 MiB per blob and 128 MiB per request
+(ADR 0058); the selected bounds may differ. Each attempt reserves one request
+budget across its slots before any backend call: a per-occurrence envelope
+for MIME and label, and then what each delivered form costs. Bytes cost the blob's retained buffer
+once per delivery group and four base64-sized encoding allowances for every
+occurrence. A URL costs its escaped length for every occurrence. A provider file costs its escaped id for every
 occurrence, plus the bytes it read as upload scratch when this delivery
 uploaded it; a file reused from the cache reads nothing. A provider file is
 never charged the base64 expansion: provider files exist to carry what does

@@ -78,7 +78,8 @@ so its close settles the switch's work with the rest of its own. A host
 cancels the follow-on as it cancels any queued input or running turn.
 
 A chain is bounded by the deployment's
-`ExecutionBudgetsConfig::agent_frame_switch_limit` (nonzero, default 16).
+`ExecutionBudgetsConfig::agent_frame_switch_limit` (nonzero; 16 in the
+explicitly selected `ExecutionBudgetsConfig::recommended()` preset).
 Fresh host input and host notices start at depth zero. The switch's mailed
 `TurnInput::agent_frame_switches` is its admitted depth plus one, persisted
 with the task and included in its submission digest. A claimed or resumed
@@ -178,22 +179,16 @@ the deadline, and a host reattaches by the receipt. The convenience calls
 (`append_messages`, `append_session_nodes`, `open_agent_frame`, the plugin
 operations, `compact_context`) submit and await. Dropping an await does not
 withdraw the command; `withdraw` does, transactionally, and answers
-`AlreadyAdmitted` once an owner read it. A host's cancel of a plugin task an
-owner admitted writes a cancel request row to the session actor's mailbox
-(`SessionCommandCancelSignal`) under the command's session-operation scope,
-which only a host's cancel writes; a cancel of a command that already settled
-finds its settlement and writes nothing. The request is durable, never a
-decision: the owner reads it before the task runs and commits that reading as
-a phase, fires the task's cancellation token when the cancel lands, and reads
-it again the moment the task's code returns. A cancel requested by then
-settles the command `PluginOperationCommandOutcome::Cancelled` with nothing of
-the task committed; otherwise it settles with the task's own outcome. The
-settling commit publishes that decision with the settlement in one
-transaction (FIG-4893), so no crash separates them. A pre-run reading that
-committed and found no cancel runs the task's code again under the live
-request if the settlement did not commit; a committed pre-run cancel runs
-none of it. Neither the withdrawal nor the cancel takes the runtime writer,
-which the owner applying the commands holds. The runtime
+`AlreadyAdmitted` once an owner read it. Plugin tasks expose their own
+operation-run handle: `PluginOperations::start_task` returns a `RunHandle`,
+and `RunHandle::cancel` uses `CancelBuilder` to request that logical owner's
+cancellation. Cancellation of the task withdraws its command row. The actor
+watches that row while the task runs and fires its cancellation token when
+withdrawal is observed. The applying commit requires the row still to be
+open, so a withdrawn task publishes none of its head changes; a settled task
+keeps its recorded outcome. This is distinct from withdrawing an ordinary
+command before its admission. The owner executes and settles the task; the
+host only submits, follows or cancels it. The runtime
 writer is never held while a settlement is awaited. A command run, once it drained the lane, writes its
 `RunTerminalCause::CommandsApplied` terminal and closes its scope in that
 transaction, so its phase rows are retired like a turn run's; an operation

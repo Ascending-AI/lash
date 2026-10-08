@@ -18,16 +18,17 @@ core `SetGeneration` config command (ADR 0126).
 
 `GenerationOverlay::Merge` keeps unstated options. `Replace` discards them, and
 replacing with default options clears the intent. The same vocabulary applies
-to creation, child-policy resolution, and `SetGeneration`. A child that
-sets only its cap therefore keeps an inherited temperature and seed unless it
-explicitly replaces them.
+to creation against an explicitly supplied base and to `SetGeneration`.
+A host applying a cap-only merge to a base copied from a parent keeps that
+base's temperature and seed. `SessionCreation::child_of` itself copies no
+configuration; a fork copies the configuration recorded at its fork point.
 
-The durable config includes the generation controls and every plugin's
-namespace. The system prompt is part of the protocol plugin's namespace, not
-of core config: a session's spec states it, the session records it at
-creation and renders the recorded config on every worker (ADR 0030,
-FIG-4589). On open, the recorded model binds back to its
-transport by its recorded key and cannot be silently replaced.
+The durable config includes the generation controls, the core `PromptPlan`
+and every plugin's namespace. The creator states the prompt plan separately
+from plugin creation options; protocols contribute keyed sections. Each new
+model call composes under the recorded plan, and its admission fixes the
+composition for redrive of that call (ADRs 0030 and 0133). On open, the recorded
+model binds back to its transport by its recorded key and cannot be silently replaced.
 
 Every request taken from session policy pairs its generation options with the
 request's model. `LlmProfileMetadata` clamps a requested output cap to that model's

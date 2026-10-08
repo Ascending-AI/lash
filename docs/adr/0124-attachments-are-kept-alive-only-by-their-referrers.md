@@ -198,8 +198,10 @@ An unbound put's upload edge expires at the store clock at the put plus
 `upload_expiry_ms`, fixed when the put is made. Its guard is owed at that
 instant: a relay visit before it defers the row to the expiry (or the
 maximum backoff, if sooner), never past it. The host sets it with
-`LashCoreBuilder::attachment_upload_expiry(Duration)` (default 24 hours);
-every runtime the host builds, session or process, inherits it.
+`DataRetention::attachments`, specifically `AttachmentPolicy::upload_expiry_ms`,
+through `LashCoreBuilder::data_retention`. `AttachmentPolicy::standard()`
+selects 24 hours; no expiry is chosen implicitly. Every runtime the host
+builds, session or process, uses the stated policy.
 
 ### 6. A process runtime is keyed by its id
 

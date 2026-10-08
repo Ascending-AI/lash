@@ -24,9 +24,12 @@ Three rules apply:
 Tool-call accounting populates assembled turns and host observations. It does
 not itself add conversation nodes or model attempts to the ADR 0032 ledger.
 
-Each exec retains at most 128 tool records. Oversized inline string scalars,
-above 64 KiB, become `omitted_bytes` markers recursively inside success and raw
-failure values. Arrays, objects, and attachment references retain their shape.
+The recorded `RlmPresentationConfig::max_tool_call_records` and
+`max_inline_scalar_bytes` bound accounting; `RlmPresentationConfig::standard()`
+selects 128 records per exec and 64 KiB per inline string scalar. Hosts may
+state other limits at protocol creation. Scalars above the selected limit
+become `omitted_bytes` markers recursively inside success and raw failure
+values. Arrays, objects, and attachment references retain their shape.
 The omitted tail contributes one `ToolCallsOmitted` event with its count,
 failures, and attachment references. The final attachment scan includes both
 retained records and that summary.

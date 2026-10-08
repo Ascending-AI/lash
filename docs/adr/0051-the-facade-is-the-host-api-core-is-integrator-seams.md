@@ -74,8 +74,9 @@ protocol contracts and the types needed to implement them. Operations use
 outcomes. Hosts invoke those operations through `lash::admin`. The facade's
 single general prelude is `lash::prelude`.
 
-`TurnContext` carries runtime correlation; per-send prompt overrides belong to
-`RunSpec`. A plugin receives runtime-provided services rather than assembling
+`TurnContext` carries runtime correlation. `RunSpec` carries per-run model,
+reasoning, generation, protocol turn options and tool authority. Prompt policy
+changes through the core `SetPromptPlan` config command. A plugin receives runtime-provided services rather than assembling
 the runtime's authority.
 
 Prompt sections follow [ADR 0133](0133-prompt-sections-are-keyed-trusted-and-placed-by-the-host.md): `lash::plugins` carries the section and wrapper

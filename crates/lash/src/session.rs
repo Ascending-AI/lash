@@ -70,9 +70,9 @@ pub struct SessionCreation {
     pub tool_access: lash_core::SessionToolAccess,
     /// The session's parent, recorded as its Session Relation (ADR 0089).
     /// This is the only facade path to a related session: the session is an
-    /// ordinary session with its own Session Binding and its own usage
-    /// ledger — rolling related sessions together is host policy, not a
-    /// facade service. Parentage copies no configuration.
+    /// ordinary session with its own Session Binding and recorded response
+    /// usage and attempt observations. Aggregating related sessions is host
+    /// policy. Parentage copies no configuration.
     /// `None` creates a root session.
     pub parent: Option<SessionId>,
     /// The initial prompt plan chosen by the creator. `None` uses the neutral

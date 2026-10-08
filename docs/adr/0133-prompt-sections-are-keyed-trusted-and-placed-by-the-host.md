@@ -14,7 +14,7 @@ the workbench's sections are on main (FIG-5258), and §9's plugin message and
 context-overlay routes and `TurnContextTransform` are deleted. §6, admission
 at `model.start`, is on main (FIG-5255): `lash-core/src/runtime/durable/phases.rs`
 admits each call and `lash-core/src/runtime/turn_driver/prompt.rs` composes
-it. Exact provider bodies for every call kind, and the admission of
+it. Recorded request templates for every admitted call kind, and admission of
 compaction and direct calls under their owners (§6, §8), are on main
 (FIG-5259): `lash-core/src/runtime/turn_driver/prepare.rs` prepares a turn's
 call and `lash-core/src/runtime/owned_call.rs` admits an owned one. Every
@@ -22,9 +22,10 @@ other prompt route is deleted (§9, FIG-5260): only the runtime builds a
 call's cut and composes it, through `lash_core_execution::core_internal`
 (`prompt_cut`, `compose_prompt`); the facade exports neither, and a test
 composes through `lash::testing::prompt`. A resumed turn serves its recorded
-before-turn decisions (§6). The request template with live attachment slots
-(§6, WIRE-SLOTS) is open work under ADR 0135 (FIG-5445): main records and
-resends each call's exact body, attachments resolved.
+before-turn decisions (§6). Request templates with live attachment slots
+(§6, WIRE-SLOTS) are on main under ADR 0135: admission records literals,
+attachment refs, acceptance and codecs, and the response contract. Each
+attempt fills slots afresh; resolved delivery values are never admitted.
 
 ## Context
 
@@ -244,8 +245,9 @@ transaction:
   it, in the checkpoint that re-delivers the call;
 - the call's snapshot (`PromptWrite::Record`);
 - the request, with the composed text lowered into it: the
-  `InitialInstructions` text after the request's own instructions, the
-  `CurrentContext` text as one system message after the conversation;
+  `InitialInstructions` composition replaces `LlmRequest.instructions`;
+  `CurrentContext` continues the projector's dedicated User prefix, separated
+  by three newlines, or becomes one trailing User message without a prefix;
 - the call's request template and response context, in its snapshot root.
 
 Before admission the call is prepared once: its prompt is composed, the
@@ -382,9 +384,10 @@ instructions are its plugin's `Direct { name: "llm_query" }` section.
 An owned caller may supply opaque derived section inputs, frozen for that
 composition (the standard summarizer's requested focus, for example). They
 are renderer inputs, never extra messages; the admission records their
-composed text and exact request body. A resend reads that admission and
-renders nothing again. The compaction request's derived identity still
-includes its source snapshot and requested instruction.
+composed text, request template and response contract. A resend reads that
+admission and renders nothing again; slots receive fresh transient deliveries.
+`Provider::send` sends the supplied live body byte for byte for that attempt.
+The compaction request's derived identity still includes its source snapshot and requested instruction.
 
 Each call is admitted under the execution that owns it: a compaction under
 its session command's run, a direct call under its tool attempt or process

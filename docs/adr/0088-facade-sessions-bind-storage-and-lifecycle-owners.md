@@ -33,8 +33,8 @@ attachment store, process-environment store, and work ports. The receiving core
 supplies only physical binding: live provider resolution, the implementations
 of its one plugin set, and tracing. Behaviour is recorded config. The durable
 session config, including generation, the recorded model with its request
-defaults, the execution controls of ADR 0030 and every installed plugin's
-namespace (ADR 0126), the protocol's prompt config among them, remains
+defaults, the execution controls of ADR 0030, the core `PromptPlan` and every
+installed plugin's namespace (ADR 0126), remains
 recorded config under ADR 0074. A core holds no session defaults (ADR 0030):
 what its host passes to the sessions it creates never reaches a resumed
 session.
@@ -49,17 +49,17 @@ states physical facts — the provider that serves the recorded route and the
 tool-source policy that refuses an unavailable source — and neither selects
 behaviour.
 
-A process runs under the environment its start captured: its starter's
-recorded policy and plugin config. That holds for a session-turn process as
-for an engine or tool-call process. The start resolves the child's complete
-facts against that environment on its own plugin set before it registers, so
-a child the set cannot create is refused before the handoff. The node that runs
-the process binds the same set and builds the process's runtime from the
-captured environment; it supplies no policy or plugin config of its own. A
-child that node's set cannot create is a terminal typed refusal (`session_config_refused`), never a
-retried infrastructure error. A tool-declared session-turn start without a
-captured environment is `ExecutionEnvMissing` at intent admission, before any
-start command is recorded. Completed batches refuse together; pending declared
+An engine or tool-call process runs under its starter's captured execution
+environment. A session-turn process instead records a new child environment
+from the supplied policy and model, tool authority, prompt plan and plugin
+creation options. Parentage copies no configuration. The start resolves the
+child's complete facts with its installed plugin set before registration;
+the worker binds that set and uses the recorded environment, supplying no
+replacement policy or plugin configuration. A child that the set cannot
+create is a typed `session_config_refused`, never a retried infrastructure
+error. A tool-declared session-turn start without the required execution
+environment is `ExecutionEnvMissing` at intent admission, before any start
+command is recorded. Completed batches refuse together; pending declared
 starts settle the call with a non-retryable refusal.
 
 A deployment that needs an incompatible plugin set — another protocol, or

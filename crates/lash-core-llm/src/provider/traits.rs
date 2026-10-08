@@ -77,9 +77,11 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
     }
     /// Send `body` byte for byte and read its response under `context`.
     ///
-    /// The body is the only statement of what the call asks: a first send
-    /// and a resend after a crash are handed the same recorded body, and no
-    /// request travels beside it to disagree with it. `context` holds what
+    /// The body is the only statement of what the call asks. A first send
+    /// and a resend after a crash share the admitted template and response
+    /// contract; each attempt fills attachment slots afresh, so transient
+    /// delivery values may differ. No request travels beside the supplied
+    /// live body to disagree with it. `context` holds what
     /// reading the response needs and the body does not carry: the call's
     /// scope, the recorded contract (the pinned route's model, the output
     /// the call asked for, its tools' input schemas) and this send's live

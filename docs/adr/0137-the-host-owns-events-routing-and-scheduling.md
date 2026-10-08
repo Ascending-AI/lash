@@ -36,7 +36,8 @@ once; retries and takeover preserve it. `UntilScopeEnd` has no deadline and
 is revoked when its owning turn or process scope ends. Engine `PinKey` and
 `AwaitProcess` actions likewise carry `bound: ParkBound`,
 with no runtime default or ceiling. Engine steps declare their body bound
-through `EngineSteps::execution` or `EngineHostSteps::execution`.
+through `EngineSteps::execution`. Hosted external work uses its tool
+manifest's execution contract.
 
 `AttemptContext::call_id()` names one logical call across redelivery and
 retry ([ADR 0117](0117-lash-names-every-tool-call.md)). Hosts key their records

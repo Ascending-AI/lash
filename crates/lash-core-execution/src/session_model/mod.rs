@@ -242,8 +242,8 @@ pub struct SessionSpec {
     pub no_progress_budget: Option<NoProgressBudget>,
     /// Duplicate-billing appetite. `None` keeps the base policy's.
     pub charge_safety: Option<ChargeSafetyPolicy>,
-    /// Plugin-keyed, serializable creation options (FIG-4379), the protocol
-    /// plugin's prompt config among them. Each installed plugin creates its
+    /// Plugin-keyed, serializable creation options (FIG-4379). The core
+    /// prompt plan is recorded separately. Each installed plugin creates its
     /// recorded namespace from its key, and only its owner's typed config
     /// commands change it afterwards. A key no installed plugin owns, or a
     /// value its owner refuses, fails the creation typed as

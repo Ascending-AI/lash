@@ -33,7 +33,8 @@ output and usage before collecting the next attempt (ADR 0040).
 Explicit cancellation is distinct from truncation. A protocol-owned abort can
 still drain provider usage before sealing its attempt. The host selects
 the stop grace of its execution budgets (`ExecutionBudgets::stop_grace`),
-which is two seconds in `ExecutionBudgets::recommended()`. Usage received in that
+which is two seconds in the explicitly selected
+`ExecutionBudgets::recommended()` preset. Usage received in that
 interval remains provider-reported; missing usage becomes
 `UnreportedAfterAbort` (ADR 0031).
 
