@@ -26,110 +26,8 @@ fn replay_origin_conflict_with_provider_error(
     provider_error
 }
 
-#[derive(Debug)]
-struct ProviderCompletionSidebandState {
-    serving_route: ProviderRouteIdentity,
-    replay_drops: Vec<crate::ProviderReplayDrop>,
-    origin_conflict: Option<ProviderReplayOriginConflict>,
-}
-
-/// Replay safety state shared with the runtime independently of the spawned
-/// LLM Provider task's terminal return.
-#[derive(Clone)]
-pub struct ProviderCompletionSideband {
-    state: Arc<Mutex<ProviderCompletionSidebandState>>,
-    attempt_observer: Option<Arc<dyn Fn(lash_trace::TraceLlmAttempt) + Send + Sync>>,
-    attempt_clock: Option<Arc<dyn crate::Clock>>,
-}
-
-impl std::fmt::Debug for ProviderCompletionSideband {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ProviderCompletionSideband")
-            .field("state", &self.state)
-            .field("observed", &self.attempt_observer.is_some())
-            .finish()
-    }
-}
-
-impl ProviderCompletionSideband {
-    #[must_use]
-    pub fn with_attempt_observer(
-        mut self,
-        observer: Arc<dyn Fn(lash_trace::TraceLlmAttempt) + Send + Sync>,
-        clock: Arc<dyn crate::Clock>,
-    ) -> Self {
-        self.attempt_observer = Some(observer);
-        self.attempt_clock = Some(clock);
-        self
-    }
-
-    fn new(
-        serving_route: ProviderRouteIdentity,
-        replay_drops: Vec<crate::ProviderReplayDrop>,
-    ) -> Self {
-        Self {
-            attempt_observer: None,
-            attempt_clock: None,
-            state: Arc::new(Mutex::new(ProviderCompletionSidebandState {
-                serving_route,
-                replay_drops,
-                origin_conflict: None,
-            })),
-        }
-    }
-
-    fn with_state<R>(&self, f: impl FnOnce(&mut ProviderCompletionSidebandState) -> R) -> R {
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        f(&mut state)
-    }
-
-    fn record_origin_conflict(&self, conflict: ProviderReplayOriginConflict) {
-        self.with_state(|state| {
-            if state.origin_conflict.is_none() {
-                state.origin_conflict = Some(conflict);
-            }
-        });
-    }
-
-    pub fn replay_drops(&self) -> Vec<crate::ProviderReplayDrop> {
-        self.with_state(|state| state.replay_drops.clone())
-    }
-
-    fn serving_route(&self) -> ProviderRouteIdentity {
-        self.with_state(|state| state.serving_route.clone())
-    }
-
-    pub fn origin_conflict(&self) -> Option<ProviderReplayOriginConflict> {
-        self.with_state(|state| state.origin_conflict.clone())
-    }
-
-    pub fn fence_response(&self, response: &mut LlmResponse) -> Result<(), LlmTransportError> {
-        let serving_route = self.serving_route();
-        if let Err(conflict) = response.stamp_replay_origin(&serving_route) {
-            self.record_origin_conflict(conflict);
-        }
-        match self.origin_conflict() {
-            Some(conflict) => Err(replay_origin_conflict_error(conflict)),
-            None => Ok(()),
-        }
-    }
-
-    fn fence_error(&self, mut error: LlmTransportError) -> LlmTransportError {
-        let serving_route = self.serving_route();
-        if let Some(partial) = error.partial_response.as_deref_mut()
-            && let Err(conflict) = partial.stamp_replay_origin(&serving_route)
-        {
-            self.record_origin_conflict(conflict);
-        }
-        match self.origin_conflict() {
-            Some(conflict) => replay_origin_conflict_with_provider_error(conflict, error),
-            None => error,
-        }
-    }
-}
+mod completion;
+pub use completion::ProviderCompletionSideband;
 
 /// Component bundle returned by provider factories.
 ///
@@ -453,14 +351,12 @@ impl ProviderHandle {
         let deadline = clock.now() + limit.remaining(clock.timestamp_ms());
         let remaining = |clock: &dyn crate::Clock| deadline.saturating_duration_since(clock.now());
         let mut budget = RetryBudget::default();
-        let mut records = Vec::new();
         loop {
-            let attempt_ordinal = records.len() as u32 + 1;
+            let attempt_ordinal = sideband.next_attempt_ordinal();
             if remaining(clock.as_ref()).is_zero() {
                 return Err(model_total_exceeded(
                     call_id,
                     &sideband,
-                    records,
                     attempt_ordinal,
                     limit,
                     None,
@@ -477,7 +373,6 @@ impl ProviderHandle {
                 return Err(model_total_exceeded(
                     call_id,
                     &sideband,
-                    records,
                     attempt_ordinal,
                     limit,
                     None,
@@ -520,7 +415,6 @@ impl ProviderHandle {
                 return Err(model_total_exceeded(
                     call_id,
                     &sideband,
-                    records,
                     attempt_ordinal,
                     limit,
                     Some(ProtocolPosition::NoResponse),
@@ -601,7 +495,7 @@ impl ProviderHandle {
                         .provider_usage
                         .as_ref()
                         .map(|_| response.usage.clone());
-                    records.push(AttemptRecord {
+                    sideband.seal_attempt(AttemptRecord {
                         ordinal: attempt_ordinal,
                         outcome,
                         protocol_position: success_protocol_position(&response, outcome),
@@ -614,12 +508,7 @@ impl ProviderHandle {
                     });
                     return Ok(ProviderCompletion {
                         response,
-                        call_record: LlmCallRecord {
-                            call_id,
-                            label: None,
-                            replay_drops: sideband.replay_drops(),
-                            attempts: records,
-                        },
+                        call_record: sideband.call_record(call_id),
                     });
                 }
                 Err(failure) => {
@@ -722,7 +611,7 @@ impl ProviderHandle {
                     };
                     let delay = decision.delay();
                     let unsafe_retry = charge_safety_decision.is_some();
-                    records.push(failure_attempt_record(
+                    sideband.seal_attempt(failure_attempt_record(
                         attempt_ordinal,
                         recorded_failure,
                         consumed,
@@ -744,12 +633,7 @@ impl ProviderHandle {
                             };
                             let completion_error = ProviderCompletionError {
                                 error,
-                                call_record: Box::new(LlmCallRecord {
-                                    call_id,
-                                    label: None,
-                                    replay_drops: sideband.replay_drops(),
-                                    attempts: records,
-                                }),
+                                call_record: Box::new(sideband.call_record(call_id)),
                             };
                             if matches!(
                                 cause,
@@ -884,14 +768,13 @@ fn model_total_error(
 fn model_total_exceeded(
     call_id: LlmCallId,
     sideband: &ProviderCompletionSideband,
-    mut records: Vec<AttemptRecord>,
     ordinal: u32,
     limit: lash_sansio::ExecutionLimit,
     cut_at: Option<ProtocolPosition>,
 ) -> ProviderCompletionError {
     let error = model_total_error(limit, None);
     if let Some(position) = cut_at {
-        records.push(failure_attempt_record(
+        sideband.seal_attempt(failure_attempt_record(
             ordinal,
             &error,
             true,
@@ -903,12 +786,7 @@ fn model_total_exceeded(
     }
     ProviderCompletionError {
         error,
-        call_record: Box::new(LlmCallRecord {
-            call_id,
-            label: None,
-            replay_drops: sideband.replay_drops(),
-            attempts: records,
-        }),
+        call_record: Box::new(sideband.call_record(call_id)),
     }
 }
 
@@ -1450,7 +1328,7 @@ impl Provider for UnconfiguredProvider {
         Box::new(self.clone())
     }
 }
-/// Detaches the replay-safety sideband from `request` before `handle` serves
+/// Detaches the replay-safety and sealed-attempt sideband from `request` before `handle` serves
 /// it: the runtime's turn driver prepares the request, spawns the completion,
 /// and reads the sideband however the task ends. The runtime's seam;
 /// `core_internal` re-exports it and the `lash` facade does not.

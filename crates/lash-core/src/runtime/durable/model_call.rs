@@ -162,7 +162,9 @@ pub(super) fn start(
 /// Send one attempt of a pinned call and answer the machine, bounded live by
 /// its pinned deadline: `remaining` is `deadline - now` on the store's clock,
 /// counted down on the node's. A re-sent call restarts the session's live
-/// stream first; an expired one settles timed out, unsent.
+/// stream first; an expired one settles timed out, unsent. An immediate cancel
+/// cooperatively settles the live call before returning `false`; `true` means
+/// the call answered or timed out.
 ///
 /// # Errors
 ///
@@ -175,11 +177,11 @@ pub(super) async fn send(
     request: std::sync::Arc<LlmRequest>,
     body: &lash_sansio::llm::types::ProviderRequestBody,
     start: &ModelStart,
-) -> Result<(), TurnError> {
+) -> Result<bool, TurnError> {
     let (pin, limit, resent) = match start {
         ModelStart::Expired { pin } => {
             super::phases::settle_unsent(drive, id, timed_out(pin));
-            return Ok(());
+            return Ok(true);
         }
         ModelStart::Send { pin, limit, resent } => (pin, *limit, *resent),
     };
@@ -189,18 +191,48 @@ pub(super) async fn send(
     cx.note_due(DueSource::ModelDeadline, pin.deadline);
     let now = cx.durable_now().await?;
     let remaining = Duration::from_millis(millis(pin.deadline).saturating_sub(millis(now)));
-    let expired = tokio::select! {
-        answered = drive.model_call(cx, id, request, body, pin.attempt, limit) => {
-            answered?;
-            false
+    let expired = {
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let call = drive.model_call(
+            cx,
+            id,
+            request,
+            body,
+            super::session::ModelCallAttempt {
+                ordinal: pin.attempt,
+                limit,
+                cancel: cancel.clone(),
+            },
+        );
+        tokio::pin!(call);
+        let expiry = cx.clock().sleep(remaining);
+        tokio::pin!(expiry);
+        loop {
+            tokio::select! {
+                biased;
+                answered = &mut call => {
+                    answered?;
+                    break false;
+                }
+                () = &mut expiry => break true,
+                () = cx.wait_for_mail() => {
+                    if super::turn_cancel::immediate(cx).await? {
+                        cancel.cancel();
+                        // A live cancellation settles the provider call before
+                        // the turn terminal; dropping it discards sealed attempts.
+                        call.await?;
+                        cx.clear_due(DueSource::ModelDeadline);
+                        return Ok(false);
+                    }
+                }
+            }
         }
-        () = cx.clock().sleep(remaining) => true,
     };
     cx.clear_due(DueSource::ModelDeadline);
     if expired {
         super::phases::settle_unsent(drive, id, timed_out(pin));
     }
-    Ok(())
+    Ok(true)
 }
 
 /// The settlement of a call whose pinned deadline passed:

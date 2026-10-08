@@ -65,9 +65,9 @@ use std::time::Duration;
 use lash_core::facade_support::{EffectId, Response};
 use lash_core::runtime::durable::head::SessionHead;
 use lash_core::runtime::durable::session::{
-    AdmittedInputs, CellExit, CodeCell, ComposedCall, ModelPin, OpenTurn, PreparedCall,
-    SessionActivation, TurnCancelRequest, TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore,
-    TurnRow, TurnServices, request_turn_cancel,
+    AdmittedInputs, CellExit, CodeCell, ComposedCall, ModelCallAttempt, ModelPin, OpenTurn,
+    PreparedCall, SessionActivation, TurnCancelRequest, TurnCommit, TurnDone, TurnDrive, TurnError,
+    TurnRestore, TurnRow, TurnServices, request_turn_cancel,
 };
 use lash_core::sansio::{ChatContextProjector, PendingToolCall, PendingWork, ProtocolDriverHandle};
 use lash_core::{
@@ -95,9 +95,9 @@ use lash_sansio::llm::types::{ProviderRequestBody, ProviderRouteIdentity};
 use lash_sansio::sansio::ExecutionEnvironmentSync;
 use lash_sansio::sync::MutexExt as _;
 use lash_sansio::{
-    ExecutionBudgets, ExecutionLimit, ExecutionPolicy, LimitCause, ModelToolReturn, ParkBound,
-    SessionId, ToolBounds, ToolCallId, ToolCallOutput, ToolFailure, ToolFailureClass, ToolId,
-    TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnId,
+    ExecutionBudgets, ExecutionPolicy, LimitCause, ModelToolReturn, ParkBound, SessionId,
+    ToolBounds, ToolCallId, ToolCallOutput, ToolFailure, ToolFailureClass, ToolId, TurnCancelMode,
+    TurnCancelUndeliveredInputPolicy, TurnId,
 };
 
 const SESSION: &str = "l4t-session";
@@ -634,8 +634,7 @@ impl TurnDrive for L4Drive {
         id: EffectId,
         request: Arc<LlmRequest>,
         _body: &ProviderRequestBody,
-        _attempt: u32,
-        _limit: ExecutionLimit,
+        _attempt: ModelCallAttempt,
     ) -> Result<(), TurnError> {
         let rendered = serde_json::to_string(&*request).expect("a request encodes");
         let second = rendered.contains(RESULTS_MARKER);

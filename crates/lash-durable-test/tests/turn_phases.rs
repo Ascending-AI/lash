@@ -79,9 +79,10 @@ use std::time::Duration;
 use lash_core::facade_support::{EffectId, Response};
 use lash_core::runtime::durable::head::{HeadCache, SessionHead};
 use lash_core::runtime::durable::session::{
-    AdmittedInputs, CellExit, CodeCell, ComposedCall, ModelPin, OpenTurn, PhaseCheckpoint,
-    PreparedCall, SessionActivation, SessionParkReason, TurnCancelRequest, TurnCommit, TurnDone,
-    TurnDrive, TurnError, TurnRestore, TurnRow, TurnServices, UnfinishedPhase, request_turn_cancel,
+    AdmittedInputs, CellExit, CodeCell, ComposedCall, ModelCallAttempt, ModelPin, OpenTurn,
+    PhaseCheckpoint, PreparedCall, SessionActivation, SessionParkReason, TurnCancelRequest,
+    TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore, TurnRow, TurnServices,
+    UnfinishedPhase, request_turn_cancel,
 };
 use lash_core::sansio::PendingToolCall;
 use lash_core::sansio::{ChatContextProjector, PendingWork, ProtocolDriverHandle};
@@ -112,8 +113,8 @@ use lash_sansio::llm::types::{ProviderRequestBody, ProviderRouteIdentity};
 use lash_sansio::sansio::ExecutionEnvironmentSync;
 use lash_sansio::sync::MutexExt as _;
 use lash_sansio::{
-    ExecutionBudgets, ExecutionBudgetsConfig, ExecutionLimit, ProviderAttemptLimits, SessionId,
-    TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnId,
+    ExecutionBudgets, ExecutionBudgetsConfig, ProviderAttemptLimits, SessionId, TurnCancelMode,
+    TurnCancelUndeliveredInputPolicy, TurnId,
 };
 
 use dialect::Dialect;
@@ -572,9 +573,13 @@ impl TurnDrive for L3Drive {
         id: EffectId,
         request: Arc<LlmRequest>,
         body: &ProviderRequestBody,
-        attempt: u32,
-        _limit: ExecutionLimit,
+        attempt: ModelCallAttempt,
     ) -> Result<(), TurnError> {
+        let ModelCallAttempt {
+            ordinal: attempt,
+            cancel,
+            ..
+        } = attempt;
         let rendered = serde_json::to_string(&*request).expect("a request encodes");
         let second = rendered.contains(AGAIN_MARKER);
         let composed = Composition::of(&request);
@@ -685,7 +690,8 @@ impl TurnDrive for L3Drive {
             }
             if mode == TurnCancelMode::Immediate {
                 // The stream never ends on its own: only the cancel stops it.
-                return std::future::pending().await;
+                cancel.cancelled().await;
+                return Ok(());
             }
             // Outlive at least one wake of the owner's cancel watch before
             // answering: an after-step request must not stop the call. The
@@ -696,7 +702,10 @@ impl TurnDrive for L3Drive {
         }
         match self.services.mode {
             // The stream never ends on its own: only the cancel stops it.
-            Mode::CancelAtAdmission => return std::future::pending().await,
+            Mode::CancelAtAdmission => {
+                cancel.cancelled().await;
+                return Ok(());
+            }
             // While its turn runs, the host withdraws the queued input,
             // once, as Figments withdraws a chat message the user took back.
             Mode::QueuedCancel if self.run == run() => {

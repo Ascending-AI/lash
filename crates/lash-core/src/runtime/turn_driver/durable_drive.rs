@@ -12,8 +12,8 @@ use super::*;
 use crate::runtime::durable::commit_publication::{CommitBase, PublishedHeads};
 use crate::runtime::durable::head::SessionHead;
 use crate::runtime::durable::session::{
-    CellExit, CodeCell, OpenTurn, PreparedCall, RestoredTurn, TurnCommit, TurnDone, TurnDrive,
-    TurnError, TurnRestore,
+    CellExit, CodeCell, ModelCallAttempt, OpenTurn, PreparedCall, RestoredTurn, TurnCommit,
+    TurnDone, TurnDrive, TurnError, TurnRestore,
 };
 use crate::runtime::turn_loop::DurableTurn;
 
@@ -322,22 +322,42 @@ impl TurnDrive for RuntimeDrive {
         id: crate::EffectId,
         request: Arc<LlmRequest>,
         body: &lash_sansio::llm::types::ProviderRequestBody,
-        attempt: u32,
-        _limit: crate::ExecutionLimit,
+        attempt: ModelCallAttempt,
     ) -> Result<(), TurnError> {
+        let ModelCallAttempt {
+            ordinal: attempt,
+            cancel,
+            ..
+        } = attempt;
         self.driver
             .protocol_reply
             .mark_model_call(self.machine.messages().iter());
-        Box::pin(self.driver.handle_llm_call_effect(
+        let stop = self.driver.children_stop.clone();
+        let call = Box::pin(self.driver.handle_llm_call_effect(
             &mut self.machine,
             id,
             request,
             body,
             attempt,
             &self.observer,
-        ))
-        .await
-        .map_err(runtime)
+        ));
+        tokio::pin!(call);
+        let result = tokio::select! {
+            biased;
+            result = &mut call => result,
+            () = cancel.cancelled() => {
+                stop.cancel();
+                call.await
+            }
+        }
+        .map_err(runtime);
+        if cancel.is_cancelled() {
+            // Publish the sealed model call before the turn's cancel terminal:
+            // dropping this drive otherwise aborts its live publisher.
+            self.observer.close();
+            let _ = (&mut self.publisher).await;
+        }
+        result
     }
 
     async fn prepare_call(

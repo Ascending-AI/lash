@@ -20,7 +20,9 @@
 //! would still finish survives it, and a model call, round or cell that
 //! never answers cannot hold the close back (FIG-3871).
 //!
-//! Honouring it stops the turn's in-memory work and leaves the rest to the
+//! A live model call settles cooperatively before the owner stops, preserving
+//! its sealed attempts in the observed model-call record. Other in-memory
+//! work is dropped when the stop wins. Honouring it leaves the rest to the
 //! next activation pass, which finds the request on the row and
 //! [`finalize`]s the turn: its `Cancelled` terminal in one `turn.cancel`
 //! commit, which also settles a tool round's unfinished members `Cancelled`.

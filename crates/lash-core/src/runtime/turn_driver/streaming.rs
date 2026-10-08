@@ -344,6 +344,8 @@ impl RuntimeTurnDriver<'_> {
             {
                 DrivePollOutcome::Cancelled => {
                     llm_task.abort();
+                    let _ = (&mut llm_task).await;
+                    llm_task_abort.disarm();
                     let failure = crate::llm::transport::LlmTransportError::new("cancelled")
                         .with_kind(crate::ProviderFailureKind::Unknown)
                         .with_lash_code(TurnFailureCode::Cancelled)
@@ -351,7 +353,7 @@ impl RuntimeTurnDriver<'_> {
                         .with_retry_verdict(
                             crate::llm::transport::TransportRetryVerdict::NotRetryable,
                         );
-                    call_record = Some(crate::provider::synthetic_terminal_call_record(
+                    call_record = Some(completion_sideband.terminal_call_record(
                         call_id.clone(),
                         crate::AttemptOutcome::Aborted,
                         &failure,
@@ -361,7 +363,6 @@ impl RuntimeTurnDriver<'_> {
                             stream_state.stream_accumulator,
                             stream_state.stream_evidence,
                         ),
-                        completion_sideband.replay_drops(),
                     ));
                     break Err(crate::runtime::effect::llm_call_error_from_transport(
                         failure,

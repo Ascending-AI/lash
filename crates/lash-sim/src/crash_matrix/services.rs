@@ -16,9 +16,9 @@ use std::time::Duration;
 use lash_core::facade_support::{EffectId, Response};
 use lash_core::runtime::durable::head::SessionHead;
 use lash_core::runtime::durable::session::{
-    AdmittedInputs, CellExit, CodeCell, ComposedCall, ModelPin, OpenTurn, PreparedCall,
-    TurnCancelRequest, TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore, TurnRow,
-    TurnServices, request_turn_cancel,
+    AdmittedInputs, CellExit, CodeCell, ComposedCall, ModelCallAttempt, ModelPin, OpenTurn,
+    PreparedCall, TurnCancelRequest, TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore,
+    TurnRow, TurnServices, request_turn_cancel,
 };
 use lash_core::sansio::{ChatContextProjector, PendingToolCall, PendingWork, ProtocolDriverHandle};
 use lash_core::{
@@ -39,9 +39,8 @@ use lash_durable::domain::OwnerKey;
 use lash_sansio::llm::types::{ProviderRequestBody, ProviderRouteIdentity};
 use lash_sansio::sansio::ExecutionEnvironmentSync;
 use lash_sansio::{
-    ExecutionBudgets, ExecutionLimit, ExecutionPolicy, ModelToolReturn, SessionId, ToolCallOutput,
-    ToolFailure, ToolFailureClass, ToolId, TurnCancelMode, TurnCancelUndeliveredInputPolicy,
-    TurnId,
+    ExecutionBudgets, ExecutionPolicy, ModelToolReturn, SessionId, ToolCallOutput, ToolFailure,
+    ToolFailureClass, ToolId, TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnId,
 };
 
 use super::world::{BodyEntry, World, retry};
@@ -622,8 +621,7 @@ impl TurnDrive for SimDrive {
         id: EffectId,
         request: Arc<LlmRequest>,
         _body: &ProviderRequestBody,
-        _attempt: u32,
-        _limit: ExecutionLimit,
+        _attempt: ModelCallAttempt,
     ) -> Result<(), TurnError> {
         let rendered =
             serde_json::to_string(&*request).map_err(|error| TurnError::Exec(error.to_string()))?;

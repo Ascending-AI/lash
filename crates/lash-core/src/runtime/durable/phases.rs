@@ -308,16 +308,11 @@ pub async fn run_phases(
                         calls = pin.call;
                     }
                 }
-                let sent = turn_cancel::unless_cancelled(
-                    cx,
-                    model_call::send(cx, drive.as_mut(), id, request, &body, &start),
-                )
-                .await?;
-                match sent {
-                    Some(sent) => sent?,
-                    None => return Ok(PhaseExit::CancelRequested),
+                if !model_call::send(cx, drive.as_mut(), id, request, &body, &start).await? {
+                    return Ok(PhaseExit::CancelRequested);
                 }
             }
+
             Effect::ExecCode { id, language, code } => {
                 let mut tx = cx.begin().await?;
                 if turn_cancel::immediate_in(&tx) {

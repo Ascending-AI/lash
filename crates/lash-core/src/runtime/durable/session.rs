@@ -150,6 +150,17 @@ pub(super) fn settle_trace_admission<T>(
     }
 }
 
+/// One admitted model attempt's ordinal, execution bound and cooperative stop.
+#[derive(Clone, Debug)]
+pub struct ModelCallAttempt {
+    /// Ordinal of this send within the pinned call.
+    pub ordinal: u32,
+    /// Execution bound derived from the call's pinned deadline.
+    pub limit: crate::ExecutionLimit,
+    /// Stop the live call and retain its sealed attempts before returning.
+    pub cancel: tokio_util::sync::CancellationToken,
+}
+
 /// One turn an owner runs: its machine and the in-memory work around it. The
 /// phase runner polls the machine through it, commits at the turn's labels
 /// and hands each effect to the method that answers it; every method answers
@@ -167,8 +178,8 @@ pub trait TurnDrive: Send {
     /// [`TurnError`] when the effect cannot be answered.
     async fn local(&mut self, cx: &ActorContext, effect: Effect) -> Result<(), TurnError>;
 
-    /// Run attempt `attempt` of the pinned model call `id`, bounded by
-    /// `limit` (its deadline is the pinned one, never refreshed), and answer
+    /// Run `attempt.ordinal` of the pinned model call `id`, bounded by
+    /// `attempt.limit` (its deadline is the pinned one, never refreshed), and answer
     /// the machine with its result. Deltas it streams go to the session's
     /// live stream; only the completed response is durable.
     ///
@@ -178,14 +189,15 @@ pub trait TurnDrive: Send {
     ///
     /// `body` is the call's exact provider body as `model.start` admitted
     /// it: every attempt, and a resend on any owner, sends those bytes.
+    /// When `attempt.cancel` fires, settle the call with its already-sealed attempts
+    /// before returning. Its cancellation does not authorize another send.
     async fn model_call(
         &mut self,
         cx: &ActorContext,
         id: EffectId,
         request: Arc<LlmRequest>,
         body: &ProviderRequestBody,
-        attempt: u32,
-        limit: crate::ExecutionLimit,
+        attempt: ModelCallAttempt,
     ) -> Result<(), TurnError>;
 
     /// Prepare model call `call`, new to the turn, whose request the machine

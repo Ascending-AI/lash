@@ -16,8 +16,8 @@ use lash_core::facade_support::{CommitBudget, EffectId, Response};
 use lash_core::llm::types::LlmContentBlock;
 use lash_core::runtime::durable::head::SessionHead;
 use lash_core::runtime::durable::session::{
-    AdmittedInputs, CellExit, CodeCell, ComposedCall, ModelPin, OpenTurn, PreparedCall, TurnCommit,
-    TurnDone, TurnDrive, TurnError, TurnRestore, TurnRow, TurnServices,
+    AdmittedInputs, CellExit, CodeCell, ComposedCall, ModelCallAttempt, ModelPin, OpenTurn,
+    PreparedCall, TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore, TurnRow, TurnServices,
 };
 use lash_core::sansio::{ChatContextProjector, PendingToolCall, PendingWork, ProtocolDriverHandle};
 use lash_core::{
@@ -37,8 +37,8 @@ use lash_sansio::llm::types::{ProviderRequestBody, ProviderRouteIdentity};
 use lash_sansio::sansio::ExecutionEnvironmentSync;
 use lash_sansio::sync::MutexExt as _;
 use lash_sansio::{
-    ExecutionBudgets, ExecutionLimit, ExecutionPolicy, ModelToolReturn, SessionId, ToolCallOutput,
-    ToolFailure, ToolFailureClass, ToolId, TurnId,
+    ExecutionBudgets, ExecutionPolicy, ModelToolReturn, SessionId, ToolCallOutput, ToolFailure,
+    ToolFailureClass, ToolId, TurnId,
 };
 use serde::Serialize;
 use tokio::sync::oneshot;
@@ -529,9 +529,13 @@ impl TurnDrive for BenchDrive {
         id: EffectId,
         request: Arc<LlmRequest>,
         _body: &ProviderRequestBody,
-        attempt: u32,
-        _limit: ExecutionLimit,
+        attempt: ModelCallAttempt,
     ) -> Result<(), TurnError> {
+        let ModelCallAttempt {
+            ordinal: attempt,
+            cancel,
+            ..
+        } = attempt;
         self.services.recorder.model_call(&self.session);
         let script = self.script;
         let results_marker = format!("{RESULTS}{} ", self.run);
@@ -542,7 +546,8 @@ impl TurnDrive for BenchDrive {
             && let Some(reached) = self.services.scripts.take_hold(&self.session)
         {
             let _ = reached.send(());
-            std::future::pending::<()>().await;
+            cancel.cancelled().await;
+            return Ok(());
         }
         let parts = if rounds_done < script.rounds {
             (0..script.tools_per_round)

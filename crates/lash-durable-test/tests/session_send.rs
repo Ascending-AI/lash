@@ -640,3 +640,128 @@ async fn host_input_ids_correlate_new_queued_and_steering_rows(tier: Tier) {
     drop(live);
     world.shutdown().await;
 }
+
+/// ADR 0015/0033: the cancelled turn observes the sealed failed attempt
+/// followed by the aborted attempt, even when it cancels in retry backoff.
+#[tokio::test]
+async fn sqlite_memory_cancelled_model_keeps_sealed_attempts() {
+    #[derive(Debug, Default)]
+    struct HeldBackoff(tokio::sync::Notify);
+
+    #[async_trait::async_trait]
+    impl lash_core::Clock for HeldBackoff {
+        fn now(&self) -> std::time::Instant {
+            lash_core::facade_support::SystemClock.now()
+        }
+        fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+            lash_core::facade_support::SystemClock.timestamp_datetime()
+        }
+        async fn sleep(&self, duration: std::time::Duration) {
+            if duration == std::time::Duration::from_secs(7) {
+                self.0.notify_one();
+                std::future::pending().await
+            } else {
+                lash_core::facade_support::SystemClock.sleep(duration).await;
+            }
+        }
+        async fn sleep_until(&self, deadline: std::time::Instant) {
+            lash_core::facade_support::SystemClock
+                .sleep_until(deadline)
+                .await;
+        }
+    }
+
+    let clock = Arc::new(HeldBackoff::default());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut options = lash_core::facade_support::ProviderOptions::default();
+    options.reliability.retry.max_attempts = 2;
+    options.reliability.retry.base_delay_ms = 7_000;
+    options.reliability.retry.max_delay_ms = 7_000;
+    options.reliability.retry.jitter_ms = 0;
+    let provider = lash_core::testing::TestProvider::builder()
+        .kind("cancel-backoff")
+        .options(options)
+        .complete({
+            let calls = Arc::clone(&calls);
+            move |_request| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                async {
+                    Err(lash_core::llm::transport::LlmTransportError::new("retry me")
+                        .with_kind(lash_core::ProviderFailureKind::Transport)
+                        .with_headers([("x-request-id", "failed-attempt")])
+                        .with_retry_verdict(lash_core::llm::transport::TransportRetryVerdict::RetryableTransient))
+                }
+            }
+        }).build().into_handle();
+    let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock.clone())
+        .await
+        .expect("memory stores");
+    let backend = served::backend(Arc::new(stores));
+    let core = lash::LashCore::standard_builder(backend)
+        .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .serve_test_llm_profile(provider, served::metadata())
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "cancel-backoff",
+            "boot",
+        ))
+        .expect("core builds");
+    let session = core
+        .session(lash::SessionId::parse("cancel-model-backoff").unwrap())
+        .create(lash::SessionCreation::root(served::spec(8)))
+        .await
+        .expect("session created");
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        let handle = session
+            .send(lash::TurnInput::text("retry then cancel"))
+            .await
+            .expect("send input");
+        clock.0.notified().await;
+        assert!(matches!(
+            handle.cancel().await.expect("cancel input"),
+            lash::CancelReceipt::Cancelled { .. }
+        ));
+        let output = handle.output().await.expect("settled turn");
+        assert_eq!(output.result.status(), lash::TurnStatus::Cancelled);
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "no retry was sent");
+        let [call] = output.result.llm_calls.as_slice() else {
+            panic!("one model call settles: {:?}", output.result.llm_calls);
+        };
+        assert_eq!(
+            call.attempts.len(),
+            2,
+            "failed and cancelled attempts: {call:?}"
+        );
+        let failed = &call.attempts[0];
+        assert_eq!(failed.ordinal, 1);
+        assert_eq!(failed.outcome, lash_core::AttemptOutcome::Failed);
+        assert_eq!(
+            failed
+                .error
+                .as_ref()
+                .unwrap()
+                .provider_request_id
+                .as_deref(),
+            Some("failed-attempt")
+        );
+        assert!(matches!(
+            failed.retry_decision,
+            Some(lash_core::RetryDecision::Scheduled {
+                wait: lash_core::RetryWait::Backoff,
+                ..
+            })
+        ));
+        let cancelled = &call.attempts[1];
+        assert_eq!(cancelled.ordinal, 2);
+        assert_eq!(cancelled.outcome, lash_core::AttemptOutcome::Aborted);
+        assert_eq!(
+            cancelled.error.as_ref().unwrap().code,
+            Some(lash_core::FailureCode::lash(
+                lash_core::TurnFailureCode::Cancelled
+            ))
+        );
+    })
+    .await
+    .expect("cancellation settles without releasing the retry clock");
+    core.shutdown().await.expect("core stops");
+}
