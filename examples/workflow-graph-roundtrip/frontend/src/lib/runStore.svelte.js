@@ -1,4 +1,4 @@
-import { runWorkflow, signalWorkflow } from './api.js';
+import { runWorkflow, resolveApproval } from './api.js';
 import { acceptsRunEvent } from './runEvents.js';
 
 const EMPTY_DISPLAY = {
@@ -27,7 +27,7 @@ export class RunController {
   eventCount = $state(0);
   error = $state(null);
   finished = $state(false);
-  waitingSignal = $state(null);
+  approvalKey = $state(null);
 
   #abort = null;
 
@@ -38,7 +38,7 @@ export class RunController {
     this.eventCount = 0;
     this.error = null;
     this.finished = false;
-    this.waitingSignal = null;
+    this.approvalKey = null;
   }
 
   async start(definition) {
@@ -58,7 +58,7 @@ export class RunController {
         this.#apply(ev);
       }
       this.finished = true;
-      this.waitingSignal = null;
+      this.approvalKey = null;
     } catch (err) {
       if (!controller.signal.aborted) {
         this.error = err?.message ?? String(err);
@@ -76,11 +76,11 @@ export class RunController {
     this.running = false;
   }
 
-  async signal() {
-    if (!this.runId || !this.waitingSignal) return;
+  async approve() {
+    if (!this.runId || !this.approvalKey) return;
     try {
-      await signalWorkflow(this.runId, this.waitingSignal, { approved: true });
-      this.waitingSignal = null;
+      await resolveApproval(this.approvalKey, { approved: true });
+      this.approvalKey = null;
     } catch (err) {
       this.error = err?.message ?? String(err);
     }
@@ -94,7 +94,7 @@ export class RunController {
     this.runId = ev.runId;
     this.workflowVersion = ev.workflowVersion;
     this.eventCount += 1;
-    if (ev.waitingSignal) this.waitingSignal = ev.waitingSignal;
+    if (ev.approvalKey) this.approvalKey = ev.approvalKey;
     if (ev.display) {
       this.display = {
         messages: ev.display.messages ?? [],

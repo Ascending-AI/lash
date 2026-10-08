@@ -84,36 +84,6 @@ fn definition() -> Value {
     .expect("definition")
 }
 
-/// A start outside any chain is a session start, so the calling session is the
-/// wake target of everything the started process declares. Without it the
-/// process runs, its `processes.emit` materializes a wake, and the wake is
-/// dropped for want of a delivery target — the session waiting on it never
-/// sees queued work.
-#[tokio::test]
-async fn a_session_start_declares_the_calling_session_as_its_wake_target() {
-    let outcome = attempt!(
-        "start_process",
-        serde_json::json!({
-            "definition": definition(),
-        })
-    );
-    let (_, declared) = intents(outcome);
-    let [ToolIntent::StartProcess(intent)] = declared.as_slice() else {
-        panic!("expected one start declaration, got {declared:?}");
-    };
-    let session_id = {
-        let call = attempt_context(None);
-        call.owner()
-            .session_id()
-            .expect("the fixture call runs in a session")
-            .clone()
-    };
-    assert_eq!(
-        intent.declaration.wake_session_id.as_ref(),
-        Some(&session_id)
-    );
-}
-
 #[tokio::test]
 async fn start_and_get_accept_only_the_exact_definition_contracts() {
     let (_, declared) = intents(attempt!(
@@ -216,28 +186,4 @@ fn a_started_definition_is_the_definition_processes_list_filters_by() {
         .expect("id filter");
         assert_eq!(filter.matches_record(&record), matches);
     }
-}
-
-#[tokio::test]
-async fn signal_process_refuses_a_value_that_is_not_a_process_handle() {
-    let message = refusal(attempt!(
-        "signal_process",
-        serde_json::json!({ "handle": { "id": "process-7" }, "name": "approved" })
-    ));
-    assert!(message.contains("Invalid process handle"), "{message}");
-}
-
-#[tokio::test]
-async fn emit_process_event_is_refused_outside_a_process() {
-    // A cell has no enclosing process, and the event this tool appends belongs
-    // to the process the call runs inside. Refusing is the contract, so it says
-    // so rather than appending nowhere.
-    let message = refusal(attempt!(
-        "emit_process_event",
-        serde_json::json!({ "value": { "stage": "approved" } })
-    ));
-    assert!(
-        message.contains("running inside a durable process"),
-        "{message}"
-    );
 }

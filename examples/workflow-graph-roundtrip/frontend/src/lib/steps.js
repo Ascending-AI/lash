@@ -217,12 +217,8 @@ function effectLabel(node) {
       return { category: 'start', glyph: '▷', lead: 'Start', name: effectSubject(d), tail: 'in the background' };
     case 'await_join':
       return { category: 'await', glyph: '⏳', lead: 'Wait for', name: effectSubject(d), tail: 'to finish' };
-    case 'wait_signal':
-      return { category: 'waitSignal', glyph: '⏳', lead: 'Wait for', name: signalName(d) };
     case 'sleep_for':
       return { category: 'sleep', glyph: '⏸', lead: 'Wait for', name: durationName(d) };
-    case 'signal_run':
-      return { category: 'effect', glyph: '◆', lead: 'Notify', name: effectSubject(d) };
     case 'cancel':
       return { category: 'effect', glyph: '◆', lead: 'Cancel', name: effectSubject(d) };
     default:
@@ -319,10 +315,7 @@ function effectSubject(d) {
   const f = d.fields ?? {};
   return editableText(f.name ?? f.process ?? f.handle) || d.title || 'task';
 }
-function signalName(d) {
-  const f = d.fields ?? {};
-  return editableText(f.signal) || d.title || 'a signal';
-}
+
 function durationName(d) {
   const f = d.fields ?? {};
   return editableText(f.duration) || 'a moment';

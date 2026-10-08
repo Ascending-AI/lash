@@ -290,27 +290,6 @@
                 onCommit={commit}
               />
             </span>
-          {:else if label.category === 'waitSignal'}
-            <span class="lead">Wait for the</span>
-            {#if fieldKeys.includes('signal')}
-              <ArgField {node} fieldKey="signal" onCommit={commit} />
-            {:else}
-              <span class="name">{label.name}</span>
-            {/if}
-            <span class="lead">signal</span>
-            {#if node.data.binding}
-              <span class="lead">, save it as</span>
-              <span class="name-slot">
-                <IdentifierField
-                  value={node.data.binding}
-                  variant="box"
-                  placeholder="name"
-                  ariaLabel="Saved name"
-                  onInput={(v) => (node.data.binding = v === '' ? undefined : v)}
-                  onCommit={commit}
-                />
-              </span>
-            {/if}
           {:else if label.category === 'sleep'}
             <span class="lead">Wait for</span>
             {#if fieldKeys.includes('duration')}

@@ -261,7 +261,7 @@ message alone. The cohort summary reports its mean. Later prompt totals can
 be compared with that baseline to measure round-by-round growth.
 
 The RLM host explicitly disables image/type-literal/decomposition prompt
-features, label annotations, processes, sleep, process signals and triggers,
+features, label annotations, processes, sleep, deferring host tools,
 and disables continuation soft warnings. This removes what the current
 renderer gates; the `control.continue_as` catalogue entry and the
 label/process/sleep teaching are gated separately by FIG-2750 (#1172) and

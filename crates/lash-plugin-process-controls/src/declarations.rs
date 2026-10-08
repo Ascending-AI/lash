@@ -1,4 +1,4 @@
-//! The declaring process-control leaf tools: `start`, `signal`, `emit` and
+//! The declaring process-control leaf tools: `start` and
 //! `get`.
 //!
 //! Each one is an ordinary leaf tool. None of them performs its durable act in
@@ -106,84 +106,6 @@ fn exact_fields<'a>(
     Ok(map)
 }
 
-/// `processes.signal(handle, name, payload)` — deliver a named signal.
-#[expect(
-    clippy::expect_used,
-    reason = "this module declares the tool or payload schema and admission checks its invariant"
-)]
-pub fn process_signal_tool_definition() -> ToolDefinition {
-    ToolDefinition::raw(
-        "tool:signal_process",
-        "signal_process",
-        "Deliver a named signal to a running durable process. The signal is durable and is delivered once, even if the signalling turn restarts.",
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "handle": {
-                    "x-lash": { "kind": "process_unknown" },
-                    "description": "Process handle to signal, as returned by `processes.list(...)`."
-                },
-                "name": {
-                    "type": "string",
-                    "description": "Signal name the target process waits on.",
-                },
-                "payload": {
-                    "description": "Signal payload, validated against the target's event schema.",
-                },
-            },
-            "required": ["handle", "name"],
-            "additionalProperties": false
-        }),
-        serde_json::json!({ "description": "The recorded signal event." }),
-    ).expect("valid declared tool schemas")
-        .with_execution(std::time::Duration::from_secs(30))
-    .with_examples(vec![
-        r#"await processes.signal({ handle: h, name: "approved", payload: { by: "sam" } })?"#.into(),
-    ])
-    .with_declaration(ToolDeclaration::default().with_intents([ToolIntentKind::SignalProcess]))
-    .with_tool_binding(ToolBinding::new(["processes"], "signal"))
-}
-
-/// `processes.emit(value)` — append progress to the *enclosing* process.
-///
-/// Run-only by construction: the event it appends belongs to the process the
-/// caller is running inside, and a cell has no such process. That refusal is
-/// the tool's contract, not a missing capability, so it is refused with a typed
-/// reason rather than silently appending nowhere.
-#[expect(
-    clippy::expect_used,
-    reason = "this module declares the tool or payload schema and admission checks its invariant"
-)]
-pub fn process_emit_tool_definition() -> ToolDefinition {
-    ToolDefinition::raw(
-        "tool:emit_process_event",
-        "emit_process_event",
-        "Append a progress value to the event journal of the process this call is running inside. Only available inside a durable process; a call from a cell is refused.",
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "value": {
-                    "description": "Progress value to append.",
-                },
-            },
-            "required": ["value"],
-            "additionalProperties": false
-        }),
-        serde_json::json!({ "description": "The appended process event." }),
-    ).expect("valid declared tool schemas")
-        .with_execution(std::time::Duration::from_secs(30))
-    .with_examples(vec![
-        r#"await processes.emit({ value: { stage: "approved" } })?"#.into(),
-    ])
-    .with_declaration(ToolDeclaration::default().with_intents([ToolIntentKind::EmitProcessEvent]))
-    .with_tool_binding(ToolBinding::new(["processes"], "emit"))
-}
-
-fn required_object_field<'a>(args: &'a Value, field: &str) -> Result<&'a Value, String> {
-    args.get(field)
-        .ok_or_else(|| format!("`{field}` is required"))
-}
-
 /// The host-facing label a start declares, when it declares one.
 ///
 /// A present-but-unusable label is refused rather than dropped: the argument is
@@ -246,38 +168,21 @@ pub async fn execute_process_start_tool_call(
     };
     let lifetime = lifetime(&cx);
     let owner = context.owner().runtime_owner();
-    // A child started from inside a running process belongs to the chain that
-    // started that process, not to the ephemeral session the run executes in:
-    // it inherits the chain's originator and its wake target, and the execution
-    // scope never reaches a record. The in-attempt start path has always read
-    // this off the runtime execution context; since ADR 0095 a start is a leaf
-    // tool, so the declaration is where the inheritance has to be stamped —
-    // without it a process's children are owned by (and observed from) a
-    // session that disappears when the run ends.
-    // A start that is *not* inside a chain is a session start: the session that
-    // authored the call is both its originator and its wake target, exactly as
-    // the in-session start path stamps it
-    // (`lash_core::runtime::session_manager::process_runners::control`). Leaving
-    // the wake target unset here registers a process whose declared wakes are
-    // materialized and then dropped for want of a delivery target, so a
-    // `processes.emit` from that process never becomes queued work on the
-    // session waiting for it.
+    // Children inherit their chain's originator rather than the ephemeral
+    // session that executes their parent.
     let spawn = context.process_spawn_provenance().cloned();
-    let (originator, wake_session_id) = match (spawn, context.owner()) {
-        (Some(spawn), _) => (spawn.originator, spawn.wake_session_id),
+    let originator = match (spawn, context.owner()) {
+        (Some(spawn), _) => spawn.originator,
         (
             None,
             lash_core::ExecutionOwner::SessionFrame {
                 session_id,
                 agent_frame_id,
             },
-        ) => (
-            lash_core::ProcessOriginator::Session {
-                session_id: session_id.clone(),
-                agent_frame_id: Some(agent_frame_id.clone()),
-            },
-            Some(session_id.clone()),
-        ),
+        ) => lash_core::ProcessOriginator::Session {
+            session_id: session_id.clone(),
+            agent_frame_id: Some(agent_frame_id.clone()),
+        },
         (None, lash_core::ExecutionOwner::Process { process_id }) => {
             return refuse(format!(
                 "process `{process_id}` carries no spawn provenance for the child it starts"
@@ -292,7 +197,6 @@ pub async fn execute_process_start_tool_call(
         originator,
         lifetime,
     )
-    .with_wake_session_id(wake_session_id)
     // An engine start is admitted against the execution env its own record
     // carries, never against the live session env, so the declaration captures
     // the attempt's environment digest here. The coordinator stores the bytes
@@ -325,76 +229,6 @@ pub async fn execute_process_start_tool_call(
         ToolIntents::v3(vec![ToolIntent::StartProcess(Box::new(
             lash_core::StartProcessIntent { owner, declaration },
         ))]),
-    )
-}
-
-pub fn execute_process_signal_tool_call(
-    context: &AttemptContext<'_>,
-    args: &Value,
-) -> ToolAttemptOutcome {
-    let handle = match required_object_field(args, "handle") {
-        Ok(value) => value,
-        Err(message) => return refuse(message),
-    };
-    let process_id = match lash_core::process_id_from_handle_json(handle) {
-        Ok(process_id) => process_id,
-        Err(message) => return refuse(message),
-    };
-    let Some(signal_name) = args
-        .get("name")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-    else {
-        return refuse("signal_process requires a non-empty `name`");
-    };
-    ToolAttemptOutcome::done(
-        ToolOutcomeDone::ok(serde_json::json!({
-            "process_id": process_id,
-            "signal": signal_name,
-        })),
-        ToolIntents::v3(vec![ToolIntent::SignalProcess(
-            lash_core::SignalProcessIntent {
-                owner: context.owner().runtime_owner(),
-                process_id,
-                signal_name: signal_name.to_string(),
-                payload: args.get("payload").cloned().unwrap_or(Value::Null),
-            },
-        )]),
-    )
-}
-
-/// The event type a progress emission appends under.
-const PROCESS_PROGRESS_EVENT_TYPE: &str = "process.yield";
-
-pub fn execute_process_emit_tool_call(
-    context: &AttemptContext<'_>,
-    args: &Value,
-) -> ToolAttemptOutcome {
-    let Some(process_id) = context.enclosing_process() else {
-        return refuse(
-            "emit_process_event appends to the process it runs inside, and this call is not \
-             running inside a durable process",
-        );
-    };
-    let value = match required_object_field(args, "value") {
-        Ok(value) => value.clone(),
-        Err(message) => return refuse(message),
-    };
-    let process_id = process_id.clone();
-    ToolAttemptOutcome::done(
-        ToolOutcomeDone::ok(serde_json::json!({
-            "process_id": process_id,
-            "event_type": PROCESS_PROGRESS_EVENT_TYPE,
-        })),
-        ToolIntents::v3(vec![ToolIntent::EmitProcessEvent(
-            lash_core::EmitProcessEventIntent {
-                owner: context.owner().runtime_owner(),
-                process_id,
-                event_type: PROCESS_PROGRESS_EVENT_TYPE.to_string(),
-                payload: value,
-            },
-        )]),
     )
 }
 

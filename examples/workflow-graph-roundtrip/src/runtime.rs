@@ -168,8 +168,7 @@ impl PreparedRun {
                 Lifetime::Detached,
             )
             .with_host_start_key(key)
-            .with_env_ref(env_ref)
-            .with_extra_event_types([crate::display::event_type()]))
+            .with_env_ref(env_ref))
         }
         .await;
         // The admission caller releases this only after start acquires the closure.
@@ -187,14 +186,16 @@ impl PreparedRun {
         core: LashCore,
         process: lash::ProcessId,
         sender: mpsc::Sender<Result<RunEvent, RunError>>,
+        host: Arc<crate::display::HostTools>,
     ) -> Result<(), RunError> {
         let mut overlay = Overlay {
             prepared: self,
             process: process.clone(),
             sequence: 0,
             display: DisplayState::default(),
-            bindings: BTreeMap::new(),
-            pending: BTreeMap::new(),
+            completed_calls: BTreeMap::new(),
+            delivered: BTreeSet::new(),
+            host,
             observed: BTreeSet::new(),
         };
         let mut live = core
@@ -231,13 +232,7 @@ impl PreparedRun {
                 ));
             };
             for event in events {
-                let terminal = matches!(
-                    event.event_type.as_str(),
-                    "process.completed"
-                        | "process.failed"
-                        | "process.cancelled"
-                        | "process.abandoned"
-                );
+                let terminal = matches!(&event.fact, ProcessLifecycleFact::Terminal { .. });
                 if terminal {
                     // The final snapshot catches call bindings and pure-node transitions
                     // published while the durable reader drained its last page.
@@ -253,10 +248,10 @@ impl PreparedRun {
                         }
                     }
                 }
-                if let Some(projected) = overlay.durable(&event)?
-                    && sender.send(Ok(projected)).await.is_err()
-                {
-                    return Ok(());
+                for projected in overlay.durable(&event)? {
+                    if sender.send(Ok(projected)).await.is_err() {
+                        return Ok(());
+                    }
                 }
                 if terminal {
                     return Ok(());
@@ -288,8 +283,9 @@ struct Overlay {
     process: lash::ProcessId,
     sequence: u64,
     display: DisplayState,
-    bindings: BTreeMap<String, String>,
-    pending: BTreeMap<String, DisplayDelta>,
+    completed_calls: BTreeMap<String, String>,
+    delivered: BTreeSet<String>,
+    host: Arc<crate::display::HostTools>,
     observed: BTreeSet<String>,
 }
 
@@ -312,81 +308,81 @@ impl Overlay {
             display_delta,
             display: self.display.clone(),
             error,
-            waiting_signal: None,
+            approval_key: None,
         }
     }
 
-    fn durable(&mut self, event: &ObservedProcessEvent) -> Result<Option<RunEvent>, RunError> {
-        if event.event_type == crate::display::EVENT_TYPE {
-            let operation: crate::display::DisplayEvent =
-                serde_json::from_value(event.payload.clone())?;
+    fn durable(&mut self, event: &ObservedProcessEvent) -> Result<Vec<RunEvent>, RunError> {
+        let mut events = Vec::new();
+        match &event.fact {
+            ProcessLifecycleFact::EffectOutcome(occurrence) => {
+                if !self.prepared.nodes.contains(&occurrence.node_id) {
+                    return Err(RunError::Invalid(format!(
+                        "process event names a node outside the saved execution map: {}",
+                        occurrence.node_id
+                    )));
+                }
+                let status = match occurrence.outcome_class {
+                    ProcessEffectOutcomeClass::Success => RunStatus::Succeeded,
+                    ProcessEffectOutcomeClass::Failure | ProcessEffectOutcomeClass::Cancelled => {
+                        RunStatus::Failed
+                    }
+                };
+                events.push(self.event(
+                    occurrence.node_id.clone(),
+                    status,
+                    DisplayDelta::default(),
+                    occurrence.code.as_ref().map(ToString::to_string),
+                ));
+            }
+            ProcessLifecycleFact::Waiting { wait } => {
+                let mut event = self.event(
+                    self.prepared.root_node.clone(),
+                    RunStatus::Waiting,
+                    DisplayDelta::default(),
+                    None,
+                );
+                let WaitKind::Call { call_id, .. } = &wait.kind;
+                event.approval_key = self.host.approval_key(&self.process, call_id.as_str());
+                events.push(event);
+            }
+            ProcessLifecycleFact::Terminal { outcome, .. } => {
+                let status = if outcome.status() == TerminalProcessStatus::Completed {
+                    RunStatus::Succeeded
+                } else {
+                    RunStatus::Failed
+                };
+                events.extend(self.deliver_display()?);
+                events.push(self.event(
+                    self.prepared.root_node.clone(),
+                    status,
+                    DisplayDelta::default(),
+                    (status == RunStatus::Failed).then(|| format!("{outcome:?}")),
+                ));
+            }
+            _ => {}
+        }
+        Ok(events)
+    }
+
+    fn deliver_display(&mut self) -> Result<Vec<RunEvent>, RunError> {
+        let mut events = Vec::new();
+        for operation in self.host.display_calls(&self.process) {
+            if self.delivered.contains(&operation.call_id) {
+                continue;
+            }
+            let Some(node) = self.completed_calls.get(&operation.call_id).cloned() else {
+                break;
+            };
+            self.delivered.insert(operation.call_id.clone());
             let (_, delta) = crate::display::apply_tool(
                 &mut self.display,
                 &operation.operation,
                 &[lash::rlm::lang::from_json(operation.args)],
             )?;
-            let node = self.bindings.get(&operation.call_id).cloned();
-            let (node, status) = match node {
-                Some(node) => (node, RunStatus::Succeeded),
-                None => {
-                    self.pending.insert(operation.call_id, delta.clone());
-                    (self.prepared.root_node.clone(), RunStatus::Started)
-                }
-            };
-            return Ok(Some(self.event(node, status, delta, None)));
+            events.push(self.event(node, RunStatus::Succeeded, delta, None));
         }
-        if event.event_type == PROCESS_EFFECT_OUTCOME_EVENT_TYPE {
-            let occurrence: ProcessEffectOccurrence =
-                serde_json::from_value(event.payload.clone())?;
-            if !self.prepared.nodes.contains(&occurrence.node_id) {
-                return Err(RunError::Invalid(format!(
-                    "process event names a node outside the saved execution map: {}",
-                    occurrence.node_id
-                )));
-            }
-            let status = match occurrence.outcome_class {
-                ProcessEffectOutcomeClass::Success => RunStatus::Succeeded,
-                ProcessEffectOutcomeClass::Failure | ProcessEffectOutcomeClass::Cancelled => {
-                    RunStatus::Failed
-                }
-            };
-            return Ok(Some(self.event(
-                occurrence.node_id,
-                status,
-                DisplayDelta::default(),
-                occurrence.code.map(|code| code.to_string()),
-            )));
-        }
-        if event.event_type == "process.waiting" {
-            #[derive(serde::Deserialize)]
-            struct Waiting {
-                wait: WaitState,
-            }
-            let Waiting { wait } = serde_json::from_value(event.payload.clone())?;
-            let waiting_signal = match wait.kind {
-                WaitKind::Signal { name, .. } => Some(name),
-                WaitKind::Call { .. } => None,
-            };
-            let mut event = self.event(
-                self.prepared.root_node.clone(),
-                RunStatus::Waiting,
-                DisplayDelta::default(),
-                None,
-            );
-            event.waiting_signal = waiting_signal;
-            return Ok(Some(event));
-        }
-        let status = match event.event_type.as_str() {
-            "process.completed" => RunStatus::Succeeded,
-            "process.failed" | "process.cancelled" | "process.abandoned" => RunStatus::Failed,
-            _ => return Ok(None),
-        };
-        Ok(Some(self.event(
-            self.prepared.root_node.clone(),
-            status,
-            DisplayDelta::default(),
-            (status == RunStatus::Failed).then(|| event.payload.to_string()),
-        )))
+        Ok(events)
     }
 
     fn observation(&mut self, item: ProcessObservationItem) -> Vec<RunEvent> {
@@ -420,61 +416,47 @@ impl Overlay {
                 events.push(event);
             }
         }
-        let ready = self
-            .pending
-            .keys()
-            .filter(|call| self.bindings.contains_key(*call))
-            .cloned()
-            .collect::<Vec<_>>();
-        for call in ready {
-            if let (Some(delta), Some(node)) = (
-                self.pending.remove(&call),
-                self.bindings.get(&call).cloned(),
-            ) {
-                events.push(self.event(node, RunStatus::Succeeded, delta, None));
-            }
+        match self.deliver_display() {
+            Ok(delivered) => events.extend(delivered),
+            Err(error) => events.push(self.event(
+                self.prepared.root_node.clone(),
+                RunStatus::Failed,
+                DisplayDelta::default(),
+                Some(error.to_string()),
+            )),
         }
         events
     }
 
     fn language(&mut self, payload: TraceLanguageExecutionPayload) -> Option<RunEvent> {
-        match &payload {
-            TraceLanguageExecutionPayload::NodeStarted {
-                node_id,
-                call_id: Some(call),
-                ..
-            }
-            | TraceLanguageExecutionPayload::NodeCompleted {
-                node_id,
-                call_id: Some(call),
-                ..
-            }
-            | TraceLanguageExecutionPayload::NodeFailed {
-                node_id,
-                call_id: Some(call),
-                ..
-            } if self.prepared.nodes.contains(node_id) => {
-                self.bindings.insert(call.to_string(), node_id.clone());
-            }
-            _ => {}
+        // The engine resumes the VM with a settled step's recorded output.
+        // NodeCompleted identifies that logical call even after the bounded
+        // effect summary stops carrying individual loop occurrences.
+        if let TraceLanguageExecutionPayload::NodeCompleted {
+            node_id,
+            call_id: Some(call),
+            ..
+        } = &payload
+            && self.prepared.nodes.contains(node_id)
+        {
+            self.completed_calls
+                .insert(call.to_string(), node_id.clone());
         }
         let (node, status, error) = match payload {
             TraceLanguageExecutionPayload::NodeStarted { node_id, .. }
             | TraceLanguageExecutionPayload::NodeResumed { node_id, .. } => {
                 (node_id, RunStatus::Started, None)
             }
-            TraceLanguageExecutionPayload::NodeWaiting {
-                node_id, awaited, ..
-            } => {
+            TraceLanguageExecutionPayload::NodeWaiting { node_id, .. } => {
                 if !self.prepared.nodes.contains(&node_id) {
                     return None;
                 }
-                let mut event =
-                    self.event(node_id, RunStatus::Waiting, DisplayDelta::default(), None);
-                if let lash::tracing::TraceNodeAwaited::Signal { name, .. } = awaited {
-                    event.waiting_signal = Some(name);
-                }
-                return Some(event);
+                return Some(self.event(
+                    node_id,
+                    RunStatus::Waiting,
+                    DisplayDelta::default(),
+                    None,
+                ));
             }
             TraceLanguageExecutionPayload::NodeCompleted { node_id, .. }
             | TraceLanguageExecutionPayload::BranchSelected { node_id, .. } => {
@@ -503,7 +485,21 @@ pub(crate) fn host_environment() -> lash::rlm::lang::LashlangHostEnvironment {
     crate::operations::host_environment()
 }
 
-pub fn core(backend: lash::Backend) -> lash::Result<LashCore> {
+/// The example's engine and the host tools whose effect ledger it observes.
+#[derive(Clone)]
+pub struct WorkflowHost {
+    pub(crate) core: LashCore,
+    pub(crate) tools: Arc<crate::display::HostTools>,
+}
+
+impl WorkflowHost {
+    pub fn core(&self) -> &LashCore {
+        &self.core
+    }
+}
+
+pub fn core(backend: lash::Backend) -> lash::Result<WorkflowHost> {
+    let tools = Arc::new(crate::display::HostTools::default());
     let mut config = lash::rlm::RlmProtocolPluginConfig::builder()
         .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
         .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
@@ -518,10 +514,10 @@ pub fn core(backend: lash::Backend) -> lash::Result<LashCore> {
         Arc::new(lash::rlm::TypescriptDialect),
         &backend,
     );
-    LashCore::rlm_builder(backend, factory)
+    let core = LashCore::rlm_builder(backend, factory)
         .tools(Arc::new(lash::tools::StaticToolProvider::new(
             crate::operations::tool_definitions(),
-            crate::display::DisplayTools,
+            tools.as_ref().clone(),
         )))
         .trace_level(lash::tracing::TraceLevel::Extended)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -529,11 +525,11 @@ pub fn core(backend: lash::Backend) -> lash::Result<LashCore> {
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "workflow-graph",
             uuid::Uuid::new_v4().to_string(),
-        ))
+        ))?;
+    Ok(WorkflowHost { core, tools })
 }
 
-/// The host's process commands. A start or signal runs through the core's
-/// process API in the deployment's effect host.
+/// Starts run through the engine's process admission API.
 #[derive(Clone)]
 pub(crate) struct CommandClient(lash::LashCore);
 
@@ -551,14 +547,6 @@ impl CommandClient {
             .processes()
             .start(request, self.0.effect_host())
             .await?)
-    }
-
-    pub(crate) async fn signal(&self, signal: ProcessSignal) -> Result<(), RunError> {
-        self.0
-            .processes()
-            .signal(signal, self.0.effect_host())
-            .await?;
-        Ok(())
     }
 }
 

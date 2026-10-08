@@ -265,7 +265,6 @@ async fn catalog_process_shape_adds_a_seeded_top_level_process_that_reprojects_a
             .is_some_and(|name| name.starts_with(lash::rlm::lang::LIFTED_PROCESS_NAME_PREFIX))
     );
     assert!(added.data.params().is_empty());
-    assert!(added.data.signals().is_empty());
     let body = added
         .data
         .children()
@@ -297,7 +296,7 @@ async fn catalog_process_shape_adds_a_seeded_top_level_process_that_reprojects_a
 }
 
 #[tokio::test]
-async fn process_name_params_and_signals_add_remove_and_round_trip() {
+async fn process_name_and_params_add_remove_and_round_trip() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind test listener");
@@ -307,14 +306,8 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
     let client = reqwest::Client::new();
     let base = format!("http://{addr}");
 
-    // FIG-3118: a top-level arrow is a lifted process literal, so a process
-    // container's signature splits in two. Its parameter list is authored —
-    // it is the arrow's own parameter list, and the lens splices it back into
-    // the literal. Its name and signal set are not: the name is the lens's
-    // derived lift identity (the authored name is the `const` binding on the
-    // statement node) and the signals are read back out of the body's
-    // `waitSignal` calls. A client that echoes the derived fields back is
-    // echoing a projection, and the echo is dropped on save.
+    // A lifted process's parameters and const binding are authored. Its
+    // projected lift identity stays derived when those fields change.
     let mut document = select_workflow(&client, &base, "blank").await;
     let process = document
         .nodes
@@ -338,10 +331,6 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
             field_type: "bool".to_string(),
         },
     ];
-    *process.data.signals_mut().expect("signals node") = vec![EditableProcessField {
-        name: "continue".to_string(),
-        field_type: "any".to_string(),
-    }];
     let statement = document
         .nodes
         .iter_mut()
@@ -385,11 +374,6 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
             .is_some_and(|name| name.starts_with(lash::rlm::lang::LIFTED_PROCESS_NAME_PREFIX)),
         "a lifted process keeps its derived name: {:?}",
         process.data.process_name()
-    );
-    assert!(
-        process.data.signals().is_empty(),
-        "signals are read out of the body, not carried on the container: {:?}",
-        process.data.signals()
     );
     process.data.params_mut().expect("process node").pop();
 
@@ -779,12 +763,9 @@ async fn data_terminal_call_and_effect_edits_round_trip_without_raw_constructor_
         .iter_mut()
         .find(|node| node.data.effect() == Some(lash::rlm::lang::WorkflowEffectKind::SleepFor))
         .expect("saved effect");
-    *effect.data.effect_mut().expect("effect node") =
-        lash::rlm::lang::WorkflowEffectKind::WaitSignal;
-    effect.data.fields_mut().expect("fields node").clear();
     effect.data.fields_mut().expect("fields node").insert(
-        "signal".to_string(),
-        EditableValue::String("continue".to_string()),
+        "duration".to_string(),
+        EditableValue::String("2ms".to_string()),
     );
 
     let response = client
@@ -804,7 +785,7 @@ async fn data_terminal_call_and_effect_edits_round_trip_without_raw_constructor_
     );
     assert!(!switched.source.contains("key: \"phase\""));
     assert!(!switched.source.contains("value: \"ready\""));
-    assert!(switched.source.contains("await waitSignal(\"continue\")"));
+    assert!(switched.source.contains("await sleep(\"2ms\")"));
 
     let call = switched
         .nodes

@@ -22,9 +22,7 @@ mod process;
 
 use editable::*;
 
-use process::{
-    editable_process_param, editable_process_signal, process_from_data, seeded_process_body,
-};
+use process::{editable_process_param, process_from_data, seeded_process_body};
 
 pub(crate) fn validate_fragment(request: ValidateRequest) -> ValidateResponse {
     // A fragment is validated in the scope it will be edited in: the host sends
@@ -95,11 +93,6 @@ pub(crate) fn document_from_graph(
                 body: NodeBody::Process {
                     process_name: Some(process.name.clone()),
                     params: process.params.iter().map(editable_process_param).collect(),
-                    signals: process
-                        .signals
-                        .iter()
-                        .map(editable_process_signal)
-                        .collect(),
                     children: vec![ChildGroup {
                         slot: "body".to_string(),
                         scope: scope.clone(),

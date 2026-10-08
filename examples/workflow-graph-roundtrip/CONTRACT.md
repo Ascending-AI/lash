@@ -35,7 +35,7 @@ in `examples/workflow-graph-roundtrip/frontend/dist/` (or directly in
   {
     "id": "onboarding",
     "name": "Onboarding",
-    "description": "A labeled onboarding flow with a signal wait, branch, and mixed display updates."
+    "description": "A labeled onboarding flow with a host approval call, branch, and mixed display updates."
   },
   {
     "id": "traffic-lights",
@@ -45,7 +45,7 @@ in `examples/workflow-graph-roundtrip/frontend/dist/` (or directly in
   {
     "id": "branching-approval",
     "name": "Branching Approval",
-    "description": "An if-heavy approval flow with a visible signal wait and distinct outcomes."
+    "description": "An if-heavy approval flow with a visible host approval call and distinct outcomes."
   },
   {
     "id": "counter-loop",
@@ -287,8 +287,9 @@ The data JSON shape is:
 `status` is `started`, `succeeded`, `waiting`, or `failed`. Empty delta fields
 are omitted; `displayDelta` itself is always present. `display` is the full
 state after that event, which lets a client either apply deltas or replace its
-view. Sleep and `wait_signal` emit `waiting`. The host auto-fires the declared
-`continue` signal after 650 ms. Loop body nodes can emit multiple occurrences.
+view. Sleep and ordinary deferred host calls produce `waiting`. Approval
+remains pending until the operator resolves it. Loop body nodes can produce
+multiple occurrences.
 Stream EOF means the run is complete; the correlated
 terminal node's `succeeded` event is the final normal event.
 
@@ -308,7 +309,7 @@ correlated `failed` event before EOF.
 
 The in-process `display` module has no network or external dependencies:
 
-| Lashlang call | Persistent effect |
+| Host tool call | Display effect |
 | --- | --- |
 | `display.show_message({ text })` | Append to `display.messages` |
 | `display.set_status({ key, value })` | Set `display.statuses[key]` |
@@ -323,12 +324,20 @@ The in-process `display` module has no network or external dependencies:
 process. Each SSE `run_event` retains the saved version and artifact identity;
 `runId` is the canonical process ID. Node statuses come from the process's
 recorded effect outcomes and live language observation, bounded to its execution
-map. Display snapshots fold committed `workflow.display` events in sequence. Their
-stable tool-call IDs correlate display deltas with observed graph nodes.
+map. Display snapshots fold host-owned tool effects when the engine's language
+observation completes the call from its recorded result. Stable tool-call IDs
+correlate host records with graph nodes; retries reuse the same host record.
+Display delivery does not depend on the bounded per-node effect summary,
+so later loop occurrences continue to update the display.
+The example keeps those records in memory. A production host persists them
+before it prunes any process and maintains its own delivery ledger.
 A terminal process event closes the stream. A `run_error` SSE event reports a
 failed observation and does not end the durable process.
 
-A waiting event may include `waitingSignal`. The operator sends its value with
-`POST /runs/{runId}/signals/{waitingSignal}` and a JSON body. Signals use Lash's
-process signal admission. The example UI sends `{ "approved": true }`.
+A waiting event may include `approvalKey`, the host's completion key. The
+operator posts `{ "approved": true }` (or `false`) to `POST /approvals/{key}`.
+The host passes the result to `Completions::resolve`; an identical redelivery
+is accepted, while a conflicting or revoked resolution is refused. The key
+is disclosed after the wait commits. The host authorizes key access and
+chooses approval deadlines separately.
 Dropping a stream stops observation and leaves the process running.

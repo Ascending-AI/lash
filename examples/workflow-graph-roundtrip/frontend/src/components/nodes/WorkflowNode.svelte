@@ -34,7 +34,7 @@
   const isData = $derived(kind === 'data');
   const isTerminal = $derived(kind === 'terminal');
   // call / effect are configured through their typed `fields` (record args /
-  // duration / signal) + an optional `let <binding> =` name; their raw call
+  // duration) + an optional `let <binding> =` name; their raw call
   // expression is rebuilt by the lens, so it is not shown as an input here.
   const isInvoke = $derived(kind === 'call' || kind === 'effect');
   const hasBinding = $derived(isInvoke || isData);
@@ -70,7 +70,7 @@
   const fieldKeys = $derived(Object.keys(node.data.fields ?? {}));
 
   // Operation catalog entries this node may switch between (display.* for a
-  // call, sleep/wait_signal for an effect), and the entry it currently matches.
+  // call, sleep for an effect), and the entry it currently matches.
   const opOptions = $derived(isInvoke ? operationsForKind(ops?.entries, kind) : []);
   const currentOpId = $derived(currentOperationId(ops?.entries, node));
 
@@ -488,7 +488,7 @@
 
   {#if isWaitEffect}
     <div class="wf-wait-note">
-      {node.data.effect === 'sleep_for' ? 'pauses the run' : 'waits for a signal'}
+      {node.data.effect === 'sleep_for' ? 'pauses the run' : 'waits for a process'}
     </div>
   {/if}
 

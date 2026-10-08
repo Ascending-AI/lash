@@ -258,7 +258,6 @@ CLIPPY_REQUESTS = {
     "toolbench/toolbench": {"cpu_count": 1, "memory_kb": 1048576},
     "transcript-contract/transcript_contract": {"cpu_count": 1, "memory_kb": 524288},
     "workflow-graph-roundtrip/workflow_contract_schema": {"cpu_count": 1, "memory_kb": 524288},
-    "workflow-graph-roundtrip/workflow_graph": {"cpu_count": 1, "memory_kb": 524288},
     "workflow-graph-roundtrip/workflow_graph_roundtrip": {"cpu_count": 1, "memory_kb": 524288},
 }
 
@@ -754,7 +753,6 @@ TEST_RUN_REQUESTS = {
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test": {"cpu_count": 1, "memory_kb": 262144},
-    "//examples/workflow-graph-roundtrip:workflow_graph__test": {"cpu_count": 1, "memory_kb": 1048576},
     "//runbooks/rlm-smoke:rlm-smoke__unit_test": {"cpu_count": 1, "memory_kb": 262144},
 }
 

@@ -3,7 +3,7 @@
 
   // A name input that validates as a Lashlang `identifier` inline (via the same
   // /validate path ExpressionField uses for expressions), so a bad process name,
-  // param/signal name, loop binding, or a brand-new assignment target fails at
+  // parameter name, loop binding, or a brand-new assignment target fails at
   // the field with a red underline + message instead of only at Save. `variant`
   // picks the look: 'title' (borderless, large) or 'box' (bordered, compact).
   // When `options` is non-empty the input becomes a combobox (a native datalist)

@@ -44,13 +44,18 @@ SQLite process records live in the database file `WORKFLOW_GRAPH_SQLITE_PATH`,
 default `.workflow-graph/lash.db`. Editor versions remain in memory and reset
 when the backend restarts.
 
-Display operations are leaf tools whose committed intents append
-`workflow.display` events. The sample email, web, and agent tools return fixed
+Display operations are ordinary host tools. The sample email, web, and agent tools return fixed
 example data through the same engine dispatcher. They make no provider calls.
-Sleeps use their authored duration. A signal wait remains pending until the
-operator clicks **Send continue**, which calls
-`POST /runs/{process_id}/signals/{name}` with a JSON payload. Closing the SSE
-stream stops observation; it does not cancel the process.
+Sleeps use their authored duration. The host's `approval` tool parks until
+an operator resolves its completion key with
+`POST /approvals/{key}` and `{ "approved": true }`. The key appears in the SSE
+stream only after the process wait commits. Closing the SSE stream stops
+observation and leaves the process running.
+
+Display effects are host-owned and deduplicated by `call_id()`. The overlay
+applies them when language observation completes the call from its recorded result. This toy host keeps its
+call records in memory; a production host persists its effect and approval
+ledger, authorizes access to completion keys, and chooses its own deadlines.
 
 ## Coverage
 

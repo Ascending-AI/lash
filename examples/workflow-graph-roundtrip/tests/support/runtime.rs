@@ -20,8 +20,9 @@ pub async fn state_and_core() -> (AppState, lash::LashCore) {
     let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
         .build()
         .expect("the durable backend");
-    let core = workflow_graph_roundtrip::workflow_core(backend).expect("workflow core");
-    (AppState::new(core.clone()).expect("workflow state"), core)
+    let host = workflow_graph_roundtrip::workflow_core(backend).expect("workflow core");
+    let core = host.core().clone();
+    (AppState::new(host).expect("workflow state"), core)
 }
 
 pub async fn run_workflow(
@@ -41,7 +42,7 @@ pub async fn run_workflow(
     }
     let mut pending = String::new();
     let mut events = Vec::new();
-    let mut signalled = std::collections::BTreeSet::new();
+    let mut resolved = std::collections::BTreeSet::new();
     while let Some(chunk) = response.chunk().await.expect("SSE chunk") {
         pending.push_str(std::str::from_utf8(&chunk).expect("UTF8 events"));
         while let Some(end) = pending.find("\n\n") {
@@ -52,15 +53,15 @@ pub async fn run_workflow(
             for data in frame.lines().filter_map(|line| line.strip_prefix("data: ")) {
                 let event: workflow_graph_roundtrip::RunEvent =
                     serde_json::from_str(data).expect("run event");
-                if let Some(signal) = &event.waiting_signal
-                    && signalled.insert(signal.clone())
+                if let Some(key) = &event.approval_key
+                    && resolved.insert(key.clone())
                 {
                     let response = client
-                        .post(format!("{base}/runs/{}/signals/{signal}", event.run_id))
+                        .post(format!("{base}/approvals/{key}"))
                         .json(&serde_json::json!({"approved": true}))
                         .send()
                         .await
-                        .expect("operator signal");
+                        .expect("operator approval");
                     assert_eq!(response.status(), reqwest::StatusCode::OK);
                 }
                 events.push(event);

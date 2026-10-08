@@ -158,17 +158,6 @@ fn synthesize_effect_expression(
                 })?
                 .to_expr(id, "fields.duration", scope)?,
         )),
-        WorkflowEffectKind::WaitSignal => {
-            let Some(EditableValue::String(signal)) = data.fields().get("signal") else {
-                return Err(RenderErrorResponse::invalid_node_payload(
-                    id,
-                    "wait_signal needs a string `signal` field",
-                ));
-            };
-            Expr::WaitSignal {
-                name: signal.clone().into(),
-            }
-        }
         _ => {
             return Err(RenderErrorResponse::invalid_node_payload(
                 id,
@@ -216,10 +205,6 @@ pub(super) fn editable_fields(
         Expr::SleepFor(value) => {
             BTreeMap::from([("duration".to_string(), EditableValue::from_expr(value))])
         }
-        Expr::WaitSignal { name } => BTreeMap::from([(
-            "signal".to_string(),
-            EditableValue::String(name.to_string()),
-        )]),
         _ => BTreeMap::new(),
     }
 }
@@ -242,11 +227,6 @@ pub(super) fn apply_fields(
         Expr::SleepFor(value) => {
             if let Some(duration) = fields.get("duration") {
                 **value = duration.to_expr(node_id, "fields.duration", scope)?;
-            }
-        }
-        Expr::WaitSignal { name } => {
-            if let Some(EditableValue::String(signal)) = fields.get("signal") {
-                *name = signal.clone().into();
             }
         }
         _ => {}

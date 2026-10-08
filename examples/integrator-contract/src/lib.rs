@@ -12,7 +12,6 @@ use lash::process::*;
 use lash::provider::*;
 use lash::runtime::*;
 use lash::tools::*;
-use lash::triggers::*;
 use lash::*;
 use lash::{
     AwaitEventKey, AwaitEventWaitIdentity, CancellationToken, NodeId, ProcessId, Resolution,
@@ -395,131 +394,6 @@ impl LiveReplayStore for Integrator {
 }
 
 #[lash::async_trait]
-impl TriggerStore for Integrator {
-    async fn execute_command(
-        &self,
-        operation_id: &str,
-        command: TriggerCommand,
-    ) -> Result<TriggerEffectResult, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn list_subscriptions(
-        &self,
-        filter: TriggerSubscriptionFilter,
-    ) -> Result<Vec<TriggerSubscriptionRecord>, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn subscriptions_changed_since(
-        &self,
-        cursor: TriggerSubscriptionChangeCursor,
-        limit: usize,
-    ) -> Result<
-        (
-            Vec<TriggerSubscriptionChange>,
-            TriggerSubscriptionChangeCursor,
-        ),
-        PluginError,
-    > {
-        unreachable!("external signature witness")
-    }
-    async fn list_subscriptions_with_cursor(
-        &self,
-    ) -> Result<
-        (
-            Vec<TriggerSubscriptionRecord>,
-            TriggerSubscriptionChangeCursor,
-        ),
-        PluginError,
-    > {
-        unreachable!("external signature witness")
-    }
-    async fn compact_subscription_tombstones(
-        &self,
-        cutoff_epoch_ms: u64,
-    ) -> Result<usize, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn delete_session_subscriptions(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<usize, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn plan_occurrence(
-        &self,
-        request: &TriggerOccurrenceRequest,
-    ) -> Result<TriggerOccurrencePlan, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn list_occurrences(
-        &self,
-        filter: TriggerOccurrenceFilter,
-    ) -> Result<Vec<TriggerOccurrenceRecord>, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn list_deliveries_by_occurrence_id(
-        &self,
-        occurrence_id: &str,
-    ) -> Result<Vec<TriggerDeliveryReservation>, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn list_deliveries_by_subscription_id(
-        &self,
-        subscription_id: &str,
-    ) -> Result<Vec<TriggerDeliveryReservation>, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn list_deliveries_by_process_id(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<Vec<TriggerDeliveryReservation>, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn list_deliveries(&self) -> Result<Vec<TriggerDeliveryReservation>, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn list_delivery_process_ids(&self) -> Result<Vec<ProcessId>, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn list_delivery_retention_candidates(
-        &self,
-    ) -> Result<Vec<TriggerDeliveryRetentionCandidate>, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn list_session_owner_ids_for_retention(&self) -> Result<Vec<SessionId>, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn reconcile_trigger_retention(
-        &self,
-        candidates: &[TriggerDeliveryRetentionCandidate],
-        deleted_session_ids: &[SessionId],
-    ) -> Result<TriggerRetentionReconciliationReport, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn delete_delivery_retention_candidates(
-        &self,
-        candidates: &[TriggerDeliveryRetentionCandidate],
-    ) -> Result<usize, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn reclaim_trigger_occurrences(
-        &self,
-        cutoff_epoch_ms: u64,
-    ) -> TriggerOccurrenceReclamationResult {
-        unreachable!("external signature witness")
-    }
-    async fn forget_trigger_tombstones(&self, cutoff_epoch_ms: u64) -> Result<usize, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn prune_non_fired_occurrences(
-        &self,
-        cutoff_epoch_ms: u64,
-    ) -> Result<usize, PluginError> {
-        unreachable!("external signature witness")
-    }
-}
-
-#[lash::async_trait]
 impl ProcessQuery for Integrator {
     async fn require_process_id(&self, process_id: &ProcessId) -> Result<ProcessId, PluginError> {
         unreachable!("external signature witness")
@@ -675,16 +549,6 @@ impl ProcessObserverRegistry for Integrator {
     ) -> Result<Vec<SessionId>, PluginError> {
         unreachable!("external signature witness")
     }
-    async fn wake_target(&self, process_id: &ProcessId) -> Result<Option<SessionId>, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn retarget_subscription(
-        &self,
-        process_id: &ProcessId,
-        target: Option<&str>,
-    ) -> Result<(), PluginError> {
-        unreachable!("external signature witness")
-    }
     async fn delete_session_process_state(
         &self,
         session_id: &SessionId,
@@ -735,14 +599,7 @@ impl ProcessEventLog for Integrator {
     ) -> Result<ProcessEventReadOutcome<ProcessEventPage>, PluginError> {
         unreachable!("external signature witness")
     }
-    async fn count_events_through(
-        &self,
-        process_id: &ProcessId,
-        event_type: &str,
-        up_to_sequence: u64,
-    ) -> Result<u64, PluginError> {
-        unreachable!("external signature witness")
-    }
+
     async fn recent_events(
         &self,
         process_id: &ProcessId,
@@ -854,7 +711,6 @@ impl ProcessRetention for Integrator {
         &self,
         cutoff_epoch_ms: u64,
         watermark: ProjectionWatermark,
-        trigger_store: Option<&dyn TriggerStore>,
     ) -> Result<usize, PluginError> {
         unreachable!("external signature witness")
     }

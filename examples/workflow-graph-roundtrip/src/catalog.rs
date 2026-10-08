@@ -65,7 +65,7 @@ const branching_approval = async () => {
   await display.highlight({ target: "approval" });
   await display.show_message({ text: "Approval requested" });
   /** @label Wait for the decision */
-  const decision = await waitSignal("continue");
+  const decision = await host.approval({});
   if (decision.approved) {
     await display.set_status({ key: "approval", value: "approved" });
     if (true) {
@@ -161,7 +161,7 @@ pub(crate) const BUILT_IN_WORKFLOWS: &[BuiltInWorkflow] = &[
     BuiltInWorkflow {
         id: "onboarding",
         name: "Onboarding",
-        description: "A labeled onboarding flow with a signal wait, branch, and mixed display updates.",
+        description: "A labeled onboarding flow with a host approval call, branch, and mixed display updates.",
         source: DEFAULT_WORKFLOW,
     },
     BuiltInWorkflow {
@@ -191,7 +191,7 @@ pub(crate) const BUILT_IN_WORKFLOWS: &[BuiltInWorkflow] = &[
     BuiltInWorkflow {
         id: "branching-approval",
         name: "Branching Approval",
-        description: "An if-heavy approval flow with a visible signal wait and distinct outcomes.",
+        description: "An if-heavy approval flow with a visible host approval call and distinct outcomes.",
         source: BRANCHING_APPROVAL_WORKFLOW,
     },
     BuiltInWorkflow {

@@ -97,9 +97,9 @@ export function layoutDocument(doc) {
       return HEADER_BAND + listBuilderRows(node.data.iterable) * 28;
     }
     if (node.data.kind === 'process') {
-      // Editable signature: one row per param + per signal, plus the two
-      // section labels and their "+ param" / "+ signal" controls.
-      const rows = (node.data.params ?? []).length + (node.data.signals ?? []).length;
+      // Editable signature: one row per parameter, plus its
+      // section label and "+ param" control.
+      const rows = (node.data.params ?? []).length;
       return HEADER_BAND + rows * 24 + 56;
     }
     return HEADER_BAND;

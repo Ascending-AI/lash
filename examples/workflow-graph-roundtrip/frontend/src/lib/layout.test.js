@@ -13,7 +13,6 @@ describe('layoutDocument', () => {
           data: {
             kind: 'process',
             params: [],
-            signals: [],
             children: [{ slot: 'body', nodeIds: [terminalId] }],
           },
         },

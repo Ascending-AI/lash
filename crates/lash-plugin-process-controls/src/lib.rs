@@ -19,14 +19,8 @@ use lash_tool_support::{
 
 mod declarations;
 
-pub use declarations::{
-    execute_process_emit_tool_call, execute_process_get_tool_call,
-    execute_process_signal_tool_call, execute_process_start_tool_call,
-};
-use declarations::{
-    process_emit_tool_definition, process_get_tool_definition, process_signal_tool_definition,
-    process_start_tool_definition,
-};
+pub use declarations::{execute_process_get_tool_call, execute_process_start_tool_call};
+use declarations::{process_get_tool_definition, process_start_tool_definition};
 
 /// A process capability whose tool contract a host can inspect or grant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,8 +28,6 @@ pub enum ProcessControlTool {
     Start,
     List,
     Await,
-    Signal,
-    Emit,
     Get,
     Cancel,
 }
@@ -46,8 +38,6 @@ pub fn process_tool_definition(tool: ProcessControlTool) -> ToolDefinition {
         ProcessControlTool::Start => process_start_tool_definition(),
         ProcessControlTool::List => process_list_tool_definition(),
         ProcessControlTool::Await => process_await_tool_definition(),
-        ProcessControlTool::Signal => process_signal_tool_definition(),
-        ProcessControlTool::Emit => process_emit_tool_definition(),
         ProcessControlTool::Get => process_get_tool_definition(),
         ProcessControlTool::Cancel => process_cancel_tool_definition(),
     }
@@ -134,12 +124,6 @@ impl StaticToolExecute for SessionProcessAdminTools {
         }
         if call.name() == "start_process" {
             return execute_process_start_tool_call(call.context, call.args, &self.lifetime).await;
-        }
-        if call.name() == "signal_process" {
-            return execute_process_signal_tool_call(call.context, call.args);
-        }
-        if call.name() == "emit_process_event" {
-            return execute_process_emit_tool_call(call.context, call.args);
         }
         if call.name() == "get_process_definition" {
             return execute_process_get_tool_call(call.context, call.args);
@@ -249,8 +233,6 @@ fn processes_tool_definitions(include_cancel_process: bool) -> Vec<ToolDefinitio
         process_start_tool_definition(),
         process_list_tool_definition(),
         process_await_tool_definition(),
-        process_signal_tool_definition(),
-        process_emit_tool_definition(),
         process_get_tool_definition(),
     ];
     if include_cancel_process {
@@ -269,9 +251,8 @@ fn processes_tool_definitions(include_cancel_process: bool) -> Vec<ToolDefinitio
 ///
 /// The kind is `process_unknown` — a process the host can only describe as
 /// callable — because the host has no authoritative call signature for an
-/// arbitrary awaited process. `handle` is the *trigger* handle kind and carries
-/// the payload its trigger delivers, which is a different type and would refuse
-/// a process value here.
+/// arbitrary awaited process. The argument uses the same nominal process
+/// contract as the handle returned by a start.
 #[expect(
     clippy::expect_used,
     reason = "this module declares the tool or payload schema and admission checks its invariant"
@@ -348,8 +329,8 @@ fn process_cancel_tool_definition() -> ToolDefinition {
     .with_execution(std::time::Duration::from_secs(30))
     .with_examples(vec![
         "await processes.cancel({ handle: h })?".into(),
-        r#"await processes.cancel({ process_id: "tool:call-01JZK7G4QP9Q4J7W3Q2E1H6M9C" })?"#.into(),
-        r#"await processes.cancel({ process_id: "subagent:session-01JZK7G4QP9Q4J7W3Q2E1H6M9C" })?"#.into(),
+        r#"await processes.cancel({ process_id: "p_019a432c701070008000000000000001" })?"#.into(),
+        r#"await processes.cancel({ process_id: "p_019a432c701070008000000000000002" })?"#.into(),
     ])
     .with_declaration(
         lash_core::ToolDeclaration::default()
@@ -461,6 +442,20 @@ pub fn process_handle_view_schema() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Cancel examples must carry ids admitted by the public process-id parser.
+    #[test]
+    fn cancel_examples_name_valid_process_ids() {
+        for example in process_cancel_tool_definition().contract().examples.iter() {
+            if let Some((_, tail)) = example.split_once("process_id: \"") {
+                let id = tail.split('"').next().expect("example id");
+                assert!(
+                    ProcessId::parse(id).is_ok(),
+                    "invalid example process id: {id}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn list_output_contract_matches_the_handle_view() {

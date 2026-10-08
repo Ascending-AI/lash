@@ -927,14 +927,6 @@
     "peak_bytes": 56676352,
     "samples": 100
   },
-  "workflow-graph-roundtrip/workflow_graph": {
-    "cpu_count": 1,
-    "memory_kb": 524288,
-    "p95_cores": 1.07,
-    "p99_peak_bytes": 125693952,
-    "peak_bytes": 125693952,
-    "samples": 46
-  },
   "workflow-graph-roundtrip/workflow_graph_roundtrip": {
     "cpu_count": 1,
     "memory_kb": 524288,

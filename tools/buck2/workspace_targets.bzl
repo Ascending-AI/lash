@@ -275,7 +275,6 @@ WORKSPACE_COMPILE_TARGETS = [
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
-    "//examples/workflow-graph-roundtrip:workflow_graph__test",
     "//runbooks/rlm-smoke:rlm-smoke",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test",
 ]
@@ -555,7 +554,6 @@ WORKSPACE_CLIPPY_TARGETS = [
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
-    "//examples/workflow-graph-roundtrip:workflow_graph__test",
     "//runbooks/rlm-smoke:rlm-smoke",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test",
 ]
@@ -1402,7 +1400,6 @@ WORKSPACE_CARGO_TEST_TARGETS = [
     "//examples/workflow-graph-roundtrip:durable_run__test",
     "//examples/workflow-graph-roundtrip:roundtrip__test",
     "//examples/workflow-graph-roundtrip:type_facets__test",
-    "//examples/workflow-graph-roundtrip:workflow_graph__test",
 ]
 
 WORKSPACE_TEST_TARGETS = [
@@ -1603,7 +1600,6 @@ WORKSPACE_TEST_TARGETS = [
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
-    "//examples/workflow-graph-roundtrip:workflow_graph__test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test",
 ]
 

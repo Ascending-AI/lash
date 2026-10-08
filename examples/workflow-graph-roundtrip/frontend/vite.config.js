@@ -23,6 +23,7 @@ export default defineConfig({
       '/validate': { target: BACKEND, changeOrigin: true },
       '/project': { target: BACKEND, changeOrigin: true },
       '/run': { target: BACKEND, changeOrigin: true },
+      '/approvals': { target: BACKEND, changeOrigin: true },
       '/healthz': { target: BACKEND, changeOrigin: true },
     },
   },

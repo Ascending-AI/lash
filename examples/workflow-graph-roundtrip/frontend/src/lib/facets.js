@@ -11,7 +11,7 @@
 // Type strings come from lashlang's `format_type_expr`:
 //   any · str · int · float · bool · dict · null
 //   enum["a", "b"] · list[T] · { f: t, g: t? } · <RefName> · Process<in, out>
-//   TriggerHandle<E> · unions as `a | b | null`
+//   unions as `a | b | null`
 // NOTE the lowercase, bracketed spelling (`list[...]`, `enum[...]`, `any`,
 // `dict`) — the compatibility logic keys off these exact tokens.
 
@@ -97,7 +97,6 @@ export function parseType(str) {
     return { kind: 'object' };
   }
   if (t.startsWith('Process<')) return { kind: 'process' };
-  if (t.startsWith('TriggerHandle<')) return { kind: 'trigger' };
   return { kind: 'ref', name: t };
 }
 

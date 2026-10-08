@@ -665,8 +665,8 @@
       {#if saveOk && !saveError}
         <div class="banner banner-ok">{saveOk}</div>
       {/if}
-      {#if run.waitingSignal}
-        <button class="btn" onclick={() => run.signal()}>Send {run.waitingSignal}</button>
+      {#if run.approvalKey}
+        <button class="btn" onclick={() => run.approve()}>Approve request</button>
       {/if}
       {#if run.error}
         <div class="banner banner-err">

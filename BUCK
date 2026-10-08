@@ -281,7 +281,6 @@ test_suite(
         "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
         "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin",
         "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
-        "//examples/workflow-graph-roundtrip:workflow_graph__test",
         "//runbooks/rlm-smoke:rlm-smoke",
         "//runbooks/rlm-smoke:rlm-smoke__unit_test"
 ],
@@ -611,7 +610,6 @@ test_suite(
         "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test[check]",
         "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin[check]",
         "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test[check]",
-        "//examples/workflow-graph-roundtrip:workflow_graph__test[check]",
         "//runbooks/rlm-smoke:rlm-smoke[check]",
         "//runbooks/rlm-smoke:rlm-smoke__unit_test[check]"
 ],
@@ -1465,7 +1463,6 @@ test_suite(
         "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test__clippy[clippy.txt]",
         "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__clippy[clippy.txt]",
         "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test__clippy[clippy.txt]",
-        "//examples/workflow-graph-roundtrip:workflow_graph__test__clippy[clippy.txt]",
         "//runbooks/rlm-smoke:rlm-smoke__clippy[clippy.txt]",
         "//runbooks/rlm-smoke:rlm-smoke__unit_test__clippy[clippy.txt]"
 ],

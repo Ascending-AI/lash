@@ -166,17 +166,9 @@ function seedFields(fields) {
   return out;
 }
 
-// An effect node's seeded expression, in the same canonical TypeScript the lens
-// projects back out of source: `await sleep(..)` / `await waitSignal(..)`, not
-// the dialect's `sleep for ..` surface. A palette insertion is posted before
-// any field is edited, so a seeded expression the fragment validator cannot
-// parse made `effect.sleep` and `effect.wait_signal` unsaveable straight out
-// of the palette (FIG-3179).
+// Seed sleep as the canonical TypeScript accepted by the fragment validator.
 function synthEffectExpression(op, byName) {
   if (op.effect === 'sleep_for') return `await sleep(${slotText(byName.duration) || '"1s"'})`;
-  if (op.effect === 'wait_signal') {
-    return `await waitSignal(${JSON.stringify(slotText(byName.signal) || 'continue')})`;
-  }
   return slotText(byName.expression) || 'await sleep("1s")';
 }
 
@@ -311,7 +303,6 @@ export function addProcessToDoc(doc, operation, catalog = []) {
       name,
       nameSource: 'derived',
       params: [],
-      signals: [],
       children: [{ slot: 'body', scope: `process:${id}`, nodeIds: [childId] }],
     },
   });

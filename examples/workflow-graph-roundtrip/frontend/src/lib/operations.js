@@ -51,7 +51,7 @@ export function groupOperations(catalog, { includePower = true, topLevel = true 
 }
 
 // The catalog entries a node of `nodeKind` can switch between (its operation
-// options) — display calls for `call`, sleep/wait_signal for `effect`, etc.
+// options) — display calls for `call`, sleep for `effect`, etc.
 export function operationsForKind(catalog, nodeKind) {
   return (catalog ?? []).filter((op) => op.nodeKind === nodeKind);
 }

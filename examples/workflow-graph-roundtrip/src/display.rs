@@ -196,39 +196,76 @@ fn scalar_text_arg(args: &Record, key: &str) -> Result<String, ExecutionHostErro
     }
 }
 
-pub(crate) const EVENT_TYPE: &str = "workflow.display";
+/// Example-owned records, deduplicated by Lash's stable call id. Display
+/// delivery reads these after the observed call completes from its recorded result.
+/// A production host persists this ledger alongside its external effects.
+#[derive(Clone, Default)]
+pub(crate) struct HostTools {
+    display: std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, Vec<DisplayCall>>>>,
+    approvals: std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, ApprovalCall>>>,
+}
 
-#[derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-pub(crate) struct DisplayEvent {
+#[derive(Clone)]
+pub(crate) struct DisplayCall {
     pub call_id: String,
     pub operation: String,
     pub args: serde_json::Value,
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "the declared display event schema admits"
-)]
-pub(crate) fn event_type() -> lash::process::ProcessEventType {
-    lash::process::ProcessEventType {
-        name: EVENT_TYPE.into(),
-        payload_schema: lash::schema::JsonSchema::admit(
-            serde_json::to_value(schemars::schema_for!(DisplayEvent))
-                .expect("display schema serializes"),
-        )
-        .expect("display event schema"),
-        semantics: Default::default(),
+struct ApprovalCall {
+    process: lash::ProcessId,
+    key: String,
+}
+
+impl HostTools {
+    pub(crate) fn display_calls(&self, process: &lash::ProcessId) -> Vec<DisplayCall> {
+        use lash::sync::MutexExt;
+        self.display
+            .lock_recover()
+            .get(process.as_str())
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn approval_key(&self, process: &lash::ProcessId, call_id: &str) -> Option<String> {
+        use lash::sync::MutexExt;
+        self.approvals
+            .lock_recover()
+            .get(call_id)
+            .filter(|call| &call.process == process)
+            .map(|call| call.key.clone())
+    }
+
+    pub(crate) fn forget_approval(&self, key: &str) {
+        use lash::sync::MutexExt;
+        self.approvals
+            .lock_recover()
+            .retain(|_, call| call.key != key);
     }
 }
 
-pub(crate) struct DisplayTools;
-
 #[lash::async_trait]
-impl lash::tools::StaticToolExecute for DisplayTools {
+impl lash::tools::StaticToolExecute for HostTools {
     async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
-        use lash::tools::{
-            EmitProcessEventIntent, ToolIntent, ToolIntents, ToolOutcome, ToolOutcomeDone,
-        };
+        use lash::sync::MutexExt;
+        use lash::tools::{PendingCompletion, ToolAttemptOutcome, ToolOutcome};
+        if call.name() == "host_approval" {
+            let Some(process) = call.context.enclosing_process() else {
+                return ToolOutcome::err_fmt("approval requires a workflow process").into();
+            };
+            let key = match call.context.completion_key() {
+                Ok(key) => key,
+                Err(error) => return ToolOutcome::err_fmt(error).into(),
+            };
+            self.approvals
+                .lock_recover()
+                .entry(call.context.call_id().to_string())
+                .or_insert_with(|| ApprovalCall {
+                    process: process.clone(),
+                    key: key.as_str().into(),
+                });
+            return ToolAttemptOutcome::pending(PendingCompletion::new());
+        }
         let Some(operation) = call.name().strip_prefix("display_") else {
             return match crate::sample_tools::apply_tool(
                 call.name(),
@@ -245,17 +282,19 @@ impl lash::tools::StaticToolExecute for DisplayTools {
         ) {
             return ToolOutcome::err_fmt(error).into();
         }
-        let Some(process_id) = call.context.enclosing_process() else {
+        let Some(process) = call.context.enclosing_process() else {
             return ToolOutcome::err_fmt("display tools require a durable workflow process").into();
         };
-        lash::tools::ToolAttemptOutcome::done(
-            ToolOutcomeDone::ok(serde_json::Value::Null),
-            ToolIntents::v3(vec![ToolIntent::EmitProcessEvent(EmitProcessEventIntent {
-                owner: call.context.owner().runtime_owner(),
-                process_id: process_id.clone(),
-                event_type: EVENT_TYPE.into(),
-                payload: serde_json::json!({"operation": operation, "args": call.args, "call_id": call.context.call_id().as_str()}),
-            })]),
-        )
+        let mut ledger = self.display.lock_recover();
+        let records = ledger.entry(process.to_string()).or_default();
+        let call_id = call.context.call_id().to_string();
+        if !records.iter().any(|record| record.call_id == call_id) {
+            records.push(DisplayCall {
+                call_id,
+                operation: operation.into(),
+                args: call.args.clone(),
+            });
+        }
+        ToolOutcome::ok(serde_json::Value::Null).into()
     }
 }

@@ -40,7 +40,7 @@ pub use contract::{
     SaveWorkflowResponse, SourceProjectionErrorResponse, TypeDiagnostic, TypedVariable,
     ValidateRequest, ValidateResponse, ValidationKind, WorkflowDocument,
 };
-pub use runtime::core as workflow_core;
+pub use runtime::{WorkflowHost, core as workflow_core};
 
 /// Default deterministic workflow served as version 1.
 ///
@@ -62,8 +62,8 @@ const onboarding = async () => {
   } else {
     await display.show_message({ text: "Alternate path" });
   }
-  /** @label Wait for approval — Hold until the operator signals continue */
-  const approval = await waitSignal("continue");
+  /** @label Wait for approval — Hold until the operator approves the request */
+  const approval = await host.approval({});
   await display.highlight({ target: "checklist" });
   await display.add_item({ list: "steps", item: "Approved" });
   let count = 0;
@@ -85,6 +85,7 @@ pub struct AppState {
     store: Arc<Mutex<WorkflowStore>>,
     core: lash::LashCore,
     commands: runtime::CommandClient,
+    host: Arc<display::HostTools>,
 }
 
 struct WorkflowStore {
@@ -107,7 +108,8 @@ impl AppState {
         clippy::expect_used,
         reason = "the built-in workflow is rendered by the graph printer"
     )]
-    pub fn new(core: lash::LashCore) -> Result<Self, WorkflowGraphBuildError> {
+    pub fn new(runtime: WorkflowHost) -> Result<Self, WorkflowGraphBuildError> {
+        let core = runtime.core;
         let graph = workflow_graph_from_source(DEFAULT_WORKFLOW)?;
         let source = workflow_graph_to_source(&graph)
             .expect("the default workflow graph should render canonically");
@@ -120,6 +122,7 @@ impl AppState {
                     graph,
                 }],
             })),
+            host: runtime.tools,
             commands: runtime::CommandClient::new(core.clone()),
             core,
         })
@@ -161,7 +164,7 @@ pub fn app(state: AppState) -> Router {
         .route("/workflow", get(get_workflow).post(save_workflow))
         .route("/workflow/select", post(select_workflow))
         .route("/run", post(run_workflow))
-        .route("/runs/{process}/signals/{name}", post(signal_process))
+        .route("/approvals/{key}", post(resolve_approval))
         .route("/healthz", get(healthz))
         .route("/", get(static_index))
         .route("/{*path}", get(static_asset))
@@ -324,8 +327,12 @@ async fn run_workflow(
         .map_err(RenderErrorResponse::run_preparation)?;
     let started = started.map_err(RenderErrorResponse::run_preparation)?;
     let core = state.core;
+    let host = state.host;
     tokio::spawn(async move {
-        if let Err(error) = prepared.observe(core, started.process_id, tx.clone()).await {
+        if let Err(error) = prepared
+            .observe(core, started.process_id, tx.clone(), host)
+            .await
+        {
             let _ = tx.send(Err(error)).await;
         }
     });
@@ -345,23 +352,35 @@ async fn run_workflow(
     ))
 }
 
-async fn signal_process(
+async fn resolve_approval(
     State(state): State<AppState>,
-    AxumPath((process, name)): AxumPath<(String, String)>,
+    AxumPath(key): AxumPath<String>,
     Json(payload): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, RenderErrorResponse> {
-    let process = process
-        .parse::<lash::ProcessId>()
-        .map_err(RenderErrorResponse::run_preparation)?;
-    let id = uuid::Uuid::new_v4().to_string();
-    let identity = lash::process::ProcessSignalIdentity::new(process, name, &id)
-        .map_err(RenderErrorResponse::run_preparation)?;
-    state
-        .commands
-        .signal(lash::process::ProcessSignal::new(identity, payload))
+    let approved = payload
+        .get("approved")
+        .and_then(serde_json::Value::as_bool)
+        .ok_or_else(|| {
+            RenderErrorResponse::run_preparation("approval requires an approved boolean")
+        })?;
+    let answer = state
+        .core
+        .completions()
+        .resolve(
+            &key,
+            lash::Resolution::Ok(serde_json::json!({"approved": approved})),
+        )
         .await
         .map_err(RenderErrorResponse::run_preparation)?;
-    Ok(Json(serde_json::json!({"accepted": true})))
+    match answer {
+        lash::durable::ResolveAnswer::Resolved | lash::durable::ResolveAnswer::AlreadyResolved => {
+            state.host.forget_approval(&key);
+            Ok(Json(serde_json::json!({"accepted": true})))
+        }
+        other => Err(RenderErrorResponse::run_preparation(format!(
+            "approval resolution refused: {other:?}"
+        ))),
+    }
 }
 
 async fn healthz() -> Json<serde_json::Value> {

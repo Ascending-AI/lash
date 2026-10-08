@@ -96,10 +96,9 @@ async fn a_saved_workflow_runs_as_a_durable_process() {
     };
     let outcomes = durable
         .iter()
-        .filter(|event| event.event_type == lash::process::PROCESS_EFFECT_OUTCOME_EVENT_TYPE)
-        .map(|event| {
-            serde_json::from_value::<lash::process::ProcessEffectOccurrence>(event.payload.clone())
-                .expect("effect occurrence")
+        .filter_map(|event| match &event.fact {
+            lash::process::ProcessLifecycleFact::EffectOutcome(occurrence) => Some(occurrence),
+            _ => None,
         })
         .collect::<Vec<_>>();
     assert!(!outcomes.is_empty(), "the engine recorded graph effects");
@@ -108,15 +107,8 @@ async fn a_saved_workflow_runs_as_a_durable_process() {
             .iter()
             .any(|event| event.node_id == outcome.node_id && event.status == RunStatus::Succeeded)
     }));
-    assert!(
-        durable
-            .iter()
-            .any(|event| event.event_type == "process.completed")
-    );
-    assert!(
-        durable
-            .iter()
-            .any(|event| event.event_type == "workflow.display")
-    );
+    assert!(durable.iter().any(|event| matches!(&event.fact,
+        lash::process::ProcessLifecycleFact::Terminal { outcome, .. }
+            if outcome.status() == lash::process::TerminalProcessStatus::Completed)));
     server.abort();
 }

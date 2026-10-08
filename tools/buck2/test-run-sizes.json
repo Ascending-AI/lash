@@ -1375,14 +1375,6 @@
     "peak_bytes": 16740352,
     "samples": 148
   },
-  "//examples/workflow-graph-roundtrip:workflow_graph__test": {
-    "cpu_count": 1,
-    "memory_kb": 1048576,
-    "p95_cores": 0.88,
-    "p99_peak_bytes": 28000256,
-    "peak_bytes": 28000256,
-    "samples": 9
-  },
   "//runbooks/rlm-smoke:rlm-smoke__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,

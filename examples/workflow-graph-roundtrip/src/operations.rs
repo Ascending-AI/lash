@@ -46,6 +46,17 @@ pub(crate) fn entries() -> Vec<OperationCatalogEntry> {
                 .collect(),
         }
     }));
+    entries.push(OperationCatalogEntry {
+        id: "host.approval".into(),
+        label: "Request approval".into(),
+        node_kind: "call".into(),
+        subkind: None,
+        operation: Some("approval".into()),
+        receiver: Some("host".into()),
+        effect: None,
+        terminal_kind: None,
+        fields: Vec::new(),
+    });
     entries.extend([
         entry(
             "proc.process",
@@ -66,16 +77,6 @@ pub(crate) fn entries() -> Vec<OperationCatalogEntry> {
             Some("sleep_for"),
             None,
             vec![field("duration", "expression", "\"1s\"")],
-        ),
-        entry(
-            "effect.wait_signal",
-            "Wait for signal",
-            "effect",
-            None,
-            None,
-            Some("wait_signal"),
-            None,
-            vec![field("signal", "string", "continue")],
         ),
         entry(
             "control.if",
@@ -274,9 +275,7 @@ pub(crate) fn host_environment() -> LashlangHostEnvironment {
     reason = "the example declares valid schemas and bindings"
 )]
 pub(crate) fn tool_definitions() -> Vec<lash::tools::ToolDefinition> {
-    use lash::tools::{
-        ToolBinding, ToolDeclaration, ToolDefinition, ToolDefinitionBindingExt, ToolIntentKind,
-    };
+    use lash::tools::{ToolBinding, ToolDeclaration, ToolDefinition, ToolDefinitionBindingExt};
     let mut definitions = Vec::new();
     for operation in crate::display::OPERATIONS {
         let properties = operation
@@ -297,10 +296,19 @@ pub(crate) fn tool_definitions() -> Vec<lash::tools::ToolDefinition> {
         definitions.push(ToolDefinition::raw(format!("tool:{name}"), name, operation.label,
             serde_json::json!({"type":"object", "properties":properties, "required":operation.fields.iter().map(|field| field.name).collect::<Vec<_>>(), "additionalProperties":false}),
             serde_json::json!({"type":"null"})).expect("display schema").with_execution(std::time::Duration::from_secs(120))
-            .with_tool_binding(ToolBinding::new(["display"], operation.operation).with_authority_type("ToyDisplay"))
-            // A display tool appends its operation to the workflow's event journal.
-            .with_declaration(ToolDeclaration::default().with_intents([ToolIntentKind::EmitProcessEvent])));
+            .with_tool_binding(ToolBinding::new(["display"], operation.operation).with_authority_type("ToyDisplay")));
     }
+    definitions.push(ToolDefinition::raw(
+        "tool:host_approval", "host_approval", "Park until the operator approves this request.",
+        serde_json::json!({"type":"object", "properties":{}, "additionalProperties":false}),
+        serde_json::json!({"type":"object", "properties":{"approved":{"type":"boolean"}}, "required":["approved"], "additionalProperties":false}),
+    ).expect("approval schema")
+        .with_execution(std::time::Duration::from_secs(120))
+        .with_tool_binding(ToolBinding::new(["host"], "approval"))
+        .with_declaration(ToolDeclaration::deferring())
+        // The operator decides in their own time: the park lasts until the
+        // decision or the end of the run that asked.
+        .with_park(lash::tools::ParkBound::UntilScopeEnd));
     for operation in crate::sample_tools::OPERATIONS {
         let name = operation.host_operation.replace('.', "_");
         let definition = ToolDefinition::raw(

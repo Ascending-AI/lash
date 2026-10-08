@@ -54,7 +54,6 @@
   const isConditional = $derived(isWhile || isIf);
   const clauses = $derived(node.data.clauses ?? []);
   const params = $derived(node.data.params ?? []);
-  const signals = $derived(node.data.signals ?? []);
 
   function commit() {
     data.onCommit?.();
@@ -71,14 +70,6 @@
   }
   function removeParam(i) {
     node.data.params = (node.data.params ?? []).filter((_, j) => j !== i);
-    relayout();
-  }
-  function addSignal() {
-    node.data.signals = [...(node.data.signals ?? []), { name: 'sig', type: 'any' }];
-    relayout();
-  }
-  function removeSignal(i) {
-    node.data.signals = (node.data.signals ?? []).filter((_, j) => j !== i);
     relayout();
   }
   // Comprehension clause add/remove. The lens rebuilds `data.clauses` verbatim,
@@ -381,50 +372,6 @@
             e.stopPropagation();
             addParam();
           }}>+ param</button
-        >
-      </div>
-      <div class="ct-sig-group">
-        <span class="ct-sig-label">signals</span>
-        {#each signals as s, i (i)}
-          <div class="ct-sig-row">
-            <span class="ct-sig-name">
-              <IdentifierField
-                value={s.name}
-                variant="bare"
-                placeholder="name"
-                ariaLabel="Signal name"
-                onInput={(v) => (node.data.signals[i].name = v)}
-                onCommit={commit}
-              />
-            </span>
-            <span class="ct-sig-colon">:</span>
-            <input
-              class="ct-sig-type"
-              value={s.type}
-              oninput={(e) => (node.data.signals[i].type = e.currentTarget.value)}
-              onchange={commit}
-              spellcheck="false"
-              placeholder="type"
-            />
-            <button
-              class="ct-sig-del"
-              title="Remove signal"
-              aria-label="Remove signal"
-              onpointerdown={(e) => e.stopPropagation()}
-              onclick={(e) => {
-                e.stopPropagation();
-                removeSignal(i);
-              }}>×</button
-            >
-          </div>
-        {/each}
-        <button
-          class="ct-sig-add"
-          onpointerdown={(e) => e.stopPropagation()}
-          onclick={(e) => {
-            e.stopPropagation();
-            addSignal();
-          }}>+ signal</button
         >
       </div>
     </div>

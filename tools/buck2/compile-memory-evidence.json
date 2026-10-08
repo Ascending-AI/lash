@@ -726,12 +726,6 @@
       "p99_anon_peak_bytes": 39768064,
       "samples": 8
     },
-    "workflow-graph-roundtrip/workflow_graph": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 41467904,
-      "samples": 3
-    },
     "workflow-graph-roundtrip/workflow_graph_roundtrip": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
@@ -1465,12 +1459,6 @@
       "oom_kills": 0,
       "p99_anon_peak_bytes": 496136192,
       "samples": 25
-    },
-    "workflow-graph-roundtrip/workflow_graph": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 409280512,
-      "samples": 7
     },
     "workflow-graph-roundtrip/workflow_graph_roundtrip": {
       "legacy_peak_bytes": 0,

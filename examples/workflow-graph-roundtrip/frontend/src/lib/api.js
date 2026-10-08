@@ -193,8 +193,8 @@ function parseFrame(/** @type {string} */ frame) {
   }
 }
 
-export async function signalWorkflow(/** @type {string} */ processId, /** @type {string} */ signal, /** @type {unknown} */ payload) {
-  const response = await fetch(`/runs/${encodeURIComponent(processId)}/signals/${encodeURIComponent(signal)}`, {
+export async function resolveApproval(/** @type {string} */ key, /** @type {unknown} */ payload) {
+  const response = await fetch(`/approvals/${encodeURIComponent(key)}`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload),
   });
   if (!response.ok) throw new Error(await response.text());

@@ -266,8 +266,6 @@ pub enum NodeBody {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         params: Vec<EditableProcessField>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        signals: Vec<EditableProcessField>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
         children: Vec<ChildGroup>,
     },
     Data {
@@ -401,22 +399,6 @@ impl NodeData {
     pub fn params_mut(&mut self) -> Option<&mut Vec<EditableProcessField>> {
         match &mut self.body {
             NodeBody::Process { params, .. } => Some(params),
-            _ => None,
-        }
-    }
-    pub fn signals(&self) -> &Vec<EditableProcessField> {
-        match &self.body {
-            NodeBody::Process { signals, .. } => signals,
-            _ => {
-                static EMPTY: std::sync::LazyLock<Vec<EditableProcessField>> =
-                    std::sync::LazyLock::new(Vec::new);
-                &EMPTY
-            }
-        }
-    }
-    pub fn signals_mut(&mut self) -> Option<&mut Vec<EditableProcessField>> {
-        match &mut self.body {
-            NodeBody::Process { signals, .. } => Some(signals),
             _ => None,
         }
     }
@@ -1082,7 +1064,7 @@ pub struct RunEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub waiting_signal: Option<String>,
+    pub approval_key: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, JsonSchema)]

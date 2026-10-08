@@ -251,32 +251,6 @@ lash_rust_integration_test(
     version = "0.0.0-dev",
 )
 
-lash_rust_integration_test(
-    name = "workflow_graph__test",
-    crate_features = [],
-    crate_name = "workflow_graph",
-    crate_root = "tests/workflow_graph.rs",
-    declared_features = [],
-    exec_properties = sized_exec_properties("workflow-graph-roundtrip", "workflow_graph", "//examples/workflow-graph-roundtrip:workflow_graph__test"),
-    extra_compile_data = [
-        "//examples:shared_rust_sources",
-    ],
-    extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin",
-    ],
-    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    library = ":workflow-graph-roundtrip",
-    library_crate_name = "workflow_graph_roundtrip",
-    manifest_dir = "examples/workflow-graph-roundtrip",
-    package_name = "workflow-graph-roundtrip",
-    rustc_env = {},
-    tags = [
-        "cargo-frontend-assets",
-        "manual",
-    ],
-    version = "0.0.0-dev",
-)
-
 export_file(
     name = "scripts/generate-contract-schema.py",
     src = "scripts/generate-contract-schema.py",

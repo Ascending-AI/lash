@@ -9,7 +9,7 @@ homepage.workspace = true
 readme.workspace = true
 rust-version.workspace = true
 description = "LLM-backed tool implementations (llm_query and friends) for the lash agent runtime."
-keywords = ["lash", "agent", "tools", "llm", "subagent"]
+keywords = ["lash", "agent", "tools", "llm"]
 categories = ["asynchronous", "api-bindings"]
 
 [lib]
