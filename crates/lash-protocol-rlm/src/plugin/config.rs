@@ -59,7 +59,7 @@ pub struct RlmProtocolPluginConfig {
     pub memory_limit: MemoryBound,
     #[serde(default)]
     pub prompt_features: crate::protocol::RlmPromptFeatures,
-    #[serde(default)]
+    #[serde(default = "standard_lashlang_abilities")]
     pub lashlang_abilities: RlmAbilities,
     /// Lashlang language features offered to the model. Absent from a host's
     /// config means the RLM default (label annotations on); a host that spells
@@ -79,6 +79,10 @@ fn default_max_output_chars() -> usize {
 
 fn default_continue_as_soft_warn_tokens() -> Option<usize> {
     Some(100_000)
+}
+
+fn standard_lashlang_abilities() -> RlmAbilities {
+    RlmAbilities::default().with_sleep()
 }
 
 /// The RLM protocol's default language-feature set. This is the single site
@@ -187,7 +191,7 @@ impl RlmProtocolPluginConfigBuilder<InstructionBound, MemoryBound, super::RlmCha
             instruction_limit: self.instruction_limit,
             memory_limit: self.memory_limit,
             prompt_features: crate::protocol::RlmPromptFeatures::default(),
-            lashlang_abilities: RlmAbilities::default(),
+            lashlang_abilities: standard_lashlang_abilities(),
             lashlang_language_features: default_lashlang_language_features(),
             max_output_chars: default_max_output_chars(),
             continue_as_soft_warn_tokens: default_continue_as_soft_warn_tokens(),
@@ -208,7 +212,8 @@ impl RlmProtocolPluginConfig {
     }
 
     /// Standard preset builder: complete standard print/preview render, images
-    /// and decomposition on, sleep off, label annotations on, 10,000 output
+    /// and decomposition on, durable sleep when process lifecycle is available
+    /// unless the host opts out, label annotations on, 10,000 output
     /// characters, soft warning at 100,000 tokens, no discovery, and standard
     /// presentation. The historical values have no universal workload measurement.
     /// Execution budgets and channel are still explicit named inputs.

@@ -25,16 +25,12 @@ pub fn rlm_lashlang_surface(
     config: &RlmProtocolPluginConfig,
     process_lifecycle: bool,
 ) -> LashlangSurface {
-    let surface = LashlangSurface::new(
+    LashlangSurface::new(
         config.lashlang_abilities.into_engine(),
         config.lashlang_language_features.into_engine(),
         lashlang::LashlangHostCatalog::new(),
-    );
-    if process_lifecycle {
-        surface.for_process_registry(true)
-    } else {
-        surface
-    }
+    )
+    .for_process_registry(process_lifecycle)
 }
 
 pub struct RlmProtocolPluginFactory {

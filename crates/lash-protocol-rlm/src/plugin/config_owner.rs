@@ -102,6 +102,7 @@ impl RlmRecordedConfig {
                 .instruction_limit(super::InstructionBound::unbounded())
                 .memory_limit(super::MemoryBound::unbounded())
                 .build()
+                .with_lashlang_abilities(super::RlmAbilities::default())
                 .recorded_behaviour(),
         })
         .expect("the recorded namespace encodes")
@@ -206,10 +207,12 @@ impl ConfigOwner for RlmConfigOwner {
         input: Option<RlmCreateConfig>,
     ) -> Result<Option<RlmRecordedConfig>, RlmConfigRefusal> {
         let stated = input.unwrap_or_default().0;
-        self.process_lifecycle
+        let process_lifecycle = self
+            .process_lifecycle
             .get()
             .ok_or(RlmConfigRefusal::ProcessLifecycleUndeclared)?;
-        let behaviour = self.config.recorded_behaviour();
+        let mut behaviour = self.config.recorded_behaviour();
+        behaviour.lashlang_abilities.sleep &= *process_lifecycle;
         Ok(Some(RlmRecordedConfig {
             render: stated.render,
             termination: stated.termination,
@@ -633,6 +636,54 @@ mod tests {
                 .expect_err("undeclared lifecycle"),
             RlmConfigRefusal::ProcessLifecycleUndeclared
         );
+    }
+
+    /// D-SLEEPDEFAULT: creation records durable sleep only when the deployment
+    /// can honor it, and reopening cannot override an authored opt-out.
+    #[test]
+    fn durable_sleep_requires_lifecycle_and_preserves_host_opt_out() {
+        let deserialized: RlmProtocolPluginConfig = serde_json::from_value(serde_json::json!({
+            "channel": "cell",
+            "instruction_limit": { "bounded": 1000 },
+            "memory_limit": { "bounded": 1048576 }
+        }))
+        .expect("omitted abilities use the standard preset");
+        for standard in [config(), deserialized] {
+            assert!(standard.lashlang_abilities.sleep);
+            for lifecycle in [false, true] {
+                for opt_out in [false, true] {
+                    let mut owner = owner_with(Some(lifecycle));
+                    owner.config = standard.clone();
+                    if opt_out {
+                        owner.config.lashlang_abilities.sleep = false;
+                    }
+                    let recorded = owner.create(None).expect("create").expect("namespace");
+                    let expected_sleep = lifecycle && !opt_out;
+                    assert_eq!(recorded.behaviour.lashlang_abilities.sleep, expected_sleep);
+                    let restored: RlmRecordedConfig = serde_json::from_value(
+                        serde_json::to_value(recorded).expect("recorded settings encode"),
+                    )
+                    .expect("recorded settings decode");
+                    let reopened = config().under_recorded_behaviour(&restored.behaviour);
+                    for reopening_lifecycle in [false, true] {
+                        let surface = super::super::factory::rlm_lashlang_surface(
+                            &reopened,
+                            reopening_lifecycle,
+                        );
+                        assert_eq!(
+                            surface.abilities.sleep,
+                            expected_sleep && reopening_lifecycle
+                        );
+                    }
+                    assert_eq!(
+                        super::super::factory::rlm_lashlang_surface(&owner.config, lifecycle)
+                            .abilities
+                            .sleep,
+                        expected_sleep
+                    );
+                }
+            }
+        }
     }
 
     /// The render a deployment configures is recorded behaviour: a session
