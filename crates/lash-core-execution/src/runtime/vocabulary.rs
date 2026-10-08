@@ -254,13 +254,15 @@ pub enum TurnEvent {
     AssistantProseDelta {
         text: Arc<str>,
         /// Provider-minted identity of the assistant-text block this delta
-        /// belongs to. The activity's `correlation_id` carries the same `id`.
+        /// belongs to. The activity's `correlation_id` names this block
+        /// within its model call's stream.
         block: crate::llm::types::StreamBlockIdentity,
     },
     ReasoningDelta {
         text: Arc<str>,
         /// Provider-minted identity of the reasoning block this delta belongs
-        /// to. The activity's `correlation_id` carries the same `id`.
+        /// to. The activity's `correlation_id` names this block within its
+        /// model call's stream.
         block: crate::llm::types::StreamBlockIdentity,
     },
     /// A provider-minted assistant-text or reasoning block opened. Hosts

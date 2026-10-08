@@ -972,7 +972,7 @@ impl RuntimeTurnDriver<'_> {
             );
             remember_attempt_correlation(
                 state.assistant_prose_attempt_correlations,
-                &TurnActivityId::new(block.id.clone()),
+                &TurnActivityId::stream_block(forwarder.stream_key(), block),
             );
             forwarder.forward_delta(ProviderDeltaClass::AssistantProse, block.clone(), text);
         }
@@ -1001,7 +1001,7 @@ impl RuntimeTurnDriver<'_> {
         state.reasoning_publication.record_streamed_block(&block);
         remember_attempt_correlation(
             state.reasoning_attempt_correlations,
-            &TurnActivityId::new(block.id.clone()),
+            &TurnActivityId::stream_block(forwarder.stream_key(), &block),
         );
         forwarder.forward_block_start(ProviderDeltaClass::Reasoning, block.clone());
         let mut block_text = String::new();
@@ -1064,7 +1064,7 @@ impl RuntimeTurnDriver<'_> {
                 );
                 remember_attempt_correlation(
                     state.assistant_prose_attempt_correlations,
-                    &TurnActivityId::new(block.id.clone()),
+                    &TurnActivityId::stream_block(forwarder.stream_key(), &block),
                 );
                 forwarder.forward_block_start(ProviderDeltaClass::AssistantProse, block);
             }
@@ -1129,7 +1129,7 @@ impl RuntimeTurnDriver<'_> {
                 );
                 remember_attempt_correlation(
                     state.assistant_prose_attempt_correlations,
-                    &TurnActivityId::new(block.id.clone()),
+                    &TurnActivityId::stream_block(forwarder.stream_key(), &block),
                 );
                 forwarder.forward_block_end(ProviderDeltaClass::AssistantProse, block, sealed);
             }
@@ -1144,7 +1144,7 @@ impl RuntimeTurnDriver<'_> {
                 );
                 remember_attempt_correlation(
                     state.reasoning_attempt_correlations,
-                    &TurnActivityId::new(block.id.clone()),
+                    &TurnActivityId::stream_block(forwarder.stream_key(), &block),
                 );
                 forwarder.forward_block_start(ProviderDeltaClass::Reasoning, block);
             }
@@ -1176,7 +1176,7 @@ impl RuntimeTurnDriver<'_> {
                     );
                     remember_attempt_correlation(
                         state.reasoning_attempt_correlations,
-                        &TurnActivityId::new(block.id.clone()),
+                        &TurnActivityId::stream_block(forwarder.stream_key(), &block),
                     );
                     forwarder.forward_delta(ProviderDeltaClass::Reasoning, block, text);
                 }
@@ -1208,7 +1208,7 @@ impl RuntimeTurnDriver<'_> {
                 );
                 remember_attempt_correlation(
                     state.reasoning_attempt_correlations,
-                    &TurnActivityId::new(block.id.clone()),
+                    &TurnActivityId::stream_block(forwarder.stream_key(), &block),
                 );
                 forwarder.forward_block_end(ProviderDeltaClass::Reasoning, block, text);
             }
@@ -1315,7 +1315,7 @@ impl RuntimeTurnDriver<'_> {
                     state.reasoning_publication.record_streamed_block(&block);
                     remember_attempt_correlation(
                         state.reasoning_attempt_correlations,
-                        &TurnActivityId::new(block.id.clone()),
+                        &TurnActivityId::stream_block(forwarder.stream_key(), &block),
                     );
                     forwarder.forward_block_start(ProviderDeltaClass::Reasoning, block.clone());
                     forwarder.forward_delta(

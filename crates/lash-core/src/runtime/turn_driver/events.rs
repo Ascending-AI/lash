@@ -46,6 +46,7 @@ pub(in crate::runtime) fn send_turn_input_applications(
 pub(in crate::runtime) fn emit_semantic_response_parts(
     event_tx: &TurnObserver,
     cursor: &mut crate::engine::ObservationCursor,
+    stream_key: &str,
     response: &LlmResponse,
     prose_projector: Option<&dyn crate::plugin::AssistantProseProjectorPlugin>,
     reasoning_publication: &ReasoningPublicationState,
@@ -73,7 +74,7 @@ pub(in crate::runtime) fn emit_semantic_response_parts(
                     item_id,
                 };
                 next_ordinal += 1;
-                let correlation_id = TurnActivityId::new(block.id.clone());
+                let correlation_id = TurnActivityId::stream_block(stream_key, &block);
                 cursor.observe(
                     event_tx,
                     crate::engine::ObservedEvent::Activity {
@@ -116,7 +117,7 @@ pub(in crate::runtime) fn emit_semantic_response_parts(
                 for (block, text) in
                     reasoning_publication.unpublished_blocks(part_index, part, &mut next_ordinal)
                 {
-                    let correlation_id = TurnActivityId::new(block.id.clone());
+                    let correlation_id = TurnActivityId::stream_block(stream_key, &block);
                     cursor.observe(
                         event_tx,
                         crate::engine::ObservedEvent::Activity {
@@ -156,7 +157,7 @@ pub(in crate::runtime) fn emit_semantic_response_parts(
     let full_text = project_assistant_prose(&response.full_text(), prose_projector);
     if !emitted_text && !full_text.is_empty() {
         let block = StreamBlockIdentity::new("response:full-text", next_ordinal);
-        let correlation_id = TurnActivityId::new(block.id.clone());
+        let correlation_id = TurnActivityId::stream_block(stream_key, &block);
         cursor.observe(
             event_tx,
             crate::engine::ObservedEvent::Activity {

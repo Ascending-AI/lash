@@ -179,9 +179,17 @@ impl RuntimeTurnDriver<'_> {
             && !text_streamed
         {
             let prose_projector = self.session.plugins().assistant_prose_projector();
+            let invocation = self
+                .turn_effect_invocation(machine, id, RuntimeEffectKind::LlmCall)
+                .map_err(RuntimeEffectControllerError::into_runtime_error)?;
+            let stream_key = super::abandoned_stream::model_stream_key(
+                invocation.effect_replay_key(),
+                self.model_attempt,
+            );
             emit_semantic_response_parts(
                 event_tx,
                 &mut self.turn_observations,
+                &stream_key,
                 response,
                 prose_projector.as_deref(),
                 &ReasoningPublicationState::from_published_blocks(reasoning_published),

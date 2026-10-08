@@ -55,6 +55,10 @@ impl<'a> ProviderHostForwarder<'a> {
         Self { event_tx, cursor }
     }
 
+    pub(super) fn stream_key(&self) -> &str {
+        self.cursor.key().as_str()
+    }
+
     pub(super) fn forward_delta(
         &mut self,
         class: ProviderDeltaClass,
@@ -64,7 +68,7 @@ impl<'a> ProviderHostForwarder<'a> {
         if content.is_empty() || self.event_tx.is_closed() {
             return;
         }
-        let correlation_id = TurnActivityId::new(block.id.clone());
+        let correlation_id = TurnActivityId::stream_block(self.stream_key(), &block);
         let text = Arc::from(content.as_str());
         self.cursor.observe(
             self.event_tx,
@@ -96,7 +100,7 @@ impl<'a> ProviderHostForwarder<'a> {
         self.cursor.observe(
             self.event_tx,
             crate::engine::ObservedEvent::Activity {
-                correlation_id: Some(TurnActivityId::new(block.id.clone())),
+                correlation_id: Some(TurnActivityId::stream_block(self.stream_key(), &block)),
                 event: TurnEvent::StreamBlockStarted { kind, block },
             },
         );
@@ -121,7 +125,7 @@ impl<'a> ProviderHostForwarder<'a> {
         self.cursor.observe(
             self.event_tx,
             crate::engine::ObservedEvent::Activity {
-                correlation_id: Some(TurnActivityId::new(block.id.clone())),
+                correlation_id: Some(TurnActivityId::stream_block(self.stream_key(), &block)),
                 event: TurnEvent::StreamBlockCompleted {
                     kind,
                     block,

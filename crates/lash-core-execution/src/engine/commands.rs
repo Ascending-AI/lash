@@ -75,6 +75,11 @@ impl ObservationCursor {
         Self { key, next: 0 }
     }
 
+    /// The replay key of the observation lane this cursor sequences.
+    pub fn key(&self) -> &super::context::ReplayKey {
+        &self.key
+    }
+
     /// Publish `event` under this cursor's key at the next ordinal, then
     /// advance. Synchronous and non-waking; what the sink does with an
     /// observation is never a decision input.

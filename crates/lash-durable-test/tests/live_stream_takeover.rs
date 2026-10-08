@@ -28,7 +28,7 @@ use std::time::Duration;
 
 use lash::observe::{SessionObservationStreamItem, Stream as _};
 use lash_core::facade_support::{InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig};
-use lash_core::llm::types::{LlmRequest, StreamBlockIdentity};
+use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmStreamEvent, StreamBlockIdentity};
 use lash_core::runtime::durable::session::SessionActivation;
 use lash_core::{
     LiveReplayEventDraft, LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore,
@@ -321,6 +321,91 @@ impl Takeover {
         self.nodes.kill("b");
         drop(self.keep);
     }
+}
+
+/// FIG-5390: provider block ids are local to a response attempt. A reset
+/// in the second call must leave the first call's text on the follower.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_second_model_call_reset_preserves_the_first_calls_blocks_on_sqlite_memory() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let seen = Arc::clone(&calls);
+    let model = lash_core::testing::TestProvider::builder()
+        .kind("reused-provider-blocks")
+        .requires_streaming(true)
+        .complete(move |request: LlmRequest| {
+            let call = seen.fetch_add(1, Ordering::SeqCst);
+            async move {
+                let stream = request.stream_events.as_ref().expect("the call streams");
+                let block = StreamBlockIdentity::new("content_block:0", 0);
+                let delta = |text: &str| LlmStreamEvent::Delta {
+                    block: block.clone(),
+                    text: text.to_owned(),
+                };
+                let text = if call == 0 { "Let me check." } else { "Done." };
+                if call == 1 {
+                    stream.send(delta("Partial"));
+                    stream.send(LlmStreamEvent::AttemptReset);
+                }
+                stream.send(delta(text));
+                let mut response = served::response(vec![LlmOutputPart::Text {
+                    text: text.to_owned(),
+                    response_meta: None,
+                }]);
+                if call == 0 {
+                    response.parts.push(served::call(
+                        "check",
+                        "echo_tool",
+                        serde_json::json!({ "value": "check" }),
+                    ));
+                }
+                Ok(response)
+            }
+        })
+        .build()
+        .into_handle();
+    let world =
+        served::World::with_model(served::Tier::SqliteMemory, Vec::new(), model, |backend| {
+            lash::LashCore::standard_builder(backend.clone())
+                .tools(Arc::new(lash_core::testing::runtime_helpers::EchoTool))
+        })
+        .await
+        .expect("the SQLite world opens");
+    let name = "two-calls-reused-blocks";
+    let durable = world.session(name, served::spec(4)).await;
+    let observed = world
+        .core
+        .session(durable.session_id().clone())
+        .open()
+        .await
+        .unwrap();
+    let snapshot = observed.observe().snapshot().await.unwrap();
+    let revision = snapshot.cursor.parse().unwrap().revision;
+    let feed = Feed::follow(observed.observe().subscribe_and_recover(snapshot.cursor));
+    let output = world.send(&durable, "answer after checking").await;
+    served::assert_answered(name, &output);
+    feed.until("the feed reaches the two-call turn's commit", |feed| {
+        committed_past(feed, revision)
+    })
+    .await;
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    let events = feed.events();
+    assert!(streamed(&events, "Partial"));
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(
+                &event.payload,
+                SessionObservationEventPayload::TurnActivity(TurnActivity {
+                    event: TurnEvent::ModelAttemptReset { .. },
+                    ..
+                })
+            ))
+            .count(),
+        1,
+        "the second call retracts its failed attempt"
+    );
+    assert_eq!(followed_prose(&events), "Let me check.Done.");
+    world.shutdown().await;
 }
 
 /// A streams the call and dies before its answer commits with the turn; B

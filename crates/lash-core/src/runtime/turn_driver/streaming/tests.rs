@@ -154,10 +154,10 @@ fn every_delta_reaches_both_lanes_in_order_framed() {
     assert_eq!(
         turn,
         vec![
-            ("text", "assistant", "alpha"),
-            ("text", "assistant", "betagamma"),
-            ("reasoning", "reasoning", "why"),
-            ("reasoning", "reasoning", "therefore"),
+            ("text", "test:stream/assistant", "alpha"),
+            ("text", "test:stream/assistant", "betagamma"),
+            ("reasoning", "test:stream/reasoning", "why"),
+            ("reasoning", "test:stream/reasoning", "therefore"),
         ]
     );
 }
@@ -197,10 +197,10 @@ fn interleaved_correlations_and_classes_remain_distinct() {
     assert_eq!(
         turn,
         vec![
-            ("text", "A", "a1"),
-            ("text", "B", "b"),
-            ("text", "A", "a2"),
-            ("reasoning", "A", "r"),
+            ("text", "test:stream/A", "a1"),
+            ("text", "test:stream/B", "b"),
+            ("text", "test:stream/A", "a2"),
+            ("reasoning", "test:stream/A", "r"),
         ]
     );
 }

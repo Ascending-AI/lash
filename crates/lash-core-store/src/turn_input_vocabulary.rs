@@ -1229,6 +1229,12 @@ impl TurnActivityId {
         Self(id.into())
     }
 
+    /// Name a live block within its model call's stream. Provider block ids
+    /// are attempt-local; hosts treat this scoped correlation as opaque.
+    pub fn stream_block(stream_key: &str, block: &crate::llm::types::StreamBlockIdentity) -> Self {
+        Self(format!("{stream_key}/{}", block.id).into())
+    }
+
     /// The id of the activity observed under `key` at `ordinal`.
     pub fn observed(key: impl fmt::Display, ordinal: u32) -> Self {
         Self(format!("{key}#{ordinal}").into())
