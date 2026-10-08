@@ -262,8 +262,14 @@ fn held_or_ended(
 
 /// Admit a host session-turn start before staging writes. `fresh` is false
 /// when its key already retains a process, whose model is never revalidated.
-pub type SessionTurnAdmission =
-    Arc<dyn Fn(bool) -> BoxFuture<'static, Result<(), RuntimeEffectControllerError>> + Send + Sync>;
+/// What the admission publishes it holds under the start's own staging
+/// claim, the `Start(key)` claim every other input of the start is staged
+/// under (ADR 0113 §3.3).
+pub type SessionTurnAdmission = Arc<
+    dyn Fn(bool, ReferrerClaim) -> BoxFuture<'static, Result<(), RuntimeEffectControllerError>>
+        + Send
+        + Sync,
+>;
 
 /// What a host start's recorded admission consults beyond the stores every
 /// start writes through. Held boxed by the executors that carry it: most
@@ -616,6 +622,10 @@ pub async fn stage_process_start<'a>(
             "a journaled process start must carry its start key",
         ));
     };
+    let claim = ReferrerClaim::guarded(ReferrerGuard::Start {
+        start_key: start_key.clone(),
+        starter: stores.starter.clone(),
+    });
     let prepared = async {
         require_host_session_live(stores, &registration).await?;
         restore_trigger_route(stores, &start_key).await?;
@@ -625,9 +635,14 @@ pub async fn stage_process_start<'a>(
                 .get_process_by_start_key(&start_key)
                 .await?
                 .is_none();
-            admit(fresh).await?;
+            match admit(fresh, claim.clone()).await {
+                // An earlier attempt settled the key: staging meets the same
+                // fence and adopts what the key retains.
+                Err(error) if error.ended_referrer() == Some(&claim.referrer()) => {}
+                admitted => admitted?,
+            }
         }
-        stage(stores, &start_key, registration, observers).await
+        stage(stores, &start_key, claim, registration, observers).await
     }
     .await;
     if let Err(error) = &prepared
@@ -782,13 +797,10 @@ pub fn is_start_operation(
 async fn stage<'a>(
     stores: &ProcessStartStores<'a>,
     start_key: &StartKey,
+    claim: ReferrerClaim,
     registration: ProcessStartRegistration,
     observers: &[SessionId],
 ) -> Result<PreparedProcessStart<'a>, RuntimeEffectControllerError> {
-    let claim = ReferrerClaim::guarded(ReferrerGuard::Start {
-        start_key: start_key.clone(),
-        starter: stores.starter.clone(),
-    });
     let env = stage_env(stores, &claim, registration.env_ref.clone()).await?;
     let env_spec = match env.as_ref() {
         Some(env) => Some(

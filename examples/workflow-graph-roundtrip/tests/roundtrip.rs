@@ -843,7 +843,6 @@ async fn data_terminal_call_and_effect_edits_round_trip_without_raw_constructor_
     server.abort();
 }
 
-#[ignore = "run preparation of a built-in workflow after another is refused: artifact_referrer_ended for the detached execution referrer (found by FIG-5372)"]
 #[tokio::test]
 async fn lists_selects_projects_and_runs_built_in_workflows() {
     let state = runtime::state().await;

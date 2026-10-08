@@ -483,16 +483,12 @@ impl Processes {
         &self,
         request: lash_core::SessionCreateRequest,
         environment: Option<lash_core::ProcessExecutionEnvSpec>,
-        env_ref: Option<lash_core::ProcessExecutionEnvRef>,
-        claim: lash_core::ReferrerClaim,
     ) -> lash_core::runtime::SessionTurnAdmission {
         let core = self.core.clone();
-        Arc::new(move |fresh| {
+        Arc::new(move |fresh, claim| {
             let core = core.clone();
             let request = request.clone();
             let environment = environment.clone();
-            let env_ref = env_ref.clone();
-            let claim = claim.clone();
             Box::pin(async move {
                 let env_store = core.env.core.durability.process_env_store.as_ref();
                 if fresh && let Some(key) = request.model.as_ref() {
@@ -519,19 +515,12 @@ impl Processes {
                         )
                     })?;
                 }
-                match environment {
-                    Some(environment) => {
-                        lash_core::publish_process_execution_env(env_store, &claim, &environment)
-                            .await?;
-                    }
-                    None => {
-                        if let Some(env_ref) = env_ref {
-                            env_store
-                                .acquire_process_execution_env(&claim, &env_ref)
-                                .await
-                                .map_err(lash_core::PluginError::from)?;
-                        }
-                    }
+                // The environment lash derived for the start is published
+                // under its staging claim; one the host stated is already
+                // stored, and staging acquires it under the same claim.
+                if let Some(environment) = environment {
+                    lash_core::publish_process_execution_env(env_store, &claim, &environment)
+                        .await?;
                 }
                 Ok(())
             })
@@ -590,43 +579,29 @@ impl Processes {
             }
             _ => None,
         };
+        // A host start is its own operation (ADR 0113 §3.3): its staging
+        // holds the environment under `Start(key)` until registration carries
+        // it onto the record. The caller's context names no execution of the
+        // start's own: the core's host context is one scope every host start
+        // shares, settled at once.
         let mut session_turn_admission = None;
-        if registration.env_ref.is_some() || host_session_turn_environment.is_some() {
-            let claim = lash_core::ReferrerClaim::guarded(lash_core::ReferrerGuard::Journal(
-                scoped_effect_controller
-                    .execution_scope()
-                    .journal_identity()
-                    .map_err(|error| lash_core::PluginError::Session(error.to_string()))?,
-            ));
-            if let lash_core::ProcessStartTarget::Input(lash_core::ProcessInput::SessionTurn {
-                create_request,
-                ..
-            }) = registration.input.as_ref()
-            {
-                if let Some(environment) = host_session_turn_environment.as_ref() {
-                    let env_ref = environment.stable_ref().map_err(|error| {
-                        lash_core::PluginError::Session(format!(
-                            "failed to encode process execution env: {error}"
-                        ))
-                    })?;
-                    registration.env_ref = Some(env_ref);
-                }
-                session_turn_admission = Some(self.host_session_turn_admission(
-                    create_request.as_ref().clone(),
-                    host_session_turn_environment,
-                    registration.env_ref.clone(),
-                    claim,
-                ));
-            } else if let Some(env_ref) = registration.env_ref.as_ref() {
-                self.core
-                    .env
-                    .core
-                    .durability
-                    .process_env_store
-                    .acquire_process_execution_env(&claim, env_ref)
-                    .await
-                    .map_err(lash_core::PluginError::from)?;
+        if let lash_core::ProcessStartTarget::Input(lash_core::ProcessInput::SessionTurn {
+            create_request,
+            ..
+        }) = registration.input.as_ref()
+        {
+            if let Some(environment) = host_session_turn_environment.as_ref() {
+                let env_ref = environment.stable_ref().map_err(|error| {
+                    lash_core::PluginError::Session(format!(
+                        "failed to encode process execution env: {error}"
+                    ))
+                })?;
+                registration.env_ref = Some(env_ref);
             }
+            session_turn_admission = Some(self.host_session_turn_admission(
+                create_request.as_ref().clone(),
+                host_session_turn_environment,
+            ));
         }
         let start_key = registration.start_key.clone();
         let command = lash_core::ProcessCommand::Start {

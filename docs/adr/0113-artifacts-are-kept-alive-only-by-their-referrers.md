@@ -355,7 +355,12 @@ local start with no causal effect) has no execution to settle: its staging
 claims wait until its registration carries them or its abandonment ends
 both `Start(key)` and its `StartInput`
 (`crates/lash-core-execution/src/runtime/process/start_staging.rs`
-`start_operation_journal`, FIG-5231).
+`start_operation_journal`, FIG-5231). A host start through the core's
+process API is such a start: everything its preparation holds, including
+the environment lash publishes for a host session-turn start, is held under
+`Start(key)`, never under the context the host called from. The core's host
+context is one scope every host start shares and is settled at once, so an
+edge under it would be ended and fenced after the first start (FIG-5384).
 Because keys are global, resolving an `Ended` start reads the key again
 *after the fence* and acquires any retained record's content under that
 record before severing the start. This protects a registration racing the
@@ -450,7 +455,8 @@ fact alone cannot authorize cleanup while that execution may still resume
 The attempt coordinator publishes its live capture or acquires an inherited
 reference before returning a recordable attempt outcome, including pending
 starts. A code-runtime start does the same before recording its command.
-Host ingress acquires an already-published reference under its execution.
+Tool-intent ingress acquires an already-published reference under its
+execution; a host start holds its reference under `Start(key)` (§3.3).
 Leaf tools derive a digest and declare it; publication belongs to the
 coordinator. Every capture publication is guarded by `AwaitJournal`.
 Declarations, submission rows, Run records and process records contain

@@ -1771,6 +1771,91 @@ async fn host_signal_wakes_a_parked_process(tier: Tier) {
 
 on_every_tier!(host_signal_wakes_a_parked_process);
 
+/// A host start is its own operation (ADR 0113 §3.3): its run preparation
+/// holds what it names under its own staging, `Start(key)`, until its
+/// registration carries it onto the process record. It never holds through
+/// the core's host context, a scope every host start shares and that has
+/// settled as soon as the cleanup relay reads it. So after one start's
+/// source pin is released and the relay has run, its process still
+/// resolves its environment, and the next host start prepares and
+/// registers (FIG-5384).
+async fn a_host_starts_preparation_is_held_by_its_own_start(tier: Tier) {
+    let deployment = deploy(
+        tier,
+        vec![Arc::new(ScriptEngine {
+            kind: SIGNAL_ENGINE,
+            advance: signal_engine_advance,
+        })],
+        |builder| builder,
+    )
+    .await;
+    let relay = lash_core::runtime::artifact_cleanup::ArtifactCleanupRelay::over_backend(
+        &deployment.backend,
+        lash_core::ProcessEngineRegistry::default(),
+    );
+    let env_store = deployment.backend.process_env_store();
+    let artifacts = deployment.core.host_artifacts();
+    let mut started = Vec::new();
+    for run in 0..2 {
+        let pin = lash_core::HostArtifactPin::mint();
+        let env_ref = artifacts
+            .publish_process_env(&pin, &environment())
+            .await
+            .expect("the environment is published");
+        let request = lash_core::ProcessStartRequest::new(
+            lash_core::ProcessInput::Engine {
+                kind: SIGNAL_ENGINE.to_owned(),
+                payload: serde_json::json!({ "run": run }),
+            },
+            lash_core::ProcessOriginator::host(),
+            lash_core::LifetimeDecision::Detached,
+        )
+        .with_env_ref(env_ref.clone());
+        let receipt = deployment
+            .core
+            .processes()
+            .start(request, deployment.core.effect_host())
+            .await;
+        artifacts.release(pin).await.expect("the pin is released");
+        let process = receipt
+            .unwrap_or_else(|error| panic!("host start {run} prepares and registers: {error}"))
+            .process_id;
+        // Every cleanup the start and the release armed is due a day on.
+        let later = lash_core::testing::TestClock::new(
+            u64::try_from(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("the wall clock is past the epoch")
+                    .as_millis(),
+            )
+            .expect("milliseconds fit")
+                + 86_400_000,
+        );
+        for _ in 0..2 {
+            lash_core::runtime::obligations::relay::relay_due(
+                &relay,
+                &later,
+                std::num::NonZeroUsize::new(256).expect("a page"),
+            )
+            .await
+            .expect("the cleanup relay's due pass");
+        }
+        assert_eq!(
+            lash_core::runtime::load_process_execution_env(env_store.as_ref(), &env_ref)
+                .await
+                .expect("the started process still resolves its environment"),
+            environment()
+        );
+        started.push(process);
+    }
+    assert_ne!(
+        started[0], started[1],
+        "each start registered its own process"
+    );
+}
+
+on_every_tier!(a_host_starts_preparation_is_held_by_its_own_start);
+
 /// The tool whose call declares a `SignalProcess` intent.
 const SIGNAL_TOOL: &str = "core_node_signal";
 
