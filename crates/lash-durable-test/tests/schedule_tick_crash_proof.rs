@@ -22,6 +22,10 @@
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 
+// Shared with the matrices that also run a SQLite file leg.
+#[allow(dead_code)]
+#[path = "support/dialect.rs"]
+mod dialect;
 #[path = "support/sim.rs"]
 mod sim;
 
@@ -46,7 +50,7 @@ use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, 
 use lash_core_execution::{
     ActorContext, Backend, BackendParts, DurableSettings, EngineAction, EngineEvent, EngineState,
     EngineStateFormat, ExecutionBudgets, NoProjectionProviders, ProcessEngine, ProcessInfraError,
-    ProcessRecord, StepRequest, StoreSet, TriggerSchedule, TriggerScheduleError, TriggerSchedules,
+    ProcessRecord, StepRequest, TriggerSchedule, TriggerScheduleError, TriggerSchedules,
 };
 use lash_durable::{
     ActorDispatch, ActorKey, ActorState, CommitLabel, DurableStore, FormatSet, MailTx,
@@ -54,6 +58,8 @@ use lash_durable::{
 use lash_durable_test::{Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig};
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt as _;
+
+use dialect::Dialect;
 
 const KIND: &str = "schedule-tick-proof";
 const SOURCE_TYPE: &str = "proof.schedule";
@@ -294,13 +300,6 @@ async fn processes(backend: &Backend) -> Vec<ProcessRecord> {
 
 // --- the scenario ----------------------------------------------------------------
 
-/// Where a scenario's database lives.
-#[derive(Clone, Copy, Debug)]
-enum Dialect {
-    SqliteMemory,
-    Postgres,
-}
-
 struct Proof {
     dialect: Dialect,
     postgres_url: Option<String>,
@@ -338,48 +337,19 @@ impl Proof {
     }
 }
 
-/// A fresh isolated PostgreSQL database, provisioned from the schema, made
-/// on a thread and runtime of its own (see `vertical_crash_proof`).
-fn isolated_database(url: String) -> lash_postgres_store::testing::IsolatedDatabase {
-    std::thread::spawn(move || {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("a setup runtime")
-            .block_on(lash_postgres_store::testing::IsolatedDatabase::create(&url))
-    })
-    .join()
-    .expect("the isolated database is created")
-}
-
 #[async_trait::async_trait]
 impl Scenario for Proof {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
         let first = lash_core_ids::clock::ClockWallTime::timestamp_ms(&*clock);
         let tick = first - first % 1_000 + TICK_SPACING_MS;
         *self.ticks.lock_recover() = [tick, tick + TICK_SPACING_MS];
-        let (stores, database): (Arc<dyn StoreSet>, Arc<dyn DurableStore>) = match self.dialect {
-            Dialect::SqliteMemory => {
-                let stores = sim::memory(clock).await;
-                let database = Arc::new(stores.durable_store());
-                (Arc::new(stores), database)
-            }
-            Dialect::Postgres => {
-                let url = self.postgres_url.clone().expect("a PostgreSQL URL");
-                let isolated = isolated_database(url);
-                let storage = lash_postgres_store::testing::connect(isolated.url())
-                    .await
-                    .expect("the isolated database opens");
-                let database: Arc<dyn DurableStore> =
-                    Arc::new(storage.durable_store().with_clock_for_testing(clock));
-                let stores = lash_postgres_store::PostgresStoreSet::new(
-                    &storage,
-                    Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
-                );
-                self.keep.lock_recover().push(Box::new(isolated));
-                (Arc::new(stores), database)
-            }
-        };
+        let (stores, database) = dialect::open(
+            self.dialect,
+            self.postgres_url.as_deref(),
+            clock,
+            &self.keep,
+        )
+        .await;
         let backend = Backend::assemble(BackendParts {
             stores,
             settings: DurableSettings::default(),
@@ -610,10 +580,7 @@ async fn a_scheduled_tick_fires_once_at_every_cut_on_sqlite_memory() {
 /// T1 and T2 on PostgreSQL, at every cut of the tick.
 #[tokio::test]
 async fn a_scheduled_tick_fires_once_at_every_cut_on_postgres() {
-    let Some(url) = std::env::var("LASH_POSTGRES_DATABASE_URL")
-        .ok()
-        .filter(|url| !url.trim().is_empty())
-    else {
+    let Some(url) = dialect::postgres_url() else {
         eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
         return;
     };
