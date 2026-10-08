@@ -1,50 +1,394 @@
-//! The exact body a provider sends for one model call (ADR 0133 §6,
-//! FIG-5259).
+//! Recorded JSON literals and attachment slots; deliveries exist only while sending.
 
+use super::attachment_delivery::{AttachmentPosition, Delivery, ProviderAccepts};
+use super::types::{GenerationReceipt, LlmContentBlock, LlmRequest, ProviderRouteIdentity};
+use crate::AttachmentRef;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use super::types::{GenerationReceipt, LlmRequest, ProviderRouteIdentity};
-
-/// The exact body one model call sends: lowered once, by the provider of
-/// the route that serves the call, before the call is admitted.
-///
-/// A resend of an admitted call sends these bytes: no renderer, projector,
-/// attachment resolver or provider builder runs for it again, so a provider
-/// whose builder changed since sends the body the call admitted.
-/// Authentication and transport headers are not part of a body: the
-/// provider binds them fresh for every attempt.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ProviderRequestBody {
-    /// The route that lowered the body. Only that route sends it.
-    pub route: ProviderRouteIdentity,
-    /// Whether the body asks for a streamed response.
-    pub stream: bool,
-    /// The receipt of the generation settings the body carries, as the
-    /// provider built it: the response of every attempt reports it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub generation: Option<GenerationReceipt>,
-    /// The exact bytes. Every provider body is UTF-8 JSON.
-    pub body: Arc<str>,
+pub struct SlotCodec {
+    pub name: Box<str>,
+    pub revision: u32,
 }
 
-impl ProviderRequestBody {
-    /// The canonical encoding of `request` itself, for a provider with no
-    /// wire format of its own, such as an in-process double: the logical
-    /// request is what it receives.
-    ///
-    /// # Errors
-    ///
-    /// The encoding error when the request does not encode.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AttachmentSlot {
+    pub reference: AttachmentRef,
+    pub position: AttachmentPosition,
+    pub accepts: ProviderAccepts,
+    pub codec: SlotCodec,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "segment", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RequestSegment {
+    Literal { text: Arc<str> },
+    Attachment { slot: Box<AttachmentSlot> },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecordedRequestTemplate {
+    pub route: ProviderRouteIdentity,
+    pub stream: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation: Option<GenerationReceipt>,
+    pub segments: Vec<RequestSegment>,
+}
+
+impl RecordedRequestTemplate {
+    pub fn literal(
+        route: ProviderRouteIdentity,
+        stream: bool,
+        generation: Option<GenerationReceipt>,
+        body: impl Into<Arc<str>>,
+    ) -> Self {
+        Self {
+            route,
+            stream,
+            generation,
+            segments: vec![RequestSegment::Literal { text: body.into() }],
+        }
+    }
+
+    pub fn builder(
+        route: ProviderRouteIdentity,
+        stream: bool,
+        generation: Option<GenerationReceipt>,
+    ) -> RequestTemplateBuilder {
+        RequestTemplateBuilder {
+            template: Self {
+                route,
+                stream,
+                generation,
+                segments: Vec::new(),
+            },
+        }
+    }
+
+    /// Serialize a JSON tree, replacing only the explicitly bound JSON pointers
+    /// with typed slots. No searching or replacement of serialized strings.
+    pub fn from_json(
+        route: ProviderRouteIdentity,
+        stream: bool,
+        generation: Option<GenerationReceipt>,
+        value: &serde_json::Value,
+        slots: &[(String, AttachmentSlot)],
+    ) -> Result<Self, TemplateError> {
+        let mut builder = Self::builder(route, stream, generation);
+        let mut used = 0;
+        write_json(&mut builder, value, "", slots, &mut used)?;
+        if used != slots.len() {
+            return Err(TemplateError::SlotCount {
+                expected: slots.len(),
+                actual: used,
+            });
+        }
+        builder.finish()
+    }
+
     pub fn of_request(
         route: ProviderRouteIdentity,
         request: &LlmRequest,
-    ) -> Result<Self, serde_json::Error> {
-        Ok(Self {
-            route,
-            stream: request.stream_events.is_some(),
-            generation: None,
-            body: Arc::from(serde_json::to_string(request)?),
+    ) -> Result<Self, TemplateError> {
+        let value =
+            serde_json::to_value(request).map_err(|_| TemplateError::InvalidJson { offset: 0 })?;
+        let mut slots = Vec::new();
+        let mut add = |pointer: String, reference: &AttachmentRef, position| {
+            let accepts = ProviderAccepts {
+                bytes: true,
+                url: true,
+                provider_file: None,
+            }
+            .narrowed(request.attachment_acceptance.forms(
+                &route.provider,
+                &reference.media_type,
+                position,
+            ));
+            if accepts.is_empty() {
+                return Err(TemplateError::EmptyAcceptance);
+            }
+            slots.push((
+                pointer,
+                AttachmentSlot {
+                    reference: reference.clone(),
+                    position,
+                    accepts,
+                    codec: SlotCodec {
+                        name: "lash.canonical".into(),
+                        revision: 1,
+                    },
+                },
+            ));
+            Ok(())
+        };
+        for (mi, message) in request.messages.iter().enumerate() {
+            for (bi, block) in message.blocks.iter().enumerate() {
+                match block {
+                    LlmContentBlock::Attachment { reference } => add(
+                        format!("/messages/{mi}/blocks/{bi}/Attachment"),
+                        reference,
+                        AttachmentPosition::Message,
+                    )?,
+                    LlmContentBlock::ToolResult { content, .. } => {
+                        for (pi, part) in content.iter().enumerate() {
+                            if let Some(reference) = part.attachment() {
+                                add(
+                                    format!("/messages/{mi}/blocks/{bi}/ToolResult/content/{pi}"),
+                                    reference,
+                                    AttachmentPosition::ToolResult,
+                                )?;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Self::from_json(route, request.stream_events.is_some(), None, &value, &slots)
+    }
+
+    pub fn validate(&self) -> Result<(), TemplateError> {
+        let mut text = String::new();
+        let mut literal = false;
+        for segment in &self.segments {
+            match segment {
+                RequestSegment::Literal { text: span } => {
+                    if span.is_empty() {
+                        return Err(TemplateError::EmptyLiteral);
+                    }
+                    if literal {
+                        return Err(TemplateError::AdjacentLiterals);
+                    }
+                    literal = true;
+                    text.push_str(span);
+                }
+                RequestSegment::Attachment { slot } => {
+                    if slot.accepts.is_empty() {
+                        return Err(TemplateError::EmptyAcceptance);
+                    }
+                    literal = false;
+                    text.push_str("null");
+                }
+            }
+        }
+        serde_json::from_str::<serde_json::Value>(&text).map_err(|error| {
+            TemplateError::InvalidJson {
+                offset: error.column(),
+            }
+        })?;
+        Ok(())
+    }
+
+    pub fn slots(&self) -> impl Iterator<Item = &AttachmentSlot> {
+        self.segments.iter().filter_map(|segment| match segment {
+            RequestSegment::Attachment { slot } => Some(slot.as_ref()),
+            RequestSegment::Literal { .. } => None,
         })
     }
+
+    pub fn redacted(&self) -> String {
+        let mut text = String::new();
+        for segment in &self.segments {
+            match segment {
+                RequestSegment::Literal { text: span } => text.push_str(span),
+                RequestSegment::Attachment { slot } => text.push_str(
+                    &serde_json::json!({"$lash_attachment": {
+                        "id": slot.reference.id, "media_type": slot.reference.media_type,
+                        "byte_len": slot.reference.byte_len, "position": slot.position
+                    }})
+                    .to_string(),
+                ),
+            }
+        }
+        text
+    }
+}
+
+pub struct RequestTemplateBuilder {
+    template: RecordedRequestTemplate,
+}
+impl RequestTemplateBuilder {
+    pub fn literal(&mut self, text: impl AsRef<str>) -> &mut Self {
+        let text = text.as_ref();
+        if text.is_empty() {
+            return self;
+        }
+        if let Some(RequestSegment::Literal { text: previous }) = self.template.segments.last_mut()
+        {
+            *previous = Arc::from(format!("{previous}{text}"));
+        } else {
+            self.template.segments.push(RequestSegment::Literal {
+                text: Arc::from(text),
+            });
+        }
+        self
+    }
+    pub fn attachment(&mut self, slot: AttachmentSlot) -> &mut Self {
+        self.template.segments.push(RequestSegment::Attachment {
+            slot: Box::new(slot),
+        });
+        self
+    }
+    pub fn finish(self) -> Result<RecordedRequestTemplate, TemplateError> {
+        self.template.validate()?;
+        Ok(self.template)
+    }
+}
+
+fn write_json(
+    builder: &mut RequestTemplateBuilder,
+    value: &serde_json::Value,
+    pointer: &str,
+    slots: &[(String, AttachmentSlot)],
+    used: &mut usize,
+) -> Result<(), TemplateError> {
+    if let Some((_, slot)) = slots.iter().find(|(path, _)| path == pointer) {
+        builder.attachment(slot.clone());
+        *used += 1;
+        return Ok(());
+    }
+    match value {
+        serde_json::Value::Array(values) => {
+            builder.literal("[");
+            for (index, value) in values.iter().enumerate() {
+                if index != 0 {
+                    builder.literal(",");
+                }
+                write_json(builder, value, &format!("{pointer}/{index}"), slots, used)?;
+            }
+            builder.literal("]");
+        }
+        serde_json::Value::Object(values) => {
+            builder.literal("{");
+            for (index, (key, value)) in values.iter().enumerate() {
+                if index != 0 {
+                    builder.literal(",");
+                }
+                builder
+                    .literal(serde_json::Value::String(key.clone()).to_string())
+                    .literal(":");
+                let escaped = key.replace('~', "~0").replace('/', "~1");
+                write_json(builder, value, &format!("{pointer}/{escaped}"), slots, used)?;
+            }
+            builder.literal("}");
+        }
+        _ => {
+            builder.literal(value.to_string());
+        }
+    }
+    Ok(())
+}
+
+/// A JSON value for the live wire, retaining only its scrub patterns privately.
+pub struct TransientJson {
+    value: String,
+    secrets: Vec<String>,
+}
+impl TransientJson {
+    pub fn new(value: &serde_json::Value, delivery: &Delivery) -> Self {
+        let mut secrets = Vec::new();
+        if let Some(secret) = delivery.secret() {
+            let raw = secret.expose();
+            if !raw.is_empty() {
+                secrets.push(raw.to_owned());
+                let escaped = serde_json::Value::String(raw.to_owned()).to_string();
+                secrets.push(escaped[1..escaped.len() - 1].to_owned());
+            }
+        }
+        Self {
+            value: value.to_string(),
+            secrets,
+        }
+    }
+}
+impl std::fmt::Debug for TransientJson {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("TransientJson(<redacted>)")
+    }
+}
+
+pub struct LiveRequestBody {
+    template: Arc<RecordedRequestTemplate>,
+    values: Vec<TransientJson>,
+}
+impl LiveRequestBody {
+    pub fn fill(
+        template: Arc<RecordedRequestTemplate>,
+        values: Vec<TransientJson>,
+    ) -> Result<Self, TemplateError> {
+        template.validate()?;
+        let expected = template.slots().count();
+        if expected != values.len() {
+            return Err(TemplateError::SlotCount {
+                expected,
+                actual: values.len(),
+            });
+        }
+        Ok(Self { template, values })
+    }
+    pub fn template(&self) -> &RecordedRequestTemplate {
+        &self.template
+    }
+    pub fn route(&self) -> &ProviderRouteIdentity {
+        &self.template.route
+    }
+    pub fn stream(&self) -> bool {
+        self.template.stream
+    }
+    pub fn generation(&self) -> Option<GenerationReceipt> {
+        self.template.generation
+    }
+    pub fn wire(&self) -> String {
+        let mut text = String::new();
+        let mut values = self.values.iter();
+        for segment in &self.template.segments {
+            match segment {
+                RequestSegment::Literal { text: span } => text.push_str(span),
+                RequestSegment::Attachment { .. } => {
+                    if let Some(value) = values.next() {
+                        text.push_str(&value.value);
+                    }
+                }
+            }
+        }
+        text
+    }
+    pub fn redacted(&self) -> String {
+        self.template.redacted()
+    }
+    pub fn scrub(&self, text: &str) -> String {
+        let mut secrets: Vec<&str> = self
+            .values
+            .iter()
+            .flat_map(|value| value.secrets.iter().map(String::as_str))
+            .collect();
+        secrets.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
+        secrets.dedup();
+        secrets.into_iter().fold(text.to_owned(), |text, secret| {
+            text.replace(secret, "[redacted attachment delivery]")
+        })
+    }
+}
+impl std::fmt::Debug for LiveRequestBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.redacted())
+    }
+}
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum TemplateError {
+    #[error("a request template contains an empty literal")]
+    EmptyLiteral,
+    #[error("a request template contains adjacent literals")]
+    AdjacentLiterals,
+    #[error("a request template is not one JSON value at offset {offset}")]
+    InvalidJson { offset: usize },
+    #[error("a request template expects {expected} slots, received {actual}")]
+    SlotCount { expected: usize, actual: usize },
+    #[error("an attachment slot has empty acceptance")]
+    EmptyAcceptance,
 }

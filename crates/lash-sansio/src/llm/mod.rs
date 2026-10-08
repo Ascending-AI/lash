@@ -1,7 +1,7 @@
 pub mod attachment_delivery;
 pub mod capability;
 mod estimate;
-mod provider_body;
+pub mod provider_body;
 mod provider_keys;
 mod provider_route;
 mod stream_senders;

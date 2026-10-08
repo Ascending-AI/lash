@@ -201,7 +201,10 @@ pub struct ProviderRouteIdentity {
     pub model: Box<str>,
 }
 
-pub use super::provider_body::ProviderRequestBody;
+pub use super::provider_body::{
+    AttachmentSlot, LiveRequestBody, RecordedRequestTemplate, RequestSegment,
+    RequestTemplateBuilder, SlotCodec, TemplateError, TransientJson,
+};
 pub use super::provider_route::ProviderEndpointError;
 pub use super::stream_senders::{LlmEventSender, LlmProviderTraceEvent, LlmProviderTraceSender};
 
