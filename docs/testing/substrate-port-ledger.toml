@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1615 rows over 873 files, 3988 laws.
-# By class: mechanical 164, semantic 115, delete 871, replace 465.
-# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 73, L9c 342, L9d 83, L9e 131, L9f 125, L9g 98, L9h 106, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
-# By status: todo 372, ported 102, deleted 1141.
+# 1621 rows over 873 files, 3994 laws.
+# By class: mechanical 170, semantic 115, delete 871, replace 465.
+# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 73, L9c 342, L9d 89, L9e 131, L9f 125, L9g 98, L9h 106, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
+# By status: todo 370, ported 102, deleted 1149.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -1169,9 +1169,93 @@ laws = [
   "cached_only_child_usage_stays_on_the_child_turn_result",
   "a_child_records_the_config_its_owners_chose_from_the_parent",
 ]
-disposition = "port"
-status = "todo"
-note = "owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
+disposition = "replaced-by:crates/lash-durable-test/tests/core_node_processes.rs"
+status = "deleted"
+note = "the file went with LashRuntime::execute_turn (FIG-5208, bbffe67d98); a child is an ordinary session with a lineage link (FIG-5296, 35b70ca82b), and each law has a row of its own"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/child_sessions.rs"
+test = "captured_plugin_init_is_immune_to_post_spawn_parent_mutation"
+area = "child-sessions"
+needs = ["turn", "process"]
+class = "mechanical"
+lane = "L9d"
+laws = [
+  "captured_plugin_init_is_immune_to_post_spawn_parent_mutation",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5296 (35b70ca82b) deleted SessionPluginInit and the ParentFork plugin source: a child records only its own create request, so nothing of the parent is captured to mutate (a_linked_child_behaves_like_an_unlinked_session_and_outlives_its_parent)"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/child_sessions.rs"
+test = "a_child_records_the_config_its_owners_chose_from_the_parent"
+area = "child-sessions"
+needs = ["turn", "process"]
+class = "mechanical"
+lane = "L9d"
+laws = [
+  "a_child_records_the_config_its_owners_chose_from_the_parent",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5296 (35b70ca82b) deleted owner inheritance from the parent: only a catalog fork copies its parent's config (a_fork_starts_with_its_parents_full_configuration), and every other child records exactly its explicit request"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/child_sessions.rs"
+test = "durable_child_writes_to_its_own_attachment_namespace"
+area = "child-sessions"
+needs = ["turn", "process"]
+class = "mechanical"
+lane = "L9d"
+laws = [
+  "durable_child_writes_to_its_own_attachment_namespace",
+]
+disposition = "replaced-by:crates/lash-durable-test/tests/core_node_processes.rs::a_linked_childs_attachment_is_held_by_the_child_alone"
+status = "deleted"
+note = "FIG-5309 re-wrote the law through a linked child's send() on the core's node; it exposed a bug: FIG-5208 (bbffe67d98) dropped the turn commit's attachment adoption, so a durable turn's tool-written attachment stayed on its expiring upload referrer. FIG-5309 restored it in TurnBoundary::durable_commit"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/child_sessions.rs"
+test = "process_registered_during_first_durable_child_turn_remains_listable_after_commit"
+area = "child-sessions"
+needs = ["turn", "process"]
+class = "mechanical"
+lane = "L9d"
+laws = [
+  "process_registered_during_first_durable_child_turn_remains_listable_after_commit",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/declared_start.rs::spawn_agent_record_carries_child_identity"
+status = "deleted"
+note = "a child is an ordinary session (FIG-5296), so its first turn is any session's: the process a session's first turn declares is listed by the registry after the commit, with its originator and session capability"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/child_sessions.rs"
+test = "child_usage_stays_on_the_child_turn_result"
+area = "child-sessions"
+needs = ["turn", "process"]
+class = "mechanical"
+lane = "L9d"
+laws = [
+  "child_usage_stays_on_the_child_turn_result",
+]
+disposition = "replaced-by:crates/lash-durable-test/tests/core_node_processes.rs::a_childs_model_usage_stays_on_the_childs_own_turn"
+status = "deleted"
+note = "FIG-5309 re-wrote the law over a spawn_agent child and a linked child's send(), on each turn's call ledger; TurnReport::usage reads zero through send() and its law (sqlite_memory_report_usage) is #[ignore]d against FIG-5328"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/child_sessions.rs"
+test = "cached_only_child_usage_stays_on_the_child_turn_result"
+area = "child-sessions"
+needs = ["turn", "process"]
+class = "mechanical"
+lane = "L9d"
+laws = [
+  "cached_only_child_usage_stays_on_the_child_turn_result",
+]
+disposition = "replaced-by:crates/lash-durable-test/tests/core_node_processes.rs::a_childs_model_usage_stays_on_the_childs_own_turn"
+status = "deleted"
+note = "the linked child's cache-read-only call is the law's second half"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/commit_placement.rs"
@@ -1309,9 +1393,9 @@ lane = "L9d"
 laws = [
   "controller_owned_non_tool_trigger_reemission_answers_its_bound_process_without_session_nodes",
 ]
-disposition = "port"
-status = "todo"
-note = "owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail; the re-emission starts its process through process_effect: blocked: L6 (FIG-5175): ActorContext::process_effect hands its process executor to RuntimeEffectLocalExecutor::execute, which refuses every process command as RuntimeEffectLocalExecutorMismatch (lash-core-execution runtime/effect/executor.rs:1042); repro crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/executor/process_local.rs::a_process_start_issued_through_the_actor_context_registers_its_process (#[ignore]d, red)"
+disposition = "covered-by:crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs::a_held_occurrence_answers_the_capture_it_started_against_and_asks_no_route"
+status = "deleted"
+note = "a re-emitted occurrence answers the delivery its first emission started and starts nothing; the ingest, bind and process-start command counting went with the relays (FIG-5175, 4ff06e18f6), which trigger.start replaced with one transaction"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/effect/fig2471.rs"

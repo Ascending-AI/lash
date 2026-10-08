@@ -154,6 +154,7 @@ impl TurnBoundary {
                 record_ordinal += 1;
             }
         }
+        let attachments = committed_attachment_ids(state);
         let mut graph = state.pending_graph_commit();
         derive_commit_node_ids(state, &mut graph, &operation)?;
         let mut commit = RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
@@ -162,9 +163,32 @@ impl TurnBoundary {
             operation,
             commit_budget,
             fleet_format,
-        )?;
+        )?
+        .with_committed_attachments(attachments);
         commit.failure_evidence = failure_evidence.to_vec();
         commit.outcome = Some(crate::store::TurnCommitOutcome::from_terminal(outcome));
         Ok(commit)
     }
+}
+
+/// Every stored attachment the committed transcript names, a tool result's
+/// blocks and its retained outputs included: the commit holds each on the
+/// session, so what the turn wrote outlives its upload's staging referrer
+/// (ADR 0124 §4).
+fn committed_attachment_ids(state: &crate::RuntimeSessionState) -> Vec<crate::AttachmentId> {
+    let mut ids = std::collections::BTreeSet::new();
+    for message in &state.read_model().messages {
+        for part in message.parts.iter() {
+            ids.extend(
+                part.attachment_sources()
+                    .filter_map(|source| source.stored_ref())
+                    .map(|reference| reference.id.clone()),
+            );
+            ids.extend(
+                part.retained_outputs()
+                    .map(|retained| retained.reference.id.clone()),
+            );
+        }
+    }
+    ids.into_iter().collect()
 }

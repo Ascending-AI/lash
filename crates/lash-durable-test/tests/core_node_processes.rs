@@ -18,7 +18,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash_core::facade_support::ProviderHandle;
-use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, StreamBlockIdentity};
+use lash_core::llm::types::{
+    LlmRequest, LlmResponse, LlmStreamEvent, LlmUsage, StreamBlockIdentity,
+};
 use lash_core::{LlmOutputPart, ProcessEventLogTestSupport as _};
 use lash_core_execution::StoreSet;
 use lash_sansio::SessionId;
@@ -713,6 +715,280 @@ on_every_tier!(a_linked_child_behaves_like_an_unlinked_session_and_outlives_its_
 on_every_tier!(a_child_uses_exactly_its_explicit_prompt_plan);
 on_every_tier!(a_fork_starts_with_its_parents_full_configuration);
 on_every_tier!(spawned_and_related_children_start_with_the_default_prompt_plan);
+
+// --- a child's own turns ----------------------------------------------------
+
+/// The bytes a child's tool writes.
+const CHILD_BYTES: [u8; 4] = [4, 2, 4, 2];
+
+/// Writes [`CHILD_BYTES`] through its call's attachment client and answers
+/// the stored attachment, typed, so the turn's commit holds it.
+struct WriteAttachment;
+
+#[async_trait::async_trait]
+impl lash::tools::StaticToolExecute for WriteAttachment {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        let reference = match call
+            .context
+            .attachments()
+            .put(
+                CHILD_BYTES.to_vec(),
+                lash_core::AttachmentCreateMeta::new(
+                    lash_core::MediaType::parse("image/png").unwrap(),
+                    Some(lash_core::AttachmentTypeMetadata::image(Some(2), Some(2))),
+                    Some("child.png".to_owned()),
+                ),
+            )
+            .await
+        {
+            Ok(reference) => reference,
+            Err(error) => return lash_core::ToolOutcome::err_fmt(error).into(),
+        };
+        lash_core::ToolOutcome::from_output(lash_core::ToolCallOutput::success_tool_value(
+            lash_core::ToolValue::Attachment(lash_core::AttachmentSource::stored(reference)),
+        ))
+        .into()
+    }
+}
+
+/// The host tool `write_attachment`.
+fn write_attachment_tool() -> Arc<dyn lash_core::ToolProvider> {
+    use lash_core::ToolDefinitionBindingExt as _;
+    let definition = lash_core::ToolDefinition::raw(
+        "write_attachment",
+        "write_attachment",
+        "Writes a small image attachment.",
+        serde_json::json!({ "type": "object", "additionalProperties": false }),
+        serde_json::json!({}),
+    )
+    .expect("the attachment tool's schemas")
+    .with_tool_binding(lash_core::ToolBinding::new(["tools"], "write_attachment"));
+    Arc::new(lash::tools::StaticToolProvider::new(
+        vec![definition],
+        WriteAttachment,
+    ))
+}
+
+/// A linked child's turn writes its attachment for itself: the child
+/// session holds the reference its committed turn wrote, and its parent
+/// holds none.
+async fn a_linked_childs_attachment_is_held_by_the_child_alone(tier: Tier) {
+    let model = scripted(|request, _| {
+        if results(request).is_empty() {
+            call(
+                "child-attachment-call",
+                "write_attachment",
+                serde_json::json!({}),
+            )
+        } else {
+            text(request, CHILD_REPLY)
+        }
+    });
+    let deployment = deploy(tier, Vec::new(), |builder| {
+        builder
+            .serve_test_llm_profile(model, metadata())
+            .tools(write_attachment_tool())
+    })
+    .await;
+    let parent = SessionId::from("attachment-parent");
+    let child = SessionId::from("attachment-child");
+    for (id, creation) in [
+        (parent.clone(), lash::SessionCreation::root(spec())),
+        (
+            child.clone(),
+            lash::SessionCreation::child_of(parent.clone(), spec()),
+        ),
+    ] {
+        deployment.core.session(id).create(creation).await.unwrap();
+    }
+    let output = deployment
+        .core
+        .session(child.clone())
+        .durable()
+        .await
+        .unwrap()
+        .send(lash::TurnInput::text("write the attachment"))
+        .output()
+        .await
+        .unwrap();
+    assert!(output.is_success(), "{output:?}");
+    let referrers = deployment
+        .backend
+        .attachment_referrers()
+        .attachment_referrers(&lash_core::attachments::content_id(&CHILD_BYTES))
+        .await
+        .unwrap();
+    assert!(
+        referrers.contains(&lash_core::ArtifactReferrer::Session(child)),
+        "the child holds the attachment its turn wrote: {referrers:?}"
+    );
+    assert!(
+        !referrers.contains(&lash_core::ArtifactReferrer::Session(parent)),
+        "the parent holds no reference to its child's attachment: {referrers:?}"
+    );
+    drop(deployment.backend);
+}
+
+// The PostgreSQL store set these laws deploy keeps no attachment bytes.
+mod a_linked_childs_attachment_is_held_by_the_child_alone {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn on_sqlite_memory() {
+        super::a_linked_childs_attachment_is_held_by_the_child_alone(super::Tier::SqliteMemory)
+            .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn on_sqlite_file() {
+        super::a_linked_childs_attachment_is_held_by_the_child_alone(super::Tier::SqliteFile).await;
+    }
+}
+
+/// The usage a model call reports.
+fn usage(input: i64, output: i64, cache_read: i64, reasoning: i64) -> LlmUsage {
+    LlmUsage {
+        input_tokens: input,
+        output_tokens: output,
+        cache_read_input_tokens: cache_read,
+        cache_write_input_tokens: 0,
+        reasoning_output_tokens: reasoning,
+    }
+}
+
+/// `response`, reporting `usage`.
+fn reporting(response: LlmResponse, usage: &LlmUsage) -> LlmResponse {
+    LlmResponse {
+        usage: usage.clone(),
+        ..response
+    }
+}
+
+/// The usage each model call of `output`'s turn reported, in call order.
+fn call_usage(output: &lash::TurnOutput) -> Vec<LlmUsage> {
+    output
+        .result
+        .llm_calls
+        .iter()
+        .flat_map(|call| &call.attempts)
+        .filter_map(|attempt| attempt.usage.clone())
+        .collect()
+}
+
+/// Every session owns its usage: a parent turn whose `spawn_agent` child
+/// ran inside it records only its own model calls' usage, and a linked
+/// child's turn records its own, a cache-read-only call's included, on its
+/// own turn and on no other.
+async fn a_childs_model_usage_stays_on_the_childs_own_turn(tier: Tier) {
+    const CACHED_CHILD_INPUT: &str = "usage law: answer from the cache";
+    let parent_spawns = usage(11, 3, 0, 0);
+    let parent_answers = usage(5, 1, 0, 0);
+    let cached_child = usage(0, 0, 9, 0);
+    let model = {
+        let spawned_child = usage(7, 2, 4, 1);
+        let (parent_spawns, parent_answers, cached_child) = (
+            parent_spawns.clone(),
+            parent_answers.clone(),
+            cached_child.clone(),
+        );
+        scripted(move |request, transcript| {
+            if transcript.contains(CHILD_TASK) && !transcript.contains(PARENT_INPUT) {
+                return reporting(text(request, CHILD_REPLY), &spawned_child);
+            }
+            if transcript.contains(CACHED_CHILD_INPUT) {
+                return reporting(text(request, CHILD_REPLY), &cached_child);
+            }
+            if results(request).is_empty() {
+                return reporting(
+                    call(
+                        "usage-spawn",
+                        "spawn_agent",
+                        serde_json::json!({ "task": CHILD_TASK }),
+                    ),
+                    &parent_spawns,
+                );
+            }
+            reporting(text(request, PARENT_DONE), &parent_answers)
+        })
+    };
+    let deployment = deploy(tier, Vec::new(), |builder| {
+        builder
+            .serve_test_llm_profile(model, metadata())
+            .plugin(Arc::new(delegation()))
+    })
+    .await;
+    let parent = settle(&deployment.core, "usage-parent", PARENT_INPUT).await;
+    assert!(
+        format!("{parent:?}").contains(PARENT_DONE),
+        "the parent's turn ends on its own answer: {parent:?}"
+    );
+    assert_eq!(
+        call_usage(&parent),
+        vec![parent_spawns, parent_answers],
+        "the parent records its own two calls and none of its child's"
+    );
+    let child = SessionId::from("usage-linked-child");
+    deployment
+        .core
+        .session(child.clone())
+        .create(lash::SessionCreation::child_of(
+            SessionId::from("usage-parent"),
+            spec(),
+        ))
+        .await
+        .unwrap();
+    let cached = deployment
+        .core
+        .session(child)
+        .durable()
+        .await
+        .unwrap()
+        .send(lash::TurnInput::text(CACHED_CHILD_INPUT))
+        .output()
+        .await
+        .unwrap();
+    assert!(cached.is_success(), "{cached:?}");
+    assert_eq!(
+        call_usage(&cached),
+        vec![cached_child],
+        "the child's cache-read-only call is its own turn's"
+    );
+    drop(deployment.backend);
+}
+
+on_every_tier!(a_childs_model_usage_stays_on_the_childs_own_turn);
+
+/// A turn's report carries the sum of the usage its own model calls
+/// reported.
+async fn a_turn_report_sums_its_own_model_calls_usage(tier: Tier) {
+    let reported = usage(11, 3, 0, 0);
+    let model = {
+        let reported = reported.clone();
+        scripted(move |request, _| reporting(text(request, CHILD_REPLY), &reported))
+    };
+    let deployment = deploy(tier, Vec::new(), |builder| {
+        builder.serve_test_llm_profile(model, metadata())
+    })
+    .await;
+    let output = settle(&deployment.core, "report-usage", "report your usage").await;
+    assert_eq!(call_usage(&output), vec![reported], "{output:?}");
+    assert_eq!(
+        output.result.usage,
+        lash_core::TokenUsage {
+            input_tokens: 11,
+            output_tokens: 3,
+            ..lash_core::TokenUsage::default()
+        },
+        "the report sums its own call's usage"
+    );
+    drop(deployment.backend);
+}
+
+mod sqlite_memory_report_usage {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "FIG-5328: a turn read through send() reports zero usage"]
+    async fn a_turn_report_sums_its_own_model_calls_usage() {
+        super::a_turn_report_sums_its_own_model_calls_usage(super::Tier::SqliteMemory).await;
+    }
+}
 
 // --- host engines -----------------------------------------------------------
 
