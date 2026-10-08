@@ -210,7 +210,8 @@ validate against this core. So no admin surface reads an activated runtime
   active manifests (above); the execution snapshot
   (`SessionStateAdmin::snapshot_execution`), the head checkpoint's
   execution root and leaves, `None` when the head records none; the config
-  revision and catalog; trigger registrations; processes. The synchronous
+  revision and catalog; processes. Host registrations live in host storage
+  under ADR 0136. The synchronous
   `ObservableSession::tool_state` and `active_tool_manifests` answer the
   adopted head's recorded tool state when no registry is built.
 - Writes are session commands applied at the next transition: appends,
@@ -266,3 +267,5 @@ carry the outcome instead.
 Usage is data on the model call's recorded result. Hosts meter spend at the
 `Provider` seam under [ADR 0127](0127-usage-is-result-data-hosts-meter-spend.md).
 Lash has no accounting ledger or delivery dependency.
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

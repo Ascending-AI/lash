@@ -6,7 +6,7 @@ Accepted.
 
 ## Context
 
-Host input, process wakes, and session commands require durable admission,
+Host input, generic queued work, and session commands require durable admission,
 comparable ordering, idempotent settlement, and explicit cancellation outcomes.
 A frame switch's follow-on must survive any crash between the switch and the
 turn that runs it.
@@ -21,11 +21,11 @@ result; they do not own a turn's continuation.
 ### 1. The model
 
 `pending_turn_inputs` holds host input. Each `queued_work_batches` row holds
-one process wake or session command in `payload_json`; its `work_kind` CHECK
+one generic work item or session command in `payload_json`; its `work_kind` CHECK
 agrees with the payload.
 `session_ingress_sequence` allocates one per-session `enqueue_seq` across both
 admission families. The counter is allocated inside the producer transaction.
-The command lane is selected by kind; input and wakes form the turn lane.
+The command lane is selected by kind; input and generic work form the turn lane.
 
 A selected row records `admitted_run` and `admitted_by`. Run and checkpoint
 admissions are fenced writes under the session actor's epoch. The producer
@@ -49,16 +49,13 @@ Evidence: `crates/lash-core-store/src/store/admission_plan.rs:1`, `:31`, `:67`,
 
 ### 2. What stays separate, and why
 
-Process wake delivery outboxes and allocation floors belong to the process
-registry. Receiver wake-redelivery fences outlive queue rows. Turn cancellation
-is arbitrated through the keyed-promise contract of
+Product routing and schedules belong to the host under
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md). A host sends a notice only after its source fact commits,
+using `send().id(TurnId)` to make retries idempotent. Its event ledger is not
+another turn ingress. Internal actor wakes notify runtime work; they carry no
+product event or routing decision. Turn cancellation follows
 [ADR 0039](0039-turn-cancellation-is-a-first-party-work-driver-primitive.md).
-Engine lane serialization controls executing, not ingress order. The host's
-`QueuedDrainPolicy` bounds composition. None is another turn ingress.
-
-Evidence: `crates/lash-core-execution/src/runtime/process/registry.rs:112`,
-`crates/lash-core-store/src/store/admission_plan.rs:332`, and
-`crates/lash-core-execution/src/runtime/turn_queue.rs`.
+The host's `QueuedDrainPolicy` bounds generic work composition.
 
 ### 3. A frame switch mails its follow-on with its commit
 
@@ -82,7 +79,7 @@ cancels the follow-on as it cancels any queued input or running turn.
 
 A chain is bounded by the deployment's
 `ExecutionBudgetsConfig::agent_frame_switch_limit` (nonzero, default 16).
-Fresh host input and process wakes start at depth zero. The switch's mailed
+Fresh host input and host notices start at depth zero. The switch's mailed
 `TurnInput::agent_frame_switches` is its admitted depth plus one, persisted
 with the task and included in its submission digest. A claimed or resumed
 turn reads that immutable depth from its recorded admission. The follow-on
@@ -217,8 +214,8 @@ Evidence: `crates/lash-core/src/runtime/shift/admission.rs:213`,
 
 ### 5. Ordering and composition
 
-Within the turn lane, the shared `enqueue_seq` is the order; there is no input
-or wake priority. Commands are a separate lane and do not establish a turn-lane
+Within the turn lane, the shared `enqueue_seq` is the order; there is no
+producer priority. Commands are a separate lane and do not establish a turn-lane
 stop. Clock values can bound age; they cannot decide order. Lash implements no
 authentication or security policy.
 
@@ -281,13 +278,9 @@ answer.
 
 ### 6. Render order
 
-Within one turn's delivered set, host messages precede wake causes, and each
-kind preserves its sequence order. Selection order and presentation order are
-separate. A wake is not host-authored input and carries no host turn options.
-
-Evidence: `crates/lash-core/src/runtime/logical_turn.rs`,
-`crates/lash-core/src/runtime/turn_loop/commit.rs`, and
-`crates/lash-conformance/src/conformance/cancelled_turn_withheld_input.rs`.
+Admitted input and generic work keep their recorded presentation order.
+A host process notice is ordinary sent input and carries the options its host
+submitted. Product formatting belongs to that host under ADR 0136.
 
 ### 7. Admission, deferral and resume
 
@@ -308,18 +301,16 @@ Admission records an immutable submission digest. Equal source key and digest
 returns the existing item, open or terminal. A changed digest returns a typed
 content conflict for every kind, without silently adopting different content:
 `PendingTurnInputSourceKeyConflict` for input and
-`QueuedWorkSourceKeyConflict` for queued work. Wake identity covers its process
-fact (target session, process, sequence, event type, input, authority and
-cause) rather than host-configured delivery policy, merge key or delivery
-metadata. A command's digest covers the command, its delivery policy, its
+`QueuedWorkSourceKeyConflict` for queued work. A command's digest covers the
+command, its delivery policy, its
 authority and its merge key. A config transaction command's digest covers
 its id, the revision it was written against and its ordered commands, and
 the record holds nothing of the build that took it, so a resubmission from
 another build is the same request; the lane refuses a changed one as
 `ConfigSubmitError::ChangedContent`. System source-key namespaces belong to
 their item kinds.
-Admission reserves `command:` for session commands and `process:` for process
-wakes. Input and queued-work producers enforce this before deduplication or
+Admission reserves `command:` for session commands. Input and queued-work
+producers enforce this before deduplication or
 allocation, and a mixed input request is refused atomically. Plugin commands
 queue their inputs as one request, with generated keys under `input:command:`;
 an admission refusal retains its typed cause through command settlement to the host.
@@ -329,7 +320,7 @@ key, sequence, submitted delivery, digest, terminal cause, and terminal time,
 with no admission binding. A queued-work tombstone records `terminal_cause`
 and `terminal_at_ms`; an input's terminal state owns its cause and terminal time, decoded together
 from `state`, `ingress_json` and `terminal_at_ms`. Cancelled items cannot reopen on retry. Terminal causes
-distinguish delivered input or wake, applied command, stale config revision,
+distinguish delivered input or work, applied command, stale config revision,
 and cancellation.
 Open-row selection excludes tombstones. Host vacuum removes queued-work
 tombstones and withdrawn input; an input a run took keeps its tombstone
@@ -341,24 +332,12 @@ Evidence: `crates/lash-core-store/src/store/ingress_terminal.rs`,
 (`settle_admitted`, `settle_command`, `withdraw_open`, `delete_tombstones`), and
 `crates/lash-conformance/src/conformance/runtime_persistence/ingress_integrity.rs`.
 
-### 9. The floor invariant
+### 9. Host delivery identity
 
-Every terminal wake transition raises the receiver redelivery floor to at least
-its sequence in the same transaction: delivery, drop, host withdrawal, or the
-refusal of a changed process fact under the wake's process and sequence. That
-refusal stores no row and leaves the receiver's own wake untouched; its
-transaction commits the floor before `QueuedWorkSourceKeyConflict` is returned,
-so the sender can only acknowledge a conflict whose floor is durable. The two
-stores share no transaction: a sender that loses its acknowledgement retries
-and reaches the same refusal.
-`Defer` retains position and does not advance the floor. Until host vacuum a
-redelivery answers the wake's tombstone; after it, redelivery at or below the
-floor is refused `ProcessWakeSequenceRewound`. Neither recreates work. Process-owned allocation floors
-and receiver floors have distinct responsibilities.
-
-Evidence: `crates/lash-core-store/src/store/admission_plan.rs:332`,
-`crates/lash-sqlite-store/src/persistence/queued_work.rs:110`, and
-`crates/lash-postgres-store/src/postgres/runtime_persistence/queued_work.rs`.
+A product delivery uses a stable send id or host start key. The host records its result
+before pruning can remove start-key evidence. A cursor is acknowledged only
+after its page is recorded or its keyed deliveries complete. ADR 0136 owns
+this contract; queue ordering remains the session's ingress sequence.
 
 ### 10. Cancel by author
 
@@ -366,10 +345,11 @@ A turn cancel applies its accepted undelivered-input policy to host input
 addressed to that turn. `Defer` is the default and writes nothing; `Drop`
 records cancellation. Once the turn's run has terminal evidence, the run's
 terminal write has already applied the disposition, and a later teardown of
-that turn reaches no input. Other held input is released. Every held wake is deferred at its existing
-position with its floor unchanged. `TurnCancelInputOutcome` records affected
-inputs and affected wakes with their disposition. Host withdrawal may remove
-undelivered queued work, including wakes; wake withdrawal raises its floor.
+that turn reaches no input. Other held input is released.
+`TurnCancelInputOutcome` records the affected
+inputs and their disposition. Host withdrawal may remove undelivered generic
+queued work; host event records remain under the host's retention policy.
+
 Dropping an observation handle cancels nothing.
 
 Evidence: `crates/lash-core-store/src/turn_control_vocabulary.rs:54`, `:100`,
@@ -414,14 +394,15 @@ Sequence order is per-session commit order across admission families.
 Turn selection stops at the first ineligible unaddressed row; command priority
 applies only at turn boundaries. Recorded run admission survives resume.
 Scope-close work cannot retain the run's turn admission. A frame switch and
-its follow-on's mail commit together. Wake terminal writes and floor writes are atomic.
+its follow-on's mail commit together. Host deliveries follow their source
+commit and deduplicate by stable keys.
 
 ### 16. Conformance laws
 
 Conformance covers shared sequence allocation, command-lane precedence,
 contiguous turn-lane selection, run admission resume, stale-fence refusal,
 exactly one follow-on per frame switch, cancellation of withheld inputs
-and wakes, wake floors, and config compare-and-set.
+and config compare-and-set.
 
 Store tiers are SQLite file, SQLite memory, and PostgreSQL. Laws run the
 production runtime over a fault-injecting store with labelled commits, a
@@ -502,8 +483,8 @@ marker. Committed history and explicit host input supply model context.
 
 A single physical admission table is unnecessary for shared ordering and run
 binding; the existing tables share one counter and admission protocol.
-Timestamp arbitration cannot order concurrent producers reliably. Input-before-
-wake priority can starve earlier wakes. A strict command FIFO barrier delays
+Timestamp arbitration cannot order concurrent producers reliably. Producer priority can starve
+earlier work. A strict command FIFO barrier delays
 config updates and complicates checkpoints; class-level command priority keeps
 FIFO within its lane and preserves the running turn's snapshot.
 
@@ -521,6 +502,6 @@ another continuation owner; ingress and the engine supply one durable path.
 
 Order spans both admission tables. Commands precede fresh turns at boundaries.
 Recorded admission cannot widen on retry. Hosts observe durable handles, and
-wake cancellation preserves the receiver floor. Follow-ons survive worker loss
+keyed host deliveries retain their original identity. Follow-ons survive worker loss
 as mail their switch committed. Durable shape evolution follows the pre-1.0 freeze and
 [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md).

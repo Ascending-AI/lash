@@ -85,7 +85,7 @@ or identify an admitted artifact by itself.
 
 ## Code references
 
-- `crates/lashlang/src/trigger.rs:1063-1138` defines assignability.
+- `crates/lashlang/src/linker/` defines assignability.
 - `crates/lash-lashlang-runtime/src/lib.rs:492-534` preserves tool contracts.
 - `crates/lashlang/src/linker/catalog.rs:60-82` imports operation schemas.
 - `crates/lashlang/src/linker/pass_setup.rs:330-379` resolves closed schema witnesses.
@@ -93,3 +93,5 @@ or identify an admitted artifact by itself.
 - `crates/lash-typescript/src/workflow_graph/mod.rs:44-114` distinguishes draft and artifact projections.
 - `crates/lashlang/src/workflow_graph/facets.rs:12-45,389-430` defines and derives facets.
 - `crates/lashlang/src/workflow_graph.rs:174-184` discards incompatible facet data.
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

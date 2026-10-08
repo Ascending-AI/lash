@@ -13,14 +13,13 @@ also need one handle codec and one recorded settlement order.
 ### A process definition is a value
 
 A definition is a value of type `Process<(params), out>`. The process-control
-catalog supplies `processes.create`, `get`, `start`, `await`, `emit`, `signal`,
+catalog supplies `processes.create`, `get`, `start`, `await`,
 `cancel`, and `list`. Tools describe process values through their contracts.
 TypeScript async arrows are the source process literals under
 [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md).
 
-`triggers.register` is a declaring leaf tool. It validates a registration and
-declares `ToolIntent::RegisterTrigger`; realization installs the subscription.
-Other trigger administration operations use `TriggerHostOperation`.
+Hosts supply event and registration tools through ordinary tool contracts.
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns their routing, input checks and keyed delivery.
 
 Process handles retain identity in nested containers through suspension and
 snapshots. Process lifetime and identity follow
@@ -28,15 +27,14 @@ snapshots. Process lifetime and identity follow
 [ADR 0108](0108-a-process-lives-until-a-scope-its-start-could-reach.md).
 
 Evidence: `crates/lash-lashlang-runtime/src/process_create_tool.rs`,
-`crates/lash-lashlang-runtime/src/trigger_tools.rs`,
 `crates/lashlang/src/runtime/vm/continuation.rs`, and
-`crates/lashlang/src/trigger.rs`.
+`crates/lashlang/src/linker/`.
 
 ### Contracts say `Process` through one tagged keyword
 
 JSON Schema uses one tagged `x-lash` extension with
 `{ kind: "process", signature }`, `{ kind: "process_unknown" }`, and
-`{ kind: "handle", payload }` for a trigger handle. Malformed extensions are
+`{ kind: "handle", payload }` for a process handle. Malformed extensions are
 refused. A signature on a value
 is a claim; engine resolution supplies authority and refuses mismatches before
 registration, under
@@ -88,7 +86,7 @@ Lash has no named-definition registry, definition revisions, compare-and-swap,
 or replacement. Lash supplies no model operation to replace, delete, or list a
 definition catalog. Hosts own names and versions. Publication and pinning use
 `HostArtifactPin`; reads acquire no lasting pin. A content id alone retains
-nothing. Frames, process records, subscription revisions, starts, executions, and
+nothing. Frames, process records, starts, executions, and
 host pins hold the artifact closure under
 [ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md).
 Both a definition value and its tagged id can retain the closure in a frame;
@@ -121,8 +119,8 @@ The front end discovers inline async arrows syntactically. The linker accepts
 one only where the expected type contains `Process`, then hoists its declaration
 using canonical body and AST path. Other slots receive a typed refusal.
 Immutable, durably representable captured locals become hidden parameters.
-The linker infers signals from `waitSignal` sites and refuses disagreeing
-payload types. No call-site marker or trigger-receiver special case owns lifting.
+Host callbacks and approvals are deferring tool calls with checked schemas
+under ADR 0136. No call-site marker owns literal lifting.
 
 Evidence: `crates/lashlang/src/linker/process_literal.rs`, and `crates/lash-typescript/src/lower`.
 
@@ -173,3 +171,5 @@ children use durable wait rows and one recorded settlement order.
 - Process controls evolve through tool contracts and plugins.
 - Engine authority protects registration from forged signature claims.
 - Definition names and versions are host data; content and retention are Lash data.
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

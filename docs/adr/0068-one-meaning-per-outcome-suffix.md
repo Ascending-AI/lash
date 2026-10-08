@@ -36,8 +36,8 @@ a domain noun or `View`. The four answer nouns do not apply to every type.
 ### What this decision does not touch
 
 The rule governs type identifiers. Serde fields and variants are their own wire
-contract. For example, `TriggerMutationReceipt::disposition` carries a
-`TriggerMutationOutcome` without changing the serialized field name.
+contract. A receipt can carry a typed outcome without changing the name of
+its serialized result field.
 `LlmContentBlock::ToolResult` identifies a message-block variant serialized as
 `tool_result`; it is not a domain type named `ToolResult`.
 
@@ -98,11 +98,6 @@ These current types demonstrate the roles rather than recording a rename list.
 | --- | --- |
 | `TurnInputAcceptanceReceipt` | Accepted input identity before execution. |
 | `RuntimeCommitReceipt` | Durable acknowledgement of a committed operation. |
-| `TriggerDeliveryEmitReceipt` | One addressed delivery and its emission outcome. |
-| `TriggerDeliveryEmitOutcome` | Closed answer for that delivery's emission. |
-| `TriggerEmitReport` | Aggregate of delivery receipts for one occurrence. |
-| `TriggerMutationOutcome` | Closed answer for one subscription mutation. |
-| `TriggerMutationReceipt` | Recorded mutation acknowledgement, carrying its outcome. |
 | `ProcessRegistrationOutcome` | Registration's answer, including an existing registration. |
 | `ToolOutcome` | The tool body's return. |
 | `ToolCallOutcome` | The call's settlement. |
@@ -117,9 +112,9 @@ These current types demonstrate the roles rather than recording a rename list.
 ## Executable evidence
 
 - [Suffix gate](../../scripts/check_outcome_suffixes.py#L1) defines the scan,
-  public aliases, exclusions and the four allowed Result aliases: `Result`,
-  `MaintenanceResult`, `TriggerEffectResult` and
-  `TriggerOccurrenceReclamationResult`.
+  public aliases, exclusions and the allowed Result aliases
+  for retained fallible-return contracts, including `Result` and
+  `MaintenanceResult`.
 - [Role witnesses](../../scripts/test_identity_adr_claims.py#L23) pin delivery
   receipt/report nesting, registration outcomes and execution policy.
 - [Tool-body answer](../../crates/lash-core-execution/src/tool_result.rs#L382),

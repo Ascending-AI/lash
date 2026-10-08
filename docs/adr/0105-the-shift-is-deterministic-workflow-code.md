@@ -27,16 +27,14 @@ last committed state (ADR 0132 §2).
 The rule holds on every durable path, not only in the turn loop. A durable path
 is any code that can run more than once for one durable identity: a resumed
 actor activation, a retried transaction, and a duplicate or redelivered
-submission carrying the same durable identity (a signal id, a trigger
-occurrence key, a tool-intent identity, a session-command idempotency key). On
+submission carrying the same durable identity (a turn id, a host start key, a tool-intent identity, a session-command idempotency key). On
 a durable path every decision that shapes what is committed or returned comes
 from one of three sources:
 
 - a committed phase: a row of this actor (an admission, a checkpoint, a tool
   outcome, a resolved wait);
 - a recorded admission: the retained row a durable identity's first admission
-  wrote, returned by the admission itself when it coalesces (the retained
-  signal event and its wait binding, a trigger delivery's bound process, a
+  wrote, returned by the admission itself when it coalesces (a retained process registration or a
   tool-intent submission's recorded outcome, a session command's persisted
   outcome);
 - an immutable admitted input, or a pure function of the three.
@@ -57,8 +55,8 @@ first decision used (the target binding, the selected wait, the canonical
 request), and a coalesced admission returns those facts for the caller to use
 without further reads.
 
-So the process commands (start, signal, cancel, await, attach) carry their
-target and session checks inside their recorded admissions. A cancel, signal or
+So the process commands (start, cancel, await, attach) carry their
+target and session checks inside their recorded admissions. A cancel or
 await of a pruned process refuses or answers `NoLongerRetained` from the
 recorded guard or admission, and a repeated command after a prune returns what
 the first admission recorded. A host-wide cancel-all records its
@@ -321,3 +319,5 @@ For such a run, the final head transaction validates the admitted snapshot,
 the current intent and the selected cancellation request. Its cancellation
 decision is derived from durable intent and commits in the same transaction;
 observer gates are notified after the commit and cannot change its decision.
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

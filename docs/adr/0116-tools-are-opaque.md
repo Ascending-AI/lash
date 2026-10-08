@@ -39,8 +39,7 @@ The Run records Pending as a Deferred X: no rank, final decision, presentation
 or `ToolCompletion` occurs until its source supplies a terminal. A Pending
 result carries no general intents. It may name `PendingResolver::ProcessTerminal`
 or one sealed `DeclaredStart`; a plain Pending call reserves a key for an
-external completion. An idempotency-keyed `PendingAnnouncement` is progress metadata
-and does not wake the session blocked on that call.
+external completion. Hosts keep progress metadata in their own records under ADR 0136.
 
 #### 1.3 Declaration and admission
 
@@ -73,12 +72,12 @@ retry. Lash-owned effects use declared intents and their exactly-once fences.
 
 #### 1.6 Duration and isolation
 
-An inline attempt carries an `ExecutionLimit` recorded before its body
-starts; a Pending call's wait carries a `WaitDeadline` (ADR 0132 §7). An
-inline execution declared above `tool_ceiling` is refused at registration with
-`RegistrationRefused::InlineBudgetExceedsCeiling`. Long work is a process
-tool, an isolated tool on a host engine, or a Pending tool, each with a
-bounded inline prefix and a wait deadline. A body also owns its transport
+Every tool manifest declares a host-set `execution` bound for its body. A
+Pending-capable tool also declares a separate `park` bound, `Within(Duration)`
+or `UntilScopeEnd`, under ADR 0136. Admission records both; takeover refreshes
+neither. Lash supplies no default or tool ceiling. Long work is a process
+tool, an isolated tool on a host engine, or a Pending tool, each with an
+explicit body bound and, when it can defer, a park bound. A body also owns its transport
 timeout. A slow body is never stopped and rerun as a process. An explicit
 isolated declaration binds and admits a supported process implementation
 before any ordinary body runs. Independent lifetime alone does not prove hard
@@ -237,7 +236,7 @@ process id, child session id and the assembled turn. `FinalValue { schema }`
 returns the final value, terminal tool value or trimmed assistant text,
 validated against the optional schema. A frame switch or stopped child has a
 typed failure; process cancellation and child failure retain their typed
-outputs. The trigger definition fingerprint includes the result projection.
+outputs. The process definition carries its result projection.
 
 #### 3.8 What the host sees
 
@@ -310,7 +309,7 @@ cancel and immutable completion and authority.
 #### 7.4 Compile-fail fixtures
 
 Facade compile-fail fixtures in `crates/lash/tests/ui/` pin the attempt's missing
-controller, recursive dispatch, session mutations, trigger commands, process events,
+controller, recursive dispatch, session mutations, arbitrary process events,
 the unnameable runtime context, provider-only registration, the sealed declared
 start and a pending outcome without ordinary intents.
 
@@ -334,3 +333,5 @@ recovery. Independent attempts supply parallel execution without nested body
 dispatch. `batch` costs no executable wrapper execution, while its model
 presentation remains one call and result. A host's delegation tool uses the same
 declared start path as any other start.
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

@@ -86,7 +86,7 @@ manifest binding resolution to a typed `ResolvedToolBinding` under the manifest
 key `lash.tool`, transport, finish and retry copy assembled from the
 vocabulary and cell tags, and the `code` stream message that carries a cell's
 source. `RlmDialectServices` carries session resources rather than source
-semantics: artifact storage, deferred tool and trigger resolvers, trace
+semantics: artifact storage, deferred tool resolvers, trace
 configuration, the worker service, execution bounds, the renderer and the
 session's cell or native-tool channel. The native-tool channel has no cell delimiter.
 
@@ -159,3 +159,5 @@ upcasters or compatibility readers (FIG-3846). ADR 0115 governs the 1.0 cut.
   [the lens tests](../../crates/lash-typescript/tests/workflow_graph.rs).
 - `shared_binding_list_and_record_literals_stay_shared_after_snapshot_round_trip`
   in [the continuation tests](../../crates/lashlang/src/runtime/tests/continuation_wire_cases.rs).
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

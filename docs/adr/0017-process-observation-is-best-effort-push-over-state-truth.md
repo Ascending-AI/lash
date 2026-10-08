@@ -24,12 +24,14 @@ when live replay reports a gap.
 
 ## Rules and guarantees
 
-`emit` returns `()`: a sink cannot fail or roll back the committed write. The decorator awaits emission inline, so sink implementations must return promptly and offload I/O. Observers attach to the shared watched registry through `add_event_sink`. A `ProcessEventSinkRegistration` detaches its sink when dropped. Deployment wrapping can also provide an initial sink.
+The sink's `emit` returns `()`: a sink cannot fail or roll back the committed write. The decorator awaits emission inline, so sink implementations must return promptly and offload I/O. Observers attach to the shared watched registry through `add_event_sink`. A `ProcessEventSinkRegistration` detaches its sink when dropped. Deployment wrapping can also provide an initial sink.
 
-Retention is host-scheduled through `prune_terminal_processes(cutoff, filter, watermark)` under ADR 0023. It removes eligible retired rows and events and retains typed tombstone evidence. The facade coordinates cross-store trigger cleanup. A late read can report `ProcessNoLongerRetained`; after tombstone compaction the id can be unknown. Host retention windows must cover every reader that still awaits a retained process.
+Retention is host-scheduled through `prune_terminal_processes(cutoff, filter, watermark)` under ADR 0023. It removes eligible retired rows and events and retains typed tombstone evidence. A late read can report `ProcessNoLongerRetained`; after tombstone compaction the id can be unknown. Host retention windows must cover every reader that still awaits a retained process.
 
 ## Why and consequences
 
 A durable push feed is rejected because it duplicates the durable log's buffering and recovery responsibilities. Routing terminal waits through the sink is rejected because missed delivery must not strand a waiter. Stores stay state interfaces; decorators add freshness and local change ticks. Sink lifetime follows the observer registration, while retained state remains available independently of that observer.
 
 [Watched registry and registrations](../../crates/lash-core-execution/src/runtime/process/awaiter.rs), [event emission](../../crates/lash-core-execution/src/runtime/process/awaiter/registry_support.rs) and [retention contract](../../crates/lash-core-execution/src/runtime/process/registry_concerns.rs) implement the split.
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

@@ -24,8 +24,7 @@ when no edge remains. A content id alone retains nothing.
 
 The vocabulary and cleanup protocol belong to
 [ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md).
-`ArtifactReferrer` names a frame environment, process record, subscription
-revision, start, execution, host pin, definition revision, session, or
+`ArtifactReferrer` names a frame environment, process record, start, execution, host pin, definition revision, session, or
 upload. Stores decode each kind/id pair through its canonical encoding and
 refuse malformed or unknown vocabulary.
 
@@ -60,3 +59,5 @@ inputs; cleanup requires reader end evidence.
 - Reclamation follows exact edges and end fences.
 - Compilation and publication have separate responsibilities.
 - Every backend implements atomic publication and cleanup.
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

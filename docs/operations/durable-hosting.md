@@ -42,7 +42,7 @@ runner over a store set:
   its own on one machine ([§3](#3-sqlite-is-one-file)).
 
 Work enters through the facade (`LashSession::send`, process starts,
-signals, trigger occurrences, `Completions::resolve`). Each write commits a
+`Completions::resolve`). Each write commits a
 mailbox row and wakes the actor that owns the work. Whichever node owns that
 actor runs it. A host never drives a turn itself: there is no handler, effect
 controller or work driver for it to call.
@@ -288,7 +288,7 @@ skew does not move deadlines.
 ## 3. SQLite is one file
 
 A SQLite deployment is **one database file**. It holds the session catalog,
-the process registry, the trigger store and the durability core, so one
+the process registry and the durability core, so one
 transaction commits rows of every family
 ([Deploying and upgrading](deploying-and-upgrading.md#choose-the-deployment-shape)).
 
@@ -354,24 +354,22 @@ action runs.
   replay.
 - **There is no `run`.** There is no opaque run method, no `await_terminal`
   and no re-entry from the top. No trait method has a default body.
-- **Effects are actions.** `EngineAction` has eight variants:
+- **Effects are actions.** `EngineAction` has seven variants:
 
   | Action | Lash does | `advance` next receives |
   | --- | --- | --- |
   | `Steps(Vec<StepRequest>)` | Admits every step (started rows) in the transaction, then runs them. Non-empty. | One `StepSettled { step, outcome }` per step |
-  | `PinKey { name, kind, deadline }` | Mints a host-resolvable wait (`HostWaitKind::ToolCompletion` or `Custom`) and its key. | `KeyPinned { name, key }` at once |
+  | `PinKey { name, kind, bound }` | Mints a host-resolvable wait (`HostWaitKind::ToolCompletion` or `Custom`) and its key. | `KeyPinned { name, key }` at once |
   | `AwaitExternal { name }` | Waits on a key pinned earlier. | `ExternalResolved { name, resolution }` or `ExternalTimedOut { name }` |
-  | `AwaitProcess { process, deadline }` | Waits on another process's terminal. | `ProcessEnded { process, outcome }` or `ProcessWaitTimedOut { process }` |
+  | `AwaitProcess { process, bound }` | Waits on another process's terminal. | `ProcessEnded { process, outcome }` or `ProcessWaitTimedOut { process }` |
   | `Sleep { until }` | Sets a durable due time. | `Woke` |
   | `Idle` | Nothing, with no deadline. | The next mailbox event |
-  | `Emit { event_type, payload }` | Appends one process event in the same transaction. | `Emitted` at once |
   | `Terminal(ProcessOutcome)` | Ends the process. | Nothing |
 
-  `Signal(ProcessSignal)` and `Cancelled { origin, grace_until }` can arrive
-  whenever the process is waiting. `Started { payload }` is the first event.
+  `Cancelled { origin, grace_until }` can arrive whenever the process is waiting. `Started { payload }` is the first event.
 - **Steps.** `StepRequest::Tool { step, tool, input }` names a catalog tool.
   Its declaration's `ExecutionPolicy` (`Once` or `Repeatable`) and a limit
-  within the tool ceiling are pinned at admission. Its body runs through the
+  set by the host are pinned at admission. Its body runs through the
   admitted-execution primitive: a started row first, then the body. A crash
   then gives the usual result. A started `Once` step without an outcome
   settles `Interrupted` and never runs again. A `Repeatable` step runs again
@@ -395,16 +393,13 @@ action runs.
   `Repeatable` step runs again, and a pinned key names one wait for its whole
   life. An external system that receives work keys it on the `ToolCallId` or
   the key, so a re-sent request is recognized.
-- **Waits are bounded.** `PinKey` and `AwaitProcess` take an optional deadline.
-  With none, the wait gets `wait_default`; above `wait_ceiling` the action is
-  refused. Today the process activation reads these from
-  `ExecutionBudgets::default()` (1 h, 24 h), not from the core's configured
-  budgets. An `AwaitProcess` races the awaiter's own cancel mail, so a cycle of
-  processes awaiting each other stays cancellable.
+- **Wait bounds are host-set.** `PinKey` and `AwaitProcess` take an explicit `bound: ParkBound`
+  the host declares, with no wait default or ceiling. The configured execution
+  budgets govern the running work. An `AwaitProcess` races the awaiter's own
+  cancel mail, so a cycle of processes awaiting each other stays cancellable.
 - **Refused actions end the process.** A `Steps` with no request, a step name
-  already in flight, an `AwaitExternal` for a key never pinned, a deadline
-  above the ceiling or a refused step admission ends the process with a
-  `process_action_refused` failure.
+  already in flight, an `AwaitExternal` for a key never pinned or a refused
+  step admission ends the process with a `process_action_refused` failure.
 - **Cancel is cooperative, then forced.** A running or waiting process
   receives `Cancelled { origin, grace_until }` once. `grace_until` is the
   committed cancel request's time plus the engine's `cancel_grace()`, recorded
@@ -443,7 +438,7 @@ the key.
 
 ```text
 TURN    run_full_suite admitted -> its body starts process P (kind "ci") -> durable wait on P
-P       Started            -> PinKey { name: "done", kind: Custom, deadline: 45 min }
+P       Started            -> PinKey { name: "done", kind: Custom, bound: Within(45 min) }
         KeyPinned { key }  -> Steps([Tool { step: "submit", tool: "ci.submit",
                                             input: { suite, key } }])     ci.submit is Once
         StepSettled(Completed) -> AwaitExternal { name: "done" }           P releases as waiting
@@ -453,6 +448,7 @@ TURN    the wait on P resolves -> model -> commit
 ```
 
 ```rust,ignore
+use lash::tools::ParkBound;
 use std::time::Duration;
 use lash::plugins::{
     EngineAction, EngineEvent, EngineState, EngineStateFormat, HostWaitKind, KeyName,
@@ -508,7 +504,7 @@ impl ProcessEngine for CiEngine {
                 EngineAction::PinKey {
                     name: done(),
                     kind: HostWaitKind::Custom,
-                    deadline: Some(Duration::from_secs(45 * 60)),
+                    bound: ParkBound::Within(Duration::from_secs(45 * 60)),
                 },
             ),
             (Ci::Pinning { suite }, EngineEvent::KeyPinned { key, .. }) => (
@@ -614,7 +610,7 @@ keep keys out of logs and URLs others can read.
 | `Unknown` | No wait has this key. Nothing was written. |
 | `Revoked` | The key's wait was revoked, or timed out, first. Nothing was written. |
 
-Hosts resolve only the `tool_completion` and `custom` kinds. Signals, turn
+Hosts resolve only the `tool_completion` and `custom` kinds. Turn
 cancellation, process terminals, timers and child-session ends have their own
 admission paths, and a host resolution of them answers `ReservedKind`. Lash
 applies no authorization of its own: authenticate and authorize the caller
@@ -631,13 +627,9 @@ validates an `ExecutionBudgetsConfig`:
 
 | Field | Default | Bounds |
 | --- | --- | --- |
-| `tool_default` | 2 min | One inline tool execution whose manifest declares no duration (`ExpectedExecution::Default`). |
-| `tool_ceiling` | 5 min | The longest inline execution a tool may declare. |
 | `model_total` | 10 min | One model call, over throttle, backoff and every provider attempt. |
 | `control_phase` | 60 s | One admission or checkpoint phase, all its checks together. |
 | `stop_grace` | 2 s | Spent once after a stretch ends at its limit or on cancel, to collect evidence. |
-| `wait_default` | 1 h | A deferred or external wait with no declared deadline. |
-| `wait_ceiling` | 24 h | The longest deferred or external wait. |
 | `provider` | see below | `ProviderAttemptLimits` |
 
 `ProviderAttemptLimits::new(per_request, response_start, chunk_idle,
@@ -648,34 +640,36 @@ remaining `model_total`.
 `new` refuses with `ExecutionBudgetsError`:
 
 - `OutOfRange`: a bound below 1 ms or above `MAX_EXECUTION_BUDGET` (30 days);
-- `DefaultExceedsCeiling`: `tool_default` above `tool_ceiling`,
-  `wait_default` above `wait_ceiling`, `provider.per_request` above
+- `DefaultExceedsCeiling`: `provider.per_request` above
   `model_total`, or a provider sub-bound above `per_request`;
-- `SumOverflows`: a stretch plus its grace, or `wait_ceiling` plus
-  `tool_ceiling`, exceeds the maximum;
+- `SumOverflows`: a stretch plus its grace exceeds the maximum;
 - `UnboundedRetry`: `max_attempts` is 0 or above `MAX_PROVIDER_ATTEMPTS` (16).
 
 Limits are recorded before their work starts and never refreshed. A nested
 stretch takes `min(own, enclosing remaining)`. An expired limit found on load
 settles at once.
 
-### The inline ceiling
+### Tool bounds are host declarations
 
-A tool that can only finish inline and declares more execution than
-`tool_ceiling` is refused at registration with
-`RegistrationRefused::InlineBudgetExceedsCeiling { tool, declared, ceiling, hint }`.
-Long work takes one of three shapes, each with a bounded inline prefix and a
-wait deadline:
+Every tool definition calls `with_execution(Duration)` to supply its required
+body bound. The manifest records `execution`. A tool that can defer also
+calls `with_park(ParkBound)`, either `Within(Duration)` or `UntilScopeEnd`; a
+non-deferring tool supplies none. Registration refuses a missing bound as
+`MissingBound { tool, bound }`, or
+a park on a non-deferring tool as `ParkWithoutDeferral { tool }`. Admission
+of an ungated manifest refuses as `ToolAdmissionRefusal::Bounds`.
+Lash defaults neither bound and caps neither with a tool or wait ceiling.
 
-- **A process tool:** the declaration's intents include `StartProcess`; the
-  tool starts a process (for example the [CI engine](#worked-example-a-40-minute-ci-suite))
-  and the call waits on it.
-- **An isolated tool:** `ToolDeclaration::isolated`; the call runs on a host
-  engine.
-- **A Pending tool:** `ToolDeclaration::may_defer`; the call defers and an
-  external system resolves it with its completion key.
+The body bound ends the running body. The park bound is independent, so a
+human approval can outlive a short tool body. Admission computes a bounded
+park's deadline once and records it; recovery and takeover do not refresh it.
+`UntilScopeEnd` has no deadline and is revoked when the owning scope ends.
+An expired park settles `TimedOut` with a wait cause, distinct from a body
+timeout. Hosts set engine wait bounds explicitly too.
 
-Nothing is promoted at runtime: the declaration decides.
+Long work can use a declared process start, an isolated tool on a host engine,
+or a Pending-capable tool whose external work settles through its completion
+key. Nothing is promoted at runtime: the declaration decides.
 
 ## 7. Projection providers
 
@@ -786,12 +780,44 @@ to `limit` non-terminal processes whose lifetime is `Until` the scope or one
 of its descendants. Empty means the subtree has ended. There is no durable
 "scope settled" fact in 1.0.
 
-**Concurrent signals are unordered.** Signals reach `advance` as
-`EngineEvent::Signal` in mailbox order per sender. Two senders racing have no
-defined order. A host that needs an order across senders puts a sequence in
-the payload and orders in its engine.
+**Host event ordering is host policy.** The host records callbacks and due ticks
+in its own ledger and decides their order before keyed delivery. Lash orders
+accepted session input through its ingress; it does not order product events
+from independent producers.
 
-## 9. Provider credentials
+## 9. Events, routing and scheduling
+
+[ADR 0136](../adr/0136-the-host-owns-events-routing-and-scheduling.md) defines
+the host-events contract. Approvals and callbacks use deferring tools with
+completion keys, a stable `call_id` and caller context. Process-end notices use
+committed lifecycle cursor reads followed by `send().id(TurnId)`. Hosts own
+trigger registrations, source provisioning, input mappings, timers and enabled
+state, and deliver process starts with `with_host_start_key` after committing
+the occurrence or tick. A start-args check validates partial mappings at
+registration and complete arguments at delivery against the definition's
+signature. The host chooses the started process's tools explicitly and keeps
+its definition pinned while its registration needs it.
+
+Delivery from the host comes after the commit, deduplicated by keys. Persist
+unfinished deliveries and reconcile them after a restart. Record a start's
+returned process binding before permitting pruning: a start key deduplicates
+only while its process is retained, and Lash has no host delivery receipt
+table. A later duplicate consults the host's saved binding.
+
+The process lifecycle log has a closed vocabulary: started, waiting with
+`call_id` and `tool_id`, resumed, effect outcome, effect omissions, cancel
+requested, observer added and removed, external reference set, and succeeded,
+failed, cancelled or abandoned. Waiting facts carry no completion key. Hosts
+reconcile retained process and turn cursors, acknowledging a page only after
+recording it or completing its idempotent actions. Best-effort observation is
+freshness; it does not replace reconciliation.
+
+The [workbench approval tool](../../examples/agent-workbench/src/approvals.rs)
+and [host routes and timers](../../examples/agent-workbench/src/main_sections/)
+show these patterns. Internal actor notifications and `NodeWakes` remain
+runtime transport; they do not route product notices.
+
+## 10. Provider credentials
 
 Lash runs no OAuth. The host owns login, refresh, rotation and secret
 storage, and gives each provider a `lash::provider::TokenSource`. Lash keeps

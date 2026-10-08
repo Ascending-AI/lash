@@ -62,7 +62,7 @@ justify its reclamation.
 | Reference-edge class | Owner | Reclaim trigger |
 | --- | --- | --- |
 | `checkpoint_blob_refs` / `lash_checkpoint_blob_refs` | The session-owned checkpoint root named by `checkpoint_ref` | Deleting an unreferenced root cascades its edges in the owning transaction. Explicit global repair also severs edges of roots held by no retained revision before deleting any component blob. |
-| Artifact referrer edge | The exact frame, process, subscription, start, execution or host pin holding it | Severance by that referrer; artifact cleanup can free the descriptor after the last edge disappears. An id stored without an edge retains nothing. |
+| Artifact referrer edge | The exact frame, process, start, execution or host pin holding it | Severance by that referrer; artifact cleanup can free the descriptor after the last edge disappears. An id stored without an edge retains nothing. |
 
 ### 2. Terminal-before-reclaimable
 
@@ -76,24 +76,13 @@ Both SQL backends guard reclaim markers with named CHECK constraints.
 A parent-end plan's `settled_at_ms` requires its batched cancellation cascade
 to have reached every child; a plan whose cascade cursor still has children
 remains retained. The batch that finishes the cascade arms the marker
-atomically (ADR 0132 §11). A subscription change's `deleted_at_ms`
-requires the tombstoned lifecycle in its retained JSON record. Missing lifecycle
-tags cannot satisfy that guard under SQL NULL semantics.
+atomically (ADR 0132 §11).
 
-A fired trigger occurrence belongs to its committed delivery fan-out. A
-zero-match fan-out is complete at ingest; a matched fan-out waits until its
-last delivery ends and the retained delivery rows can be removed. The absence
-of surviving delivery rows authorizes the occurrence cascade.
+Host product records follow the host's own delivery and retention contract
+under ADR 0136. Lash retains lifecycle and call settlement evidence; it does
+not own the product's event ledger.
 
-A non-fired occurrence is factory-owned audit history, not a delivery-free fired
-occurrence. Delivery-fan-out retention cannot select it. The explicit
-`TriggerStore::prune_non_fired_occurrences(cutoff_epoch_ms)` operation removes
-only non-fired rows recorded strictly before the host's cutoff. The factory has
-no terminal frontier, so the host states that audit-retention decision each
-time. `audit_retained_count` reports retained audit rows without making a
-completed sweep incomplete.
-
-### 3. Scope-split trigger topology
+### 3. Scope-split storage topology
 
 Owner-scoped reclamation runs in the owning transaction. Factory-wide work runs
 only through explicit host-invoked maintenance. Session deletion reclaims its
@@ -101,27 +90,15 @@ eligible rows and unreferenced blobs while retaining protected receipts under
 ADR 0023. A failed cascade fails the delete. A session transaction does not
 silently become a whole-catalog blob sweep.
 
-#### Trigger-store ownership map
-
 | Row class and scope | Owner | Reclaim trigger |
 | --- | --- | --- |
 | Process definition artifact | Its exact referrers | Cleanup after the last referrer edge is severed. Host names and versions belong in host storage. |
-| Session subscription | Registering session | The deleted-session frontier and zero remaining deliveries. A tombstone remains a `Revive` fence while that session can still speak. |
-| Host or platform subscription tombstone | Host or platform namespace | Permanent name fence; the namespace has no deleted-session frontier or purge lever. |
 | Session ingress tombstone | Its session | Host vacuum after its terminal transition, or session deletion. A command retains its first receipt and applying operation key until vacuum. |
-| Session mutation receipt | Registering session's retry eligibility | The host retention lever under ADR 0023 once its owner is durably deleted and no outstanding delivery names it. |
-| Host or platform mutation receipt | Namespace retry eligibility | The host retention lever under ADR 0023, by age alone. |
-| Fired occurrence | Committed delivery fan-out | Transactional reconciliation after zero delivery rows remain. |
-| Non-fired occurrence | Factory audit history | Explicit non-fired audit cutoff, never delivery reconciliation. |
-| Occurrence tombstone | Factory redelivery fence for one reclaimed occurrence identity | Explicit host deletion through `forget_trigger_tombstones(written_before_epoch_ms)`, after the host vouches that its source stops redelivering the selected identities. Reclaim never deletes these tombstones (ADR 0021, FIG-4610). |
-| Trigger delivery | Process run | Process-retention policy under ADR 0021. |
 | Attachment condemnation | Factory condemnation protocol | Adoption and discharge under §6. |
 
-Trigger reconciliation deletes exact terminal delivery candidates, then applies
-occurrence and deleted-session subscription cascades in one transaction. A
-failure rolls the transaction back. Receipts whose owner cannot be established
-from their retained record remain protected; an irreversible hashed receipt key
-is not evidence for assigning an owner.
+Host event records and their retention are outside this storage topology.
+The host records a process binding before pruning may remove a keyed start's
+result, and explicitly holds any definition needed between starts (ADR 0136).
 
 #### Host tool-intent ledger
 
@@ -137,7 +114,7 @@ admitted or realized again (FIG-1509).
 | Row or payload | Owner | Reclaim trigger |
 | --- | --- | --- |
 | Retained event payload | Process history readers selected by the host | Explicit prefix release under ADR 0023, or terminal process pruning. |
-| Released event metadata and digest | Process idempotency and signal-ordinal evidence | Terminal process pruning. Prefix release keeps these fences. |
+| Released event metadata and digest | Process lifecycle identity evidence | Terminal process pruning. Prefix release keeps these fences. |
 | Process event horizon | The retained process | Process deletion cascades the horizon. |
 | VM snapshot | The process actor | Replaced by the next snapshot revision, or terminal process pruning. |
 | Run records and phase rows | The owning turn or process actor | A turn's rows are pruned by its turn commit; a process's are compacted into its next snapshot, or pruned with the process. |
@@ -287,9 +264,8 @@ coverage at the reclamation boundary.
   and [retention counts](../../crates/lash-core-store/src/store/retention.rs#L15)
   implement §4. [Outcome laws](../../crates/lash-conformance/src/conformance/store_maintenance_outcome.rs#L1)
   cover failures and witnessed emptiness.
-- [Trigger retention contract](../../crates/lash-core-execution/src/triggers.rs#L1693)
-  and [audit cutoff](../../crates/lash-core-execution/src/triggers.rs#L1940)
-  separate fired fan-out and non-fired history.
+
+
 - [Sweep](../../crates/lash-core-store/src/attachments.rs#L819),
   [enumeration outcomes](../../crates/lash-core-store/src/attachments.rs#L883),
   [SQLite liveness](../../crates/lash-sqlite-store/src/attachments.rs#L299),
@@ -303,3 +279,5 @@ coverage at the reclamation boundary.
 - [Complete attachment root collector](../../crates/lash-core-store/src/attachments/root_enumeration.rs).
 - [Reclamation enumeration witnesses and partial-scan laws](../../crates/lash-core-store/src/store/enumeration.rs).
 - [Skipped-kind and truncated-page laws](../../crates/lash-conformance/src/conformance/attachment_referrers.rs).
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

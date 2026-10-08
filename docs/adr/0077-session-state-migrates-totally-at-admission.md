@@ -46,7 +46,7 @@ supply those facts; there is no separate child compatibility gate.
 
 ### Record counters remain codec discriminators
 
-Head, checkpoint, component, wake, and protocol counters remain independent.
+Head, checkpoint, component and protocol counters remain independent.
 The owning readers apply their format guards within the recorded fleet window.
 A compatible session marker does not authorize ignoring a record's own guard.
 `scripts/versioned-surfaces.toml` and `lash::formats` identify the formats the

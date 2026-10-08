@@ -24,8 +24,7 @@ retries preserve `ToolCallId`, while `attempt_number` identifies the attempt
 (ADR 0117). Authors key external idempotency on the logical call id.
 
 `Done` carries terminal output and ordered `ToolIntents`. `Pending` cannot
-carry general intents. It may carry a `PendingAnnouncement`, appended by the
-runtime at park time, or exactly one same-session `DeclaredStart` through its
+carry general intents. It may carry exactly one same-session `DeclaredStart` through its
 pending resolver. The Run records the declaration's recoverable launch obligation and its
 pre-admission cancellation decision. A non-final attempt's
 declarations are discarded.
@@ -97,3 +96,5 @@ preparation or execution; it is not a store-dependent start-admission verdict.
 - [Pending declarations](../../crates/lash-core-execution/src/tool_result.rs) and [pending launch](../../crates/lash-core-execution/src/tool_dispatch/pending_resolver.rs).
 - [Final recording and intent drain](../../crates/lash-core-execution/src/tool_dispatch/run_coordinator/drain.rs).
 - [Run final-or-cancel arbitration](../../crates/lash-core-store/src/tool_run/run_event.rs).
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

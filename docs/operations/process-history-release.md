@@ -2,8 +2,8 @@
 
 FIG-3482 investigates retained history across execution segments. The
 post-1.0 sweep authorizes implementing a necessary stored horizon before
-the 1.0 cut. This inventory was checked against main `f9dfed0c61` and the
-release implementation. SQLite file, SQLite memory and PostgreSQL are
+the 1.0 cut. This inventory describes lifecycle history under
+[ADR 0136](../adr/0136-the-host-owns-events-routing-and-scheduling.md). SQLite file, SQLite memory and PostgreSQL are
 storage tiers.
 
 Hosts call `Processes::release_events(process_id, through)` to release an
@@ -18,26 +18,20 @@ does not make process-owned rows prune-eligible.
 
 | Record | Growth and readers | Existing cleanup owner | Effect of event release |
 | --- | --- | --- | --- |
-| Process events | One row per producer emit, signal or lifecycle transition. Replay matching, pages, event awaiters and observation summaries read them. | Terminal process pruning deletes the log. A running process previously had no release lever. | Strips selected payloads; retains ordering, invocation, semantics, admitted signal binding and replay fences. |
-| Effect-summary events | At most eight individually recorded occurrences per effect node; later occurrences accumulate omission counts. Pending summaries travel in segment state until a boundary write. Producer emits and signals have no such cap. | Runtime incorporation writes events in the next boundary's transaction; terminal pruning owns their rows. | Releases committed payloads. Suffix snapshots report their summary incomplete. Pending summaries stay untouched. |
-| Segment handovers and start markers | Each successor records a continuation, route, generation and execution-start fence. Normal retirement removes consumed handovers. Rows can coexist while retirement is owed or fails. | Engine-owned journaled resume and retirement; terminal pruning removes survivors. | Nothing. The successor continuation and start marker remain replay authority. |
-| Wake delivery rows | A wake-producing event adds a row with its own content. Claim, enqueue and discard update it. Settled rows stay process-owned; the outbox contract has no running-process deletion. | Process deletion cascades the rows. Owed wakes prevent terminal pruning; discarded wakes permit explicit redrive. | Nothing. Release preserves content and claims, including pending work. These rows can also accumulate during a long process. |
-| Wake allocation and receiver floors | One monotonic floor per process and target session, independent of queue-row lifetime. | Session/process-state cleanup and receiver terminal transitions. | Nothing. Event sequences and floors never reset. |
+| Process events | One row per typed lifecycle transition. Replay matching, pages, event awaiters and observation summaries read them. | Terminal process pruning deletes the log. Hosts explicitly release running-process history. | Strips selected payloads; retains ordering, invocation and lifecycle identity fences. |
+| Effect-summary events | At most eight individually recorded occurrences per effect node; later occurrences accumulate omission counts. Pending summaries travel in committed execution state until a boundary write. | Runtime incorporation writes events in the next boundary's transaction; terminal pruning owns their rows. | Releases committed payloads. Suffix snapshots report their summary incomplete. Pending summaries stay untouched. |
 | Process record, wait, cancellation and outcome | Current state replaces the record; its values can be large. | Lifecycle writes and terminal pruning. | Nothing. Outcomes stay awaitable. Cancellation retains its special replay-matching payload. |
 | Child processes, parent-end plans and consumer holds | Each child and retained obligation is independently owned. A captured started-child set may grow. | Existing parent-end settlement, hold release and terminal pruning. | Nothing. Event age cannot prove child work or a consumer obligation dead. |
-| Triggers and mutation receipts | Deliveries follow their process; receipts fence retries. Occurrence accounting has its own terminal frontier. | Trigger reconciliation and explicit eligible receipt/tombstone maintenance, under ADRs 0021 and 0067. | Nothing. The process id remains stable, preserving delivery linkage. |
 | Session history, inputs and commit receipts | Child-session turns can retain graph nodes, revisions, receipts and input identity evidence. | Shared reachability, session deletion, vacuum and eligible evidence retention, under ADRs 0047 and 0023. | Nothing. Release neither compacts conversations nor releases history pins. |
 | Attachments, artifacts and process environments | Bytes follow live referrers and may outlive the event mentioning them. | Referrer cleanup and attachment GC, under ADRs 0113 and 0124. | Nothing. Releasing JSON does not authorize deletion of referenced bytes. |
-| Live program and Run state | VM stacks, values, aggregate prefixes, unseated finals, source seals, material, state frontier, capacity and owed starts/cancels cross segments. | Run consumption, protected drain, dependency release and identity-fenced retirement under ADRs 0025 and 0099. | Nothing. Age cannot discard live state; Closing is not garbage collection. |
+| Live program and Run state | VM stacks, values, aggregate prefixes, unseated finals, source seals, material, state frontier, capacity and owed starts/cancels survive takeover. | Run consumption, protected drain, dependency release and identity-fenced retirement under ADRs 0065 and 0099. | Nothing. Age cannot discard live state; Closing is not garbage collection. |
 
 Evidence: [event SQL](../../crates/lash-store-sql/src/process/events.rs),
 [append and replay matching](../../crates/lash-core-execution/src/runtime/process/validation.rs),
 [effect accounting](../../crates/lash-core-execution/src/runtime/process/effect_summary.rs),
 [snapshot SQL](../../crates/lash-store-sql/src/durable/snapshots.rs),
-[wake SQL](../../crates/lash-store-sql/src/process/wake_deliveries.rs),
 [outbox and retention contracts](../../crates/lash-core-execution/src/runtime/process/registry_concerns.rs),
 [SQLite pruning](../../crates/lash-sqlite-store/src/process_registry_change.rs),
-[trigger maintenance](../../crates/lash-core-execution/src/triggers.rs) and
 [row ownership](../adr/0067-durable-rows-name-one-owner-and-one-reclaim-trigger.md).
 
 ## Exact release contract
@@ -54,7 +48,7 @@ duration or payload bytes. Hosts can select smaller incremental horizons.
 `released_events` counts rows crossing the horizon, including the cancellation
 event whose special payload stays. It does not count reclaimed bytes.
 
-Each row keeps its sequence, type, key, invocation, signal binding, semantics
+Each row keeps its sequence, typed lifecycle kind, key, invocation
 and timestamp. SHA-256 over the existing canonical JSON identity leaf replaces
 the payload. An equal-key retry supplies and verifies that payload and gets
 the recorded metadata with it. Changed type or payload conflicts. Cancellation
@@ -69,7 +63,7 @@ resume at the reported horizon. Required event awaits refuse typed
 `ProcessEventsReleased`. Snapshots fold the retained suffix and report
 `HistoryReleased`. The optional wait-start timestamp lookup first uses the
 stored current wait, then searches the retained suffix, with its existing
-diagnostic timestamp fallback. Signal identity and ordinal stay unchanged.
+diagnostic timestamp fallback. Call identity stays unchanged.
 
 The schema adds `process_events.released_payload_digest` and
 `process_event_horizons(process_id, released_through)`, with PostgreSQL's
@@ -83,7 +77,7 @@ Evidence: [release types and digest](../../crates/lash-core-execution/src/runtim
 [host API](../../crates/lash/src/process_admin.rs),
 [snapshot fold](../../crates/lash/src/process_observation.rs),
 [event awaits](../../crates/lash-core-execution/src/runtime/work/awaiter.rs) and
-[signal-wait timestamp](../../crates/lash-lashlang-runtime/src/process.rs).
+[process wait projection](../../crates/lash-core-execution/src/runtime/process/validation.rs).
 
 ## Safety and ownership
 
@@ -101,14 +95,14 @@ Terminal pruning's projection watermark keeps its separate contract.
 
 Lash protects execution dependencies by preserving them. Continuations,
 admission, pending summaries, Run aggregates and source seals, cancellation
-state, signal promises, process work, trigger linkage, holds and wake content are outside
-release. Counts include released signal rows, so a successor cannot reuse an
-ordinal. Recorded engine steps replay their recorded answers. An old segment
-or native Run attempt retrying an unrecorded append still has its digest fence. Hosts
+state, parked calls, process work and holds are outside release. Recorded
+engine steps read their committed answers. A resumed phase retrying an
+uncommitted append still has its digest fence. Product records and notice
+delivery belong to the host under ADR 0136 and are outside this event log. Hosts
 submit work through `send()` and the engine; release executes no turn.
 
 Deleting rows would require proof that every writer stopped replaying its
-keys and replacement signal-ordinal evidence. Storage has neither proof.
+keys. Storage has neither proof.
 No TTL, registration retention field, automatic cleaner, successor process
 or `ContinuedAsNew` terminal is added.
 
@@ -133,21 +127,19 @@ this fixture. This is an event-log reproduction, not a many-segment engine
 storage benchmark. It proves payload reclamation and retained fence growth,
 not bounded total storage.
 
-Released metadata and wake rows survive while the process is retained. Live
+Released lifecycle metadata survives while the process is retained. Live
 program state and child session history follow their own contracts. A total
-storage bound needs new proof about dead replay keys, signal-count preservation
-and settled-wake redrive eligibility. Today's store contract supplies none.
+storage bound needs new proof about dead lifecycle identities and live-state retention. Today's store contract supplies none.
 
 ## Validation cases
 
 The [store law](../../crates/lash-conformance/src/conformance/process_registry/event_release.rs)
-checks typed expiry, tails, equal-key and conflicting replay, signal counts,
+checks typed expiry, tails, equal-key and conflicting retry,
 monotonic allocation, clamping and repetition on all three storage tiers.
 The [facade law](../../crates/lash/src/process_observation/tests.rs) checks the
 read gap, cursor and incomplete fold.
 
 Transaction serialization and rollback above are source reasoning. Crash-reopen
-release transactions, concurrent append/release stress, pending-wake redrive
-after release and a many-segment live-retention benchmark remain useful cases.
+release transactions, concurrent append/release stress and a many-segment live-retention benchmark remain useful cases.
 They were not added to this unit's minimal gate. The task report distinguishes
 executed tests from these cases.

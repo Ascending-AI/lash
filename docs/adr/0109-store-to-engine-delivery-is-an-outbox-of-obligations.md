@@ -181,7 +181,6 @@ writes the mailbox row and the wake, so nothing is owed after it commits.
 | Scope close | The run or process terminal | The terminal transaction itself | Committed with the terminal |
 | Parent end | `parent_end_plans` with a cascade cursor | The terminal transaction | Each batch commits; the cursor reaches the last child (ADR 0132 §11) |
 | `SessionDelete` | `session_meta` obligation | The close acknowledgement | Physical storage deletion completes (§4) |
-| Trigger delivery | `trigger_deliveries` | The emission's transaction, with the start and binding | Committed with the reservation |
 | Process start | `processes`, a runnable actor row | The start's transaction | Committed with the registration |
 | Process terminal | `processes`, `process_terminal` wait rows | The terminal transaction, which resolves the waits | Committed with the terminal |
 | `ArtifactCleanup` | `artifact_cleanup_obligations` | Referrer end or guarded staging | Referrer cleanup completes |
@@ -204,8 +203,7 @@ and another node claims it and resumes from committed state (ADR 0132 §3).
 There is no lost-run or lost-process scan. An actor whose claims make no
 progress parks with `ActivationLoop`.
 
-Evidence: `crates/lash-core-execution/src/runtime/trigger_delivery.rs`,
-`crates/lash-sqlite-store/src/process_registry/registration.rs` and
+Evidence: `crates/lash-sqlite-store/src/process_registry/registration.rs` and
 `crates/lash-core-execution/src/runtime/vocabulary.rs`.
 
 ## 4. Two-phase session delete
@@ -224,7 +222,7 @@ scope close commit together; the parent-end cascade proceeds in batches after
 them.
 
 Physical delete waits retryably while the session's parent-end cascade is
-unfinished. It removes process-session state and subscriptions, revokes
+unfinished. It removes process-session state, revokes
 waits, prunes the session's phase rows and deletes storage last. Storage
 delete removes the owning obligation row. Every preceding step is idempotent;
 a failed attempt leaves the obligation owed for another attempt. The permanent
@@ -335,3 +333,5 @@ Evidence: `crates/lash-core-store/src/store/session_fault.rs`,
 Usage is data on the model call's recorded result. Hosts meter spend at the
 `Provider` seam under [ADR 0127](0127-usage-is-result-data-hosts-meter-spend.md).
 Lash has no accounting ledger or delivery dependency.
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

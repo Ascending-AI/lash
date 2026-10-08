@@ -98,7 +98,7 @@ per resume. Any count above its bound fails the law.
   state reloads from rows. It is never patched.
 - **`ActorTx` and `MailTx`.** An `ActorTx` is fenced and may write the actor's
   state rows. A `MailTx` is what every other writer gets: it appends to an
-  actor's mailbox (inputs, signals, cancel requests, wait resolutions,
+  actor's mailbox (inputs, cancel requests, wait resolutions,
   parent-end) and wakes the actor, and has no owner-state writers. The two are
   distinct types, so the compiler enforces the split.
 - **Crash loops.** A claim with no phase progress since the previous claim
@@ -155,8 +155,7 @@ The execution record splits into a start and an outcome.
   without an outcome runs again at the same ordinal, uncounted. A retry is a
   record with a due time; the next attempt takes the next ordinal.
 - **Store-local effects commit with the tool result.** A built-in tool whose
-  effect is a lash store write (process start, trigger create or delete,
-  signal send, child session spawn, the store half of intent realization)
+  effect is a lash store write (process start, child session spawn, the store half of intent realization)
   performs that write in the transaction that records its outcome. Its effect
   is exactly once. A tool's plugin-state resolutions are such an effect: they
   ride its outcome record and publish into the resident namespace only from
@@ -173,7 +172,7 @@ The execution record splits into a start and an outcome.
 ### 6. Waits and timers are rows
 
 - **Wait rows.** A wait is a row with a kind, an owner actor, an owner scope
-  for revocation and a deadline written once at creation. The row exists from
+  for revocation and an optional deadline written once at creation. The row exists from
   minting, so a resolution that arrives before the owner awaits finds it.
 - **First winner.** Resolution is a conditional update from `pending`. A
   second resolution with the same digest answers `AlreadyResolved`; with a
@@ -186,8 +185,8 @@ The execution record splits into a start and an outcome.
   signatures), so it hands a key only to callers it has authorized
   (FIG-5217). The key carries no scope or kind. Hosts resolve only the `tool_completion` and `custom` kinds; a
   host resolution of any other kind answers `ReservedKind` and writes nothing.
-  Signals, turn cancellation and process terminals have their own admission
-  paths.
+  Turn cancellation and process terminals have their own admission paths.
+  Host events settle deferring calls through completion keys under ADR 0136.
 - **Timers are due times.** A durable sleep is a timer wait row, a backoff is
   a retry record, and every deadline is a column. A waiting actor carries the
   earliest due time; the ordinary claim picks it up and commits the timer
@@ -210,14 +209,14 @@ journal-engine window.
 - `ExecutionLimit` and `WaitDeadline` are recorded before their work starts,
   never refreshed, and nested limits take `min(own, enclosing remaining)`.
   An expired deadline found on load settles at once.
-- `ExecutionBudgets` holds `tool_default`, `tool_ceiling`, `model_total`,
-  `control_phase`, `stop_grace`, `wait_default`, `wait_ceiling` and the
-  provider attempt limits. `commit_margin`, `schedule_margin`,
-  `abort_backstop` and the per-handler timeout table are deleted.
-- An inline execution declared above `tool_ceiling` is refused at registration
-  with `RegistrationRefused::InlineBudgetExceedsCeiling`. Long work is a
-  process tool, an isolated tool on a host engine, or a Pending tool, each
-  with a bounded inline prefix and a wait deadline.
+- `ExecutionBudgets` holds model, control-phase, stop-grace and provider
+  attempt limits. Tool execution and park bounds are explicit host-provided
+  manifest data under ADR 0136, with no Lash default or ceiling. Engine waits
+  likewise require their own bound.
+- Long work is a process tool, an isolated tool on a host engine, or a Pending
+  tool. Body and park bounds are independent. A bounded park's deadline is
+  fixed at admission; an `UntilScopeEnd` park is revoked by scope end.
+
 - Recipients deduplicate external work on the lash-minted `ToolCallId`, which
   is stable across `Repeatable` ordinals under
   [ADR 0117](0117-lash-names-every-tool-call.md).
@@ -272,30 +271,27 @@ fn advance(&self, state: EngineState, event: EngineEvent)
 
 enum EngineAction {
     Steps(Vec<StepRequest>),                         // admitted executions of catalog tools
-    PinKey { name: KeyName, kind: HostWaitKind, deadline: Option<Duration> },
+    PinKey { name: KeyName, kind: HostWaitKind, bound: ParkBound },
     AwaitExternal { name: KeyName },                 // a key pinned earlier
-    AwaitProcess { process: ProcessId, deadline: Option<Duration> },
+    AwaitProcess { process: ProcessId, bound: ParkBound },
     Sleep { until: DurableInstant },
     Idle,                                            // until the next mailbox event
-    Emit { event_type: ProcessEventType, payload: serde_json::Value },
     Terminal(ProcessOutcome),
 }
 ```
 
-- A step names a catalog tool: its declaration's `ExecutionPolicy` and a limit
-  within the tool ceiling are pinned at admission, and its body runs through
+- A step names a catalog tool: its declaration's `ExecutionPolicy` and a host-set
+  body bound are pinned at admission, and its body runs through
   the admitted-execution primitive (§5). There is no `perform`.
-- The new state and the action's admission (its started rows, its wait row or
-  its event) commit in one `process.advance` transaction before the action
-  runs. The engine state lives in the snapshot store under `p/<pid>`.
+- The new state and the action's admission (its started rows or its wait row)
+  commit in one `process.advance` transaction before the action runs. The engine state lives in the snapshot store under `p/<pid>`.
 - `advance` performs no effects; effects happen only as actions. When the
   commit did not happen, the next pass calls `advance` with the same state and
   event, which is recomputation from committed state.
 - Events come from rows, at most one per transaction: `Cancelled` (once),
-  `Started`, the immediate answer to `PinKey` (`KeyPinned`) or `Emit`
-  (`Emitted`), a step's `AttemptOutcome` under the §5 recovery rules, a signal
-  from the mailbox, a resolved or timed-out wait, a process terminal, a sleep's
-  end.
+  `Started`, the immediate answer to `PinKey` (`KeyPinned`),
+  a step's `AttemptOutcome` under the §5 recovery rules, a resolved or
+  timed-out wait, a process terminal, a sleep's end.
 - There is no opaque `run`, no `await_terminal` and no re-invocation of host
   code from the top. No trait method has a default body.
 - Cancellation is cooperative first. A running or waiting process receives
@@ -324,14 +320,14 @@ enum EngineAction {
   stays runnable until the cursor is drained. No single statement walks a
   large tree. A parent's terminal does not mean its subtree is quiescent:
   `live_until_descendants` reads what is still live.
-- A process-to-process wait is a bounded `process_terminal` wait raced against
+- A process-to-process wait is a `process_terminal` wait with an explicit host-set bound raced against
   the awaiter's own cancel mail, so a cycle of waits is cancellable.
 
 ### 12. The outbox keeps two kinds, and SQLite is one database file
 
 Every cross-actor message is a mailbox write plus a wake in the producer's
-transaction. Ingress, control intents, scope close, parent-end, trigger
-delivery, process start and process terminal stop being relayed obligations.
+transaction. Ingress, control intents, scope close, parent-end,
+process start and process terminal stop being relayed obligations.
 Two kinds remain:
 
 - `SessionDelete`, as durable deferred work in the closing session actor;
@@ -339,7 +335,7 @@ Two kinds remain:
   [ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md).
 
 The relay, claim tokens, re-arm and stall machinery of the other kinds are
-deleted. On SQLite the process registry and triggers move into the one
+deleted. On SQLite the process registry and durability core share the one
 database file of the deployment, so every producer transaction spans every
 table it writes.
 
@@ -428,3 +424,5 @@ format does, under [ADR 0106](0106-durable-formats-upgrade-by-migration-or-drain
 - `/workspace/notes/lash/prospect-substrate/verify.md`
 - `/workspace/notes/lash/prospect-substrate/framing.md`
 - `/workspace/notes/lash/prospect-longwork/spec-v3.md` Parts B, C and E
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

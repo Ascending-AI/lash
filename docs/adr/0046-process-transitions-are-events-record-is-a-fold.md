@@ -15,19 +15,15 @@ order as individual appends would, then saves the record once.
 
 ## Rendering and visibility
 
-Wake subscription and observers are edge state, not lifecycle fields.
-`wake_session_id` is indexed routing truth.
-`process.subscription_retargeted` records its audit event, while retargeting
-updates the edge and discards eligible pending deliveries transactionally.
-Observer-added and observer-removed events audit the
-`process_observers(session_id, process_id)` relation without changing process
-lifecycle or extending retention.
+Observers are edge state, not lifecycle fields. Observer-added and
+observer-removed events audit the `process_observers(session_id, process_id)`
+relation without changing lifecycle or extending retention. The closed
+lifecycle vocabulary is defined by ADR 0136.
 
-Session deletion removes its observer edges and wake routing while retaining
-process execution. It is a bulk session-lifecycle fact, not a fan-out of
-per-edge events for a deleted endpoint. Process pruning removes child edges
-with the process. Single-use session ids prevent delete-and-reuse ambiguity
-(ADR 0049).
+Session deletion removes its observer edges while retaining process execution.
+It is a bulk session-lifecycle fact, not a fan-out of per-edge events for a
+deleted endpoint. Process pruning removes child edges with the process.
+Single-use session ids prevent delete-and-reuse ambiguity (ADR 0049).
 
 Rendering distinguishes a retained row, a host projection with its mandatory
 prune watermark and a typed `NoLongerRetained` outcome. An absent retained
@@ -50,35 +46,14 @@ selection; history position and writer provenance do not select observers.
 A factory-scoped `ProcessToolVisibilityFilter` applies only after observer
 visibility, to session process tools. It is synchronous, infallible and
 narrow-only; core intersects its returned ids with visible candidates. It
-does not govern admin reads, projections, wake delivery, cleanup or pruning.
+does not govern admin reads, projections, host routing, cleanup or pruning.
 A run-local handle can address its process independently of the session tool
 filter.
 
-Input and process wakes compose under ADR 0101's FIFO admission policy.
-Per-item merge metadata is not a composition gate. Wake delivery has its own
-ownership token; retargeting discards work that has not entered delivery,
-while a reclaimed in-flight delivery retains its original target. A stale
-claimant cannot settle a successor's delivery. Typed delivery reports and
-explicit redrive preserve host decisions about discarded ordering barriers.
-
-Each claimed wake is attempted independently. Expiry is checked before reading
-its source process, so an unreadable source cannot prevent expiry or a sibling's
-delivery. A permanent source-read failure records the typed `source_unreadable`
-discard. A transient failure releases its claim with bounded backoff; the next
-attempt never moves beyond the original expiry. If a settlement write fails,
-only that row waits for claim lapse, and the rest of the claimed page continues.
-These delivery outcomes do not change the source process's lifecycle.
-
-A `SourceUnreadable` head remains an ordering barrier. After repairing the
-source, the host calls `redrive_wake_delivery` with the delivery id named by
-`wake_delivery_report`.
-
-A delivery whose process fact differs from the wake its receiver already holds
-under the same process and sequence records the typed `content_conflict`
-discard, once the receiver has refused it and raised its redelivery floor
-(ADR 0101 §9). Like `sequence_rewound`, it is not an ordering barrier: later
-deliveries in its group proceed, and it is never retried. Transient receiver
-faults still release the claim with backoff.
+The host chooses destinations and sends process notices only after their
+source facts commit. It deduplicates each send with a stable turn identity;
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns delivery and retention. Observer relationships do not
+route a notice or start a turn.
 
 Pruning and tombstone compaction require an explicit
 `ProjectionWatermark::{UpTo, NoProjector}` choice. Session deletion does not
@@ -98,8 +73,8 @@ a second transition. First-writer and write-once constraints are checked before
 projection. Every registry must pass the record-refolding conformance law.
 
 The best-effort event sink is observation; the durable event log is the
-reconciliation source. Event-page consumers ignore unknown event kinds so
-additional runtime facts remain additive. Counted observer receipts are
+reconciliation source. Stored lifecycle facts are a closed typed vocabulary; malformed facts are
+refused rather than interpreted as producer-defined events. Counted observer receipts are
 rejected because visibility does not own process retention.
 
 ## Implementation
@@ -108,3 +83,5 @@ rejected because visibility does not own process retention.
 - [SQLite event transaction](../../crates/lash-sqlite-store/src/process_registry/support.rs) and [PostgreSQL event transaction](../../crates/lash-postgres-store/src/postgres/process_helpers.rs).
 - [Registry concerns, visibility and retention](../../crates/lash-core-execution/src/runtime/process/registry_concerns.rs).
 - [Record-fold law](../../crates/lash-conformance/src/conformance/process_registry.rs).
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

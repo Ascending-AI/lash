@@ -60,9 +60,6 @@ The following were not executed and are covered here only:
 | 6 | Turn loop commit: `turn_loop/commit.rs:681,738` | Commit callbacks are served from the journal on replay, "no callback runs again (K10)" | covered for the head (`turn.commit`); needs a phase record (L3) for callbacks | The head CAS, the revision and the terminal are one transaction, published once (P7, observed). Callback results ride `turn.commit` |
 | 7 | Logical turn: `logical_turn.rs` follow-ons (FIG-3157) and `turn_loop/follow_on_recovery.rs` | A follow-on physical turn is recovered by redriving the logical run | needs a phase record (L3) | A follow-on is a new admitted turn (`turn.admit`) carrying the withheld work as its input. `RecoverFollowOn` is deleted (row 26 below) |
 | 8 | The shift: `shift.rs:1-5`, `shift/admission.rs:18,77,164,223-267` | The root nonce and the admission receipt are journaled, so a retry never re-selects. Redrive intents gate admission | needs a phase record (L3s) | The session mail drain commits selection and sealing in its own transaction. A retry reads the committed rows and never re-runs selection. A redrive intent becomes mail |
-| 9 | The shift: `shift/turn_config.rs:12-54` | The resolved config is keyed by the run's replay key, and a redrive replays it | pure once L3s writes it | The admission row carries the resolved config binding. A restore decodes it and reads no live config |
-| 10 | The shift: `shift/close.rs:6` | A replay acknowledges the recorded close | needs a phase record (L6b) | Session close is its own phase transaction |
-| 11 | `RunCoordinator`: `tool_dispatch/run_coordinator.rs:1-41,170-190` | A/X/D/V records are appended "in program order, so a replay serves them in the order they were recorded". `EffectReplayDivergence` guards the replayed decode | needs a phase record (L4, FIG-5174) | `round::{admit, run_body, settle, fold}`: rows fold to `RunFold` state, and nothing re-runs to regenerate them. V0 shows the `Once` case: an unsettled `x_start` folds to `Interrupted`, committed under `round.outcome` (K1). The drain's rank order becomes phase records (`round.present+model.start`) |
 | 12 | `RunCoordinator`: `run_coordinator/parallel.rs:49-302` | Concurrent attempts keep a recorded schedule that a replay walks | needs a phase record (L4) | Each member of a round is admitted at ordinal 1+2i with its outcome at 2+2i (`round::member_ordinal`). The fold reads members by ordinal, never by schedule |
 | 13 | `tool_dispatch/production.rs:339,470,620-640,1212,1297` | "Replay consults X's recorded outcome" in place of a live token. The attempt runs inside a replayable step body | covered for `Once` (V0); needs a phase record (L4) for the model tool-call path | `run_body` runs a body only after its admission commits, at most once per admission (P1). The outcome commits under `round.outcome`. The stop watch is the cancel token on the admitted execution |
 | 14 | RLM executor: `lash-protocol-rlm/src/native/driver.rs:372-460` (`handle_exec_result`, `projection_rehydration`) | None in itself: it interprets an `ExecResponse` | pure | Its driver state is inside the machine checkpoint. The response it receives is the cell's `Ended` result, read from state |
@@ -85,10 +82,7 @@ These classes refine I0's routing table in `substrate-seams.md` (which method ow
 | 6 | `Direct` | needs a phase record | L4: an admitted execution of the calling tool's body |
 | 7 | `ToolAttempt` | covered (`Once`, V0 executed); needs a phase record for the model tool-call path | `cell.snapshot+admit` (`x_start`), `round.outcome`; L4 |
 | 8 | `PresentToolResult` | needs a phase record | L4: `round.present+model.start` |
-| 9 | `Trigger` | needs a phase record | L4: a store-local effect of the settled outcome. V0's `settle` refuses store-local effects until then |
-| 10 | `IngestTriggerOccurrence` | needs a phase record | L4: as `Trigger` |
-| 11 | `AdmitTriggerDelivery` | needs a phase record | L4: as `Trigger` |
-| 12 | `Process` | needs a phase record | L6: store-local start and signal, a wait for await, mail for cancel |
+| 12 | `Process` | needs a phase record | L6: store-local start, a wait for await, mail for cancel |
 | 13 | `ExecCode` | covered | `cell.snapshot+admit`, `round.outcome`, `cell.snapshot` (V0 executed, P2 to P6) |
 | 14 | `AcceptTurnInput` | needs a phase record | L3s: `turn.accept` |
 | 15 | `ObserveDrainMark` | deleted | a drain is a release at a committed phase (L11) |
@@ -108,7 +102,7 @@ These classes refine I0's routing table in `substrate-seams.md` (which method ow
 | 29 | `SyncExecutionEnvironment` | pure (V0); needs a phase record (L3) for plugin-driven syncs | the sync result lands in the checkpoint's `environment`; `turn.prepare` |
 | 30 | `LoadExecutionEnv` | needs a phase record | L6: admitted execution |
 | 31 | `Sleep` | needs a phase record | L5: a pinned timer row |
-| 32 | `AwaitEvent` | deleted | FIG-5216: no path issued it; a process takes a signal as its mail |
+| 32 | `AwaitEvent` | deleted | FIG-5216: no path issued it; outside events settle host-resolvable waits under ADR 0136 |
 | 33 | `PeekAwaitEvent` | deleted | FIG-5216, with `AwaitEvent` |
 | 34 | `LanguageRuntimeValue` | deleted | values live in the VM heap snapshot (`cell.snapshot`) |
 

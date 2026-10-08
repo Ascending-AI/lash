@@ -46,7 +46,6 @@ as specified by
 [ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md).
 
 Evidence: `crates/lashlang/src/ast.rs:219`, `:1252`, `:1354`,
-`crates/lashlang/src/trigger.rs:1100`,
 `crates/lashlang/src/linker/pass_validation.rs:4`, `:415`,
 `crates/lashlang/src/artifact.rs:273`, `:334`, `:1053`, and
 `crates/lash-core-execution/src/runtime/process/definition.rs:417`.
@@ -63,3 +62,5 @@ those contradictions.
 - Zero, scalar, outer-named object, and multi-parameter callables use one type.
 - Host schemas can describe a callable without fabricating a shape.
 - A forged claim cannot authorize registration of a different executable.
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

@@ -15,7 +15,7 @@ The named integrator classes are:
 
 ### 1. Store implementors
 
-Store implementors provide persistence, deployment-store, process, trigger,
+Store implementors provide persistence, deployment-store, process,
 attachment and artifact contracts and need their signature types.
 
 ### 2. Projection-provider implementors
@@ -126,3 +126,5 @@ import scanning, the feature-plan check and compile-fail fixtures.
 - [Import scanning](../../scripts/check_facade_only_examples.py),
   [feature plan](../../scripts/check_feature_coverage.py), and
   [compile-fail fixtures](../../crates/lash/tests/ui.rs).
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

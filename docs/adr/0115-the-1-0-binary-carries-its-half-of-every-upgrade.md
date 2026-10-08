@@ -231,8 +231,8 @@ changed plugin-state component and recorded config, a created or forked
 session's config, and a process execution environment's config. The guarded
 transaction admits them before its first write, and a stamp outside its
 plugin's range refuses `PluginWriterOutsideRange` with nothing published. A
-malformed range refuses `PluginWriterRangeMalformed`. Process rows and
-trigger targets hold an environment's content reference, never a namespace.
+malformed range refuses `PluginWriterRangeMalformed`. Process rows hold an environment's content reference, never a namespace.
+Host registrations choose tools and pin definitions explicitly under ADR 0136.
 
 Ranges are provisioned from plugin registrations. Inside a rollback window a
 provisioned plugin is permitted its oldest writable format; once `F` is the
@@ -492,3 +492,5 @@ readable by the older build, while finalize fences its writers. Rollback needs
 only nodes that decode the stored formats. Operators use one binary with
 stable DTOs and exit codes. A compatibility release carries its predecessor's
 readers, writer pins and recovery operations before it uses newer formats.
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

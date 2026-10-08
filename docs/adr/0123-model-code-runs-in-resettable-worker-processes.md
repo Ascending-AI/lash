@@ -73,8 +73,7 @@ interface borrows:
   different request is refused and leaves the run suspended.
 - `VmContinuation` carries `resume: VmResumePoint`: `NextInstruction`, or
   `ReissueOperation { operation, loop_phase }` when the continuation must
-  issue an operation again. A signal wait restored from a snapshot reissues
-  its wait. A run parked while awaiting an effect (section 8) reissues the
+  issue an operation again. A run parked while awaiting an effect (section 8) reissues the
   resource operation, resource-operation batch, process await or sleep it
   was waiting on: the VM rewinds to the operation's instruction, pushes its
   operands back, restores any pending-request entries a batch consumed,
@@ -89,7 +88,7 @@ interface borrows:
   run's expired functions. Resuming checks that the instruction pointer
   stands on the operation the discriminant names.
 - A resume may answer a parkable effect request (a resource operation, a
-  batch, a process await, a sleep or a signal wait) with `VmResume::Park`. The run suspends
+  batch, a process await, a sleep) with `VmResume::Park`. The run suspends
   into `VmStep::Parked` with `VmParkReason::AwaitingEffect`, and the parent
   resumes it later from the continuation with the effect's outcome. A run
   that cannot suspend there asks `VmRequest::ParkDeclined` and stays
@@ -108,7 +107,7 @@ pins the loop phase.
 ### 4. Authority stays with the parent
 
 The worker holds the guest heap, roots and scratch, and nothing else. The
-parent holds the grants and their `execution_binding`s, trigger routes,
+parent holds the grants and their `execution_binding`s,
 ordinals, incorporation, pending-summary and group ledgers, and `ToolCallId`
 derivation (ADR 0117). It authorises every effect request against the
 admitted execution context: a worker's identity, receiver bytes or claimed
@@ -121,8 +120,7 @@ policy.
   unchanged fragments). Both deny unknown fields, so a capture that names a
   grant is refused. Deferred tool outcomes have one durable home in the
   recorded resolution. The parent keeps an in-memory `DeferredLink`
-  while executing the cell; the snapshot carries no copy. The root takes
-  `deferred_trigger_resolutions` from the parent's own state.
+  while executing the cell; the snapshot carries no copy. Product event records remain in host storage under ADR 0136.
 - A process body's worker returns the VM bytes of its continuation only;
   the body's ledgers stay in the parent's envelope.
 - Laws: `rlm_worker_envelope_carries_no_grant_or_binding` (a sentinel in an
@@ -262,7 +260,7 @@ belongs to the transport, which reports a silent worker as
   broker does not serve yet. A refused request takes no ordinal. The broker
   serves resource operations, batches, awaits, sleeps and cancel
   checkpoints. The shipped adapters also serve prints, finishes, failures,
-  process events and signal waits through their admitted runtime hosts.
+  admitted host tool calls for product events under ADR 0136.
 - **The parent owns every counter.** `ParentLedger` gives each admitted
   request the next ordinal and derives its `ToolCallId`s through
   `CodeCallIdentities` (ADR 0117 §2), the one derivation both Lashlang
@@ -536,3 +534,5 @@ The native laws in `crates/lash-vm-worker/tests/pool_laws.rs`
 `one_slot_cell_that_starts_and_awaits_a_process_completes` in
 `crates/lash-protocol-rlm/src/executor/tests/one_slot_process_await.rs`
 pin this behaviour.
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

@@ -11,13 +11,13 @@ cell and native transport need different execution instructions.
 TypeScript is the RLM authoring dialect under ADR 0096. Render one tool catalog
 as typed declarations with descriptions and parameter/return notes. Preserve
 the host's distinction between structured results and strings. The host section
-contains host operations, constructors, data types, and trigger sources.
+contains host operations, constructors and data types.
 Catalog operations do not appear there a second time. Reserved internal `__`
 modules remain hidden.
 
 Teaching follows the selected catalog, host environment, and prompt features.
 Process teaching depends on process catalog membership. Sleep depends on its
-host ability. Trigger teaching requires declared trigger sources. Image,
+host ability. Host event teaching follows the host tools actually enabled under ADR 0136. Image,
 decomposition, and continuation instructions follow their configured features
 and catalog. The features and abilities a prompt teaches are the ones the
 session recorded at creation, not the opening deployment's (FIG-4398, ADR
@@ -57,3 +57,5 @@ Prompt rendering does not change the catalog's dispatch or durable identity.
 - `crates/lash-protocol-rlm/src/driver/history.rs` and `crates/lash-protocol-rlm/src/native/history.rs` render iteration tails.
 - `crates/lash-protocol-rlm/src/rlm_support.rs:320` explains actual variable truncation.
 - `crates/lash-protocol-rlm/src/prompt_contract_tests.rs` pins capability and transport teaching.
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

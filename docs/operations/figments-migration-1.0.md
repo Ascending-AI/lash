@@ -6,7 +6,8 @@ defines the 1.0 surfaces each row moves to.
 
 The sites were read from Figments `origin/main` at `8ac063f58a`. That tree
 pins lash at `fa443796` (2026-08-25), which still ships `lash-restate`. The
-checklist covers the durable substrate only. Other facade changes since that
+checklist covers the durable substrate and host event ownership under
+[ADR 0136](../adr/0136-the-host-owns-events-routing-and-scheduling.md). Other facade changes since that
 pin appear only where they touch these sites.
 
 Each row is marked:
@@ -55,8 +56,8 @@ otherwise ([D1](#decisions)). The rows below are the lash parts only.
 
 | Done | Site | Today | On 1.0 | Mark |
 | --- | --- | --- | --- | --- |
-| [ ] | <a id="backend-construction"></a>B1 `apps/lash-runtime/src/main.rs:403` | Connects `PostgresStorage` through `figments_lash_postgres::connect_postgres_storage` (`crates/figments-lash-postgres/src/storage_pool.rs:11`), then hands out each store separately (`session_store_factory`, attachments, artifacts, env store, process registry, trigger store, `:460`–`:487`). | Build one `lash::postgres::PostgresStoreSet::new(&storage, attachments)` and one `Backend` with `DurableBackendBuilder::new(stores).config(..).build()`. The store ports come from the backend. | contract change |
-| [ ] | `apps/lash-runtime/src/engine.rs:33` | `build_process_worker_core` builds a process `LashCore` with `.store_factory`, `.child_store_factory`, `.attachment_store`, `.process_env_store`, `.effect_host`, `.process_work_driver`, `.trigger_store` and `.live_replay_store`. | `LashCore::builder(backend)`; the store, effect-host and work-driver setters are gone. | mechanical |
+| [ ] | <a id="backend-construction"></a>B1 `apps/lash-runtime/src/main.rs:403` | Connects `PostgresStorage` through `figments_lash_postgres::connect_postgres_storage` (`crates/figments-lash-postgres/src/storage_pool.rs:11`), then hands out each store separately (`session_store_factory`, attachments, artifacts, env store and process registry, `:460`–`:487`). | Build one `lash::postgres::PostgresStoreSet::new(&storage, attachments)` and one `Backend` with `DurableBackendBuilder::new(stores).config(..).build()`. The store ports come from the backend. | contract change |
+| [ ] | `apps/lash-runtime/src/engine.rs:33` | `build_process_worker_core` builds a process `LashCore` with `.store_factory`, `.child_store_factory`, `.attachment_store`, `.process_env_store`, `.effect_host`, `.process_work_driver`, `.live_replay_store`. | `LashCore::builder(backend)`; the store, effect-host and work-driver setters are gone. | mechanical |
 | [ ] | `apps/lash-runtime/src/turns.rs:712` | `run_agent_turn` builds a fresh `LashCore` per work item, with that item's provider, model, `max_turns` and plugins, over the shared Restate effect host. | One `LashCore` per node over one `Backend`. Per-turn provider, model and limits move into the session's `SessionSpec` and the send's `RunSpec`. Another node may run the turn, so nothing a turn needs may live only in the per-item core. | contract change |
 | [ ] | `apps/lash-runtime/src/main.rs:208` | `RuntimeIdentity::from_env` (`LASH_RUNTIME_INSTANCE_ID`, else `HOSTNAME`, set to the pod name) and a fresh incarnation UUID at `:209`. | Serve the lash node as `NodeId` = the pod name. Each pod start is a new boot; two live pods must never share a name. | mechanical |
 | [ ] | `apps/lash-runtime/src/main.rs:456` | `InMemoryLiveReplayStore` per pod; live streams are served by the pod that owns the turn. | A turn runs on whichever node claims its session, and moves on failover. Use one shared live replay store, `lash::postgres::PostgresLiveReplayStore`. | contract change |
@@ -70,15 +71,15 @@ runs ([guide §1](durable-hosting.md#no-engine-server)).
 
 | Done | Site | Today | On 1.0 | Mark |
 | --- | --- | --- | --- | --- |
-| [ ] | `apps/lash-runtime/src/work_items.rs:174` | `LashWorkItem`, a Restate virtual object, runs each work item in-process with `RestateRuntimeEffectController::new(ctx)` (`:203`). | Lash work is a `send()` on the session (agent turns) or a facade call (process start, cancel, signal, trigger emit). A Figments object may still sequence work items, but must not run a turn inside its handler (D1). | decision needed |
+| [ ] | `apps/lash-runtime/src/work_items.rs:174` | `LashWorkItem`, a Restate virtual object, runs each work item in-process with `RestateRuntimeEffectController::new(ctx)` (`:203`). | Lash work is a `send()` on the session (agent turns) or a facade call (process start or cancel, and completion resolution). A Figments object may still sequence work items, but must not run a turn inside its handler (D1). | decision needed |
 | [ ] | `apps/lash-runtime/src/work_items.rs:94` | Submits each work item to Restate (`send_json_object(WORK_ITEM_SERVICE, ..)`). | Under D1: submit to lash directly, or keep the Figments object. | decision needed |
 | [ ] | `apps/lash-runtime/src/work_items/wait.rs:61` | Waits for a work item by polling the Restate invocation's output. | Wait on lash: the `SendHandle`, or `Processes::await_output` for a process. | contract change |
 | [ ] | `apps/lash-runtime/src/turns.rs:571` | `run_agent_turn` takes a Restate controller and drives the turn in the work item's handler. | `session.send(input)` and follow its handle. The turn's provider calls, tool rounds and resume are lash's. | contract change |
-| [ ] | `apps/lash-runtime/src/turns.rs:60` | `run_process_start_work_item`, `run_process_cancel_work_item` (`:88`), `run_process_signal_work_item` (`:110`) and `run_trigger_emit_work_item` (`:136`) call `processes()` and `triggers()` under `controller.scoped_effect_controller(..)`. | Call the same facade methods with the core's `ActorContext` (`LashCore::effect_host()`). Start, signal and trigger writes commit with their mailbox wakes. | mechanical |
+| [ ] | `apps/lash-runtime/src/turns.rs:60`, `:88`, `:110`, `:136` | Process and event work items call the pinned facade under a Restate controller. | Start and cancel through the process facade. Move product event records and routing into Figments; after committing them, resolve a parked call, send with a stable turn id or start with a host key. Record each process binding before pruning can remove it (ADR 0136). | contract change |
 | [ ] | `apps/lash-runtime/src/turns.rs:160` | `run_direct_llm_work_item` journals model resolution and the provider call in the Restate object. | Not lash work. It moves with the work-item decision (D1). | decision needed |
 | [ ] | `apps/lash-runtime/src/providers.rs:35` | `resolve_model` journals the model-registry lookup with `run_fallible_json_send`. | For turns, resolve before `send()` and record the choice in the run spec; lash pins the model request before the first byte. | contract change |
-| [ ] | `apps/lash-runtime/src/cron.rs:215` | `LashCronJob`, a Restate object that schedules itself with delayed sends (`:263`, `:278`, `:314`). | Keep it as a Figments scheduler that calls `triggers().emit` with an idempotency key naming the subscription's tick (D1). Lash has no scheduler and dispatches no trigger occurrence for a host. | decision needed |
-| [ ] | `apps/lash-runtime/src/cron/journaled.rs:114` | Emits the cron occurrence under `RestateRuntimeEffectController::new(ctx)` (also `apps/lash-runtime/src/cron/legacy.rs:80`). | `triggers().emit(request, core.effect_host())`; the occurrence's idempotency key stays the dedupe. | mechanical |
+| [ ] | `apps/lash-runtime/src/cron.rs:215` | `LashCronJob`, a Restate object that schedules itself with delayed sends (`:263`, `:278`, `:314`). | Keep it as a Figments scheduler that records each enabled registration's due tick, then starts or sends with a key derived from that tick (D1, ADR 0136). Figments owns the registration, timer and routing. | decision needed |
+| [ ] | `apps/lash-runtime/src/cron/journaled.rs:114` | Emits the cron occurrence under `RestateRuntimeEffectController::new(ctx)` (also `apps/lash-runtime/src/cron/legacy.rs:80`). | Commit the tick in Figments storage, then deliver with a stable host start key or turn id. Reconcile unfinished delivery and retain its binding under ADR 0136. | mechanical |
 | [ ] | `apps/lash-runtime/src/restate.rs:32` | Lists active `LashCronJob` invocations through the Restate admin API. | Follows the cron decision (D1). | decision needed |
 | [ ] | `apps/lash-runtime/src/sessions.rs:552` | `request_turn_cancel_with_driver` cancels through `TurnWorkDriver::request_cancel` and reports its `durability_tier`. | Cancel through the facade's session cancel. A turn cancel is session mail and reaches the owning node. There is no tier. | mechanical |
 | [ ] | `apps/lash-runtime/src/state.rs:306` | `TurnCancelMap` routes cooperative cancels to the replica running the turn (`:302`). | Delete: cancel is a durable request any node may write. | mechanical |
@@ -89,7 +90,7 @@ runs ([guide §1](durable-hosting.md#no-engine-server)).
 
 | Done | Site | Today | On 1.0 | Mark |
 | --- | --- | --- | --- | --- |
-| [ ] | `apps/lash-runtime/src/engine.rs:317` | `RuntimeAwareLashlangProcessEngine` implements `ProcessEngine` with `validate_start`, `run`, `identity` and `durability_tier`. `run` loads the process's env, rebuilds a `LashlangProcessEngine` with that env's trigger event types (`materialize`, `:282`) and runs it. | Delete the wrapper. The RLM protocol plugin factory registers lash's lashlang engine, whose `advance` answers `Steps([vm_run])` ([guide §4](durable-hosting.md#4-host-process-engines)). The per-process trigger event types must reach the surface the factory's `LashlangRunSettingsRecorder` records at creation: contribute them as a plugin extension the recorder reads. | contract change |
+| [ ] | `apps/lash-runtime/src/engine.rs:317` | `RuntimeAwareLashlangProcessEngine` implements `ProcessEngine` with `validate_start`, `run`, `identity` and `durability_tier`. `run` loads the process's env, rebuilds a `LashlangProcessEngine` with product-specific event declarations (`materialize`, `:282`) and runs it. | Delete the wrapper. The RLM protocol plugin factory registers lash's lashlang engine, whose `advance` answers `Steps([vm_run])` ([guide §4](durable-hosting.md#4-host-process-engines)). The process log contains closed lifecycle facts only. Product events use host deferring tools; Figments selects each started process's tools and pins its definition explicitly (ADR 0136). | contract change |
 | [ ] | `apps/lash-runtime/src/engine.rs:28` | `RuntimeAwareRlmProtocolPluginFactory` wraps the RLM factory to pass the artifact and env stores to the engine. | The stores come from the backend; keep the wrapper only for its surface contribution. | contract change |
 
 This is the only `ProcessEngine` implementation in Figments.
@@ -103,7 +104,7 @@ a VM sees is plain data, so decision 7 ("every live host object maps to a
 
 | Done | Site | Today | On 1.0 | Mark |
 | --- | --- | --- | --- | --- |
-| [ ] | `apps/lash-runtime/src/triggers/mod.rs:266` | Decodes a trigger source with `lashlang::HostDescriptor::decode`, which is plain data. | No change. | mechanical |
+| [ ] | `apps/lash-runtime/src/triggers/mod.rs:266` | Decodes a trigger source with `lashlang::HostDescriptor::decode`, which is plain data. | Keep the source descriptor as Figments data; registration, input mapping validation, provisioning and routing belong to the host (ADR 0136). | contract change |
 | [ ] | `apps/control-plane/crates/chat/src/turn_runtime.rs:90` | Maps `ToolArgumentProjectionPolicy` to its remote form. | No change; the policy still exists. | mechanical |
 
 A future Figments projection is a `ProjectionProvider` registered on the
@@ -113,8 +114,8 @@ builder, read by `ResourceRef` ([guide §7](durable-hosting.md#7-projection-prov
 
 Figments mints and resolves no lash completion key today: lash-runtime calls
 no `completions()` and no `resolve`. Its webhooks
-(`apps/lash-runtime/src/main.rs:513`, Composio) are trigger ingress, which
-does not change.
+(`apps/lash-runtime/src/main.rs:513`, Composio) remain Figments ingress. Figments commits their product event first, then
+delivers through a keyed start, send or completion resolution under ADR 0136.
 
 | Done | Site | Today | On 1.0 | Mark |
 | --- | --- | --- | --- | --- |
@@ -133,7 +134,7 @@ authenticates the caller first, retries until it gets an answer and treats
 | [ ] | `apps/lash-runtime/src/work_items.rs:12` | `DEFAULT_BACKGROUND_ADMISSION_TIMEOUT_SECS = 840`, clamped below the Restate inactivity timeout (`:27`). | Derive the bound from `ExecutionBudgets::model_total` instead of a Restate timeout. | decision needed |
 | [ ] | `k8s/helm/figments/values.yaml:549` | `backgroundAdmissionTimeoutSeconds: 840`, kept "below the 900s synchronous caller wait". | Configure `ExecutionBudgetsConfig` (`model_total`, `provider`) on `LashCoreBuilder::execution_budgets` from chart values. | decision needed |
 | [ ] | `apps/lash-runtime/src/turns.rs:716` | `.max_turns(execution.max_turns.unwrap_or(12))` on the per-item core. | A turn budget on the run spec; execution time comes from `ExecutionBudgets`. | mechanical |
-| [ ] | `apps/lash-runtime/src/tools.rs:854` | Tool-host HTTP calls run inline under Figments' own client timeouts. | Each tool's manifest declares its `expected_execution`; an inline tool above `tool_ceiling` (default 5 min) is refused at registration. A longer tool becomes a process, isolated or Pending tool ([guide §6](durable-hosting.md#6-execution-budgets)). | contract change |
+| [ ] | `apps/lash-runtime/src/tools.rs:854` | Tool-host HTTP calls run inline under Figments' own client timeouts. | Each tool's manifest declares a host-set `execution` bound and, if it can defer, an independent `park` bound (`Within(Duration)` or `UntilScopeEnd`). Lash defaults neither. Long work can use a process, isolated or Pending tool ([guide §6](durable-hosting.md#6-execution-budgets)). | contract change |
 
 ## SQLite
 
@@ -183,10 +184,10 @@ Figments' own ADRs that describe lash on Restate need superseding notes:
 - **D1. Figments-owned Restate objects that run lash work.** `LashWorkItem`,
   `LashCronJob` and `LashBootstrap` live in lash-runtime and drive lash inside
   their handlers. Either keep them as Figments objects that only submit to
-  lash (`send()`, facade process and trigger calls) and wait on lash's
+  lash (`send()`, facade process calls and completion resolution) and wait on lash's
   handles, or delete them and submit from the HTTP routes, with cron as a
-  Figments scheduler that emits each tick through `triggers().emit`: lash has
-  no scheduler. Keeping them keeps a second durable log in
+  Figments scheduler that commits each tick and then delivers through a keyed
+  start or send under ADR 0136. Figments owns source registrations and routing. Keeping them keeps a second durable log in
   front of lash.
 - **D2. PostgreSQL topology** for the lash database: synchronous standby, a
   single primary without failover, or an asynchronous replica with the

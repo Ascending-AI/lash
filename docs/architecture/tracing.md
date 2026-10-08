@@ -23,7 +23,7 @@ effect identities, tool-call identities or graph-node identities.
 
 Awaited work uses a parent edge. Independently admitted work starts a trace
 with links to its producers. The receiving scope keeps its parent when a
-signal resolves a wait or a checkpoint consumes another input. A current
+host completion resolves a wait or a checkpoint consumes another input. A current
 execution attempt is an optional link, supplied through the engine interface;
 it never replaces the retained parent.
 

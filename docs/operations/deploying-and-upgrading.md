@@ -34,7 +34,7 @@ contract.
 
 **In-process SQLite.** A SQLite deployment is one database file (ADR 0132
 §12): the host configures its path, and the session catalog, the process
-registry, the trigger store and the durability core all live in it, so one
+registry and the durability core all live in it, so one
 transaction commits rows of every family or none. One host owns the file.
 Stop that host before replacing its binary. When the release changes a
 durable format, drain the old build first (`LashCore::drain`, below), shut it
@@ -63,7 +63,7 @@ An interrupted migration is finished by the next open: one whose transaction
 committed is recorded finished, and one that did not commit starts again from
 a fresh backup. A migration that fails before its commit changes nothing; its
 backup goes with the error. A component opened on its own
-(`SqliteStore::open`, `SqliteTriggerStore::open` and the like) never migrates
+(`SqliteStore::open` and the like) never migrates
 and refuses an older database with `migration_pending`.
 
 **PostgreSQL workers.** PostgreSQL 17 and 18 are supported for lash 1.0; 18

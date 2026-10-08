@@ -146,12 +146,12 @@ terminal output needs the row anyway.
   batch's stored ids and records the row together; an `UnknownAttachment`
   refuses the enqueue. A pending input therefore resolves its bytes when its
   turn commits however long it waited, even past the upload expiry of the
-  put that produced it. Process wakes carry text only, so a wake delivers
-  no attachment.
+  put that produced it. Host notices use ordinary sent input and the same
+  attachment admission rules under ADR 0136.
 - **Terminal publication.** Before a registry records an output, the caller
   acquires `ProcessRecord(p)` on the output's stored ids. An engine terminal
   whose source was already swept is recorded as the typed failure
-  `process_result_attachment_unavailable`; an external or host completion is
+  `process_result_attachment_unavailable`; a terminal proposal without available output is
   refused with `ProcessOutputAttachmentUnavailable` and nothing is recorded.
 - **Start inputs.** Before registration, the recorded start acquires
   `guarded(ReferrerGuard::StartInput { start_key: key, starter })` on the input's

@@ -33,7 +33,7 @@ references retain their existing string encodings.
 ### Runtime roots and heap fragments
 
 The RLM root contains the engine ID, a durable state header, globals, deferred
-tool resolutions and deferred trigger resolutions. Each global body is a
+tool resolutions and deferred-call resolutions. Each global body is a
 durable fragment containing its value and its assigned heap objects. The
 header carries format and heap-accounting information. Guest scratch files are
 outside this root.
@@ -109,3 +109,5 @@ to null would hide capture failures, so unsupported values fail at the writer.
 - [Component descriptors and hydration](../../crates/lash-core-store/src/store/checkpoint.rs#L131).
 - [Budget measurement](../../crates/lash-core-store/src/store/commit_budget.rs#L267).
 - [Content hash](../../crates/lash-core-store/src/store/mod.rs#L329).
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

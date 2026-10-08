@@ -212,7 +212,7 @@ these preimages byte for byte:
 - Opener encodings: `turn:`, `drain:` (session operation) and `process:`,
   each component length-prefixed.
 - `StartKey`: `process-start-key:v1:<namespace>:blake3:<hex>` for the
-  intent, trigger, host and keyless families; keyless keys take scope tags
+  intent, host and keyless families; keyless keys take scope tags
   1 turn, 2 process, 3 session operation, 4 session delete and
   5 runtime operation.
 

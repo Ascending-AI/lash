@@ -4,7 +4,7 @@ How the engineering skills should consume this repo's domain documentation when 
 
 ## Before exploring, read these
 
-- **`CONTEXT.md`** at the repo root: the ubiquitous-language glossary (Host Application, Execution Mode, Runtime Scenario, Trigger Occurrence, Pending Turn Input, Queued Work, and the rest).
+- **`CONTEXT.md`** at the repo root: the ubiquitous-language glossary (Host Application, Execution Mode, Runtime Scenario, Pending Turn Input, Queued Work, and the rest).
 - **`docs/adr/`**: read the ADRs that touch the area you're about to work in.
 
 If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill creates them lazily when terms or decisions actually get resolved.

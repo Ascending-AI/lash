@@ -29,15 +29,11 @@ binder hides and restores its outer binding. Body and catch results join before
 has the `any` binding while all paths lower for validation, scope effects, and
 completion. Index expressions lower both target and index operands.
 
-Trigger subscription-key materialization belongs to runtime registration.
-Lowering validates supplied keys; the runtime derives an absent key from the
-process and trigger source. Scope stores no static trigger facts.
+Product registration keys belong to the host under ADR 0136. Lowering checks
+ordinary tool contracts and carries no static product-routing facts.
 
-Evidence: `crates/lashlang/src/linker/lower_expr.rs:4`, `:19`, `:60`, `:206`,
-`:1251`, `:1269`. Trigger-key validation and derivation live in
-`crates/lashlang/src/linker/pass_validation.rs` and
-`crates/lash-core-execution/src/triggers/router.rs:299` and
-`crates/lash-lashlang-runtime/src/trigger_commands.rs:511`.
+Evidence: `crates/lashlang/src/linker/lower_expr.rs` and
+`crates/lashlang/src/linker/pass_validation.rs`.
 
 ## Alternatives considered
 
@@ -50,4 +46,6 @@ the stack bound.
 
 - Diagnostics, inferred outputs, completion facts, and facets share lowering.
 - Expression variants have one structural implementation point.
-- Durable trigger keys depend on materialized registration inputs.
+- Product routing does not add a separate lowering walk.
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

@@ -39,8 +39,6 @@ Its preimage identifies the admitted operation, not the submitted content,
 source, compiler or minted result. The start paths have separate namespaces:
 
 - A tool intent uses its recorded intent identity.
-- A trigger delivery uses its occurrence, subscription, subscription
-  incarnation and revision.
 - A host or remote caller supplies bytes to `StartKey::for_host`.
 - A keyless host start uses its admitted scope and start ordinal, so a
   resumed start issues the same key.
@@ -49,10 +47,10 @@ Host bytes alone determine a host key across the store set. Originators and
 deployment namespaces that share a store share that key space. The host
 owns any partitioning policy; Lash performs no authorization decision.
 
-A tool-intent or trigger key is trusted. A repeat returns the retained
+A tool-intent key is trusted. A repeat returns the retained
 process as `Existing` regardless of the retry's submitted content. A host
 key, supplied or keyless, fences the start. Its input, lifetime, ancestry,
-session capability, identity, event types, provenance, wake target and
+session capability, identity, provenance and
 environment must match the retained registration. A mismatch returns
 `PluginError::StartKeyConflict { start_key }`, whose error names only the key.
 
@@ -111,23 +109,14 @@ Evidence: `crates/lash-sansio/src/handle.rs:168`,
 `crates/lash-sqlite-store/src/process_registry/registration.rs:104`, and
 `crates/lash-sqlite-store/src/process_registry/prune_api.rs:119`.
 
-### 5. A trigger delivery binds its process in the start's transaction
+### 5. A host records its start before pruning
 
-A delivery reservation has no process until the start registers. Registration
-and binding commit in one transaction with the reservation
-([ADR 0021](0021-trigger-deliveries-are-first-class-and-recoverable.md)), so
-no crash separates them and there is no delivery to settle afterwards.
-
-A bound delivery never mints again, although §2 lets a key register afresh
-once its process is pruned. A delivery's key finds nothing after the bound
-process is pruned, while the binding outlives it. When the key finds nothing,
-the registrar reads the delivery's binding in the same transaction. A bound
-delivery registers nothing and refuses as `TriggerDeliveryBound`, and its
-emitter answers the bound process (FIG-4369). The binding is written once, and
-a bind precedes the prune of its process, so the check sees every bind whose
-process is absent from the key lookup.
-
-Evidence: `crates/lash-core-execution/src/triggers/router.rs:666`.
+A host delivery uses `ProcessStartRequest::with_host_start_key`. A repeated
+start returns its retained process and refuses changed start content. The
+host records the returned binding before it permits pruning, and answers
+later duplicate deliveries from that record. Once the process is pruned,
+the start key can register a fresh lifetime; Lash keeps no host-delivery
+receipt table. [ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns this retention contract.
 
 ### 6. Durable identity shapes
 
@@ -153,3 +142,5 @@ identity. A separate incarnation would require every handle and command to
 carry another identity. A minted id names the lifetime directly. Host-key
 content checks make retries explicit without turning submitted content into
 the idempotency key.
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

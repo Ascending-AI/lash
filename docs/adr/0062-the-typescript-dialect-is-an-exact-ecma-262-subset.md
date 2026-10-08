@@ -79,9 +79,9 @@ the deferred tool-resolution path. ADR 0087 owns runtime promise arrays.
 
 Durable work is a `Process` value. A top-level const-bound uncalled async arrow
 or an inline arrow in a catalogue slot typed as `Process` lifts to an admitted
-process body. Its signals come from `waitSignal` calls. Starting, signalling,
-yielding and trigger registration are catalogue tools under ADR 0095.
-`waitSignal` is process-scoped; `sleep` is available in a cell too. Tools return
+process body. Process controls are catalogue tools under ADR 0095.
+Approvals and outside callbacks use host tools that can defer under ADR 0136;
+`sleep` is available in a cell too. Tools return
 declared work for runtime realization under ADR 0116.
 
 A process-body `return` runs every enclosing `finally` before the wrapper
@@ -382,3 +382,5 @@ that each entry is a limit taken knowingly.
   and [Test262 census](../../crates/lash-typescript/tests/test262/census/).
 - [Durable shared heap](../../crates/lashlang/src/runtime/state.rs#L699) and
   [fragment partition](../../crates/lashlang/src/runtime/heap/partition.rs#L1).
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

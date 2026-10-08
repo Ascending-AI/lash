@@ -6,7 +6,7 @@ Accepted.
 
 ## Context
 
-A runtime needs a coherent set of session, process, trigger, attachment and
+A runtime needs a coherent set of session, process, attachment and
 module-artifact stores, together with the engine that executes its work.
 Constructing those ports independently can make a session write state that its
 reopen or cleanup path cannot reach. Tests need inexpensive storage with the
@@ -111,3 +111,5 @@ Embedders select a store set explicitly. Memory storage shares SQL semantics
 and costs local SQL work, but loses its data when its owning handles
 disappear. A durable local application needs no server. Every runtime port
 comes from the backend's construction.
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

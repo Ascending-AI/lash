@@ -8,20 +8,19 @@ hand-forwarding every unrelated operation.
 
 ## Decision
 
-The registry contract has nine concern traits:
+The registry contract has eight concern traits:
 
 - `ProcessQuery` supplies point reads, listings, change feeds, bounded
   non-terminal pages, and aggregates.
 - `ProcessRegistrar` registers a process.
-- `ProcessObserverRegistry` owns observer edges and session routing cleanup.
+- `ProcessObserverRegistry` owns observer edges and session cleanup.
 - `ProcessEventLog` owns the append-only process event log.
 - `ProcessLifecycle` records starts, waits, departures, completion, and parent-end teardown.
 - `ProcessToolIntents` admits and settles durable tool-intent submissions.
-- `ProcessWakeOutbox` owns wake obligations and their claim, settle, and redrive protocol.
 - `ProcessRetention` reclaims terminal rows and tombstones.
 - `ProcessClockRebind` binds the registry to the runtime clock.
 
-`ProcessRegistry` composes all nine and `FleetFormatStore` as supertraits. A
+`ProcessRegistry` composes all eight and `FleetFormatStore` as supertraits. A
 blanket implementation covers types satisfying the complete bundle.
 `Arc<dyn ProcessRegistry>` is the common runtime handle. Methods remain
 available through the concern traits on that object.
@@ -33,8 +32,8 @@ decorator delegates unintercepted concerns wholesale.
 
 Process execution and recovery belong to the durable engine under ADR 0110 and
 [ADR 0132](0132-durability-is-state-first-over-the-lash-store.md); registry
-concerns are persistence reads and writes. Wake-outbox claim tokens belong to
-wake delivery under ADR 0046.
+concerns are persistence reads and writes. Product routing belongs to the
+host under ADR 0136.
 
 The runtime-store decorator follows the same ownership rule. Its default
 forwarder and component implementations derive from one `runtime_store_operations!`
@@ -61,3 +60,5 @@ ownership to storage.
 - `crates/lash-core-execution/src/runtime/process/registry_concerns.rs:40-994` declares the concern traits.
 - `crates/lash-core-execution/src/runtime/process/registry.rs:703-729` composes the registry and fleet format.
 - `crates/lash-core-store/src/store/runtime_store_decorator.rs` defines the generated forwarding contract.
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

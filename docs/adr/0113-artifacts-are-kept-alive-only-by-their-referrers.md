@@ -6,7 +6,7 @@ Accepted.
 
 ## Context
 
-A frame's globals, a process record, a subscription revision and a resuming
+A frame's globals, a process record and a resuming
 execution can read the same immutable artifact at different times. Each
 reader needs its own durable edge. Process lifetime is a separate decision
 ([ADR 0108](0108-a-process-lives-until-a-scope-its-start-could-reach.md)); a
@@ -19,8 +19,8 @@ durable facts decide when it has settled
 
 ### 1. Referrers and their canonical ids
 
-An artifact has one exact edge per artifact/referrer pair. Six kinds hold
-artifacts: `frame_environment`, `process_record`, `subscription_revision`,
+An artifact has one exact edge per artifact/referrer pair. Five kinds hold
+artifacts: `frame_environment`, `process_record`,
 `start`, `execution` and `host_pin`. `session`, `upload` and `start_input`
 hold attachments
 only ([ADR 0124](0124-attachments-are-kept-alive-only-by-their-referrers.md)).
@@ -32,7 +32,6 @@ An artifact reference or definition id alone keeps no bytes alive.
 |---|---|
 | `frame_environment` | Compact JSON array `["<session id>","<frame node id>"]` |
 | `process_record` | The process id's display form |
-| `subscription_revision` | Compact JSON array `["<subscription id>","<incarnation>",<revision>]` |
 | `start` | The start key's text |
 | `start_input` | Compact JSON array `["<start key>","<starter execution key>"]` |
 | `execution` | The admitted execution's identity, `EffectJournalIdentity::key()` |
@@ -47,14 +46,9 @@ are `Incompatible(UnknownVocabulary)` under
 malformed ids are `StoredDataCorrupt`. A store never treats an undecodable
 edge as absent (`crates/lash-core-store/src/artifact_referrer.rs:176-279,621-633`).
 
-A frame id combines the session and the admitted frame node. A subscription
-revision combines its subscription id, incarnation and positive revision.
-`Register` and `Revive` derive their incarnation with `trigger_incarnation`
-from the owner scope and operation id; other mutations keep the incarnation
-and increment the expected revision. The effect therefore knows the
-revision it acquires before the mutation commits
-(`crates/lash-core-execution/src/triggers/revision_referrer.rs:64-151`,
-`crates/lash-core-execution/src/triggers/mutation.rs:408-413`).
+A frame id combines the session and the admitted frame node. Host registrations
+hold their definitions with an explicit `host_pin` under ADR 0136; a host
+record or copied definition id alone acquires no artifact edge.
 
 SQLite stores exact edges in `artifact_referrer_edges` and permanent fences
 in `referrer_fences`. Edges have a composite primary key and a foreign key
@@ -82,11 +76,11 @@ transaction (`crates/lash-core-execution/src/module_artifacts.rs:158-191`,
 
 A claim is unguarded for a frame, process record or host pin. A guarded
 claim contains a `ReferrerGuard` whose typed identity determines its
-referrer: `Journal`, `Start`, `StartInput`, `SubscriptionRevision`, or an
+referrer: `Journal`, `Start`, `StartInput`, or an
 optionally guarded prepared successor `Frame`. `requires_guard` names
 kinds whose acquisitions must be guarded; frames also permit unguarded
 claims. A guard cannot name another kind or carry an `Ended` plan.
-`holds_artifacts` admits the six artifact kinds and refuses attachment-only
+`holds_artifacts` admits the five artifact kinds and refuses attachment-only
 kinds with typed `ReferrerKindRefused`. Attachment guards belong to ADR 0124
 (`crates/lash-core-store/src/artifact_referrer.rs:640-730`).
 
@@ -175,7 +169,7 @@ An `Ended` plan replaces a guard; a guard cannot replace an existing plan.
 When the end shares the artifact database, arming it also writes the fence
 in that transaction. A first guarded acquisition writes its guard before
 committing the edge. Guard resolution asks the relevant durable authority,
-so a publication whose start or subscription never commits still has an
+so a publication whose start never commits still has an
 end path (`crates/lash-sqlite-store/src/obligation_ledger.rs:578-598`,
 `crates/lash-store-sql/src/artifact/cleanup_obligations.rs:37-68`,
 `crates/lash-sqlite-store/src/artifact_store.rs:209-218,276-281`).
@@ -194,7 +188,7 @@ outside an end hook's transaction
    protects any concurrently registered record before severing (§3.3).
    `AwaitJournal` waits for execution settlement. `AwaitStart` carries the
    retained record's inputs or waits for an absent start's execution to
-   settle. `AwaitSubscriptionRevision` uses §3.4's three conditions.
+   settle.
    `AwaitFrame` keeps a retained frame and otherwise waits for its creator
    to settle. ADR 0124 owns upload-expiry and session-graph guards.
 4. Applies each store's share to environments, modules, definitions and
@@ -350,7 +344,7 @@ independent durable lifetimes.
 
 A terminal refusal with no registered record arms an empty-carry `Ended`
 plan. An absent start is also ended when its starter's execution settles.
-A start that is its own runtime operation (a trigger delivery's start, or a
+A start that is its own runtime operation (a
 local start with no causal effect) has no execution to settle: its staging
 claims wait until its registration carries them or its abandonment ends
 both `Start(key)` and its `StartInput`
@@ -370,26 +364,14 @@ cleanup. The refusing start itself writes no rescue edge
 (`crates/lash-core-execution/src/runtime/process/start_staging.rs:348-376`,
 `crates/lash-core/src/runtime/artifact_cleanup.rs:250-252,365-451`).
 
-#### 3.4 `subscription_revision`: subscription retirement, delivery settlement
+#### 3.4 Host registration artifacts
 
-`Register`, `Update`, `Revive`, and a state-changing `Enable` or `Disable`
-acquire the committed revision's environment and target before the command
-commits. `Delete` and `Prune` acquire no deliverable revision. The claim
-arms `AwaitSubscriptionRevision { creator }`. After commit, the wrapper
-nudges the replaced revision
-(`crates/lash-core-execution/src/triggers/revision_referrer.rs:64-151,179-218`).
-
-The declaration carries the draft's `env_ref`, held under its creator's
-`Execution` referrer before the command is recorded (§3.7).
-
-A revision ends only when it is not the current nontombstoned revision,
-no delivery reserved under its incarnation/revision remains unbound, and
-its creator's execution is settled. A disabled current revision still holds
-its artifacts. Binding follows the delivery start's acquisition, so the
-revision needs no carries
-(`crates/lash-core/src/runtime/artifact_cleanup.rs:118-153,281-292`,
-`crates/lash-core-execution/src/triggers/router.rs:624`,
-`crates/lash-core-execution/src/runtime/process/start_staging.rs:302-313`).
+A host registration owns a host pin for every definition and environment it
+needs between starts. It publishes or acquires that closure before making its
+registration usable and releases the pin when its own delivery obligations
+permit it. Starts acquire their own protection under §3.3. There is no
+implicit capture of the registering agent's environment; ADR 0136 owns tool
+selection and host delivery retention.
 
 #### 3.5 `host_pin`: host release
 
@@ -400,7 +382,7 @@ relay, not synchronous reclamation
 (`crates/lash/src/artifacts.rs:156-165`,
 `crates/lash-sqlite-store/src/obligation_ledger.rs:595-598,726-739`).
 
-#### 3.6 Definition artifacts: immutable, held by the six kinds
+#### 3.6 Definition artifacts: immutable, held by the five kinds
 
 A definition is an immutable canonical descriptor of engine kind, engine
 value and sorted, deduplicated artifact manifest, named by its
@@ -426,7 +408,7 @@ bytes even on an existing id; conflicting bytes are `Immutable`. Reads
 re-derive the id and reject noncanonical bytes. `ProcessDefinitionStore`
 stores descriptors in the `process_definition` namespace beside modules
 and environments. A start by id realizes an engine input and records that
-id in the process identity. Frame globals, starts, records, revisions,
+id in the process identity. Frame globals, starts, records,
 executions and host pins hold their own closure edges
 (`crates/lash-core-execution/src/runtime/process/definition_store.rs:49-85,229-243`,
 `crates/lash-core-execution/src/runtime/process/start_staging.rs:640-718`,
@@ -502,14 +484,12 @@ inputs. Starts encountering the key's fence use the record path in §3.2;
 terminal refusal races use §3.3's rescue acquisition
 (`crates/lash-core/src/runtime/artifact_cleanup.rs:346-362,454-502`).
 
-#### 4.4 A trigger delivery after its creator is gone
+#### 4.4 A host delivery after its creator is gone
 
-Revision edges precede visible registration. They remain independent of
-the creator's frame or session and cover unbound deliveries. A delivery
-acquires its own start protection before it binds; revision cleanup waits
-for that binding rather than carrying the creator's references onward
-(`crates/lash-core-execution/src/triggers/revision_referrer.rs:3-18`,
-`crates/lash-core/src/runtime/artifact_cleanup.rs:118-153`).
+A host pin retains the definition independently of the caller's frame or
+session. Before a start registers, it acquires its own protected inputs under
+§3.3. The host selects the tools and environment explicitly, and releases its
+registration pin only when its own obligations allow it (ADR 0136).
 
 #### 4.5 A cancelling child still reading its inputs
 
@@ -521,7 +501,7 @@ The facade settles eligible process executions before deleting their records
 #### 4.6 Cross-store prepare, acknowledge, activate and sever
 
 An engine can own an independent artifact store. Protection therefore
-precedes activation across stores: guarded starts and revisions acquire
+precedes activation across stores: guarded starts acquire
 before registration, and a frame prepares its engine share before SQL
 activation. The descriptor and its store-set manifest share one transaction
 (`crates/lash-core-execution/src/runtime/process/start_staging.rs:109-180`,
@@ -628,10 +608,11 @@ A failed store acknowledgment prevents whole-delivery success and retries
 A coalesced start carries the retained record's content
 (`crates/lash-core/src/runtime/artifact_cleanup_tests.rs:657`).
 
-#### 7.9 Subscription revisions
+#### 7.9 Host registration pins
 
-Revision cleanup waits for currency, bindings and its creator
-(`crates/lash-core/src/runtime/artifact_cleanup_tests.rs:913`).
+Host registration artifacts follow the host-pin laws in §7.14 and the
+start-protection laws in §7.6 and §7.8. Product delivery retention is the
+host's contract under ADR 0136.
 
 #### 7.10 Prune racing start rescue
 
@@ -713,3 +694,5 @@ name/version mapping and a pin for availability between starts. Frame
 switches clear execution state and retain only the definitions their seed
 carries; forks of ended frames start without those execution components
 (§2.6, §3.1, §3.6).
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

@@ -75,7 +75,6 @@ and completion order do not renumber members.
 | RLM cell command | Opener admission, code opener, cell admission key, command ordinal, and aggregate index for a leaf |
 | Process-body command | Process admission, code opener, command ordinal, and aggregate index for a leaf |
 | Host submission | Submission admission and any content position assigned by its caller |
-| Trigger delivery | The bound process admission and that process's command positions |
 
 `CodeCallIdentities` owns the code derivation shared by the Lashlang hosts and
 worker broker. VM snapshots preserve the whole-program ordinal (ADR 0132 §8).
@@ -112,7 +111,8 @@ Sources: `crates/lash-sansio/src/sansio/turn_protocol.rs`,
 
 ### 5. The tool-facing API
 
-The public `AttemptContext` exposes:
+The public `AttemptContext` exposes caller context (`owner`,
+`enclosing_process`, `logical_run`, `process_spawn_provenance`) and:
 
 ```rust
 fn call_id(&self) -> &ToolCallId;
@@ -135,8 +135,12 @@ Source: `crates/lash-core-execution/src/tool_provider.rs`.
 Tool addresses, activity ids, frames, environment, presentation, await and
 cancellation keys derive from the call id. Attempts and retry sleeps add the
 attempt number. Intent identities add the intent index; final-emission
-attribution remains separate evidence. Completion keys include the execution
-scope. Commit records retain both lash identity and provider correlation.
+attribution remains separate evidence. Completion keys are opaque bearer
+capabilities. Hosts keep their association
+with `call_id` in a durable record or read it through `Completions::parked`;
+ADR 0136 owns that delivery contract.
+
+Commit records retain both lash identity and provider correlation.
 Run operand slots govern ordering independently of identity.
 
 Sources: `crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs`,
@@ -213,3 +217,5 @@ execution identity. Refusing malformed provider ids would discard usable
 responses without improving tool idempotency; repairing correlation keeps the
 provider boundary tolerant. A new id per retry would defeat deduplication
 when an error follows a successful external write.
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

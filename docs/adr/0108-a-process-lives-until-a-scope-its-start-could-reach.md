@@ -138,9 +138,11 @@ Evidence:
 
 Lifetime, ancestry and session capability are durable registration facts.
 A start that must outlive its reachable scopes chooses `Detached` explicitly.
-Provenance and wake routing grant no lifetime authority. Grant validation
+Provenance and host notice routing grant no lifetime authority. Grant validation
 keeps scope reachability explicit; it is not an authentication policy.
 
 Caller-supplied parent data would admit scopes the start never reaches.
 Cancelling at every physical turn boundary would end children during a
 frame switch. A recorded grant and a logical-run close avoid both problems.
+
+[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

@@ -167,6 +167,7 @@ The generated region below is checked against the live filenames and headings.
 | 0133 | [Prompt sections are keyed, trusted, and placed by the host](0133-prompt-sections-are-keyed-trusted-and-placed-by-the-host.md) |
 | 0134 | [Creating a session is explicit; only a fork clones](0134-creating-a-session-is-explicit-only-a-fork-clones.md) |
 | 0135 | [Attachments are durable refs delivered by the host store](0135-attachments-are-durable-refs-delivered-by-the-host-store.md) |
+| 0136 | [The host owns events, routing and scheduling](0136-the-host-owns-events-routing-and-scheduling.md) |
 <!-- adr-index:end -->
 
 ## Replaced and retired decisions
@@ -177,6 +178,7 @@ every decision from 0001 to 0131.
 
 | Number | Status | Owner |
 | --- | --- | --- |
+| 0021 | Replaced | ADR 0136 |
 | 0059 | Replaced | ADR 0128 |
 | 0103 | Replaced | ADR 0132 §8 |
 | 0104 | Replaced | ADR 0132 |
