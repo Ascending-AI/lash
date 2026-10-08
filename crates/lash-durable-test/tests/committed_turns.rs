@@ -205,7 +205,13 @@ async fn a_cursor_reads_on_across_compaction_and_a_frame_switch(tier: Tier) {
     assert!(
         live.admin()
             .state()
-            .compact_context(None)
+            .compact_context(None, "host:committed_turns:compact_context:192".to_string())
+            .await
+            .expect("the compaction is accepted")
+            .settle_with(
+                &live.admin().commands(),
+                lash::testing::admin_fixture_outcome
+            )
             .await
             .expect("the compaction settles"),
         "the compaction opened a frame"
@@ -335,6 +341,7 @@ async fn a_cursor_survives_a_process_restart(tier: Tier) {
         lash::LashCore::standard_builder(backend.clone())
             .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+            .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .serve_test_llm_profile(served::model(Arc::clone(&scripts)), served::metadata())
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 "committed-turns-restart",

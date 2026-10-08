@@ -283,6 +283,7 @@ async fn core_with_responses(
         ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .plugin(plugin)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "embed-plugins-test-worker",
@@ -311,6 +312,7 @@ async fn created_with_label(core: &LashCore, session_id: &str, label: Option<&st
                 lash::TurnBudget::Unbounded,
                 lash::MaxToolCalls::new(1024),
             )
+            .no_progress_budget(lash::NoProgressBudget::bounded(12))
             .plugin_options(plugin_options),
         ))
         .await

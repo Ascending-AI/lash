@@ -330,7 +330,7 @@ async fn a_prompt_command_reaches_the_next_run_and_not_the_running_one(
     output?;
     assert!(
         matches!(
-            commanded?,
+            commanded?.await_outcome(&session.admin().config()).await?,
             crate::config::ConfigTransactionOutcome::Applied { .. }
         ),
         "the plan command applies"

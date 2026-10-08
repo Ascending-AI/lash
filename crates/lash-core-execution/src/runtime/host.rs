@@ -253,6 +253,7 @@ impl RuntimeHostConfig {
         backend: crate::Backend,
         commit_budget: crate::CommitBudget,
         queued_work_batching: crate::QueuedWorkBatchingConfig,
+        tool_source_policy: crate::ToolSourcePolicy,
     ) -> Self {
         let effect_host = crate::ActorContext::detached(backend.clone());
         let attachment_store = backend.attachment_store();
@@ -290,7 +291,7 @@ impl RuntimeHostConfig {
                 delta_coalescing: DeltaCoalescing::default(),
                 effect_host,
                 process_tool_visibility_filter: None,
-                tool_source_policy: crate::ToolSourcePolicy::default(),
+                tool_source_policy,
                 recovery_pass: crate::engine::RecoveryPassBudget::default(),
             },
             tracing: crate::trace::TraceRuntime::new(Arc::clone(&clock)),

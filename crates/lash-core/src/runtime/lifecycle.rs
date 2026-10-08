@@ -164,7 +164,7 @@ impl LashRuntime {
             .map_err(SessionError::Plugin)?;
         // A state no commit has recorded is a new session's: its creator's
         // policy is the one it will record, so a defaulted state (e.g.
-        // `RuntimeSessionState::new(SessionPolicy::new(TurnBudget::Unbounded, MaxToolCalls::new(1024)))`)
+        // `RuntimeSessionState::new(SessionPolicy::new(TurnBudget::Unbounded, MaxToolCalls::new(1024),crate::NoProgressBudget::bounded(12)))`)
         // takes it. A recorded policy is never filled or replaced from the
         // opener's (FIG-4531): a head that records no model is refused
         // below, whatever the opener selects.
@@ -540,7 +540,7 @@ impl LashRuntime {
     /// O(full-infrastructure-init).
     ///
     /// * `env` — the shared environment. `env.plugin_host` must be set.
-    /// * `policy` — per-session policy (model, provider, autonomy, turn limits).
+    /// * `policy` — per-session policy (model, provider, turn limits).
     /// * `state` — persisted session state (empty for a fresh session).
     /// * `store` — per-session store. `None` builds an embedded runtime
     ///   with no persistence; `Some` builds a persistent
@@ -820,6 +820,7 @@ mod tests {
             crate::testing::sqlite_memory_store_backend().await,
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
+            crate::ToolSourcePolicy::Tolerate,
         ));
         let services = crate::RuntimeServices::new(
             plugins,
@@ -847,6 +848,7 @@ mod tests {
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
             ))
         };
         recorded.head_revision = 3;
@@ -866,6 +868,7 @@ mod tests {
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
             ))
         };
         let created = opened_with_a_llm_profile(unrecorded)
@@ -884,6 +887,7 @@ mod tests {
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
             ))
         };
         state.ensure_agent_frame_initialized();
@@ -958,6 +962,7 @@ mod tests {
                 ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
+                    crate::NoProgressBudget::bounded(12),
                 ))
             },
             crate::testing::runtime_lease_owner(),
@@ -1041,6 +1046,7 @@ mod tests {
                 ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
+                    crate::NoProgressBudget::bounded(12),
                 ))
             },
             crate::testing::runtime_lease_owner(),

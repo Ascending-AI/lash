@@ -762,10 +762,6 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
         self.observed_cancellation
     }
 
-    pub fn autonomous(&self) -> bool {
-        self.config.autonomous
-    }
-
     pub fn messages(&self) -> &MessageSequence {
         self.messages
     }
@@ -1008,7 +1004,6 @@ pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
     /// The session's recorded attachment-acceptance rules.
     pub attachment_acceptance: Arc<crate::llm::capability::AttachmentCapabilitySnapshot>,
     pub generation: crate::llm::types::GenerationOptions,
-    pub autonomous: bool,
     pub session_id: SessionId,
     /// The committed active frame whose history is being projected.
     pub agent_frame_id: String,

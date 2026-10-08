@@ -64,6 +64,9 @@ async fn apply(
             transaction,
         )
         .await
+        .unwrap()
+        .await_outcome(config)
+        .await
         .unwrap();
     assert!(
         matches!(
@@ -154,6 +157,12 @@ async fn opening_a_historical_frame_is_refused_and_keeps_the_changed_config(tier
         let opened = state
             .open_agent_frame(frame(material), format!("open-{material}"))
             .await
+            .unwrap()
+            .settle_with(
+                &live.admin().commands(),
+                lash::testing::admin_fixture_outcome,
+            )
+            .await
             .unwrap();
         assert!(opened.opened, "{material} opens: {opened:?}");
     }
@@ -201,6 +210,12 @@ async fn opening_a_historical_frame_is_refused_and_keeps_the_changed_config(tier
 
     let refused = state
         .open_agent_frame(frame("first-frame"), "reopen-first-frame".to_owned())
+        .await
+        .expect("the historical open is submitted")
+        .settle_with(
+            &live.admin().commands(),
+            lash::testing::admin_fixture_outcome,
+        )
         .await
         .expect_err("the session left the first frame");
     let lash::EmbedError::Runtime(error) = refused else {
@@ -272,6 +287,7 @@ async fn a_terminally_refused_command_commit_settles_with_its_cause_and_the_lane
     let core = lash::LashCore::standard_builder(backend.clone())
         .serve_sessions(false)
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .serve_test_llm_profile(served::model(Arc::default()), served::metadata())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(

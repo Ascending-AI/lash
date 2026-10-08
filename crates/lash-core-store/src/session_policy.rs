@@ -15,7 +15,6 @@ pub struct SessionPolicy {
     /// against (ADR 0026). Session config of its own: a model change keeps
     /// them, and only an explicit change replaces them.
     pub attachment_acceptance: Arc<AttachmentCapabilitySnapshot>,
-    pub autonomous: bool,
     /// Required turn-budget decision. A host must choose either a non-zero
     /// bound or explicit unbounded execution; absence is never interpreted.
     pub turn_budget: TurnBudget,
@@ -29,8 +28,7 @@ pub struct SessionPolicy {
     /// successful execution.
     ///
     /// Session config like the turn budget (FIG-4376), recorded at creation.
-    /// Its default is bounded, so a carrier that states none resolves to the
-    /// bound rather than to a loop.
+    /// The host must state a bound or explicitly choose unbounded execution.
     pub no_progress_budget: NoProgressBudget,
     /// The session's appetite for duplicate provider billing: session config
     /// like the turn budget (FIG-4376). A carrier that states none resolves to
@@ -44,21 +42,24 @@ pub struct SessionPolicy {
     /// The durable session-head copy restores this intent on a cold load. Per
     /// ADR 0030, a live facade host may still reconcile its current spec over
     /// loaded state at open time.
-    /// The process/remote policy carrier mirrors the same field.
+    /// The process policy carrier mirrors the same field.
     pub generation: crate::GenerationOptions,
 }
 
 impl SessionPolicy {
-    /// Construct a policy with an explicit turn budget and tool-call limit,
+    /// Construct a policy with explicit turn, tool-call and no-progress bounds,
     /// no model selected and otherwise neutral settings.
-    pub fn new(turn_budget: TurnBudget, max_tool_calls: MaxToolCalls) -> Self {
+    pub fn new(
+        turn_budget: TurnBudget,
+        max_tool_calls: MaxToolCalls,
+        no_progress_budget: NoProgressBudget,
+    ) -> Self {
         Self {
             model: None,
             attachment_acceptance: Arc::default(),
-            autonomous: false,
             turn_budget,
             max_tool_calls,
-            no_progress_budget: NoProgressBudget::default(),
+            no_progress_budget,
             charge_safety: ChargeSafetyPolicy::default(),
             generation: crate::GenerationOptions::default(),
         }

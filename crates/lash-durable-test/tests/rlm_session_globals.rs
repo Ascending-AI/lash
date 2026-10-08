@@ -155,19 +155,28 @@ async fn session_globals_survive_cells_and_reload_and_private_slots_never_do(tie
         return;
     };
     world.session(SESSION, served::spec(64)).await;
-    world
+    let live = world
         .core
         .session(lash::SessionId::try_from(SESSION.to_owned()).expect("a session id"))
         .open()
         .await
-        .expect("the session opens")
-        .admin()
+        .expect("the session opens");
+    live.admin()
         .protocol()
-        .apply_session_extension(lash::rlm::rlm_session_projection_extension(
-            lash::rlm::RlmProjectedBindings::new()
-                .bind_json("host_config", serde_json::json!({ "label": "from-host" }))
-                .expect("the projected binding is unique"),
-        ))
+        .apply_session_extension(
+            lash::rlm::rlm_session_projection_extension(
+                lash::rlm::RlmProjectedBindings::new()
+                    .bind_json("host_config", serde_json::json!({ "label": "from-host" }))
+                    .expect("the projected binding is unique"),
+            ),
+            "host:rlm_session_globals:apply_session_extension:166".to_string(),
+        )
+        .await
+        .expect("the host projection is accepted")
+        .settle_with(
+            &live.admin().commands(),
+            lash::testing::admin_fixture_outcome,
+        )
         .await
         .expect("the host projects its binding");
 
@@ -321,12 +330,13 @@ async fn rlm_message_append_keeps_the_committed_execution(tier: Tier) {
         .await
         .expect("the establishing turn committed an execution root");
 
-    let appended = world
+    let live = world
         .core
         .session(lash::SessionId::try_from(SESSION.to_owned()).expect("a session id"))
         .open()
         .await
-        .expect("the session opens")
+        .expect("the session opens");
+    let appended = live
         .admin()
         .state()
         .append_session_nodes(lash_core::AppendSessionNodesRequest {
@@ -337,6 +347,12 @@ async fn rlm_message_append_keeps_the_committed_execution(tier: Tier) {
                     .with_id("fig2521-message"),
             )],
         })
+        .await
+        .expect("the append is accepted")
+        .settle_with(
+            &live.admin().commands(),
+            lash::testing::admin_fixture_outcome,
+        )
         .await
         .expect("the message append settles");
     assert!(

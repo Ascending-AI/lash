@@ -177,7 +177,8 @@ async fn witness_core_over(
                 .expect("register the test model"),
         ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024));
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate);
     let builder = if installed {
         builder.plugin(Arc::new(Witness { registered }))
     } else {
@@ -218,6 +219,9 @@ async fn a_host_registers_sections_sets_the_plan_and_decodes_a_snapshot_through_
             lash::config::ConfigTransaction::of(lash::config::SetPromptPlan { plan }),
         )
         .await
+        .expect("config accepted")
+        .await_outcome(&config)
+        .await
         .expect("the plan settles");
     assert!(
         matches!(
@@ -240,6 +244,9 @@ async fn a_host_registers_sections_sets_the_plan_and_decodes_a_snapshot_through_
                 },
             }),
         )
+        .await
+        .expect("config accepted")
+        .await_outcome(&config)
         .await
         .expect("the refusal settles");
     let lash::config::ConfigTransactionOutcome::Refused { refusal } = refused else {
@@ -274,6 +281,9 @@ async fn a_host_registers_sections_sets_the_plan_and_decodes_a_snapshot_through_
                 lash::config::ConfigWrite::new(format!("unknown-plan-{index}"), revision),
                 lash::config::ConfigTransaction::of(lash::config::SetPromptPlan { plan }),
             )
+            .await
+            .expect("config accepted")
+            .await_outcome(&config)
             .await
             .expect("the refusal settles");
         let lash::config::ConfigTransactionOutcome::Refused { refusal } = outcome else {
@@ -389,6 +399,9 @@ async fn a_host_reads_back_its_plan_and_the_catalog_and_previews_the_resolution(
             lash::config::ConfigWrite::new("host-plan", revision),
             lash::config::ConfigTransaction::of(lash::config::SetPromptPlan { plan: plan.clone() }),
         )
+        .await
+        .expect("config accepted")
+        .await_outcome(&config)
         .await
         .expect("the plan settles");
     assert!(
@@ -535,6 +548,9 @@ async fn a_removed_plugins_plan_override_is_recorded_and_the_turn_succeeds() {
             ),
             lash::config::ConfigTransaction::of(lash::config::SetPromptPlan { plan: plan.clone() }),
         )
+        .await
+        .expect("config accepted")
+        .await_outcome(&config)
         .await
         .expect("plan settles");
     assert!(

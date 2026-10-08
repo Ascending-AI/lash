@@ -57,6 +57,7 @@ fn session_env_ref() -> lash_core::ProcessExecutionEnvRef {
             ..lash_core::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
             )
         },
     ))
@@ -285,6 +286,7 @@ async fn ingress_engine_core(
                     ..lash_core::SessionPolicy::new(
                         crate::TurnBudget::Unbounded,
                         crate::MaxToolCalls::new(1024),
+                        crate::NoProgressBudget::bounded(12),
                     )
                 },
             ),
@@ -318,6 +320,7 @@ fn engine_start_intent(kind: &str, payload: serde_json::Value) -> lash_core::Too
                     ..lash_core::SessionPolicy::new(
                         crate::TurnBudget::Unbounded,
                         crate::MaxToolCalls::new(1024),
+                        crate::NoProgressBudget::bounded(12),
                     )
                 },
             ))
@@ -335,6 +338,7 @@ fn ingress_engine_env_spec() -> lash_core::ProcessExecutionEnvSpec {
             ..lash_core::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
             )
         },
     )

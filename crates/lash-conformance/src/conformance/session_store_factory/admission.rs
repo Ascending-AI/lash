@@ -48,7 +48,6 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
         )
     };
     request.config.turn_budget = crate::TurnBudget::bounded(7);
-    request.config.autonomous = true;
     request.config.no_progress_budget = crate::NoProgressBudget::bounded(3);
     request.config.charge_safety = crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
         max_unsafe_retries: 2,

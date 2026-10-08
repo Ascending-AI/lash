@@ -56,6 +56,7 @@ async fn the_after_turn_note_commits_with_the_turn_after_the_one_it_summarizes()
         .plugin(Arc::new(factory))
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "workbench-after-turn",
             "workbench-after-turn-boot",
@@ -66,6 +67,7 @@ async fn the_after_turn_note_commits_with_the_turn_after_the_one_it_summarizes()
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(8),
     )
+    .no_progress_budget(lash::NoProgressBudget::bounded(12))
     .plugin(
         "agent_workbench",
         workbench_session_prompt(

@@ -101,7 +101,11 @@ pub(super) async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) 
                 .build()
                 .unwrap(),
         )),
-        ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
+        ..crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
+        )
     };
     let mut state = RuntimeSessionState {
         session_id: id.into(),

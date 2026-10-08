@@ -72,7 +72,11 @@ pub fn process_registry_alternate_environment_ref() -> crate::ProcessExecutionEn
 fn alternate_process_environment() -> crate::ProcessExecutionEnvSpec {
     crate::ProcessExecutionEnvSpec::new(
         crate::AdmittedPluginConfig::default(),
-        crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1)),
+        crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1),
+            lash_core::NoProgressBudget::bounded(12),
+        ),
     )
 }
 

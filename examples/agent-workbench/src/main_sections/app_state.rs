@@ -645,6 +645,9 @@ pub(crate) async fn apply_llm_profile_selection_to_session(
                 }),
         )
         .await
+        .map_err(AppError::internal)?
+        .await_outcome(&config)
+        .await
         .map_err(AppError::internal)?;
     if !matches!(
         outcome,

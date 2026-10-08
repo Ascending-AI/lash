@@ -27,6 +27,7 @@ pub async fn fork_inherits_history_without_execution_queues_waits_or_journals(
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     state.ensure_agent_frame_initialized();
@@ -156,6 +157,7 @@ pub async fn reclaim_races_fork_and_unpin_without_using_process_roots(
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     state.ensure_agent_frame_initialized();

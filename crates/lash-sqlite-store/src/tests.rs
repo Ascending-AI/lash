@@ -327,6 +327,7 @@ async fn session_listing_statement_count_is_session_count_invariant() {
                 config: lash_core_execution::SessionPolicy::new(
                     lash_core_execution::TurnBudget::Unbounded,
                     lash_core_execution::MaxToolCalls::new(1024),
+                    lash_core::NoProgressBudget::bounded(12),
                 )
                 .into(),
                 head: lash_core_execution::SessionCreationHead::Config,
@@ -414,6 +415,7 @@ async fn durable_state(
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     store
@@ -581,6 +583,7 @@ async fn catalog_lookup_and_repeated_admission_share_a_readable_snapshot() {
         config: lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         )
         .into(),
         head: lash_core_execution::SessionCreationHead::Config,
@@ -618,6 +621,7 @@ async fn lookup_session_aborts_on_unreadable_requested_session_meta() {
         config: lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         )
         .into(),
         head: lash_core_execution::SessionCreationHead::Config,
@@ -766,6 +770,7 @@ async fn concurrent_admission_creates_both_sessions_in_one_catalog() {
         config: lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         )
         .into(),
         head: lash_core_execution::SessionCreationHead::Config,
@@ -869,6 +874,7 @@ async fn a_session_delete_and_fork_answer_inline_on_the_store_connection() {
         config: lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         )
         .into(),
     };

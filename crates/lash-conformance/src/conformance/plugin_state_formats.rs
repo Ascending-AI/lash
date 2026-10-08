@@ -144,6 +144,7 @@ pub(super) async fn plugin_format_boundary(
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     // Include all bound namespaces so migration alone must dirty the component.

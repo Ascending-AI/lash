@@ -113,8 +113,11 @@ fn catalog() -> Catalog {
 }
 
 fn snapshot() -> PersistedSessionConfig {
-    let mut config =
-        PersistedSessionConfig::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
+    let mut config = PersistedSessionConfig::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+        crate::NoProgressBudget::bounded(12),
+    );
     config.model = Some(
         LlmProfileConfig::new(recorded("session-model"))
             .with_reasoning(ReasoningSelection::Effort("low".to_string())),
@@ -164,6 +167,7 @@ fn recorded_render_survives_run_and_detached_environment_round_trip() {
     let mut state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
+        crate::NoProgressBudget::bounded(12),
     ));
     state.install_run_view(&decoded);
     let env = state.process_execution_env_spec(&state.policy);
@@ -388,8 +392,11 @@ fn a_reasoning_override_for_a_session_without_a_profile_is_refused() {
         reasoning: Some(ReasoningSelection::Effort("high".to_string())),
         ..RunOverrides::default()
     });
-    let bare =
-        PersistedSessionConfig::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
+    let bare = PersistedSessionConfig::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+        crate::NoProgressBudget::bounded(12),
+    );
     assert!(matches!(
         spec.resolve(&bare, None, &catalog(), &MapOwner),
         Err(RunResolveError::Refused(

@@ -1331,7 +1331,6 @@ pub(crate) fn apply_persisted_config_to_policy(
     policy.attachment_acceptance = config.attachment_acceptance.clone();
     policy.turn_budget = config.turn_budget;
     policy.max_tool_calls = config.max_tool_calls;
-    policy.autonomous = config.autonomous;
     policy.no_progress_budget = config.no_progress_budget;
     policy.charge_safety = config.charge_safety.clone();
     policy.generation = config.generation.clone();

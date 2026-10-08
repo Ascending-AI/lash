@@ -140,6 +140,7 @@ pub async fn gc_blobs(factory: ReopenableRuntimeStore) {
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     v1.set_tool_state_snapshot(Some(
@@ -160,6 +161,7 @@ pub async fn gc_blobs(factory: ReopenableRuntimeStore) {
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     v2.set_tool_state_snapshot(Some(
@@ -263,6 +265,7 @@ pub async fn append_receipt_reopen(factory: ReopenableRuntimeStore) {
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     let nodes = vec![crate::SessionAppendNode::plugin(
@@ -305,6 +308,7 @@ pub async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimeSt
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     state.ensure_agent_frame_initialized();
@@ -354,6 +358,7 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeSto
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     state.ensure_agent_frame_initialized();
@@ -372,6 +377,7 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeSto
             assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             )),
         },
     };
@@ -392,6 +398,7 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeSto
             assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             )),
         },
         ..original
@@ -434,6 +441,7 @@ pub async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimeStore
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     let duplicate_node_id = caller_frame_node_id(&SessionId::from("root"), "duplicate");
@@ -481,6 +489,7 @@ pub async fn committed_leaf_is_derived_from_the_terminal_appended_node(
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     let first = sample_session_node(&SessionId::from("root"), "append-run", None);
@@ -529,6 +538,7 @@ pub async fn preserve_head_commit_reports_the_resident_leaf(store: Arc<dyn Runti
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     state.ensure_agent_frame_initialized();
@@ -569,6 +579,7 @@ pub async fn empty_append_cannot_move_the_head(store: Arc<dyn RuntimeStore>) {
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     state.ensure_agent_frame_initialized();

@@ -73,6 +73,7 @@ pub async fn head_and_window_reads_agree_for_each_named_session(store: Arc<dyn R
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     commit_runtime_state_for_test(
@@ -159,6 +160,7 @@ pub async fn session_plugin_config_round_trips_through_the_committed_head(
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     state.authority.plugin_config = expected.clone();
@@ -208,6 +210,7 @@ pub async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
     let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
+        lash_core::NoProgressBudget::bounded(12),
     ));
     state.session_id = SessionId::from("execution-state-replace-then-clear");
     lash_core::testing::stage_execution_state_components(
@@ -297,6 +300,7 @@ pub async fn commit_rejects_carried_nondefault_node_budget(store: Arc<dyn Runtim
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     let parent = sample_session_node(&SessionId::from("root"), "budget-frame", None);
@@ -338,6 +342,7 @@ pub async fn commit_rejects_carried_nondefault_byte_budget(store: Arc<dyn Runtim
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     let budget = crate::CommitBudget::new(
@@ -369,6 +374,7 @@ pub(super) fn commit_budget_conformance_fixture(byte_limit: usize) -> RuntimeCom
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     RuntimeCommit::persisted_state_for_test_with_budget(
@@ -503,6 +509,7 @@ pub async fn checkpoint_restore_rejects_turn_index_without_increment_headroom(
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     commit_runtime_state_for_test(
@@ -554,6 +561,7 @@ pub async fn checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overfl
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     commit_runtime_state_for_test(

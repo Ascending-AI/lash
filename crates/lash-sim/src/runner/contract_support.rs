@@ -553,10 +553,9 @@ pub(super) fn standard_contract_turn_machine_config() -> lash_core::TurnMachineC
         )
         .with_reasoning(Default::default()),
         turn_budget: lash_core::TurnBudget::Unbounded,
-        no_progress_budget: Default::default(),
+        no_progress_budget: lash_core::NoProgressBudget::bounded(12),
         attachment_acceptance: Default::default(),
         generation: lash_core::GenerationOptions::default(),
-        autonomous: false,
         session_id: SessionId::from("standard-max-turn-contract"),
         agent_frame_id: "standard-max-turn-frame".to_string(),
         turn_id: TurnId::from("standard-max-turn"),

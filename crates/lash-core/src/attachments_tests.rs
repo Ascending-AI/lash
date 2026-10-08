@@ -244,6 +244,7 @@ async fn committed_factory_attachment() -> (
         config: crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         )
         .into(),
         head: crate::SessionCreationHead::Config,
@@ -1075,6 +1076,7 @@ async fn fenced_fixture(session_id: &SessionId) -> FencedFixture {
         config: crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         )
         .into(),
         head: crate::SessionCreationHead::Config,
@@ -1684,8 +1686,11 @@ fn pinned_session_attachment_acceptance_survives_model_catalogue_change() {
     let recorded = |key: &str| {
         crate::testing::test_llm_profile_config(key, crate::testing::test_llm_profile_metadata(key))
     };
-    let mut policy =
-        crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
+    let mut policy = crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+        crate::NoProgressBudget::bounded(12),
+    );
     policy.model = Some(recorded("attachment-model"));
     policy.attachment_acceptance = lash_core_store::attachments::attachment_test_acceptance();
     let changed_host = Arc::new(crate::provider::AttachmentCapabilitySnapshot {

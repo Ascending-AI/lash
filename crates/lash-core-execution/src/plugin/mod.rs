@@ -263,10 +263,12 @@ mod tests {
                     previous: SessionPolicy::new(
                         crate::TurnBudget::Unbounded,
                         crate::MaxToolCalls::new(1024),
+                        crate::NoProgressBudget::bounded(12),
                     ),
                     current: SessionPolicy::new(
                         crate::TurnBudget::Unbounded,
                         crate::MaxToolCalls::new(1024),
+                        crate::NoProgressBudget::bounded(12),
                     ),
                     sessions: Arc::new(NoopSessionManager),
                 },

@@ -1625,7 +1625,7 @@ fn full_random_seed_12_keeps_modeled_provider_exchange_slots_owned_by_scheduler(
             .get("provider_exchange_count")
             .and_then(Value::as_u64),
         Some(3),
-        "autonomous queued turns must not consume provider scripts before modeled turn 3"
+        "queued turns must not consume provider scripts before modeled turn 3"
     );
 }
 

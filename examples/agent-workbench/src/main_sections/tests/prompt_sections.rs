@@ -189,6 +189,7 @@ async fn workbench_prompt_sections_shape_the_prompt_the_provider_receives() {
         .plugin(Arc::new(factory))
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "workbench-prompt",
             "workbench-prompt-boot",
@@ -199,6 +200,7 @@ async fn workbench_prompt_sections_shape_the_prompt_the_provider_receives() {
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(8),
     )
+    .no_progress_budget(lash::NoProgressBudget::bounded(12))
     .plugin(
         "agent_workbench",
         workbench_session_prompt(

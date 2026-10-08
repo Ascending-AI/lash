@@ -9,11 +9,11 @@
 //! Three embedder patterns this enables:
 //!
 //! * **CLI interactive (single runtime, default):**
-//!   `RuntimeEnvironment::builder(RuntimeHostConfig::new(backend, commit_budget, batching)).build()`.
+//!   `RuntimeEnvironment::builder(RuntimeHostConfig::new(backend, commit_budget, batching,crate::ToolSourcePolicy::Tolerate)).build()`.
 //!   The host config is built over one backend, which supplies every store
 //!   port and the effect host; the zero-infra backend is a SQLite memory
 //!   backend (ADR 0102).
-//! * **Long autonomous agent:** reuse the environment and let the durable
+//! * **Long-running agent:** reuse the environment and let the durable
 //!   store retain the session's single leaf-to-root history chain.
 //! * **Webserver multi-tenant:** one `RuntimeEnvironment` per process,
 //!   `park()` / `resume()` per request. HTTP connection pooling is a provider concern —

@@ -184,6 +184,7 @@ impl BackendRunner {
                         config: lash_core::SessionPolicy::new(
                             lash_core::TurnBudget::Unbounded,
                             lash_core::MaxToolCalls::new(1024),
+                            lash_core::NoProgressBudget::bounded(12),
                         )
                         .into(),
                     })
@@ -221,6 +222,7 @@ impl BackendRunner {
                         config: lash_core::SessionPolicy::new(
                             lash_core::TurnBudget::Unbounded,
                             lash_core::MaxToolCalls::new(1024),
+                            lash_core::NoProgressBudget::bounded(12),
                         )
                         .into(),
                     })
@@ -260,6 +262,7 @@ impl BackendRunner {
                         config: lash_core::SessionPolicy::new(
                             lash_core::TurnBudget::Unbounded,
                             lash_core::MaxToolCalls::new(1024),
+                            lash_core::NoProgressBudget::bounded(12),
                         )
                         .into(),
                     })
@@ -299,6 +302,7 @@ impl BackendRunner {
                         config: lash_core::SessionPolicy::new(
                             lash_core::TurnBudget::Unbounded,
                             lash_core::MaxToolCalls::new(1024),
+                            lash_core::NoProgressBudget::bounded(12),
                         )
                         .into(),
                     })
@@ -429,6 +433,7 @@ pub(super) async fn selected_observer_intents(
             config: lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             )
             .into(),
             head: SessionCreationHead::Config,

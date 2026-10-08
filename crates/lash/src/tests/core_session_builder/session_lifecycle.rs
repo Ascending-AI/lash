@@ -226,23 +226,25 @@ async fn public_session_state_appends_preserve_concurrent_retirement_refusals() 
             .delete_session(&SessionId::from(session_id))
             .await
             .expect("retire session before public state append");
-        let error =
-            if append_plugin_body {
-                Box::pin(
-                    opened
-                        .admin()
-                        .state()
-                        .append_plugin_body("test-plugin", serde_json::json!({ "retired": true })),
-                )
-                .await
-                .expect_err("plugin-body append must preserve the retirement refusal")
-            } else {
-                Box::pin(opened.admin().state().append_messages(vec![
-                    lash_core::PluginMessage::text(lash_core::MessageRole::User, "must not append"),
-                ]))
-                .await
-                .expect_err("message append must preserve the retirement refusal")
-            };
+        let error = if append_plugin_body {
+            Box::pin(opened.admin().state().append_plugin_body(
+                "test-plugin",
+                serde_json::json!({ "retired": true }),
+                "host:session_lifecycle:append_plugin_body:235".to_string(),
+            ))
+            .await
+            .expect_err("plugin-body append must preserve the retirement refusal")
+        } else {
+            Box::pin(opened.admin().state().append_messages(
+                vec![lash_core::PluginMessage::text(
+                    lash_core::MessageRole::User,
+                    "must not append",
+                )],
+                "host:session_lifecycle:append_messages:240".to_string(),
+            ))
+            .await
+            .expect_err("message append must preserve the retirement refusal")
+        };
         // A host append is a session command (FIG-4202): the retired session
         // refuses its submission, typed, before anything is queued.
         assert!(
@@ -484,6 +486,7 @@ async fn open_with_state_keeps_supplied_policy_without_rewriting_frame_history()
         lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         )
     };
     let with_model = |model: &str, window: usize| lash_core::SessionPolicy {

@@ -54,6 +54,7 @@ async fn every_tool_a_standard_workbench_turn_offers_projects_under_every_provid
     let core = LashCore::standard_builder(backend)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .llm_profiles(Arc::new(WorkbenchLlmProfiles { provider }))
         .configure_plugins(move |plugins| {
             configure_workbench_plugins(

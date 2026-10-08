@@ -63,6 +63,7 @@ impl ExplicitEphemeralFacets for lash::LashCoreBuilder {
     fn with_explicit_ephemeral_facets(self) -> Self {
         self.commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+            .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
     }
 }
 
@@ -98,6 +99,7 @@ impl BenchmarkCore {
             turn_budget,
             lash::MaxToolCalls::new(1024),
         )
+        .no_progress_budget(lash_core::NoProgressBudget::bounded(12))
     }
 
     /// Create a benchmark's fresh session with `creation`, then open it.
@@ -772,7 +774,8 @@ fn benchmark_plugin_factories(
                 benchmark_llm_profile_spec().wire_model,
                 turn_budget,
                 lash::MaxToolCalls::new(1024),
-            ),
+            )
+            .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
             lash_core::lifetime::starter,
         );
         factories.push(Arc::new(if scenario.execution_mode().is_rlm() {
@@ -1119,6 +1122,7 @@ fn durable_benchmark_core(
     let builder = builder
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .plugins(plugin_stack);
     let core = builder.build(runtime_perf_owner())?;
     Ok(match mode_id {

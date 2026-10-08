@@ -274,6 +274,8 @@ async fn apply(
         .admin()
         .config()
         .apply(crate::config::ConfigWrite::new(id, revision), transaction)
+        .await?
+        .await_outcome(&session.admin().config())
         .await
 }
 

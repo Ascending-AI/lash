@@ -25,6 +25,7 @@ pub fn default_state() -> RuntimeSessionState {
     let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
+        crate::NoProgressBudget::bounded(12),
     ));
     state.ensure_agent_frame_initialized();
     state
@@ -442,6 +443,7 @@ pub async fn advance_session_head(
             let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
             ));
             state.session_id = meta.session_id;
             state
@@ -538,6 +540,7 @@ pub async fn recording_session_store(
             config: crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
             )
             .into(),
             head: crate::SessionCreationHead::Config,
@@ -558,6 +561,7 @@ pub fn test_runtime_host_config(backend: &crate::Backend) -> RuntimeHostConfig {
         backend.clone(),
         test_commit_budget(),
         crate::QueuedWorkBatchingConfig::new(1),
+        crate::ToolSourcePolicy::Tolerate,
     )
 }
 
@@ -688,6 +692,7 @@ impl TestRuntime {
         let mut initial_state = RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         ));
         // The fixture session records what a creator records: each installed
         // owner's namespace from its defaults (FIG-4379).

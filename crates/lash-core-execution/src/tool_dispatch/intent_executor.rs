@@ -647,8 +647,11 @@ mod tests {
     /// A start carrying `payload` as its declared input under an execution
     /// env captured from a session whose recorded protocol prompt is `prompt`.
     fn start_under_prompt(payload: serde_json::Value, prompt: String) -> crate::ToolIntent {
-        let policy =
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
+        let policy = crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
+        );
         let mut plugin_config = crate::PluginConfig::for_protocol(Some("protocol".to_string()));
         plugin_config.insert(
             "protocol",

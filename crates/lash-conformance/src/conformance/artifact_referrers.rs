@@ -173,6 +173,7 @@ where
         lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ),
     );
     let env_ref = env.stable_ref().expect("env ref");
@@ -292,6 +293,7 @@ where
         lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ),
     );
     let env_ref = env.stable_ref().expect("env ref");
@@ -478,6 +480,7 @@ where
         lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ),
     );
     let first_ref = spec.stable_ref().expect("first captured digest");
@@ -581,6 +584,7 @@ where
         lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ),
     );
     let env_ref = env.stable_ref().expect("environment reference");

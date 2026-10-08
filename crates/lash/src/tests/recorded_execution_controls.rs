@@ -1,4 +1,4 @@
-//! The turn budget, autonomy, no-progress budget and charge safety are
+//! The turn budget, no-progress budget and charge safety are
 //! recorded session config (FIG-4376): stated at creation and snapshotted per
 //! run in its recorded `ResolvedRun`. One engine runs sessions created with
 //! different budgets, and each keeps its own across the engine's reopen.
@@ -189,6 +189,8 @@ async fn apply(
         .admin()
         .config()
         .apply(crate::config::ConfigWrite::new(id, revision), transaction)
+        .await?
+        .await_outcome(&session.admin().config())
         .await
 }
 
@@ -250,6 +252,7 @@ async fn creation_refuses_charge_safety_above_the_ceiling_without_recording_a_se
         let mut policy = lash_core::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         );
         policy.charge_safety = crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
             max_unsafe_retries: requested,
@@ -480,35 +483,6 @@ async fn refused_publishes_nothing<T: PartialEq + std::fmt::Debug>(
         "a refused transaction publishes nothing"
     );
     Ok(refusal)
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn set_autonomy_is_applied_at_the_next_revision_and_a_stale_one_publishes_nothing()
--> Result<()> {
-    applied_then_stale(
-        "set-autonomy",
-        crate::config::SetAutonomy { autonomous: true },
-        crate::config::SetAutonomy { autonomous: false },
-        |config| config.autonomous,
-        true,
-    )
-    .await
-}
-
-/// Every autonomy is admissible, so its refusal is the transaction's: in a
-/// transaction the core owner refuses, it publishes nothing.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn set_autonomy_in_a_refused_transaction_publishes_nothing() -> Result<()> {
-    refused_publishes_nothing(
-        "set-autonomy-refused",
-        crate::config::ConfigTransaction::of(crate::config::SetAutonomy { autonomous: true })
-            .then(charge_safety_above_the_ceiling()),
-        1,
-        "set_charge_safety",
-        |config| config.autonomous,
-    )
-    .await?;
-    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

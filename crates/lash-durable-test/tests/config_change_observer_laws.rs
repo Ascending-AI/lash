@@ -174,6 +174,9 @@ async fn set_limit(
             }),
         )
         .await
+        .expect("the transaction is accepted")
+        .await_outcome(&session.admin().config())
+        .await
         .expect("the transaction settles")
 }
 
@@ -375,6 +378,7 @@ impl CutDelivery {
                     .serve_sessions(false)
                     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+                    .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
                     .serve_test_llm_profile(served::model(Arc::default()), served::metadata())
                     .plugin(factory)
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(

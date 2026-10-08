@@ -10,7 +10,7 @@ fn open_takes_no_llm_profile(core: lash::LashCore, model: lash::LlmProfileKey) {
             model,
             lash::TurnBudget::Unbounded,
             lash::MaxToolCalls::new(1024),
-        ))
+        ).no_progress_budget(lash::NoProgressBudget::bounded(12)))
         .open();
 }
 

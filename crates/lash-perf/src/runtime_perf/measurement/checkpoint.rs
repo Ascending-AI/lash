@@ -219,11 +219,14 @@ impl CheckpointBindingFixture {
             Arc::clone(&factory),
         )?;
         let session_id = SessionId::fixture(format!("checkpoint-worker-{}", uuid::Uuid::new_v4()));
-        let creation = lash::SessionCreation::root(lash::SessionSpec::new(
-            "mock-model",
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1024),
-        ));
+        let creation = lash::SessionCreation::root(
+            lash::SessionSpec::new(
+                "mock-model",
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            )
+            .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
+        );
         core.session(session_id.clone()).create(creation).await?;
         core.shutdown().await?;
         Ok(Self {
@@ -244,7 +247,12 @@ impl CheckpointBindingFixture {
         let session = core.session(self.session_id.clone()).open().await?;
         let answer = session
             .plugin_operations()
-            .run_task::<AssignCheckpointBinding>((index, turn))
+            .start_task::<AssignCheckpointBinding>(
+                (index, turn),
+                format!("checkpoint-binding:{index}:{turn}"),
+            )
+            .await?
+            .result()
             .await;
         let close = session.close().await;
         let shutdown = core.shutdown().await;
@@ -286,6 +294,7 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
                 ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                     lash_core::MaxToolCalls::new(1024),
+                    lash_core::NoProgressBudget::bounded(12),
                 ))
             };
             let store = memory_perf_store(&runtime_state.session_id).await?;
@@ -635,10 +644,9 @@ fn checkpoint_config(
         )
         .with_reasoning(Default::default()),
         turn_budget: lash_core::TurnBudget::bounded(8),
-        no_progress_budget: Default::default(),
+        no_progress_budget: lash_core::NoProgressBudget::bounded(12),
         attachment_acceptance: Default::default(),
         generation: lash_core::GenerationOptions::default(),
-        autonomous: false,
         session_id: SessionId::from("runtime-perf-turn-checkpoint"),
         agent_frame_id: "runtime-perf-turn-frame".to_string(),
         turn_id: TurnId::from("runtime-perf-turn"),

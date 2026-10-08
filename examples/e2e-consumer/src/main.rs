@@ -58,7 +58,8 @@ async fn submit(
         "consumer",
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(8),
-    );
+    )
+    .no_progress_budget(lash::NoProgressBudget::bounded(12));
     match host
         .core
         .session(session_id.clone())
@@ -365,6 +366,7 @@ async fn main() -> Result<()> {
         .llm_profiles(Arc::new(profiles))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .plugin(Arc::new(fixture::ConsumerPlugin(controls.clone())))
         .trace_sink(Arc::new(lash::tracing::JsonlTraceSink::new(trace)))
         .trace_level(lash::tracing::TraceLevel::Extended);

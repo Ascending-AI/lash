@@ -152,6 +152,7 @@ pub async fn checkpoint_identity_is_independent_of_compression_profile(
                 ..RuntimeSessionState::new(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
+                    lash_core::NoProgressBudget::bounded(12),
                 ))
             }
         } else {
@@ -201,6 +202,7 @@ pub async fn checkpoint_profile_change_preserves_refs_budget_and_atomic_root_lea
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     let bytes = vec![b'a'; 12_288];

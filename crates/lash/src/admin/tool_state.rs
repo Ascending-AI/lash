@@ -104,26 +104,37 @@ impl SessionAdmin {
         })
     }
 
-    /// Submit `change` and await its settlement.
-    async fn change_tool_state(&self, change: ToolStateChange) -> Result<ToolStateChangeOutcome> {
+    /// Submit `change` and return its applied outcome or pending receipt.
+    async fn change_tool_state(
+        &self,
+        change: ToolStateChange,
+        idempotency_key: String,
+    ) -> Result<AdminMutation<ToolStateChangeOutcome>> {
         let receipt = self
             .submit_session_command(
                 lash_core::facade_support::SessionCommand::ChangeToolState {
                     change: Box::new(change),
                 },
-                format!("tool-state:{}", uuid::Uuid::new_v4()),
+                idempotency_key,
             )
             .await?;
-        match Box::pin(self.await_command_settlement(receipt)).await? {
+        match Box::pin(self.command_status(receipt)).await? {
             lash_core::runtime::SessionCommandSettlement::Applied {
                 outcome: lash_core::runtime::SessionCommandOutcome::ToolState { outcome },
                 ..
-            } => Ok(outcome),
+            } => Ok(AdminMutation::Applied(outcome)),
+            lash_core::runtime::SessionCommandSettlement::Pending(receipt) => {
+                Ok(AdminMutation::Pending(receipt))
+            }
             settlement => Err(unsettled_command_error(settlement)),
         }
     }
 
-    pub(super) async fn apply_tool_state(&self, state: ToolState) -> Result<u64> {
+    pub(super) async fn apply_tool_state(
+        &self,
+        state: ToolState,
+        idempotency_key: String,
+    ) -> Result<AdminMutation<u64>> {
         let store = self.head_store()?;
         if let Some(recorded) = Self::recorded_tool_state(&store).await?
             && recorded.generation() != state.generation()
@@ -135,27 +146,32 @@ impl SessionAdmin {
                 },
             ));
         }
-        applied_generation(
-            self.change_tool_state(ToolStateChange::Apply { state })
-                .await?,
-        )
+        self.change_tool_state(ToolStateChange::Apply { state }, idempotency_key)
+            .await?
+            .try_map(applied_generation)
     }
 
-    pub(super) async fn restore_tool_state(&self, state: ToolState) -> Result<ToolRestoreReport> {
-        match self
-            .change_tool_state(ToolStateChange::Restore { state })
+    pub(super) async fn restore_tool_state(
+        &self,
+        state: ToolState,
+        idempotency_key: String,
+    ) -> Result<AdminMutation<ToolRestoreReport>> {
+        self.change_tool_state(ToolStateChange::Restore { state }, idempotency_key)
             .await?
-        {
-            ToolStateChangeOutcome::Restored { report } => Ok(report),
-            ToolStateChangeOutcome::Refused { error } => Err(EmbedError::from(error)),
-            outcome @ ToolStateChangeOutcome::Applied { .. } => Err(mismatched_outcome(&outcome)),
-        }
+            .try_map(|outcome| match outcome {
+                ToolStateChangeOutcome::Restored { report } => Ok(report),
+                ToolStateChangeOutcome::Refused { error } => Err(EmbedError::from(error)),
+                outcome @ ToolStateChangeOutcome::Applied { .. } => {
+                    Err(mismatched_outcome(&outcome))
+                }
+            })
     }
 
     pub(super) async fn set_tool_membership_many(
         &self,
         updates: &[(lash_core::ToolId, bool)],
-    ) -> Result<u64> {
+        idempotency_key: String,
+    ) -> Result<AdminMutation<u64>> {
         let store = self.head_store()?;
         if let Some(mut recorded) = Self::recorded_tool_state(&store).await? {
             for (tool_id, member) in updates {
@@ -164,8 +180,8 @@ impl SessionAdmin {
                     .map_err(EmbedError::from)?;
             }
         }
-        applied_generation(
-            self.change_tool_state(ToolStateChange::SetMembership {
+        self.change_tool_state(
+            ToolStateChange::SetMembership {
                 updates: updates
                     .iter()
                     .map(|(tool_id, member)| ToolMembershipUpdate {
@@ -173,9 +189,11 @@ impl SessionAdmin {
                         member: *member,
                     })
                     .collect(),
-            })
-            .await?,
+            },
+            idempotency_key,
         )
+        .await?
+        .try_map(applied_generation)
     }
 
     pub(super) async fn active_tool_manifests(&self) -> Result<Vec<ToolManifest>> {

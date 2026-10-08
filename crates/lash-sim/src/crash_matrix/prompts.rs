@@ -94,6 +94,7 @@ pub fn prompt_core(world: &Arc<World>) -> Result<lash::LashCore, String> {
         .serve_sessions(false)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .serve_test_llm_profile(model(Arc::downgrade(world)), metadata()?)
         .plugin(Arc::new(Memo {
             world: Arc::downgrade(world),
@@ -116,11 +117,14 @@ pub fn prompt_core(world: &Arc<World>) -> Result<lash::LashCore, String> {
 /// The facade refused.
 pub async fn send(core: &lash::LashCore, session: &SessionId, run: &TurnId) -> Result<(), String> {
     core.session(session.clone())
-        .create(lash::SessionCreation::root(lash::SessionSpec::new(
-            MODEL,
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(8),
-        )))
+        .create(lash::SessionCreation::root(
+            lash::SessionSpec::new(
+                MODEL,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(8),
+            )
+            .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
+        ))
         .await
         .map_err(|error| format!("create the prompt session: {error}"))?
         .send(lash::TurnInput::text("remember"))

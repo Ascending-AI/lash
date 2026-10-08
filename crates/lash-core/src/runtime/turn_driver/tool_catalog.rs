@@ -46,7 +46,6 @@ impl RuntimeTurnDriver<'_> {
                 .expect("an admitted turn has a committed active agent frame")
                 .into_inner(),
             turn_id: self.turn_id.clone(),
-            autonomous: session_policy.autonomous,
             model: session_policy.llm_profile_config().clone(),
             messages,
             events: self.turn_pipeline.active_events(),

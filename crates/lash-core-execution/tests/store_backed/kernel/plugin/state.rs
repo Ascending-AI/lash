@@ -68,6 +68,7 @@ mod tests {
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                lash_core_execution::NoProgressBudget::bounded(12),
             ))
         };
         publish(&plugins, "first", serde_json::json!(1)).await;

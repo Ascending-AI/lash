@@ -134,6 +134,7 @@ async fn google_streaming_runtime_preserves_tool_interleaved_reasoning_boundarie
         .tools(Arc::new(RuntimeLookupTool))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "google-reasoning-boundaries-test",
             "google-reasoning-boundaries-test-boot",
@@ -216,6 +217,7 @@ async fn google_streaming_runtime_does_not_republish_reasoning_after_signature_o
         ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "google-signature-only-reasoning-test",
             "google-signature-only-reasoning-test-boot",
@@ -268,11 +270,14 @@ async fn durable_backend() -> lash::Backend {
 /// Create the root session `session_id` on the test model.
 async fn created_session(core: &lash::LashCore, session_id: &str) -> lash::DurableSession {
     core.session(lash::SessionId::fixture(session_id.to_owned()))
-        .create(lash::SessionCreation::root(lash::SessionSpec::new(
-            "gemini-test",
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1024),
-        )))
+        .create(lash::SessionCreation::root(
+            lash::SessionSpec::new(
+                "gemini-test",
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            )
+            .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
+        ))
         .await
         .expect("the session is created")
 }

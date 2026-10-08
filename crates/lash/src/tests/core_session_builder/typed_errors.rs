@@ -30,7 +30,10 @@ async fn a_native_tool_membership_refusal_preserves_its_cause() {
     let tools = session.admin().tools();
     let before = tools.state().await.expect("tool state");
     let error = tools
-        .set_membership_many(&[("tool:absent".into(), false)])
+        .set_membership_many(
+            &[("tool:absent".into(), false)],
+            "host:typed_errors:set_membership_many:33",
+        )
         .await
         .expect_err("unknown membership refuses");
     assert!(
@@ -190,4 +193,100 @@ async fn a_native_cold_open_preserves_state_codec_refusals() {
         assert!(error.is_terminal(), "{error:?}");
         core.shutdown().await.expect("shutdown");
     }
+}
+
+/// FIG-5431: a host must choose how a deployment handles missing tool sources.
+#[tokio::test]
+async fn a_core_without_a_tool_loss_choice_is_refused() {
+    let builder = LashCore::standard_builder(sqlite_memory_store_backend().await)
+        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1));
+    assert!(matches!(
+        builder.build(crate::testing::runtime_lease_owner()),
+        Err(EmbedError::MissingToolSourcePolicy)
+    ));
+}
+
+/// FIG-5431: a creator must choose the session's stall bound.
+#[tokio::test]
+async fn a_session_without_a_stall_bound_is_refused() {
+    let core = standard_core_over(sqlite_memory_store_backend().await);
+    let spec = crate::SessionSpec::new(
+        mock_llm_profile_spec().wire_model,
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    );
+    assert!(matches!(
+        core.session(crate::SessionId::from("no-stall-choice"))
+            .create(crate::SessionCreation::root(spec))
+            .await,
+        Err(EmbedError::MissingNoProgressBudget)
+    ));
+    core.shutdown().await.expect("shutdown");
+}
+
+/// FIG-5431: a retry after a lost acknowledgement reattaches to one mutation.
+#[tokio::test]
+async fn a_retried_admin_mutation_with_the_same_host_key_applies_once() {
+    let core = standard_core_over(sqlite_memory_store_backend().await);
+    core.session(crate::SessionId::from("retry-keyed-append"))
+        .create(crate::SessionCreation::root(mock_session_spec()))
+        .await
+        .expect("create");
+    let session = core
+        .session(crate::SessionId::from("retry-keyed-append"))
+        .open()
+        .await
+        .expect("open");
+    let state = session.admin().state();
+    let messages = || {
+        vec![lash_core::PluginMessage::text(
+            lash_core::MessageRole::User,
+            "append once",
+        )]
+    };
+    let first = state
+        .append_messages(messages(), "host-stable-append".to_string())
+        .await
+        .expect("first submission");
+    let retried = state
+        .append_messages(messages(), "host-stable-append".to_string())
+        .await
+        .expect("retry submission");
+    if let (crate::AdminMutation::Pending(first), crate::AdminMutation::Pending(retried)) =
+        (&first, &retried)
+    {
+        assert_eq!(first, retried, "a retry carries the original receipt");
+    }
+    first
+        .settle_with(
+            &session.admin().commands(),
+            crate::testing::admin_fixture_outcome,
+        )
+        .await
+        .expect("first settles");
+    retried
+        .settle_with(
+            &session.admin().commands(),
+            crate::testing::admin_fixture_outcome,
+        )
+        .await
+        .expect("retry settles");
+    let snapshot = state.export().await;
+    assert_eq!(
+        snapshot
+            .session_graph
+            .nodes
+            .iter()
+            .filter(|node| matches!(
+                &node.payload,
+                lash_core::SessionNodePayload::Event {
+                    event: lash_core::SessionHistoryRecord::Conversation(_)
+                }
+            ))
+            .count(),
+        1,
+        "one append was committed"
+    );
+    core.shutdown().await.expect("shutdown");
 }

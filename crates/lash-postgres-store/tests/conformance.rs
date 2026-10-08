@@ -572,6 +572,7 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
             config: lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
                 lash_core_execution::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             )
             .into(),
             head: lash_core_execution::SessionCreationHead::Config,
@@ -603,6 +604,7 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     // A mid-turn commit: the stamps are the subject, and a final commit

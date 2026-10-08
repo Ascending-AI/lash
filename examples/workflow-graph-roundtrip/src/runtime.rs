@@ -155,6 +155,7 @@ impl PreparedRun {
                 lash::runtime::SessionPolicy::new(
                     lash::TurnBudget::bounded(32),
                     lash::MaxToolCalls::new(1024),
+                    lash::NoProgressBudget::bounded(12),
                 ),
             );
             let env_ref = artifacts.publish_process_env(&pin, &env).await?;
@@ -522,6 +523,7 @@ pub fn core(backend: lash::Backend) -> lash::Result<WorkflowHost> {
         .trace_level(lash::tracing::TraceLevel::Extended)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "workflow-graph",
             uuid::Uuid::new_v4().to_string(),

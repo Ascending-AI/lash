@@ -30,7 +30,11 @@ const LIFECYCLES: usize = 32;
 fn environment() -> lash_core::ProcessExecutionEnvSpec {
     let mut environment = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy::new(lash::TurnBudget::Unbounded, lash::MaxToolCalls::new(16)),
+        lash_core::SessionPolicy::new(
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(16),
+            lash_core::NoProgressBudget::bounded(12),
+        ),
     );
     environment.render = Some(lash_core::RecordedRender {
         renderer_id: lash::render::ToolOutputRendererSlot::default()
@@ -75,6 +79,7 @@ async fn one_lifecycle(run: usize) -> std::sync::Weak<lash_sqlite_store::SqliteS
     let core = lash::LashCore::standard_builder(backend.clone())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .serve_test_llm_profile(
             provider,
             lash_core::LlmProfileMetadata::builder(MODEL)
@@ -126,11 +131,14 @@ async fn one_lifecycle(run: usize) -> std::sync::Weak<lash_sqlite_store::SqliteS
 
     let session = core
         .session(lash_core::SessionId::fixture(format!("capacity-{run}")))
-        .create(lash::SessionCreation::root(lash::SessionSpec::new(
-            MODEL,
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(16),
-        )))
+        .create(lash::SessionCreation::root(
+            lash::SessionSpec::new(
+                MODEL,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(16),
+            )
+            .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
+        ))
         .await
         .expect("the session is created");
     let answered = tokio::time::timeout(

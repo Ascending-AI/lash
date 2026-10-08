@@ -100,6 +100,7 @@ fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
         config: crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         )
         .into(),
         head: SessionCreationHead::Config,
@@ -124,6 +125,7 @@ async fn seed(
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     state.ensure_agent_frame_initialized();
@@ -164,6 +166,7 @@ async fn fork(
             config: crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             )
             .into(),
         })
@@ -497,6 +500,7 @@ pub async fn fork_lineage_no_carrier_law(handles: LineageConformanceHandles) {
             config: crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             )
             .into(),
         })

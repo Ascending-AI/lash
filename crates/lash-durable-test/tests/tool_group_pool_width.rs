@@ -225,6 +225,7 @@ fn core(
         .serve_sessions(false)
         .commit_budget(lash::CommitBudget::bounded(4 * 1024 * 1024, 4096))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .serve_test_llm_profile(model(protocol, Arc::clone(seen)), metadata())
         .tools(touch(Arc::clone(touched)))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -347,11 +348,14 @@ impl Scenario for Wide {
         let session = self
             .core()
             .session(session())
-            .create(lash::SessionCreation::root(lash::SessionSpec::new(
-                MODEL,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(WIDTH),
-            )))
+            .create(lash::SessionCreation::root(
+                lash::SessionSpec::new(
+                    MODEL,
+                    lash::TurnBudget::Unbounded,
+                    lash::MaxToolCalls::new(WIDTH),
+                )
+                .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
+            ))
             .await
             .map_err(|error| format!("create the session: {error}"))?;
         session

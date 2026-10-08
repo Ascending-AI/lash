@@ -302,6 +302,7 @@ impl PressureFrame {
                     .serve_sessions(false)
                     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+                    .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
                     .serve_test_llm_profile(model(self.script, Arc::clone(&self.seen)), metadata())
                     .plugin(Arc::new(
                         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
@@ -321,11 +322,14 @@ impl PressureFrame {
         let session = self
             .core()
             .session(session())
-            .create(lash::SessionCreation::root(lash::SessionSpec::new(
-                MODEL,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(64),
-            )))
+            .create(lash::SessionCreation::root(
+                lash::SessionSpec::new(
+                    MODEL,
+                    lash::TurnBudget::Unbounded,
+                    lash::MaxToolCalls::new(64),
+                )
+                .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
+            ))
             .await
             .map_err(|error| format!("create the session: {error}"))?;
         for (input, run) in [(ASK, FIRST_RUN), (NEXT, SECOND_RUN)] {
@@ -848,6 +852,7 @@ impl PromptUsage {
                 .serve_sessions(false)
                 .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
                 .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+                .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
                 .serve_test_llm_profile(model, metadata())
                 .build(lash::persistence::LeaseOwnerIdentity::opaque(
                     "prompt-usage-deployment",
@@ -896,11 +901,14 @@ impl Scenario for PromptUsage {
         let session = self
             .core()
             .session(usage_session())
-            .create(lash::SessionCreation::root(lash::SessionSpec::new(
-                MODEL,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(64),
-            )))
+            .create(lash::SessionCreation::root(
+                lash::SessionSpec::new(
+                    MODEL,
+                    lash::TurnBudget::Unbounded,
+                    lash::MaxToolCalls::new(64),
+                )
+                .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
+            ))
             .await
             .map_err(|error| format!("create the session: {error}"))?;
         session

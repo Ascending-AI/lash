@@ -298,6 +298,9 @@ async fn set_tool_access(core: &lash::LashCore, name: &str, access: lash_core::S
             lash::config::ConfigTransaction::of(lash::config::SetToolAccess { access }),
         )
         .await
+        .expect("the config write is accepted")
+        .await_outcome(&config)
+        .await
         .expect("the config write settles");
     assert!(
         matches!(
@@ -426,9 +429,19 @@ async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flap
         .await
         .admin()
         .tools()
-        .set_membership(original.id, false)
+        .set_membership(
+            original.id,
+            false,
+            "host:tool_surface_laws:set_membership:429",
+        )
         .await
-        .expect("the host opts the original out");
+        .expect("the host opts the original out")
+        .settle_with(
+            &open(&core, "live-surface").await.admin().commands(),
+            lash::testing::admin_fixture_outcome,
+        )
+        .await
+        .expect("fixture mutation settled");
     let curated = recorded(&core, "live-surface").await;
     assert!(!entry(&curated, original.id).is_member());
     core.shutdown().await.expect("the core shuts down");
@@ -533,9 +546,19 @@ async fn orphan_lifecycle_rebinds_by_id_and_supersedes_same_name_without_duplica
         .await
         .admin()
         .tools()
-        .set_membership(original.id, false)
+        .set_membership(
+            original.id,
+            false,
+            "host:tool_surface_laws:set_membership:536",
+        )
         .await
-        .expect("the host opts the original out");
+        .expect("the host opts the original out")
+        .settle_with(
+            &open(&core, "orphans").await.admin().commands(),
+            lash::testing::admin_fixture_outcome,
+        )
+        .await
+        .expect("fixture mutation settled");
 
     surface.replace(Vec::new());
     send(&core, "orphans", "the source is gone").await;
@@ -608,9 +631,15 @@ async fn public_apply_tool_state_round_trip_keeps_delta_and_generation_fencing(t
         .admin()
         .tools()
         .advanced()
-        .apply_state(edited)
+        .apply_state(edited, "host:tool_surface_laws:apply_state:611")
         .await
-        .expect("a generation-matched delta applies");
+        .expect("a generation-matched delta applies")
+        .settle_with(
+            &session.admin().commands(),
+            lash::testing::admin_fixture_outcome,
+        )
+        .await
+        .expect("fixture mutation settled");
     assert_eq!(applied_generation, stale.generation() + 1);
     let applied = recorded(&core, "apply-state").await;
     assert!(!entry(&applied, first.id).is_member());
@@ -625,13 +654,21 @@ async fn public_apply_tool_state_round_trip_keeps_delta_and_generation_fencing(t
         "a non-member is refused by id"
     );
 
-    let refused = session
-        .admin()
-        .tools()
-        .advanced()
-        .apply_state(stale)
-        .await
-        .expect_err("a stale generation is fenced");
+    let refused = async {
+        session
+            .admin()
+            .tools()
+            .advanced()
+            .apply_state(stale, "host:tool_surface_laws:apply_state:632")
+            .await?
+            .settle_with(
+                &session.admin().commands(),
+                lash::testing::admin_fixture_outcome,
+            )
+            .await
+    }
+    .await
+    .expect_err("a stale generation is fenced");
     let message = refused.to_string();
     assert!(message.contains("generation"), "{message}");
     assert!(
@@ -674,9 +711,15 @@ async fn fig3353_sequence_keeps_curation_across_an_orphaned_commit(tier: Tier) {
         .await
         .admin()
         .tools()
-        .set_membership(BETA_ID, false)
+        .set_membership(BETA_ID, false, "host:tool_surface_laws:set_membership:677")
         .await
-        .expect("opt out beta");
+        .expect("opt out beta")
+        .settle_with(
+            &open(&core, "fig3353").await.admin().commands(),
+            lash::testing::admin_fixture_outcome,
+        )
+        .await
+        .expect("fixture mutation settled");
     let seeded = recorded(&core, "fig3353").await;
     assert!(entry(&seeded, ALPHA_ID).is_member() && !entry(&seeded, ALPHA_ID).is_orphaned());
     assert!(!entry(&seeded, BETA_ID).member && !entry(&seeded, BETA_ID).is_orphaned());
@@ -801,9 +844,15 @@ async fn a_host_restore_on_a_require_core_reports_instead_of_refusing(tier: Tier
         .admin()
         .tools()
         .advanced()
-        .restore_state(snapshot)
+        .restore_state(snapshot, "host:tool_surface_laws:restore_state:804")
         .await
-        .expect("a host restore never refuses, whatever the run policy is");
+        .expect("a host restore never refuses, whatever the run policy is")
+        .settle_with(
+            &open(&core, "require-restore").await.admin().commands(),
+            lash::testing::admin_fixture_outcome,
+        )
+        .await
+        .expect("fixture mutation settled");
     assert_eq!(
         report.lost_members,
         vec![ToolId::from(ALPHA_ID)],
@@ -867,9 +916,19 @@ async fn session_fork_discovers_live_tools_and_preserves_curation_and_hidden_pol
         .await
         .admin()
         .tools()
-        .set_membership(curated.id, false)
+        .set_membership(
+            curated.id,
+            false,
+            "host:tool_surface_laws:set_membership:870",
+        )
         .await
-        .expect("curate the source's tool out");
+        .expect("curate the source's tool out")
+        .settle_with(
+            &open(&core, "fork-source").await.admin().commands(),
+            lash::testing::admin_fixture_outcome,
+        )
+        .await
+        .expect("fixture mutation settled");
     set_tool_access(&core, "fork-source", hiding(hidden.name)).await;
     let lash::SendOutcome::Settled { run, .. } =
         outcome(&core, "fork-source", "the turn the fork is taken at").await
@@ -912,15 +971,32 @@ async fn session_fork_discovers_live_tools_and_preserves_curation_and_hidden_pol
         "authority never rewrites ToolId-keyed host curation"
     );
 
-    let tools = open(&core, "fork-child").await.admin().tools();
+    let child_session = open(&core, "fork-child").await;
+    let tools = child_session.admin().tools();
     tools
-        .set_membership(hidden.id, false)
+        .set_membership(
+            hidden.id,
+            false,
+            "host:tool_surface_laws:set_membership:917",
+        )
         .await
-        .expect("curate the hidden tool out");
+        .expect("curate the hidden tool out")
+        .settle_with(
+            &child_session.admin().commands(),
+            lash::testing::admin_fixture_outcome,
+        )
+        .await
+        .expect("fixture mutation settled");
     tools
-        .set_membership(hidden.id, true)
+        .set_membership(hidden.id, true, "host:tool_surface_laws:set_membership:921")
         .await
-        .expect("curate the hidden tool back in");
+        .expect("curate the hidden tool back in")
+        .settle_with(
+            &child_session.admin().commands(),
+            lash::testing::admin_fixture_outcome,
+        )
+        .await
+        .expect("fixture mutation settled");
     assert!(
         entry(&recorded(&core, "fork-child").await, hidden.id).is_member(),
         "authority does not undo set_membership(true)"
@@ -937,7 +1013,11 @@ async fn session_fork_discovers_live_tools_and_preserves_curation_and_hidden_pol
 fn process_environment() -> lash_core_execution::ProcessExecutionEnvSpec {
     let mut environment = lash_core_execution::ProcessExecutionEnvSpec::new(
         lash_core_execution::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy::new(lash::TurnBudget::Unbounded, lash::MaxToolCalls::new(16)),
+        lash_core::SessionPolicy::new(
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(16),
+            lash_core::NoProgressBudget::bounded(12),
+        ),
     );
     environment.render = Some(lash_core::RecordedRender {
         renderer_id: lash::render::ToolOutputRendererSlot::default()

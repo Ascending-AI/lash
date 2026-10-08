@@ -82,16 +82,6 @@ fn drain_area_witnesses() {
             let _ = f0;
         }
     });
-    // W0030: lash::SessionError::SessionCommandPending [variant]
-    variant_witness(|value: &lash::SessionError| {
-        matches!(value, lash::SessionError::SessionCommandPending(..))
-    });
-    // W0031: lash::SessionError::SessionCommandPending::0 [field]
-    field_witness(|value: &lash::SessionError| {
-        if let lash::SessionError::SessionCommandPending(f0) = value {
-            let _ = f0;
-        }
-    });
     // W0032: lash::TurnBudget::max_turns [function]
     let _ = lash::TurnBudget::max_turns;
     // W0033: lash::TurnCancellationEvidence [struct]

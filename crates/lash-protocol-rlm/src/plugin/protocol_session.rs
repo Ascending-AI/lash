@@ -278,6 +278,7 @@ mod tests {
             lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(16),
+                lash_core::NoProgressBudget::bounded(12),
             ),
         );
         snapshot.session_graph.append_node_drafts_at(
@@ -338,6 +339,7 @@ mod tests {
             ..lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             )
         };
         let state = lash_core::SessionSnapshot {
@@ -386,6 +388,7 @@ mod tests {
             ..lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             )
         };
         let state = lash_core::SessionSnapshot {
@@ -435,6 +438,7 @@ mod tests {
             ..lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             )
         };
         let state = lash_core::SessionSnapshot {

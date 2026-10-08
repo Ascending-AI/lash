@@ -143,6 +143,7 @@ pub fn spec(max_tool_calls: usize) -> lash::SessionSpec {
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(max_tool_calls),
     )
+    .no_progress_budget(lash_core::NoProgressBudget::bounded(12))
 }
 
 /// Every scenario's script and the requests the model was asked in it,
@@ -420,6 +421,7 @@ impl World {
         let core = builder(&backend)
             .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
             .queued_work_batching(batching)
+            .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .serve_test_llm_profile(model, metadata())
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 "tool-semantics-deployment",
@@ -488,6 +490,7 @@ impl World {
         self.core = builder(&self.backend)
             .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+            .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .serve_test_llm_profile(model(Arc::clone(&self.scripts)), metadata())
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 "tool-semantics-deployment",

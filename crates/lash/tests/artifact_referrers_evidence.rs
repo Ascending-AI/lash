@@ -388,6 +388,7 @@ fn rlm_core_with_plugins(
         )
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .plugin(Arc::new(
             lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
                 lash_core::lifetime::session_or_starter,
@@ -1034,7 +1035,11 @@ async fn host_pin_keeps_a_definition_across_an_uncarried_switch(backend: Backend
 fn process_environment() -> lash_core::ProcessExecutionEnvSpec {
     lash_core::ProcessExecutionEnvSpec::new(
         lash_core::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy::new(lash::TurnBudget::Unbounded, lash::MaxToolCalls::new(16)),
+        lash_core::SessionPolicy::new(
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(16),
+            lash::NoProgressBudget::bounded(12),
+        ),
     )
 }
 
@@ -1181,11 +1186,14 @@ async fn created_session(
     let session_id = session_id.into();
     match core
         .session(session_id.clone())
-        .create(lash::SessionCreation::root(lash::SessionSpec::new(
-            "artifact-referrers",
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1024),
-        )))
+        .create(lash::SessionCreation::root(
+            lash::SessionSpec::new(
+                "artifact-referrers",
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            )
+            .no_progress_budget(lash::NoProgressBudget::bounded(12)),
+        ))
         .await
     {
         Ok(_)

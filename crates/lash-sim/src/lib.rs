@@ -87,7 +87,8 @@ pub(crate) async fn open_created_session(
             model,
             lash::TurnBudget::Unbounded,
             lash::MaxToolCalls::new(1024),
-        ),
+        )
+        .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
         core,
         session_id,
     )

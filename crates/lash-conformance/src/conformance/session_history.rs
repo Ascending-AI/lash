@@ -32,6 +32,7 @@ fn state(session_id: &str) -> RuntimeSessionState {
         ..RuntimeSessionState::new(SessionPolicy::new(
             TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     }
 }
@@ -443,8 +444,12 @@ pub async fn history_fork_respects_ceiling(store: Arc<dyn ConformanceDeployment>
             head_revision: fork_revision,
             relation: SessionRelation::Root,
             pending_observer_intents: Vec::new(),
-            config: SessionPolicy::new(TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
-                .into(),
+            config: SessionPolicy::new(
+                TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
+            )
+            .into(),
         })
         .await
         .expect("fork at retained node");
@@ -477,8 +482,12 @@ pub async fn history_fork_respects_ceiling(store: Arc<dyn ConformanceDeployment>
             head_revision: 0,
             relation: SessionRelation::Root,
             pending_observer_intents: Vec::new(),
-            config: SessionPolicy::new(TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
-                .into(),
+            config: SessionPolicy::new(
+                TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
+            )
+            .into(),
         })
         .await
         .expect("fork an inherited node through the child lineage");
@@ -521,8 +530,12 @@ async fn fork_at(
             head_revision,
             relation: SessionRelation::Root,
             pending_observer_intents: Vec::new(),
-            config: SessionPolicy::new(TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
-                .into(),
+            config: SessionPolicy::new(
+                TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
+            )
+            .into(),
         })
         .await
         .expect("fork at a retained node");

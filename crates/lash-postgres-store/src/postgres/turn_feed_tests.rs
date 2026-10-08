@@ -38,6 +38,7 @@ fn persisted_state(session_id: &SessionId) -> lash_core_execution::RuntimeSessio
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     }
 }

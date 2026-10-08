@@ -309,6 +309,7 @@ async fn open_of_a_missing_id_is_unknown_session_and_writes_no_row() {
         let mut state = lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         ));
         state.session_id = missing.clone();
         state

@@ -24,6 +24,7 @@ fn frame_state(session_id: &str) -> lash_core_execution::RuntimeSessionState {
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     state.ensure_agent_frame_initialized();

@@ -267,7 +267,12 @@ async fn drain_an_append(
             .append_session_nodes(an_append(ancestor)),
     )
     .await
-    .expect("the session's actor drains the queued command")?;
+    .expect("the session's actor drains the queued command")?
+    .settle_with(
+        &host.admin().commands(),
+        crate::testing::admin_fixture_outcome,
+    )
+    .await?;
     assert!(
         store
             .list_open_queued_work()

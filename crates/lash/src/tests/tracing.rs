@@ -249,6 +249,8 @@ async fn composition_trace_is_snapshot_on_change_and_ignores_route_capacity_nois
                 model: lash_core::LlmProfileKey::new("different-route"),
             }),
         )
+        .await?
+        .await_outcome(&config)
         .await?;
     assert!(
         matches!(
@@ -316,7 +318,16 @@ async fn composition_trace_fires_once_when_tool_membership_changes_with_full_ord
     session
         .admin()
         .tools()
-        .set_membership(lash_core::ToolId::from("tool:echo_tool"), false)
+        .set_membership(
+            lash_core::ToolId::from("tool:echo_tool"),
+            false,
+            "host:tracing:set_membership:319",
+        )
+        .await?
+        .settle_with(
+            &session.admin().commands(),
+            crate::testing::admin_fixture_outcome,
+        )
         .await?;
     session
         .send(TurnInput::text("tool-removed"))

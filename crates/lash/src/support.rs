@@ -11,7 +11,6 @@ pub(crate) use lash_core::{
     facade_support::RuntimeHostConfig, facade_support::RuntimeObservation,
     facade_support::SessionSpec,
 };
-pub(crate) use tokio_util::sync::CancellationToken;
 
 pub(crate) use lash_core::plugin::runtime_host::SessionStateService;
 pub(crate) use lash_core::{

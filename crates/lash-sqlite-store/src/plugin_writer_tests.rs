@@ -110,6 +110,7 @@ fn state(session_id: &str) -> RuntimeSessionState {
         ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     }
 }
@@ -168,6 +169,7 @@ fn env_bytes(format: u32) -> Vec<u8> {
         lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ),
     )
     .to_store_bytes()

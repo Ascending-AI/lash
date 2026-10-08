@@ -287,8 +287,6 @@ pub enum SessionError {
         #[source]
         source: crate::StoreError,
     },
-    #[error("session config command has not settled yet: {0}")]
-    SessionCommandPending(crate::SessionCommandReceipt),
     #[error("session config command was cancelled before settlement: {0}")]
     SessionCommandCancelled(crate::SessionCommandReceipt),
     /// Session config a creation stated that was refused, before anything
@@ -344,7 +342,6 @@ impl SessionError {
             | Self::LlmProfileUnavailable { .. }
             | Self::LlmProfileUnknown { .. }
             | Self::Store { .. }
-            | Self::SessionCommandPending(_)
             | Self::SessionCommandCancelled(_)
             | Self::SessionConfigRefused(_)
             | Self::Plugin(_)
@@ -408,7 +405,6 @@ impl ExecutionEnvironmentSyncError {
             | SessionError::LlmProfileUnconfigured { .. }
             | SessionError::LlmProfileUnavailable { .. }
             | SessionError::LlmProfileUnknown { .. }
-            | SessionError::SessionCommandPending(_)
             | SessionError::SessionCommandCancelled(_)
             | SessionError::SessionConfigRefused(_)
             | SessionError::Protocol(_)) => {

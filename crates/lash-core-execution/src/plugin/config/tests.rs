@@ -190,6 +190,7 @@ fn head(registry: &ConfigRegistry, revision: u64) -> crate::PersistedSessionConf
     let mut config = crate::PersistedSessionConfig::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
+        crate::NoProgressBudget::bounded(12),
     );
     config.plugin_config = registry
         .resolve_creation(
@@ -752,11 +753,9 @@ fn core_commands_keep_what_they_do_not_name() {
         &registry,
         &base,
         &models,
-        ConfigTransaction::new()
-            .then(core::SetLlmProfile {
-                model: crate::LlmProfileKey::new("next-model"),
-            })
-            .then(core::SetAutonomy { autonomous: true }),
+        ConfigTransaction::new().then(core::SetLlmProfile {
+            model: crate::LlmProfileKey::new("next-model"),
+        }),
     );
     let mut published = base.clone();
     assert!(matches!(
@@ -775,7 +774,6 @@ fn core_commands_keep_what_they_do_not_name() {
         published.attachment_acceptance, base.attachment_acceptance,
         "a model change keeps the attachment-acceptance snapshot"
     );
-    assert!(published.autonomous, "the second command applied too");
     assert_eq!(published.plugin_config, base.plugin_config);
 }
 
@@ -959,6 +957,7 @@ fn config_namespaces_are_written_in_the_admissions_recorded_format() {
     let mut base = crate::PersistedSessionConfig::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
+        crate::NoProgressBudget::bounded(12),
     );
     base.plugin_config = created;
     base.config_revision = 7;

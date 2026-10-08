@@ -120,6 +120,7 @@ fn state(session_id: &str) -> RuntimeSessionState {
         ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     }
 }
@@ -178,6 +179,7 @@ async fn publish_env(storage: &PostgresStorage, format: u32) -> Result<(), Store
         lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ),
     )
     .to_store_bytes()

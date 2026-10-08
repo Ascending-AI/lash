@@ -42,6 +42,7 @@ async fn a_core_refuses_an_rlm_factory_built_over_another_backend() -> Result<()
             .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
             .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+            .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
             .build(crate::testing::runtime_lease_owner())
     };
 
@@ -77,6 +78,7 @@ async fn the_backend_process_registry_stamps_from_the_backend_clock() {
     let core = LashCore::standard_builder(store_backend_with_clock(clock).await)
         .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
         .build(crate::testing::runtime_lease_owner())
         .expect("build core over a clocked memory backend");
     let registry = core.process_registry();
@@ -146,6 +148,7 @@ async fn fork_distinguishes_collected_revision_from_unknown_and_deleted_sources(
         ..lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         )
     };
     let source_request = lash_core::SessionStoreCreateRequest {
@@ -165,6 +168,7 @@ async fn fork_distinguishes_collected_revision_from_unknown_and_deleted_sources(
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         ))
     };
     source_state.ensure_agent_frame_initialized();
@@ -295,6 +299,7 @@ async fn fork_observer_selection_is_recoverable_and_selective() -> Result<()> {
         ..lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         )
     };
     let source_store = lash_core::runtime::admit_session_view(
@@ -316,6 +321,7 @@ async fn fork_observer_selection_is_recoverable_and_selective() -> Result<()> {
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         ))
     };
     source_state.ensure_agent_frame_initialized();
@@ -522,6 +528,7 @@ async fn fork_observer_selection_is_recoverable_and_selective() -> Result<()> {
                 ..lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                     lash_core::MaxToolCalls::new(1024),
+                    crate::NoProgressBudget::bounded(12),
                 )
             })
         })
@@ -686,6 +693,7 @@ async fn duplicate_only_fork_intents_are_canonical(
         ..lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         )
     };
     let source_store = lash_core::runtime::admit_session_view(
@@ -706,6 +714,7 @@ async fn duplicate_only_fork_intents_are_canonical(
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         ))
     };
     source_state.ensure_agent_frame_initialized();
@@ -801,6 +810,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
                 ..lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                     lash_core::MaxToolCalls::new(1024),
+                    crate::NoProgressBudget::bounded(12),
                 )
             }
             .into(),
@@ -933,6 +943,7 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
                     ..lash_core::SessionPolicy::new(
                         lash_core::TurnBudget::Unbounded,
                         lash_core::MaxToolCalls::new(1024),
+                        crate::NoProgressBudget::bounded(12),
                     )
                 }
                 .into(),
@@ -1054,6 +1065,7 @@ async fn a_fork_runs_under_its_branch_points_generation_not_what_the_host_passes
         ..lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         )
     };
     let source_store = lash_core::runtime::admit_session_view(
@@ -1075,6 +1087,7 @@ async fn a_fork_runs_under_its_branch_points_generation_not_what_the_host_passes
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         ))
     };
     source_state.ensure_agent_frame_initialized();

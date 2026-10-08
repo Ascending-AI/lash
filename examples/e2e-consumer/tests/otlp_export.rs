@@ -42,11 +42,14 @@ fn provider() -> lash::provider::ProviderHandle {
 async fn send(core: &lash::LashCore, id: &str) -> Result<()> {
     let session = core
         .session(lash::SessionId::fixture(id))
-        .create(lash::SessionCreation::root(lash::SessionSpec::new(
-            "socket",
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(16),
-        )))
+        .create(lash::SessionCreation::root(
+            lash::SessionSpec::new(
+                "socket",
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(16),
+            )
+            .no_progress_budget(lash::NoProgressBudget::bounded(12)),
+        ))
         .await?;
     let handle = session
         .send(lash::TurnInput::text("export this answer"))
@@ -92,6 +95,7 @@ async fn socket_outage_is_counted_and_shutdown_drains_acknowledged_export() -> R
                 .llm_profiles(Arc::new(registry))
                 .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
                 .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+                .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
                 .trace_jsonl_path(trace.path()),
         )
         .build(lash::persistence::LeaseOwnerIdentity::opaque(

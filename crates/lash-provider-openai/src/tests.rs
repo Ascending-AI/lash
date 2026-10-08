@@ -299,6 +299,7 @@ fn route_headers_stay_out_of_the_persisted_session_config() {
     let mut policy = lash_core::SessionPolicy::new(
         lash_core::TurnBudget::Unbounded,
         lash_core::MaxToolCalls::new(1024),
+        lash_core::NoProgressBudget::bounded(12),
     );
     policy.model = Some(lash_core::LlmProfileConfig::new(
         lash_core::LlmProfiles::snapshot(&models, &lash_core::LlmProfileKey::new("model")).unwrap(),

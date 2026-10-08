@@ -63,6 +63,7 @@ async fn persisted_record_decode_store(
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     store
@@ -185,6 +186,7 @@ async fn seed_failure_evidence_session(
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     let mut commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state);
@@ -654,6 +656,7 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
         config: lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         )
         .into(),
         head: lash_core_execution::SessionCreationHead::Config,
@@ -762,6 +765,7 @@ async fn admitted_input_fixture(
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     let seeded = store
@@ -1150,6 +1154,7 @@ async fn postgres_gc_sweep_statement_count_is_dead_set_invariant_when_configured
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     store

@@ -44,6 +44,7 @@ fn persistence_types_are_nameable(graph: GraphAppend) -> RuntimeCommit {
         config: PersistedSessionConfig::new(
             lash::TurnBudget::Unbounded,
             lash::MaxToolCalls::new(1024),
+            lash::NoProgressBudget::bounded(12),
         ),
         execution_config: None,
         frame_transition: None,
@@ -345,6 +346,7 @@ fn main() {
             config: PersistedSessionConfig::new(
                 lash::TurnBudget::Unbounded,
                 lash::MaxToolCalls::new(1024),
+                lash::NoProgressBudget::bounded(12),
             ),
         },
         0,

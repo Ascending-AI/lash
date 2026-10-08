@@ -52,9 +52,7 @@ error[E0599]: no associated function or constant named `default` found for struc
 19 |     let _ = lash::SessionSpec::default();
    |                                ^^^^^^^ associated function or constant not found in `SessionSpec`
    |
-note: if you're trying to build a new `SessionSpec` consider using one of the following associated functions:
-      SessionSpec::new
-      SessionSpec::inherit
+note: if you're trying to build a new `SessionSpec`, consider using `SessionSpec::new` which returns `SessionSpec`
   --> $WORKSPACE/crates/lash-core-execution/src/session_model/mod.rs
    |
    | /     pub fn new(
@@ -63,9 +61,6 @@ note: if you're trying to build a new `SessionSpec` consider using one of the fo
    | |         max_tool_calls: MaxToolCalls,
    | |     ) -> Self {
    | |_____________^
-...
-   |       pub fn inherit() -> Self {
-   |       ^^^^^^^^^^^^^^^^^^^^^^^^
 
 error[E0599]: no associated function or constant named `default` found for struct `SessionCreation` in the current scope
   --> tests/ui/session_spec_requires_its_required_parts.rs:23:36

@@ -221,6 +221,7 @@ async fn runtime_for_config_settlement(
         backend,
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
+        lash_core::ToolSourcePolicy::Tolerate,
     )
     .with_clock(clock as Arc<dyn crate::Clock>);
     // The laws change the session's model: resolution mints the key through

@@ -130,6 +130,7 @@ fn core(
         .process_event_sink(Arc::new(heard.clone()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "lifecycle-events-deployment",
             boot,
@@ -349,7 +350,11 @@ fn write(step: &str, x: u64, site: Option<(&str, u64)>) -> lash_core::EngineActi
 fn environment() -> lash_core::ProcessExecutionEnvSpec {
     let mut environment = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy::new(lash::TurnBudget::Unbounded, lash::MaxToolCalls::new(16)),
+        lash_core::SessionPolicy::new(
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(16),
+            lash_core::NoProgressBudget::bounded(12),
+        ),
     );
     environment.render = Some(lash_core::RecordedRender {
         renderer_id: lash::render::ToolOutputRendererSlot::default()

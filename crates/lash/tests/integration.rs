@@ -37,11 +37,14 @@ async fn created_session(
     let session_id = session_id.into();
     match core
         .session(session_id.clone())
-        .create(lash::SessionCreation::root(lash::SessionSpec::new(
-            model,
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1024),
-        )))
+        .create(lash::SessionCreation::root(
+            lash::SessionSpec::new(
+                model,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            )
+            .no_progress_budget(lash::NoProgressBudget::bounded(12)),
+        ))
         .await
     {
         Ok(_)

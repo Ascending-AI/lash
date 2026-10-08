@@ -42,6 +42,7 @@ pub mod run_spec;
 pub mod runtime_owner;
 pub mod scope_identity;
 pub use runtime_owner::RuntimeOwner;
+mod persisted_session_config;
 pub mod runtime_error;
 #[cfg(test)]
 mod runtime_error_tests;

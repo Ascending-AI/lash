@@ -76,6 +76,7 @@ pub(crate) fn state_store_request(
     let mut policy = lash::runtime::SessionPolicy::new(
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(1024),
+        lash::NoProgressBudget::bounded(12),
     );
     let selection = state.selected_llm_profile();
     policy.model = workbench_recorded_llm_profile(&selection.key())

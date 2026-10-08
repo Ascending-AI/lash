@@ -229,6 +229,7 @@ fn state(session: &str) -> RuntimeSessionState {
         ..RuntimeSessionState::new(SessionPolicy::new(
             TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     state.ensure_agent_frame_initialized();
@@ -605,8 +606,12 @@ pub async fn session_referrer_waits_for_graph_retirement(h: AttachmentReferrerHa
             head_revision: receipt.head_revision,
             relation: SessionRelation::Root,
             pending_observer_intents: Vec::new(),
-            config: SessionPolicy::new(TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
-                .into(),
+            config: SessionPolicy::new(
+                TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
+            )
+            .into(),
         })
         .await
         .unwrap();

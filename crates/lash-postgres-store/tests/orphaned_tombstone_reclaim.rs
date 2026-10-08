@@ -42,6 +42,7 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
     let policy = lash_core_execution::SessionPolicy::new(
         lash_core_execution::TurnBudget::Unbounded,
         lash_core_execution::MaxToolCalls::new(1024),
+        lash_core::NoProgressBudget::bounded(12),
     );
 
     async fn resident_node_ids(pool: &sqlx::PgPool) -> Vec<String> {

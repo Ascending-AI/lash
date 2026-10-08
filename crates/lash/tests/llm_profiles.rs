@@ -247,6 +247,7 @@ fn core_serving(double: &Double, entries: &[Entry<'_>], worker: &str, serve: boo
         .llm_profiles(catalog(entries))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "model-keys-worker",
             worker,
@@ -256,11 +257,14 @@ fn core_serving(double: &Double, entries: &[Entry<'_>], worker: &str, serve: boo
 
 async fn created_on(core: &LashCore, id: &str, key: &str) -> lash::LashSession {
     core.session(lash::SessionId::parse(id).expect("nonblank host identity"))
-        .create(lash::SessionCreation::root(lash::SessionSpec::new(
-            key,
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1024),
-        )))
+        .create(lash::SessionCreation::root(
+            lash::SessionSpec::new(
+                key,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            )
+            .no_progress_budget(lash::NoProgressBudget::bounded(12)),
+        ))
         .await
         .expect("create the session");
     core.session(lash::SessionId::parse(id).expect("nonblank host identity"))
@@ -367,7 +371,8 @@ fn core_over(
     let mut builder = LashCore::standard_builder(double.backend())
         .llm_profiles(Arc::clone(catalog) as Arc<dyn lash::LlmProfiles>)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1));
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate);
     for plugin in plugins {
         builder = builder.plugin(plugin);
     }
@@ -528,6 +533,9 @@ async fn a_catalog_edit_reaches_a_session_only_through_a_profile_change(tier: Ti
                 model: LlmProfileKey::new(KIMI),
             }),
         )
+        .await
+        .expect("config accepted")
+        .await_outcome(&config)
         .await
         .expect("the model change settles");
     assert!(
@@ -691,11 +699,14 @@ async fn an_unknown_key_is_refused_before_anything_changes(tier: Tier) {
 
     let created = core
         .session(lash::SessionId::parse("keys-unknown-create").expect("nonblank host identity"))
-        .create(lash::SessionCreation::root(lash::SessionSpec::new(
-            unregistered,
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1024),
-        )))
+        .create(lash::SessionCreation::root(
+            lash::SessionSpec::new(
+                unregistered,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            )
+            .no_progress_budget(lash::NoProgressBudget::bounded(12)),
+        ))
         .await;
     assert!(
         matches!(&created, Err(lash::EmbedError::LlmProfileUnknown(error)) if error.key.as_str() == unregistered),
@@ -737,6 +748,9 @@ async fn an_unknown_key_is_refused_before_anything_changes(tier: Tier) {
                 model: LlmProfileKey::new(unregistered),
             }),
         )
+        .await
+        .expect("config accepted")
+        .await_outcome(&config)
         .await
         .expect("the model change settles");
     let lash::config::ConfigTransactionOutcome::Refused { refusal } = changed else {
@@ -804,6 +818,7 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(tier: 
         .llm_profiles(Arc::new(registry))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "model-keys-worker",
             "keys-reasoning",
@@ -819,6 +834,7 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(tier: 
                 lash::TurnBudget::Unbounded,
                 lash::MaxToolCalls::new(1024),
             )
+            .no_progress_budget(lash::NoProgressBudget::bounded(12))
             .reasoning(high.clone()),
         ))
         .await;
@@ -850,6 +866,7 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(tier: 
                 lash::TurnBudget::Unbounded,
                 lash::MaxToolCalls::new(1024),
             )
+            .no_progress_budget(lash::NoProgressBudget::bounded(12))
             .reasoning(high.clone()),
         ))
         .await

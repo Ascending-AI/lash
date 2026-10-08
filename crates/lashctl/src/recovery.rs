@@ -164,6 +164,7 @@ impl Invocation {
         lash::LashCore::standard_builder(backend)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+            .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
             .build(lash_core_store::store::LeaseOwnerIdentity::opaque(
                 "lashctl",
                 std::process::id().to_string(),

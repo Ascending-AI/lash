@@ -48,8 +48,11 @@ async fn runtime_feedback_process_environment_refuses_prior_family() {
     };
     let backend = crate::support::sqlite_memory_store_set().await;
     let store = backend.process_env_store();
-    let mut policy =
-        crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
+    let mut policy = crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+        lash_core_execution::NoProgressBudget::bounded(12),
+    );
     policy.model = Some(crate::LlmProfileConfig::new(
         crate::RecordedLlmProfile::mint(
             crate::LlmProfileKey::new("model"),

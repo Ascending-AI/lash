@@ -24,6 +24,7 @@ pub async fn plugin_state_boundary_trace(
             ..RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             ))
         };
         state
@@ -153,6 +154,7 @@ pub async fn plugin_state_boundary_trace(
             ..RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             ))
         };
         child_state

@@ -181,6 +181,7 @@ impl Deployment {
         builder
             .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+            .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .serve_test_llm_profile(model(requests, answer), served::metadata())
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 "recorded-behaviour-deployment",
@@ -378,6 +379,7 @@ async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(t
                 lash_core::SessionPolicy::new(
                     lash::TurnBudget::Unbounded,
                     lash::MaxToolCalls::new(16),
+                    lash_core::NoProgressBudget::bounded(12),
                 ),
             ),
         )

@@ -166,6 +166,7 @@ async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
             lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
             ),
         ),
     );
@@ -207,6 +208,7 @@ finish(value);
                     lash_core::SessionPolicy::new(
                         lash_core::TurnBudget::Unbounded,
                         lash_core::MaxToolCalls::new(1024),
+                        crate::NoProgressBudget::bounded(12),
                     ),
                 ),
             ),

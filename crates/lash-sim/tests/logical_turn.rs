@@ -193,6 +193,7 @@ fn standard_core_on(
         .tools(tools)
         .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .max_attachment_bytes(max_attachment_bytes)
         .trace_sink(trace)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -290,6 +291,7 @@ async fn admitted_switch_is_seeded_queued_after_earlier_work_and_exactly_once() 
     let core = lash::LashCore::standard_builder(backend)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .serve_test_llm_profile(provider, model())
         .tools(Arc::new(SeedSwitchTool { initial_nodes }))
         .trace_sink(trace.clone())
@@ -619,6 +621,7 @@ async fn assert_switch_chain(limit: usize, switches: usize, finishes: bool) {
         }))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(
             lash::ExecutionBudgets::new(lash_core::ExecutionBudgetsConfig {
                 agent_frame_switch_limit: std::num::NonZeroU32::new(limit as u32).unwrap(),
@@ -787,6 +790,7 @@ finish({ baton: baton });
     let core = lash::LashCore::rlm_builder(backend, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .serve_test_llm_profile(provider, model())
         .trace_sink(trace.clone())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -912,6 +916,7 @@ await control.continue_as({
     let core = lash::LashCore::rlm_builder(backend, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .serve_test_llm_profile(provider, model())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "logical-turn-test",
@@ -984,11 +989,14 @@ async fn created_session(
     let session_id = session_id.into();
     match core
         .session(session_id.clone())
-        .create(lash::SessionCreation::root(lash::SessionSpec::new(
-            model().wire_model,
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1024),
-        )))
+        .create(lash::SessionCreation::root(
+            lash::SessionSpec::new(
+                model().wire_model,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            )
+            .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
+        ))
         .await
     {
         Ok(_)

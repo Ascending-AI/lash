@@ -217,6 +217,7 @@ impl Default for SessionHeadPayload {
             config: crate::PersistedSessionConfig::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
             ),
         }
     }

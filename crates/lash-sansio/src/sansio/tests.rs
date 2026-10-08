@@ -43,10 +43,9 @@ fn test_config(protocol_driver: Arc<dyn ProtocolDriverHandle>) -> TurnMachineCon
         )
         .with_reasoning(crate::ReasoningSelection::ProviderDefault),
         turn_budget: crate::TurnBudget::Unbounded,
-        no_progress_budget: Default::default(),
+        no_progress_budget: crate::NoProgressBudget::bounded(12),
         attachment_acceptance: Default::default(),
         generation: crate::llm::types::GenerationOptions::default(),
-        autonomous: false,
         session_id: SessionId::from("test"),
         agent_frame_id: "test-frame".to_string(),
         turn_id: TurnId::from("test-turn"),

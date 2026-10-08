@@ -250,6 +250,7 @@ pub(super) fn measure_snapshot(
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     let mut commit = lash_core::RuntimeCommit::persisted_state_for_test(&state);

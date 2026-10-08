@@ -25,9 +25,6 @@ impl serde::Serialize for SessionPolicy {
         if !self.attachment_acceptance.is_empty() {
             fields += 1;
         }
-        if self.no_progress_budget != NoProgressBudget::default() {
-            fields += 1;
-        }
         if self.charge_safety != crate::ChargeSafetyPolicy::default() {
             fields += 1;
         }
@@ -41,12 +38,9 @@ impl serde::Serialize for SessionPolicy {
         if !self.attachment_acceptance.is_empty() {
             state.serialize_field("attachment_acceptance", &self.attachment_acceptance)?;
         }
-        state.serialize_field("autonomous", &self.autonomous)?;
         state.serialize_field("turn_budget", &self.turn_budget)?;
         state.serialize_field("max_tool_calls", &self.max_tool_calls)?;
-        if self.no_progress_budget != NoProgressBudget::default() {
-            state.serialize_field("no_progress_budget", &self.no_progress_budget)?;
-        }
+        state.serialize_field("no_progress_budget", &self.no_progress_budget)?;
         if self.charge_safety != crate::ChargeSafetyPolicy::default() {
             state.serialize_field("charge_safety", &self.charge_safety)?;
         }
@@ -69,11 +63,8 @@ impl<'de> serde::Deserialize<'de> for SessionPolicy {
             model: Option<LlmProfileConfig>,
             #[serde(default)]
             attachment_acceptance: std::sync::Arc<crate::provider::AttachmentCapabilitySnapshot>,
-            #[serde(default)]
-            autonomous: bool,
             turn_budget: TurnBudget,
             max_tool_calls: MaxToolCalls,
-            #[serde(default)]
             no_progress_budget: NoProgressBudget,
             #[serde(default)]
             charge_safety: crate::ChargeSafetyPolicy,
@@ -85,7 +76,6 @@ impl<'de> serde::Deserialize<'de> for SessionPolicy {
         Ok(Self {
             model: wire.model,
             attachment_acceptance: wire.attachment_acceptance,
-            autonomous: wire.autonomous,
             turn_budget: wire.turn_budget,
             max_tool_calls: wire.max_tool_calls,
             no_progress_budget: wire.no_progress_budget,

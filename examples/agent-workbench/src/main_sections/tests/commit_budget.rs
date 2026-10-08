@@ -54,6 +54,7 @@ async fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback
     let error = match LashCore::standard_builder(backend())
         .llm_profiles(profiles())
         .queued_work_batching(batching.clone())
+        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .build(owner())
     {
         Ok(_) => panic!("the builder must not invent a commit budget"),
@@ -75,6 +76,7 @@ async fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback
         .llm_profiles(profiles())
         .commit_budget(bounded)
         .queued_work_batching(batching)
+        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .build(owner())
         .expect("an explicit commit budget and batching build");
     core.shutdown().await.expect("the core shuts down");

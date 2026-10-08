@@ -26,6 +26,7 @@ where
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     state.set_execution_state_snapshot(Some(b"known-execution-state".to_vec().into()));
@@ -276,6 +277,7 @@ pub async fn checkpoint_rejects_unknown_component_ref(store: Arc<dyn RuntimeStor
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     let mut commit = RuntimeCommit::persisted_state_for_test(&state);
@@ -318,6 +320,7 @@ pub async fn commit_rejects_leaf_without_frame_open_ancestor(store: Arc<dyn Runt
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     let node = SessionNodeRecord {
@@ -496,6 +499,7 @@ pub(super) fn sample_session_node(
                 assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
+                    lash_core::NoProgressBudget::bounded(12),
                 )),
             }
         } else {

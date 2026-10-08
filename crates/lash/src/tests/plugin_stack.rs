@@ -71,7 +71,16 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
     session
         .admin()
         .tools()
-        .set_membership(app_lookup.clone(), false)
+        .set_membership(
+            app_lookup.clone(),
+            false,
+            "host:plugin_stack:set_membership:74",
+        )
+        .await?
+        .settle_with(
+            &session.admin().commands(),
+            crate::testing::admin_fixture_outcome,
+        )
         .await?;
     let curated = session.admin().tools().state().await?;
     assert!(

@@ -276,6 +276,7 @@ fn core(
         )
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "facade-host-wrappers-worker",
             "facade-host-wrappers-boot",
@@ -316,11 +317,14 @@ async fn a_facade_host_wraps_the_rlm_factory_and_its_stores(tier: Tier) {
 
     match core
         .session(lash::SessionId::parse("facade-host-wrappers").expect("nonblank host identity"))
-        .create(lash::SessionCreation::root(lash::SessionSpec::new(
-            "facade-host-wrappers",
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1024),
-        )))
+        .create(lash::SessionCreation::root(
+            lash::SessionSpec::new(
+                "facade-host-wrappers",
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            )
+            .no_progress_budget(lash::NoProgressBudget::bounded(12)),
+        ))
         .await
     {
         Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}
@@ -415,6 +419,7 @@ async fn eviction_law(backend: lash::Backend, tag: &str) -> LashCore {
         .live_replay_store(replay.clone())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "replay-bounds",
             tag,
@@ -422,11 +427,14 @@ async fn eviction_law(backend: lash::Backend, tag: &str) -> LashCore {
         .expect("core");
     let id = format!("replay-bounds-{tag}");
     core.session(lash::SessionId::fixture(&id))
-        .create(lash::SessionCreation::root(lash::SessionSpec::new(
-            "live-replay-bounds",
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1024),
-        )))
+        .create(lash::SessionCreation::root(
+            lash::SessionSpec::new(
+                "live-replay-bounds",
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            )
+            .no_progress_budget(lash::NoProgressBudget::bounded(12)),
+        ))
         .await
         .expect("create");
     let session = core

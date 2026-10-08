@@ -949,7 +949,6 @@ fn assert_graph_payloads(nodes: &[std::sync::Arc<lash_core::SessionNodeRecord>])
             assert_eq!(reason.as_str(), "initial");
             assert_eq!(assignment.policy.model, None);
             assert_eq!(assignment.policy.context_window_tokens(), None);
-            assert!(!assignment.policy.autonomous);
             assert_eq!(
                 assignment.policy.turn_budget,
                 lash_core::TurnBudget::Unbounded
@@ -1055,6 +1054,7 @@ fn fixture_session_request(session_id: &SessionId) -> SessionStoreCreateRequest 
         config: SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         )
         .into(),
         head: SessionCreationHead::Config,
@@ -1095,6 +1095,7 @@ fn fixture_state() -> RuntimeSessionState {
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     }
 }
@@ -1129,6 +1130,7 @@ fn fixture_process_env() -> ProcessExecutionEnvSpec {
         SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ),
     );
     env.render = Some(lash_core::RecordedRender {

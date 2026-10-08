@@ -38,10 +38,9 @@ fn machine_config(max_turns: Option<usize>) -> TurnMachineConfig {
         turn_budget: max_turns
             .map(lash_core::TurnBudget::bounded)
             .unwrap_or(lash_core::TurnBudget::Unbounded),
-        no_progress_budget: Default::default(),
+        no_progress_budget: lash_core::NoProgressBudget::bounded(12),
         attachment_acceptance: Default::default(),
         generation: lash_core::GenerationOptions::default(),
-        autonomous: false,
         session_id: lash_core::SessionId::from("standard-driver-contract"),
         agent_frame_id: "standard-frame".to_string(),
         turn_id: TurnId::from("standard-driver-turn"),

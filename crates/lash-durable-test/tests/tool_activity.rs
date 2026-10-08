@@ -597,6 +597,7 @@ async fn a_durable_turn_streams_provider_deltas_before_its_committed_rows(tier: 
         let core = lash::LashCore::standard_builder(backend)
             .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+            .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .serve_test_llm_profile(
                 model,
                 lash_core::LlmProfileMetadata::builder(served::MODEL)
@@ -930,6 +931,7 @@ async fn a_commit_on_one_node_reaches_a_subscriber_attached_through_another(tier
         .live_replay_store(live)
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .serve_test_llm_profile(
             served::model(Arc::clone(&world.scripts)),
             served::metadata(),

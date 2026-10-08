@@ -317,6 +317,7 @@ impl Spawn {
                     .serve_sessions(false)
                     .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+                    .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
                     .serve_test_llm_profile(
                         served::model(Arc::clone(&self.scripts)),
                         served::metadata(),
@@ -377,6 +378,7 @@ impl Spawn {
                     lash_core::SessionPolicy::new(
                         lash::TurnBudget::Unbounded,
                         lash::MaxToolCalls::new(16),
+                        lash_core::NoProgressBudget::bounded(12),
                     ),
                 ),
             )

@@ -191,11 +191,10 @@ impl SessionBuilder {
     /// The creation spec's model key is minted into a recorded binding here,
     /// through the core's models; a key they do not register is refused with
     /// [`EmbedError::LlmProfileUnknown`] and nothing is created. A spec that
-    /// states no model, no turn budget or no tool-call limit (a
-    /// [`SessionSpec::inherit`] overlay) is refused with
-    /// [`EmbedError::MissingLlmProfile`], [`EmbedError::MissingTurnBudget`] or
-    /// [`EmbedError::MissingMaxToolCalls`]: a creation has no base to take
-    /// them from.
+    /// omits its model, turn budget, tool-call limit or stall bound is refused with
+    /// [`EmbedError::MissingLlmProfile`], [`EmbedError::MissingTurnBudget`],
+    /// [`EmbedError::MissingMaxToolCalls`] or [`EmbedError::MissingNoProgressBudget`]:
+    /// a creation has no base to take them from.
     ///
     /// An id the catalog already holds is refused with
     /// [`EmbedError::SessionAlreadyExists`], always — even when a retry states
@@ -370,6 +369,9 @@ impl SessionBuilder {
                 }
                 lash_core::facade_support::SpecResolveError::RootWithoutMaxToolCalls => {
                     EmbedError::MissingMaxToolCalls
+                }
+                lash_core::facade_support::SpecResolveError::RootWithoutNoProgressBudget => {
+                    EmbedError::MissingNoProgressBudget
                 }
                 lash_core::facade_support::SpecResolveError::Reasoning(error) => {
                     EmbedError::ReasoningRefused(error)

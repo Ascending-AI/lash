@@ -483,7 +483,7 @@ impl LashCore {
     ///   the revision was collected.
     ///
     /// The fork records the forked revision's recorded config in full
-    /// (FIG-4594): model, turn budget, autonomy, no-progress budget, charge
+    /// (FIG-4594): model, turn budget, no-progress budget, charge
     /// safety, generation, attachment acceptance, tool access and plugin
     /// configuration are the revision's, and nothing this core or its host
     /// states today stands in for any of them. Change the fork's config
@@ -860,24 +860,8 @@ impl LashCoreBuilder {
         self
     }
 
-    /// The default is [`ToolSourcePolicy::Tolerate`](lash_core::ToolSourcePolicy::Tolerate):
-    /// a turn run goes on without a lost member and reports a typed
-    /// [`ToolRestoreReport`](crate::support::ToolRestoreReport), because
-    /// locking a user out of a conversation is worse than degrading it.
-    /// Unattended and fixed-tool deployments set
-    /// [`Require`](lash_core::ToolSourcePolicy::Require): a turn run whose
-    /// restore would lose a member — a persisted Tool Catalog member no
-    /// registered source resolves — is refused before it installs anything,
-    /// and its sender reads [`SendOutcome::Refused`](crate::SendOutcome::Refused)
-    /// with a
-    /// [`RuntimeErrorCode::ToolSourcesUnavailable`](lash_core::RuntimeErrorCode::ToolSourcesUnavailable)
-    /// refusal that carries the report (FIG-5134). Parked opt-outs and
-    /// superseded identities never refuse. An open builds no capabilities
-    /// and never refuses, and a command run, such as a host's tool restore,
-    /// tolerates whatever the policy.
-    ///
-    /// The choice is carried on the core's host config, which every turn
-    /// run the core's node executes reads, whichever session it serves.
+    /// Required host choice for running with a missing persisted tool source.
+    /// Both choices preserve typed tool-loss reporting.
     pub fn tool_source_policy(mut self, policy: lash_core::ToolSourcePolicy) -> Self {
         self.tool_source_policy = Some(policy);
         self

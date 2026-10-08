@@ -529,6 +529,7 @@ fn stored_frame_open_rejects_a_raw_frame_key() {
             assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
             )),
         },
     };
@@ -560,6 +561,7 @@ fn nearest_frame_is_derived_from_ancestry() {
     let assignment = crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
+        crate::NoProgressBudget::bounded(12),
     ));
     let mut graph = SessionGraph::default();
     let first_key =
@@ -828,6 +830,7 @@ fn open_test_frame(
     let assignment = crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
+        crate::NoProgressBudget::bounded(12),
     ));
     let frame_key = crate::FrameKey::from_caller_material(key).expect("non-empty material");
     let frame = frame_node_id(session, frame_key.as_str());
@@ -1036,6 +1039,7 @@ mod window_anchor {
                 assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
+                    crate::NoProgressBudget::bounded(12),
                 )),
             },
         }

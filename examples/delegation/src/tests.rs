@@ -37,6 +37,7 @@ impl SessionStateService for NoSnapshots {
 
 fn child_spec() -> SessionSpec {
     SessionSpec::new("child-model", TurnBudget::bounded(3), MaxToolCalls::new(16))
+        .no_progress_budget(lash::NoProgressBudget::bounded(12))
 }
 
 fn spawner() -> SpawnAgent {

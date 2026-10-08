@@ -102,6 +102,11 @@ impl Replay {
                     )],
                     requires_ancestor_node_id: None,
                 })
+                .await?
+                .settle_with(
+                    &session.admin().commands(),
+                    crate::testing::admin_fixture_outcome,
+                )
                 .await?;
         }
         Ok(Self {

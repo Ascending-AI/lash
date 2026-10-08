@@ -648,6 +648,7 @@ mod label_annotation_tests {
                         lash_core::SessionPolicy::new(
                             lash_core::TurnBudget::Unbounded,
                             lash_core::MaxToolCalls::new(1024),
+                            lash_core::NoProgressBudget::bounded(12),
                         ),
                     ),
                 ),
@@ -785,6 +786,7 @@ mod process_settings_tests {
                     backend.clone(),
                     CommitBudget::bounded(8 * 1024 * 1024, 1024),
                     QueuedWorkBatchingConfig::new(1),
+                    lash_core::ToolSourcePolicy::Tolerate,
                 ),
                 true,
             )
@@ -801,6 +803,7 @@ mod process_settings_tests {
             lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             ),
         );
         let record = runtime_host

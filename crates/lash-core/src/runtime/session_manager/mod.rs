@@ -625,6 +625,7 @@ mod process_visibility_tests {
             backend.clone(),
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
+            crate::ToolSourcePolicy::Tolerate,
         )
         .with_process_tool_visibility_filter(filter.clone());
         let env = crate::RuntimeEnvironment::builder(core)
@@ -645,6 +646,7 @@ mod process_visibility_tests {
                 ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
+                    crate::NoProgressBudget::bounded(12),
                 ))
             },
             None,

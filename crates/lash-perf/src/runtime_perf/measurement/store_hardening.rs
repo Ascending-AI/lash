@@ -455,6 +455,7 @@ async fn measure_store_hardening_history_reads(
                     config: lash_core::SessionPolicy::new(
                         lash_core::TurnBudget::Unbounded,
                         lash_core::MaxToolCalls::new(1024),
+                        lash_core::NoProgressBudget::bounded(12),
                     )
                     .into(),
                 })
@@ -575,6 +576,7 @@ async fn load_store_hardening_state(
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     }))
 }
@@ -590,6 +592,7 @@ pub(super) fn runtime_perf_session_create_request(
         config: lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         )
         .into(),
         head: lash_core::SessionCreationHead::Config,

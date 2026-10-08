@@ -179,10 +179,7 @@ impl ToolRegistryInner {
 /// Host policy for **running** a session whose persisted tools no live source
 /// resolves.
 ///
-/// The default is [`Tolerate`](Self::Tolerate): locking a user out of a
-/// conversation is worse than degrading it, so a lost tool is a typed fact the
-/// host receives on the run that restored it rather than a refusal.
-/// Unattended and fixed-tool deployments opt into [`Require`](Self::Require).
+/// The host chooses whether lost tools are tolerated or required.
 ///
 /// Opening a session builds no capabilities (FIG-4857), so an open never
 /// consults this policy. A turn run does, when it builds the session it runs
@@ -192,9 +189,8 @@ impl ToolRegistryInner {
 /// capabilities — a host restore command, a persisted-state install, the
 /// resident re-sync after an invalidation — always tolerates and reports,
 /// whatever this policy says.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolSourcePolicy {
-    #[default]
     Tolerate,
     /// A turn run is refused when restoring the session's persisted tool
     /// state would lose a member. Parked opt-outs

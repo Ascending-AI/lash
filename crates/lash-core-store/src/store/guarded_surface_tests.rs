@@ -167,6 +167,7 @@ fn write_head(fleet: FleetFormat) -> Vec<u8> {
         crate::PersistedSessionConfig::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         ),
         fleet,
     );

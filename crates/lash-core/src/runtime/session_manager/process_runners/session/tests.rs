@@ -183,6 +183,7 @@ async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
         backend.clone(),
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
+        crate::ToolSourcePolicy::Tolerate,
     ));
     // The refusal lands before any turn runs: no provider call is made.
     let transport = mock_provider(Vec::new());

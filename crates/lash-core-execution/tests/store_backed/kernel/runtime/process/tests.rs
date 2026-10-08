@@ -220,7 +220,11 @@ async fn env_store_reports_typed_referrer_fences_and_carry_refusals() {
     let store = backend.process_env_store();
     let spec = ProcessExecutionEnvSpec::new(
         crate::AdmittedPluginConfig::default(),
-        crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
+        crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+            lash_core_execution::NoProgressBudget::bounded(12),
+        ),
     );
     let env_ref = spec.stable_ref().expect("stable env ref");
     let bytes = spec.to_store_bytes().expect("encode env spec");

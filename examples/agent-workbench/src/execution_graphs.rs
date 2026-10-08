@@ -530,6 +530,7 @@ mod tests {
             lash::runtime::SessionPolicy::new(
                 lash::TurnBudget::Unbounded,
                 lash::MaxToolCalls::new(1024),
+                lash::NoProgressBudget::bounded(12),
             ),
         )
         .stable_ref()

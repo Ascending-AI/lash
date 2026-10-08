@@ -58,6 +58,7 @@ fn commit_at(
         ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     let commit = RuntimeCommit {
@@ -245,6 +246,7 @@ async fn process_record_is_a_root_without_registry_liveness() {
         config: lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         )
         .into(),
         head: lash_core_execution::SessionCreationHead::Config,

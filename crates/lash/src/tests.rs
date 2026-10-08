@@ -116,7 +116,12 @@ impl ConfigureExt for crate::admin::SessionConfigAdmin {
             format!("test-config:{}", uuid::Uuid::new_v4()),
             revision,
         );
-        match self.apply(write, transaction).await? {
+        match self
+            .apply(write, transaction)
+            .await?
+            .await_outcome(self)
+            .await?
+        {
             crate::config::ConfigTransactionOutcome::Applied { .. } => Ok(()),
             outcome => Err(EmbedError::Session(crate::support::SessionError::Protocol(
                 format!("the config transaction did not apply: {outcome:?}"),

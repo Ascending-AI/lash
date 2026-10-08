@@ -752,9 +752,18 @@ async fn committed_attachment_ref_is_exposed_in_the_workbench_snapshot() {
     session
         .admin()
         .state()
-        .append_messages(vec![message])
+        .append_messages(
+            vec![message],
+            "host:recoverable_chat:append_messages:755".to_string(),
+        )
         .await
-        .expect("append committed attachment message");
+        .expect("append committed attachment message")
+        .settle_with(
+            &session.admin().commands(),
+            lash::testing::admin_fixture_outcome,
+        )
+        .await
+        .expect("fixture mutation settled");
     drop(session);
 
     let snapshot = read_state(state, None)

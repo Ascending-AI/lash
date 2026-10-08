@@ -761,10 +761,18 @@ async fn rlm_natural_prose_completion_is_single_copy_in_next_request() -> Result
         .output()
         .await?;
     assert_eq!(first.assistant_message(), Some(MARKER));
-    Box::pin(session.admin().state().append_messages(vec![
+    Box::pin(session.admin().state().append_messages(
+        vec![
             lash_core::PluginMessage::text(lash_core::MessageRole::Assistant, MARKER)
                 .with_id("workbench-assistant:natural-turn"),
-        ]))
+        ],
+        "host:observations:append_messages:766".to_string(),
+    ))
+    .await?
+    .settle_with(
+        &session.admin().commands(),
+        crate::testing::admin_fixture_outcome,
+    )
     .await?;
 
     session

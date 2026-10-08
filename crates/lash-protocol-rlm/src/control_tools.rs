@@ -279,6 +279,7 @@ mod tests {
                 snapshot: RuntimeSessionState::new(SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                     lash_core::MaxToolCalls::new(1024),
+                    lash_core::NoProgressBudget::bounded(12),
                 )),
                 created: Mutex::new(Vec::new()),
             }
@@ -491,12 +492,14 @@ mod tests {
                         ..SessionPolicy::new(
                             lash_core::TurnBudget::Unbounded,
                             lash_core::MaxToolCalls::new(1024),
+                            lash_core::NoProgressBudget::bounded(12),
                         )
                     },
                     session_graph,
                     ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                         lash_core::TurnBudget::Unbounded,
                         lash_core::MaxToolCalls::new(1024),
+                        lash_core::NoProgressBudget::bounded(12),
                     ))
                 };
                 snapshot.authority.plugin_config = lash_core::PluginConfig::for_protocol(Some(
@@ -641,11 +644,13 @@ mod tests {
                     ..SessionPolicy::new(
                         lash_core::TurnBudget::Unbounded,
                         lash_core::MaxToolCalls::new(1024),
+                        lash_core::NoProgressBudget::bounded(12),
                     )
                 },
                 ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                     lash_core::MaxToolCalls::new(1024),
+                    lash_core::NoProgressBudget::bounded(12),
                 ))
             },
             created: Mutex::new(Vec::new()),
@@ -715,11 +720,13 @@ mod tests {
                     ..SessionPolicy::new(
                         lash_core::TurnBudget::Unbounded,
                         lash_core::MaxToolCalls::new(1024),
+                        lash_core::NoProgressBudget::bounded(12),
                     )
                 },
                 ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                     lash_core::MaxToolCalls::new(1024),
+                    lash_core::NoProgressBudget::bounded(12),
                 ))
             },
             created: Mutex::new(Vec::new()),

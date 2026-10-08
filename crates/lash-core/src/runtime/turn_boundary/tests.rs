@@ -62,6 +62,7 @@ fn state_with_graph(graph: SessionGraph) -> RuntimeSessionState {
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             UNBOUNDED,
             crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         ))
     };
     state.ensure_agent_frame_initialized();
@@ -262,6 +263,7 @@ fn reopening_a_previous_frame_refuses_and_keeps_the_current_frame() {
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             UNBOUNDED,
             crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         ))
     };
     state.ensure_agent_frame_initialized_with_clock(&clock);
@@ -368,7 +370,11 @@ async fn gates_advance_after_an_attachment_bearing_tool_result() {
     let mut pipeline = TurnBoundary::from_state(state_with_graph(SessionGraph::default()));
     pipeline
         .prepared_checkpoint(
-            SessionPolicy::new(UNBOUNDED, crate::MaxToolCalls::new(1024)),
+            SessionPolicy::new(
+                UNBOUNDED,
+                crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
+            ),
             7,
             &MessageSequence::from_base(prepared.clone().into()),
             None,
@@ -397,7 +403,11 @@ async fn gates_advance_after_an_attachment_bearing_tool_result() {
     ));
     let boundary = pipeline
         .progress_boundary_with_snapshot(ProgressBoundarySnapshot {
-            policy: SessionPolicy::new(UNBOUNDED, crate::MaxToolCalls::new(1024)),
+            policy: SessionPolicy::new(
+                UNBOUNDED,
+                crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
+            ),
             turn_index: 8,
             messages: MessageSequence::from_base(progressed.into()),
             event_delta: vec![crate::SessionHistoryRecord::Protocol(test_protocol_event(
@@ -433,6 +443,7 @@ fn a_committed_frame_open_clears_execution_state_and_ends_the_last_committed_fra
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             UNBOUNDED,
             crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         ))
     };
     state.ensure_agent_frame_initialized_with_clock(&clock);
@@ -562,6 +573,7 @@ fn a_first_commit_that_switches_ends_the_first_frame_it_opens() {
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             UNBOUNDED,
             crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         ))
     };
     state.ensure_agent_frame_initialized_with_clock(&clock);

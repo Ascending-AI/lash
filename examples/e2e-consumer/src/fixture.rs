@@ -284,17 +284,21 @@ mod tests {
             .llm_profiles(Arc::new(registry))
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+            .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
             .plugin(Arc::new(super::ConsumerPlugin(controls.clone())))
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 "s30", "sqlite",
             ))?;
         let id = lash::SessionId::parse("s30").expect("nonblank host identity");
         core.session(id.clone())
-            .create(lash::SessionCreation::root(lash::SessionSpec::new(
-                "consumer",
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(8),
-            )))
+            .create(lash::SessionCreation::root(
+                lash::SessionSpec::new(
+                    "consumer",
+                    lash::TurnBudget::Unbounded,
+                    lash::MaxToolCalls::new(8),
+                )
+                .no_progress_budget(lash::NoProgressBudget::bounded(12)),
+            ))
             .await?;
         let session = core.session(id).open().await?;
         for (ordinal, key) in ["first", "second"].into_iter().enumerate() {

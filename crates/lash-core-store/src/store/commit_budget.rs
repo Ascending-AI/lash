@@ -307,6 +307,7 @@ impl RuntimeCommit {
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 config.turn_budget,
                 config.max_tool_calls,
+                crate::NoProgressBudget::bounded(12),
             ))
         };
         crate::session_state::adopt_session_config(&mut state, &config);
@@ -451,6 +452,7 @@ mod tests {
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
             ))
         };
         let budget = CommitBudget::new(CommitBudgetLimit::Unbounded, CommitBudgetLimit::bounded(2));
@@ -482,6 +484,7 @@ mod tests {
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
             ))
         };
         let budget = CommitBudget::bounded(128, 512);
@@ -598,6 +601,7 @@ mod tests {
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
             ))
         };
         let unbounded =

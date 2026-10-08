@@ -360,6 +360,7 @@ impl GeneratedBackendFaultHarness {
             ..RuntimeSessionState::new(SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             ))
         };
         let (commit, _) = RuntimeCommit::persisted_state_for_test(&state)
@@ -458,6 +459,7 @@ impl GeneratedBackendFaultHarness {
                 config: SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                     lash_core::MaxToolCalls::new(1024),
+                    lash_core::NoProgressBudget::bounded(12),
                 )
                 .into(),
                 head: SessionCreationHead::Config,

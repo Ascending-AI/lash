@@ -186,7 +186,18 @@ async fn explicit_compaction_opens_a_summary_frame_the_next_turn_continues_in() 
             .await?;
     }
     let before = committed(&session).await;
-    assert!(Box::pin(session.admin().state().compact_context(None)).await?);
+    assert!(
+        Box::pin(session.admin().state().compact_context(
+            None,
+            "host:standard_compaction_persistence:compact_context:186".to_string()
+        ))
+        .await?
+        .settle_with(
+            &session.admin().commands(),
+            crate::testing::admin_fixture_outcome
+        )
+        .await?
+    );
     let after = committed(&session).await;
     let frame = assert_resident_in_fresh_compaction_frame(&before, &after, "explicit summary");
     assert_eq!(after.messages().len(), 1);
@@ -492,13 +503,16 @@ async fn repeated_admin_compactions_distinguish_changed_snapshots() -> Result<()
             .await?;
     }
 
-    for expected_summary in expected_summaries {
+    for (index, expected_summary) in expected_summaries.into_iter().enumerate() {
         assert!(
-            Box::pin(
-                session
-                    .admin()
-                    .state()
-                    .compact_context(Some("keep the same administrative focus".to_string()))
+            Box::pin(session.admin().state().compact_context(
+                Some("keep the same administrative focus".to_string()),
+                format!("administrative-focus:{index}")
+            ))
+            .await?
+            .settle_with(
+                &session.admin().commands(),
+                crate::testing::admin_fixture_outcome
             )
             .await?,
             "each changed snapshot remains a valid administrative compaction request"
@@ -590,11 +604,14 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
     );
 
     assert!(
-        Box::pin(
-            session
-                .admin()
-                .state()
-                .compact_context(Some("retain the durable ancestry result".to_string()))
+        Box::pin(session.admin().state().compact_context(
+            Some("retain the durable ancestry result".to_string()),
+            "host:standard_compaction_persistence:compact_context:594".to_string()
+        ))
+        .await?
+        .settle_with(
+            &session.admin().commands(),
+            crate::testing::admin_fixture_outcome
         )
         .await?,
         "standard-compaction compaction should open a summary frame after the threshold turn commits"

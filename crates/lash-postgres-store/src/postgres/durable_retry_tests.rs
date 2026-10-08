@@ -38,7 +38,12 @@ async fn admit(storage: &PostgresStorage, session: &lash_sansio::SessionId) {
         .admit_session(&SessionStoreCreateRequest {
             session_id: session.clone(),
             relation: SessionRelation::Root,
-            config: SessionPolicy::new(TurnBudget::Unbounded, MaxToolCalls::new(16)).into(),
+            config: SessionPolicy::new(
+                TurnBudget::Unbounded,
+                MaxToolCalls::new(16),
+                lash_core::NoProgressBudget::bounded(12),
+            )
+            .into(),
             head: SessionCreationHead::Config,
             owning_process_id: None,
             pending_observer_intents: Vec::new(),

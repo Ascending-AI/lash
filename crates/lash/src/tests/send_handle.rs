@@ -79,6 +79,7 @@ async fn fixture_over_with_batching(
     let core = LashCore::standard_builder(backend)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(batching)
+        .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
         .serve_test_llm_profile(
             scripted_provider(Arc::clone(&release), Arc::clone(&calls)),
             mock_llm_profile_spec(),
@@ -574,8 +575,11 @@ async fn a_shift_never_runs_on_a_session_opened_to_observe() -> Result<()> {
         .output()
         .await?;
 
-    let policy =
-        lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
+    let policy = lash_core::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+        crate::NoProgressBudget::bounded(12),
+    );
     let store = lash_core::runtime::admit_session_view(
         &fixture.core.store_factory,
         &lash_core::SessionStoreCreateRequest {

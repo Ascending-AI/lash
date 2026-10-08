@@ -448,6 +448,7 @@ async fn runtime_clamps_a_requested_cap_and_reports_the_reduced_wire_value() {
     let core = lash::LashCore::standard_builder(engine.backend())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .serve_test_llm_profile(provider, model.clone())
         .build(crate::sim_process_owner())
         .expect("runtime core");
@@ -457,6 +458,7 @@ async fn runtime_clamps_a_requested_cap_and_reports_the_reduced_wire_value() {
             lash::TurnBudget::Unbounded,
             lash::MaxToolCalls::new(1024),
         )
+        .no_progress_budget(lash_core::NoProgressBudget::bounded(12))
         .generation(lash_core::GenerationOptions {
             output_token_cap: NonZeroUsize::new(32_000),
             ..Default::default()
@@ -534,6 +536,7 @@ async fn protocol_owned_stop_is_absent_from_the_wire_and_reported_suppressed() {
     let core = lash::LashCore::rlm_builder(backend, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .serve_test_llm_profile(provider, model.clone())
         .build(crate::sim_process_owner())
         .expect("RLM core");
@@ -543,6 +546,7 @@ async fn protocol_owned_stop_is_absent_from_the_wire_and_reported_suppressed() {
             lash::TurnBudget::Unbounded,
             lash::MaxToolCalls::new(1024),
         )
+        .no_progress_budget(lash_core::NoProgressBudget::bounded(12))
         .generation(lash_core::GenerationOptions {
             stop_sequences: vec![
                 crate::provider_variations::TYPESCRIPT_CLOSE_DELIMITER.to_string(),

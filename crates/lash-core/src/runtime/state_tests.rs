@@ -72,6 +72,7 @@ async fn corrupt_commit_result_cannot_forge_discarded_execution_state_residency(
     let mut generation_a = RuntimeSessionState::new(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
+        crate::NoProgressBudget::bounded(12),
     ));
     crate::store::SessionCatalogStore::admit_session(
         &store,
@@ -221,6 +222,7 @@ fn reconciled_generation_forces_next_plugin_state_export() {
     let mut projected = RuntimeSessionState::new(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
+        crate::NoProgressBudget::bounded(12),
     ))
     .to_snapshot();
     projected.tool_state_ref = Some("persisted-tool-state".to_string().into());

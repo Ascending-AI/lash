@@ -242,6 +242,7 @@ pub fn core(backend: &Backend, witness: Witness, hold: Hold) -> Result<lash::Las
     .serve_sessions(false)
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+    .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
     .serve_test_llm_profile(model(witness.clone(), hold), metadata())
     .tools(ext_write(witness.clone(), hold))
     .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -259,11 +260,14 @@ pub fn core(backend: &Backend, witness: Witness, hold: Hold) -> Result<lash::Las
 /// The facade refused.
 pub async fn admit(core: &lash::LashCore) -> Result<(), String> {
     core.session(session())
-        .create(lash::SessionCreation::root(lash::SessionSpec::new(
-            MODEL,
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(8),
-        )))
+        .create(lash::SessionCreation::root(
+            lash::SessionSpec::new(
+                MODEL,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(8),
+            )
+            .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
+        ))
         .await
         .map_err(|error| format!("create the session: {error}"))?
         .send(lash::TurnInput::text(

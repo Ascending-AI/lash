@@ -141,6 +141,7 @@ mod tests {
                 crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
+                    lash_core_execution::NoProgressBudget::bounded(12),
                 ),
             ),
             owner: crate::ExecutionOwner::SessionFrame {
@@ -165,6 +166,7 @@ mod tests {
                 crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
+                    lash_core_execution::NoProgressBudget::bounded(12),
                 ),
             ),
         );
@@ -290,6 +292,7 @@ mod tests {
                 crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
+                    lash_core_execution::NoProgressBudget::bounded(12),
                 ),
             ),
             owner: crate::ExecutionOwner::SessionFrame {
@@ -314,6 +317,7 @@ mod tests {
                 crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
+                    lash_core_execution::NoProgressBudget::bounded(12),
                 ),
             ),
         );
@@ -574,6 +578,7 @@ mod tests {
                 crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
+                    lash_core_execution::NoProgressBudget::bounded(12),
                 ),
             ),
             owner: crate::ExecutionOwner::SessionFrame {
@@ -598,6 +603,7 @@ mod tests {
                 crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
+                    lash_core_execution::NoProgressBudget::bounded(12),
                 ),
             ),
         );

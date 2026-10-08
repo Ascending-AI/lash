@@ -78,10 +78,18 @@ async fn concurrent_host_appends_settle_through_the_command_lane_exactly_once() 
             writer
                 .admin()
                 .state()
-                .append_messages(vec![lash::plugins::PluginMessage::text(
-                    lash::messages::MessageRole::Assistant,
-                    text,
-                )])
+                .append_messages(
+                    vec![lash::plugins::PluginMessage::text(
+                        lash::messages::MessageRole::Assistant,
+                        text,
+                    )],
+                    format!("concurrent-host-append:{text}"),
+                )
+                .await?
+                .settle_with(
+                    &writer.admin().commands(),
+                    lash::testing::admin_fixture_outcome,
+                )
                 .await
         })
     };
@@ -105,6 +113,11 @@ async fn concurrent_host_appends_settle_through_the_command_lane_exactly_once() 
                     )],
                     requires_ancestor_node_id: None,
                 })
+                .await?
+                .settle_with(
+                    &reply_writer.admin().commands(),
+                    lash::testing::admin_fixture_outcome,
+                )
                 .await
         })
     };

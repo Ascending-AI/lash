@@ -440,6 +440,7 @@ mod tests {
                 snapshot: RuntimeSessionState::new(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                     lash_core::MaxToolCalls::new(1024),
+                    lash_core::NoProgressBudget::bounded(12),
                 )),
                 requests: Mutex::new(Vec::new()),
                 response_text: String::new(),
@@ -553,9 +554,9 @@ mod tests {
             snapshot: RuntimeSessionState {
                 policy: lash_core::SessionPolicy {
                     model: llm_profile_spec("root-model", Some("fast")),
-                    ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024))
+                    ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024),lash_core::NoProgressBudget::bounded(12))
                 },
-                ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024)))
+                ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024),lash_core::NoProgressBudget::bounded(12)))
             },
             requests: Mutex::new(Vec::new()),
             response_text:
@@ -611,11 +612,13 @@ mod tests {
                     ..lash_core::SessionPolicy::new(
                         lash_core::TurnBudget::Unbounded,
                         lash_core::MaxToolCalls::new(1024),
+                        lash_core::NoProgressBudget::bounded(12),
                     )
                 },
                 ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                     lash_core::MaxToolCalls::new(1024),
+                    lash_core::NoProgressBudget::bounded(12),
                 ))
             },
             requests: Mutex::new(Vec::new()),

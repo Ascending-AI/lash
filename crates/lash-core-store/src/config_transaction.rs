@@ -46,7 +46,6 @@ pub struct CoreConfig {
     pub attachment_acceptance: std::sync::Arc<crate::provider::AttachmentCapabilitySnapshot>,
     pub turn_budget: crate::TurnBudget,
     pub max_tool_calls: crate::MaxToolCalls,
-    pub autonomous: bool,
     pub no_progress_budget: crate::NoProgressBudget,
     pub charge_safety: crate::ChargeSafetyPolicy,
     pub generation: crate::GenerationOptions,
@@ -66,7 +65,6 @@ impl CoreConfig {
             attachment_acceptance: std::sync::Arc::clone(&config.attachment_acceptance),
             turn_budget: config.turn_budget,
             max_tool_calls: config.max_tool_calls,
-            autonomous: config.autonomous,
             no_progress_budget: config.no_progress_budget,
             charge_safety: config.charge_safety.clone(),
             generation: config.generation.clone(),
@@ -81,7 +79,6 @@ impl CoreConfig {
         config.attachment_acceptance = std::sync::Arc::clone(&self.attachment_acceptance);
         config.turn_budget = self.turn_budget;
         config.max_tool_calls = self.max_tool_calls;
-        config.autonomous = self.autonomous;
         config.no_progress_budget = self.no_progress_budget;
         config.charge_safety = self.charge_safety.clone();
         config.generation = self.generation.clone();

@@ -451,6 +451,7 @@ impl Law {
         .serve_test_llm_profile(model(queue), served::metadata())
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .tools(Arc::new(BlobTools {
             witness: Arc::clone(witness),
         }))
@@ -509,6 +510,7 @@ impl Law {
                     self.backend.clone(),
                     lash::CommitBudget::bounded(16 * 1024 * 1024, 4096),
                     lash::QueuedWorkBatchingConfig::new(1),
+                    lash_core::ToolSourcePolicy::Tolerate,
                 ),
                 true,
             )

@@ -114,9 +114,8 @@ pub mod config {
     /// The owner of the core configuration the commands below change.
     pub use lash_core::CoreConfigOwner;
     pub use lash_core::plugin::config::core::{
-        SetAttachmentAcceptance, SetAutonomy, SetChargeSafety, SetGeneration, SetLlmProfile,
-        SetMaxToolCalls, SetNoProgressBudget, SetPromptPlan, SetReasoning, SetToolAccess,
-        SetTurnBudget,
+        SetAttachmentAcceptance, SetChargeSafety, SetGeneration, SetLlmProfile, SetMaxToolCalls,
+        SetNoProgressBudget, SetPromptPlan, SetReasoning, SetToolAccess, SetTurnBudget,
     };
     pub use lash_core::{
         CORE_CONFIG_OWNER, ConfigCommandCatalog, ConfigCommandDescriptor, ConfigCommandEntry,
@@ -164,6 +163,7 @@ pub mod render {
 /// RLM-specific turn-builder extensions.
 pub mod rlm;
 /// Reusable contracts for agent scenarios.
+#[cfg(feature = "testing")]
 pub mod scenario_contracts;
 /// Standard-lock poison recovery traits for application code.
 pub mod sync {
@@ -182,7 +182,7 @@ pub mod turn;
 pub mod usage;
 
 pub use crate::admin::{
-    AdvancedToolAdmin, Completions, PluginOperations, SessionCommandAdmin,
+    AdminMutation, AdvancedToolAdmin, Completions, PluginOperations, SessionCommandAdmin,
     SessionCommandWithdrawal, ToolAdmin,
 };
 pub use crate::core::{

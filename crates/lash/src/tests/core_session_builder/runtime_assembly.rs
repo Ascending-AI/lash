@@ -46,6 +46,7 @@ async fn assert_runtime_assembly_refuses_without_writes(
             backend.clone(),
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
+            crate::tools::ToolSourcePolicy::Tolerate,
         );
         let result = if builder {
             Box::pin(
@@ -121,6 +122,7 @@ fn peer_core(backend: lash_core::Backend) -> LashCore {
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
         .build(crate::testing::runtime_lease_owner())
         .expect("fixture core")
 }

@@ -437,6 +437,7 @@ mod tests {
             crate::testing::sqlite_memory_store_backend().await,
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
+            crate::ToolSourcePolicy::Tolerate,
         ))
         .with_plugin_host(Arc::new(crate::PluginHost::new(
             crate::testing::test_standard_protocol_factories(),
@@ -452,6 +453,7 @@ mod tests {
                 ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
+                    crate::NoProgressBudget::bounded(12),
                 ))
             },
             None,

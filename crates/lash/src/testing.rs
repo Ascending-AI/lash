@@ -171,3 +171,139 @@ pub fn node_activation(
         }),
     ))
 }
+
+/// Decode a command's recorded outcome while explicitly settling fixture setup.
+/// These conversions are test support; hosts can decode their own settlement.
+pub trait AdminFixtureOutcome: Sized {
+    fn from_admin_outcome(outcome: crate::SessionCommandOutcome) -> crate::Result<Self>;
+}
+
+/// The decoder passed to [`crate::AdminMutation::settle_with`] by host fixtures.
+pub fn admin_fixture_outcome<T: AdminFixtureOutcome>(
+    outcome: crate::SessionCommandOutcome,
+) -> crate::Result<T> {
+    T::from_admin_outcome(outcome)
+}
+
+fn fixture_outcome_error(outcome: crate::SessionCommandOutcome) -> crate::EmbedError {
+    match outcome {
+        crate::SessionCommandOutcome::Failed { refusal } => {
+            crate::EmbedError::Runtime(refusal.into())
+        }
+        crate::SessionCommandOutcome::PluginOperation {
+            outcome: lash_core::runtime::PluginOperationCommandOutcome::Failed { failure },
+        } => crate::EmbedError::Control(
+            lash_core::facade_support::PluginOperationInvokeError::Failed(failure),
+        ),
+        crate::SessionCommandOutcome::PluginOperation {
+            outcome: lash_core::runtime::PluginOperationCommandOutcome::Refused { refusal },
+        } => crate::EmbedError::Runtime(refusal.into()),
+        other => crate::EmbedError::Session(crate::SessionError::Protocol(format!(
+            "unexpected fixture command outcome: {other:?}"
+        ))),
+    }
+}
+
+impl AdminFixtureOutcome for () {
+    fn from_admin_outcome(outcome: crate::SessionCommandOutcome) -> crate::Result<Self> {
+        match outcome {
+            crate::SessionCommandOutcome::AppendSessionNodes {
+                outcome: lash_core::AppendSessionNodesOutcome::Appended { .. },
+            } => Ok(()),
+            other => Err(fixture_outcome_error(other)),
+        }
+    }
+}
+impl AdminFixtureOutcome for bool {
+    fn from_admin_outcome(outcome: crate::SessionCommandOutcome) -> crate::Result<Self> {
+        match outcome {
+            crate::SessionCommandOutcome::CompactContext {
+                outcome: lash_core::runtime::CompactContextOutcome::Opened { .. },
+            } => Ok(true),
+            crate::SessionCommandOutcome::CompactContext {
+                outcome: lash_core::runtime::CompactContextOutcome::NothingToCompact,
+            } => Ok(false),
+            crate::SessionCommandOutcome::CompactContext {
+                outcome: lash_core::runtime::CompactContextOutcome::Failed { refusal },
+            } => Err(crate::EmbedError::Runtime(refusal.into())),
+            other => Err(fixture_outcome_error(other)),
+        }
+    }
+}
+impl AdminFixtureOutcome for lash_core::AppendSessionNodesOutcome {
+    fn from_admin_outcome(outcome: crate::SessionCommandOutcome) -> crate::Result<Self> {
+        match outcome {
+            crate::SessionCommandOutcome::AppendSessionNodes { outcome } => Ok(outcome),
+            other => Err(fixture_outcome_error(other)),
+        }
+    }
+}
+impl AdminFixtureOutcome for lash_core::OpenAgentFrameOutcome {
+    fn from_admin_outcome(outcome: crate::SessionCommandOutcome) -> crate::Result<Self> {
+        match outcome {
+            crate::SessionCommandOutcome::OpenAgentFrame {
+                outcome: lash_core::runtime::OpenAgentFrameCommandOutcome::Opened { outcome },
+            } => Ok(outcome),
+            crate::SessionCommandOutcome::OpenAgentFrame {
+                outcome: lash_core::runtime::OpenAgentFrameCommandOutcome::Refused { refusal },
+            } => Err(crate::EmbedError::Runtime(refusal.into())),
+            other => Err(fixture_outcome_error(other)),
+        }
+    }
+}
+impl AdminFixtureOutcome for u64 {
+    fn from_admin_outcome(outcome: crate::SessionCommandOutcome) -> crate::Result<Self> {
+        match outcome {
+            crate::SessionCommandOutcome::ToolState {
+                outcome: lash_core::facade_support::ToolStateChangeOutcome::Applied { generation },
+            } => Ok(generation),
+            crate::SessionCommandOutcome::ToolState {
+                outcome: lash_core::facade_support::ToolStateChangeOutcome::Refused { error },
+            } => Err(error.into()),
+            other => Err(fixture_outcome_error(other)),
+        }
+    }
+}
+impl AdminFixtureOutcome for lash_core::ToolRestoreReport {
+    fn from_admin_outcome(outcome: crate::SessionCommandOutcome) -> crate::Result<Self> {
+        match outcome {
+            crate::SessionCommandOutcome::ToolState {
+                outcome: lash_core::facade_support::ToolStateChangeOutcome::Restored { report },
+            } => Ok(report),
+            crate::SessionCommandOutcome::ToolState {
+                outcome: lash_core::facade_support::ToolStateChangeOutcome::Refused { error },
+            } => Err(error.into()),
+            other => Err(fixture_outcome_error(other)),
+        }
+    }
+}
+impl<T: serde::de::DeserializeOwned> AdminFixtureOutcome
+    for lash_core::facade_support::PluginOperationReceipt<T>
+{
+    fn from_admin_outcome(outcome: crate::SessionCommandOutcome) -> crate::Result<Self> {
+        match outcome {
+            crate::SessionCommandOutcome::PluginOperation {
+                outcome:
+                    lash_core::runtime::PluginOperationCommandOutcome::Completed {
+                        plugin_id,
+                        output,
+                        events,
+                        pending_turn_inputs,
+                    },
+            } => Ok(Self {
+                output: serde_json::from_value(output).map_err(|error| {
+                    crate::EmbedError::Session(crate::SessionError::Protocol(error.to_string()))
+                })?,
+                events: events
+                    .into_iter()
+                    .map(|value| lash_core::facade_support::PluginOwned {
+                        plugin_id: plugin_id.clone(),
+                        value,
+                    })
+                    .collect(),
+                pending_turn_inputs,
+            }),
+            other => Err(fixture_outcome_error(other)),
+        }
+    }
+}

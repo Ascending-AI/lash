@@ -230,6 +230,7 @@ where
         lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ),
     );
     let env_ref = env_spec.stable_ref().expect("stable env ref");

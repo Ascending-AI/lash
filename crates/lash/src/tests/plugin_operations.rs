@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::plugins::{
-    PluginCommand, PluginOperation, PluginOperationFailure, PluginOperationOutcome, PluginQuery,
+    PluginCommand, PluginOperation, PluginOperationFailure, PluginOperationOutcome,
     PluginRuntimeEvent, PluginTask, SessionParam,
 };
 use crate::support::TurnInput;
@@ -30,7 +30,6 @@ macro_rules! operation {
         impl $kind for $name {}
     };
 }
-operation!(Query, PluginQuery, "accept.query");
 operation!(Command, PluginCommand, "accept.command");
 operation!(Task, PluginTask, "accept.task");
 
@@ -446,11 +445,22 @@ async fn plugin_operation_failure_reaches_the_facade_as_a_typed_settlement() -> 
             .await
             .open()
             .await?;
-        let error = session
-            .plugin_operations()
-            .run_command::<FailureProbe>("reject".into())
-            .await
-            .unwrap_err();
+        let error = async {
+            session
+                .plugin_operations()
+                .run_command::<FailureProbe>(
+                    "reject".into(),
+                    "host:plugin_operations:run_command:451".to_string(),
+                )
+                .await?
+                .settle_with(
+                    &session.admin().commands(),
+                    crate::testing::admin_fixture_outcome,
+                )
+                .await
+        }
+        .await
+        .unwrap_err();
         assert!(error.is_terminal());
         assert!(!error.is_retryable());
         let EmbedError::Control(lash_core::facade_support::PluginOperationInvokeError::Failed(
@@ -529,10 +539,18 @@ async fn agent_scenario_plugin_reserved_source_key_refusal_is_typed() -> Result<
             .open()
             .await?;
         for key in ["command:refresh_tool_catalog:foreign"] {
-            let refused = session
-                .plugin_operations()
-                .run_command::<Command>(key.into())
-                .await;
+            let refused = async {
+                session
+                    .plugin_operations()
+                    .run_command::<Command>(key.into(), format!("reserved-source-command:{key}"))
+                    .await?
+                    .settle_with(
+                        &session.admin().commands(),
+                        crate::testing::admin_fixture_outcome,
+                    )
+                    .await
+            }
+            .await;
             let Err(EmbedError::Runtime(error)) = refused else {
                 panic!("plugin refusal must reach the host typed");
             };
@@ -541,174 +559,6 @@ async fn agent_scenario_plugin_reserved_source_key_refusal_is_typed() -> Result<
             assert_eq!(recorded["cause"]["source_key"], key);
             assert!(session.durable().pending_turn_inputs().await?.is_empty());
         }
-        Ok(())
-    }
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "FIG-5344: a query on a session that has run answers NotPublished on the durable path"]
-async fn agent_scenario_plugin_task_query_command() -> Result<()> {
-    {
-        let entered = Arc::new(tokio::sync::Notify::new());
-        let task_entered = entered.clone();
-        let spec = lash_core::facade_support::PluginSpec::new()
-            .with_plugin_query_typed::<Query, _, _>(|ctx, args| async move {
-                assert_eq!(ctx.session_id.as_deref(), Some("plugin-accept"));
-                Ok(format!("query:{args}"))
-            })
-            .with_plugin_command_typed::<Command, _, _>(|_, args| async move {
-                Ok(outcome(format!("command:{args}"), "recorded"))
-            })
-            .with_plugin_task_typed::<Task, _, _>(move |ctx, args| {
-                let entered = task_entered.clone();
-                async move {
-                    if args == "cancel-739" {
-                        // This task ends only on its cancellation.
-                        entered.notify_one();
-                        ctx.cancellation_token.cancelled().await;
-                        return Err(String::from("cancelled:cancel-739"));
-                    }
-                    Ok(outcome(format!("task:{args}"), "completed"))
-                }
-            });
-        let writes = lash_core::testing::checkpoint_observer::CheckpointWriteCollector::default();
-        let observed = writes.clone();
-        let backend = DecoratedBackend::over(sqlite_memory_store_backend().await)
-            .session_store_factory(move |inner| {
-                Arc::new(
-                    lash_core::testing::checkpoint_observer::ObservedDeploymentStore::new(
-                        inner, observed,
-                    ),
-                )
-            })
-            .into();
-        let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
-            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-            .plugin(Arc::new(StaticPluginFactory::new(
-                lash_core::plugin::PluginDeclaration::initial("accept"),
-                spec,
-            )))
-            .build(crate::testing::runtime_lease_owner())?;
-        // Queries read an already published plugin view; creation leaves it
-        // cold until an engine admission publishes that view.
-        let initializing = core
-            .session(crate::SessionId::parse("plugin-accept").expect("nonblank host identity"))
-            .created()
-            .await
-            .open()
-            .await?;
-        initializing
-            .send(TurnInput::text("publish the plugin view"))
-            .output()
-            .await?;
-        drop(initializing);
-        let session = core
-            .session(crate::SessionId::parse("plugin-accept").expect("nonblank host identity"))
-            .open()
-            .await?;
-        let ops = session.plugin_operations();
-        let probe = || "cobalt-583".to_string();
-        let leaf = |history: &[lash_core::store::HistoryNode]| {
-            history.first().map(|node| node.record.node_id.clone())
-        };
-        let before = durable_history(&session.durable()).await?;
-        assert_eq!(
-            ops.query::<Query>(probe())
-                .await
-                .expect("initial query services"),
-            "query:cobalt-583"
-        );
-        assert_eq!(
-            leaf(&durable_history(&session.durable()).await?),
-            leaf(&before),
-            "query must not append history"
-        );
-        let command = ops.run_command::<Command>(probe()).await?;
-        let task = ops.run_task::<Task>(probe()).await?;
-        for (receipt, output, label) in [
-            (command, "command:cobalt-583", "recorded"),
-            (task, "task:cobalt-583", "completed"),
-        ] {
-            assert_eq!(receipt.output, output);
-            assert!(receipt.pending_turn_inputs.is_empty());
-            assert_eq!(receipt.events.len(), 1);
-            assert_eq!(receipt.events[0].plugin_id, "accept");
-            assert!(matches!(&receipt.events[0].value,
-                PluginRuntimeEvent::Status { key, label: actual, detail }
-                if key == "accept-probe" && actual == label && detail.as_deref() == Some(output)));
-        }
-        let before_cancel = durable_history(&session.durable()).await?;
-        let persisted_events: Vec<_> = before_cancel
-            .iter()
-            .rev()
-            .filter_map(|node| {
-                match lash_core::facade_support::SessionNodeProjection::event(&node.record) {
-                    Some(lash_core::SessionHistoryRecord::Protocol(event))
-                        if event.plugin_id == "lash.plugin_runtime" =>
-                    {
-                        Some(event.payload.clone())
-                    }
-                    _ => None,
-                }
-            })
-            .collect();
-        // Each persisted plugin runtime event carries its format stamp
-        // (FIG-5028).
-        assert_eq!(
-            persisted_events,
-            vec![
-                serde_json::json!({"format": 1, "plugin_id": "accept", "event": {
-                    "kind": "status", "key": "accept-probe", "label": "recorded", "detail": "command:cobalt-583"
-                }}),
-                serde_json::json!({"format": 1, "plugin_id": "accept", "event": {
-                    "kind": "status", "key": "accept-probe", "label": "completed", "detail": "task:cobalt-583"
-                }}),
-            ],
-            "both owned events persist in operation order"
-        );
-        // The task is running in the shift, so the cancel no longer
-        // withdraws it (FIG-4202): it reaches the task through its cancel
-        // signal, and the shift settles the command cancelled (FIG-4391).
-        let cancel = crate::CancellationToken::new();
-        let task_cancel = cancel.clone();
-        let running_ops = ops.clone();
-        let running = tokio::spawn(async move {
-            running_ops
-                .run_task_with_cancel::<Task>("cancel-739".into(), task_cancel)
-                .await
-        });
-        tokio::time::timeout(Duration::from_secs(5), entered.notified())
-            .await
-            .expect("task entered");
-        cancel.cancel();
-        let error = tokio::time::timeout(Duration::from_secs(5), running)
-            .await
-            .expect("the cancelled task settles")
-            .expect("task does not panic")
-            .expect_err("the cancelled task settles cancelled");
-        assert!(
-            matches!(
-                error,
-                EmbedError::Send(ref error) if matches!(error.as_ref(), crate::SendError::NotSettled { status: crate::TurnStatus::Cancelled, .. })
-            ),
-            "a host cancel of an admitted task settles it with the typed cancel: {error:?}"
-        );
-        assert_eq!(
-            leaf(&durable_history(&session.durable()).await?),
-            leaf(&before_cancel),
-            "nothing of the cancelled task commits"
-        );
-        assert_eq!(
-            ops.query::<Query>(probe())
-                .await
-                .expect("query services after operation cancellation"),
-            "query:cobalt-583",
-            "writer released after the cancelled settlement"
-        );
-        assert!(
-            !writes.events().is_empty(),
-            "the operations' commits reached the deployment store"
-        );
         Ok(())
     }
 }

@@ -194,6 +194,7 @@ mod tests {
         let state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         ));
         let store = FacadeTestStore {
             materialized_session: Some(state.session_id.clone()),
@@ -220,6 +221,7 @@ mod tests {
         let state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         ));
         let store = FacadeTestStore {
             materialized_session: Some(state.session_id.clone()),
@@ -245,6 +247,7 @@ mod tests {
         let state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         ));
         let store = FacadeTestStore {
             materialized_session: Some(state.session_id.clone()),
@@ -279,6 +282,7 @@ mod tests {
         let state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         ));
         let commit = RuntimeCommit::persisted_state_for_test(&state);
 
@@ -320,6 +324,7 @@ mod tests {
         let state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         ));
         let store = FacadeTestStore {
             materialized_session: Some(state.session_id.clone()),
@@ -355,6 +360,7 @@ mod tests {
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
             ))
         };
         state.ensure_agent_frame_initialized();
@@ -383,6 +389,7 @@ mod tests {
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
             ))
         };
         let store = FacadeTestStore {
@@ -436,6 +443,7 @@ mod tests {
         let mut state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         ));
         state.ensure_agent_frame_initialized();
         let store = FacadeTestStore {
@@ -452,6 +460,7 @@ mod tests {
         let mut state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         ));
         state.ensure_agent_frame_initialized();
         let store = FacadeTestStore {

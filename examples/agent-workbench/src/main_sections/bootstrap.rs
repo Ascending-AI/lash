@@ -315,6 +315,7 @@ pub(crate) async fn workbench_core_builder(
     }
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
     .live_replay_store(live_replay)
     .delta_coalescing(delta_coalescing_from_environment()?);
     if let Some(tool_provider) = tool_provider {

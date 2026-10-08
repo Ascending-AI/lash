@@ -202,7 +202,7 @@ impl SessionCreateRequest {
     /// # Errors
     ///
     /// A spec that states no model or no turn budget
-    /// ([`SessionSpec::inherit`](crate::SessionSpec::inherit)).
+    /// (an incomplete spec).
     pub fn with_spec(
         mut self,
         spec: &crate::SessionSpec,

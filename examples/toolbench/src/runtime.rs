@@ -416,6 +416,7 @@ fn build_turn_core(
         })
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "toolbench",
             format!("run-{run}-typescript-{}", task.id),
@@ -424,6 +425,7 @@ fn build_turn_core(
     // The run's session spec: the bench's one model under the task's turn
     // budget and the run's reasoning effort.
     let session_spec = lash::SessionSpec::new(model, budget, lash::MaxToolCalls::new(1024))
+        .no_progress_budget(lash::NoProgressBudget::Unbounded)
         .reasoning(reasoning(effort));
     Ok((core, session_spec))
 }

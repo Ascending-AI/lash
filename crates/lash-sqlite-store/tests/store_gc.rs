@@ -58,6 +58,7 @@ async fn factory_state(
         ..RuntimeSessionState::new(SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     }
 }
@@ -80,6 +81,7 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
         ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     state.set_tool_state_snapshot(Some(tool_state));
@@ -175,6 +177,7 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
             ..SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
                 lash_core_execution::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             )
         }
         .into(),
@@ -204,6 +207,7 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
                 ..SessionPolicy::new(
                     lash_core_execution::TurnBudget::Unbounded,
                     lash_core_execution::MaxToolCalls::new(1024),
+                    lash_core::NoProgressBudget::bounded(12),
                 )
             }
             .into(),
@@ -241,6 +245,7 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
             ..SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
                 lash_core_execution::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             )
         }
         .into(),
@@ -335,6 +340,7 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
         config: SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         )
         .into(),
         head: SessionCreationHead::Config,
@@ -367,6 +373,7 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
                     SessionPolicy::new(
                         lash_core_execution::TurnBudget::Unbounded,
                         lash_core_execution::MaxToolCalls::new(1024),
+                        lash_core::NoProgressBudget::bounded(12),
                     ),
                 ),
             },
@@ -434,6 +441,7 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
         config: SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         )
         .into(),
         head: SessionCreationHead::Config,
@@ -465,6 +473,7 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
                 SessionPolicy::new(
                     lash_core_execution::TurnBudget::Unbounded,
                     lash_core_execution::MaxToolCalls::new(1024),
+                    lash_core::NoProgressBudget::bounded(12),
                 ),
             ),
         },
@@ -517,6 +526,7 @@ async fn sqlite_vacuum_is_scoped_to_the_bound_session() {
         config: SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         )
         .into(),
         head: SessionCreationHead::Config,
@@ -612,6 +622,7 @@ async fn commit_single_root_node(
             config: SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
                 lash_core_execution::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             )
             .into(),
             head: SessionCreationHead::Config,
@@ -708,6 +719,7 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
     let policy = SessionPolicy::new(
         lash_core_execution::TurnBudget::Unbounded,
         lash_core_execution::MaxToolCalls::new(1024),
+        lash_core::NoProgressBudget::bounded(12),
     );
     factory
         .fork_session(&lash_core_execution::ForkSessionRequest {

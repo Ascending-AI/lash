@@ -44,6 +44,7 @@ async fn durable_transcript_projection_fixture() -> Vec<crate::ChatRow> {
         )
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "transcript-projection",
             "transcript-projection-boot",
@@ -55,6 +56,7 @@ async fn durable_transcript_projection_fixture() -> Vec<crate::ChatRow> {
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(8),
     )
+    .no_progress_budget(lash::NoProgressBudget::bounded(12))
     .plugin(
         lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
         lash::rlm::RlmCreateExtras::default(),
@@ -139,7 +141,13 @@ async fn durable_transcript_projection_fixture() -> Vec<crate::ChatRow> {
             requires_ancestor_node_id: None,
         })
         .await
-        .expect("the fixture append answers");
+        .expect("the fixture append answers")
+        .settle_with(
+            &session.admin().commands(),
+            lash::testing::admin_fixture_outcome,
+        )
+        .await
+        .expect("fixture mutation settled");
     assert!(
         matches!(
             outcome,

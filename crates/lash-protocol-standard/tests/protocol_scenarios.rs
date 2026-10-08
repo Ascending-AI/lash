@@ -510,10 +510,9 @@ fn standard_config() -> TurnMachineConfig {
         )
         .with_reasoning(Default::default()),
         turn_budget: lash_core::TurnBudget::Unbounded,
-        no_progress_budget: Default::default(),
+        no_progress_budget: lash_core::NoProgressBudget::bounded(12),
         attachment_acceptance: Default::default(),
         generation: lash_core::GenerationOptions::default(),
-        autonomous: false,
         session_id: lash_core::SessionId::from("standard-protocol-scenario"),
         agent_frame_id: "standard-frame".to_string(),
         turn_id: TurnId::from("standard-protocol-turn"),

@@ -44,6 +44,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
             ..SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             )
         },
         turn_index: 3,
@@ -57,6 +58,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     state.ensure_agent_frame_initialized();
@@ -78,6 +80,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
                 lash_conformance::backend_over(stores.clone()),
                 lash_core::CommitBudget::bounded(1024 * 1024, 512),
                 lash_core::QueuedWorkBatchingConfig::new(1),
+                lash_core::ToolSourcePolicy::Tolerate,
             ),
             lash_core::LeaseOwnerIdentity::opaque("protocol-test-worker", "protocol-test-boot"),
         )
@@ -116,11 +119,13 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
             ..SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             )
         },
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     let store = lash_core::runtime::admit_session_view(
@@ -140,6 +145,7 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
                 lash_conformance::backend_over(stores.clone()),
                 lash_core::CommitBudget::bounded(1024 * 1024, 512),
                 lash_core::QueuedWorkBatchingConfig::new(1),
+                lash_core::ToolSourcePolicy::Tolerate,
             ),
             lash_core::LeaseOwnerIdentity::opaque("protocol-test-worker", "protocol-test-boot"),
         )

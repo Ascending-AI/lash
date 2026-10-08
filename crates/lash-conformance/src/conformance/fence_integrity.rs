@@ -79,6 +79,7 @@ async fn negative_session_head_revision(handles: FenceIntegrityHandles) {
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     handles

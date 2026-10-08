@@ -178,6 +178,9 @@ async fn apply<C: lash_core::ConfigCommand>(core: &lash::LashCore, session: &str
             lash::config::ConfigTransaction::of(command),
         )
         .await
+        .expect("the render command is accepted")
+        .await_outcome(&config)
+        .await
         .expect("the render command settles");
     assert!(
         matches!(
@@ -325,6 +328,7 @@ fn standard_core(
         .tools(Arc::clone(tool) as Arc<dyn lash_core::ToolProvider>)
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .serve_test_llm_profile(model.provider(), served::metadata())
         .build(owner(build))
         .expect("the core builds")
@@ -538,6 +542,7 @@ fn rlm_core(
     lash::LashCore::rlm_builder(backend.clone(), factory)
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .serve_test_llm_profile(model.provider(), served::metadata())
         .build(owner(build))
         .expect("the core builds")

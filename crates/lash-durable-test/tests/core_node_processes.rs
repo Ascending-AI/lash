@@ -141,6 +141,7 @@ async fn deploy_with(
     let core = build(&backend)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "core-node-deployment",
             "core-node-boot",
@@ -166,6 +167,7 @@ fn spec() -> lash::SessionSpec {
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(16),
     )
+    .no_progress_budget(lash_core::NoProgressBudget::bounded(12))
 }
 
 /// A text answer, streamed as one delta.
@@ -339,6 +341,9 @@ async fn set_prompt_plan(
             lash::config::ConfigWrite::new(id, config.revision().await.unwrap()),
             lash::config::ConfigTransaction::of(lash::config::SetPromptPlan { plan }),
         )
+        .await
+        .unwrap()
+        .await_outcome(&config)
         .await
         .unwrap();
     assert!(
@@ -1268,7 +1273,11 @@ fn write_tool(world: &Arc<World>) -> Arc<dyn lash_core::ToolProvider> {
 fn environment() -> lash_core::ProcessExecutionEnvSpec {
     let mut environment = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy::new(lash::TurnBudget::Unbounded, lash::MaxToolCalls::new(16)),
+        lash_core::SessionPolicy::new(
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(16),
+            lash_core::NoProgressBudget::bounded(12),
+        ),
     );
     environment.render = Some(lash_core::RecordedRender {
         renderer_id: lash::render::ToolOutputRendererSlot::default()

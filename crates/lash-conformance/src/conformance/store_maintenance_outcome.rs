@@ -275,6 +275,7 @@ async fn commit_generation(
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     state.set_tool_state_snapshot(Some(

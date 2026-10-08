@@ -24,6 +24,9 @@ async fn observation_get_preserves_config(path: &str) {
             }),
         )
         .await
+        .expect("config accepted")
+        .await_outcome(&config)
+        .await
         .expect("a peer commands a model change");
     assert!(
         matches!(

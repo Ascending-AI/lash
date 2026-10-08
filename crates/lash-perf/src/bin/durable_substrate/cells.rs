@@ -59,6 +59,7 @@ pub fn core(
     .serve_sessions(false)
     .commit_budget(lash::CommitBudget::bounded(64 * 1024 * 1024, 4096))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+    .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
     .serve_test_llm_profile(model(scripts, recorder), metadata()?)
     .tools(echo()?)
     .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -81,11 +82,14 @@ pub fn services(core: &lash::LashCore) -> Arc<dyn TurnServices> {
 /// The facade refused.
 pub async fn create_session(core: &lash::LashCore, session: &SessionId) -> Result<()> {
     core.session(session.clone())
-        .create(lash::SessionCreation::root(lash::SessionSpec::new(
-            MODEL,
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1_000_000),
-        )))
+        .create(lash::SessionCreation::root(
+            lash::SessionSpec::new(
+                MODEL,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1_000_000),
+            )
+            .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
+        ))
         .await
         .map(drop)
         .map_err(|error| anyhow::anyhow!("create {session}: {error}"))

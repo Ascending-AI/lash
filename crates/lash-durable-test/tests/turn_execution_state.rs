@@ -477,12 +477,22 @@ async fn a_rotations_follow_on_is_offered_the_newly_advertised_tools(tier: Tier)
             }),
         )
         .await
+        .unwrap()
+        .await_outcome(&config)
+        .await
         .unwrap();
     live.admin()
         .tools()
         .set_membership(
             lash_core::ToolId::from("tool:curated_before_rotation"),
             false,
+            "host:turn_execution_state:set_membership:483",
+        )
+        .await
+        .unwrap()
+        .settle_with(
+            &live.admin().commands(),
+            lash::testing::admin_fixture_outcome,
         )
         .await
         .unwrap();

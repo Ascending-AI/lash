@@ -21,6 +21,7 @@ pub(super) async fn prove_runtime_facade_turn() -> Result<RuntimeFacadeProof, Fi
     let core = lash::LashCore::standard_builder(engine.backend())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .serve_test_llm_profile(provider_handle, model.clone())
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
@@ -130,6 +131,7 @@ pub(super) async fn run_live_turn_facts(
     let core = lash::LashCore::standard_builder(engine.backend())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .serve_test_llm_profile(provider_handle, model.clone())
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
@@ -249,6 +251,7 @@ pub(crate) async fn prove_pending_tool_completion_on(
     let core = lash::LashCore::standard_builder(engine.backend())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .serve_test_llm_profile(
             pending_tool_roundtrip_provider(Arc::clone(&final_answer)),
             lash_core::LlmProfileMetadata::builder("mock-model")
@@ -530,6 +533,7 @@ pub(super) async fn final_value_session(
     let core = lash::LashCore::rlm_builder(backend, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .serve_test_llm_profile(
             rlm_final_value_provider(),
             lash_core::LlmProfileMetadata::builder("mock-rlm-final-value")

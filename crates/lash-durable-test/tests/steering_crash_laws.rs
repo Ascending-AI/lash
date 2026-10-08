@@ -297,6 +297,7 @@ impl Steering {
                     .serve_sessions(false)
                     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+                    .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
                     .serve_test_llm_profile(
                         model(self.arrival, Arc::clone(&self.core), Arc::clone(&self.seen)),
                         metadata(),
@@ -317,11 +318,14 @@ impl Steering {
         let session = self
             .core()
             .session(session())
-            .create(lash::SessionCreation::root(lash::SessionSpec::new(
-                MODEL,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(64),
-            )))
+            .create(lash::SessionCreation::root(
+                lash::SessionSpec::new(
+                    MODEL,
+                    lash::TurnBudget::Unbounded,
+                    lash::MaxToolCalls::new(64),
+                )
+                .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
+            ))
             .await
             .map_err(|error| format!("create the session: {error}"))?;
         session

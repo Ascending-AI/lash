@@ -41,6 +41,7 @@ fn completed_turn(
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         ))
     };
     let mut commit = RuntimeCommit::persisted_state_for_test(&state);

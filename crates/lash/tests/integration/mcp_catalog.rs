@@ -514,6 +514,7 @@ async fn turn_witness(store: Store, failure_law: bool) {
         .max_attachment_bytes(failure_law.then_some(1))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .plugin(factory.clone())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "mcp-catalog",

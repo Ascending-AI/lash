@@ -18,6 +18,7 @@ pub async fn queue_head_read_failure_publishes_recoverable_gap(backend: crate::B
                 config: crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
+                    lash_core::NoProgressBudget::bounded(12),
                 )
                 .into(),
                 head: crate::SessionCreationHead::Config,
@@ -30,6 +31,7 @@ pub async fn queue_head_read_failure_publishes_recoverable_gap(backend: crate::B
                 ..RuntimeSessionState::new(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
+                    lash_core::NoProgressBudget::bounded(12),
                 ))
             };
             view.commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))

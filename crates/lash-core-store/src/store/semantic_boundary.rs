@@ -175,6 +175,7 @@ mod semantic_boundary_request_identity_tests {
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
             ))
         };
         RuntimeCommit::persisted_state_with_operation_for_testing(
@@ -285,6 +286,7 @@ mod semantic_boundary_request_identity_tests {
         changed_config.config = crate::PersistedSessionConfig::new(
             crate::TurnBudget::bounded(7),
             crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         );
         let (_, changed) = semantic_boundary_request_identity(
             &changed_config,
@@ -313,6 +315,7 @@ mod semantic_boundary_request_identity_tests {
         stale.config = crate::PersistedSessionConfig::new(
             crate::TurnBudget::bounded(3),
             crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         );
         let error = stale
             .validate_operation_session()

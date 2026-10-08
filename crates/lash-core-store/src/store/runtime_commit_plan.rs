@@ -543,6 +543,7 @@ mod tests {
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
             ))
         };
         let commit = RuntimeCommit::persisted_state_for_test(&state)
@@ -582,6 +583,7 @@ mod tests {
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
             ))
         };
         let commit = RuntimeCommit::persisted_state_for_test(&state);

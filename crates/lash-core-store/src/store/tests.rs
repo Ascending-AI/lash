@@ -35,6 +35,7 @@ fn intent_fixture() -> RuntimeCommit {
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         ))
     };
     state.ensure_agent_frame_initialized();
@@ -268,6 +269,7 @@ fn session_head_meta_refuses_a_head_json_naming_another_session() {
             config: crate::PersistedSessionConfig::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
             ),
         },
         7,
@@ -295,7 +297,7 @@ fn session_head_meta_refuses_a_head_json_missing_its_session_id() {
     // the row key is what decides whether that is this session's identity.
     let payload: SessionHeadPayload = serde_json::from_value(serde_json::json!({
         "schema_version": SESSION_HEAD_META_SCHEMA_VERSION,
-        "config": crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
+        "config": crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024),crate::NoProgressBudget::bounded(12)),
     }))
     .expect("a head payload without a session id still decodes");
 
@@ -516,6 +518,7 @@ fn node_derivation_guard_rejects_frame_open_rogue_id() {
         assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         )),
     };
 

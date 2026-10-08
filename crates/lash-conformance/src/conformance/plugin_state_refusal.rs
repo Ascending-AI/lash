@@ -20,6 +20,7 @@ pub(super) async fn plugin_state_corrupt_boundary(store: Arc<dyn RuntimeStore>, 
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     let seed = host

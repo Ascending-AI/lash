@@ -761,10 +761,9 @@ fn rlm_contract_config_with_turn_options(
         )
         .with_reasoning(Default::default()),
         turn_budget: lash_core::TurnBudget::Unbounded,
-        no_progress_budget: Default::default(),
+        no_progress_budget: lash_core::NoProgressBudget::bounded(12),
         attachment_acceptance: Default::default(),
         generation: lash_core::GenerationOptions::default(),
-        autonomous: false,
         session_id: SessionId::from("rlm-contract"),
         agent_frame_id: "rlm-contract-frame".to_string(),
         turn_id: TurnId::from("rlm-contract-turn"),

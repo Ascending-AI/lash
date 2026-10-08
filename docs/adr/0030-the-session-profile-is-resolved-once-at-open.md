@@ -34,17 +34,17 @@ durable, revision-checked `ConfigTransaction` (ADR 0126). The core owner's comma
 model and reasoning, prompt, generation, attachment acceptance, the execution
 controls and tool access; each plugin's commands cover its own namespace.
 
-The execution controls are the turn budget, autonomy, the no-progress budget
+The execution controls are the turn budget, the no-progress budget
 and charge safety. They are session configuration like the model. The creator
 states them in `SessionCreation::spec`. A core keeps no session defaults
 (FIG-4594): `SessionSpec::new(model, turn_budget, max_tool_calls)` takes the
-three parts nothing defaults, the other controls take the neutral values lash
-documents, and a host that wants a default keeps its own `SessionSpec` value
+three initial parts of the spec; the host also states a no-progress bound
+with `no_progress_budget`, and a host that wants a default keeps its own `SessionSpec` value
 and passes it.
 Every root creation takes an explicit spec, a host-started session-turn
 process start included; one that states none is refused typed
 (`SessionTurnStartUnspecified`). Everything else lash creates derives from a
-record: a child copies its parent's recorded config, a fork copies its fork
+record: a child states its own configuration, a fork copies its fork
 point's recorded config in full, a process runs under its captured
 environment, and an open or a shift reads only the record. Each run
 snapshots the configuration, controls included, in its committed admission
@@ -53,9 +53,9 @@ snapshot, so a later configuration change reaches the next run, never a
 running or resumed one.
 An urgent stop is a recorded cancellation, not a configuration change.
 
-Remote process environments carry the recorded no-progress budget and charge
-safety alongside the turn budget and autonomy. A peer requires both fields;
-it never substitutes its defaults. Session creation and `SetChargeSafety`
+Captured process environments carry the recorded no-progress budget and
+charge safety alongside the turn budget. A stored environment requires the
+stall choice; it never substitutes a default. Session creation and `SetChargeSafety`
 share the ceiling check and refuse `UnsafeRetriesAboveCeiling` before
 publishing a configuration. The provider handle applies the admitted retry
 limit without a separate clamp (FIG-4480).

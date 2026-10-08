@@ -757,6 +757,7 @@ impl<'run> ToolContext<'run> {
                 crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
+                    crate::NoProgressBudget::bounded(12),
                 ),
             ),
             child_execution_trace_hook: None,

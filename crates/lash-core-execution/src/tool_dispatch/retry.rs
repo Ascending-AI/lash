@@ -354,6 +354,7 @@ mod panic_tests {
                 crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
+                    crate::NoProgressBudget::bounded(12),
                 ),
             ),
             owner: crate::ExecutionOwner::SessionFrame {

@@ -1003,29 +1003,6 @@ impl RuntimeSessionServices {
         let Some(store) = store else {
             return Ok(None);
         };
-        // A session the catalog attributes to this process exists solely to
-        // run its turn, so every open row under it is the process's work. A
-        // session not caused by this process is foreign: only the row mailed
-        // under this turn's id may be touched.
-        let owned_by_process = store
-            .load_session_meta()
-            .await
-            .map_err(|error| {
-                crate::PluginError::Session(format!(
-                    "failed to read cancelled process `{process_id}` child session `{session_id}` metadata: {error}"
-                ))
-            })?
-            .is_some_and(|meta| {
-                matches!(
-                    &meta.relation,
-                    crate::SessionRelation::Child {
-                        caused_by: Some(crate::CausalRef::Process {
-                            process_id: owner_process_id,
-                        }),
-                        ..
-                    } if owner_process_id == process_id
-                )
-            });
         let pending = store
             .list_pending_turn_inputs()
             .await
@@ -1038,8 +1015,7 @@ impl RuntimeSessionServices {
             .iter()
             .filter(|read| {
                 !read.input.state.is_terminal()
-                    && (owned_by_process
-                        || read.input.source_key.as_deref() == Some(turn_id.as_str()))
+                    && read.input.source_key.as_deref() == Some(turn_id.as_str())
             })
             .map(|read| {
                 crate::PendingTurnInputCancelTarget::input_id(read.input.input_id.to_string())
@@ -1168,7 +1144,11 @@ mod tests {
     /// A stated policy with nothing else: the turn budget and tool-call
     /// limit a creator must choose.
     fn stated_policy() -> SessionPolicy {
-        SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
+        SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
+        )
     }
 
     /// FIG-4531: a child's model key is judged where the child's facts
@@ -1254,6 +1234,7 @@ mod tests {
             crate::TurnBudget::bounded(4),
             crate::MaxToolCalls::new(1024),
         )
+        .no_progress_budget(crate::NoProgressBudget::bounded(12))
         .reasoning(crate::ReasoningSelection::Effort("high".to_string()));
         let request = root_request().with_spec(&spec).expect("a root spec");
         assert_eq!(request.unstated_root_config(), None);
@@ -1270,12 +1251,6 @@ mod tests {
         assert_eq!(
             root_request().unstated_root_config(),
             Some(crate::UnstatedSessionConfig::Policy)
-        );
-        assert!(
-            root_request()
-                .with_spec(&crate::SessionSpec::inherit())
-                .is_err(),
-            "an overlay states no session of its own"
         );
     }
 

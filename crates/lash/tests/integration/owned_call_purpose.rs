@@ -219,6 +219,7 @@ async fn compaction_and_direct_calls_compose_only_their_own_purpose() {
         ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "purpose-probe-worker",
             "purpose-probe-boot",
@@ -231,7 +232,8 @@ async fn compaction_and_direct_calls_compose_only_their_own_purpose() {
                 MODEL,
                 lash::TurnBudget::Unbounded,
                 lash::MaxToolCalls::new(1024),
-            ),
+            )
+            .no_progress_budget(lash::NoProgressBudget::bounded(12)),
             prompt_plan: Some(PromptPlan {
                 placements: vec![PromptSectionPlacement {
                     section: PromptSectionId::new(
@@ -261,9 +263,18 @@ async fn compaction_and_direct_calls_compose_only_their_own_purpose() {
         session
             .admin()
             .state()
-            .compact_context(Some("host-focus-to-replace".to_owned()))
+            .compact_context(
+                Some("host-focus-to-replace".to_owned()),
+                "host:owned_call_purpose:compact_context:230".to_string(),
+            )
             .await
-            .expect("the compaction settles"),
+            .expect("the compaction settles")
+            .settle_with(
+                &session.admin().commands(),
+                lash::testing::admin_fixture_outcome
+            )
+            .await
+            .expect("fixture mutation settled"),
         "the compaction opened a frame"
     );
 

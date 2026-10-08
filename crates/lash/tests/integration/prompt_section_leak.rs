@@ -231,6 +231,7 @@ async fn section_text_never_enters_history_or_a_compaction_seed() {
         ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "section-leak-worker",
             "section-leak-boot",
@@ -289,9 +290,18 @@ async fn section_text_never_enters_history_or_a_compaction_seed() {
         session
             .admin()
             .state()
-            .compact_context(None)
+            .compact_context(
+                None,
+                "host:prompt_section_leak:compact_context:292".to_string()
+            )
             .await
-            .expect("the compaction settles"),
+            .expect("the compaction settles")
+            .settle_with(
+                &session.admin().commands(),
+                lash::testing::admin_fixture_outcome
+            )
+            .await
+            .expect("fixture mutation settled"),
         "the compaction opened a frame"
     );
     let seeded = session

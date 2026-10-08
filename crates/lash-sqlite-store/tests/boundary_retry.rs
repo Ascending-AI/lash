@@ -95,6 +95,7 @@ fn commit(boundary: &str, key: &str, revision: u64) -> RuntimeCommit {
         ..RuntimeSessionState::new(SessionPolicy::new(
             TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     commit_state(boundary, key, &state)
@@ -130,6 +131,7 @@ async fn semantic_boundary_retry_after_head_advance(boundary: &str, key: &str) {
         ..RuntimeSessionState::new(SessionPolicy::new(
             TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     let first = semantic_commit_state(boundary, key, &state);
@@ -217,6 +219,7 @@ async fn initial_park_exact_commit_retry_after_head_advance() {
         ..RuntimeSessionState::new(SessionPolicy::new(
             TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     // Mirror lifecycle's content-addressed operation for an empty pending graph.
@@ -287,6 +290,7 @@ async fn append_identity_replays_after_head_advance() {
         ..RuntimeSessionState::new(SessionPolicy::new(
             TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     let nodes = vec![lash_core_execution::SessionAppendNode::plugin(

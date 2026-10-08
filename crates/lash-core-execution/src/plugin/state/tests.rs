@@ -62,6 +62,7 @@ async fn an_equal_format_different_revision_redrive_parks_before_callbacks_or_ef
     let state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
+        crate::NoProgressBudget::bounded(12),
     ));
     let result = session
         .dispatch(None)
@@ -675,7 +676,11 @@ fn plugin_formats_stamp_every_state_write() {
         assert_eq!(options.plugins["format-probe"].format_version, writer);
         let environment = crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::new(encoded_config, 3),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
+            crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
+            ),
         );
         let environment: crate::ProcessExecutionEnvSpec =
             rmp_serde::from_slice(&rmp_serde::to_vec_named(&environment).unwrap()).unwrap();

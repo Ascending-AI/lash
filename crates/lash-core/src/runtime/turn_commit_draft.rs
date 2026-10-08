@@ -577,6 +577,7 @@ mod tests {
             ..RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
             ))
         };
         state.ensure_agent_frame_initialized_with_clock(&clock);
@@ -858,6 +859,7 @@ mod tests {
             ..RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
             ))
         };
         state.ensure_agent_frame_initialized_with_clock(&clock);

@@ -38,10 +38,9 @@ fn process_execution_env_identity_corpus() -> [(String, String); 2] {
             .with_reasoning(crate::ReasoningSelection::Effort("high".to_string())),
         ),
         attachment_acceptance: Default::default(),
-        autonomous: true,
         turn_budget: crate::TurnBudget::bounded(1),
         max_tool_calls: crate::MaxToolCalls::new(1024),
-        no_progress_budget: Default::default(),
+        no_progress_budget: crate::NoProgressBudget::bounded(12),
         generation: crate::GenerationOptions {
             output_token_cap: std::num::NonZeroUsize::new(1024),
             temperature: Some(crate::NonNegativeFiniteF64::new(0.25).expect("finite temperature")),
@@ -54,7 +53,11 @@ fn process_execution_env_identity_corpus() -> [(String, String); 2] {
     let specs = [
         ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
+            crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
+            ),
         ),
         ProcessExecutionEnvSpec::new(plugin_config, policy),
     ];

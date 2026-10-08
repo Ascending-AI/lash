@@ -356,6 +356,7 @@ fn build_core(
         .plugins(plugins)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .build(latency_owner())
         .map_err(anyhow::Error::from)
 }
@@ -431,11 +432,14 @@ async fn run_lane(
     let durable = topology
         .core
         .session(session_id.clone())
-        .create(lash::SessionCreation::root(lash::SessionSpec::new(
-            latency_llm_profile_spec()?.wire_model,
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1024),
-        )))
+        .create(lash::SessionCreation::root(
+            lash::SessionSpec::new(
+                latency_llm_profile_spec()?.wire_model,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            )
+            .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
+        ))
         .await
         .map_err(anyhow::Error::from)?;
     let session = match spec.topology {
@@ -1081,6 +1085,7 @@ mod tests {
                 config: lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                     lash_core::MaxToolCalls::new(1024),
+                    lash_core::NoProgressBudget::bounded(12),
                 )
                 .into(),
                 head: lash_core::SessionCreationHead::Config,

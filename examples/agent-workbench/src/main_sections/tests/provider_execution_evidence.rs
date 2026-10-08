@@ -138,6 +138,9 @@ async fn provider_execution_evidence_reaches_the_record_surfaces() {
                     }),
                 )
                 .await
+                .expect("config accepted")
+                .await_outcome(&config)
+                .await
                 .expect("state the fixture model's output cap");
         }
         let observable = session.observe();

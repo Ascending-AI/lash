@@ -368,6 +368,7 @@ mod tests {
         let config = lash_core::PersistedSessionConfig::from(&lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ));
         let core = lash_core::CoreConfig::of(&config);
         check(&CandidateFacts {
@@ -496,6 +497,7 @@ mod tests {
         let mut config = lash_core::PersistedSessionConfig::from(&lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ));
         config.plugin_config = registry
             .resolve_creation(

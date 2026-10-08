@@ -12,7 +12,11 @@ mod tests {
         let pin = crate::testing::host_pin_claim_for_testing();
         let spec = crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
+            crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+                lash_core_execution::NoProgressBudget::bounded(12),
+            ),
         );
         let env_ref = crate::publish_process_execution_env(store.as_ref(), &pin, &spec)
             .await
@@ -100,6 +104,7 @@ mod tests {
                     crate::SessionPolicy::new(
                         crate::TurnBudget::Unbounded,
                         crate::MaxToolCalls::new(1024),
+                        lash_core_execution::NoProgressBudget::bounded(12),
                     ),
                 ),
             )
@@ -184,6 +189,7 @@ mod tests {
                 crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
+                    lash_core_execution::NoProgressBudget::bounded(12),
                 ),
             ),
         )
@@ -335,7 +341,11 @@ mod tests {
         let env_store: Arc<dyn crate::ProcessExecutionEnvStore> = backend.process_env_store();
         let env_spec = crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
+            crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+                lash_core_execution::NoProgressBudget::bounded(12),
+            ),
         );
         let env_ref = env_spec.stable_ref().expect("stable environment reference");
         let command = start_envelope(
@@ -463,7 +473,11 @@ mod tests {
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let env_spec = crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
+            crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+                lash_core_execution::NoProgressBudget::bounded(12),
+            ),
         );
         let env_ref = env_spec.stable_ref().expect("stable environment reference");
         let bytes = env_spec.to_store_bytes().expect("encode environment");
@@ -565,7 +579,11 @@ mod tests {
         let env = |budget: crate::TurnBudget| {
             crate::ProcessExecutionEnvSpec::new(
                 crate::AdmittedPluginConfig::default(),
-                crate::SessionPolicy::new(budget, crate::MaxToolCalls::new(1024)),
+                crate::SessionPolicy::new(
+                    budget,
+                    crate::MaxToolCalls::new(1024),
+                    lash_core_execution::NoProgressBudget::bounded(12),
+                ),
             )
         };
         let first_env = env(crate::TurnBudget::Unbounded);
@@ -696,6 +714,7 @@ mod tests {
                 crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
+                    lash_core_execution::NoProgressBudget::bounded(12),
                 ),
             ),
         )

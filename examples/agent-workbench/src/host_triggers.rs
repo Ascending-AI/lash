@@ -640,6 +640,7 @@ fn delivered_process_environment() -> lash::process::ProcessExecutionEnvSpec {
         lash::runtime::SessionPolicy::new(
             lash::TurnBudget::bounded(32),
             lash::MaxToolCalls::new(1024),
+            lash::NoProgressBudget::bounded(12),
         ),
     )
 }

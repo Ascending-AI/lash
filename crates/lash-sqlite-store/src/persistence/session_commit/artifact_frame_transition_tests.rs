@@ -23,6 +23,7 @@ fn first_commit_may_end_its_own_appended_frame_open() {
                     lash_core_execution::SessionPolicy::new(
                         lash_core_execution::TurnBudget::Unbounded,
                         lash_core_execution::MaxToolCalls::new(1024),
+                        lash_core::NoProgressBudget::bounded(12),
                     ),
                 ),
             },
@@ -192,6 +193,7 @@ async fn committed_first_frame(
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     state.ensure_agent_frame_initialized_with_clock(clock);

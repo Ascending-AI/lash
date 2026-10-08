@@ -75,6 +75,7 @@ pub(super) async fn seed_append_receipt_state(
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     let nodes = vec![crate::SessionAppendNode::plugin(
@@ -604,6 +605,7 @@ pub async fn concurrent_same_append_operation_applies_exactly_once(store: Arc<dy
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     let nodes = vec![crate::SessionAppendNode::plugin(
@@ -887,6 +889,7 @@ pub async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimeSt
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     let nodes = vec![crate::SessionAppendNode::plugin(

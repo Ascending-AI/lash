@@ -35,7 +35,7 @@ pub enum EmbedError {
     PluginDeclaration(#[from] lash_core::plugin::PluginDeclarationError),
     #[error("a model key is required; a root session's spec must name a registered model")]
     /// Returned when a creation's spec states no model: an overlay
-    /// ([`SessionSpec::inherit`](crate::SessionSpec::inherit)) passed where a
+    /// passed where a
     /// root session is created. Nothing is created.
     MissingLlmProfile,
     #[error(transparent)]
@@ -50,7 +50,7 @@ pub enum EmbedError {
         "turn budget is required; SessionSpec must carry TurnBudget::Bounded(...) or TurnBudget::Unbounded"
     )]
     /// Returned when a creation's spec states no turn budget: an overlay
-    /// ([`SessionSpec::inherit`](crate::SessionSpec::inherit)) passed where a
+    /// passed where a
     /// root session is created. Nothing is created.
     MissingTurnBudget,
     #[error(
@@ -59,6 +59,12 @@ pub enum EmbedError {
     /// Returned when the session has no explicit tool-call limit. There is
     /// no default and no built-in ceiling.
     MissingMaxToolCalls,
+    /// The creator must choose a bound on consecutive unproductive attempts.
+    #[error("no_progress_budget is required; choose a bound or explicit unbounded execution")]
+    MissingNoProgressBudget,
+    /// The host must choose how to handle a missing tool source.
+    #[error("tool source policy is required; provide .tool_source_policy(...)")]
+    MissingToolSourcePolicy,
     #[error(
         "a host session-turn start must state its session's {unstated}: build its create request with SessionCreateRequest::with_spec, or start it under a captured environment"
     )]
@@ -77,7 +83,7 @@ pub enum EmbedError {
     /// Returned when the runtime has no commit budget.
     MissingCommitBudget,
     #[error(
-        "queued-work batching policy is required; provide an explicit model-action reserve with .queued_work_batching(...)"
+        "queued-work batching policy is required; provide an explicit model-action reserve with .queued_work_batching(...).tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)"
     )]
     /// Returned when queued-work batching has not been configured.
     MissingQueuedWorkBatching,
@@ -347,6 +353,8 @@ impl EmbedError {
             | Self::ReasoningRefused(_)
             | Self::MissingTurnBudget
             | Self::MissingMaxToolCalls
+            | Self::MissingNoProgressBudget
+            | Self::MissingToolSourcePolicy
             | Self::SessionTurnStartUnspecified { .. }
             | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching
@@ -398,6 +406,8 @@ impl EmbedError {
             | Self::ReasoningRefused(_)
             | Self::MissingTurnBudget
             | Self::MissingMaxToolCalls
+            | Self::MissingNoProgressBudget
+            | Self::MissingToolSourcePolicy
             | Self::SessionTurnStartUnspecified { .. }
             | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching

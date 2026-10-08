@@ -446,6 +446,9 @@ async fn a_refresh_queued_while_the_session_is_idle_settles_and_the_next_turn_se
             }),
         )
         .await
+        .expect("config accepted")
+        .await_outcome(&config)
+        .await
         .expect("the model selection settles");
     assert!(
         matches!(

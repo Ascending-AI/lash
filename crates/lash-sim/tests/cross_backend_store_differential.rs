@@ -310,6 +310,7 @@ impl NodeSpec {
                         lash_core::SessionPolicy::new(
                             lash_core::TurnBudget::Unbounded,
                             lash_core::MaxToolCalls::new(1024),
+                            lash_core::NoProgressBudget::bounded(12),
                         ),
                     ),
                 }
@@ -573,6 +574,7 @@ fn runtime_commit(
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     let mut commit = RuntimeCommit::persisted_state_for_test(&state);
@@ -880,6 +882,7 @@ impl BackendRunner {
             config: lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             )
             .into(),
             head: SessionCreationHead::Config,
@@ -915,6 +918,7 @@ impl BackendRunner {
         lash::LashCore::standard_builder(self.lifecycle_backend.clone())
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+            .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .serve_test_llm_profile(provider, model)
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 "cross-backend-differential-test",
@@ -1040,6 +1044,7 @@ impl BackendRunner {
                         config: lash_core::SessionPolicy::new(
                             lash_core::TurnBudget::Unbounded,
                             lash_core::MaxToolCalls::new(1024),
+                            lash_core::NoProgressBudget::bounded(12),
                         )
                         .into(),
                     })
@@ -1339,6 +1344,7 @@ impl BackendRunner {
                     ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                         lash_core::TurnBudget::Unbounded,
                         lash_core::MaxToolCalls::new(1024),
+                        lash_core::NoProgressBudget::bounded(12),
                     ))
                 };
                 let error = handle
@@ -1446,6 +1452,7 @@ async fn assert_storage_failure_mappings_agree(sqlite_root: &Path, postgres: &Po
         config: lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         )
         .into(),
         head: SessionCreationHead::Config,
@@ -1600,6 +1607,7 @@ async fn runners_for_case_with_clock(
         config: lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         )
         .into(),
         head: SessionCreationHead::Config,

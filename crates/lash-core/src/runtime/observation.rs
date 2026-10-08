@@ -789,6 +789,7 @@ mod tests {
                     crate::testing::sqlite_memory_store_backend().await,
                     crate::CommitBudget::bounded(1024 * 1024, 512),
                     crate::QueuedWorkBatchingConfig::new(1),
+                    crate::ToolSourcePolicy::Tolerate,
                 ),
                 crate::testing::runtime_lease_owner(),
             )
@@ -807,6 +808,7 @@ mod tests {
                 ..crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
+                    crate::NoProgressBudget::bounded(12),
                 )
             })
             .build(),
@@ -849,6 +851,7 @@ mod tests {
                     crate::testing::sqlite_memory_store_backend().await,
                     crate::CommitBudget::bounded(1024 * 1024, 512),
                     crate::QueuedWorkBatchingConfig::new(1),
+                    crate::ToolSourcePolicy::Tolerate,
                 ),
                 crate::testing::runtime_lease_owner(),
             )
@@ -867,6 +870,7 @@ mod tests {
                 ..crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
+                    crate::NoProgressBudget::bounded(12),
                 )
             })
             .build(),

@@ -242,6 +242,7 @@ fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
         config: lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         )
         .into(),
         head: SessionCreationHead::Config,

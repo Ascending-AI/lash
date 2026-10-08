@@ -1,10 +1,10 @@
 [
   [
-    "{\"plugin_config\":{\"revision\":0,\"config\":{}},\"policy\":{\"autonomous\":false,\"turn_budget\":\"unbounded\",\"max_tool_calls\":1024}}",
-    "process-env:v6:blake3:3641569afdcec6b35e96943efa84f8677600ab5ce39909921592ff7a4cde44ee"
+    "{\"plugin_config\":{\"revision\":0,\"config\":{}},\"policy\":{\"turn_budget\":\"unbounded\",\"max_tool_calls\":1024,\"no_progress_budget\":{\"bounded\":12}}}",
+    "process-env:v6:blake3:158366434f94a7e07da187e160f882427e19dc74d42ffbe2a8176ec815c0d14b"
   ],
   [
-    "{\"plugin_config\":{\"revision\":3,\"config\":{\"protocol\":\"protocol\",\"namespaces\":{\"a:b\":{\"format_version\":1,\"value\":{\"enabled\":true}}}}},\"policy\":{\"model\":{\"model\":{\"key\":\"rich-key\",\"metadata\":{\"wire_model\":\"model:rich\",\"limits\":{\"context_window_tokens\":8192,\"output_tokens\":{\"capacity\":2048,\"default_cap\":null}},\"capability\":{\"instruction_role\":\"developer\",\"native_mid_conversation_system\":true,\"cache_control\":\"anthropic\",\"stream_termination\":\"eof_tolerated\",\"sampling\":\"pinned\",\"reasoning\":{\"efforts\":[\"low\",\"high\"],\"encoding\":{\"budget\":{\"high\":1024,\"low\":256}},\"disable\":true,\"mandatory\":true}}}},\"reasoning\":{\"effort\":\"high\"}},\"autonomous\":true,\"turn_budget\":{\"bounded\":1},\"max_tool_calls\":1024,\"generation\":{\"output_token_cap\":1024,\"temperature\":0.25,\"seed\":-7}}}",
-    "process-env:v6:blake3:d889af384952fb83f88e4493af4b0d7d8bc72613e0f00e360979709be0224dbf"
+    "{\"plugin_config\":{\"revision\":3,\"config\":{\"protocol\":\"protocol\",\"namespaces\":{\"a:b\":{\"format_version\":1,\"value\":{\"enabled\":true}}}}},\"policy\":{\"model\":{\"model\":{\"key\":\"rich-key\",\"metadata\":{\"wire_model\":\"model:rich\",\"limits\":{\"context_window_tokens\":8192,\"output_tokens\":{\"capacity\":2048,\"default_cap\":null}},\"capability\":{\"instruction_role\":\"developer\",\"native_mid_conversation_system\":true,\"cache_control\":\"anthropic\",\"stream_termination\":\"eof_tolerated\",\"sampling\":\"pinned\",\"reasoning\":{\"efforts\":[\"low\",\"high\"],\"encoding\":{\"budget\":{\"high\":1024,\"low\":256}},\"disable\":true,\"mandatory\":true}}}},\"reasoning\":{\"effort\":\"high\"}},\"turn_budget\":{\"bounded\":1},\"max_tool_calls\":1024,\"no_progress_budget\":{\"bounded\":12},\"generation\":{\"output_token_cap\":1024,\"temperature\":0.25,\"seed\":-7}}}",
+    "process-env:v6:blake3:019958982efb3460d031199c6602bc515b0ca7488600ea2d746b27d9aec63347"
   ]
 ]

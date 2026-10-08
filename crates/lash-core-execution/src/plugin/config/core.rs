@@ -1,6 +1,6 @@
 //! The core owner's config commands (FIG-4379): the changes a session's
 //! model, reasoning, attachment acceptance, generation, execution
-//! controls (turn budget, autonomy, no-progress budget, charge safety;
+//! controls (turn budget, no-progress budget, charge safety;
 //! FIG-4376), tool access and the host's prompt plan (ADR 0133) admit.
 //!
 //! The core owner is not a plugin. Its share of the session's config is the
@@ -251,20 +251,6 @@ impl ConfigCommand for SetMaxToolCalls {
     const NAME: &'static str = "set_max_tool_calls";
 }
 
-/// Whether the session's turns run autonomously from its next run. Every
-/// value is admissible.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct SetAutonomy {
-    pub autonomous: bool,
-}
-
-impl ConfigCommand for SetAutonomy {
-    type Owner = CoreConfigOwner;
-    type Output = ();
-    const NAME: &'static str = "set_autonomy";
-}
-
 /// The consecutive unproductive attempts the session allows from its next
 /// run. A zero bound does not decode, so it is refused at submit; every
 /// decodable value is admissible.
@@ -413,12 +399,6 @@ pub(super) fn registration() -> Result<RegisteredOwner, ConfigRegistrationError>
     reg.command::<SetMaxToolCalls>(|core, command| {
         changed(CoreConfig {
             max_tool_calls: command.max_tool_calls,
-            ..core.clone()
-        })
-    })?;
-    reg.command::<SetAutonomy>(|core, command| {
-        changed(CoreConfig {
-            autonomous: command.autonomous,
             ..core.clone()
         })
     })?;

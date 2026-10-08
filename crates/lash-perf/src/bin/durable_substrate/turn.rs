@@ -346,10 +346,9 @@ fn machine_config(session: &SessionId, run: &TurnId, driver: &Arc<Protocol>) -> 
         )
         .with_reasoning(Default::default()),
         turn_budget: lash_core::TurnBudget::bounded(64),
-        no_progress_budget: Default::default(),
+        no_progress_budget: lash_core::NoProgressBudget::bounded(12),
         attachment_acceptance: Default::default(),
         generation: lash_core::GenerationOptions::default(),
-        autonomous: false,
         session_id: session.clone(),
         agent_frame_id: "bench-frame".to_string(),
         turn_id: run.clone(),

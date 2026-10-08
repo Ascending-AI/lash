@@ -380,10 +380,9 @@ fn machine_config(session: &SessionId, run: &TurnId) -> TurnMachineConfig {
         )
         .with_reasoning(Default::default()),
         turn_budget: lash_core::TurnBudget::bounded(8),
-        no_progress_budget: Default::default(),
+        no_progress_budget: lash_core::NoProgressBudget::bounded(12),
         attachment_acceptance: Default::default(),
         generation: lash_core::GenerationOptions::default(),
-        autonomous: false,
         session_id: session.clone(),
         agent_frame_id: "l3-frame".to_string(),
         turn_id: run.clone(),
@@ -822,6 +821,7 @@ fn colliding(commit: TurnCommit) -> Result<TurnCommit, TurnError> {
                 lash_core::SessionPolicy::new(
                     lash::TurnBudget::Unbounded,
                     lash::MaxToolCalls::new(16),
+                    lash_core::NoProgressBudget::bounded(12),
                 ),
             ),
         };

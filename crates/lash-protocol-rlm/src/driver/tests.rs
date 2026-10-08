@@ -240,10 +240,9 @@ pub(super) fn projection_test_config(
         )
         .with_reasoning(Default::default()),
         turn_budget: lash_core::TurnBudget::Unbounded,
-        no_progress_budget: Default::default(),
+        no_progress_budget: lash_core::NoProgressBudget::bounded(12),
         attachment_acceptance: Default::default(),
         generation,
-        autonomous: false,
         session_id: SessionId::from("prefix-stability"),
         agent_frame_id: "prefix-stability-frame".to_string(),
         turn_id: TurnId::from("prefix-stability-turn"),

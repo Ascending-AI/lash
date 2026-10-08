@@ -150,6 +150,7 @@ async fn preopened_store_binds_without_remapping_initial_frame() {
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     state.ensure_agent_frame_initialized();
@@ -230,6 +231,7 @@ async fn park_returns_error_when_final_commit_fails() {
             ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             ))
         },
         lash_core::testing::runtime_lease_owner(),
@@ -281,6 +283,7 @@ async fn storeless_append_rejects_inactive_ancestor_before_mutation() {
         RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         )),
         lash_core::testing::runtime_lease_owner(),
     )

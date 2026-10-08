@@ -902,17 +902,33 @@ async fn inbox_authority_resolves_for_any_account_name() {
         compact.signature
     );
     session_tools
-        .set_membership(send_manifest.id.clone(), false)
+        .set_membership(
+            send_manifest.id.clone(),
+            false,
+            "host:tests:set_membership:905",
+        )
         .await
-        .expect("remove send from this session catalog");
+        .expect("remove send from this session catalog")
+        .settle_with(
+            &session.admin().commands(),
+            lash::testing::admin_fixture_outcome,
+        )
+        .await
+        .expect("fixture mutation settled");
     assert!(
         active_send().await.is_none(),
         "a non-member tool leaves the session's recorded catalog"
     );
     session_tools
-        .set_membership(send_manifest.id, true)
+        .set_membership(send_manifest.id, true, "host:tests:set_membership:913")
         .await
-        .expect("restore send to this session catalog");
+        .expect("restore send to this session catalog")
+        .settle_with(
+            &session.admin().commands(),
+            lash::testing::admin_fixture_outcome,
+        )
+        .await
+        .expect("fixture mutation settled");
     assert!(
         active_send().await.is_some(),
         "membership restores the tool to the session's recorded catalog"

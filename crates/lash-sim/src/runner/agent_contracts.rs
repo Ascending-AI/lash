@@ -345,7 +345,8 @@ await task.fail({ reason: "parent observed child failure" });
             "lash_runtime agent failed child graph",
             lash::TurnBudget::bounded(1),
             lash::MaxToolCalls::new(1024),
-        ),
+        )
+        .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
         &core,
         "sim-agent-failed-child-contract",
     )
@@ -481,6 +482,7 @@ async fn facade_final_value_execution_inner(
     let mut builder = lash::LashCore::rlm_builder(backend, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .serve_test_llm_profile(
             fixed_texts_provider(provider_kind, provider_responses),
             lash_core::LlmProfileMetadata::builder(provider_kind)
@@ -612,7 +614,8 @@ async fn facade_agent_process_execution_with_options(
             provider_kind,
             max_turns.map_or(lash::TurnBudget::Unbounded, lash::TurnBudget::bounded),
             lash::MaxToolCalls::new(1024),
-        ),
+        )
+        .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
         &core,
         session_id,
     )
@@ -826,7 +829,7 @@ async fn agent_process_contract_core_with_options(
             lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_core::lifetime::session_or_starter),
         ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024)).tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .serve_test_llm_profile(fixed_texts_provider(provider_kind, provider_responses), lash_core::LlmProfileMetadata::builder(provider_kind)
                 .context_window_tokens(200_000)
                 .build()
@@ -855,7 +858,8 @@ fn agent_contract_delegation_plugin(
                 provider_kind,
                 lash::TurnBudget::bounded(1),
                 lash::MaxToolCalls::new(1024),
-            ),
+            )
+            .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
             lash_core::lifetime::starter,
         )
         .with_rlm_children(),

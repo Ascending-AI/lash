@@ -97,6 +97,7 @@ pub(super) async fn a_session_turn_start_retried_after_the_host_changed_what_it_
         lash::TurnBudget::bounded(6),
         lash::MaxToolCalls::new(1024),
     )
+    .no_progress_budget(lash::NoProgressBudget::bounded(12))
     .generation(lash::direct::GenerationOptions {
         seed: Some(11),
         ..Default::default()
@@ -138,6 +139,7 @@ pub(super) async fn a_session_turn_start_retried_after_the_host_changed_what_it_
     modelless.policy = Some(lash::runtime::SessionPolicy::new(
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(1024),
+        lash::NoProgressBudget::bounded(12),
     ));
     let unstated = start_on(
         &double,
@@ -234,6 +236,7 @@ pub(super) async fn a_session_turn_start_retried_after_the_host_changed_what_it_
         lash::TurnBudget::bounded(2),
         lash::MaxToolCalls::new(1024),
     )
+    .no_progress_budget(lash::NoProgressBudget::bounded(12))
     .generation(lash::direct::GenerationOptions {
         seed: Some(99),
         ..Default::default()

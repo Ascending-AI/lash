@@ -132,7 +132,19 @@ async fn compacted_with(provider: ProviderHandle, script: Script) -> Result<Answ
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let session = core.session(id).open().await?;
-    let compacted = session.admin().state().compact_context(None).await?;
+    let compacted = session
+        .admin()
+        .state()
+        .compact_context(
+            None,
+            "host:direct_completion_lanes:compact_context:135".to_string(),
+        )
+        .await?
+        .settle_with(
+            &session.admin().commands(),
+            crate::testing::admin_fixture_outcome,
+        )
+        .await?;
     assert!(!compacted, "the compactor compacts nothing");
     drop(session);
     core.shutdown().await?;

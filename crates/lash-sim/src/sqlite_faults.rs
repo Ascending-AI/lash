@@ -532,6 +532,7 @@ async fn run_composition_case(
         ..RuntimeSessionState::new(SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     let prefix =
@@ -736,6 +737,7 @@ async fn run_seed(
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
 
@@ -985,6 +987,7 @@ fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
         config: SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         )
         .into(),
         head: SessionCreationHead::Config,
@@ -1254,6 +1257,7 @@ mod tests {
             ..RuntimeSessionState::new(SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             ))
         };
         let commit = stamped_commit(backend, &state, "armed")

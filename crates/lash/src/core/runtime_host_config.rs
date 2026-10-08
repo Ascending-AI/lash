@@ -13,8 +13,16 @@ impl LashCoreBuilder {
             .queued_work_batching
             .take()
             .ok_or(EmbedError::MissingQueuedWorkBatching)?;
-        let core =
-            RuntimeHostConfig::new(self.backend.clone(), commit_budget, queued_work_batching);
+        let tool_source_policy = self
+            .tool_source_policy
+            .take()
+            .ok_or(EmbedError::MissingToolSourcePolicy)?;
+        let core = RuntimeHostConfig::new(
+            self.backend.clone(),
+            commit_budget,
+            queued_work_batching,
+            tool_source_policy,
+        );
         Ok(self.apply_core_overrides(core))
     }
 
@@ -54,9 +62,6 @@ impl LashCoreBuilder {
         }
         if let Some(context) = self.trace_context.take() {
             core.tracing = core.tracing.clone().with_base_context(context);
-        }
-        if let Some(policy) = self.tool_source_policy.take() {
-            core.control.tool_source_policy = policy;
         }
         if let Some(budgets) = self.execution_budgets.take() {
             core.control.execution_budgets = budgets;

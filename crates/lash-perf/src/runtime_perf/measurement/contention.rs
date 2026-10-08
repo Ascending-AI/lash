@@ -51,6 +51,8 @@ async fn run_writer_operation(
                         turn_budget: session.policy_snapshot().turn_budget,
                     }),
                 )
+                .await?
+                .await_outcome(&config)
                 .await?;
             anyhow::ensure!(
                 !matches!(
@@ -64,10 +66,18 @@ async fn run_writer_operation(
             session
                 .admin()
                 .state()
-                .append_messages(vec![lash_core::PluginMessage::text(
-                    lash_core::MessageRole::User,
-                    "writer contention append",
-                )])
+                .append_messages(
+                    vec![lash_core::PluginMessage::text(
+                        lash_core::MessageRole::User,
+                        "writer contention append",
+                    )],
+                    format!("writer-contention-append:{ordinal}"),
+                )
+                .await?
+                .settle_with(
+                    &session.admin().commands(),
+                    lash::testing::admin_fixture_outcome,
+                )
                 .await?;
         }
         WriterContentionOperation::SecondTurn => {
@@ -647,6 +657,7 @@ mod contention_tests {
             ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             ))
         };
         first_state.policy.model = Some(lash_core::testing::test_llm_profile_config(

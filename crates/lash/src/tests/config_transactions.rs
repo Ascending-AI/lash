@@ -90,7 +90,7 @@ type Changes = Arc<StdMutex<Vec<(lash_core::SessionPolicy, lash_core::SessionPol
 /// Every applied core command announces `SessionConfigChanged` to the
 /// session's plugins with the policy before and after it, whatever it
 /// changed: the model binding (to another key, or another transport for one
-/// wire model), autonomy, generation and the turn budget.
+/// wire model), generation and the turn budget.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "FIG-5317: the durable session actor applies a config transaction without building its plugins, so no SessionConfigChanged observer runs"]
 async fn every_applied_config_transaction_emits_a_lifecycle_event() -> Result<()> {
@@ -165,7 +165,6 @@ async fn every_applied_config_transaction_emits_a_lifecycle_event() -> Result<()
         crate::config::ConfigTransaction::of(crate::config::SetLlmProfile {
             model: crate::LlmProfileKey::new("alt-model-on-alt"),
         }),
-        crate::config::ConfigTransaction::of(crate::config::SetAutonomy { autonomous: true }),
         crate::config::ConfigTransaction::of(crate::config::SetGeneration {
             generation: lash_core::facade_support::GenerationOverlay::Replace(generation.clone()),
         }),
@@ -178,6 +177,8 @@ async fn every_applied_config_transaction_emits_a_lifecycle_event() -> Result<()
                 crate::config::ConfigWrite::new(format!("lifecycle-{index}"), revision),
                 transaction,
             )
+            .await?
+            .await_outcome(&config)
             .await?;
         assert!(
             matches!(
@@ -191,7 +192,7 @@ async fn every_applied_config_transaction_emits_a_lifecycle_event() -> Result<()
     let changes = changes.lock_recover().clone();
     assert_eq!(
         changes.len(),
-        5,
+        4,
         "every applied transaction is announced once"
     );
     let key = |policy: &lash_core::SessionPolicy| {
@@ -211,13 +212,9 @@ async fn every_applied_config_transaction_emits_a_lifecycle_event() -> Result<()
     assert_eq!(key(previous), "alt-model");
     assert_eq!(key(current), "alt-model-on-alt");
     assert_eq!(previous.wire_model(), current.wire_model());
-    let (previous, current) = &changes[2];
-    assert!(!previous.autonomous);
-    assert!(current.autonomous);
-    let (previous, current) = &changes[3];
-    assert!(previous.autonomous);
+    let (_, current) = &changes[2];
     assert_eq!(current.generation, generation);
-    let (previous, current) = &changes[4];
+    let (previous, current) = &changes[3];
     assert_eq!(previous.generation, generation);
     assert_eq!(current.turn_budget, crate::TurnBudget::bounded(9));
     core.shutdown().await?;

@@ -5,8 +5,8 @@
 use super::*;
 
 impl SessionAdmin {
-    /// Append `request`'s nodes to the session graph and await the append's
-    /// settlement (FIG-4202).
+    /// Submit `request`'s nodes to the session graph and return their status
+    /// (FIG-4202).
     ///
     /// The bound turn owns a store-backed session's head, so the append is a
     /// session command the shift applies at the next turn boundary: the
@@ -16,7 +16,7 @@ impl SessionAdmin {
     pub(super) async fn append_session_nodes(
         &self,
         request: lash_core::AppendSessionNodesRequest,
-    ) -> Result<lash_core::AppendSessionNodesOutcome> {
+    ) -> Result<AdminMutation<lash_core::AppendSessionNodesOutcome>> {
         let submitted = self
             .with_writer(async |runtime: &mut LashRuntime| {
                 if runtime.is_store_backed() {
@@ -38,21 +38,24 @@ impl SessionAdmin {
             })
             .await?;
         match submitted {
-            SubmittedCommand::Applied(outcome) => Ok(outcome),
+            SubmittedCommand::Applied(outcome) => Ok(AdminMutation::Applied(outcome)),
             SubmittedCommand::Queued(receipt) => {
-                match Box::pin(self.await_command_settlement(receipt)).await? {
+                match Box::pin(self.command_status(receipt)).await? {
                     lash_core::runtime::SessionCommandSettlement::Applied {
                         outcome:
                             lash_core::runtime::SessionCommandOutcome::AppendSessionNodes { outcome },
                         ..
-                    } => Ok(outcome),
+                    } => Ok(AdminMutation::Applied(outcome)),
+                    lash_core::runtime::SessionCommandSettlement::Pending(receipt) => {
+                        Ok(AdminMutation::Pending(receipt))
+                    }
                     settlement => Err(unsettled_command_error(settlement)),
                 }
             }
         }
     }
 
-    /// Open `request`'s frame durably and await the open's settlement
+    /// Submit `request`'s frame open durably and return its status
     /// (FIG-4202): a session command on a store-backed session, applied and
     /// committed by the shift at the next turn boundary, under
     /// `idempotency_key`. A storeless session opens directly.
@@ -60,7 +63,7 @@ impl SessionAdmin {
         &self,
         request: lash_core::OpenAgentFrameRequest,
         idempotency_key: String,
-    ) -> Result<lash_core::OpenAgentFrameOutcome> {
+    ) -> Result<AdminMutation<lash_core::OpenAgentFrameOutcome>> {
         let submitted = self
             .with_writer(async |runtime: &mut LashRuntime| {
                 if runtime.is_store_backed() {
@@ -81,9 +84,9 @@ impl SessionAdmin {
             })
             .await?;
         match submitted {
-            SubmittedCommand::Applied(outcome) => Ok(outcome),
+            SubmittedCommand::Applied(outcome) => Ok(AdminMutation::Applied(outcome)),
             SubmittedCommand::Queued(receipt) => {
-                match Box::pin(self.await_command_settlement(receipt)).await? {
+                match Box::pin(self.command_status(receipt)).await? {
                     lash_core::runtime::SessionCommandSettlement::Applied {
                         outcome:
                             lash_core::runtime::SessionCommandOutcome::OpenAgentFrame {
@@ -91,7 +94,7 @@ impl SessionAdmin {
                                     lash_core::runtime::OpenAgentFrameCommandOutcome::Opened { outcome },
                             },
                         ..
-                    } => Ok(outcome),
+                    } => Ok(AdminMutation::Applied(outcome)),
                     lash_core::runtime::SessionCommandSettlement::Applied {
                         outcome:
                             lash_core::runtime::SessionCommandOutcome::OpenAgentFrame {
@@ -102,47 +105,24 @@ impl SessionAdmin {
                             },
                         ..
                     } => Err(EmbedError::Runtime(refusal.into())),
+                    lash_core::runtime::SessionCommandSettlement::Pending(receipt) => {
+                        Ok(AdminMutation::Pending(receipt))
+                    }
                     settlement => Err(unsettled_command_error(settlement)),
                 }
             }
         }
     }
 
-    /// Submit a host task as an operation Run, or apply a tool-free plugin
-    /// command at a session boundary. Task helpers follow the same durable Run
-    /// result and cancellation path exposed to hosts by `start_task`.
-    pub(super) async fn run_plugin_operation(
+    /// Submit a tool-free plugin command at a session boundary under the
+    /// host's stable key and return its status.
+    pub(super) async fn run_plugin_command(
         &self,
-        operation: HostPluginOperation,
         name: &str,
         args: serde_json::Value,
-        cancellation: CancellationToken,
-    ) -> Result<lash_core::facade_support::PluginOperationReceipt<serde_json::Value>> {
-        if operation == HostPluginOperation::Task {
-            let task = crate::PluginOperations {
-                control: self.clone(),
-            }
-            .start_task_raw(
-                name,
-                args,
-                format!("run_plugin_task:{name}:{}", uuid::Uuid::new_v4()),
-            )
-            .await?;
-            let followed = task.clone();
-            let receipt = tokio::select! {
-                result = followed.result() => result?,
-                () = cancellation.cancelled() => {
-                    task.cancel().await?;
-                    task.result().await?
-                }
-            };
-            self.record_plugin_operation_observations(
-                &receipt.events,
-                &receipt.pending_turn_inputs,
-            )
-            .await;
-            return Ok(receipt);
-        }
+        idempotency_key: String,
+    ) -> Result<AdminMutation<lash_core::facade_support::PluginOperationReceipt<serde_json::Value>>>
+    {
         let session_id = SessionId::from(self.runtime.observe().session_id());
         let submitted = self
             .with_writer(async |runtime: &mut LashRuntime| {
@@ -151,8 +131,6 @@ impl SessionAdmin {
                         name: name.to_string(),
                         args,
                     };
-                    let idempotency_key =
-                        format!("{}:{name}:{}", command.kind(), uuid::Uuid::new_v4());
                     return Box::pin(runtime.submit_session_command(command, idempotency_key))
                         .await
                         .map(SubmittedCommand::Queued)
@@ -167,7 +145,7 @@ impl SessionAdmin {
         let receipt = match submitted {
             SubmittedCommand::Applied(receipt) => receipt,
             SubmittedCommand::Queued(receipt) => {
-                match Box::pin(self.settle_or_withdraw(receipt, cancellation)).await? {
+                match Box::pin(self.command_status(receipt)).await? {
                     lash_core::runtime::SessionCommandSettlement::Applied {
                         outcome:
                             lash_core::runtime::SessionCommandOutcome::PluginOperation {
@@ -227,35 +205,16 @@ impl SessionAdmin {
                             receipt,
                         )));
                     }
+                    lash_core::runtime::SessionCommandSettlement::Pending(receipt) => {
+                        return Ok(AdminMutation::Pending(receipt));
+                    }
                     settlement => return Err(unsettled_command_error(settlement)),
                 }
             }
         };
         self.record_plugin_operation_observations(&receipt.events, &receipt.pending_turn_inputs)
             .await;
-        Ok(receipt)
-    }
-
-    /// Await a tool-free plugin command, withdrawing it if cancellation wins
-    /// before admission. An admitted command runs to its recorded settlement.
-    pub(super) async fn settle_or_withdraw(
-        &self,
-        receipt: lash_core::runtime::SessionCommandReceipt,
-        cancellation: CancellationToken,
-    ) -> Result<lash_core::runtime::SessionCommandSettlement> {
-        tokio::select! {
-            settled = Box::pin(self.await_command_settlement(receipt.clone())) => settled,
-            () = cancellation.cancelled() => {
-                match self.withdraw_session_command(&receipt).await? {
-                    SessionCommandWithdrawal::Withdrawn => {
-                        Ok(lash_core::runtime::SessionCommandSettlement::Cancelled(receipt))
-                    }
-                    SessionCommandWithdrawal::AlreadyAdmitted => {
-                        Box::pin(self.await_command_settlement(receipt)).await
-                    }
-                }
-            }
-        }
+        Ok(AdminMutation::Applied(receipt))
     }
 
     /// Refuse a host operation on a command of another session than this
@@ -309,23 +268,13 @@ pub(super) enum SubmittedCommand<T> {
     Applied(T),
 }
 
-/// Which host plugin operation the facade runs.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum HostPluginOperation {
-    Command,
-    Task,
-}
-
 /// The error a command's caller answers when its settlement is not one its
-/// command applies with: still pending, withdrawn, rejected before
+/// command applies with: withdrawn, rejected before
 /// acceptance, or another command's settlement shape.
 pub(super) fn unsettled_command_error(
     settlement: lash_core::runtime::SessionCommandSettlement,
 ) -> EmbedError {
     match settlement {
-        lash_core::runtime::SessionCommandSettlement::Pending(receipt) => {
-            EmbedError::Session(SessionError::SessionCommandPending(receipt))
-        }
         lash_core::runtime::SessionCommandSettlement::Cancelled(receipt) => {
             EmbedError::Session(SessionError::SessionCommandCancelled(receipt))
         }

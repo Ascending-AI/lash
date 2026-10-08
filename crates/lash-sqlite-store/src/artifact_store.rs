@@ -1043,6 +1043,7 @@ mod tests {
             lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
                 lash_core_execution::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             ),
         );
         let bytes = spec.to_store_bytes().expect("encode environment");

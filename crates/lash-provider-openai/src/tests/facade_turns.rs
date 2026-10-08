@@ -42,7 +42,8 @@ pub(super) async fn durable_core(
                 .expect("register the test model"),
         ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1));
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate);
     let builder = match tools {
         Some(tools) => builder.tools(tools),
         None => builder,
@@ -62,11 +63,14 @@ pub(super) async fn session(
     session_id: &str,
 ) -> lash::DurableSession {
     core.session(lash::SessionId::fixture(session_id.to_owned()))
-        .create(lash::SessionCreation::root(lash::SessionSpec::new(
-            model,
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1024),
-        )))
+        .create(lash::SessionCreation::root(
+            lash::SessionSpec::new(
+                model,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            )
+            .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
+        ))
         .await
         .expect("the session is created")
 }

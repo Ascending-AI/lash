@@ -22,6 +22,7 @@ pub fn window_state(
     let mut state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
         config.turn_budget,
         config.max_tool_calls,
+        crate::NoProgressBudget::bounded(12),
     ));
     crate::runtime::state::adopt_durable_head(&mut state, read, fleet)?;
     Ok(LoadedSessionWindow { state, config })

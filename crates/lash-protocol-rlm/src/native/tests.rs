@@ -54,7 +54,6 @@ pub(super) fn config(native: bool, termination: RlmTermination) -> TurnMachineCo
         no_progress_budget: lash_core::NoProgressBudget::bounded(3),
         attachment_acceptance: Default::default(),
         generation: Default::default(),
-        autonomous: false,
         session_id: SessionId::from("parity"),
         agent_frame_id: "parity-frame".to_string(),
         turn_id: TurnId::from("parity-turn"),

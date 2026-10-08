@@ -13,11 +13,16 @@ pub async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn 
                 "gpt-5.4-mini",
                 crate::testing::test_llm_profile_metadata("gpt-5.4-mini"),
             )),
-            ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
+            ..SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
+            )
         },
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     state.ensure_agent_frame_initialized();
@@ -119,6 +124,7 @@ pub async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Ru
             ..RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             ))
         };
         let node = sample_session_node(&SessionId::from(session_id), node_id, None);
@@ -206,6 +212,7 @@ pub async fn serves_each_admitted_session_and_refuses_an_unknown_one(store: Arc<
             ..RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             ))
         };
         state.ensure_agent_frame_initialized();
@@ -336,6 +343,7 @@ pub async fn load_hydrates_checkpoint(store: Arc<dyn RuntimeStore>) {
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     state.set_tool_state_snapshot(Some(
@@ -402,6 +410,7 @@ pub async fn session_read_loads_persisted_history(store: Arc<dyn RuntimeStore>) 
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     let commit = RuntimeCommit::persisted_state_for_test(&state);

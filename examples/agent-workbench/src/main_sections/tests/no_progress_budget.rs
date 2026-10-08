@@ -10,21 +10,6 @@ use super::*;
 /// because the bug was policy the workbench never expressed.
 #[test]
 fn the_workbench_bounds_both_turn_work_and_turn_stalling() {
-    // The bound is a bound: an absent host opinion resolves to it, and only an
-    // explicit opt-out removes it.
-    let default_attempts = lash::NoProgressBudget::default().max_attempts();
-    let documented_default = Some(lash::NoProgressBudget::DEFAULT_MAX_ATTEMPTS);
-    assert_eq!(default_attempts, documented_default);
-    assert_eq!(lash::NoProgressBudget::Unbounded.max_attempts(), None);
-    assert!(lash::NoProgressBudget::bounded(12).is_exhausted_by(12));
-    assert!(!lash::NoProgressBudget::bounded(12).is_exhausted_by(11));
-    assert!(!lash::NoProgressBudget::Unbounded.is_exhausted_by(10_000));
-
-    let lash::NoProgressBudget::Bounded(bound) = lash::NoProgressBudget::bounded(7) else {
-        panic!("a bounded budget carries its bound");
-    };
-    assert_eq!(bound.get(), 7);
-
     // The workbench's own policy, resolved the way the runtime resolves it.
     let spec = lash::SessionSpec::new(
         "test-model",
@@ -49,13 +34,4 @@ fn the_workbench_bounds_both_turn_work_and_turn_stalling() {
         resolved_attempts < policy.turn_budget.max_turns(),
         "a stall bound at or above the turn budget can never fire"
     );
-
-    // An explicit opt-out survives resolution, so a deployment that wants the
-    // old behaviour can still ask for it in as many words.
-    let opted_out = lash::SessionSpec::inherit()
-        .no_progress_budget(lash::NoProgressBudget::Unbounded)
-        .resolve_against(&policy, &lash::EmptyLlmProfiles)
-        .expect("a spec naming no model resolves without a catalog");
-    let opted_out_budget = opted_out.no_progress_budget;
-    assert_eq!(opted_out_budget, lash::NoProgressBudget::Unbounded);
 }

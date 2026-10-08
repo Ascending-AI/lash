@@ -47,6 +47,7 @@ fn root_session_request(session_id: &str) -> lash_core_execution::SessionStoreCr
         config: lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         )
         .into(),
         head: lash_core_execution::SessionCreationHead::Config,

@@ -32,6 +32,7 @@ pub(crate) fn session_spec_for(metadata: &lash_core::LlmProfileMetadata) -> crat
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
     )
+    .no_progress_budget(crate::NoProgressBudget::bounded(12))
 }
 
 /// `metadata` as [`test_catalog`] records it, run with the provider's default
@@ -178,6 +179,7 @@ pub(crate) fn explicit_ephemeral_facets_with_budget(
     builder
         .commit_budget(commit_budget)
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
 }
 
 fn capability_for_variant(variant: Option<&str>) -> lash_core::LlmProfileCapability {

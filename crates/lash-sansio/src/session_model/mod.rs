@@ -192,10 +192,7 @@ impl std::error::Error for ToolCallLimitExceeded {}
 /// successful execution resets the count, so ordinary repair traffic — a model
 /// that mis-writes a cell and then fixes it — never approaches the bound.
 ///
-/// Unlike [`TurnBudget`], this budget has a bounded default: an absent value
-/// is a host that never considered the stall, and the safe reading of silence
-/// is the bound rather than the loop. `Unbounded` remains available as an
-/// explicit host opt-in.
+/// The host must choose a non-zero bound or explicitly opt out.
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
@@ -206,13 +203,6 @@ pub enum NoProgressBudget {
 }
 
 impl NoProgressBudget {
-    /// Consecutive unproductive attempts allowed when a host expresses none.
-    ///
-    /// Judged runbook traffic repairs a bad cell within a handful of attempts;
-    /// twelve leaves that headroom untouched while turning the measured
-    /// 1,223-call stall into twelve calls.
-    pub const DEFAULT_MAX_ATTEMPTS: usize = 12;
-
     /// # Panics
     ///
     /// Panics when `max_attempts` is zero — a turn must always be allowed at
@@ -238,12 +228,6 @@ impl NoProgressBudget {
     pub fn is_exhausted_by(self, attempts: usize) -> bool {
         self.max_attempts()
             .is_some_and(|max_attempts| attempts >= max_attempts)
-    }
-}
-
-impl Default for NoProgressBudget {
-    fn default() -> Self {
-        Self::bounded(Self::DEFAULT_MAX_ATTEMPTS)
     }
 }
 

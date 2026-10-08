@@ -32,6 +32,7 @@ fn started(model: &str, keyed: bool) -> lash_core::ProcessStartRequest {
             ..lash_core::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
             )
         },
         lash_core::PluginOptions::default(),

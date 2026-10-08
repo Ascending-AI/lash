@@ -41,9 +41,20 @@ pub(crate) async fn seed_runtime_state(
         .expect("benchmark session")
         .admin()
         .state()
-        .append_messages(messages)
+        .append_messages(messages, "runtime-perf-history-seed".to_string())
         .await
-        .map_err(|err| anyhow::anyhow!("seed historical messages: {err}"))?;
+        .map_err(|err| anyhow::anyhow!("seed historical messages: {err}"))?
+        .settle_with(
+            &runtime
+                .session
+                .as_ref()
+                .expect("benchmark session")
+                .admin()
+                .commands(),
+            lash::testing::admin_fixture_outcome,
+        )
+        .await
+        .expect("fixture mutation settled");
 
     if matches!(scenario, RuntimePerfScenario::RlmGlobals) {
         install_rlm_session_projection(runtime).await?;
@@ -71,6 +82,16 @@ async fn install_rlm_session_projection(runtime: &mut BenchmarkRuntime) -> anyho
             ),
             requires_ancestor_node_id: None,
         })
+        .await?
+        .settle_with(
+            &runtime
+                .session
+                .as_ref()
+                .expect("benchmark session")
+                .admin()
+                .commands(),
+            lash::testing::admin_fixture_outcome,
+        )
         .await?;
     let turn_input =
         lash::TurnInput::text("Seed current working variables, then finish the benchmark marker.");

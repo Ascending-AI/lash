@@ -447,6 +447,7 @@ pub async fn register_receiver(
                 lash::runtime::SessionPolicy::new(
                     lash::TurnBudget::Unbounded,
                     lash::MaxToolCalls::new(1024),
+                    lash::NoProgressBudget::bounded(12),
                 ),
             ),
         )
@@ -478,6 +479,7 @@ pub async fn start_source(
                 lash::runtime::SessionPolicy::new(
                     lash::TurnBudget::Unbounded,
                     lash::MaxToolCalls::new(1024),
+                    lash::NoProgressBudget::bounded(12),
                 ),
             ),
         )
@@ -512,6 +514,7 @@ pub async fn start_sleeper(
                 lash::runtime::SessionPolicy::new(
                     lash::TurnBudget::Unbounded,
                     lash::MaxToolCalls::new(1024),
+                    lash::NoProgressBudget::bounded(12),
                 ),
             ),
         )

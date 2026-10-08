@@ -127,6 +127,7 @@ async fn workbench_plugin_observes_session_config_policy_transition() {
         .plugin(Arc::new(plugin))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "agent-workbench-test",
             uuid::Uuid::new_v4().to_string(),
@@ -134,11 +135,14 @@ async fn workbench_plugin_observes_session_config_policy_transition() {
         .expect("build the config-change core");
     let session_id = lash::SessionId::from("workbench-config-change-session");
     core.session(session_id.clone())
-        .create(lash::SessionCreation::root(lash::SessionSpec::new(
-            "workbench-model-before",
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(8),
-        )))
+        .create(lash::SessionCreation::root(
+            lash::SessionSpec::new(
+                "workbench-model-before",
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(8),
+            )
+            .no_progress_budget(lash::NoProgressBudget::bounded(12)),
+        ))
         .await
         .expect("create the config-change session");
     let session = core
@@ -157,6 +161,9 @@ async fn workbench_plugin_observes_session_config_policy_transition() {
                 model: lash::LlmProfileKey::new("workbench-model-after"),
             }),
         )
+        .await
+        .expect("config accepted")
+        .await_outcome(&config)
         .await
         .expect("patch the session's model");
     assert!(

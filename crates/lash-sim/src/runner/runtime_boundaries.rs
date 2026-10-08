@@ -485,6 +485,7 @@ fn durable_effect_core(
     lash::LashCore::standard_builder(engine.backend())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .serve_test_llm_profile(
             provider,
             lash_core::LlmProfileMetadata::builder(DURABLE_EFFECT_MODEL)

@@ -42,6 +42,28 @@ pub enum ConfigSettlement {
     Cancelled(lash_core::runtime::SessionCommandReceipt),
 }
 
+impl ConfigSettlement {
+    /// Explicitly wait for this transaction's outcome, without a host timeout.
+    pub async fn await_outcome(
+        self,
+        config: &SessionConfigAdmin,
+    ) -> Result<lash_core::ConfigTransactionOutcome> {
+        match self {
+            Self::Settled(outcome) => Ok(outcome),
+            Self::Pending(receipt) => match config.settle(receipt).await? {
+                Self::Settled(outcome) => Ok(outcome),
+                Self::Cancelled(receipt) => Err(EmbedError::Session(
+                    SessionError::SessionCommandCancelled(receipt),
+                )),
+                Self::Pending(_) => unreachable!("settle awaits a terminal outcome"),
+            },
+            Self::Cancelled(receipt) => Err(EmbedError::Session(
+                SessionError::SessionCommandCancelled(receipt),
+            )),
+        }
+    }
+}
+
 impl SessionConfigAdmin {
     /// The session's config revision: what a transaction written now is
     /// written against. It is read from the durable head's metadata, which
@@ -76,31 +98,14 @@ impl SessionConfigAdmin {
             .await
     }
 
-    /// Submit `transaction` under `write` and wait for it to settle.
-    ///
-    /// A transaction the shift has not settled by the wait's deadline is
-    /// refused [`SessionError::SessionCommandPending`] with its receipt; it
-    /// stays durable, and [`Self::settle`] reads it later.
+    /// Submit a keyed transaction and return its durable status. Pending is
+    /// successful acceptance; the host chooses whether and how long to settle it.
     pub async fn apply(
         &self,
         write: ConfigWrite,
         transaction: lash_core::ConfigTransaction,
-    ) -> Result<lash_core::ConfigTransactionOutcome> {
-        match Box::pin(self.submit(write, transaction)).await? {
-            ConfigSettlement::Settled(outcome) => Ok(outcome),
-            ConfigSettlement::Pending(receipt) => match Box::pin(self.settle(receipt)).await? {
-                ConfigSettlement::Settled(outcome) => Ok(outcome),
-                ConfigSettlement::Pending(receipt) => Err(EmbedError::Session(
-                    SessionError::SessionCommandPending(receipt),
-                )),
-                ConfigSettlement::Cancelled(receipt) => Err(EmbedError::Session(
-                    SessionError::SessionCommandCancelled(receipt),
-                )),
-            },
-            ConfigSettlement::Cancelled(receipt) => Err(EmbedError::Session(
-                SessionError::SessionCommandCancelled(receipt),
-            )),
-        }
+    ) -> Result<ConfigSettlement> {
+        self.submit(write, transaction).await
     }
 
     /// Submit `transaction` under `write`, and return once it is durable:

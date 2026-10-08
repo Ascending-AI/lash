@@ -8,7 +8,11 @@ use super::*;
 fn a_process_execution_environment_rejects_unknown_fields() {
     let spec = ProcessExecutionEnvSpec::new(
         crate::AdmittedPluginConfig::default(),
-        crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
+        crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
+        ),
     );
     let encoded = spec.to_store_bytes().expect("encode the environment");
     assert_eq!(
@@ -35,8 +39,11 @@ fn a_process_execution_environment_rejects_unknown_fields() {
 
 #[test]
 fn a_process_execution_policy_rejects_the_retired_session_id() {
-    let policy =
-        crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
+    let policy = crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+        crate::NoProgressBudget::bounded(12),
+    );
     let encoded = serde_json::to_value(&policy).expect("encode policy");
     assert!(encoded.get("session_id").is_none());
     for retired in [serde_json::Value::Null, serde_json::json!("session")] {

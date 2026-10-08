@@ -170,6 +170,7 @@ async fn captured_rlm_iterations() -> Vec<LlmRequest> {
     let core = lash::LashCore::rlm_builder(backend, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .serve_test_llm_profile(
             provider,
             lash_core::LlmProfileMetadata::builder("cache-regression-model")

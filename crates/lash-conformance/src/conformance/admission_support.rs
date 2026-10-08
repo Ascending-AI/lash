@@ -35,6 +35,7 @@ pub(crate) async fn head_commit(
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         ))
     };
     crate::RuntimeCommit::persisted_state_for_test(&state)

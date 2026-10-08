@@ -213,11 +213,11 @@ impl std::ops::DerefMut for RuntimeSessionPolicy {
 /// A session's configuration, as its creator states it.
 ///
 /// A root creation states a whole spec: [`SessionSpec::new`] takes the model
-/// key and the turn budget, the two parts nothing defaults, and every other
-/// field has a neutral value of its own. Nothing stands beneath it: a
+/// key, turn budget and tool-call limit; the creator also states a stall
+/// bound with [`SessionSpec::no_progress_budget`]. Other fields have neutral
+/// values. Nothing stands beneath it: a
 /// deployment keeps no default spec, so a host that wants one keeps its own
-/// `SessionSpec` value and passes it (FIG-4594). A child states an overlay
-/// ([`SessionSpec::inherit`]) over its parent's recorded policy.
+/// `SessionSpec` value and passes it (FIG-4594). Every creation states its own policy.
 ///
 /// It selects a model by key; resolving the spec mints that key's binding
 /// through the host's models, once, and the resulting policy records it. An
@@ -225,7 +225,6 @@ impl std::ops::DerefMut for RuntimeSessionPolicy {
 /// verbatim, never re-resolving its key.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SessionSpec {
-    inherit: bool,
     pub model: Option<LlmProfileKey>,
     /// The reasoning the session runs its model with. `None` keeps the base
     /// policy's selection.
@@ -238,9 +237,6 @@ pub struct SessionSpec {
     /// process may hold at once. `None` keeps the base policy's; a root
     /// session has no base to keep, so it must state one.
     pub max_tool_calls: Option<MaxToolCalls>,
-    /// Whether the session's turns run autonomously. `None` keeps the base
-    /// policy's.
-    pub autonomous: Option<bool>,
     /// Bound on consecutive unproductive provider attempts. `None` keeps the
     /// bound the base policy already carries.
     pub no_progress_budget: Option<NoProgressBudget>,
@@ -267,8 +263,8 @@ impl Eq for SessionSpec {}
 impl SessionSpec {
     /// A root session's spec: the model it runs, by the host's key, its
     /// turn budget and its tool-call limit, the three parts nothing
-    /// defaults. Every other field starts at the neutral value
-    /// [`SessionPolicy::new`] states; state it with the setters.
+    /// defaults. The root also requires [`Self::no_progress_budget`]. Other
+    /// fields start at the neutral value [`SessionPolicy::new`] states.
     pub fn new(
         model: impl Into<LlmProfileKey>,
         turn_budget: TurnBudget,
@@ -278,26 +274,17 @@ impl SessionSpec {
             model: Some(model.into()),
             turn_budget: Some(turn_budget),
             max_tool_calls: Some(max_tool_calls),
-            ..Self::overlay(false)
+            ..Self::neutral()
         }
     }
 
-    /// A child's overlay: unset fields inherit from the parent's recorded
-    /// policy at resolution time. It states no session of its own, so a root
-    /// creation refuses it.
-    pub fn inherit() -> Self {
-        Self::overlay(true)
-    }
-
-    fn overlay(inherit: bool) -> Self {
+    fn neutral() -> Self {
         Self {
-            inherit,
             model: None,
             reasoning: None,
             attachment_acceptance: None,
             turn_budget: None,
             max_tool_calls: None,
-            autonomous: None,
             no_progress_budget: None,
             charge_safety: None,
             plugin_options: crate::PluginOptions::default(),
@@ -307,9 +294,9 @@ impl SessionSpec {
 
     /// The policy a run records from this spec alone: its stated fields
     /// over the neutral [`SessionPolicy::new`] of its turn budget and
-    /// tool-call limit, its key minted through `models` now. A spec that
-    /// states no model, no turn budget or no tool-call limit (an
-    /// [`inherit`](Self::inherit) overlay) is refused: a root has no base to
+    /// tool-call limit and stall bound, its key minted through `models` now.
+    /// A spec that lacks any of these required choices (an
+    /// incomplete spec) is refused: a root has no base to
     /// take them from.
     pub fn resolve_root(
         &self,
@@ -338,7 +325,14 @@ impl SessionSpec {
         let max_tool_calls = self
             .max_tool_calls
             .ok_or(SpecResolveError::RootWithoutMaxToolCalls)?;
-        Ok(SessionPolicy::new(turn_budget, max_tool_calls))
+        let no_progress_budget = self
+            .no_progress_budget
+            .ok_or(SpecResolveError::RootWithoutNoProgressBudget)?;
+        Ok(SessionPolicy::new(
+            turn_budget,
+            max_tool_calls,
+            no_progress_budget,
+        ))
     }
 
     /// The model the session runs, by the host's key.
@@ -372,12 +366,6 @@ impl SessionSpec {
     /// process may hold at once.
     pub fn max_tool_calls(mut self, max_tool_calls: MaxToolCalls) -> Self {
         self.max_tool_calls = Some(max_tool_calls);
-        self
-    }
-
-    /// Whether the session's turns run autonomously.
-    pub fn autonomous(mut self, autonomous: bool) -> Self {
-        self.autonomous = Some(autonomous);
         self
     }
 
@@ -446,7 +434,7 @@ impl SessionSpec {
     /// A spec that selects a key or reasoning has the pair it records judged
     /// against the recorded capability, so an unsupported selection is
     /// refused here and nothing is created with it.
-    pub fn resolve_against(
+    fn resolve_against(
         &self,
         base: &SessionPolicy,
         models: &dyn LlmProfiles,
@@ -487,9 +475,6 @@ impl SessionSpec {
         if let Some(max_tool_calls) = self.max_tool_calls {
             policy.max_tool_calls = max_tool_calls;
         }
-        if let Some(autonomous) = self.autonomous {
-            policy.autonomous = autonomous;
-        }
         if let Some(no_progress_budget) = self.no_progress_budget {
             policy.no_progress_budget = no_progress_budget;
         }
@@ -529,6 +514,9 @@ pub enum SpecResolveError {
     /// supply one.
     #[error("a root session's spec states no max_tool_calls")]
     RootWithoutMaxToolCalls,
+    /// The host has not chosen a stall bound.
+    #[error("a root session's spec states no no_progress_budget")]
+    RootWithoutNoProgressBudget,
 }
 
 /// The receiving half of [`llm_stream_channel`]: the provider's stream events
@@ -581,7 +569,11 @@ mod tests {
     /// it lacks, and zero is not a limit.
     #[test]
     fn recorded_config_without_max_tool_calls_is_refused() {
-        let policy = SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(8));
+        let policy = SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(8),
+            crate::NoProgressBudget::bounded(12),
+        );
         let head = crate::PersistedSessionConfig::from(&policy);
         for (name, complete) in [
             (
@@ -629,6 +621,7 @@ mod tests {
         let mut value = serde_json::to_value(SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         ))
         .expect("serialize complete policy");
         value
@@ -644,285 +637,39 @@ mod tests {
         );
     }
 
-    /// A catalog serving the listed keys, counting its mints; it is never
-    /// asked to bind.
-    struct CountingLlmProfiles {
-        keys: &'static [&'static str],
-        snapshots: std::sync::atomic::AtomicUsize,
-    }
-
-    impl CountingLlmProfiles {
-        fn serving(keys: &'static [&'static str]) -> Self {
-            Self {
-                keys,
-                snapshots: std::sync::atomic::AtomicUsize::new(0),
-            }
-        }
-
-        fn snapshots(&self) -> usize {
-            self.snapshots.load(std::sync::atomic::Ordering::SeqCst)
-        }
-    }
-
-    impl LlmProfiles for CountingLlmProfiles {
-        fn snapshot(
-            &self,
-            key: &LlmProfileKey,
-        ) -> Result<crate::RecordedLlmProfile, LlmProfileUnavailable> {
-            self.snapshots
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            if self.keys.contains(&key.as_str()) {
-                Ok(recorded(key.as_str()).model)
+    /// FIG-5431: stored policies and heads require the host's stall choice.
+    #[test]
+    fn recorded_config_without_no_progress_budget_is_refused() {
+        let policy = SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(8),
+            crate::NoProgressBudget::Unbounded,
+        );
+        for (name, mut record) in [
+            ("policy", serde_json::to_value(&policy).expect("policy")),
+            (
+                "head",
+                serde_json::to_value(crate::PersistedSessionConfig::from(&policy)).expect("head"),
+            ),
+        ] {
+            assert_eq!(record["no_progress_budget"], "unbounded");
+            record
+                .as_object_mut()
+                .expect("record")
+                .remove("no_progress_budget");
+            let error = if name == "policy" {
+                serde_json::from_value::<SessionPolicy>(record)
+                    .expect_err("missing stall choice")
+                    .to_string()
             } else {
-                Err(LlmProfileUnavailable::new(
-                    key.clone(),
-                    crate::LlmProfileUnavailableReason::UnknownKey,
-                ))
-            }
+                serde_json::from_value::<crate::PersistedSessionConfig>(record)
+                    .expect_err("missing stall choice")
+                    .to_string()
+            };
+            assert!(
+                error.contains("missing field `no_progress_budget`"),
+                "{name}: {error}"
+            );
         }
-
-        fn bind(
-            &self,
-            recorded: &crate::RecordedLlmProfile,
-        ) -> Result<ProviderHandle, LlmProfileUnavailable> {
-            panic!(
-                "resolving a spec never binds a transport: {}",
-                recorded.key()
-            )
-        }
-    }
-
-    /// `key`'s binding with the `low`/`high` efforts, except `plain-model`,
-    /// whose capability has no reasoning controls.
-    fn recorded(key: &str) -> LlmProfileConfig {
-        let mut builder = crate::LlmProfileMetadata::builder(format!("{key}-wire"))
-            .context_window_tokens(200_000);
-        if key != "plain-model" {
-            builder = builder.capability(crate::LlmProfileCapability {
-                reasoning: Some(crate::ReasoningCapability {
-                    efforts: vec!["low".to_string(), "high".to_string()],
-                    encoding: crate::ReasoningEncoding::Effort,
-                    disable: false,
-                    mandatory: false,
-                }),
-                ..crate::LlmProfileCapability::default()
-            });
-        }
-        LlmProfileConfig::new(crate::RecordedLlmProfile::mint(
-            LlmProfileKey::new(key),
-            builder.build().expect("valid test model"),
-        ))
-    }
-
-    fn resolve(spec: &SessionSpec, base: &SessionPolicy) -> SessionPolicy {
-        spec.resolve_against(base, &crate::EmptyLlmProfiles)
-            .expect("a spec naming no model resolves without a catalog")
-    }
-
-    #[test]
-    fn an_inheriting_spec_copies_the_recorded_llm_profile_without_minting() {
-        let base = SessionPolicy {
-            model: Some(
-                recorded("parent-model")
-                    .with_reasoning(ReasoningSelection::Effort("high".to_string())),
-            ),
-            ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
-        };
-        let models = CountingLlmProfiles::serving(&["parent-model"]);
-        let child = SessionSpec::inherit()
-            .resolve_against(&base, &models)
-            .expect("inherit");
-        assert_eq!(
-            child.model, base.model,
-            "the child copies the resolved fact"
-        );
-        assert_eq!(
-            models.snapshots(),
-            0,
-            "inheritance never re-derives the model"
-        );
-    }
-
-    #[test]
-    fn a_spec_key_is_minted_once_and_keeps_the_base_reasoning() {
-        let base = SessionPolicy {
-            model: Some(
-                recorded("parent-model")
-                    .with_reasoning(ReasoningSelection::Effort("high".to_string())),
-            ),
-            ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
-        };
-        let models = CountingLlmProfiles::serving(&["parent-model", "child-model"]);
-        let child = SessionSpec::inherit()
-            .model("child-model")
-            .resolve_against(&base, &models)
-            .expect("mint");
-        assert_eq!(models.snapshots(), 1);
-        assert_eq!(
-            child.model,
-            Some(
-                recorded("child-model")
-                    .with_reasoning(ReasoningSelection::Effort("high".to_string()))
-            )
-        );
-
-        let low = SessionSpec::inherit()
-            .model("child-model")
-            .reasoning(ReasoningSelection::Effort("low".to_string()))
-            .resolve_against(&base, &models)
-            .expect("mint with reasoning");
-        assert_eq!(
-            low.model.expect("model").reasoning,
-            ReasoningSelection::Effort("low".to_string())
-        );
-    }
-
-    #[test]
-    fn a_spec_naming_an_unserved_key_or_reasoning_without_a_profile_is_refused() {
-        let base = SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
-        let models = CountingLlmProfiles::serving(&["served"]);
-        assert!(matches!(
-            SessionSpec::inherit()
-                .model("retired")
-                .resolve_against(&base, &models),
-            Err(SpecResolveError::Model(LlmProfileUnavailable {
-                reason: crate::LlmProfileUnavailableReason::UnknownKey,
-                ..
-            }))
-        ));
-        assert!(matches!(
-            SessionSpec::inherit()
-                .reasoning(ReasoningSelection::Effort("high".to_string()))
-                .resolve_against(&base, &models),
-            Err(SpecResolveError::ReasoningWithoutLlmProfile)
-        ));
-    }
-
-    /// FIG-4531: the pair a spec records is judged where it is stated. An
-    /// effort its key's capability does not advertise, and a base's effort
-    /// inherited onto a key with no reasoning controls, are refused typed; a
-    /// spec that changes neither keeps the base as recorded, unjudged.
-    #[test]
-    fn a_spec_whose_reasoning_the_model_refuses_is_refused_typed() {
-        let base = SessionPolicy {
-            model: Some(
-                recorded("parent-model")
-                    .with_reasoning(ReasoningSelection::Effort("high".to_string())),
-            ),
-            ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
-        };
-        let models = CountingLlmProfiles::serving(&["parent-model", "plain-model"]);
-        match SessionSpec::inherit()
-            .reasoning(ReasoningSelection::Effort("extreme".to_string()))
-            .resolve_against(&base, &models)
-        {
-            Err(SpecResolveError::Reasoning(refused)) => {
-                assert_eq!(refused.key, LlmProfileKey::new("parent-model"));
-                assert_eq!(
-                    refused.reasoning,
-                    ReasoningSelection::Effort("extreme".to_string())
-                );
-            }
-            other => panic!("an unadvertised effort is refused, got {other:?}"),
-        }
-        match SessionSpec::inherit()
-            .model("plain-model")
-            .resolve_against(&base, &models)
-        {
-            Err(SpecResolveError::Reasoning(refused)) => {
-                assert_eq!(refused.key, LlmProfileKey::new("plain-model"));
-            }
-            other => panic!("an inherited effort the key cannot take is refused, got {other:?}"),
-        }
-        SessionSpec::inherit()
-            .model("plain-model")
-            .reasoning(ReasoningSelection::ProviderDefault)
-            .resolve_against(&base, &models)
-            .expect("the provider's default reasoning fits a model with no controls");
-    }
-
-    fn pinned_base_policy() -> SessionPolicy {
-        SessionPolicy {
-            generation: crate::GenerationOptions {
-                temperature: Some(
-                    crate::NonNegativeFiniteF64::new(0.7).expect("finite temperature"),
-                ),
-                seed: Some(9),
-                ..Default::default()
-            },
-            ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
-        }
-    }
-
-    #[test]
-    fn session_spec_generation_merge_keeps_a_parent_pin_a_child_never_mentioned() {
-        // A base pins sampling for a repeatable benchmark; an overlay only
-        // bounds its own output length. The result must not
-        // silently fall back to provider-default sampling — nothing reports
-        // an option the child never requested.
-        let base = SessionPolicy {
-            generation: crate::GenerationOptions {
-                temperature: Some(
-                    crate::NonNegativeFiniteF64::new(0.0).expect("finite temperature"),
-                ),
-                seed: Some(42),
-                stop_sequences: Vec::new(),
-                ..Default::default()
-            },
-            ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
-        };
-
-        let child = resolve(
-            &SessionSpec::inherit().generation(crate::GenerationOptions {
-                output_token_cap: std::num::NonZeroUsize::new(4096),
-                ..Default::default()
-            }),
-            &base,
-        );
-
-        assert_eq!(
-            child.generation,
-            crate::GenerationOptions {
-                output_token_cap: std::num::NonZeroUsize::new(4096),
-                temperature: base.generation.temperature.clone(),
-                seed: Some(42),
-                stop_sequences: base.generation.stop_sequences.clone(),
-                parallel_tool_calls: None,
-                projection_provenance: Default::default(),
-            }
-        );
-    }
-
-    #[test]
-    fn session_spec_generation_replaces_and_clears_only_when_asked() {
-        let base = pinned_base_policy();
-
-        let replaced = resolve(
-            &SessionSpec::inherit().replace_generation(crate::GenerationOptions {
-                seed: Some(11),
-                ..Default::default()
-            }),
-            &base,
-        );
-        assert_eq!(
-            replaced.generation,
-            crate::GenerationOptions {
-                seed: Some(11),
-                ..Default::default()
-            },
-            "an explicit replace discards every inherited option"
-        );
-
-        let cleared = resolve(&SessionSpec::inherit().clear_generation(), &base);
-        assert_eq!(cleared.generation, crate::GenerationOptions::default());
-
-        let merged_default = resolve(
-            &SessionSpec::inherit().generation(crate::GenerationOptions::default()),
-            &base,
-        );
-        assert_eq!(
-            merged_default.generation, base.generation,
-            "an empty merge overlay expresses nothing and so clears nothing"
-        );
     }
 }

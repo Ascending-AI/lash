@@ -59,7 +59,11 @@ fn test_execution_context_with_env_store(
         observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
+            crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
+            ),
         ),
         owner: crate::ExecutionOwner::SessionFrame {
             session_id: SessionId::from("session"),
@@ -80,7 +84,11 @@ fn test_execution_context_with_env_store(
         crate::TurnContext::default(),
         crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
+            crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
+            ),
         ),
     )
 }

@@ -49,6 +49,7 @@ async fn test_core() -> lash::Result<(lash::LashCore, ProcessId, ProcessId)> {
         ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "intent-ingress-observability-worker",
             "intent-ingress-observability-boot",

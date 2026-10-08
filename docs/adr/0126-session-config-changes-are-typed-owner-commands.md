@@ -8,7 +8,7 @@ Accepted.
 
 A session records its config with its head: the core model,
 generation, attachment acceptance, tool access, the execution controls
-(turn budget, autonomy, no-progress budget and charge safety; FIG-4376), and
+(turn budget, no-progress budget and charge safety; FIG-4376), and
 one namespace per installed plugin, the protocol's included (FIG-4379,
 [ADR 0013](0013-protocol-capabilities-enter-through-the-plugin-contract.md)).
 Changing that record through an open patch bag had two flaws. The bag named
@@ -28,7 +28,7 @@ the namespace registered.
 `ConfigCommand`s that change that namespace. The owner:
 
 - creates the namespace at session creation from the creator's typed input,
-  its defaults and, for a child, its parent's recorded value;
+  its defaults and the child creator's explicit input;
 - validates a final candidate, including a run override against the
   namespace it was derived from;
 - declares its typed `RunOptions` and applies them over its recorded
@@ -41,7 +41,7 @@ the next namespace and the command's output. It sees immutable facts only. A
 setting with no command cannot change after creation. Core config is owned
 by the reserved `core` owner, whose commands include `SetLlmProfile`,
 `SetReasoning`, `SetAttachmentAcceptance`,
-`SetGeneration`, `SetToolAccess`, `SetTurnBudget`, `SetAutonomy`,
+`SetGeneration`, `SetToolAccess`, `SetTurnBudget`,
 `SetNoProgressBudget`, `SetChargeSafety` and `SetPromptPlan`, which records
 the host's prompt plan (ADR 0133 §3). `SetChargeSafety` refuses a
 policy accepting more unsafe retries than the provider handle ever buys. The

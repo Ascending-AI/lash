@@ -534,6 +534,9 @@ pub(crate) async fn record_accounts_context_for_session(
                 transaction,
             )
             .await
+            .map_err(AppError::internal)?
+            .await_outcome(&config)
+            .await
             .map_err(|error| {
                 state.session_admission_error(&session.session_id(), "accounts.context", error)
             })?;

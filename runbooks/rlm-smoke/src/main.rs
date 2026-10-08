@@ -515,7 +515,7 @@ async fn main() -> Result<()> {
         ))
         .tools(workspace.provider())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024)).tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .trace_jsonl_path(&trace_path)
         .trace_level(lash::tracing::TraceLevel::Extended)
         .trace_context(trace_context)

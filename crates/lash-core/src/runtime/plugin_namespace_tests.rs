@@ -49,6 +49,7 @@ async fn runtime_open_defers_capabilities_until_recorded_publication() {
         crate::testing::sqlite_memory_store_backend().await,
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
+        crate::ToolSourcePolicy::Tolerate,
     );
     let current_factories = factories.clone();
     let runtime = crate::runtime::EmbeddedRuntimeBuilder::new(
@@ -362,6 +363,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
     let mut runtime_state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
+        crate::NoProgressBudget::bounded(12),
     ));
     runtime_state
         .capture_plugin_states(&child, lash_core_store::store::FleetFormat::current())
@@ -377,6 +379,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
         crate::testing::sqlite_memory_store_backend().await,
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
+        crate::ToolSourcePolicy::Tolerate,
     ));
     let runtime_services = crate::RuntimeServices::new(
         child.clone(),
@@ -401,6 +404,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
         crate::testing::sqlite_memory_store_backend().await,
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
+        crate::ToolSourcePolicy::Tolerate,
     ));
     let runtime_services = crate::RuntimeServices::new(
         host.session(&SessionId::from("private-child")).unwrap(),

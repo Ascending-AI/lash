@@ -105,7 +105,12 @@ impl StoreLawBackend {
         commit_budget: crate::CommitBudget,
         queued_work_batching: crate::QueuedWorkBatchingConfig,
     ) -> crate::RuntimeHostConfig {
-        crate::RuntimeHostConfig::new(self.into_backend(), commit_budget, queued_work_batching)
+        crate::RuntimeHostConfig::new(
+            self.into_backend(),
+            commit_budget,
+            queued_work_batching,
+            lash_core::ToolSourcePolicy::Tolerate,
+        )
     }
 }
 
