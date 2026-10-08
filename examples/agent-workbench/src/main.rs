@@ -168,6 +168,8 @@ pub(crate) use session_roster::*;
 #[path = "main_sections/file_replace.rs"]
 mod file_replace;
 pub(crate) use file_replace::*;
+#[path = "main_sections/host_ingress.rs"]
+mod host_ingress;
 #[path = "main_sections/session_fence.rs"]
 mod session_fence;
 #[path = "main_sections/tool_loss_notice.rs"]

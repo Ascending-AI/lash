@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1654 rows over 873 files, 4027 laws.
-# By class: mechanical 184, semantic 128, delete 871, replace 471.
-# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 87, L9c 352, L9d 91, L9e 138, L9f 125, L9g 98, L9h 106, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
-# By status: todo 353, ported 105, deleted 1196.
+# 1671 rows over 873 files, 4033 laws.
+# By class: mechanical 184, semantic 128, delete 888, replace 471.
+# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 87, L9c 352, L9d 91, L9e 138, L9f 125, L9g 98, L9h 123, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
+# By status: todo 342, ported 116, deleted 1213.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -10513,7 +10513,8 @@ laws = [
   "visibility_keeps_later_child_session_paths",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5316 ported the four graph-visibility laws onto the in-process workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core, AppState and session watchers over a SQLite memory store set: the observer and process registry are a running workbench's own"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests.rs"
@@ -10533,16 +10534,84 @@ laws = [
   "turn_cancel_route_requests_first_party_turn_cancellation",
   "inbox_authority_resolves_for_any_account_name",
   "parallel_inbox_lists_complete_in_durable_workbench_turn",
-  "button_trigger_occurrence_is_finishted_to_restate_workflow",
-  "a_button_press_is_one_row_published_by_its_workflow",
-  "reset_chat_deletes_old_session_and_clears_trigger_started_work",
-  "live_restate_cron_zombie_cancel_path_end_to_end",
-  "live_restate_cron_queued_turn_sync_cancel_path_end_to_end",
+  "a_button_press_emits_its_occurrence_under_the_selected_model",
+  "a_button_press_is_one_row_published_by_its_occurrence",
   "persisted_trigger_route_fires_after_reopening_the_core",
   "slash_text_uses_chat_admission_and_model_validation",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5316 ported these laws onto the in-process workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core, AppState and session watchers over a SQLite memory store set. The accounts-context redrive crosses an owner change: one build drains the session at its next committed phase (LashCore::drain) and a second build over the same stores resumes the turn; the trigger-reopen law drains its first build the same way. The button route now emits its occurrence with the host's own runtime-operation authority, so both button laws drive the route; the cancel route aborts a running turn (a cancel aimed at a turn that never started is UnknownOrRevoked on the durable engine)"
+
+[[row]]
+path = "examples/agent-workbench/src/main_sections/tests.rs"
+test = "button_trigger_occurrence_is_finishted_to_restate_workflow"
+area = "workbench"
+needs = ["turn", "process", "cell"]
+class = "delete"
+lane = "L9h"
+laws = [
+  "button_trigger_occurrence_is_finishted_to_restate_workflow",
+]
+disposition = "covered-by:examples/agent-workbench/src/main_sections/tests.rs::a_button_press_emits_its_occurrence_under_the_selected_model"
+status = "deleted"
+note = "The press is no longer submitted to a Restate workflow (removed in 5ad9641f9e, FIG-5190); the route's model selection and its one emitted button occurrence are the renamed law's (FIG-5316)"
+
+[[row]]
+path = "examples/agent-workbench/src/main_sections/tests.rs"
+test = "a_button_press_is_one_row_published_by_its_workflow"
+area = "workbench"
+needs = ["turn", "process", "cell"]
+class = "delete"
+lane = "L9h"
+laws = [
+  "a_button_press_is_one_row_published_by_its_workflow",
+]
+disposition = "covered-by:examples/agent-workbench/src/main_sections/tests.rs::a_button_press_is_one_row_published_by_its_occurrence"
+status = "deleted"
+note = "The workflow that published the press row went in 5ad9641f9e (FIG-5190); the route publishes the one row from the occurrence it emitted, which the renamed law pins with the republish idempotency (FIG-5316)"
+
+[[row]]
+path = "examples/agent-workbench/src/main_sections/tests.rs"
+test = "reset_chat_deletes_old_session_and_clears_trigger_started_work"
+area = "workbench"
+needs = ["turn", "process", "cell"]
+class = "delete"
+lane = "L9h"
+laws = [
+  "reset_chat_deletes_old_session_and_clears_trigger_started_work",
+]
+disposition = "covered-by:examples/agent-workbench/src/main_sections/tests/reset_chat.rs::reset_chat_deletes_old_session_and_clears_trigger_started_work"
+status = "deleted"
+note = "Moved beside the other reset laws and ported onto the harness; the press goes through the button route (FIG-5316)"
+
+[[row]]
+path = "examples/agent-workbench/src/main_sections/tests.rs"
+test = "live_restate_cron_zombie_cancel_path_end_to_end"
+area = "workbench"
+needs = ["turn", "process", "cell"]
+class = "delete"
+lane = "L9h"
+laws = [
+  "live_restate_cron_zombie_cancel_path_end_to_end",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "The workbench's Restate cron jobs, their tick workflow and the zombie-cancel backstop were removed in 5ad9641f9e (FIG-5190); only the cron.Schedule source declaration remains"
+
+[[row]]
+path = "examples/agent-workbench/src/main_sections/tests.rs"
+test = "live_restate_cron_queued_turn_sync_cancel_path_end_to_end"
+area = "workbench"
+needs = ["turn", "process", "cell"]
+class = "delete"
+lane = "L9h"
+laws = [
+  "live_restate_cron_queued_turn_sync_cancel_path_end_to_end",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "The workbench's Restate cron jobs, their tick workflow and the queued-turn sync cancel were removed in 5ad9641f9e (FIG-5190); only the cron.Schedule source declaration remains"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs"
@@ -10556,7 +10625,8 @@ laws = [
   "attachment_usage_gate",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5316 ported both laws onto the in-process workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core, AppState and session watchers over a SQLite memory store set; the gate restarts the web process over an on-disk SQLite store set after draining the first build, and checks the attachment bytes where a provider sees them, in the lowered call"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/concurrent_send.rs"
@@ -10566,23 +10636,102 @@ needs = ["turn"]
 class = "mechanical"
 lane = "L9h"
 laws = [
-  "new_turn_after_abandoned_shift_admits_without_waiting",
-  "same_worker_successor_opens_after_abandoned_shift",
   "concurrent_host_appends_settle_through_the_command_lane_exactly_once",
-  "slow_delete_retention_is_bounded_and_can_be_retried",
-  "an_ambiguous_delete_attach_failure_never_claims_the_session_remains_live",
-  "a_failed_delete_call_reconciles_a_committed_tombstone_before_rotating",
   "deleting_a_non_current_session_preserves_selected_session_buffers",
-  "a_terminally_failed_session_delete_keeps_the_old_session_live_and_visible",
-  "active_turn_idle_claim_is_atomic_per_session",
   "a_send_queues_if_queued_work_claims_after_its_idle_read",
   "a_panicked_turn_submission_cleans_up_and_publishes_failure",
   "a_dropped_send_request_cannot_wedge_a_committed_turn",
   "a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input",
   "a_stalled_turn_does_not_block_competing_recovery_open",
+  "active_turn_idle_claim_is_atomic_per_session",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5316 ported these laws onto the in-process workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core, AppState and session watchers over a SQLite memory store set"
+
+[[row]]
+path = "examples/agent-workbench/src/main_sections/tests/concurrent_send.rs"
+test = "new_turn_after_abandoned_shift_admits_without_waiting"
+area = "workbench"
+needs = ["turn"]
+class = "delete"
+lane = "L9h"
+laws = [
+  "new_turn_after_abandoned_shift_admits_without_waiting",
+]
+disposition = "covered-by:crates/lash-durable-test/src/fencing.rs::the_fencing_laws_hold_at_every_cut_on_sqlite_memory"
+status = "deleted"
+note = "Shifts and their seals were deleted by FIG-5196 (0cc1b81d98); a successor owner admitting work after an abandoned one is the actor fencing law's"
+
+[[row]]
+path = "examples/agent-workbench/src/main_sections/tests/concurrent_send.rs"
+test = "same_worker_successor_opens_after_abandoned_shift"
+area = "workbench"
+needs = ["turn"]
+class = "delete"
+lane = "L9h"
+laws = [
+  "same_worker_successor_opens_after_abandoned_shift",
+]
+disposition = "covered-by:crates/lash-durable-test/src/fencing.rs::the_fencing_laws_hold_at_every_cut_on_sqlite_memory"
+status = "deleted"
+note = "Shifts and their seals were deleted by FIG-5196 (0cc1b81d98); a successor owner opening after an abandoned one is the actor fencing law's"
+
+[[row]]
+path = "examples/agent-workbench/src/main_sections/tests/concurrent_send.rs"
+test = "slow_delete_retention_is_bounded_and_can_be_retried"
+area = "workbench"
+needs = ["turn"]
+class = "delete"
+lane = "L9h"
+laws = [
+  "slow_delete_retention_is_bounded_and_can_be_retried",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "Pinned the Restate delete workflow's attach ceiling, removed in 5ad9641f9e (FIG-5190); the in-process delete's unconfirmed-tombstone branch is owed under FIG-5347"
+
+[[row]]
+path = "examples/agent-workbench/src/main_sections/tests/concurrent_send.rs"
+test = "an_ambiguous_delete_attach_failure_never_claims_the_session_remains_live"
+area = "workbench"
+needs = ["turn"]
+class = "delete"
+lane = "L9h"
+laws = [
+  "an_ambiguous_delete_attach_failure_never_claims_the_session_remains_live",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "Pinned an ambiguous Restate delete-workflow attach, removed in 5ad9641f9e (FIG-5190); the in-process delete's unconfirmed-tombstone branch is owed under FIG-5347"
+
+[[row]]
+path = "examples/agent-workbench/src/main_sections/tests/concurrent_send.rs"
+test = "a_failed_delete_call_reconciles_a_committed_tombstone_before_rotating"
+area = "workbench"
+needs = ["turn"]
+class = "delete"
+lane = "L9h"
+laws = [
+  "a_failed_delete_call_reconciles_a_committed_tombstone_before_rotating",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "Pinned a failed Restate delete-workflow attach after its tombstone committed, removed in 5ad9641f9e (FIG-5190); the in-process refused-close branch is owed under FIG-5347"
+
+[[row]]
+path = "examples/agent-workbench/src/main_sections/tests/concurrent_send.rs"
+test = "a_terminally_failed_session_delete_keeps_the_old_session_live_and_visible"
+area = "workbench"
+needs = ["turn"]
+class = "delete"
+lane = "L9h"
+laws = [
+  "a_terminally_failed_session_delete_keeps_the_old_session_live_and_visible",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "Pinned a terminally failed Restate delete workflow, removed in 5ad9641f9e (FIG-5190); the in-process refused-close branch is owed under FIG-5347"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/process_work.rs"
@@ -10599,7 +10748,8 @@ laws = [
   "work_rail_keeps_a_nonterminal_process_past_the_retirement_window",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5316 ported these laws onto the in-process workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core, AppState and session watchers over a SQLite memory store set; the cancel route now requests cancellation with the host's own runtime-operation authority. The durable builder takes no host process event sink, so the await law pins the route's terminal outcome and reconciled events only, and a deleted session's terminal work is reclaimed by the delete route"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs"
@@ -10609,8 +10759,6 @@ needs = ["turn"]
 class = "mechanical"
 lane = "L9h"
 laws = [
-  "reset_cron_cancellation_preserves_a_retired_session_refusal",
-  "reset_cron_close_preserves_a_concurrent_retirement_refusal",
   "retired_session_admission_precedes_attachment_reads_and_submission",
   "retired_session_cancel_and_tool_refresh_return_the_typed_conflict",
   "retired_session_http_refusals_record_structured_admission_evidence",
@@ -10620,13 +10768,56 @@ laws = [
   "settled_product_reconciliation_keeps_the_cursor_monotonic",
   "product_event_route_lag_emits_durable_ordered_resync",
   "submit_failure_retires_a_user_row_for_a_turn_that_never_commits",
-  "continue_as_keeps_session_user_rows_collapses_old_assistant_and_survives_reload",
+  "continue_as_keeps_every_frames_rows_and_survives_reload",
   "committed_attachment_ref_is_exposed_in_the_workbench_snapshot",
   "send_turn_state_projection_stays_readable_and_settles_to_durable_truth",
   "workbench_settled_turn_cancels_preserve_execution_done",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5316 ported these laws onto the in-process workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core, AppState and session watchers over a SQLite memory store set; a retired session is tombstoned through the core's own delete, so every refusal comes from the store tombstone. A stale cancel of a settled turn is UnknownOrRevoked on the durable engine, and the law pins that it adds no Done"
+
+[[row]]
+path = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs"
+test = "reset_cron_cancellation_preserves_a_retired_session_refusal"
+area = "workbench"
+needs = ["turn"]
+class = "delete"
+lane = "L9h"
+laws = [
+  "reset_cron_cancellation_preserves_a_retired_session_refusal",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "The reset's Restate cron-job cancellation was removed in 5ad9641f9e (FIG-5190)"
+
+[[row]]
+path = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs"
+test = "reset_cron_close_preserves_a_concurrent_retirement_refusal"
+area = "workbench"
+needs = ["turn"]
+class = "delete"
+lane = "L9h"
+laws = [
+  "reset_cron_close_preserves_a_concurrent_retirement_refusal",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "The reset's Restate cron-job cancellation and its close were removed in 5ad9641f9e (FIG-5190)"
+
+[[row]]
+path = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs"
+test = "continue_as_keeps_session_user_rows_collapses_old_assistant_and_survives_reload"
+area = "workbench"
+needs = ["turn"]
+class = "delete"
+lane = "L9h"
+laws = [
+  "continue_as_keeps_session_user_rows_collapses_old_assistant_and_survives_reload",
+]
+disposition = "covered-by:examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs::continue_as_keeps_every_frames_rows_and_survives_reload"
+status = "deleted"
+note = "The old-frame collapse held only for a fixture assistant row with no reply marker; ADR 0129 has the transcript walk every retained frame and keep each settled turn's one committed reply, so the renamed law pins every frame's rows, the follow-on run the engine starts (ADR 0101), the durable history and the reload (FIG-5316)"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/projection_suites.rs"
@@ -10683,10 +10874,25 @@ laws = [
   "one_output_identity_per_turn_across_disconnect_and_redelivery",
   "trimmed_gap_recovery_replaces_the_same_output_identity",
   "a_retried_attempt_replaces_partial_prose_on_the_same_row",
-  "a_redriven_turn_keeps_its_output_identity",
+  "a_turn_resumed_by_a_new_owner_keeps_its_output_identity",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5316 ported the reference transport and its laws onto the in-process workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core, AppState and session watchers over a SQLite memory store set; the page reads the production observation route with a protocol Hello"
+
+[[row]]
+path = "examples/agent-workbench/src/main_sections/tests/reference_transport.rs"
+test = "a_redriven_turn_keeps_its_output_identity"
+area = "workbench"
+needs = ["turn"]
+class = "delete"
+lane = "L9h"
+laws = [
+  "a_redriven_turn_keeps_its_output_identity",
+]
+disposition = "covered-by:examples/agent-workbench/src/main_sections/tests/reference_transport.rs::a_turn_resumed_by_a_new_owner_keeps_its_output_identity"
+status = "deleted"
+note = "The Restate journal replay after a crashed run handler went in 5ad9641f9e (FIG-5190); the renamed law hands the turn to a new owner at a committed phase (LashCore::drain) and pins one output identity, no re-bought call and a same-id send that observes the settled run. An owner lost mid-call has no facade seam; its recovery is crates/lash/src/tests/facade_turn.rs::three_step_tool_calls_survive_owner_loss_and_cold_reattachment"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/reset_chat.rs"
@@ -10701,9 +10907,11 @@ laws = [
   "a_reset_whose_request_goes_away_still_takes_the_roster_off_the_tombstone",
   "reset_response_carries_the_replacement_sessions_durable_transcript",
   "deleting_a_chat_removes_only_its_row_and_hands_back_the_most_recent_one",
+  "reset_chat_deletes_old_session_and_clears_trigger_started_work",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5316 wired the workbench's session delete to the core's delete with a tombstone confirmation and ported these laws onto the in-process workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core, AppState and session watchers over a SQLite memory store set. The laws exposed a core bug, fixed in the same change: a session created but never given work answered its close request Absent and stayed live (crates/lash-core/src/runtime/durable/scope_end_tests.rs::a_created_session_with_no_work_is_closed_by_its_close_request)"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/restate_cron.rs"
@@ -10749,7 +10957,8 @@ laws = [
   "store_maintenance_serves_stalled_delete_counts",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5316 ported these laws onto the in-process workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core, AppState and session watchers over a SQLite memory store set; the vacuum law keeps its inputs pending by queueing them behind a running turn instead of holding the engine"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/support.rs"
@@ -10779,7 +10988,8 @@ laws = [
   "operator_redelivery_after_forget_runs_and_retained_tombstone_suppresses",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5316 ported these laws onto the in-process workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core, AppState and session watchers over a SQLite memory store set, over a store set on a settable wall clock (SqliteStoreSet::memory_with_clock), emitting with the host's own runtime-operation authority; an emission records its occurrence (FIG-5175). The redelivery law exposed a core bug, fixed in the same change: a tool call in a process-owned dispatch did not run inside its process, so processes.emit in a trigger's process definition failed"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/turn_control.rs"
@@ -10791,17 +11001,45 @@ lane = "L9h"
 laws = [
   "turn_input_route_records_exact_active_and_next_turn_ingress",
   "dangling_routed_turn_does_not_hang_stop_and_is_pruned",
-  "live_restate_turn_timeout_retains_routing_as_pending",
   "stop_over_real_process_await_commits_cancelled_terminal",
   "concurrent_stops_publish_one_done_and_trace_winning_request",
   "turn_cancel_query_maps_stop_and_abort_onto_lash_modes",
   "stop_control_requests_after_step_and_abort_escalates_the_durable_record",
   "both_cancel_modes_request_cancellation_of_the_turns_awaited_process",
   "a_confirmed_tombstone_retires_the_route_a_cancel_had_to_keep",
-  "a_pending_cancel_probes_the_runs_lash_turn",
+  "a_pending_cancel_terminal_retains_the_turns_routing",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5316 ported these laws onto the in-process workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core, AppState and session watchers over a SQLite memory store set. A dangling routed turn is UnknownOrRevoked and its routing is pruned; a pending cancel terminal always keeps the route, so no unknown terminal is disclosed"
+
+[[row]]
+path = "examples/agent-workbench/src/main_sections/tests/turn_control.rs"
+test = "live_restate_turn_timeout_retains_routing_as_pending"
+area = "workbench"
+needs = ["turn", "process", "cell"]
+class = "delete"
+lane = "L9h"
+laws = [
+  "live_restate_turn_timeout_retains_routing_as_pending",
+]
+disposition = "covered-by:examples/agent-workbench/src/main_sections/tests/turn_control.rs::a_pending_cancel_terminal_retains_the_turns_routing"
+status = "deleted"
+note = "Renamed: the pending cancel terminal keeps the turn's routing on the durable engine (FIG-5316)"
+
+[[row]]
+path = "examples/agent-workbench/src/main_sections/tests/turn_control.rs"
+test = "a_pending_cancel_probes_the_runs_lash_turn"
+area = "workbench"
+needs = ["turn", "process", "cell"]
+class = "delete"
+lane = "L9h"
+laws = [
+  "a_pending_cancel_probes_the_runs_lash_turn",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "Probed the Restate admin API for the run's LashTurn invocation, removed in 5ad9641f9e (FIG-5190)"
 
 [[row]]
 path = "examples/agent-workbench/src/restate/tests/cron_replay.rs"

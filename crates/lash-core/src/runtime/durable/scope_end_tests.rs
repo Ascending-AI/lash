@@ -1471,3 +1471,73 @@ async fn end_process(backend: &Backend, process: &ProcessId) {
         .await
         .expect("release the terminal's node");
 }
+
+/// ADR 0049: a session's actor is created by its first work, so a session
+/// created but never sent anything has metadata and no actor. Its metadata
+/// makes the id one session lifetime, so its close request is its first
+/// work: the request creates the actor with the close as its mail. An id the
+/// catalog never held stays a no-op.
+#[tokio::test]
+async fn a_created_session_with_no_work_is_closed_by_its_close_request() {
+    let world = World::new("with-work", DurableSettings::default(), Vec::new()).await;
+    let idle = SessionId::parse("created-idle").expect("a session id");
+    world
+        .backend
+        .session_store_factory()
+        .admit_session(&lash_core_store::testing::store_fixtures::root_session_request(&idle))
+        .await
+        .expect("materialize the session");
+    let idle_actor = ActorKey::session(idle.as_str()).expect("a session actor key");
+    assert!(
+        world
+            .backend
+            .durable()
+            .actor(&idle_actor)
+            .await
+            .expect("read the actor")
+            .is_none(),
+        "a created session has no actor before its first work"
+    );
+
+    assert_eq!(
+        request_session_close(&world.backend, &idle)
+            .await
+            .expect("request the close"),
+        SessionCloseRequested::Requested
+    );
+    assert!(
+        world
+            .backend
+            .durable()
+            .actor(&idle_actor)
+            .await
+            .expect("read the actor")
+            .is_some(),
+        "the close request created the session's actor"
+    );
+    assert_eq!(
+        request_session_close(&world.backend, &idle)
+            .await
+            .expect("repeat the close"),
+        SessionCloseRequested::Requested,
+        "a repeated request appends to the actor the first one created"
+    );
+
+    let never = SessionId::parse("never-created").expect("a session id");
+    assert_eq!(
+        request_session_close(&world.backend, &never)
+            .await
+            .expect("request the close"),
+        SessionCloseRequested::Absent
+    );
+    assert!(
+        world
+            .backend
+            .durable()
+            .actor(&ActorKey::session(never.as_str()).expect("a session actor key"))
+            .await
+            .expect("read the actor")
+            .is_none(),
+        "closing an id the catalog never held creates nothing"
+    );
+}

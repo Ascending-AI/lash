@@ -531,7 +531,14 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                     .clone()
                     .with_execution_env_spec(dispatch.execution_env_spec.clone()),
             )
-            .enclosing_process(self.context.process_id().cloned());
+            // A dispatch a process owns runs its calls inside that process,
+            // whether or not its execution context names it.
+            .enclosing_process(
+                self.context
+                    .process_id()
+                    .or(dispatch.owner.process_id())
+                    .cloned(),
+            );
         if let Some(process_id) = self.context.process_id()
             && let Some(events) = self.context.process_event_context()
         {

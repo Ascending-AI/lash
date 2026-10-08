@@ -38,11 +38,14 @@
 //! crash between a delete and its step's commit repeats the delete, which
 //! finds nothing.
 
+use crate::store::SessionLookup;
 use lash_core_execution::runtime::actor::waits;
-use lash_durable::domain::{ScopeKey, SessionCloseRow, SessionCloseStep, SessionCloseWrite};
+use lash_durable::domain::{
+    SESSION_ACTOR_FORMATS, ScopeKey, SessionCloseRow, SessionCloseStep, SessionCloseWrite,
+};
 use lash_durable::{
-    ActorKey, ActorTx, CommitLabel, DomainWrite, DurableError, MailKind, MailRefusal, MailTx,
-    Release,
+    ActorKey, ActorTx, CommitLabel, DomainWrite, DurableError, FormatSet, MailKind, MailRefusal,
+    MailTx, Release,
 };
 
 use super::session::{TurnError, cancel_open_turn};
@@ -66,14 +69,19 @@ const LIVE_PROBE: usize = 1;
 pub enum SessionCloseRequested {
     /// The request is the session's mail: the session closes itself.
     Requested,
-    /// No session actor exists under the id: nothing was closed and the id
-    /// stays creatable (ADR 0049).
+    /// The catalog never held the id: nothing was closed and the id stays
+    /// creatable (ADR 0049).
     Absent,
     /// The session's actor has ended: its close finished before.
     AlreadyClosed,
 }
 
 /// Ask `session` to close: its close request as mail, which wakes it.
+///
+/// A session's actor is created by its first work, so a session that was
+/// created but never sent anything has metadata and no actor. Its metadata
+/// makes its id one session lifetime (ADR 0049), so its close is its first
+/// work: the request creates the actor with the close as its mail.
 ///
 /// # Errors
 ///
@@ -83,21 +91,57 @@ pub async fn request_session_close(
     session: &SessionId,
 ) -> Result<SessionCloseRequested, DurableError> {
     let actor = session_actor(session);
-    let mut tx = MailTx::new();
-    tx.append(actor, MailKind::new(SESSION_CLOSE_MAIL), String::new());
-    match backend
-        .durable()
-        .commit_mail(tx, CommitLabel::MAIL_SESSION)
-        .await
-    {
-        Ok(_) => Ok(SessionCloseRequested::Requested),
-        Err(DurableError::MailRefused(MailRefusal::UnknownActor(_))) => {
-            Ok(SessionCloseRequested::Absent)
+    loop {
+        let mut tx = MailTx::new();
+        tx.append(
+            actor.clone(),
+            MailKind::new(SESSION_CLOSE_MAIL),
+            String::new(),
+        );
+        match backend
+            .durable()
+            .commit_mail(tx, CommitLabel::MAIL_SESSION)
+            .await
+        {
+            Ok(_) => return Ok(SessionCloseRequested::Requested),
+            Err(DurableError::MailRefused(MailRefusal::UnknownActor(_))) => {}
+            Err(DurableError::MailRefused(MailRefusal::ActorTerminal(_))) => {
+                return Ok(SessionCloseRequested::AlreadyClosed);
+            }
+            Err(error) => return Err(error),
         }
-        Err(DurableError::MailRefused(MailRefusal::ActorTerminal(_))) => {
-            Ok(SessionCloseRequested::AlreadyClosed)
+        let lookup = backend
+            .session_store_factory()
+            .lookup_session(session)
+            .await
+            .map_err(|error| {
+                DurableError::Store(lash_durable::StoreFailure {
+                    kind: lash_durable::StoreFailureKind::Unavailable,
+                    message: format!("session {session} was not looked up: {error}"),
+                })
+            })?;
+        match lookup {
+            SessionLookup::Absent => return Ok(SessionCloseRequested::Absent),
+            SessionLookup::Deleted => return Ok(SessionCloseRequested::AlreadyClosed),
+            SessionLookup::Live(_) => {}
         }
-        Err(error) => Err(error),
+        let mut tx = MailTx::new();
+        tx.create_actor(actor.clone(), FormatSet::new(SESSION_ACTOR_FORMATS))
+            .append(
+                actor.clone(),
+                MailKind::new(SESSION_CLOSE_MAIL),
+                String::new(),
+            );
+        match backend
+            .durable()
+            .commit_mail(tx, CommitLabel::MAIL_SESSION)
+            .await
+        {
+            Ok(_) => return Ok(SessionCloseRequested::Requested),
+            // A first send created the actor meanwhile: append to it.
+            Err(DurableError::MailRefused(MailRefusal::ActorExists(_))) => {}
+            Err(error) => return Err(error),
+        }
     }
 }
 

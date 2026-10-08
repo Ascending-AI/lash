@@ -834,8 +834,28 @@ impl AppError {
         Self::conflict(message)
     }
 
+    /// A deletion that was requested but whose tombstone this request could
+    /// not confirm: the close may still finish, so the session is neither
+    /// live nor retired as far as this answer knows.
+    pub(crate) fn session_delete_unconfirmed(
+        session_id: &SessionId,
+        reason: impl std::fmt::Display,
+    ) -> Self {
+        let message = format!(
+            "session deletion outcome for `{session_id}` could not be confirmed; refresh session state before submitting more work: {reason}"
+        );
+        eprintln!("agent-workbench session deletion outcome unconfirmed: {message}");
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            message,
+            verdict: AppErrorVerdict::Ambiguous,
+            retirement: None,
+        }
+    }
+
     /// A request that needs the durable engine, which serves nothing until
-    /// L3 (FIG-5172) lands.
+    /// L3 (FIG-5172) lands. Only the H2 receiver stub still answers it.
+    #[cfg(feature = "e2e-tools")]
     pub(crate) fn no_engine(what: &str) -> Self {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,

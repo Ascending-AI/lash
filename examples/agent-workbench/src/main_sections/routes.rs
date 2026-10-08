@@ -408,15 +408,14 @@ pub(crate) async fn button_trigger(
     Json(request): Json<ButtonEventRequest>,
 ) -> Result<Json<CommandAccepted>, AppError> {
     // Side-effect ingress: the fence refuses before any message is pushed or
-    // any workflow submitted for a retired session.
+    // any occurrence emitted for a retired session.
     let session_id = state.admit_session(&query, "api.button_trigger").await?;
     let turn_profile = llm_profile_selection_for_request(
         &state.selected_llm_profile(),
         request.model.as_deref(),
         request.model_variant.as_deref(),
     )?;
-    let model = turn_profile.clone();
-    state.set_selected_llm_profile(model.clone());
+    state.set_selected_llm_profile(turn_profile.clone());
     state.trace_for_session(
         &session_id,
         "api.button_trigger.request",
@@ -425,10 +424,14 @@ pub(crate) async fn button_trigger(
             "model": serde_json::to_value(&turn_profile).unwrap_or(Value::Null),
         }),
     );
-    // The press ran as an engine workflow that recorded its occurrence
-    // (FIG-5036); it waits for L3 (FIG-5172).
-    let _ = model;
-    Err(AppError::no_engine("a button trigger"))
+    // The press shows as one row, published once its occurrence has an
+    // identity (FIG-5036), stamped when the press happened.
+    let pressed_at = Utc::now().to_rfc3339();
+    let operation_id = format!("workbench-button-{}", uuid::Uuid::new_v4());
+    state
+        .emit_button_press(&session_id, request.button, pressed_at, &operation_id)
+        .await?;
+    Ok(Json(CommandAccepted { accepted: true }))
 }
 
 pub(crate) async fn list_accounts(
@@ -691,15 +694,14 @@ pub(crate) async fn inject_message(
     Json(request): Json<InjectMessageRequest>,
 ) -> Result<Json<CommandAccepted>, AppError> {
     // Side-effect ingress: the fence refuses before mail is delivered or any
-    // workflow submitted for a retired session.
+    // occurrence emitted for a retired session.
     let session_id = state.admit_session(&query, "api.accounts.inject").await?;
     let turn_profile = llm_profile_selection_for_request(
         &state.selected_llm_profile(),
         request.model.as_deref(),
         request.model_variant.as_deref(),
     )?;
-    let model = turn_profile;
-    state.set_selected_llm_profile(model.clone());
+    state.set_selected_llm_profile(turn_profile);
     let delivered = state
         .mail_world
         .deliver(&slug, &request.title, &request.text)
@@ -711,10 +713,11 @@ pub(crate) async fn inject_message(
         "api.accounts.inject",
         json!({ "account": slug, "title": message.title }),
     );
-    // The delivery ran as an engine workflow that recorded its occurrence
-    // (FIG-5036); it waits for L3 (FIG-5172).
-    let _ = (model, delivery);
-    Err(AppError::no_engine("a mail delivery"))
+    let operation_id = format!("workbench-mail-{}", uuid::Uuid::new_v4());
+    state
+        .emit_mail_received(&session_id, &delivery, &operation_id)
+        .await?;
+    Ok(Json(CommandAccepted { accepted: true }))
 }
 /// Retire `old_session_id` and report the session that replaced it.
 ///
@@ -1008,10 +1011,23 @@ pub(crate) async fn cancel_work(
         lash::process::ProcessOriginator::Session { session_id, .. } => session_id.clone(),
         lash::process::ProcessOriginator::Host { .. } => state.current_session_id(),
     };
-    // Process cancellation ran as an engine workflow; it waits for L3
-    // (FIG-5172).
-    let _ = session_id;
-    Err(AppError::no_engine("a process cancel"))
+    let operation_id = format!("workbench-process-cancel-{}", uuid::Uuid::new_v4());
+    state
+        .cancel_process(&session_id, &process_id, &operation_id)
+        .await?;
+    state.trace_for_session(
+        &session_id,
+        "api.work.cancel_submitted",
+        json!({
+            "operation_id": operation_id,
+            "process_id": process_id,
+        }),
+    );
+    Ok(Json(ProcessCancelAccepted {
+        accepted: true,
+        operation_id,
+        process_id,
+    }))
 }
 
 /// Wait for one durable work item to reach a terminal state, then return its

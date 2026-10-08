@@ -239,14 +239,21 @@ pub(crate) fn retiring_session_message(session_id: &SessionId) -> String {
     format!("session `{session_id}` is being deleted; session ids cannot be reused in this store")
 }
 
-/// Retire `session_id` through the durable delete workflow, fencing it first.
+/// How long a delete waits for the session's close to write its tombstone
+/// before it answers that the outcome could not be confirmed.
+#[cfg(not(test))]
+const SESSION_DELETE_CONFIRM_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(test)]
+const SESSION_DELETE_CONFIRM_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Retire `session_id` through the session's durable close, fencing it first.
 ///
 /// The order is the contract (FIG-2358). The mark goes down before anything
 /// else so no turn can claim the session from here on. The cooperative cancel
-/// runs before the workflow, because the workflow's first act is to revoke the
-/// session's await gates and a cancel issued after that revoke has no gate to
-/// land on. Only then is the delete submitted, and the mark is settled against
-/// how it ended.
+/// runs before the close is requested, because the close's first act is to
+/// cancel the session's open turn and revoke its waits, and a cancel issued
+/// after that has no gate to land on. Only then is the delete requested, and
+/// the mark is settled against how it ended.
 pub(crate) async fn retire_session(
     state: &AppState,
     session_id: &SessionId,
@@ -272,9 +279,65 @@ async fn retire_session_attempt(state: &AppState, session_id: &SessionId) -> Res
         "api.session.delete.turns_cancelled",
         json!({ "session_id": session_id, "cancellations": cancellations }),
     );
-    // The delete ran as an engine workflow; it waits for L3 (FIG-5172).
-    Err(AppError::session_delete_failed(
+    // The delete is the session's close request, its mail (ADR 0132 §12): a
+    // refused request requested nothing, so the session stays live.
+    let deletion = {
+        let administration = state.core.session_administration().await;
+        let context = administration
+            .delete_context(session_id)
+            .map_err(|error| AppError::session_delete_failed(session_id, error))?;
+        lash::LashCore::delete_session(context)
+            .await
+            .map_err(|error| AppError::session_delete_failed(session_id, error))?
+    };
+    if matches!(deletion, lash::SessionDeletion::Requested { .. }) {
+        await_session_tombstone(state, session_id).await?;
+    }
+    // The close detaches the global process rows the session originated
+    // rather than deleting them; reclaim its finished ones so the work rail
+    // does not keep a deleted session's work forever (FIG-989).
+    let retention = match state.prune_processes_originated_by(session_id).await {
+        Ok(report) => json!({
+            "pruned_processes": report.pruned_processes,
+            "pruned_events": report.pruned_events,
+            "pruned_trigger_deliveries": report.pruned_trigger_deliveries,
+        }),
+        Err(error) => json!({ "error": error.to_string() }),
+    };
+    state.trace_for_session(
         session_id,
-        AppError::no_engine("a session delete"),
-    ))
+        "api.session.delete.deleted",
+        json!({
+            "session_id": session_id,
+            "deletion": format!("{deletion:?}"),
+            "process_retention": retention,
+        }),
+    );
+    Ok(())
+}
+
+/// Wait for the close `session_id`'s delete requested to write its tombstone.
+///
+/// The close runs on the session's actor, one durable step at a time, and
+/// owes nothing to this request: a wait that runs out leaves the delete
+/// requested, so its answer is ambiguous, never "the session remains live".
+async fn await_session_tombstone(state: &AppState, session_id: &SessionId) -> Result<(), AppError> {
+    let deadline = tokio::time::Instant::now() + SESSION_DELETE_CONFIRM_TIMEOUT;
+    loop {
+        match state.session_store_factory.lookup_session(session_id).await {
+            Ok(lash::persistence::SessionLookup::Deleted) => return Ok(()),
+            Ok(_) => {}
+            Err(error) if tokio::time::Instant::now() >= deadline => {
+                return Err(AppError::session_delete_unconfirmed(session_id, error));
+            }
+            Err(_) => {}
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(AppError::session_delete_unconfirmed(
+                session_id,
+                format!("its close did not finish within {SESSION_DELETE_CONFIRM_TIMEOUT:?}"),
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 }

@@ -498,4 +498,633 @@ fn lineage_bridge_title(
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+    use lash::TurnId;
+    use lash::process::ProcessInput as RuntimeInput;
+    use lash::tracing::{TraceLanguageExecutionStatus, TraceLashlangGraphChildLink};
+    use serde_json::json;
+    use std::sync::Arc;
+
+    /// The process observer of a running workbench, the registry its
+    /// engine runs over (which the law writes process rows into), and the
+    /// workbench that keeps both alive.
+    async fn test_process_observer() -> (
+        lash::process::ProcessWorkObserver,
+        Arc<dyn lash::process::ProcessRegistry>,
+        crate::tests::Workbench,
+    ) {
+        let workbench = crate::tests::Workbench::silent().await;
+        (
+            workbench.state.process_observer.clone(),
+            workbench.stores.process_registry(),
+            workbench,
+        )
+    }
+
+    /// The environment a fixture's session-turn start captured: a session
+    /// turn registers only under the facts its starter recorded.
+    fn session_turn_env_ref() -> lash::process::ProcessExecutionEnvRef {
+        lash::process::ProcessExecutionEnvSpec::new(
+            lash::plugins::AdmittedPluginConfig::default(),
+            lash::runtime::SessionPolicy::new(
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            ),
+        )
+        .stable_ref()
+        .expect("captured environment digest")
+    }
+
+    fn test_graph(
+        graph_key: &str,
+        session_id: &SessionId,
+        subject: TraceRuntimeSubject,
+        children: Vec<TraceLashlangGraphChildLink>,
+    ) -> TraceLashlangGraph {
+        TraceLashlangGraph {
+            schema_version: lash::tracing::TRACE_SCHEMA_VERSION,
+            graph_key: graph_key.to_string(),
+            scope: TraceRuntimeScope::new(session_id),
+            subject,
+            source_identity: format!("{graph_key}:source"),
+            module_ref: format!("{graph_key}:module"),
+            entry_kind: "main".to_string(),
+            entry_ref: None,
+            entry_name: "main".to_string(),
+            status: TraceLanguageExecutionStatus::Running,
+            completeness: lash::tracing::TraceLashlangGraphCompleteness::IncompleteMap,
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            children,
+            history_limit: lash::tracing::DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT,
+            node_retention: Vec::new(),
+            conflicts: Vec::new(),
+            history: Vec::new(),
+            execution_map: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn graph_index_resolves_subagent_bridge_to_child_session_effect_graph() {
+        let (observer, registry, _workbench) = test_process_observer().await;
+        let child_session_id = "child-session";
+        let create_request = lash::SessionCreateRequest::child_session(
+            "root",
+            lash::SessionStartPoint::Empty,
+            lash::plugins::PluginOptions::default(),
+        )
+        .with_session_id(child_session_id);
+        let subagent_process_id = registry
+            .register_process(
+                lash::process::ProcessRegistration::new(
+                    RuntimeInput::SessionTurn {
+                        definition_key: "agent-workbench-subagent:v1".to_string(),
+                        create_request: Box::new(create_request),
+                        turn_input: Box::new(lash::TurnInput::text("run child")),
+                        result: lash::process::SessionTurnOutcome::Turn,
+                    },
+                    lash::process::ProcessProvenance::session(lash::process::SessionScope::new(
+                        "root",
+                    )),
+                    lash::process::Lifetime::Detached,
+                )
+                .with_execution_env_ref(Some(session_turn_env_ref())),
+            )
+            .await
+            .expect("register subagent process")
+            .id;
+
+        let parent_graph = TraceLashlangGraph {
+            schema_version: lash::tracing::TRACE_SCHEMA_VERSION,
+            graph_key: "effect:root:turn-1:exec-1".to_string(),
+            scope: TraceRuntimeScope {
+                session_id: Some(SessionId::from("root")),
+                turn_id: Some(TurnId::from("turn-1")),
+                turn_index: Some(0),
+                protocol_iteration: Some(0),
+            },
+            subject: TraceRuntimeSubject::Effect {
+                address: lash::runtime::EffectAddress::new(
+                    lash::runtime::ExecutionScope::turn("root", "turn-1"),
+                    "exec-1",
+                )
+                .expect("valid parent effect address"),
+                effect_id: "exec-1".to_string(),
+            },
+            source_identity: "parent-source".to_string(),
+            module_ref: "parent-module".to_string(),
+            entry_kind: "main".to_string(),
+            entry_ref: None,
+            entry_name: "main".to_string(),
+            status: TraceLanguageExecutionStatus::Running,
+            completeness: lash::tracing::TraceLashlangGraphCompleteness::IncompleteMap,
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            children: vec![TraceLashlangGraphChildLink {
+                parent_graph_key: "effect:root:turn-1:exec-1".to_string(),
+                parent_node_id: "spawn".to_string(),
+                child_graph_key: None,
+                child_process_id: subagent_process_id.clone(),
+                child_attempt: None,
+                child_module_ref: None,
+                child_entry_ref: None,
+                child_entry_name: Some("subagent".to_string()),
+            }],
+            history_limit: lash::tracing::DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT,
+            node_retention: Vec::new(),
+            conflicts: Vec::new(),
+            history: Vec::new(),
+            execution_map: None,
+        };
+        let child_graph = TraceLashlangGraph {
+            schema_version: lash::tracing::TRACE_SCHEMA_VERSION,
+            graph_key: "effect:child-session:turn-1:exec-1".to_string(),
+            scope: TraceRuntimeScope {
+                session_id: Some(SessionId::fixture(child_session_id.to_string())),
+                turn_id: Some(TurnId::from("turn-1")),
+                turn_index: Some(0),
+                protocol_iteration: Some(0),
+            },
+            subject: TraceRuntimeSubject::Effect {
+                address: lash::runtime::EffectAddress::new(
+                    lash::runtime::ExecutionScope::turn(child_session_id, "turn-1"),
+                    "exec-1",
+                )
+                .expect("valid child effect address"),
+                effect_id: "exec-1".to_string(),
+            },
+            source_identity: "child-source".to_string(),
+            module_ref: "child-module".to_string(),
+            entry_kind: "main".to_string(),
+            entry_ref: None,
+            entry_name: "main".to_string(),
+            status: TraceLanguageExecutionStatus::Completed,
+            completeness: lash::tracing::TraceLashlangGraphCompleteness::IncompleteMap,
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            children: Vec::new(),
+            history_limit: lash::tracing::DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT,
+            node_retention: Vec::new(),
+            conflicts: Vec::new(),
+            history: Vec::new(),
+            execution_map: None,
+        };
+        let mut projection = GraphProjection::new(
+            &observer,
+            &SessionId::from("root"),
+            vec![parent_graph.clone(), child_graph.clone()],
+        )
+        .await
+        .expect("projection");
+        let mut lineage_edges = Vec::new();
+
+        projection
+            .append_lineage_edges(&parent_graph.children[0], &mut lineage_edges)
+            .await;
+
+        assert_eq!(lineage_edges.len(), 1);
+        let edge = &lineage_edges[0];
+        assert_eq!(edge.bridge_process_id.as_ref(), Some(&subagent_process_id));
+        assert_eq!(
+            edge.bridge_graph_key,
+            format!("process:{subagent_process_id}")
+        );
+        assert_eq!(edge.child_session_id.as_deref(), Some(child_session_id));
+        assert_eq!(
+            edge.child_graph_key.as_deref(),
+            Some(child_graph.graph_key.as_str())
+        );
+        assert!(!edge.pending);
+    }
+
+    #[tokio::test]
+    async fn graph_index_filters_to_current_session_and_reachable_children() {
+        let (observer, registry, _workbench) = test_process_observer().await;
+        let current_session_id = &SessionId::from("current-session");
+        let child_session_id = &SessionId::from("child-session");
+        let old_session_id = &SessionId::from("old-session");
+        let create_request = lash::SessionCreateRequest::child_session(
+            current_session_id,
+            lash::SessionStartPoint::Empty,
+            lash::plugins::PluginOptions::default(),
+        )
+        .with_session_id(child_session_id);
+        let subagent_process_id = registry
+            .register_process(
+                lash::process::ProcessRegistration::new(
+                    RuntimeInput::SessionTurn {
+                        definition_key: "agent-workbench-subagent:v1".to_string(),
+                        create_request: Box::new(create_request),
+                        turn_input: Box::new(lash::TurnInput::text("run child")),
+                        result: lash::process::SessionTurnOutcome::Turn,
+                    },
+                    lash::process::ProcessProvenance::session(lash::process::SessionScope::new(
+                        current_session_id,
+                    )),
+                    lash::process::Lifetime::Detached,
+                )
+                .with_execution_env_ref(Some(session_turn_env_ref())),
+            )
+            .await
+            .expect("register subagent process")
+            .id;
+        registry
+            .add_observer(
+                &SessionId::from(current_session_id),
+                &subagent_process_id,
+                lash::process::ProcessObserverBy::host("workbench-current"),
+            )
+            .await
+            .expect("observe current process");
+        let old_process_id = registry
+            .register_process(lash::testing::held_engine_registration(
+                json!({ "old": true }),
+                lash::process::ProcessProvenance::host(),
+                lash::process::Lifetime::Detached,
+            ))
+            .await
+            .expect("register old process")
+            .id;
+        registry
+            .add_observer(
+                &SessionId::from(old_session_id),
+                &old_process_id,
+                lash::process::ProcessObserverBy::host("workbench-old"),
+            )
+            .await
+            .expect("observe old process");
+
+        let parent_graph = test_graph(
+            "effect:current-session:turn-1:exec-1",
+            current_session_id,
+            TraceRuntimeSubject::Effect {
+                address: lash::runtime::EffectAddress::new(
+                    lash::runtime::ExecutionScope::turn(current_session_id, "turn-1"),
+                    "exec-1",
+                )
+                .expect("valid current-session effect address"),
+                effect_id: "exec-1".to_string(),
+            },
+            vec![TraceLashlangGraphChildLink {
+                parent_graph_key: "effect:current-session:turn-1:exec-1".to_string(),
+                parent_node_id: "spawn".to_string(),
+                child_graph_key: None,
+                child_process_id: subagent_process_id.clone(),
+                child_attempt: None,
+                child_module_ref: None,
+                child_entry_ref: None,
+                child_entry_name: Some("subagent".to_string()),
+            }],
+        );
+        let process_graph = test_graph(
+            &format!("process:{subagent_process_id}"),
+            old_session_id,
+            TraceRuntimeSubject::Process {
+                process_id: subagent_process_id.clone(),
+            },
+            Vec::new(),
+        );
+        let child_graph = test_graph(
+            "effect:child-session:turn-1:exec-1",
+            child_session_id,
+            TraceRuntimeSubject::Effect {
+                address: lash::runtime::EffectAddress::new(
+                    lash::runtime::ExecutionScope::turn(child_session_id, "turn-1"),
+                    "exec-1",
+                )
+                .expect("valid child-session effect address"),
+                effect_id: "exec-1".to_string(),
+            },
+            Vec::new(),
+        );
+        let old_graph = test_graph(
+            &format!("process:{old_process_id}"),
+            old_session_id,
+            TraceRuntimeSubject::Process {
+                process_id: old_process_id.clone(),
+            },
+            Vec::new(),
+        );
+
+        let mut projection = GraphProjection::new(
+            &observer,
+            current_session_id,
+            vec![parent_graph, process_graph, child_graph, old_graph],
+        )
+        .await
+        .expect("projection");
+        projection.compute_visibility().await;
+        let keys = projection.visible_keys;
+
+        assert!(keys.contains("effect:current-session:turn-1:exec-1"));
+        assert!(keys.contains(&format!("process:{subagent_process_id}")));
+        assert!(keys.contains("effect:child-session:turn-1:exec-1"));
+        assert!(!keys.contains(&format!("process:{old_process_id}")));
+    }
+    fn effect_graph(key: &str, session: &str) -> TraceLashlangGraph {
+        test_graph(
+            key,
+            &SessionId::fixture(session),
+            TraceRuntimeSubject::Effect {
+                address: lash::runtime::EffectAddress::new(
+                    lash::runtime::ExecutionScope::turn(
+                        SessionId::fixture(session.to_string()),
+                        "turn",
+                    ),
+                    key,
+                )
+                .expect("effect address"),
+                effect_id: key.to_string(),
+            },
+            Vec::new(),
+        )
+    }
+
+    fn child_link(
+        parent: &str,
+        target: Option<&str>,
+        process: &str,
+        attempt: Option<u32>,
+    ) -> TraceLashlangGraphChildLink {
+        TraceLashlangGraphChildLink {
+            parent_graph_key: parent.to_string(),
+            parent_node_id: format!("spawn-{process}"),
+            child_graph_key: target.map(str::to_string),
+            child_process_id: ProcessId::parse(process)
+                .unwrap_or_else(|_| ProcessId::fixture(process)),
+            child_attempt: attempt,
+            child_module_ref: None,
+            child_entry_ref: None,
+            child_entry_name: None,
+        }
+    }
+
+    fn process_graph(
+        key: &str,
+        process: &str,
+        history_attempt: Option<Option<u32>>,
+    ) -> TraceLashlangGraph {
+        let mut graph = test_graph(
+            key,
+            &SessionId::from("other"),
+            TraceRuntimeSubject::Process {
+                process_id: ProcessId::parse(process)
+                    .unwrap_or_else(|_| ProcessId::fixture(process)),
+            },
+            Vec::new(),
+        );
+        if let Some(attempt) = history_attempt {
+            graph.history.push(
+                serde_json::from_value(json!({
+                    "identity": { "attempt": attempt, "transition": "execution_finished" },
+                    "timestamp": "2026-09-29T00:00:00Z",
+                    "event": {
+                        "event_key": key,
+                        "identity": {
+                            "scope": graph.scope,
+                            "subject": graph.subject,
+                            "source_identity": graph.source_identity,
+                            "module_ref": graph.module_ref,
+                            "entry_kind": "main",
+                            "entry_name": "main",
+                            "attempt": attempt,
+                        },
+                        "kind": "execution_finished",
+                        "status": "completed",
+                    },
+                }))
+                .expect("history event"),
+            );
+        }
+        graph
+    }
+
+    fn traversal_fixtures() -> Vec<Vec<TraceLashlangGraph>> {
+        let chain = (0..64)
+            .map(|index| {
+                let key = format!("chain-{index:02}");
+                let mut graph = effect_graph(&key, if index == 0 { "root" } else { "other" });
+                if index < 63 {
+                    graph.children.push(child_link(
+                        &key,
+                        Some(&format!("chain-{:02}", index + 1)),
+                        "absent",
+                        None,
+                    ));
+                }
+                graph
+            })
+            .collect::<Vec<_>>();
+        let mut diamond = ["root", "left", "right", "leaf", "inaccessible"]
+            .map(|key| effect_graph(key, if key == "root" { "root" } else { "other" }))
+            .to_vec();
+        diamond[0].children = vec![
+            child_link("root", Some("left"), "absent", None),
+            child_link("root", Some("right"), "absent", None),
+        ];
+        diamond[1].children = vec![child_link("left", Some("leaf"), "absent", None)];
+        diamond[2].children = vec![child_link("right", Some("leaf"), "absent", None)];
+        let mut cycle = diamond.clone();
+        cycle[3].children = vec![child_link("leaf", Some("root"), "absent", None)];
+        vec![chain, diamond, cycle]
+    }
+
+    async fn reference_visibility(projection: &mut GraphProjection<'_>) {
+        loop {
+            let mut changed = false;
+            for key in projection.visible_keys.clone() {
+                let children = projection.graphs[projection.graph_by_key[&key]]
+                    .children
+                    .clone();
+                for child in children {
+                    let targets = if let Some(key) = &child.child_graph_key
+                        && projection.graph_by_key.contains_key(key)
+                    {
+                        vec![key.clone()]
+                    } else {
+                        projection.graphs.iter().filter(|graph| {
+                            matches!(&graph.subject, TraceRuntimeSubject::Process { process_id } if process_id == child.child_process_id)
+                                && graph.history.first().is_some_and(|event| child.child_attempt.is_none_or(|attempt| event.event.identity.attempt() == Some(attempt)))
+                        }).map(|graph| graph.graph_key.clone()).collect()
+                    };
+                    for target in targets {
+                        changed |= projection.visible_keys.insert(target);
+                    }
+                    if let Some(process) =
+                        projection.observed_process(&child.child_process_id).await
+                        && let Some(session) = process.child_session_id
+                    {
+                        let targets = projection
+                            .child_session_effect_graphs(&session)
+                            .iter()
+                            .map(|graph| graph.graph_key.clone())
+                            .collect::<Vec<_>>();
+                        for target in targets {
+                            changed |= projection.visible_keys.insert(target);
+                        }
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+
+    async fn assert_projection_matches_reference(
+        observer: &lash::process::ProcessWorkObserver,
+        graphs: Vec<TraceLashlangGraph>,
+    ) {
+        let session = SessionId::from("root");
+        let mut reference = GraphProjection::new(observer, &session, graphs.clone())
+            .await
+            .expect("reference");
+        reference_visibility(&mut reference).await;
+        let expected =
+            serde_json::to_value(reference.index().await.expect("reference index")).expect("JSON");
+        let actual = serde_json::to_value(
+            index_for_session(observer, &session, graphs.clone())
+                .await
+                .expect("index"),
+        )
+        .expect("JSON");
+        assert_eq!(actual, expected);
+        for graph in &graphs {
+            let detail =
+                visible_graph_by_key(observer, &session, graphs.clone(), &graph.graph_key).await;
+            if reference.visible_keys.contains(&graph.graph_key) {
+                assert_eq!(
+                    serde_json::to_value(detail.expect("visible detail")).unwrap(),
+                    serde_json::to_value(graph).unwrap()
+                );
+            } else {
+                assert!(detail.is_err(), "{} must be inaccessible", graph.graph_key);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn visibility_matches_reference_index_and_detail() {
+        let (observer, _, _workbench) = test_process_observer().await;
+        let mut fixtures = traversal_fixtures();
+        let mut root = effect_graph("root", "root");
+        root.children = vec![
+            child_link("root", Some("missing"), "target", Some(1)),
+            child_link("root", None, "target", None),
+        ];
+        let mut first = process_graph("attempt-one", "target", Some(Some(1)));
+        first.scope.turn_index = Some(2);
+        let mut second = process_graph("attempt-two", "target", Some(Some(2)));
+        second.scope.protocol_iteration = Some(3);
+        fixtures.push(vec![
+            root,
+            second,
+            process_graph("empty", "target", None),
+            first,
+            process_graph("unset", "target", Some(None)),
+            effect_graph("inaccessible", "old"),
+        ]);
+        for graphs in fixtures {
+            assert_projection_matches_reference(&observer, graphs).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn visibility_keeps_later_child_session_paths() {
+        let (observer, registry, _workbench) = test_process_observer().await;
+        let process_id = registry
+            .register_process(
+                lash::process::ProcessRegistration::new(
+                    RuntimeInput::SessionTurn {
+                        definition_key: "agent-workbench-subagent:v1".to_string(),
+                        create_request: Box::new(
+                            lash::SessionCreateRequest::child_session(
+                                "root",
+                                lash::SessionStartPoint::Empty,
+                                lash::plugins::PluginOptions::default(),
+                            )
+                            .with_session_id("child"),
+                        ),
+                        turn_input: Box::new(lash::TurnInput::text("run child")),
+                        result: lash::process::SessionTurnOutcome::Turn,
+                    },
+                    lash::process::ProcessProvenance::host(),
+                    lash::process::Lifetime::Detached,
+                )
+                .with_execution_env_ref(Some(session_turn_env_ref())),
+            )
+            .await
+            .expect("register process")
+            .id;
+        let mut root = effect_graph("root", "root");
+        root.children = vec![
+            child_link("root", Some("bridge"), "absent", None),
+            child_link("root", Some("later"), "absent", None),
+        ];
+        let bridge = process_graph("bridge", process_id.as_str(), None);
+        let mut later = effect_graph("later", "other");
+        later.children = vec![child_link(
+            "later",
+            Some("bridge"),
+            process_id.as_str(),
+            None,
+        )];
+        let mut first_effect = effect_graph("child-first", "child");
+        first_effect.scope.turn_index = Some(1);
+        first_effect.children = vec![child_link(
+            "child-first",
+            Some("descendant"),
+            "absent",
+            None,
+        )];
+        let graphs = vec![
+            root,
+            bridge,
+            later,
+            first_effect,
+            effect_graph("child-second", "child"),
+            effect_graph("descendant", "other"),
+            effect_graph("inaccessible", "old"),
+        ];
+        let mut projection =
+            GraphProjection::new(&observer, &SessionId::from("root"), graphs.clone())
+                .await
+                .expect("projection");
+        projection.compute_visibility().await;
+        assert_eq!(
+            projection.visible_keys,
+            [
+                "root",
+                "bridge",
+                "later",
+                "child-first",
+                "child-second",
+                "descendant"
+            ]
+            .map(str::to_string)
+            .into_iter()
+            .collect()
+        );
+        assert!(projection.expansions.values().all(|count| *count == 1));
+        let index = projection.index().await.expect("index");
+        let child_edges = index
+            .lineage_edges
+            .iter()
+            .filter(|edge| edge.parent_graph_key == "later")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            child_edges
+                .iter()
+                .map(|edge| edge.child_graph_key.as_deref())
+                .collect::<Vec<_>>(),
+            vec![Some("child-first"), Some("child-second")]
+        );
+        assert!(
+            child_edges
+                .iter()
+                .all(|edge| edge.child_session_id.as_deref() == Some("child") && !edge.pending)
+        );
+        assert_projection_matches_reference(&observer, graphs).await;
+    }
+}

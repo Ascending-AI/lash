@@ -424,7 +424,21 @@ pub(crate) enum ButtonChoice {
     Blue,
 }
 
-impl ButtonChoice {}
+impl ButtonChoice {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Red => "Red",
+            Self::Blue => "Blue",
+        }
+    }
+
+    pub(crate) fn lower(self) -> &'static str {
+        match self {
+            Self::Red => "red",
+            Self::Blue => "blue",
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct ButtonEventRequest {

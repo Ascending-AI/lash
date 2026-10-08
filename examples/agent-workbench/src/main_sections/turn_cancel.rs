@@ -162,7 +162,7 @@ pub(crate) async fn cancel_processes_parented_by_turn(
             return Vec::new();
         }
     };
-    let submitted = Vec::new();
+    let mut submitted = Vec::new();
     for item in observed {
         // A terminal row is settled and a row already carrying a request is
         // converging on its own; re-asking for either is pure noise.
@@ -173,20 +173,25 @@ pub(crate) async fn cancel_processes_parented_by_turn(
             continue;
         }
         let process_id = item.process.process_id.clone();
-        // Process cancellation ran as an engine workflow; it waits for L3
-        // (FIG-5172). A turn cancellation that was accepted stays accepted:
-        // the refused process cancel is reported, never folded back into the
-        // turn control's own outcome.
-        let error = AppError::no_engine("a process cancel");
-        state.trace_for_session(
-            &address.session_id,
-            "api.turn.cancel.process_cancel_failed",
-            json!({
-                "turn_id": address.turn_id,
-                "process_id": process_id,
-                "error": error.to_string(),
-            }),
-        );
+        let operation_id = format!("workbench-turn-cancel-process-{}", uuid::Uuid::new_v4());
+        match state
+            .cancel_process(&address.session_id, &process_id, &operation_id)
+            .await
+        {
+            Ok(_) => submitted.push(process_id.to_string()),
+            // A turn cancellation that was accepted stays accepted: a refused
+            // process cancel is reported, never folded back into the turn
+            // control's own outcome.
+            Err(error) => state.trace_for_session(
+                &address.session_id,
+                "api.turn.cancel.process_cancel_failed",
+                json!({
+                    "turn_id": address.turn_id,
+                    "process_id": process_id,
+                    "error": error.to_string(),
+                }),
+            ),
+        }
     }
     submitted
 }

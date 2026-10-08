@@ -202,7 +202,7 @@ pub(crate) fn configure_workbench_plugins(
 
 /// The `LASH_RLM_CHANNEL` value the workbench's RLM protocol factory is built
 /// with.
-fn workbench_rlm_channel() -> AnyhowResult<lash::rlm::RlmChannel> {
+pub(crate) fn workbench_rlm_channel() -> AnyhowResult<lash::rlm::RlmChannel> {
     match std::env::var("LASH_RLM_CHANNEL") {
         Ok(value) => value.parse().map_err(anyhow::Error::msg),
         Err(std::env::VarError::NotPresent) => Ok(lash::rlm::RlmChannel::Cell),
@@ -221,7 +221,7 @@ fn prewarm_workbench_worker(
     Ok(workers)
 }
 
-fn workbench_rlm_workers() -> AnyhowResult<Option<lash::rlm::WorkerService>> {
+pub(crate) fn workbench_rlm_workers() -> AnyhowResult<Option<lash::rlm::WorkerService>> {
     if matches!(
         crate::session_protocol::selected()?,
         crate::session_protocol::SessionProtocol::Standard
@@ -235,20 +235,20 @@ fn workbench_rlm_workers() -> AnyhowResult<Option<lash::rlm::WorkerService>> {
 }
 
 /// Everything the workbench plugin stack is configured with.
-struct WorkbenchCorePlugins {
-    rlm_workers: Option<lash::rlm::WorkerService>,
-    tool_provider: Option<Arc<dyn lash::tools::ToolProvider>>,
-    mail_world: mail::MailWorld,
+pub(crate) struct WorkbenchCorePlugins {
+    pub(crate) rlm_workers: Option<lash::rlm::WorkerService>,
+    pub(crate) tool_provider: Option<Arc<dyn lash::tools::ToolProvider>>,
+    pub(crate) mail_world: mail::MailWorld,
     /// The session config a delegated child is created with: the
     /// workbench's own session defaults, stated explicitly (ADR 0134).
-    child_spec: SessionSpec,
-    deferred_tools: deferred_tools::WorkbenchDeferredTools,
-    approvals: approvals::WorkbenchApprovals,
-    mcp: Arc<dyn PluginFactory>,
+    pub(crate) child_spec: SessionSpec,
+    pub(crate) deferred_tools: deferred_tools::WorkbenchDeferredTools,
+    pub(crate) approvals: approvals::WorkbenchApprovals,
+    pub(crate) mcp: Arc<dyn PluginFactory>,
     /// The live replay store the core publishes to and its feeds tail.
-    live_replay: Arc<dyn lash::observe::LiveReplayStore>,
+    pub(crate) live_replay: Arc<dyn lash::observe::LiveReplayStore>,
     #[cfg(feature = "e2e-tools")]
-    operation: Arc<crate::e2e_operation::Controls>,
+    pub(crate) operation: Arc<crate::e2e_operation::Controls>,
 }
 
 /// The builder behind every workbench core: the selected protocol factory
@@ -256,7 +256,7 @@ struct WorkbenchCorePlugins {
 /// surface and the workbench plugin stack, shutdown marker included. The
 /// caller applies serving-only extras (tracing, model profiles) and builds;
 /// `build` binds the backend's generation to this composition.
-async fn workbench_core_builder(
+pub(crate) async fn workbench_core_builder(
     host_backend: lash::Backend,
     rlm_channel: lash::rlm::RlmChannel,
     context_window_tokens: usize,
@@ -344,6 +344,125 @@ async fn workbench_core_builder(
             plugins.push(marker);
         }
     }))
+}
+
+/// The workbench's default session spec for `selection`: the turn and
+/// no-progress budgets, generation and attachment acceptance every session it
+/// creates states.
+pub(crate) fn workbench_session_defaults(
+    selection: &LlmProfileSelection,
+    output_token_cap: Option<std::num::NonZeroUsize>,
+) -> lash::SessionSpec {
+    lash::SessionSpec::new(
+        selection.key(),
+        lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS),
+        lash::MaxToolCalls::new(1024),
+    )
+    .reasoning(selection.reasoning())
+    .no_progress_budget(lash::NoProgressBudget::bounded(
+        WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS,
+    ))
+    .generation(lash::direct::GenerationOptions {
+        output_token_cap,
+        ..Default::default()
+    })
+    .attachment_acceptance(Arc::new(workbench_attachment_acceptance()))
+}
+
+/// Where a workbench core reports: its trace sink, and the sink its trace
+/// runtime's product observer feeds the Lashlang execution graphs through.
+pub(crate) struct WorkbenchTracing {
+    pub(crate) trace_sink: Arc<dyn TraceSink>,
+    pub(crate) lashlang_execution_sink: Arc<dyn TraceSink>,
+}
+
+/// The workbench core over `stores`: the durable backend over the store set
+/// (ADR 0132 §1), the workbench's protocol and plugin stack, its tracing and
+/// its open model catalog served by `provider`.
+pub(crate) async fn build_workbench_core(
+    stores: &Arc<dyn lash::StoreSet>,
+    rlm_channel: lash::rlm::RlmChannel,
+    context_window_tokens: usize,
+    plugins: WorkbenchCorePlugins,
+    tracing: WorkbenchTracing,
+    provider: ProviderHandle,
+    owner: lash::persistence::LeaseOwnerIdentity,
+) -> AnyhowResult<LashCore> {
+    let host_backend = lash::durable::DurableBackendBuilder::new(Arc::clone(stores))
+        .build()
+        .context("build the durable backend")?;
+    let trace_runtime = lash::runtime::TraceRuntime::new(host_backend.clock())
+        .with_product_observer(tracing.lashlang_execution_sink);
+    workbench_core_builder(host_backend, rlm_channel, context_window_tokens, plugins)
+        .await?
+        .trace_runtime(trace_runtime)
+        .trace_sink(tracing.trace_sink)
+        .trace_level(TraceLevel::Extended)
+        .llm_profiles(Arc::new(WorkbenchLlmProfiles { provider }))
+        .build(owner)
+        .context("build Lash core")
+}
+
+/// What the workbench keeps beside its core: its session defaults, roster,
+/// product events, turn routing, mail world, approvals, model selection and
+/// tracing.
+pub(crate) struct WorkbenchHost {
+    pub(crate) session_defaults: lash::SessionSpec,
+    pub(crate) sessions: WorkbenchSessions,
+    pub(crate) event_tx: SessionEventRegistry,
+    pub(crate) active_turns: ActiveTurns,
+    pub(crate) mail_world: mail::MailWorld,
+    pub(crate) approvals: approvals::WorkbenchApprovals,
+    pub(crate) selected_llm_profile: LlmProfileSelection,
+    pub(crate) trace_sink: Option<Arc<dyn TraceSink>>,
+    pub(crate) lashlang_execution: Arc<TraceLashlangGraphStore>,
+}
+
+/// The state every route serves from: `core` and the stores of the store set
+/// it was built over, beside the host's own state.
+pub(crate) fn workbench_app_state(
+    core: LashCore,
+    stores: &dyn lash::StoreSet,
+    host: WorkbenchHost,
+) -> AnyhowResult<AppState> {
+    let process_observer = core
+        .processes()
+        .observer()
+        .context("process observer was configured for the workbench core")?;
+    Ok(AppState {
+        core,
+        session_defaults: host.session_defaults,
+        unknown_turn_terminals: UnknownTurnTerminals::default(),
+        attachment_store: stores.attachment_store(),
+        session_store_factory: stores.session_store_factory(),
+        trigger_store: stores.trigger_store(),
+        process_observer,
+        sessions: host.sessions,
+        messages: Arc::new(Mutex::new(Vec::new())),
+        selected_llm_profile: Arc::new(Mutex::new(host.selected_llm_profile)),
+        trace_sink: host.trace_sink,
+        lashlang_execution: host.lashlang_execution,
+        event_tx: host.event_tx,
+        mail_world: host.mail_world,
+        active_turns: host.active_turns,
+        authorization: WorkbenchAuthorization::allow_all(),
+        approvals: host.approvals,
+    })
+}
+
+/// What a workbench does before it serves: create its current session,
+/// reconcile the approvals decided while it was down, and take up the turns a
+/// previous incarnation was following (the session's engine settles them
+/// whoever follows them) and the current session's runs.
+pub(crate) async fn start_workbench(state: &AppState) -> AnyhowResult<()> {
+    state
+        .ensure_current_session()
+        .await
+        .context("create the workbench's current session")?;
+    reconcile_decided_approvals(state).await;
+    turns::resume_turn_followers(state).await;
+    turns::watch_session_runs(state, &state.current_session_id()).await;
+    Ok(())
 }
 
 pub(crate) async fn async_main() -> AnyhowResult<()> {
@@ -456,8 +575,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         None => stores,
     };
     eprintln!("agent-workbench durable store: {}", stores.backend);
-    let core_store_factory = stores.stores.session_store_factory();
-    let trigger_store = stores.stores.trigger_store();
     let mail_world = mail::MailWorld::new();
     let sessions = WorkbenchSessions::persistent(data_dir.join("session-id"))?;
     // The boot session joins the roster so the selector lists it. A roster row
@@ -503,15 +620,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     // yet, so the freshness feed above has no producer until it does.
     let _process_event_sink = Arc::new(ChannelProcessEventSink::new(process_event_tx))
         as Arc<dyn lash::process::ProcessEventSink>;
-    // The durable backend over the store set (ADR 0132 §1); it serves turns,
-    // processes and session input once L3 (FIG-5172) lands.
-    let host_backend = lash::durable::DurableBackendBuilder::new(Arc::clone(&stores.stores))
-        .build()
-        .context("build the durable backend")?;
-    let attachment_store = stores.stores.attachment_store();
-
-    let tracing = lash::runtime::TraceRuntime::new(host_backend.clock())
-        .with_product_observer(Arc::clone(&lashlang_execution_sink));
     // FIG-1407: the workbench used to run `TurnBudget::Unbounded` with no
     // second bound, so a turn whose cells never committed re-called the
     // provider until someone noticed — one measured send bought 1,223 calls.
@@ -525,20 +633,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .transpose()
         .map_err(|error| anyhow!("invalid AGENT_WORKBENCH_OUTPUT_TOKEN_CAP: {error}"))?;
     let shutdown_provider = provider.clone();
-    let session_defaults = lash::SessionSpec::new(
-        selection.key(),
-        lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS),
-        lash::MaxToolCalls::new(1024),
-    )
-    .reasoning(selection.reasoning())
-    .no_progress_budget(lash::NoProgressBudget::bounded(
-        WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS,
-    ))
-    .generation(lash::direct::GenerationOptions {
-        output_token_cap,
-        ..Default::default()
-    })
-    .attachment_acceptance(Arc::new(workbench_attachment_acceptance()));
+    let session_defaults = workbench_session_defaults(&selection, output_token_cap);
     // Web search/fetch ride the free Parallel Search MCP server, attached with
     // no API key and no auth headers. Construction never fails on an
     // unreachable server: the pool keeps reconnecting in the background and
@@ -602,19 +697,19 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     //     )))
     //     .trace_context(TraceContext::default());
     // host_trigger_route_restorer is the host's Arc<dyn lash::triggers::TriggerRouteRestorer>.
-    let core = workbench_core_builder(host_backend, rlm_channel, context_window_tokens, plugins)
-        .await?
-        .trace_runtime(tracing)
-        .trace_sink(Arc::clone(&trace_sink))
-        .trace_level(TraceLevel::Extended)
-        .llm_profiles(Arc::new(WorkbenchLlmProfiles {
-            provider: provider.clone(),
-        }))
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "agent-workbench",
-            process_incarnation_id(),
-        ))
-        .context("build Lash core")?;
+    let core = build_workbench_core(
+        &stores.stores,
+        rlm_channel,
+        context_window_tokens,
+        plugins,
+        WorkbenchTracing {
+            trace_sink: Arc::clone(&trace_sink),
+            lashlang_execution_sink,
+        },
+        provider.clone(),
+        lash::persistence::LeaseOwnerIdentity::opaque("agent-workbench", process_incarnation_id()),
+    )
+    .await?;
     let shutdown_core = core.clone();
     // A stalled obligation is the durable, operator-actionable face of what
     // the removed worker-fault channel reported: a delivery the relay refused
@@ -672,42 +767,25 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         }
     });
     let operation = async {
-        let process_observer = core
-            .processes()
-            .observer()
-            .context("process observer was configured for the workbench core")?;
-
-        let state = AppState {
+        let state = workbench_app_state(
             core,
-            session_defaults,
-            unknown_turn_terminals: UnknownTurnTerminals::default(),
-            attachment_store,
-            session_store_factory: Arc::clone(&core_store_factory),
-            trigger_store,
-            process_observer,
-            sessions,
-            messages: Arc::new(Mutex::new(Vec::new())),
-            selected_llm_profile: Arc::new(Mutex::new(LlmProfileSelection {
-                model,
-                model_variant: Some(model_variant),
-            })),
-            trace_sink: Some(Arc::clone(&trace_sink)),
-            lashlang_execution,
-            event_tx,
-            mail_world,
-            active_turns,
-            authorization: WorkbenchAuthorization::allow_all(),
-            approvals,
-        };
-        state
-            .ensure_current_session()
-            .await
-            .context("create the workbench's current session")?;
-        reconcile_decided_approvals(&state).await;
-        // The turns a previous incarnation was following are settled by the
-        // session's engine whoever follows them; this process takes them up.
-        turns::resume_turn_followers(&state).await;
-        turns::watch_session_runs(&state, &state.current_session_id()).await;
+            stores.stores.as_ref(),
+            WorkbenchHost {
+                session_defaults,
+                sessions,
+                event_tx,
+                active_turns,
+                mail_world,
+                approvals,
+                selected_llm_profile: LlmProfileSelection {
+                    model,
+                    model_variant: Some(model_variant),
+                },
+                trace_sink: Some(Arc::clone(&trace_sink)),
+                lashlang_execution,
+            },
+        )?;
+        start_workbench(&state).await?;
         emit_workbench_trace(
             &state.trace_sink,
             None,
