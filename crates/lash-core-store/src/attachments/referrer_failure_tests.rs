@@ -186,7 +186,7 @@ impl AttachmentStore for ProbeBackend {
             });
         }
         let id = match self.result {
-            PutResult::WrongId => AttachmentId::parse("wrong-id").unwrap(),
+            PutResult::WrongId => content_id(b"wrong-id"),
             _ => content_id(&bytes),
         };
         Ok(AttachmentRef::new(
@@ -385,7 +385,7 @@ async fn wrong_id_abort_failure_preserves_terminal_contract() {
             })
             .expect("rollback must expose the typed contract failure");
         assert!(
-            matches!(write, AttachmentStoreError::Contract(message) if message.contains("wrong-id"))
+            matches!(write, AttachmentStoreError::Contract(message) if message.contains(content_id(b"wrong-id").as_str()))
         );
         assert_rollback_cause(&error, cause);
         assert!(

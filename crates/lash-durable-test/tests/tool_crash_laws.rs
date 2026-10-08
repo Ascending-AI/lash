@@ -519,7 +519,7 @@ impl lash_core::ToolProvider for Puts {
             return ToolOutcome::err_fmt(error).into();
         }
         ToolOutcome::from_output(lash_core::ToolCallOutput::success_tool_value(
-            lash_core::ToolValue::Attachment(lash_core::AttachmentSource::stored(kept)),
+            lash_core::ToolValue::Attachment(kept),
         ))
         .into()
     }

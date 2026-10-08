@@ -18,10 +18,12 @@
 use std::sync::{Arc, LazyLock};
 
 use lash_core_execution::attachments::content_id;
+use lash_core_execution::attachments::{ContentMismatchDetail, validate_attachment_bytes};
 use lash_core_execution::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentStore, AttachmentStoreError,
     AttachmentStoreFailureClass, AttachmentStorePersistence, StoredAttachment, StoredBlobRef,
 };
+use lash_sansio::llm::attachment_delivery::{Delivery, DeliveryLimits, ProviderAccepts};
 use rusqlite::{OptionalExtension, params};
 
 use crate::SqliteStore;
@@ -45,6 +47,9 @@ lash_store_sql::statements! {
 
         /// The bytes held under `?1`.
         select_content = "SELECT length(content), CASE WHEN length(content) <= ?2 THEN content END FROM attachment_blobs WHERE attachment_id = ?1";
+
+        /// A ref delivery projects content only after its length claim and read bound agree.
+        select_delivery = "SELECT length(content), CASE WHEN length(content) = ?2 AND length(content) <= ?3 THEN content END FROM attachment_blobs WHERE attachment_id = ?1";
 
         /// One blob's identity and freshness, without its bytes.
         select_ref = "SELECT attachment_id, stored_at_ms FROM attachment_blobs
@@ -216,6 +221,54 @@ impl AttachmentStore for SqliteAttachmentStore {
             }),
             None => Err(AttachmentStoreError::NotFound(id.clone())),
         }
+    }
+
+    async fn deliver(
+        &self,
+        reference: &AttachmentRef,
+        accepts: &ProviderAccepts,
+        limits: &DeliveryLimits,
+    ) -> Result<Delivery, AttachmentStoreError> {
+        if !accepts.bytes {
+            return Err(AttachmentStoreError::DeliveryUnsupported {
+                id: reference.id.clone(),
+                media_type: reference.media_type.clone(),
+            });
+        }
+        let id = reference.id.as_str().to_owned();
+        let expected = i64::try_from(reference.byte_len).unwrap_or(i64::MAX);
+        let bound = i64::try_from(limits.max_bytes).unwrap_or(i64::MAX);
+        let row = self
+            .conn
+            .call(move |connection| {
+                connection
+                    .query_row(
+                        attachment_blob_sql().select_delivery.sql(),
+                        params![id, expected, bound],
+                        |row| Ok((row.get::<_, u64>(0)?, row.get::<_, Option<Vec<u8>>>(1)?)),
+                    )
+                    .optional()
+            })
+            .await
+            .map_err(|error| backend_error("deliver", error))?;
+        let Some((actual, bytes)) = row else {
+            return Err(AttachmentStoreError::NotFound(reference.id.clone()));
+        };
+        if actual != reference.byte_len {
+            return Err(AttachmentStoreError::ContentMismatch {
+                id: reference.id.clone(),
+                detail: ContentMismatchDetail::Length {
+                    expected: reference.byte_len,
+                    actual,
+                },
+            });
+        }
+        let bytes = bytes.ok_or(AttachmentStoreError::ReadLimitExceeded {
+            byte_len: actual,
+            max_bytes: limits.max_bytes,
+        })?;
+        validate_attachment_bytes(reference, &bytes, bytes.capacity() as u64, limits.max_bytes)?;
+        Ok(Delivery::Bytes(bytes))
     }
 
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {

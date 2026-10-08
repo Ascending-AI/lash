@@ -195,7 +195,7 @@ impl BlobTools {
                 create_request: Box::new(create_request),
                 turn_input: Box::new(
                     lash::TurnInput::text("read the attached input")
-                        .with_attachment(lash_core::AttachmentSource::stored(stored)),
+                        .with_attachment(stored),
                 ),
                 result: lash_core::SessionTurnOutcome::Turn,
             },
@@ -277,9 +277,7 @@ impl ToolProvider for BlobTools {
                 {
                     Ok(reference) => lash_core::ToolOutcome::from_output(
                         lash_core::ToolCallOutput::success_tool_value(
-                            lash_core::ToolValue::Attachment(lash_core::AttachmentSource::stored(
-                                reference,
-                            )),
+                            lash_core::ToolValue::Attachment(reference),
                         ),
                     ),
                     Err(error) => lash_core::ToolOutcome::err_fmt(error),
@@ -962,8 +960,7 @@ async fn upload_expiry_is_local(tier: Tier) {
     let upload_a = upload_of(&law.referrers(&a.id).await).expect("A is held by an upload");
     run(
         &session,
-        lash::TurnInput::text("look at B")
-            .with_attachment(lash_core::AttachmentSource::stored(b.clone())),
+        lash::TurnInput::text("look at B").with_attachment(b.clone()),
     )
     .await;
     let held_b = law.referrers(&b.id).await;
@@ -1013,10 +1010,7 @@ async fn queued_input_outlives_its_upload_expiry(tier: Tier) {
         .expect("the creating core's node drains");
     let accepted = Box::pin(
         session
-            .send(
-                lash::TurnInput::text("look at this")
-                    .with_attachment(lash_core::AttachmentSource::stored(queued.clone())),
-            )
+            .send(lash::TurnInput::text("look at this").with_attachment(queued.clone()))
             .into_future(),
     )
     .await

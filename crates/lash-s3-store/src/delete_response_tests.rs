@@ -114,7 +114,7 @@ fn store_at(endpoint: String) -> S3AttachmentStore {
 }
 
 fn never_written() -> AttachmentId {
-    AttachmentId::parse("sha256:never-existed").expect("valid attachment id")
+    lash_core::attachments::content_id(b"never-existed")
 }
 
 #[tokio::test]

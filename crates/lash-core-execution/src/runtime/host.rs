@@ -17,6 +17,7 @@ use super::{DeploymentStore, ProcessWorkSubstrate, ProcessWorkWiring};
 #[derive(Clone)]
 pub struct RuntimeHostConfig {
     backend: crate::Backend,
+    provider_file_uploaders: Vec<Arc<dyn crate::attachments::ProviderFileUploader>>,
     pub durability: RuntimeDurabilityConfig,
     pub process_engines: ProcessEngineRegistry,
     pub providers: RuntimeProviderConfig,
@@ -296,6 +297,7 @@ impl RuntimeHostConfig {
             },
             tracing: crate::trace::TraceRuntime::new(Arc::clone(&clock)),
             turn_phase_probes: super::RuntimeTurnPhaseProbeSlot::default(),
+            provider_file_uploaders: Vec::new(),
             clock,
         }
     }
@@ -314,11 +316,13 @@ impl RuntimeHostConfig {
         let upload_expiry_ms = self.durability.attachment_store.upload_expiry_ms();
         let output_retention = self.durability.attachment_store.output_retention();
         self.durability.attachment_store = Arc::new(
-            crate::RuntimeAttachmentStore::ephemeral(backend.attachment_store())
-                .with_max_attachment_bytes(max_attachment_bytes)
-                .with_read_policy(self.durability.attachment_store.read_policy())
-                .with_upload_expiry_ms(upload_expiry_ms)
-                .with_output_retention(output_retention),
+            crate::RuntimeAttachmentStore::ephemeral(
+                self.delivery_backend(backend.attachment_store()),
+            )
+            .with_max_attachment_bytes(max_attachment_bytes)
+            .with_read_policy(self.durability.attachment_store.read_policy())
+            .with_upload_expiry_ms(upload_expiry_ms)
+            .with_output_retention(output_retention),
         );
         self.durability.turn_prelude_store = backend.turn_prelude_store();
         let mut config = self
@@ -358,6 +362,35 @@ impl RuntimeHostConfig {
                 .reconfigured_max_attachment_bytes(max_attachment_bytes),
         );
         self
+    }
+
+    /// Install host-scoped upload infrastructure without changing attachment holders.
+    pub fn with_provider_file_uploaders(
+        mut self,
+        uploaders: Vec<Arc<dyn crate::attachments::ProviderFileUploader>>,
+    ) -> Self {
+        self.provider_file_uploaders = uploaders;
+        let backend = self.delivery_backend(self.backend.attachment_store());
+        self.durability.attachment_store = Arc::new(
+            self.durability
+                .attachment_store
+                .reconfigured_backend(backend),
+        );
+        self
+    }
+    fn delivery_backend(
+        &self,
+        backend: Arc<dyn crate::AttachmentStore>,
+    ) -> Arc<dyn crate::AttachmentStore> {
+        if self.provider_file_uploaders.is_empty() {
+            backend
+        } else {
+            Arc::new(crate::attachments::ProviderFileDelivery::new(
+                backend,
+                self.provider_file_uploaders.clone(),
+                Default::default(),
+            ))
+        }
     }
 
     pub fn with_attachment_read_policy(mut self, policy: crate::AttachmentReadPolicy) -> Self {

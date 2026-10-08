@@ -632,6 +632,7 @@ pub struct LashCoreBuilder {
     queued_work_batching: Option<facade_support::QueuedWorkBatchingConfig>,
     max_attachment_bytes: Option<Option<u64>>,
     attachment_read_policy: Option<lash_core::AttachmentReadPolicy>,
+    provider_file_uploaders: Vec<Arc<dyn lash_core::attachments::ProviderFileUploader>>,
     attachment_upload_expiry: Option<std::time::Duration>,
     output_retention: Option<lash_core::OutputRetentionPolicy>,
     // Core fields applied over the config the backend's ports assemble.
@@ -666,6 +667,7 @@ impl LashCoreBuilder {
             queued_work_batching: None,
             max_attachment_bytes: None,
             attachment_read_policy: None,
+            provider_file_uploaders: Vec::new(),
             attachment_upload_expiry: None,
             output_retention: None,
             trace_runtime: None,
@@ -758,6 +760,15 @@ impl LashCoreBuilder {
     /// including provider encoding. Independent of put and history limits.
     pub fn attachment_read_policy(mut self, policy: lash_core::AttachmentReadPolicy) -> Self {
         self.attachment_read_policy = Some(policy);
+        self
+    }
+
+    /// Optional provider Files API uploaders, scoped to this host's credentials.
+    pub fn provider_file_uploaders(
+        mut self,
+        uploaders: Vec<Arc<dyn lash_core::attachments::ProviderFileUploader>>,
+    ) -> Self {
+        self.provider_file_uploaders = uploaders;
         self
     }
 
@@ -951,7 +962,9 @@ impl LashCoreBuilder {
         }
         let backend = self.backend.clone();
         let store_factory = backend.session_store_factory();
-        let core = self.resolve_runtime_host_config()?;
+        let core = self
+            .resolve_runtime_host_config()?
+            .with_provider_file_uploaders(std::mem::take(&mut self.provider_file_uploaders));
         let process_observation_hub = Arc::new(
             crate::process_observation::ProcessObservationHub::new(self.process_observation_config),
         );

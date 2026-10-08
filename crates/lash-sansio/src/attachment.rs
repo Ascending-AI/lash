@@ -86,8 +86,7 @@ impl<'de> serde::Deserialize<'de> for AttachmentId {
     }
 }
 
-/// The wire shape is the validated identity string; the id alphabet is
-/// enforced by `parse`, which no schema assertion can express.
+/// The wire shape is a string constrained to the content-digest alphabet.
 impl schemars::JsonSchema for AttachmentId {
     fn inline_schema() -> bool {
         true

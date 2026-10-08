@@ -5,13 +5,18 @@
 //! in the configured [`lash_core::RuntimeStore`] backend.
 
 use futures_util::TryStreamExt;
+use lash_core::attachments::{ContentMismatchDetail, validate_attachment_bytes};
 use lash_core::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentStore, AttachmentStoreError,
     AttachmentStoreFailureClass, AttachmentStorePersistence, StoredAttachment, StoredBlobRef,
 };
 use lash_sansio::Redacted;
+use lash_sansio::llm::attachment_delivery::{
+    Delivery, DeliveryLimits, DeliverySecret, ProviderAccepts,
+};
 use object_store::aws::AmazonS3Builder;
 use object_store::path::Path;
+use object_store::signer::{Method, Signer};
 use object_store::{ObjectStore, ObjectStoreExt};
 use std::sync::Arc;
 use url::Url;
@@ -92,6 +97,7 @@ impl S3AttachmentStoreBuilder {
 #[derive(Clone)]
 pub struct S3AttachmentStore {
     store: Arc<dyn ObjectStore>,
+    signer: Option<Arc<dyn Signer>>,
     prefix: Option<String>,
 }
 
@@ -117,8 +123,10 @@ impl S3AttachmentStore {
             .build()
             .map_err(|err| terminal_backend_error("build", err))?;
 
+        let store = Arc::new(store);
         Ok(Self {
-            store: Arc::new(store),
+            store: store.clone(),
+            signer: Some(store),
             prefix,
         })
     }
@@ -126,6 +134,20 @@ impl S3AttachmentStore {
     pub fn from_object_store(store: Arc<dyn ObjectStore>, prefix: Option<String>) -> Self {
         Self {
             store,
+            signer: None,
+            prefix: normalize_prefix(prefix.as_deref()),
+        }
+    }
+
+    /// Bind an object store and the signer for its immutable content namespace.
+    pub fn from_object_store_with_signer(
+        store: Arc<dyn ObjectStore>,
+        signer: Arc<dyn Signer>,
+        prefix: Option<String>,
+    ) -> Self {
+        Self {
+            store,
+            signer: Some(signer),
             prefix: normalize_prefix(prefix.as_deref()),
         }
     }
@@ -249,6 +271,76 @@ impl AttachmentStore for S3AttachmentStore {
         max_bytes: u64,
     ) -> Result<StoredAttachment, AttachmentStoreError> {
         get_at_path(&*self.store, self.content_path(id)?, id, max_bytes).await
+    }
+
+    async fn deliver(
+        &self,
+        reference: &AttachmentRef,
+        accepts: &ProviderAccepts,
+        limits: &DeliveryLimits,
+    ) -> Result<Delivery, AttachmentStoreError> {
+        if accepts.url
+            && let Some(signer) = &self.signer
+        {
+            let path = self.content_path(&reference.id)?;
+            let meta = self
+                .store
+                .head(&path)
+                .await
+                .map_err(|error| map_object_store_get_error(error, &reference.id))?;
+            if meta.size != reference.byte_len {
+                return Err(AttachmentStoreError::ContentMismatch {
+                    id: reference.id.clone(),
+                    detail: ContentMismatchDetail::Length {
+                        expected: reference.byte_len,
+                        actual: meta.size,
+                    },
+                });
+            }
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis();
+            let now = u64::try_from(now).unwrap_or(u64::MAX);
+            // Signatures start at whole seconds. Use that same conservative
+            // epoch when declaring validity, including at the seven-day edge.
+            let start = now / 1000 * 1000;
+            let seconds = limits
+                .valid_through_ms
+                .saturating_sub(start)
+                .div_ceil(1000)
+                .max(60);
+            if seconds <= 7 * 24 * 60 * 60 {
+                let url = signer
+                    .signed_url(Method::GET, &path, std::time::Duration::from_secs(seconds))
+                    .await
+                    .map_err(|error| AttachmentStoreError::Backend {
+                        operation: "sign",
+                        class: classify_object_store_error(&error),
+                        source: "attachment URL signing failed".into(),
+                    })?;
+                if url.scheme() == "https" {
+                    return Ok(Delivery::Url {
+                        url: DeliverySecret::new(url.to_string()),
+                        valid_until_ms: Some(start.saturating_add(seconds * 1000)),
+                    });
+                }
+            }
+        }
+        if accepts.bytes {
+            let stored = self.get(&reference.id, limits.max_bytes).await?;
+            validate_attachment_bytes(
+                reference,
+                &stored.bytes,
+                stored.bytes.capacity() as u64,
+                limits.max_bytes,
+            )?;
+            return Ok(Delivery::Bytes(stored.bytes));
+        }
+        Err(AttachmentStoreError::DeliveryUnsupported {
+            id: reference.id.clone(),
+            media_type: reference.media_type.clone(),
+        })
     }
 
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
@@ -459,8 +551,8 @@ mod tests {
     use object_store::aws::AmazonS3ConfigKey;
 
     #[tokio::test]
-    async fn s3_attachment_materialization_read_budgets() {
-        lash_conformance::attachment_materialization_read_budgets(Arc::new(
+    async fn s3_attachment_delivery_read_budgets() {
+        lash_conformance::attachment_delivery_read_budgets(Arc::new(
             S3AttachmentStore::from_object_store(
                 Arc::new(object_store::memory::InMemory::new()),
                 None,
@@ -887,3 +979,6 @@ mod redaction_tests {
         assert!(!debug.contains("s3-secret-sentinel"), "leaked: {debug}");
     }
 }
+
+#[cfg(test)]
+mod delivery_tests;

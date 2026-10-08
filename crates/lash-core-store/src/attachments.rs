@@ -17,9 +17,11 @@ pub use root_enumeration::{AttachmentRootPage, AttachmentRootSource, CompleteAtt
 
 use std::collections::HashSet;
 use std::path::PathBuf;
+#[cfg(test)]
 use std::sync::Arc;
 
-use lash_sansio::{AttachmentCreateMeta, AttachmentId, AttachmentRef};
+use lash_sansio::llm::attachment_delivery::{Delivery, DeliveryLimits, ProviderAccepts};
+use lash_sansio::{AttachmentCreateMeta, AttachmentId, AttachmentRef, MediaType};
 
 use crate::store::{
     AttachmentCondemnation, AttachmentCondemnationAdoption, AttachmentCondemnationPhase,
@@ -74,11 +76,30 @@ impl AttachmentStoreFailureClass {
     }
 }
 
+/// The content claim that failed verification.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum ContentMismatchDetail {
+    #[error("expected {expected} bytes, found {actual}")]
+    Length { expected: u64, actual: u64 },
+    #[error("content digest differs")]
+    Digest,
+}
+
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum AttachmentStoreError {
     #[error("attachment `{0}` was not found")]
     NotFound(AttachmentId),
+    #[error("attachment `{id}` ({media_type}) cannot be delivered in any accepted form")]
+    DeliveryUnsupported {
+        id: AttachmentId,
+        media_type: MediaType,
+    },
+    #[error("attachment `{id}` does not match its reference: {detail}")]
+    ContentMismatch {
+        id: AttachmentId,
+        detail: ContentMismatchDetail,
+    },
     /// A session put exceeded the host's configured attachment byte limit.
     #[error(
         "attachment is {byte_len} bytes, exceeding the configured {max_bytes}-byte attachment limit"
@@ -86,7 +107,7 @@ pub enum AttachmentStoreError {
     SizeLimitExceeded { byte_len: u64, max_bytes: u64 },
     #[error("attachment read reached {byte_len} bytes, exceeding the {max_bytes}-byte read limit")]
     ReadLimitExceeded { byte_len: u64, max_bytes: u64 },
-    #[error("attachment materialization exceeds the {max_bytes}-byte request budget")]
+    #[error("attachment delivery exceeds the {max_bytes}-byte request budget")]
     RequestBudgetExceeded { max_bytes: u64 },
     #[error("attachment store I/O failed at {path}: {source}")]
     Io {
@@ -225,14 +246,8 @@ pub enum AttachmentStorePersistence {
 /// freshness signal the backend exposes, `delete` is idempotent, and a missing
 /// blob maps to [`AttachmentStoreError::NotFound`].
 ///
-/// Implementors that map an id into a namespaced storage path or object key
-/// must reject malformed ids *before* constructing that path or key. A storage
-/// id is 1 to 128 bytes of printable ASCII, contains no `/` or `\\`, is not `.`
-/// or `..`, and has no absolute or platform-prefix form. This keeps lookup and
-/// deletion inside the backend namespace even when an id came from an
-/// untrusted protocol. Such backends return their typed invalid-id error, or
-/// [`AttachmentStoreError::NotFound`] when they have no separate invalid-id
-/// variant.
+/// Every id is a 64-character lowercase content digest, validated at construction.
+/// Backends preserve that content address through bounded reads and deliveries.
 #[async_trait::async_trait]
 pub trait AttachmentStore: Send + Sync {
     fn persistence(&self) -> AttachmentStorePersistence {
@@ -260,6 +275,39 @@ pub trait AttachmentStore: Send + Sync {
         id: &AttachmentId,
         max_bytes: u64,
     ) -> Result<StoredAttachment, AttachmentStoreError>;
+
+    /// Deliver immutable content in an accepted form, under the byte and validity bounds.
+    /// Delivered secrets must never appear in backend diagnostics.
+    async fn deliver(
+        &self,
+        reference: &AttachmentRef,
+        accepts: &ProviderAccepts,
+        limits: &DeliveryLimits,
+    ) -> Result<Delivery, AttachmentStoreError> {
+        if !accepts.bytes {
+            return Err(AttachmentStoreError::DeliveryUnsupported {
+                id: reference.id.clone(),
+                media_type: reference.media_type.clone(),
+            });
+        }
+        let stored = self.get(&reference.id, limits.max_bytes).await?;
+        validate_attachment_bytes(
+            reference,
+            &stored.bytes,
+            stored.bytes.capacity() as u64,
+            limits.max_bytes,
+        )?;
+        Ok(Delivery::Bytes(stored.bytes))
+    }
+
+    /// Forget only the cached delivery equal to the rejected value.
+    async fn invalidate_delivery(
+        &self,
+        _reference: &AttachmentRef,
+        _rejected: &Delivery,
+    ) -> Result<(), AttachmentStoreError> {
+        Ok(())
+    }
 
     /// Idempotent: deleting an absent blob is a no-op.
     /// This is the primitive mark-and-sweep GC uses to reclaim unreferenced content;
@@ -1419,114 +1467,52 @@ pub fn content_id(bytes: &[u8]) -> AttachmentId {
     .expect("BLAKE3 hex digest is a valid attachment id")
 }
 
+/// Verify actual content and retained allocation before a read or delivery escapes.
+pub fn validate_attachment_bytes(
+    reference: &AttachmentRef,
+    bytes: &[u8],
+    capacity: u64,
+    max_bytes: u64,
+) -> Result<(), AttachmentStoreError> {
+    let actual = bytes.len() as u64;
+    if actual > max_bytes || capacity > max_bytes {
+        return Err(AttachmentStoreError::ReadLimitExceeded {
+            byte_len: actual.max(capacity),
+            max_bytes,
+        });
+    }
+    if actual != reference.byte_len {
+        return Err(AttachmentStoreError::ContentMismatch {
+            id: reference.id.clone(),
+            detail: ContentMismatchDetail::Length {
+                expected: reference.byte_len,
+                actual,
+            },
+        });
+    }
+    if content_id(bytes) != reference.id {
+        return Err(AttachmentStoreError::ContentMismatch {
+            id: reference.id.clone(),
+            detail: ContentMismatchDetail::Digest,
+        });
+    }
+    Ok(())
+}
+
 fn now_epoch_ms() -> u64 {
     <crate::SystemClock as crate::ClockWallTime>::timestamp_ms(&crate::SystemClock)
 }
-#[path = "attachments/materialization.rs"]
-mod materialization;
-pub use materialization::resolve_llm_request_attachments;
+#[path = "attachments/delivery.rs"]
+mod delivery;
+pub mod provider_files;
+pub use provider_files::{
+    ProviderFileCacheLimits, ProviderFileDelivery, ProviderFileUploader, UploadedProviderFile,
+};
 
-pub fn attachment_materialization_notice(
-    snapshot: &crate::provider::AttachmentCapabilitySnapshot,
-    source: &crate::AttachmentSource,
-) -> Option<crate::AttachmentMaterializationNotice> {
-    crate::llm::transport::known_attachment_acceptors(snapshot, source)
-        .is_empty()
-        .then(|| crate::AttachmentMaterializationNotice::no_provider_accepts(source))
-}
-
-/// Replace attachments accepted by no provider with deterministic text blocks.
-///
-/// The fast path neither clones nor mutates the request, keeping accepted
-/// attachment envelopes byte-for-byte identical. On the degradation path the
-/// effect outcome is journaled under the turn-effect invocation key, so its
-/// recorded response wins on replay instead of dispatch running again.
-pub fn degrade_unmaterializable_request_attachments(
-    request: &mut Arc<crate::llm::types::LlmRequest>,
-) -> Vec<crate::AttachmentMaterializationNotice> {
-    let notices = request
-        .attachments()
-        .into_iter()
-        .filter_map(|source| {
-            attachment_materialization_notice(&request.attachment_acceptance, source)
-        })
-        .collect::<Vec<_>>();
-    if notices.is_empty() {
-        return notices;
-    }
-    let request = Arc::make_mut(request);
-    let snapshot = &request.attachment_acceptance;
-    for message in &mut request.messages {
-        use crate::llm::types::LlmContentBlock;
-        if !message
-            .blocks
-            .iter()
-            .flat_map(LlmContentBlock::attachment_sources)
-            .any(|source| attachment_materialization_notice(snapshot, source).is_some())
-        {
-            continue;
-        }
-        // A placeholder already in the message's text (tool execution
-        // appends the same notice to the result it degrades) is not repeated.
-        let existing_placeholders = message
-            .blocks
-            .iter()
-            .flat_map(|block| match block {
-                LlmContentBlock::Text { text, .. } => vec![text.to_string()],
-                LlmContentBlock::ToolResult { content, .. } => content
-                    .iter()
-                    .filter_map(|part| part.visible_text().map(str::to_string))
-                    .collect(),
-                _ => Vec::new(),
-            })
-            .collect::<HashSet<_>>();
-        let degrade = |source: &crate::AttachmentSource| {
-            attachment_materialization_notice(snapshot, source)
-                .map(|notice| notice.model_placeholder())
-        };
-        Arc::make_mut(&mut message.blocks).retain_mut(|block| match block {
-            LlmContentBlock::Attachment { source } => {
-                let Some(placeholder) = degrade(source) else {
-                    return true;
-                };
-                if existing_placeholders.contains(&placeholder) {
-                    return false;
-                }
-                *block = LlmContentBlock::Text {
-                    text: placeholder.into(),
-                    response_meta: None,
-                    cache_breakpoint: false,
-                };
-                true
-            }
-            // Inside a tool result the placeholder takes the attachment's
-            // place, so the result stays one block in its original order.
-            LlmContentBlock::ToolResult { content, .. } => {
-                content.retain_mut(|part| {
-                    let Some(placeholder) = part.attachment().and_then(degrade) else {
-                        return true;
-                    };
-                    if existing_placeholders.contains(&placeholder) {
-                        return false;
-                    }
-                    *part = lash_sansio::ModelToolReturnPart::text(placeholder);
-                    true
-                });
-                true
-            }
-            _ => true,
-        });
-    }
-    let retained = request
-        .attachments()
-        .into_iter()
-        .filter_map(|source| source.stored_ref().map(|r| r.id.clone()))
-        .collect::<HashSet<_>>();
-    request
-        .resolved_stored
-        .retain(|id, _| retained.contains(id));
-    notices
-}
+mod degradation;
+pub use degradation::{
+    attachment_materialization_notice, degrade_unmaterializable_request_attachments,
+};
 
 #[cfg(test)]
 #[path = "attachments/referrer_failure_tests.rs"]
@@ -1537,7 +1523,3 @@ mod referrer_failure_tests;
 pub mod test_capability;
 #[cfg(any(test, feature = "testing"))]
 pub use test_capability::attachment_test_acceptance;
-
-#[cfg(test)]
-#[path = "attachments/read_budget_tests.rs"]
-mod read_budget_tests;

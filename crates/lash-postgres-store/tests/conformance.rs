@@ -581,8 +581,9 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         .expect("admit clocked Postgres session");
     let store = factory.clone();
     let clock_intent = lash_core_execution::AttachmentWrite {
-        attachment_id: lash_core_execution::AttachmentId::parse("postgres-clock-attachment")
-            .expect("valid attachment id"),
+        attachment_id: lash_core_execution::attachments::content_id(
+            ("postgres-clock-attachment").as_bytes(),
+        ),
         claim: lash_core_execution::ReferrerClaim::unguarded(
             lash_core_execution::ArtifactReferrer::Session(SessionId::from(SESSION_ID)),
         )

@@ -92,7 +92,7 @@ pub async fn ended_process_record_refuses_attachment_writes_and_acquisitions(
     .into_iter()
     .enumerate()
     {
-        let id = AttachmentId::parse(format!("ended-{n}")).unwrap();
+        let id = lash_core::attachments::content_id((format!("ended-{n}")).as_bytes());
         assert_eq!(
             h.factory.condemn_attachment(&id, &pass).await.unwrap(),
             AttachmentCondemnation::Condemned
@@ -128,7 +128,7 @@ pub async fn ended_process_record_refuses_attachment_writes_and_acquisitions(
         ));
     }
     let refused = write(
-        &AttachmentId::parse("invalid-kind").unwrap(),
+        &lash_core::attachments::content_id(b"invalid-kind"),
         ArtifactReferrer::HostPin(HostArtifactPin::mint()),
     );
     assert!(matches!(
@@ -196,7 +196,7 @@ pub async fn upload_staging_identities_are_distinct_guarded_and_fenced_independe
         ("upload", "[\"uploads\",\"upload:v1:BAD\"]", true),
         ("synthetic_next", "future", false),
     ] {
-        let id = AttachmentId::parse(format!("malformed-{kind}")).unwrap();
+        let id = lash_core::attachments::content_id((format!("malformed-{kind}")).as_bytes());
         (h.insert_edge)(id.clone(), kind.into(), key.into())
             .await
             .unwrap();
@@ -214,7 +214,7 @@ pub async fn upload_staging_identities_are_distinct_guarded_and_fenced_independe
     }
     assert!(
         (h.insert_edge)(
-            AttachmentId::parse("empty-id").unwrap(),
+            lash_core::attachments::content_id(b"empty-id"),
             "upload".into(),
             String::new()
         )
@@ -363,7 +363,7 @@ pub async fn retained_output_is_held_by_its_execution_until_a_commit_names_it(
 
 pub async fn commit_and_enqueue_acquire_session_edges_all_or_nothing(h: AttachmentReferrerHandles) {
     let producer = create(&h.factory, "source").await;
-    let id = AttachmentId::parse("atomic-evidenced").unwrap();
+    let id = lash_core::attachments::content_id(b"atomic-evidenced");
     let source = ArtifactReferrer::ProcessRecord(ProcessId::fixture("atomic-source"));
     record_completed_write(&producer, &write(&id, source)).await;
     let receiver = create(&h.factory, "receiver").await;
@@ -384,7 +384,7 @@ pub async fn commit_and_enqueue_acquire_session_edges_all_or_nothing(h: Attachme
         .load_session_head_meta(&SessionId::from("receiver"))
         .await
         .unwrap();
-    let absent = AttachmentId::parse("atomic-z-absent").unwrap();
+    let absent = lash_core::attachments::content_id(b"atomic-z-absent");
     let current = state("receiver");
     let commit = RuntimeCommit::persisted_state_for_test(&current)
         .with_committed_attachments([id.clone(), absent.clone()]);
@@ -433,7 +433,7 @@ pub async fn commit_and_enqueue_acquire_session_edges_all_or_nothing(h: Attachme
             TurnInputIngress::NextTurn,
             TurnInput::items(
                 ids.into_iter()
-                    .map(|id| InputItem::attachment(AttachmentSource::stored(reference(id)))),
+                    .map(|id| InputItem::attachment(reference(id))),
             ),
         )
         .with_source_key(key)
@@ -508,7 +508,7 @@ pub async fn attachment_prefix_pin_keeps_the_session_edge_until_unpin(
             "pinned-part".into(),
             String::new(),
             Some(lash_sansio::PartAttachment {
-                source: AttachmentSource::stored(reference.clone()),
+                reference: reference.clone(),
             }),
         )]),
         reply_marker: None,
@@ -591,7 +591,7 @@ pub async fn session_referrer_waits_for_graph_retirement(h: AttachmentReferrerHa
             "retained-part".into(),
             String::new(),
             Some(lash_sansio::PartAttachment {
-                source: AttachmentSource::stored(reference.clone()),
+                reference: reference.clone(),
             }),
         )]),
         reply_marker: None,
@@ -694,7 +694,7 @@ pub async fn session_referrer_waits_for_graph_retirement(h: AttachmentReferrerHa
 
 pub async fn condemnation_needs_no_edge_and_no_pending_write(h: AttachmentReferrerHandles) {
     let store = create(&h.factory, "condemn-laws").await;
-    let id = AttachmentId::parse("pending-root").unwrap();
+    let id = lash_core::attachments::content_id(b"pending-root");
     let source = ArtifactReferrer::ProcessRecord(ProcessId::fixture("pending-source"));
     let attempt = write(&id, source.clone());
     let first = permit(store.as_ref(), &attempt).await;
@@ -765,7 +765,7 @@ pub async fn condemnation_needs_no_edge_and_no_pending_write(h: AttachmentReferr
         h.factory.condemn_attachment(&id, &pass).await.unwrap(),
         AttachmentCondemnation::RootPresent
     );
-    let superseded_id = AttachmentId::parse("superseded-condemnation").unwrap();
+    let superseded_id = lash_core::attachments::content_id(b"superseded-condemnation");
     assert_eq!(
         h.factory
             .condemn_attachment(&superseded_id, &pass)
@@ -834,7 +834,9 @@ impl AttachmentRootSet for PartialAttachmentRoots {
                 return AttachmentRootPage::from_rows(
                     (0..AttachmentRootPage::QUERY_LIMIT)
                         .map(|index| {
-                            AttachmentId::parse(format!("partial-page-{index:04}")).unwrap()
+                            lash_core::attachments::content_id(
+                                (format!("partial-page-{index:04}")).as_bytes(),
+                            )
                         })
                         .collect(),
                 );
@@ -937,7 +939,7 @@ pub async fn complete_attachment_roots_cover_every_kind_and_exhaust_pages(
     let session = SessionId::from("complete-roots");
     let mut expected = std::collections::BTreeSet::new();
     for index in 0..258 {
-        let id = AttachmentId::parse(format!("paged-root-{index:04}")).unwrap();
+        let id = lash_core::attachments::content_id((format!("paged-root-{index:04}")).as_bytes());
         record_completed_write(
             &store,
             &write(&id, ArtifactReferrer::Session(session.clone())),
@@ -953,11 +955,11 @@ pub async fn complete_attachment_roots_cover_every_kind_and_exhaust_pages(
     .into_iter()
     .enumerate()
     {
-        let id = AttachmentId::parse(format!("kind-root-{index}")).unwrap();
+        let id = lash_core::attachments::content_id((format!("kind-root-{index}")).as_bytes());
         record_completed_write(&store, &write(&id, referrer)).await;
         expected.insert(id);
     }
-    let pending = AttachmentId::parse("pending-without-edge").unwrap();
+    let pending = lash_core::attachments::content_id(b"pending-without-edge");
     let attempt = write(
         &pending,
         ArtifactReferrer::ProcessRecord(ProcessId::fixture("pending-process")),
@@ -982,7 +984,7 @@ pub async fn complete_attachment_roots_cover_every_kind_and_exhaust_pages(
 
 pub async fn attachment_root_sources_partition_start_inputs(h: AttachmentReferrerHandles) {
     use lash_core::attachments::AttachmentRootSource;
-    let id = AttachmentId::parse("start-input-root-partition").unwrap();
+    let id = lash_core::attachments::content_id(b"start-input-root-partition");
     let starter = ExecutionScope::runtime_operation("start-input-root-partition")
         .journal_identity()
         .unwrap();

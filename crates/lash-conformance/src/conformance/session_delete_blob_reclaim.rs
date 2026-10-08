@@ -800,9 +800,7 @@ async fn attachment_prefix_retention(backend_name: &str, handles: SessionDeleteB
             "shared-image-part".into(),
             String::new(),
             Some(lash_sansio::PartAttachment {
-                source: crate::AttachmentSource::Stored {
-                    attachment_ref: reference.clone(),
-                },
+                reference: reference.clone(),
             }),
         )]),
         reply_marker: None,
@@ -867,10 +865,9 @@ async fn attachment_prefix_retention(backend_name: &str, handles: SessionDeleteB
     );
     assert_eq!(
         child
-            .get(&reference.id)
+            .read(&reference)
             .await
-            .expect("fork reads shared-prefix attachment")
-            .bytes,
+            .expect("fork reads shared-prefix attachment"),
         vec![1, 2, 3]
     );
     handles
@@ -908,10 +905,9 @@ async fn attachment_prefix_retention(backend_name: &str, handles: SessionDeleteB
     ));
     assert_eq!(
         child
-            .get(&reference.id)
+            .read(&reference)
             .await
-            .expect("surviving fork retains attachment after parent deletion")
-            .bytes,
+            .expect("surviving fork retains attachment after parent deletion"),
         vec![1, 2, 3],
         "{backend_name}"
     );

@@ -625,45 +625,6 @@ async fn gc_non_empty_root_set_still_reclaims_an_unreferenced_blob() {
 }
 
 #[tokio::test]
-async fn facade_get_resolves_content_addresses_across_sessions() {
-    let backend: Arc<dyn AttachmentStore> = crate::testing::sqlite_memory_store_set()
-        .await
-        .attachment_store();
-    let manifest: Arc<dyn AttachmentReferrers> = Arc::new(RecordingReferrers::default());
-    let session_a = RuntimeAttachmentStore::new(
-        backend.clone(),
-        manifest.clone(),
-        session_owner("session-a"),
-    );
-    let session_b = RuntimeAttachmentStore::new(
-        backend.clone(),
-        manifest.clone(),
-        session_owner("session-b"),
-    );
-
-    let reference = session_a.put(vec![7, 7, 7], meta()).await.expect("put a");
-    // Session A holds the ref and resolves the blob.
-    assert_eq!(
-        session_a.get(&reference.id).await.expect("a reads").bytes,
-        vec![7, 7, 7]
-    );
-    // FIG-653: holding a referrer edge is liveness, not read authorization.
-    assert_eq!(
-        session_b
-            .get(&reference.id)
-            .await
-            .expect("shared read")
-            .bytes,
-        vec![7, 7, 7]
-    );
-    let missing = AttachmentId::parse("absent").unwrap();
-    assert!(matches!(
-        session_b.get(&missing).await,
-        Err(AttachmentStoreError::NotFound(_))
-    ));
-}
-
-#[tokio::test]
 async fn shared_bytes_survive_until_all_refs_released_then_gc_collects() {
     let backend: Arc<dyn AttachmentStore> = crate::testing::sqlite_memory_store_set()
         .await
@@ -800,7 +761,7 @@ async fn gc_delete_recheck_spares_blob_refreshed_after_snapshot() {
     let now = now_epoch_ms();
     const GRACE_MS: u64 = 60 * 60 * 1000;
     let backend = StaleSnapshotStore {
-        id: AttachmentId::parse("recheck").expect("valid attachment id"),
+        id: lash_core_store::attachments::content_id(b"recheck"),
         // Stale mtime well past the grace window: the first check would delete.
         list_mtime: now.saturating_sub(GRACE_MS * 2),
         // Fresh mtime inside the window: the re-check must spare it.
@@ -905,7 +866,7 @@ async fn gc_pre_delete_root_recheck_spares_reappeared_ref() {
     let now = now_epoch_ms();
     const GRACE_MS: u64 = 60 * 60 * 1000;
     let backend = StaleHeadStore {
-        id: AttachmentId::parse("reappeared").expect("valid attachment id"),
+        id: lash_core_store::attachments::content_id(b"reappeared"),
         // Well past the grace window: neither the snapshot nor the head re-stat
         // spares it, so the single-id root re-check is the only guard left.
         mtime: now.saturating_sub(GRACE_MS * 2),
@@ -946,7 +907,7 @@ async fn gc_pre_delete_root_recheck_spares_reappeared_ref() {
 async fn unfenced_root_authority_reports_best_effort_and_detects_the_window_loss() {
     let now = now_epoch_ms();
     const GRACE_MS: u64 = 60 * 60 * 1000;
-    let id = AttachmentId::parse("window-ref").expect("valid attachment id");
+    let id = lash_core_store::attachments::content_id(b"window-ref");
     let backend = StaleHeadStore {
         id: id.clone(),
         mtime: now.saturating_sub(GRACE_MS * 2),
@@ -1547,12 +1508,12 @@ async fn a_process_runtime_put_is_held_by_its_record() {
 }
 
 fn attachment_request(
-    attachments: Vec<crate::AttachmentSource>,
+    attachments: Vec<crate::AttachmentRef>,
 ) -> Arc<crate::llm::types::LlmRequest> {
     let blocks = attachments
         .into_iter()
-        .map(|source| crate::llm::types::LlmContentBlock::Attachment {
-            source: Box::new(source),
+        .map(|reference| crate::llm::types::LlmContentBlock::Attachment {
+            reference: Box::new(reference),
         })
         .collect();
     Arc::new(crate::llm::types::LlmRequest {
@@ -1576,7 +1537,6 @@ fn attachment_request(
             crate::llm::types::LlmRole::User,
             blocks,
         )],
-        resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: crate::llm::types::LlmToolChoice::None,
         attachment_acceptance: lash_core_store::attachments::attachment_test_acceptance(),
@@ -1592,97 +1552,15 @@ fn attachment_request(
     })
 }
 
-const DEGRADED_BYTES: &[u8] = b"opaque degraded attachment bytes";
-const ACCEPTED_BYTES: &[u8] = b"exact accepted PNG bytes";
-
-fn stored_attachment(
-    id: &str,
-    media_type: &str,
-    bytes: &[u8],
-    type_metadata: Option<AttachmentTypeMetadata>,
-    label: &str,
-) -> lash_sansio::AttachmentRef {
-    lash_sansio::AttachmentRef {
-        id: AttachmentId::parse(id).expect("attachment id"),
-        media_type: MediaType::parse(media_type).expect("attachment MIME"),
-        byte_len: bytes.len() as u64,
-        type_metadata,
-        label: Some(label.to_string()),
-    }
-}
-
-fn assert_typed_degradation_placeholder(block: &crate::llm::types::LlmContentBlock) {
-    assert!(matches!(
-        block,
-        crate::llm::types::LlmContentBlock::Text { text, .. }
-            if text.contains("attachment_unavailable")
-                && text.contains("degraded.bin")
-                && text.contains("application/octet-stream")
-                && text.contains("no_provider_accepts_mime_and_source")
-    ));
-}
-
-#[test]
-fn degraded_then_accepted_attachment_preserves_surviving_source() {
-    let degraded_ref = stored_attachment(
-        "mixed-degraded-first",
-        "application/octet-stream",
-        DEGRADED_BYTES,
-        None,
-        "degraded.bin",
-    );
-    let accepted_ref = stored_attachment(
-        "mixed-accepted-second",
-        "image/png",
-        ACCEPTED_BYTES,
-        Some(AttachmentTypeMetadata::image(Some(640), Some(480))),
-        "accepted.png",
-    );
-    let accepted_source = crate::AttachmentSource::stored(accepted_ref.clone());
-    let mut request = attachment_request(vec![
-        crate::AttachmentSource::stored(degraded_ref.clone()),
-        accepted_source.clone(),
-    ]);
-    Arc::make_mut(&mut request).resolved_stored.extend([
-        (degraded_ref.id.clone(), DEGRADED_BYTES.to_vec()),
-        (accepted_ref.id.clone(), ACCEPTED_BYTES.to_vec()),
-    ]);
-
-    let notices = degrade_unmaterializable_request_attachments(&mut request);
-
-    assert_eq!(notices.len(), 1);
-    assert_eq!(
-        notices[0].reason,
-        crate::AttachmentMaterializationReason::NoProviderAcceptsMimeAndSource
-    );
-    assert_eq!(request.attachments(), vec![&accepted_source]);
-    assert_eq!(
-        request.attachments()[0].stored_ref(),
-        Some(&accepted_ref),
-        "the accepted attachment must retain its exact metadata"
-    );
-    assert_eq!(
-        request.attachment_bytes(request.attachments()[0]),
-        Some(ACCEPTED_BYTES),
-        "the accepted attachment must retain its exact original bytes"
-    );
-    assert_eq!(request.resolved_stored.len(), 1);
-    assert!(!request.resolved_stored.contains_key(&degraded_ref.id));
-    assert_typed_degradation_placeholder(&request.messages[0].blocks[0]);
-    let surviving_source = match &request.messages[0].blocks[1] {
-        crate::llm::types::LlmContentBlock::Attachment { source } => source.as_ref(),
-        block => panic!("expected surviving attachment block, got {block:?}"),
-    };
-    assert_eq!(
-        surviving_source, &accepted_source,
-        "surviving attachment block must retain its source"
-    );
-}
-
 #[test]
 fn pinned_session_attachment_acceptance_survives_model_catalogue_change() {
-    let source =
-        crate::AttachmentSource::inline(MediaType::parse("image/png").unwrap(), vec![1, 2, 3]);
+    let source = AttachmentRef::new(
+        content_id(&[1, 2, 3]),
+        MediaType::parse("image/png").unwrap(),
+        3,
+        None,
+        None,
+    );
     let recorded = |key: &str| {
         crate::testing::test_llm_profile_config(key, crate::testing::test_llm_profile_metadata(key))
     };

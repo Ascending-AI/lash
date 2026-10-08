@@ -423,9 +423,14 @@ impl RuntimeAttachmentStore {
                     return Err(backend_error);
                 }
             };
-            if reference.id != attachment_id {
+            if reference.id != attachment_id
+                || reference.byte_len != bytes.len() as u64
+                || reference.media_type != meta.media_type
+                || reference.type_metadata != meta.type_metadata
+                || reference.label != meta.label
+            {
                 let backend_error = AttachmentStoreError::Contract(format!(
-                    "attachment store returned id `{}` after a pending write for `{attachment_id}`",
+                    "attachment store returned a different content reference after a pending write for `{attachment_id}` (returned id `{}`)",
                     reference.id
                 ));
                 if let Err(rollback_error) =
@@ -469,8 +474,34 @@ impl RuntimeAttachmentStore {
         Ok(reference)
     }
 
-    pub async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
-        self.backend.get(id, self.read_policy.max_blob_bytes).await
+    pub async fn read(&self, reference: &AttachmentRef) -> Result<Vec<u8>, AttachmentStoreError> {
+        let stored = self
+            .backend
+            .get(&reference.id, self.read_policy.max_blob_bytes)
+            .await?;
+        super::validate_attachment_bytes(
+            reference,
+            &stored.bytes,
+            stored.bytes.capacity() as u64,
+            self.read_policy.max_blob_bytes,
+        )?;
+        Ok(stored.bytes)
+    }
+
+    /// Host upload access keeps the session holder and clears any live tool execution.
+    pub fn unbound(&self) -> Self {
+        Self {
+            execution: Mutex::new(None),
+            ..self.reconfigured()
+        }
+    }
+
+    /// Replace the infrastructure port, preserving the holder and its limits.
+    pub fn reconfigured_backend(&self, backend: Arc<dyn AttachmentStore>) -> Self {
+        Self {
+            backend,
+            ..self.reconfigured()
+        }
     }
     /// The claims whose stored attachment this holder's process record
     /// holds. A process terminal must show this provenance before a value it
@@ -480,8 +511,8 @@ impl RuntimeAttachmentStore {
     /// claim.
     pub async fn claims_held_by_process_record(
         &self,
-        claims: Vec<crate::AttachmentSource>,
-    ) -> Result<Vec<crate::AttachmentSource>, AttachmentStoreError> {
+        claims: Vec<AttachmentRef>,
+    ) -> Result<Vec<AttachmentRef>, AttachmentStoreError> {
         let AttachmentHolder::Runtime(crate::runtime_owner::RuntimeOwner::Process(process_id)) =
             &self.holder
         else {
@@ -490,9 +521,7 @@ impl RuntimeAttachmentStore {
         let record = crate::artifact_referrer::ArtifactReferrer::ProcessRecord(process_id.clone());
         let mut held = Vec::new();
         for claim in claims {
-            let Some(attachment_ref) = claim.stored_ref() else {
-                continue;
-            };
+            let attachment_ref = &claim;
             let referrers = self
                 .referrers
                 .attachment_referrers(&attachment_ref.id)

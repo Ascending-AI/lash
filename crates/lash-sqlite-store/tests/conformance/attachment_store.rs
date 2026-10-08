@@ -6,9 +6,9 @@ use super::*;
 use lash_core_execution::attachments::{RuntimeAttachmentStore, reclaim_unreferenced_attachments};
 use lash_core_execution::{
     AttachmentCreateMeta, AttachmentGcFence, AttachmentReclamationPolicy, AttachmentRef,
-    AttachmentReferrers as _, AttachmentSource, AttachmentStore, AttachmentStoreError,
-    AttachmentStorePersistence, EmptyRootSetPolicy, Message, MessageRole, Part,
-    RuntimeSessionState, SessionCatalogStore, SessionRelation,
+    AttachmentReferrers as _, AttachmentStore, AttachmentStoreError, AttachmentStorePersistence,
+    EmptyRootSetPolicy, Message, MessageRole, Part, RuntimeSessionState, SessionCatalogStore,
+    SessionRelation,
 };
 use lash_sansio::MediaType;
 
@@ -74,9 +74,7 @@ fn state_referencing(session_id: &SessionId, reference: &AttachmentRef) -> Runti
             "held-image-part".into(),
             String::new(),
             Some(lash_sansio::PartAttachment {
-                source: AttachmentSource::Stored {
-                    attachment_ref: reference.clone(),
-                },
+                reference: reference.clone(),
             }),
         )]),
         reply_marker: None,
@@ -238,7 +236,13 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_referrer_row_holds() {
 }
 
 #[tokio::test]
-async fn sqlite_attachment_materialization_read_budgets() {
+async fn sqlite_attachment_delivery_read_budgets() {
     let backend = TestBackend::open(SUBSTRATE).await;
-    lash_conformance::attachment_materialization_read_budgets(backend.attachment_store()).await;
+    lash_conformance::attachment_delivery_read_budgets(backend.attachment_store()).await;
+}
+
+#[tokio::test]
+async fn sqlite_attachment_delivery_names_its_content() {
+    let backend = TestBackend::open(SUBSTRATE).await;
+    lash_conformance::attachment_delivery_names_its_content(backend.attachment_store()).await;
 }

@@ -138,7 +138,7 @@ pub async fn abandoned_attachment_write_recovery_after_cold_reopen<R, Fut>(
     Fut: Future<Output = Arc<dyn DeploymentStore>>,
 {
     let store = create(&initial_factory, "cold-write").await;
-    let id = AttachmentId::parse("cold-restoring-write").unwrap();
+    let id = lash_core::attachments::content_id(b"cold-restoring-write");
     let pass = open_pass(&initial_factory).await;
     assert_eq!(
         initial_factory
@@ -271,7 +271,7 @@ pub async fn cross_session_attachment_adoption_conformance(
 )]
 pub async fn attachment_condemnation_enumeration_conformance(f: Arc<dyn DeploymentStore>) {
     let store = create(&f, "enumeration").await;
-    let id = AttachmentId::parse("enumerated-condemnation").unwrap();
+    let id = lash_core::attachments::content_id(b"enumerated-condemnation");
     let pass = open_pass(&f).await;
     f.condemn_attachment(&id, &pass).await.unwrap();
     let rows = f.list_condemnations().await.unwrap();

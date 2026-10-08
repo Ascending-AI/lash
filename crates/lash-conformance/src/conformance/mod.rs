@@ -125,3 +125,6 @@ pub use store_recovery::*;
 pub(crate) use support_prelude::*;
 pub use tool_access_persistence::*;
 pub use tool_intent_retention::*;
+
+mod attachment_delivery;
+pub use attachment_delivery::*;
