@@ -222,10 +222,6 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
         DurableFormat::SessionHeadMeta => SurfaceRelation::Unwalkable(
             "no bounded surface: one row per session, refused at open rather than at rest",
         ),
-        DurableFormat::ProcessWakeDelivery => SurfaceRelation::Unwalkable(
-            "no bounded surface: a wake is queued work at its target session, refused at decode \
-             rather than at rest",
-        ),
         DurableFormat::SessionNodeBody => SurfaceRelation::Unwalkable(
             "no bounded surface: one row per graph node, each body refused at decode rather \
              than at rest",

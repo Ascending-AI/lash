@@ -13,52 +13,6 @@ fn field_witness<T>(_: impl FnOnce(&T)) {}
 fn variant_witness<T>(_: impl FnOnce(&T) -> bool) {}
 
 fn processes_area_witnesses_b() {
-    // W0326: lash::process::ProcessWakeDelivery::event_type [field]
-    field_witness(|value: &lash::process::ProcessWakeDelivery| {
-        let _ = &value.event_type;
-    });
-    // W0327: lash::process::ProcessWakeDelivery::input [field]
-    field_witness(|value: &lash::process::ProcessWakeDelivery| {
-        let _ = &value.input;
-    });
-    // W0328: lash::process::ProcessWakeDelivery::process_caused_by [field]
-    field_witness(|value: &lash::process::ProcessWakeDelivery| {
-        let _ = &value.process_caused_by;
-    });
-    // W0329: lash::process::ProcessWakeDelivery::process_id [field]
-    field_witness(|value: &lash::process::ProcessWakeDelivery| {
-        let _ = &value.process_id;
-    });
-    // W0330: lash::process::ProcessWakeDelivery::sequence [field]
-    field_witness(|value: &lash::process::ProcessWakeDelivery| {
-        let _ = &value.sequence;
-    });
-    // W0331: lash::process::ProcessWakeDelivery::target_session_id [field]
-    field_witness(|value: &lash::process::ProcessWakeDelivery| {
-        let _ = &value.target_session_id;
-    });
-    // W0332: lash::process::ProcessWakeDelivery::version [field]
-    field_witness(|value: &lash::process::ProcessWakeDelivery| {
-        let _ = &value.version;
-    });
-    // W0333: lash::process::ProcessWakeDelivery::wake_id [function]
-    let _ = lash::process::ProcessWakeDelivery::wake_id;
-    // W0325: lash::process::WakeId [struct]
-    type_witness::<lash::process::WakeId>();
-    // W0325: lash::process::WakeId::as_str [function]
-    let _ = lash::process::WakeId::as_str;
-    // W0325: lash::process::WakeId::into_inner [function]
-    let _ = lash::process::WakeId::into_inner;
-    // W0334: lash::process::ProcessWakeSpec [struct]
-    type_witness::<lash::process::ProcessWakeSpec>();
-    // W0335: lash::process::ProcessWakeSpec::input [field]
-    field_witness(|value: &lash::process::ProcessWakeSpec| {
-        let _ = &value.input;
-    });
-    // W0336: lash::process::ProcessWakeSpec::when [field]
-    field_witness(|value: &lash::process::ProcessWakeSpec| {
-        let _ = &value.when;
-    });
     // W0345: lash::process::SessionScopeId [struct]
     type_witness::<lash::process::SessionScopeId>();
     // W0346: lash::process::SessionScopeId::as_str [function]
@@ -103,16 +57,6 @@ fn processes_area_witnesses_b() {
     field_witness(|value: &lash::runtime::ProcessCommand| {
         if let lash::runtime::ProcessCommand::List { selection } = value {
             let _ = selection;
-        }
-    });
-    // W0371: lash::runtime::ProcessCommand::Signal [variant]
-    variant_witness(|value: &lash::runtime::ProcessCommand| {
-        matches!(value, lash::runtime::ProcessCommand::Signal { .. })
-    });
-    // W0373: lash::runtime::ProcessCommand::Signal::signal [field]
-    field_witness(|value: &lash::runtime::ProcessCommand| {
-        if let lash::runtime::ProcessCommand::Signal { signal } = value {
-            let _ = signal;
         }
     });
     // W0376: lash::runtime::ProcessCommand::Start::execution_context [field]
@@ -203,16 +147,6 @@ fn processes_area_witnesses_b() {
     field_witness(|value: &lash::runtime::ProcessEffectOutcome| {
         if let lash::runtime::ProcessEffectOutcome::List { entries, .. } = value {
             let _ = entries;
-        }
-    });
-    // W0393: lash::runtime::ProcessEffectOutcome::Signal [variant]
-    variant_witness(|value: &lash::runtime::ProcessEffectOutcome| {
-        matches!(value, lash::runtime::ProcessEffectOutcome::Signal { .. })
-    });
-    // W0394: lash::runtime::ProcessEffectOutcome::Signal::event [field]
-    field_witness(|value: &lash::runtime::ProcessEffectOutcome| {
-        if let lash::runtime::ProcessEffectOutcome::Signal { event, .. } = value {
-            let _ = event;
         }
     });
     // W0395: lash::runtime::ProcessEffectOutcome::Start [variant]
@@ -420,10 +354,6 @@ fn processes_area_witnesses_b() {
     field_witness(|value: &lash_core::ProcessSpawnProvenance| {
         let _ = &value.originator;
     });
-    // W0511: lash_core::ProcessSpawnProvenance::wake_session_id [field]
-    field_witness(|value: &lash_core::ProcessSpawnProvenance| {
-        let _ = &value.wake_session_id;
-    });
     // W0512: lash::process::ProcessStartOutcome [enum]
     type_witness::<lash::process::ProcessStartOutcome>();
     // W0513: lash::process::ProcessStartOutcome::AlreadyApplied [variant]
@@ -448,16 +378,6 @@ fn processes_area_witnesses_b() {
         if let lash::process::ProcessStartOutcome::Started(f0) = value {
             let _ = f0;
         }
-    });
-    // W0524: lash::process::ProcessTerminalSpec [struct]
-    type_witness::<lash::process::ProcessTerminalSpec>();
-    // W0525: lash::process::ProcessTerminalSpec::await_output [field]
-    field_witness(|value: &lash::process::ProcessTerminalSpec| {
-        let _ = &value.await_output;
-    });
-    // W0526: lash::process::ProcessTerminalSpec::status [field]
-    field_witness(|value: &lash::process::ProcessTerminalSpec| {
-        let _ = &value.status;
     });
     // W0527: lash::process::ProcessTombstone [struct]
     type_witness::<lash::process::ProcessTombstone>();
@@ -487,8 +407,6 @@ fn processes_area_witnesses_b() {
     let _ = lash::plugins::RuntimeExecutionContext::captured_process_execution_env_ref;
     // W0536: lash::plugins::RuntimeExecutionContext::process_handle_json [function]
     let _ = lash::plugins::RuntimeExecutionContext::process_handle_json;
-    // W0537: lash::plugins::RuntimeExecutionContext::signal_process_by_id [function]
-    let _ = lash::plugins::RuntimeExecutionContext::signal_process_by_id;
     // W0539: lash::plugins::RuntimeExecutionContext::start_child_process [function]
     let _ = lash::plugins::RuntimeExecutionContext::start_child_process(
         todo!(),
@@ -536,16 +454,6 @@ fn processes_area_witnesses_b() {
     let _ = lash::plugins::ProcessEngineRegistry::new;
     // W0625: lash::plugins::ProcessEngineRegistry::require [function]
     let _ = lash::plugins::ProcessEngineRegistry::require;
-    // W0633: lash::process::ProcessEventSemantics [struct]
-    type_witness::<lash::process::ProcessEventSemantics>();
-    // W0634: lash::process::ProcessEventSemantics::terminal [field]
-    field_witness(|value: &lash::process::ProcessEventSemantics| {
-        let _ = &value.terminal;
-    });
-    // W0635: lash::process::ProcessEventSemantics::wake [field]
-    field_witness(|value: &lash::process::ProcessEventSemantics| {
-        let _ = &value.wake;
-    });
     // W0636: lash::process::ProcessTerminalSemantics [struct]
     type_witness::<lash::process::ProcessTerminalSemantics>();
     // W0637: lash::process::ProcessTerminalSemantics::outcome [field]
@@ -565,16 +473,6 @@ fn processes_area_witnesses_b() {
     // W0642: lash::persistence::QueuedCheckpointTurnInput::turn_causes [field]
     field_witness(|value: &lash::persistence::QueuedCheckpointTurnInput| {
         let _ = &value.turn_causes;
-    });
-    // W0643: lash::persistence::ProcessWakeSource [struct]
-    type_witness::<lash::persistence::ProcessWakeSource>();
-    // W0644: lash::persistence::ProcessWakeSource::process_id [field]
-    field_witness(|value: &lash::persistence::ProcessWakeSource| {
-        let _ = &value.process_id;
-    });
-    // W0645: lash::persistence::ProcessWakeSource::sequence [field]
-    field_witness(|value: &lash::persistence::ProcessWakeSource| {
-        let _ = &value.sequence;
     });
     // W0646: lash::persistence::QueuedCheckpointWork [struct]
     type_witness::<lash::persistence::QueuedCheckpointWork>();
@@ -614,38 +512,6 @@ fn processes_area_witnesses_b() {
     fn meth_0660<T: lash::process::ProcessService>(_: &T) {
         let _ = T::list_visible_for_attempt;
     }
-    // W0661: lash::runtime::ProcessCommand::EmitEvent [variant]
-    variant_witness(|value: &lash::runtime::ProcessCommand| {
-        matches!(value, lash::runtime::ProcessCommand::EmitEvent { .. })
-    });
-    // W0662: lash::runtime::ProcessCommand::EmitEvent::process_id [field]
-    field_witness(|value: &lash::runtime::ProcessCommand| {
-        if let lash::runtime::ProcessCommand::EmitEvent { process_id, .. } = value {
-            let _ = process_id;
-        }
-    });
-    // W0663: lash::runtime::ProcessCommand::EmitEvent::request [field]
-    field_witness(|value: &lash::runtime::ProcessCommand| {
-        if let lash::runtime::ProcessCommand::EmitEvent { request, .. } = value {
-            let _ = request;
-        }
-    });
-    // W0664: lash::runtime::ProcessEffectOutcome::EmitEvent [variant]
-    variant_witness(|value: &lash::runtime::ProcessEffectOutcome| {
-        matches!(value, lash::runtime::ProcessEffectOutcome::EmitEvent { .. })
-    });
-    // W0665: lash::runtime::ProcessEffectOutcome::EmitEvent::event [field]
-    field_witness(|value: &lash::runtime::ProcessEffectOutcome| {
-        if let lash::runtime::ProcessEffectOutcome::EmitEvent { event, .. } = value {
-            let _ = event;
-        }
-    });
-    // W0673: lash::runtime::ProcessEffectOutcome::EmitEvent::wake_delivery [field]
-    field_witness(|value: &lash::runtime::ProcessEffectOutcome| {
-        if let lash::runtime::ProcessEffectOutcome::EmitEvent { wake_delivery, .. } = value {
-            let _ = wake_delivery;
-        }
-    });
     // W0676: lash::runtime::RuntimeEffectKind::ToolParentEnd [variant]
     variant_witness(|value: &lash::runtime::RuntimeEffectKind| {
         matches!(value, lash::runtime::RuntimeEffectKind::ToolParentEnd)
@@ -751,6 +617,4 @@ fn processes_area_witnesses_b() {
     let _ = lash::process::ProcessStatus::is_retired;
     // W0732: lash::durability::ProcessLocalExecution::execute [function]
     let _ = lash::durability::ProcessLocalExecution::execute;
-    // W0733: lash::durability::TriggerLocalExecution::execute [function]
-    let _ = lash::durability::TriggerLocalExecution::execute;
 }

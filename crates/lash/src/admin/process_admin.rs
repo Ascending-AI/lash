@@ -109,26 +109,6 @@ impl SessionProcessAdmin {
         self.control.await_process_output(process_id).await
     }
 
-    /// Delivers a signal to a process.
-    pub async fn signal(
-        &self,
-        process_id: &ProcessId,
-        signal_name: impl Into<String>,
-        signal_id: impl Into<String>,
-        payload: serde_json::Value,
-        scoped_effect_controller: ActorContext,
-    ) -> Result<lash_core::ProcessEvent> {
-        self.control
-            .signal_process(
-                process_id,
-                signal_name.into(),
-                signal_id.into(),
-                payload,
-                scoped_effect_controller,
-            )
-            .await
-    }
-
     /// Requests cancellation of a process.
     pub async fn cancel(
         &self,

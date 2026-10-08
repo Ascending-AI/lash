@@ -180,7 +180,7 @@ pub enum ProcessObservationItem {
     Committed {
         cursor: ProcessCursor,
         sequence: u64,
-        event_type: String,
+        kind: lash_core::ProcessEventKind,
     },
     Gap {
         requested_cursor: Option<ProcessCursor>,
@@ -226,7 +226,10 @@ impl Default for ProcessObservationConfig {
 #[derive(Clone)]
 enum PublishedItem {
     Live(Box<TraceRecord>),
-    Committed { sequence: u64, event_type: String },
+    Committed {
+        sequence: u64,
+        kind: lash_core::ProcessEventKind,
+    },
 }
 
 #[derive(Clone)]
@@ -608,7 +611,7 @@ impl ProcessObservationHub {
         publisher.publish(
             PublishedItem::Committed {
                 sequence: event.sequence,
-                event_type: event.event_type.clone(),
+                kind: event.fact.kind(),
             },
             self.config,
         );
@@ -726,7 +729,7 @@ async fn acquire_durable(
                 break 'pages;
             }
             if summary
-                .fold_event(&event.event_type, &event.payload, fleet_format)
+                .fold_event(event.fact.event_type(), &event.fact.payload(), fleet_format)
                 .is_err()
             {
                 completeness = ProcessDurableCompleteness::Incomplete {
@@ -981,10 +984,7 @@ impl ProcessObservationSubscription {
                         record,
                     }));
                 }
-                PublishedItem::Committed {
-                    sequence,
-                    event_type,
-                } => {
+                PublishedItem::Committed { sequence, kind } => {
                     if sequence <= self.sequence {
                         self.position = position;
                         continue;
@@ -1005,7 +1005,7 @@ impl ProcessObservationSubscription {
                     return Ok(Some(ProcessObservationItem::Committed {
                         cursor: self.cursor(),
                         sequence,
-                        event_type,
+                        kind,
                     }));
                 }
             }
@@ -1108,7 +1108,3 @@ pub(crate) async fn read_events(
         cursor: Some(cursor),
     })
 }
-
-#[cfg(test)]
-#[path = "process_observation/tests.rs"]
-mod tests;

@@ -150,10 +150,8 @@ impl RlmSessionExt for crate::LashSession {
 // `lash::process`; they are not re-exported here.
 pub use lash_lashlang_runtime::resolve_lashlang_module_operation;
 pub use lash_lashlang_runtime::{
-    DeferredTriggerProvider, DeferredTriggerProviderRegistry, DeferredTriggerResolutionError,
-    DeferredTriggerResolver, LASHLANG_SURFACE_EXTENSION_ID, LashlangAbilities, LashlangHostCatalog,
-    LashlangHostEnvironment, LashlangLanguageFeatures, LashlangProcessEngine, LashlangSurface,
-    LashlangSurfaceContribution, SharedDeferredTriggerResolver, TriggerGrant, TriggerResolution,
+    LASHLANG_SURFACE_EXTENSION_ID, LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment,
+    LashlangLanguageFeatures, LashlangProcessEngine, LashlangSurface, LashlangSurfaceContribution,
     lashlang_surface_extension,
 };
 pub use lash_lashlang_runtime::{
@@ -224,7 +222,7 @@ pub use lash_protocol_rlm::{
 };
 
 /// The Lashlang language surface: the AST, values, compile/link requests,
-/// introspection, trigger vocabulary, resource operations and artifact-store
+/// introspection, resource operations and artifact-store
 /// traits a host needs to author, compile and inspect Lashlang programs.
 ///
 /// This is `lashlang`'s own root namespace, re-exported whole rather than

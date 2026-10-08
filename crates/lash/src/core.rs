@@ -228,7 +228,7 @@ impl LashCore {
     /// stack.
     ///
     /// The host configures the factory (projection resolver, separate deferred
-    /// tool and trigger-definition resolvers, execution sink/jsonl path) before
+    /// tool resolvers, execution sink/jsonl path) before
     /// passing it in. The factory is built over this same `backend`
     /// ([`RlmProtocolPluginFactory::new`](crate::rlm::RlmProtocolPluginFactory::new)),
     /// which supplies its Lashlang artifact store; a factory built over any
@@ -334,7 +334,7 @@ impl LashCore {
     /// Select the lifecycle owner used by administrative session operations.
     ///
     /// The returned handle keeps the catalog, effect host, process services,
-    /// and trigger store chosen by this core together. Provider, plugin,
+    /// chosen by this core together. Provider, plugin,
     /// tracing, and other live turn wiring are deliberately excluded.
     pub async fn session_administration(&self) -> lash_core::SessionAdministration {
         let ports = self.substrate_slot.ports().await;
@@ -343,7 +343,6 @@ impl LashCore {
             Arc::clone(&self.store_factory),
             env.core.control.effect_host.clone(),
             Some(ports.process),
-            Some(env.core.trigger_store()),
             Arc::clone(&env.core.durability.process_env_store),
             self.host_process_engines.clone(),
         )
@@ -403,10 +402,6 @@ impl LashCore {
     pub fn flush_trace_sink(&self) -> Result<()> {
         self.env.core.tracing.flush()?;
         Ok(())
-    }
-
-    pub fn triggers(&self) -> crate::admin::CoreTriggerAdmin {
-        crate::admin::CoreTriggerAdmin { core: self.clone() }
     }
 
     pub fn processes(&self) -> crate::process_admin::Processes {
@@ -580,7 +575,7 @@ impl LashCore {
     ///
     /// The session actor closes itself, one durable step at a time: it
     /// cancels its open turn, revokes its waits, ends its `Until` processes
-    /// and waits for each to be terminal, deletes its triggers and storage
+    /// and waits for each to be terminal, deletes its storage
     /// (arming the `ArtifactCleanup` of what it referred to), deletes its
     /// process state and writes its tombstone. A crash resumes the close at
     /// the step it interrupted; nothing is owed by the caller. Await the
@@ -658,7 +653,6 @@ pub struct LashCoreBuilder {
     live_replay_store: Option<Arc<dyn LiveReplayStore>>,
     process_event_sinks: Vec<Arc<dyn facade_support::ProcessEventSink>>,
     process_observation_config: crate::process_observation::ProcessObservationConfig,
-    trigger_route_restorer: Option<Arc<dyn lash_core::TriggerRouteRestorer>>,
     serves_sessions: bool,
 }
 
@@ -693,7 +687,6 @@ impl LashCoreBuilder {
             live_replay_store: None,
             process_event_sinks: Vec::new(),
             process_observation_config: Default::default(),
-            trigger_route_restorer: None,
             serves_sessions: true,
         }
     }
@@ -709,17 +702,6 @@ impl LashCoreBuilder {
 
     pub fn protocol_plugin(mut self, plugin: Arc<dyn PluginFactory>) -> Self {
         self.protocol_factory = Some(plugin);
-        self
-    }
-
-    /// Install the live service that restores captured provider routes for
-    /// new trigger deliveries. Recorded starts and refusals replay without
-    /// consulting it again; the service is never serialized into a command.
-    pub fn trigger_route_restorer(
-        mut self,
-        restorer: Arc<dyn lash_core::TriggerRouteRestorer>,
-    ) -> Self {
-        self.trigger_route_restorer = Some(restorer);
         self
     }
 

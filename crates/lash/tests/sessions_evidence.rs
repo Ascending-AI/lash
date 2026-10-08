@@ -108,10 +108,6 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::TurnCancellationEvidence| {
         let _ = &value.request_id;
     });
-    // W0037: lash::TurnCause [struct]
-    type_witness::<lash::TurnCause>();
-    // W0038: lash::TurnCause::to_event_message [function]
-    let _ = lash::TurnCause::to_event_message;
     // W0039: lash::TurnInputApplication [struct]
     type_witness::<lash::TurnInputApplication>();
     // W0040: lash::durability::RuntimeHostConfig [struct]
@@ -215,20 +211,6 @@ fn drain_area_witnesses() {
         matches!(
             value,
             lash::runtime::RuntimeErrorCode::ProcessRegistryUnavailable
-        )
-    });
-    // W0095: lash::runtime::RuntimeErrorCode::ProcessSignalWaitCancelled [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::ProcessSignalWaitCancelled
-        )
-    });
-    // W0096: lash::runtime::RuntimeErrorCode::ProcessSignalWaitTimeout [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::ProcessSignalWaitTimeout
         )
     });
     // W0098: lash::runtime::RuntimeErrorCode::EngineEffectHostRequiresHandlerScope [variant]
@@ -387,13 +369,6 @@ fn drain_area_witnesses() {
         matches!(
             value,
             lash::runtime::RuntimeErrorCode::ToolCatalogResolutionFailed
-        )
-    });
-    // W0138: lash::runtime::RuntimeErrorCode::TriggerStoreUnavailable [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::TriggerStoreUnavailable
         )
     });
     // W0139: lash::runtime::RuntimeErrorCode::AwaitEventCancelUnsupported [variant]
@@ -892,38 +867,6 @@ fn drain_area_witnesses() {
     });
     // W0295: lash::process::WaitKind [enum]
     type_witness::<lash::process::WaitKind>();
-    // W0296: lash::process::WaitKind::Signal [variant]
-    variant_witness(|value: &lash::process::WaitKind| {
-        matches!(value, lash::process::WaitKind::Signal { .. })
-    });
-    // W0297: lash::process::WaitKind::Signal::event_type [field]
-    field_witness(|value: &lash::process::WaitKind| {
-        let lash::process::WaitKind::Signal { event_type, .. } = value else {
-            panic!("expected a signal wait")
-        };
-        let _ = event_type;
-    });
-    // W0298: lash::process::WaitKind::Signal::key [field]
-    field_witness(|value: &lash::process::WaitKind| {
-        let lash::process::WaitKind::Signal { key, .. } = value else {
-            panic!("expected a signal wait")
-        };
-        let _ = key;
-    });
-    // W0299: lash::process::WaitKind::Signal::name [field]
-    field_witness(|value: &lash::process::WaitKind| {
-        let lash::process::WaitKind::Signal { name, .. } = value else {
-            panic!("expected a signal wait")
-        };
-        let _ = name;
-    });
-    // W0300: lash::process::WaitKind::Signal::ordinal [field]
-    field_witness(|value: &lash::process::WaitKind| {
-        let lash::process::WaitKind::Signal { ordinal, .. } = value else {
-            panic!("expected a signal wait")
-        };
-        let _ = ordinal;
-    });
     // W0301: lash::process::WaitState [struct]
     type_witness::<lash::process::WaitState>();
     // W0302: lash::process::WaitState::key [function]
@@ -1177,12 +1120,6 @@ fn drain_area_witnesses() {
     variant_witness(|value: &lash::durability::RuntimeSubject| {
         matches!(value, lash::durability::RuntimeSubject::ProcessEvent { .. })
     });
-    // W0399: lash::durability::RuntimeSubject::ProcessEvent::event_type [field]
-    field_witness(|value: &lash::durability::RuntimeSubject| {
-        if let lash::durability::RuntimeSubject::ProcessEvent { event_type, .. } = value {
-            let _ = event_type;
-        }
-    });
     // W0400: lash::durability::RuntimeSubject::ProcessEvent::process_id [field]
     field_witness(|value: &lash::durability::RuntimeSubject| {
         if let lash::durability::RuntimeSubject::ProcessEvent { process_id, .. } = value {
@@ -1203,19 +1140,6 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::durability::RuntimeSubject| {
         if let lash::durability::RuntimeSubject::SessionNode { node_id, .. } = value {
             let _ = node_id;
-        }
-    });
-    // W0404: lash::durability::RuntimeSubject::TriggerOccurrence [variant]
-    variant_witness(|value: &lash::durability::RuntimeSubject| {
-        matches!(
-            value,
-            lash::durability::RuntimeSubject::TriggerOccurrence { .. }
-        )
-    });
-    // W0405: lash::durability::RuntimeSubject::TriggerOccurrence::occurrence_id [field]
-    field_witness(|value: &lash::durability::RuntimeSubject| {
-        if let lash::durability::RuntimeSubject::TriggerOccurrence { occurrence_id, .. } = value {
-            let _ = occurrence_id;
         }
     });
     // W0406: lash::durability::ProcessLocalExecution [struct]
@@ -1260,12 +1184,6 @@ fn drain_area_witnesses() {
     let _ = lash::durability::EffectJournalIdentity::key;
     // W0426: lash::durability::EffectJournalIdentity::session_id [function]
     let _ = lash::durability::EffectJournalIdentity::session_id;
-    // W0427: lash::durability::TriggerLocalExecution [struct]
-    type_witness::<lash::durability::TriggerLocalExecution>();
-    // W0428: lash::durability::TriggerLocalExecution::store [field]
-    field_witness(|value: &lash::durability::TriggerLocalExecution| {
-        let _ = &value.store;
-    });
     // W0429: lash::durability::CanonicalRuntimeEffectEnvelope [struct]
     type_witness::<lash::durability::CanonicalRuntimeEffectEnvelope>();
     // W0430: lash::durability::CanonicalRuntimeEffectEnvelope::hash [function]

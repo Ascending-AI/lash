@@ -654,12 +654,6 @@
       "p99_anon_peak_bytes": 50032640,
       "samples": 8
     },
-    "lash-runtime/triggers_evidence": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 41050112,
-      "samples": 8
-    },
     "lash-runtime/ui": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
@@ -1399,12 +1393,6 @@
       "oom_kills": 0,
       "p99_anon_peak_bytes": 198807552,
       "samples": 19
-    },
-    "lash-runtime/triggers_evidence": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 191078400,
-      "samples": 20
     },
     "lash-runtime/ui": {
       "legacy_peak_bytes": 0,

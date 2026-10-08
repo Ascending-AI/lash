@@ -104,22 +104,6 @@ pub enum ToolIntentIngressRefusal {
         /// Session, scope, or outcome identity found in recorded state.
         recorded: String,
     },
-    /// Refuses a trigger registration claiming an owner scope other than the
-    /// one this ingress's session confers (FIG-3116).
-    ForeignTriggerOwnerScope {
-        /// Owner scope the ingress's session resolves to.
-        expected: lash_core::TriggerOwnerScope,
-        /// Owner scope the submitted registration claimed.
-        recorded: lash_core::TriggerOwnerScope,
-    },
-    /// Refuses a trigger registration claiming an actor other than the
-    /// ingress's own session originator (FIG-3116).
-    ForeignTriggerActor {
-        /// Actor the ingress's session confers.
-        expected: lash_core::ProcessOriginator,
-        /// Actor the submitted registration claimed.
-        recorded: lash_core::ProcessOriginator,
-    },
     /// Refuses an identity already bound to a different intent kind.
     IdentityBoundToDifferentIntent {
         /// Intent kind already bound to this identity.
@@ -137,14 +121,6 @@ pub enum ToolIntentIngressRefusal {
         /// Session, scope, or outcome identity found in recorded state.
         recorded: String,
     },
-    /// Refuses a redelivered trigger emission whose occurrence retention has
-    /// reclaimed (FIG-4513).
-    ///
-    /// The first delivery emitted the occurrence and stopped before its
-    /// outcome was retained. The occurrence and its deliveries have since
-    /// been reclaimed, so the redelivery emits nothing again and has no
-    /// recorded outcome to answer.
-    TriggerOccurrenceReclaimed,
     /// Refuses a submission whose owner session was durably deleted and
     /// whose submission ledger the host's retained-evidence lever reclaimed
     /// (FIG-1509).
@@ -186,14 +162,12 @@ pub enum ToolIntentIngressOutcome {
 
 /// One realized host submission, before it is projected to a typed outcome.
 ///
-/// Process commands, trigger emissions and trigger registrations are owned by the trigger router, which has no `ProcessEffectOutcome`.
+/// A host-submitted intent is realized through the process command surface.
 enum RealizedIntent {
     Process(lash_core::ProcessEffectOutcome),
-    Trigger(lash_core::facade_support::TriggerEmitReport),
     // Boxed: a registration handle carries the whole admitted subscription
     // record, including its captured source contract and route, and is an
     // order of magnitude larger than the other two variants.
-    TriggerRegistration(Box<lash_core::TriggerMutationReceipt>),
 }
 
 /// Session-and-scope-bound host front door for durable intent realization.
@@ -348,10 +322,8 @@ impl ToolIntentIngress {
     /// *different* target is refused there, before the second target is
     /// touched. Every outcome is retained in that ledger.
     ///
-    /// `StartProcess` and `EmitTrigger` submissions do not retain their
-    /// host-chosen realization identifiers. Lash replaces a start's
-    /// `request.id` and a trigger's `request.idempotency_key` with the derived
-    /// intent replay key before either command reaches its durable store.
+    /// Submit one intent under its durable identity. Starts use the derived
+    /// replay key, so resubmission cannot create another process.
     pub async fn submit(
         &self,
         key: ToolIntentIngressKey,
@@ -391,7 +363,6 @@ impl ToolIntentIngress {
             return ToolIntentIngressOutcome::Refused { refusal };
         }
         let identity = key.identity;
-        let submitted_intent = intent.clone();
         let (outcome, replayed) = match self.realize(&identity, intent, trace).await {
             Ok((result, replayed)) => (
                 lash_core::ToolIntentExecutionOutcome::Executed {
@@ -468,10 +439,6 @@ impl ToolIntentIngress {
             ToolIntentIngressRefusal::ForeignSession { .. } => "foreign_session",
             ToolIntentIngressRefusal::ForeignExecutionScope { .. } => "foreign_execution_scope",
             ToolIntentIngressRefusal::IntentSessionMismatch { .. } => "intent_session_mismatch",
-            ToolIntentIngressRefusal::ForeignTriggerOwnerScope { .. } => {
-                "foreign_trigger_owner_scope"
-            }
-            ToolIntentIngressRefusal::ForeignTriggerActor { .. } => "foreign_trigger_actor",
             ToolIntentIngressRefusal::IdentityBoundToDifferentIntent { .. } => {
                 "identity_bound_to_different_intent"
             }
@@ -479,7 +446,6 @@ impl ToolIntentIngress {
             ToolIntentIngressRefusal::RecordedOutcomeOutsideIntentProtocol { .. } => {
                 "recorded_outcome_outside_intent_protocol"
             }
-            ToolIntentIngressRefusal::TriggerOccurrenceReclaimed => "trigger_occurrence_reclaimed",
             ToolIntentIngressRefusal::SubmissionOwnerReclaimed => "submission_owner_reclaimed",
         }
     }
@@ -521,42 +487,7 @@ impl ToolIntentIngress {
                 recorded: intent.owner().to_string(),
             });
         }
-        if let lash_core::ToolIntent::RegisterTrigger(registration) = intent {
-            return self.validate_trigger_authority(registration);
-        }
         None
-    }
-
-    /// A host front door runs inside no process, so the only registration
-    /// authority it confers is its own session's: the owner scope
-    /// `resolve_trigger_owner_scope` rules for that session with no
-    /// originator, and the session's frameless originator as actor. Any other
-    /// claim is refused before realization installs anything (FIG-3116).
-    fn validate_trigger_authority(
-        &self,
-        registration: &lash_core::RegisterTriggerIntent,
-    ) -> Option<ToolIntentIngressRefusal> {
-        // With no originator the ruling is infallible: the session's own scope.
-        let expected_owner = lash_core::resolve_trigger_owner_scope(
-            &lash_core::RuntimeOwner::Session(self.session_id.clone()),
-            None,
-        )
-        .unwrap_or_else(|_| lash_core::TriggerOwnerScope::session(self.session_id.clone()));
-        if registration.owner_scope != expected_owner {
-            return Some(ToolIntentIngressRefusal::ForeignTriggerOwnerScope {
-                expected: expected_owner,
-                recorded: registration.owner_scope.clone(),
-            });
-        }
-        let expected_actor = lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
-            self.session_id.clone(),
-        ));
-        (registration.actor != expected_actor).then(|| {
-            ToolIntentIngressRefusal::ForeignTriggerActor {
-                expected: expected_actor,
-                recorded: registration.actor.clone(),
-            }
-        })
     }
 
     /// The identity a well-formed record must carry, re-derived from its own
@@ -576,7 +507,6 @@ impl ToolIntentIngress {
         trace: &SubmissionTrace,
     ) -> std::result::Result<(lash_core::ToolIntentRealized, bool), RealizationFailure> {
         let kind = intent.kind();
-        let submitted_intent = intent.clone();
         if let Some(recorded) = self.admit_submission(identity, &intent, trace).await? {
             return Ok((recorded, true));
         }
@@ -585,34 +515,17 @@ impl ToolIntentIngress {
             .await
             .map_err(|error| Self::realization_failure(kind, error))?;
         let realized = match result {
-            RealizedIntent::Trigger(report) => lash_core::ToolIntentRealized::EmitTrigger(report),
-            RealizedIntent::TriggerRegistration(receipt) => {
-                lash_core::ToolIntentRealized::RegisterTrigger(receipt)
-            }
             RealizedIntent::Process(result) => match result {
                 lash_core::ProcessEffectOutcome::Start { record, .. } => {
                     lash_core::ToolIntentRealized::StartProcess(
                         lash_core::ProcessHandleView::from_record(*record),
                     )
                 }
-                // The realized signal is the one this submission sent.
-                lash_core::ProcessEffectOutcome::Signal { .. } => match &submitted_intent {
-                    lash_core::ToolIntent::SignalProcess(intent) => {
-                        lash_core::ToolIntentRealized::SignalProcess(Box::new(
-                            sent_signal(identity, intent)
-                                .map_err(|error| RealizationFailure::Command(kind, error))?,
-                        ))
-                    }
-                    _ => return Err(Self::outside_protocol_outcome("signal")),
-                },
                 lash_core::ProcessEffectOutcome::Cancel { record } => {
                     lash_core::ToolIntentRealized::CancelProcess(
                         lash_core::ProcessCancelReceipt::from_record(*record)
                             .map_err(|error| RealizationFailure::Command(kind, error))?,
                     )
-                }
-                lash_core::ProcessEffectOutcome::EmitEvent { event, .. } => {
-                    lash_core::ToolIntentRealized::EmitProcessEvent(event)
                 }
                 lash_core::ProcessEffectOutcome::Definition { definition } => match kind {
                     lash_core::ToolIntentKind::PublishDefinition => {
@@ -622,11 +535,7 @@ impl ToolIntentIngress {
                         lash_core::ToolIntentRealized::GetDefinition(definition)
                     }
                     lash_core::ToolIntentKind::StartProcess
-                    | lash_core::ToolIntentKind::SignalProcess
-                    | lash_core::ToolIntentKind::CancelProcess
-                    | lash_core::ToolIntentKind::EmitProcessEvent
-                    | lash_core::ToolIntentKind::EmitTrigger
-                    | lash_core::ToolIntentKind::RegisterTrigger => {
+                    | lash_core::ToolIntentKind::CancelProcess => {
                         return Err(Self::outside_protocol_outcome("definition"));
                     }
                 },
@@ -851,19 +760,8 @@ impl ToolIntentIngress {
 
     /// Classify one realization error.
     ///
-    /// Every shape this ingress realizes is fenced by a durable key at the
-    /// point it mutates: the process registration fingerprint for a start, the
-    /// event replay key for a signal or an emitted event, the cancel replay
-    /// override, the occurrence idempotency key for a trigger. When one of
-    /// those keys is re-presented with different content the store refuses with
-    /// [`lash_core::durable_identity_conflict`]. Mapping it here to
-    /// [`ToolIntentIngressRefusal::DuplicateIdentity`] gives hosts one refusal
-    /// vocabulary for every shape (FIG-1489) instead of a generic command
-    /// failure.
-    ///
-    /// A trigger store that finds the occurrence's tombstone refuses the
-    /// ingest with [`lash_core::trigger_occurrence_reclaimed`], which maps to
-    /// [`ToolIntentIngressRefusal::TriggerOccurrenceReclaimed`] (FIG-4513).
+    /// Retained identities fence starts and cancellations. Changed content
+    /// reaches the host as a typed duplicate-identity refusal.
     fn realization_failure(
         kind: lash_core::ToolIntentKind,
         error: lash_core::PluginError,
@@ -872,11 +770,6 @@ impl ToolIntentIngress {
             return RealizationFailure::Refused(ToolIntentIngressRefusal::DuplicateIdentity {
                 kind,
             });
-        }
-        if lash_core::is_trigger_occurrence_reclaimed(&error) {
-            return RealizationFailure::Refused(
-                ToolIntentIngressRefusal::TriggerOccurrenceReclaimed,
-            );
         }
         RealizationFailure::Command(kind, error)
     }
@@ -928,11 +821,6 @@ impl ToolIntentIngress {
                     execution_context: Box::new(lash_core::ProcessExecutionContext::default()),
                 }
             }
-            // The recorded append admission refuses an unknown or pruned
-            // target; no registry read comes ahead of it (ADR 0105 §1).
-            lash_core::ToolIntent::SignalProcess(intent) => lash_core::ProcessCommand::Signal {
-                signal: sent_signal(identity, &intent)?,
-            },
             lash_core::ToolIntent::CancelProcess(intent) => {
                 // The recorded cancel admission refuses an unknown or pruned
                 // target; no registry read comes ahead of it (ADR 0105 §1).
@@ -951,30 +839,6 @@ impl ToolIntentIngress {
                     )),
                 }
             }
-            lash_core::ToolIntent::EmitProcessEvent(intent) => {
-                // A plain event emission appends under the declaration's own
-                // replay key, with no signal-key derivation: core's
-                // `emit_event_recorded_intent` passes the same key through.
-                let request =
-                    lash_core::ProcessEventAppendRequest::new(intent.event_type, intent.payload)
-                        .with_replay_key(identity.replay_key.clone());
-                lash_core::ProcessCommand::EmitEvent {
-                    process_id: intent.process_id,
-                    request,
-                }
-            }
-            lash_core::ToolIntent::EmitTrigger(intent) => {
-                let mut request = intent.request;
-                request.idempotency_key = identity.replay_key.clone();
-                let (report, realization) = self.emit_recorded_trigger(request).await?;
-                // The replay-derived occurrence idempotency key, not an
-                // effect-journal key, is the dedupe point for a re-submitted
-                // trigger emission, so this route has no journal verdict to
-                // read. It reports the trigger store's own: a re-submitted
-                // occurrence coalesces onto the recorded one (FIG-3070).
-                let replayed = realization.is_coalesced();
-                return Ok((RealizedIntent::Trigger(report), replayed));
-            }
             lash_core::ToolIntent::PublishDefinition(intent) => {
                 lash_core::ProcessCommand::PublishDefinition {
                     draft: intent.draft,
@@ -986,118 +850,9 @@ impl ToolIntentIngress {
                     definition_id: intent.definition_id,
                 }
             }
-            lash_core::ToolIntent::RegisterTrigger(intent) => {
-                let handle = self.register_recorded_trigger(identity, *intent).await?;
-                return Ok((RealizedIntent::TriggerRegistration(handle), false));
-            }
         };
         let (result, replayed) = self.run_command(identity, command).await?;
         Ok((RealizedIntent::Process(result), replayed))
-    }
-
-    /// Install one recorded subscription draft through the same trigger effect
-    /// the runtime intent executor uses, keyed by the declaration's replay key.
-    async fn register_recorded_trigger(
-        &self,
-        identity: &lash_core::ToolIntentIdentity,
-        intent: lash_core::RegisterTriggerIntent,
-    ) -> Result<Box<lash_core::TriggerMutationReceipt>, lash_core::PluginError> {
-        // `validate` already pinned `owner_scope` and `actor` to this
-        // ingress's own session authority (FIG-3116).
-        let store = self.core.env.core.trigger_store();
-        let scoped = self
-            .core
-            .env
-            .core
-            .control
-            .effect_host
-            .scoped(lash_core::AdmittedScope::new(self.scope.clone()))
-            .map_err(lash_core::PluginError::Runtime)?;
-        // The realizing execution's journal holds what it publishes, and the
-        // command's effect holds the revision it commits before it commits
-        // (ADR 0113 §3.4, §3.7).
-        let creator = scoped
-            .execution_scope()
-            .journal_identity()
-            .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
-        let store: std::sync::Arc<dyn lash_core::TriggerStore> =
-            std::sync::Arc::new(lash_core::triggers::RevisionReferrerTriggerStore::new(
-                store,
-                self.core.host_process_engines.clone(),
-                creator.clone(),
-            ));
-        let draft = intent.draft;
-        let invocation = lash_core::RuntimeEffectInvocation::new(
-            lash_core::EffectAddress::new(
-                scoped.execution_scope().clone(),
-                identity.replay_key.clone(),
-            )
-            .map_err(|error| lash_core::PluginError::Session(error.to_string()))?,
-            lash_core::RuntimeAttribution::for_session(self.session_id.clone()),
-            identity.replay_key.clone(),
-        )
-        .with_replay_attribution(lash_core::RuntimeReplayAttribution::ToolIntent(
-            identity.clone(),
-        ));
-        let outcome = scoped
-            .tool_effect(
-                lash_core::RuntimeEffectEnvelope::new(
-                    invocation,
-                    lash_core::RuntimeEffectCommand::Trigger {
-                        command: Box::new(lash_core::TriggerCommand::Register {
-                            owner_scope: intent.owner_scope,
-                            actor: intent.actor,
-                            draft,
-                        }),
-                    },
-                ),
-                lash_core::RuntimeEffectLocalExecutor::triggers(store),
-            )
-            .await
-            .map_err(lash_core::PluginError::RuntimeEffectController)?
-            .into_trigger()
-            .map_err(lash_core::PluginError::RuntimeEffectController)?
-            .map_err(|error| lash_core::PluginError::TriggerOperation(Box::new(error)))?;
-        match outcome {
-            lash_core::TriggerCommandOutcome::Mutation { receipt } => Ok(receipt),
-            other => Err(lash_core::PluginError::Session(format!(
-                "trigger registration returned a non-mutation outcome: {other:?}"
-            ))),
-        }
-    }
-
-    async fn emit_recorded_trigger(
-        &self,
-        request: lash_core::TriggerOccurrenceRequest,
-    ) -> Result<
-        (
-            lash_core::facade_support::TriggerEmitReport,
-            lash_core::StoreRealization,
-        ),
-        lash_core::PluginError,
-    > {
-        let store = self.core.env.core.trigger_store();
-        let ports = self.core.substrate_slot.ports().await;
-        let process_work = ports.process;
-        let mut router = lash_core::facade_support::TriggerRouter::new(store, process_work)
-            .with_process_artifacts(
-                std::sync::Arc::clone(&self.core.env.core.durability.process_env_store),
-                self.core.host_process_engines.clone(),
-            );
-        if let Some(restorer) = &self.core.env.core.control.trigger_route_restorer {
-            router = router.with_route_restorer(std::sync::Arc::clone(restorer));
-        }
-        let scoped = self
-            .core
-            .env
-            .core
-            .control
-            .effect_host
-            .scoped(lash_core::AdmittedScope::new(self.scope.clone()))
-            .map_err(lash_core::PluginError::Runtime)?;
-        router
-            .emit_recorded_reporting_realization(request, &scoped)
-            .await
     }
 
     fn process_registry(
@@ -1227,21 +982,4 @@ impl ToolIntentIngress {
         };
         Ok((result, replayed))
     }
-}
-
-/// The signal a host-submitted signal intent sends. The intent's replay key
-/// is the signal's id, as on core's recorded-intent seam: the append key is
-/// derived from the signal's identity, never spelled here (FIG-4299).
-fn sent_signal(
-    identity: &lash_core::ToolIntentIdentity,
-    intent: &lash_core::SignalProcessIntent,
-) -> Result<lash_core::ProcessSignal, lash_core::PluginError> {
-    Ok(lash_core::ProcessSignal::new(
-        lash_core::ProcessSignalIdentity::new(
-            intent.process_id.clone(),
-            intent.signal_name.clone(),
-            identity.replay_key.clone(),
-        )?,
-        intent.payload.clone(),
-    ))
 }

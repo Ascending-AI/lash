@@ -224,24 +224,6 @@ impl LashCore {
         }
     }
 
-    /// The router this core emits trigger occurrences through: over its
-    /// trigger store and process work, admitting targets against its engines
-    /// and restoring captured routes with its restorer.
-    pub(crate) fn trigger_router(&self) -> lash_core::facade_support::TriggerRouter {
-        let router = lash_core::facade_support::TriggerRouter::new(
-            self.env.core.trigger_store(),
-            self.substrate_slot.setup.process.clone(),
-        )
-        .with_process_artifacts(
-            Arc::clone(&self.env.core.durability.process_env_store),
-            self.host_process_engines.clone(),
-        );
-        match &self.env.core.control.trigger_route_restorer {
-            Some(restorer) => router.with_route_restorer(Arc::clone(restorer)),
-            None => router,
-        }
-    }
-
     /// The worker the core's node runs its processes on.
     fn process_worker(&self) -> crate::Result<lash_core_worker::DurableProcessWorker> {
         lash_core_worker::DurableProcessWorker::new(self.durable_process_worker_config()?)

@@ -650,7 +650,7 @@ impl ParkedSession {
 
 impl LashSession {
     /// The lifecycle owner of this session: the catalog, effect host,
-    /// process services and trigger store its open was bound to.
+    /// process services its open was bound to.
     pub fn session_administration(&self) -> lash_core::SessionAdministration {
         self.binding.administration()
     }
@@ -952,7 +952,7 @@ impl LashSession {
         }
     }
 
-    /// Refresh the session graph from any background process that signalled it
+    /// Refresh the session graph from durable state
     /// changed. This is the honest name for the former
     /// `processes().await_all()` misnomer (ADR 0014 grill): a session-graph
     /// resync, not a terminal wait on background work — wait on a process with

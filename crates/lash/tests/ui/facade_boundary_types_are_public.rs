@@ -269,41 +269,6 @@ fn observation_types_are_homed_in_observe(
     let _ = (cursor, observation, resume, revision);
 }
 
-fn trigger_types_are_homed_in_triggers(
-    event: lash::triggers::TriggerEvent,
-    report: lash::triggers::TriggerEmitReport,
-    registration: lash::triggers::TriggerRegistration,
-    source_type: lash::triggers::TriggerEventType,
-    filter: lash::triggers::TriggerSubscriptionFilter,
-    target: lash::triggers::TriggerTarget,
-) {
-    let _ = (event, report, registration, source_type, filter, target);
-    let _ = lash::triggers::empty_trigger_source_key("ui.button.pressed");
-}
-
-fn trigger_change_types_are_homed_in_triggers(
-    cursor: lash::triggers::TriggerSubscriptionChangeCursor,
-    change: lash::triggers::TriggerSubscriptionChange,
-) {
-    let _ = (cursor, change);
-}
-
-fn trigger_route_service_is_installable(
-    builder: lash::LashCoreBuilder,
-    restorer: std::sync::Arc<dyn lash::triggers::TriggerRouteRestorer>,
-    outcome: lash::triggers::TriggerDeliveryEmitOutcome,
-) {
-    let _ = builder.trigger_route_restorer(restorer);
-    let _ = matches!(
-        outcome,
-        lash::triggers::TriggerDeliveryEmitOutcome::Failed {
-            code: lash::runtime::RuntimeErrorCode::TriggerRouteUnavailable
-                | lash::runtime::RuntimeErrorCode::TriggerRouteRevoked,
-            ..
-        }
-    );
-}
-
 async fn persistence_load_helpers_are_nameable(
     store: &lash::persistence::SessionStore,
 ) -> Result<Option<RuntimeSessionState>, StoreError> {
@@ -330,42 +295,6 @@ fn wrapped_session_store_refusal_is_nameable(error: lash::EmbedError) -> bool {
             ..
         })
     )
-}
-
-// Types that appear in facade public signatures must have a reachable facade
-// home (no bare `lash_core::` leak). See lib.rs contract: "Every public name
-// has exactly one home."
-#[allow(clippy::too_many_arguments)]
-fn leaked_signature_types_are_homed(
-    execution: lash::TurnExecutionMetrics,
-    message: lash::messages::Message,
-    tool_id: lash::tools::ToolId,
-    create_request: lash::SessionCreateRequest,
-    start_point: lash::SessionStartPoint,
-    plugin_options: lash::plugins::PluginOptions,
-    provenance: lash::process::ProcessProvenance,
-    outcome: lash::TurnOutcome,
-    finish: lash::TurnFinish,
-    stop: lash::TurnStop,
-    cause: lash::TurnCause,
-    subscription: lash::triggers::TriggerSubscriptionRecord,
-    replay_store: lash::observe::InMemoryLiveReplayStore,
-) {
-    let _ = (
-        execution,
-        message,
-        tool_id,
-        create_request,
-        start_point,
-        plugin_options,
-        provenance,
-        outcome,
-        finish,
-        stop,
-        cause,
-        subscription,
-        replay_store,
-    );
 }
 
 fn head_ownership_refusal_is_public(
@@ -442,10 +371,8 @@ fn main() {
     let _ = verified_commit_chokepoint_is_nameable;
     let _ = wrapped_session_store_refusal_is_nameable;
     let _ = observation_types_are_homed_in_observe;
-    let _ = trigger_types_are_homed_in_triggers;
     let _ = cancellation_token_is_at_root;
     let _ = pending_turn_input_cancel_facade_is_nameable;
-    let _ = leaked_signature_types_are_homed;
 }
 
 #[cfg(feature = "otel-trace")]

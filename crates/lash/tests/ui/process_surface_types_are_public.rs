@@ -28,25 +28,23 @@ use lash::process::{
     ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
     ProcessDefinitionValue, ProcessDurableCompleteness, ProcessDurableSnapshot, ProcessEngineKind,
     ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
-    ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog, ProcessEventPage,
-    ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome,
-    ProcessEventSemantics, ProcessEventSemanticsSpec, ProcessEventSink, ProcessEventType,
-    ProcessEventsFrom, ProcessEventsRead, ProcessExecutionContext, ProcessExecutionEnvRef,
-    ProcessExecutionEnvSpec, ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleView,
-    ProcessIdentity, ProcessInput, ProcessLifecycle, ProcessLineage, ProcessListFilter,
+    ProcessEventHistoryRetention, ProcessEventKind, ProcessEventLite, ProcessEventLog,
+    ProcessEventPage, ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode,
+    ProcessEventReadOutcome, ProcessEventSink, ProcessEventsFrom, ProcessEventsRead,
+    ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleView, ProcessIdentity,
+    ProcessInput, ProcessLifecycle, ProcessLifecycleFact, ProcessLineage, ProcessListFilter,
     ProcessListMode, ProcessLiveReferenceView, ProcessObservationItem, ProcessObservationSnapshot,
     ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope, ProcessOriginator,
     ProcessOriginatorFilter, ProcessOutcome, ProcessProvenance, ProcessPruneReport, ProcessQuery,
     ProcessRecord, ProcessRegistrar, ProcessRegistration, ProcessRegistry, ProcessRegistryCursor,
     ProcessRetention, ProcessRuntimeHost, ProcessService, ProcessSessionDeleteReport,
     ProcessSignature, ProcessStartOptions, ProcessStartOutcome, ProcessStartRequest,
-    ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalSemantics,
-    ProcessTerminalSpec, ProcessTerminalWait, ProcessTombstone, ProcessToolIntents,
-    ProcessToolVisibilityFilter, ProcessValueSelector, ProcessWake, ProcessWakeDelivery,
-    ProcessWakeSpec, ProcessWorkObserver, ProcessWorkSnapshot, ProcessWorkSubstrate,
-    ProcessWorkWiring, Processes, ProjectionWatermark, ScopeGrant, ScopeId, ScopeRef,
-    SessionProcessAdmin, SessionScope, SessionScopeId, StartCx, StartCxError, WaitKind, WaitState,
-    WatchedRegistry, lifetime, process_wake_source_key, watch_process_registry,
+    ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalWait, ProcessTombstone,
+    ProcessToolIntents, ProcessToolVisibilityFilter, ProcessWorkObserver, ProcessWorkSnapshot,
+    ProcessWorkSubstrate, ProcessWorkWiring, Processes, ProjectionWatermark, ScopeGrant, ScopeId,
+    ScopeRef, SessionProcessAdmin, SessionScope, SessionScopeId, StartCx, StartCxError, WaitKind,
+    WaitState, WatchedRegistry, lifetime, watch_process_registry,
 };
 // FIG-4656: the lifecycle state a record holds, the outcome a terminal state
 // owns, the statuses derived from them, and the start target a request names.
@@ -68,12 +66,6 @@ fn process_change_subscription_signature_is_public(
     process_id: &lash::ProcessId,
 ) -> ProcessChangeSubscription {
     hub.subscribe(process_id)
-}
-
-async fn trigger_retention_signatures_are_public(processes: &Processes) {
-    let _: lash::triggers::TriggerOccurrenceReclamationResult =
-        processes.reclaim_trigger_occurrences(u64::MAX).await;
-    let _: lash::Result<usize> = processes.forget_trigger_tombstones(u64::MAX).await;
 }
 
 fn main() {}

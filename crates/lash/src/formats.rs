@@ -65,8 +65,8 @@ pub use lash_core::store::{
 };
 pub use lash_core::tool_run::material::OUTCOME_MATERIAL_FORMAT_VERSION;
 pub use lash_core::{
-    PROCESS_EVENT_VOCABULARY_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-    SCOPE_STORAGE_PAYLOAD_VERSION, SESSION_NODE_BODY_SCHEMA_VERSION,
+    PROCESS_EVENT_VOCABULARY_VERSION, SCOPE_STORAGE_PAYLOAD_VERSION,
+    SESSION_NODE_BODY_SCHEMA_VERSION,
 };
 #[cfg(feature = "rlm")]
 pub use lash_lashlang_runtime::LASHLANG_SEGMENT_STATE_VERSION;
@@ -104,8 +104,6 @@ pub enum DurableFormat {
     CheckpointComponentEncoding,
     /// The persisted session-head metadata payload.
     SessionHeadMeta,
-    /// The serialized wake-delivery payload a process outbox row carries.
-    ProcessWakeDelivery,
     /// The persisted JSON body of a session-graph node.
     SessionNodeBody,
     /// The session-state generation marker admission compares before any
@@ -199,7 +197,6 @@ impl DurableFormat {
             DurableFormat::SessionCheckpointManifest => "session checkpoint manifest",
             DurableFormat::CheckpointComponentEncoding => "checkpoint component encoding",
             DurableFormat::SessionHeadMeta => "session head meta",
-            DurableFormat::ProcessWakeDelivery => "process wake delivery",
             DurableFormat::SessionNodeBody => "session node body",
             DurableFormat::SessionStateGeneration => "session state generation",
             DurableFormat::ScopeStoragePayload => "scope storage payload",
@@ -242,7 +239,6 @@ impl DurableFormat {
             DurableFormat::SessionCheckpointManifest => UpgradePolicy::Migrate,
             DurableFormat::CheckpointComponentEncoding => UpgradePolicy::Migrate,
             DurableFormat::SessionHeadMeta => UpgradePolicy::Migrate,
-            DurableFormat::ProcessWakeDelivery => UpgradePolicy::Migrate,
             DurableFormat::SessionNodeBody => UpgradePolicy::Migrate,
             DurableFormat::SessionStateGeneration => UpgradePolicy::Migrate,
             DurableFormat::ScopeStoragePayload => UpgradePolicy::Migrate,
@@ -380,13 +376,6 @@ pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
             version: FormatVersion::Counter(SESSION_HEAD_META_SCHEMA_VERSION),
             owning_crate: "lash-core",
             constant: "SESSION_HEAD_META_SCHEMA_VERSION",
-            probe: FormatProbe::Comparable,
-        },
-        DurableFormatEntry {
-            format: DurableFormat::ProcessWakeDelivery,
-            version: FormatVersion::Counter(PROCESS_WAKE_DELIVERY_FORMAT_VERSION),
-            owning_crate: "lash-core",
-            constant: "PROCESS_WAKE_DELIVERY_FORMAT_VERSION",
             probe: FormatProbe::Comparable,
         },
         DurableFormatEntry {

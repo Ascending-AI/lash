@@ -353,7 +353,7 @@ impl DurableSession {
     /// Return all pending durable queued-work batches for this session.
     ///
     /// This is an admin/introspection view for non-user queued work such as
-    /// process wakes and session commands. User-visible model input is stored
+    /// session commands. User-visible model input is stored
     /// separately as pending turn input and is exposed by
     /// [`pending_turn_inputs`](Self::pending_turn_inputs).
     pub async fn queued_work(&self) -> Result<Vec<QueuedWorkBatch>> {

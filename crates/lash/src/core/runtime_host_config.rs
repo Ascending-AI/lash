@@ -71,7 +71,6 @@ impl LashCoreBuilder {
         // recovery pass's relays and every immediate `deliver_now` derive
         // theirs from it (FIG-4246).
         core.control.recovery_pass = self.recovery_pass;
-        core.control.trigger_route_restorer = self.trigger_route_restorer.take();
         if let Some(models) = self.models.clone() {
             core.providers.models = models;
         }

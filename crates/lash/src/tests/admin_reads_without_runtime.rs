@@ -40,8 +40,6 @@ async fn read_every_admin_surface(session: &crate::LashSession) -> Result<AdminR
     admin.state().session_state_service().await?;
     admin.config().revision().await?;
     admin.config().commands().await?;
-    admin.triggers().list_all().await?;
-    admin.triggers().by_source_type("timer").await?;
     admin.processes().list().await?;
     admin.processes().list_all().await?;
     let observed = session.observe();

@@ -120,7 +120,6 @@ pub use lash_core::testing::ScriptedError;
 pub use lash_core::testing::wait_until;
 
 // The vocabulary this module's signatures name (the facade-completeness rule).
-pub use lash_core::triggers::TriggerRouter;
 
 /// Make panic containment loud in a test or performance harness.
 pub use lash_core::panic_containment::{is_loud, set_loud};

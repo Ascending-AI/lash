@@ -1207,22 +1207,6 @@
     "peak_bytes": 15847424,
     "samples": 16
   },
-  "//crates/lash:triggers_evidence__test": {
-    "cpu_count": 1,
-    "memory_kb": 262144,
-    "p95_cores": 1.06,
-    "p99_peak_bytes": 15183872,
-    "peak_bytes": 16687104,
-    "samples": 170
-  },
-  "//crates/lash:triggers_evidence__test__fv_31d3474d": {
-    "cpu_count": 1,
-    "memory_kb": 262144,
-    "p95_cores": 1.08,
-    "p99_peak_bytes": 17440768,
-    "peak_bytes": 17440768,
-    "samples": 18
-  },
   "//crates/lashctl:lashctl__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,

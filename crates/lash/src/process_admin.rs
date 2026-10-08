@@ -2,7 +2,7 @@
 //!
 //! [`Processes`] (reached via [`LashCore::processes`](crate::LashCore::processes),
 //! re-exported as [`lash::process::Processes`](crate::process::Processes)) is THE
-//! host-level process surface (ADR 0014 grill): start, observe, signal, cancel,
+//! host-level process surface (ADR 0014 grill): start, observe, cancel,
 //! transfer, prune, and abandon-request every process, with the two distinct
 //! scope filters — `observed_by` (what a session may address) and `originated_by`
 //! (what a session created). The session-scoped
@@ -15,7 +15,6 @@ use lash_core::ActorContext;
 
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
-use lash_sansio::sync::MutexExt;
 
 async fn await_process_terminal(
     process_work: &dyn lash_core::ProcessWorkSubstrate,
@@ -26,235 +25,6 @@ async fn await_process_terminal(
             lash_core::ProcessTerminalWait::Terminal(output) => return Ok(output),
             lash_core::ProcessTerminalWait::Reattach => continue,
         }
-    }
-}
-
-struct SurveyedTriggerStore<'a> {
-    inner: &'a dyn lash_core::TriggerStore,
-    retention_candidates: std::sync::Mutex<Vec<lash_core::TriggerDeliveryRetentionCandidate>>,
-}
-
-impl<'a> SurveyedTriggerStore<'a> {
-    fn new(
-        inner: &'a dyn lash_core::TriggerStore,
-        retention_candidates: Vec<lash_core::TriggerDeliveryRetentionCandidate>,
-    ) -> Self {
-        Self {
-            inner,
-            retention_candidates: std::sync::Mutex::new(retention_candidates),
-        }
-    }
-
-    fn delivery_process_ids(&self) -> Vec<ProcessId> {
-        self.retention_candidates
-            .lock_recover()
-            .iter()
-            .map(|candidate| candidate.process_id.clone())
-            .collect::<std::collections::BTreeSet<_>>()
-            .into_iter()
-            .collect()
-    }
-
-    fn protected_process_count(&self) -> usize {
-        self.delivery_process_ids().len()
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::TriggerStore for SurveyedTriggerStore<'_> {
-    async fn execute_command(
-        &self,
-        operation_id: &str,
-        command: lash_core::TriggerCommand,
-    ) -> std::result::Result<lash_core::TriggerEffectResult, lash_core::PluginError> {
-        self.inner.execute_command(operation_id, command).await
-    }
-
-    async fn list_subscriptions(
-        &self,
-        filter: lash_core::TriggerSubscriptionFilter,
-    ) -> std::result::Result<Vec<lash_core::TriggerSubscriptionRecord>, lash_core::PluginError>
-    {
-        self.inner.list_subscriptions(filter).await
-    }
-
-    async fn subscriptions_changed_since(
-        &self,
-        cursor: lash_core::TriggerSubscriptionChangeCursor,
-        limit: usize,
-    ) -> std::result::Result<
-        (
-            Vec<lash_core::TriggerSubscriptionChange>,
-            lash_core::TriggerSubscriptionChangeCursor,
-        ),
-        lash_core::PluginError,
-    > {
-        self.inner.subscriptions_changed_since(cursor, limit).await
-    }
-    async fn list_subscriptions_with_cursor(
-        &self,
-    ) -> std::result::Result<
-        (
-            Vec<lash_core::TriggerSubscriptionRecord>,
-            lash_core::TriggerSubscriptionChangeCursor,
-        ),
-        lash_core::PluginError,
-    > {
-        self.inner.list_subscriptions_with_cursor().await
-    }
-    async fn compact_subscription_tombstones(
-        &self,
-        cutoff_epoch_ms: u64,
-    ) -> std::result::Result<usize, lash_core::PluginError> {
-        self.inner
-            .compact_subscription_tombstones(cutoff_epoch_ms)
-            .await
-    }
-
-    async fn delete_session_subscriptions(
-        &self,
-        session_id: &SessionId,
-    ) -> std::result::Result<usize, lash_core::PluginError> {
-        self.inner.delete_session_subscriptions(session_id).await
-    }
-
-    async fn plan_occurrence(
-        &self,
-        request: &lash_core::TriggerOccurrenceRequest,
-    ) -> std::result::Result<lash_core::TriggerOccurrencePlan, lash_core::PluginError> {
-        self.inner.plan_occurrence(request).await
-    }
-
-    async fn list_occurrences(
-        &self,
-        filter: lash_core::TriggerOccurrenceFilter,
-    ) -> std::result::Result<Vec<lash_core::TriggerOccurrenceRecord>, lash_core::PluginError> {
-        self.inner.list_occurrences(filter).await
-    }
-
-    async fn list_deliveries_by_occurrence_id(
-        &self,
-        occurrence_id: &str,
-    ) -> std::result::Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError>
-    {
-        self.inner
-            .list_deliveries_by_occurrence_id(occurrence_id)
-            .await
-    }
-
-    async fn list_deliveries_by_subscription_id(
-        &self,
-        subscription_id: &str,
-    ) -> std::result::Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError>
-    {
-        self.inner
-            .list_deliveries_by_subscription_id(subscription_id)
-            .await
-    }
-
-    async fn list_deliveries_by_process_id(
-        &self,
-        process_id: &ProcessId,
-    ) -> std::result::Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError>
-    {
-        self.inner.list_deliveries_by_process_id(process_id).await
-    }
-
-    async fn list_deliveries(
-        &self,
-    ) -> std::result::Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError>
-    {
-        self.inner.list_deliveries().await
-    }
-
-    async fn list_delivery_process_ids(
-        &self,
-    ) -> std::result::Result<Vec<ProcessId>, lash_core::PluginError> {
-        Ok(self.delivery_process_ids())
-    }
-
-    async fn list_delivery_retention_candidates(
-        &self,
-    ) -> std::result::Result<
-        Vec<lash_core::TriggerDeliveryRetentionCandidate>,
-        lash_core::PluginError,
-    > {
-        Ok(self.retention_candidates.lock_recover().clone())
-    }
-
-    async fn list_session_owner_ids_for_retention(
-        &self,
-    ) -> std::result::Result<Vec<SessionId>, lash_core::PluginError> {
-        self.inner.list_session_owner_ids_for_retention().await
-    }
-
-    async fn reconcile_trigger_retention(
-        &self,
-        candidates: &[lash_core::TriggerDeliveryRetentionCandidate],
-        deleted_session_ids: &[SessionId],
-    ) -> std::result::Result<lash_core::TriggerRetentionReconciliationReport, lash_core::PluginError>
-    {
-        let report = self
-            .inner
-            .reconcile_trigger_retention(candidates, deleted_session_ids)
-            .await?;
-        if report.reclaimed_delivery_count == candidates.len() {
-            let deleted_candidates = candidates
-                .iter()
-                .cloned()
-                .collect::<std::collections::HashSet<_>>();
-            self.retention_candidates
-                .lock_recover()
-                .retain(|candidate| !deleted_candidates.contains(candidate));
-        }
-        Ok(report)
-    }
-
-    async fn delete_delivery_retention_candidates(
-        &self,
-        candidates: &[lash_core::TriggerDeliveryRetentionCandidate],
-    ) -> std::result::Result<usize, lash_core::PluginError> {
-        let deleted = self
-            .inner
-            .delete_delivery_retention_candidates(candidates)
-            .await?;
-        if deleted == candidates.len() {
-            let deleted_candidates = candidates
-                .iter()
-                .cloned()
-                .collect::<std::collections::HashSet<_>>();
-            self.retention_candidates
-                .lock_recover()
-                .retain(|candidate| !deleted_candidates.contains(candidate));
-        }
-        Ok(deleted)
-    }
-
-    async fn reclaim_trigger_occurrences(
-        &self,
-        cutoff_epoch_ms: u64,
-    ) -> lash_core::TriggerOccurrenceReclamationResult {
-        self.inner
-            .reclaim_trigger_occurrences(cutoff_epoch_ms)
-            .await
-    }
-
-    async fn forget_trigger_tombstones(
-        &self,
-        written_before_epoch_ms: u64,
-    ) -> std::result::Result<usize, lash_core::StoreError> {
-        self.inner
-            .forget_trigger_tombstones(written_before_epoch_ms)
-            .await
-    }
-
-    async fn prune_non_fired_occurrences(
-        &self,
-        cutoff_epoch_ms: u64,
-    ) -> std::result::Result<usize, lash_core::PluginError> {
-        self.inner
-            .prune_non_fired_occurrences(cutoff_epoch_ms)
-            .await
     }
 }
 
@@ -747,37 +517,6 @@ impl Processes {
             .map_err(|error| EmbedError::Plugin(lash_core::PluginError::Invoke(error.to_string())))
     }
 
-    /// Delivers one signal to the process its identity names.
-    ///
-    /// The signal's identity is its append key (FIG-4299): delivering the
-    /// same signal again, from a retry, a redrive or another host, is served
-    /// the event its first delivery admitted, and the same identity under a
-    /// changed payload is refused as a durable-identity conflict.
-    pub async fn signal(
-        &self,
-        signal: lash_core::ProcessSignal,
-        scoped_effect_controller: ActorContext,
-    ) -> Result<lash_core::ProcessEvent> {
-        // The producer's context is snapshotted here, before the first
-        // await, unless the signal states its own.
-        let signal = if signal.trace_cause.is_root() {
-            let captured = self.core.env.core.tracing.scopes().capture_current();
-            signal.with_trace_cause(lash_core::TraceCause::linked_to(captured))
-        } else {
-            signal
-        };
-        let command = lash_core::ProcessCommand::Signal { signal };
-        let outcome = self
-            .run_command(command, scoped_effect_controller.clone())
-            .await?;
-        let lash_core::ProcessEffectOutcome::Signal { event } = outcome else {
-            return Err(EmbedError::Plugin(lash_core::PluginError::Session(
-                "process signal returned the wrong outcome".to_string(),
-            )));
-        };
-        Ok(*event)
-    }
-
     /// Returns the current process-session snapshot.
     pub async fn session_snapshot(
         &self,
@@ -850,8 +589,7 @@ impl Processes {
     ///
     /// The prefix is clamped to the process's last event and a horizon never
     /// moves back, so repeating the call releases nothing new. Released events
-    /// keep their sequence, type and replay identity: sequences, signal
-    /// ordinals and replayed appends behave exactly as before, so the release
+    /// keep their sequence, kind and replay identity, so the release
     /// is safe while the process runs. A read starting below the horizon
     /// answers [`ProcessEventHistoryRetention::Released`](lash_core::ProcessEventHistoryRetention::Released)
     /// with a cursor after it, and an observation snapshot reports its effect
@@ -872,12 +610,7 @@ impl Processes {
     /// Host-scheduled retention lever (ADR 0017): physically delete retired
     /// process rows (and their events, observer edges, leases) older than
     /// `cutoff_epoch_ms`, returning what was reclaimed. Retired is the terminal
-    /// outcomes. The configured trigger
-    /// store then removes exact delivery reservations for processes now
-    /// represented by tombstones. In the same trigger-store transaction it
-    /// reclaims empty-fan-out occurrences and trigger rows whose session owner
-    /// has crossed the ADR 0049 deletion frontier. Host and platform name
-    /// fences remain permanent. Live process rows — running and waiting — are
+    /// outcomes. Live process rows — running and waiting — are
     /// never touched. Lash exposes no finite maximum waiter
     /// lifetime: the host must retain rows beyond every still-replayable await,
     /// and a later await after pruning receives the typed
@@ -904,164 +637,22 @@ impl Processes {
     ) -> Result<lash_core::ProcessPruneReport> {
         let registry = self.registry();
         Self::prune_selection(filter)?;
-        let mut report = match registry
+        Ok(registry
             .prune_terminal_processes(cutoff_epoch_ms, filter.cloned(), watermark)
-            .await
-        {
-            Ok(report) => report,
-            Err(err) => {
-                tracing::warn!(
-                    failure_stage = "prune_process_registry",
-                    cutoff_epoch_ms,
-                    error = %err,
-                    "process retention failed"
-                );
-                return Err(err.into());
-            }
-        };
-        let trigger_store = self.core.env.core.trigger_store();
-        let retention = match lash_core::facade_support::reconcile_pruned_trigger_deliveries(
-            registry.as_ref(),
-            trigger_store.as_ref(),
-            Some(self.core.store_factory.as_ref()),
-        )
-        .await
-        {
-            Ok(retention) => retention,
-            Err(err) => {
-                tracing::warn!(
-                    failure_stage = "reconcile_trigger_deliveries_after_process_prune",
-                    cutoff_epoch_ms,
-                    pruned_processes = report.pruned_processes,
-                    pruned_events = report.pruned_events,
-                    error = %err,
-                    "process retention partially completed"
-                );
-                return Err(err.into());
-            }
-        };
-        report.pruned_trigger_deliveries = retention.reclaimed_delivery_count;
-        tracing::info!(
-            reclaimed_trigger_deliveries = retention.reclaimed_delivery_count,
-            reclaimed_trigger_occurrences = retention.reclaimed_occurrence_count,
-            reclaimed_trigger_subscriptions = retention.reclaimed_subscription_count,
-            "completed trigger retention after process prune"
-        );
-        Ok(report)
+            .await?)
     }
 
-    /// Reclaim terminal trigger occurrences armed no later than the cutoff.
-    /// Each delete writes a tombstone on the store's clock. Reclaim never
-    /// deletes a tombstone, including when the cutoff is `u64::MAX`.
-    pub async fn reclaim_trigger_occurrences(
-        &self,
-        cutoff_epoch_ms: u64,
-    ) -> lash_core::TriggerOccurrenceReclamationResult {
-        self.core
-            .env
-            .core
-            .trigger_store()
-            .reclaim_trigger_occurrences(cutoff_epoch_ms)
-            .await
-    }
-
-    /// Delete exactly the trigger-occurrence tombstones written strictly
-    /// before `written_before_epoch_ms` on the configured store's clock.
-    /// Returns the number removed. Tombstones are never deleted automatically.
-    ///
-    /// The host vouches that its trigger source will no longer redeliver those
-    /// occurrences. A later redelivery of a forgotten occurrence runs as a
-    /// new occurrence; identities whose tombstones remain are still refused.
-    ///
-    /// Store failures, including writer-fence and contention causes, remain
-    /// typed as [`EmbedError::Store`](crate::EmbedError::Store). A failed
-    /// transaction removes nothing.
-    pub async fn forget_trigger_tombstones(&self, written_before_epoch_ms: u64) -> Result<usize> {
-        self.core
-            .env
-            .core
-            .trigger_store()
-            .forget_trigger_tombstones(written_before_epoch_ms)
-            .await
-            .map_err(Into::into)
-    }
-
-    /// Compact payload-free process tombstones while structurally excluding
-    /// every process id referenced by an outstanding trigger delivery.
-    /// Reconciliation runs first, then the raw registry compaction lever surveys
-    /// the configured trigger store itself and refuses every matching tombstone.
-    /// A configured trigger store that cannot be surveyed or reconciled blocks
-    /// compaction, so tombstones accumulate until it recovers rather than
-    /// allowing recovery evidence to become orphaned. The caller supplies the
-    /// same explicit projection watermark required by the registry retention
-    /// contract.
+    /// Compact payload-free process tombstones through the host's retention
+    /// cutoff and explicit projection watermark.
     pub async fn compact_tombstones(
         &self,
         cutoff_epoch_ms: u64,
         watermark: lash_core::ProjectionWatermark,
     ) -> Result<usize> {
-        let registry = self.registry();
-        let trigger_store = self.core.env.core.trigger_store();
-        let retention_candidates = match trigger_store.list_delivery_retention_candidates().await {
-            Ok(candidates) => candidates,
-            Err(err) => {
-                tracing::warn!(
-                    failure_stage = "survey_outstanding_trigger_deliveries",
-                    cutoff_epoch_ms,
-                    error = %err,
-                    "process tombstone compaction blocked"
-                );
-                return Err(err.into());
-            }
-        };
-        let surveyed_trigger_store =
-            SurveyedTriggerStore::new(trigger_store.as_ref(), retention_candidates);
-        let reconciled_trigger_deliveries =
-            match lash_core::facade_support::reconcile_pruned_trigger_deliveries(
-                registry.as_ref(),
-                &surveyed_trigger_store,
-                Some(self.core.store_factory.as_ref()),
-            )
-            .await
-            {
-                Ok(retention) => retention.reclaimed_delivery_count,
-                Err(err) => {
-                    tracing::warn!(
-                        failure_stage = "reconcile_trigger_deliveries_before_compaction",
-                        cutoff_epoch_ms,
-                        protected_process_count = surveyed_trigger_store.protected_process_count(),
-                        error = %err,
-                        "process tombstone compaction blocked"
-                    );
-                    return Err(err.into());
-                }
-            };
-        tracing::debug!(
-            protected_process_count = surveyed_trigger_store.protected_process_count(),
-            reconciled_trigger_deliveries,
-            "prepared delivery-aware process tombstone compaction"
-        );
-
-        match registry
-            .compact_process_tombstones(
-                cutoff_epoch_ms,
-                watermark,
-                Some(&surveyed_trigger_store as &dyn lash_core::TriggerStore),
-            )
-            .await
-        {
-            Ok(compacted) => Ok(compacted),
-            Err(err) => {
-                tracing::warn!(
-                    failure_stage = "compact_process_tombstones",
-                    cutoff_epoch_ms,
-                    protected_process_count = surveyed_trigger_store.protected_process_count(),
-                    error = %err,
-                    "process tombstone compaction failed"
-                );
-                Err(err.into())
-            }
-        }
+        Ok(self
+            .registry()
+            .compact_process_tombstones(cutoff_epoch_ms, watermark)
+            .await?)
     }
 }
 /// A conflicting host start names only its key (ADR 0107). Every other

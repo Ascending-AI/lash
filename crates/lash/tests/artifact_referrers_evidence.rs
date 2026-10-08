@@ -185,11 +185,14 @@ async fn stored_module_refusals_preserve_causes_and_terminal_semantics(backend: 
             .expect("read durable terminal event");
         let terminals: Vec<_> = events
             .iter()
-            .filter_map(|event| event.semantics.terminal.as_ref())
+            .filter_map(|event| match &event.fact {
+                lash_core::ProcessLifecycleFact::Terminal { outcome, .. } => Some(outcome),
+                _ => None,
+            })
             .collect();
         assert_eq!(terminals.len(), 1, "the process writes one terminal event");
         assert_eq!(
-            lash_core::ProcessAwaitOutput::from(terminals[0].outcome.clone()),
+            lash_core::ProcessAwaitOutput::from(terminals[0].clone()),
             decoded,
             "event retains the cause"
         );

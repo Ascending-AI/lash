@@ -96,7 +96,6 @@ impl SessionAdmin {
                     }
                     _ => None,
                 },
-                lash_core::runtime::QueuedWorkPayload::ProcessWake { .. } => None,
             })
             .collect();
         Ok(SessionToolState {

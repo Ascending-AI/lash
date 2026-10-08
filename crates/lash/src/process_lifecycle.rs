@@ -117,7 +117,7 @@ impl ProcessEventSink for ProcessLifecycleFeed {
     async fn emit(&self, event: &ProcessEvent) {
         self.observation_hub.publish_committed(event);
         if let Some(kind) =
-            SessionProcessEventKind::from_durable_event(&event.event_type, event.sequence)
+            SessionProcessEventKind::from_durable_event(event.fact.event_type(), event.sequence)
             && !self.routes.lock_recover().is_empty()
             && let Some(registry) = self.registry.get()
         {

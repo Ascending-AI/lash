@@ -20,9 +20,6 @@
       "sessions_evidence": [
         "tests/sessions_evidence.rs"
       ],
-      "triggers_evidence": [
-        "tests/triggers_evidence.rs"
-      ],
       "ui": [
         "tests/ui.rs",
         "tests/ui/*.rs"

@@ -63,122 +63,6 @@ fn durable_error(message: String) -> EmbedError {
     ))
 }
 
-/// Host-scoped trigger surface: emit occurrences and read registrations across
-/// every owner scope.
-///
-/// This is the read and ingress half. Changing a subscription (register,
-/// update, enable, disable, delete) goes through
-/// [`TriggerCommand`](crate::triggers::TriggerCommand) executed by
-/// [`TriggerStore::execute_command`](crate::triggers::TriggerStore::execute_command)
-/// on the trigger store the host installed, so the mutation keeps its revision
-/// fence and its operation receipt. Never write the store's `lash_*` tables
-/// directly.
-#[derive(Clone)]
-pub struct CoreTriggerAdmin {
-    pub(crate) core: LashCore,
-}
-
-impl CoreTriggerAdmin {
-    fn store(&self) -> Result<Arc<dyn lash_core::TriggerStore>> {
-        Ok(self.core.env.core.trigger_store())
-    }
-
-    pub async fn emit(
-        &self,
-        request: lash_core::TriggerOccurrenceRequest,
-        scoped_effect_controller: ActorContext,
-    ) -> Result<lash_core::facade_support::TriggerEmitReport> {
-        // The producer's context is snapshotted here, before the first
-        // await, unless the request states its own: the fire links it.
-        let request = if request.trace.is_empty() {
-            let captured = self.core.env.core.tracing.scopes().capture_current();
-            request.with_trace(lash_core::TraceScopeOffer::caused_by(
-                lash_core::TraceCause::linked_to(captured),
-            ))
-        } else {
-            request
-        };
-        self.core
-            .trigger_router()
-            .emit(request, &scoped_effect_controller)
-            .await
-            .map_err(Into::into)
-    }
-
-    /// Read the latest desired source states in durable change order.
-    /// Apply idempotently by subscription id. Within an incarnation, ignore
-    /// revisions older than the one already applied. A new incarnation replaces
-    /// the prior source. Commit the cursor after applying the page, or atomically
-    /// with your own records. Re-reading an earlier cursor is safe.
-    ///
-    /// On `PluginError::TriggerSubscriptionChangeCursorPruned`, resync through
-    /// `subscriptions_snapshot`, remove sources absent from that snapshot, and
-    /// continue from its cursor. Hosts send work through the engine as usual.
-    pub async fn changed_since(
-        &self,
-        cursor: lash_core::TriggerSubscriptionChangeCursor,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<
-        crate::ChangePage<
-            lash_core::TriggerSubscriptionChange,
-            lash_core::TriggerSubscriptionChangeCursor,
-        >,
-    > {
-        let (changes, next) = self
-            .store()?
-            .subscriptions_changed_since(cursor, limit.get())
-            .await?;
-        Ok(crate::ChangePage {
-            changes,
-            next,
-            retained_after: None,
-        })
-    }
-
-    /// Atomically read all live subscriptions and their continuation cursor.
-    pub async fn subscriptions_snapshot(
-        &self,
-    ) -> Result<(
-        Vec<lash_core::TriggerSubscriptionRecord>,
-        lash_core::TriggerSubscriptionChangeCursor,
-    )> {
-        self.store()?
-            .list_subscriptions_with_cursor()
-            .await
-            .map_err(Into::into)
-    }
-
-    /// Retain tombstones until this host-chosen cutoff. Consumers behind the
-    /// removed evidence receive a typed refusal and must resync.
-    pub async fn compact_subscription_tombstones(
-        &self,
-        cutoff: std::time::SystemTime,
-    ) -> Result<usize> {
-        let cutoff_epoch_ms = cutoff
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|error| EmbedError::Session(SessionError::Protocol(error.to_string())))?
-            .as_millis();
-        let cutoff_epoch_ms = u64::try_from(cutoff_epoch_ms)
-            .map_err(|error| EmbedError::Session(SessionError::Protocol(error.to_string())))?;
-        self.store()?
-            .compact_subscription_tombstones(cutoff_epoch_ms)
-            .await
-            .map_err(Into::into)
-    }
-
-    pub async fn subscriptions(
-        &self,
-        filter: lash_core::TriggerSubscriptionFilter,
-    ) -> Result<Vec<lash_core::facade_support::TriggerRegistration>> {
-        let store = self.store()?;
-        let records = store.list_subscriptions(filter).await?;
-        Ok(records
-            .iter()
-            .map(lash_core::facade_support::TriggerRegistration::from)
-            .collect())
-    }
-}
-
 #[derive(Clone)]
 /// Facade handle for session administration.
 pub struct SessionAdmin {
@@ -218,12 +102,6 @@ impl SessionAdmin {
 
     pub fn commands(&self) -> SessionCommandAdmin {
         SessionCommandAdmin {
-            control: self.clone(),
-        }
-    }
-
-    pub fn triggers(&self) -> SessionTriggerAdmin {
-        SessionTriggerAdmin {
             control: self.clone(),
         }
     }
@@ -377,7 +255,7 @@ impl SessionAdmin {
         }
     }
 
-    /// Refresh the session graph from any background process that signalled it
+    /// Refresh the session graph from durable state
     /// changed. This is the honest name for what the core `await_background_work`
     /// call does — a session-graph resync, **not** a terminal wait on background
     /// work (that lives on the process admin's `await_output`). Renamed off the
@@ -416,33 +294,6 @@ impl SessionAdmin {
     /// Observer edges are session-scoped and deliberately frame-less.
     fn process_observer_scope(&self) -> lash_core::SessionScope {
         self.runtime.observe().process_scope()
-    }
-
-    async fn signal_process(
-        &self,
-        process_id: &ProcessId,
-        signal_name: String,
-        signal_id: String,
-        payload: serde_json::Value,
-        scoped_effect_controller: ActorContext,
-    ) -> Result<lash_core::ProcessEvent> {
-        let (owner, processes) = {
-            let writer = self.runtime.writer();
-            let runtime = writer.lock().await;
-            (
-                lash_core::RuntimeOwner::Session(SessionId::from(runtime.session_id())),
-                runtime.process_service()?,
-            )
-        };
-        let scope = lash_core::ProcessOpScope::new(scoped_effect_controller);
-        processes
-            .validate_visible(&owner, std::slice::from_ref(process_id), scope.clone())
-            .await
-            .map_err(EmbedError::Plugin)?;
-        processes
-            .signal_possessed(&owner, process_id, signal_name, signal_id, payload, scope)
-            .await
-            .map_err(EmbedError::Plugin)
     }
 
     async fn transfer_process_handles(
@@ -491,31 +342,6 @@ impl SessionAdmin {
         let idempotency_key = idempotency_key.into();
         self.with_writer(async |runtime: &mut LashRuntime| {
             Box::pin(runtime.submit_session_command(command, idempotency_key))
-                .await
-                .map_err(Into::into)
-        })
-        .await
-    }
-
-    async fn list_trigger_registrations(
-        &self,
-    ) -> Result<Vec<lash_core::facade_support::TriggerRegistration>> {
-        self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime
-                .list_trigger_registrations()
-                .await
-                .map_err(Into::into)
-        })
-        .await
-    }
-
-    async fn trigger_registrations_by_source_type(
-        &self,
-        source_type: impl Into<lash_core::facade_support::TriggerEventType>,
-    ) -> Result<Vec<lash_core::facade_support::TriggerRegistration>> {
-        self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime
-                .trigger_registrations_by_source_type(source_type)
                 .await
                 .map_err(Into::into)
         })
@@ -956,32 +782,6 @@ impl SessionCommandAdmin {
                 },
                 idempotency_key,
             )
-            .await
-    }
-}
-
-/// Session-scoped read controls for Lashlang trigger registrations.
-#[derive(Clone)]
-pub struct SessionTriggerAdmin {
-    control: SessionAdmin,
-}
-
-impl SessionTriggerAdmin {
-    /// This is an admin/introspection view. Source owners should prefer
-    /// [`Self::by_source_type`] so they only inspect registrations for the
-    /// concrete source type they own.
-    pub async fn list_all(&self) -> Result<Vec<lash_core::facade_support::TriggerRegistration>> {
-        self.control.list_trigger_registrations().await
-    }
-
-    /// This is the source-owner API: a timer, UI, webhook, or other host-owned
-    /// source uses it to inspect registrations for keys it may schedule and emit.
-    pub async fn by_source_type(
-        &self,
-        source_type: impl Into<lash_core::facade_support::TriggerEventType>,
-    ) -> Result<Vec<lash_core::facade_support::TriggerRegistration>> {
-        self.control
-            .trigger_registrations_by_source_type(source_type)
             .await
     }
 }

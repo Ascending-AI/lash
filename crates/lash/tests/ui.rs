@@ -77,14 +77,11 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/recorded_llm_profile_is_minted_by_the_registry.rs");
     t.compile_fail("tests/ui/root_tool_provider_is_not_public.rs");
     t.compile_fail("tests/ui/session_admin_flat_methods_are_not_public.rs");
-    t.compile_fail("tests/ui/effect_host_activation_methods_are_removed.rs");
-    t.compile_fail("tests/ui/trigger_emit_requires_execution_scope.rs");
     t.compile_fail("tests/ui/core_delete_session_rejects_arbitrary_controller.rs");
     t.compile_fail("tests/ui/session_turn_run_requires_scope.rs");
     t.compile_fail("tests/ui/session_turn_stream_requires_scope.rs");
     t.compile_fail("tests/ui/queued_turn_run_requires_scope.rs");
     t.compile_fail("tests/ui/scoped_turn_builders_are_not_prelude.rs");
-    t.compile_fail("tests/ui/taxonomy_types_are_not_root.rs");
     t.compile_fail("tests/ui/process_start_requires_scope.rs");
     t.compile_fail("tests/ui/process_scope_requires_admission.rs");
     t.compile_fail("tests/ui/queue_operations_left_lash_session.rs");
@@ -93,17 +90,13 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/session_head_meta_requires_assemble.rs");
     t.compile_fail("tests/ui/commit_budget_has_no_default.rs");
     t.compile_fail("tests/ui/runtime_host_config_requires_commit_budget.rs");
-    t.compile_fail("tests/ui/attempt_context_has_no_journal_capability.rs");
     t.compile_fail("tests/ui/attempt_context_has_no_recursive_dispatch.rs");
     t.compile_fail("tests/ui/attempt_context_has_no_session_mutations.rs");
-    t.compile_fail("tests/ui/attempt_context_has_no_trigger_commands.rs");
-    t.compile_fail("tests/ui/attempt_context_has_no_process_event_commands.rs");
     t.compile_fail("tests/ui/attempt_context_has_no_child_trace_emission.rs");
     t.compile_fail("tests/ui/granted_attempt_context_is_not_constructible.rs");
     // ADR 0116: no context a body holds reaches dispatch, process
     // administration or a controller, and a plugin registers only providers.
     t.compile_fail("tests/ui/tool_context_is_not_nameable.rs");
-    t.compile_fail("tests/ui/attempt_context_has_no_process_administration.rs");
     t.compile_fail("tests/ui/attempt_context_has_no_controller.rs");
     t.compile_fail("tests/ui/attempt_context_has_no_optional_call_ids.rs");
     t.compile_fail("tests/ui/plugin_spec_registers_only_providers.rs");
@@ -130,7 +123,6 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/process_id_minting_is_sealed.rs");
     // FIG-4375: a SQLite process registry comes only from its store set, the
     // one place its trigger store is attached (FIG-4369).
-    t.compile_fail("tests/ui/process_registry_comes_from_a_store_set.rs");
     // FIG-4112: only `create` takes session config; an open cannot state it.
     t.compile_fail("tests/ui/session_open_takes_no_config.rs");
     if cfg!(feature = "rlm") {

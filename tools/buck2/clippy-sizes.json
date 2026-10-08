@@ -831,14 +831,6 @@
     "peak_bytes": 157831168,
     "samples": 54
   },
-  "lash-runtime/triggers_evidence": {
-    "cpu_count": 1,
-    "memory_kb": 524288,
-    "p95_cores": 1.07,
-    "p99_peak_bytes": 82509824,
-    "peak_bytes": 82509824,
-    "samples": 56
-  },
   "lash-runtime/ui": {
     "cpu_count": 1,
     "memory_kb": 524288,

@@ -73,7 +73,6 @@ impl BoundSession {
             self.catalog(),
             self.effect_host(),
             Some(self.process.clone()),
-            Some(self.backend.trigger_store()),
             Arc::clone(&self.process_env_store),
             self.process_engines.clone(),
         )
