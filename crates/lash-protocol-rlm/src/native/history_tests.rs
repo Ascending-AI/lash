@@ -190,7 +190,7 @@ fn frame_switch_does_not_reconstruct_old_provider_calls() {
 fn native_envelope(payload: serde_json::Value) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(crate::projection::rlm_protocol_event(
         RlmProtocolEvent::RlmDiagnostic(lash_rlm_types::RlmDiagnosticEvent {
-            phase: "native_transport".into(),
+            phase: lash_rlm_types::RlmDiagnosticPhase::NativeTransport,
             payload,
         }),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(

@@ -427,7 +427,7 @@ pub struct PromptModel {
     pub context_window_tokens: Option<u64>,
     /// The prompt usage the session last committed: the previous turn's,
     /// constant across one turn's calls. `None` before any call committed.
-    pub committed_usage: Option<crate::TokenUsage>,
+    pub committed_usage: Option<crate::LlmUsage>,
 }
 
 /// Facts the session's protocol derives from its committed execution state

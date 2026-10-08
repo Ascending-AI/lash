@@ -1130,7 +1130,7 @@ impl Scenario for PromptUsage {
                 committed.last_prompt_usage
             ));
         }
-        let expected = lash_core::TokenUsage {
+        let expected = lash_core::LlmUsage {
             input_tokens: PROMPT_TOKENS,
             ..Default::default()
         };

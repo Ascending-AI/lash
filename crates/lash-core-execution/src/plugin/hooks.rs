@@ -240,7 +240,7 @@ pub enum PluginLifecycleEvent {
 pub struct TurnHookReport {
     pub outcome: crate::TurnOutcome,
     pub execution: crate::runtime::TurnExecutionMetrics,
-    pub token_usage: crate::TokenUsage,
+    pub token_usage: crate::LlmUsage,
     pub tool_calls: Arc<Vec<crate::ToolCallRecord>>,
     pub omitted: Option<crate::OmittedToolCalls>,
     pub errors: Arc<Vec<crate::runtime::TurnIssue>>,

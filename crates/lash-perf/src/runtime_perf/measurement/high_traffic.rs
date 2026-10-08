@@ -9,7 +9,7 @@ struct HighTrafficOperationResult {
     arrival_pacing_lateness_ms: Option<f64>,
     durable_queue_depth: u64,
     phase_profile: BTreeMap<String, RuntimePerfPhaseRunResult>,
-    turn_usage: TokenUsage,
+    turn_usage: LlmUsage,
 }
 
 struct HighTrafficStepResult {
@@ -479,7 +479,7 @@ async fn run_high_traffic_operation(
                 report.outcome
             );
         }
-        TokenUsage::default()
+        LlmUsage::default()
     } else {
         run_high_traffic_direct_turn(session, ordinal, kind).await?
     };
@@ -513,7 +513,7 @@ async fn run_high_traffic_direct_turn(
     session: &lash::LashSession,
     ordinal: usize,
     kind: HighTrafficOperationKind,
-) -> anyhow::Result<TokenUsage> {
+) -> anyhow::Result<LlmUsage> {
     let report = session
         .send(TurnInput::text(format!(
             "load-kind:{kind} operation:{ordinal} session:{}",

@@ -27,7 +27,6 @@ use lash::plugins::{
 use lash::provider::{ProviderRateLimitPolicy, ProviderReliability, ProviderRetryPolicy};
 use lash::tools::{ToolCallRecord, ToolOutputContract};
 use lash::turn::{TurnFailureCode, TurnFailureKind, TurnIssue};
-use lash::usage::TokenUsage;
 use lash::{
     EmptyLlmProfiles, LlmProfileConfig, LlmProfileKey, LlmProfileLimits, LlmProfileMetadata,
     LlmProfileRegistry, LlmProfileUnavailable, LlmProfileUnavailableReason, LlmProfiles,
@@ -128,9 +127,8 @@ fn direct_payload_types_are_nameable(
     event_sender: LlmEventSender,
     output: LlmOutputPart,
     usage: LlmUsage,
-    token_usage: TokenUsage,
 ) {
-    let _ = (attachment, event_sender, output, usage, token_usage);
+    let _ = (attachment, event_sender, output, usage);
 }
 
 fn generation_option_types_are_nameable(

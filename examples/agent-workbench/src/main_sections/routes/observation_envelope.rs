@@ -114,7 +114,7 @@ pub(crate) struct ObservationSnapshot {
     pub(crate) session_id: SessionId,
     pub(crate) cursor: String,
     pub(crate) turn_index: u64,
-    pub(crate) usage: lash::usage::TokenUsage,
+    pub(crate) usage: lash::usage::LlmUsage,
 }
 
 impl From<lash::observe::SessionObservation> for ObservationSnapshot {

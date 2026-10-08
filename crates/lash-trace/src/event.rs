@@ -2,19 +2,19 @@
 
 use std::collections::BTreeMap;
 
+use lash_sansio::llm::types::{AttemptRecord, LlmUsage};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    CellFailure, ExecCodeFailureReason, TextProjectionMetadata, TraceDomainCompletion,
-    TraceDomainStatus, TraceDurableTimerStatus, TraceDurableWaitResolution,
+    CellFailure, ExecCodeFailureReason, TextProjectionMetadata, TraceAttemptObservation,
+    TraceDomainCompletion, TraceDomainStatus, TraceDurableTimerStatus, TraceDurableWaitResolution,
     TraceEffectEnvelopeDiffEvent, TraceError, TraceExecToolCall, TraceJournaledEffectStatus,
     TraceLanguageExecution, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
-    TraceLlmAttempt, TraceLlmRequest, TraceLlmResponse, TraceProgramStepOutcome,
-    TracePromptComponent, TraceProviderReplayDropEvent, TraceProviderRequestEvent,
-    TraceProviderStreamEvent, TraceRetryAttempt, TraceRuntimeStreamEvent, TraceStoreErrorClass,
-    TraceTokenUsage, TraceToolCallOutcome, TraceToolCallOutput, TraceToolSpec, TraceToolTerminal,
-    TraceTurnOutcome,
+    TraceLlmRequest, TraceLlmResponse, TraceProgramStepOutcome, TracePromptComponent,
+    TraceProviderEvent, TraceProviderReplayDropEvent, TraceRetryAttempt, TraceRuntimeStreamEvent,
+    TraceStoreErrorClass, TraceToolCallOutcome, TraceToolCallOutput, TraceToolSpec,
+    TraceToolTerminal, TraceTurnOutcome,
 };
 
 #[derive(
@@ -105,25 +105,28 @@ pub enum TraceEvent {
     LlmCallCompleted {
         response: TraceLlmResponse,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        usage: Option<TraceTokenUsage>,
+        usage: Option<LlmUsage>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         provider_usage: Option<Value>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stream_summary: Option<Value>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        attempts: Option<Vec<TraceRetryAttempt>>,
+        attempts: Option<Vec<AttemptRecord>>,
     },
     LlmCallFailed {
         error: TraceError,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stream_summary: Option<Value>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        attempts: Option<Vec<TraceRetryAttempt>>,
+        attempts: Option<Vec<AttemptRecord>>,
     },
-    /// One real provider request attempt of a model call, made by the body
-    /// that dispatched it. A call that retried reports one per attempt.
+    /// One real provider request attempt of a model call, reported by the
+    /// body that dispatched it when the attempt is sealed. `attempt` is the
+    /// record the call's `attempts` ledger carries under the same ordinal. A
+    /// call that retried reports one per attempt.
     LlmAttemptCompleted {
-        attempt: TraceLlmAttempt,
+        attempt: AttemptRecord,
+        observation: TraceAttemptObservation,
     },
     /// The terminal of a durable domain operation that has no record of its
     /// own kind: a run, a process, a process segment, a host send or a tool
@@ -131,17 +134,14 @@ pub enum TraceEvent {
     DomainCompleted {
         completion: TraceDomainCompletion,
     },
-    ProviderRequest {
-        event: TraceProviderRequestEvent,
+    ProviderEvent {
+        event: TraceProviderEvent,
     },
     ProviderReplayDropped {
         event: TraceProviderReplayDropEvent,
     },
     EffectEnvelopeDiff {
         event: TraceEffectEnvelopeDiffEvent,
-    },
-    ProviderStreamEvent {
-        event: TraceProviderStreamEvent,
     },
     RuntimeStreamEvent {
         event: TraceRuntimeStreamEvent,
@@ -260,6 +260,13 @@ pub enum TraceEvent {
     TurnCompleted {
         outcome: TraceTurnOutcome,
     },
+    /// A built-in tool check selected one terminal reply over others. The
+    /// same fact reaches session observers as a plugin runtime event.
+    ToolCheckConflict {
+        /// The plugin whose reply won.
+        plugin_id: String,
+        conflict: lash_sansio::ToolCheckConflict,
+    },
     Custom {
         name: String,
         payload: Value,
@@ -345,9 +352,8 @@ impl TraceEvent {
             | Self::LlmCallStarted { .. }
             | Self::LlmCallCompleted { .. }
             | Self::LlmAttemptCompleted { .. }
-            | Self::ProviderRequest { .. }
+            | Self::ProviderEvent { .. }
             | Self::ProviderReplayDropped { .. }
-            | Self::ProviderStreamEvent { .. }
             | Self::RuntimeStreamEvent { .. }
             | Self::ToolCallStarted { .. }
             | Self::ExecCodeStarted { .. }
@@ -358,6 +364,7 @@ impl TraceEvent {
             | Self::DurableWaitParked { .. }
             | Self::DurableTimerStarted { .. }
             | Self::ProtocolStep { .. }
+            | Self::ToolCheckConflict { .. }
             | Self::Custom { .. } => false,
         }
     }

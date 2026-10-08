@@ -10,17 +10,17 @@ use lash_core::SessionGraph;
 use lash_core::plugin::{PluginTraceEmitter, SessionReadService};
 use serde_json::json;
 
-fn prompt_usage(used_tokens: usize) -> TokenUsage {
-    TokenUsage {
+fn prompt_usage(used_tokens: usize) -> LlmUsage {
+    LlmUsage {
         input_tokens: used_tokens as i64,
-        ..TokenUsage::default()
+        ..LlmUsage::default()
     }
 }
 
 /// Mirrors what the pruning policy and the pressure hook ask of the
 /// pressure: no pressure, no decisions.
 fn standard_compaction_decisions(
-    usage: Option<&TokenUsage>,
+    usage: Option<&LlmUsage>,
     max_context_tokens: Option<usize>,
 ) -> (bool, bool) {
     ContextPressure::derive(usage, max_context_tokens)
@@ -123,7 +123,7 @@ fn test_turn_controller() -> lash_core::ActorContext {
 
 fn build_omission_ctx(
     state: SessionSnapshot,
-    prompt_usage: Option<TokenUsage>,
+    prompt_usage: Option<LlmUsage>,
     max_context_tokens: Option<usize>,
     traces: &Arc<RecordingTraces>,
 ) -> AttachmentOmissionContext {
@@ -140,7 +140,7 @@ fn build_omission_ctx(
 
 fn build_pressure_ctx(
     state: SessionSnapshot,
-    prompt_usage: Option<TokenUsage>,
+    prompt_usage: Option<LlmUsage>,
     max_context_tokens: Option<usize>,
     traces: &Arc<RecordingTraces>,
     direct_completions: lash_core::facade_support::DirectCompletionClient<'static>,

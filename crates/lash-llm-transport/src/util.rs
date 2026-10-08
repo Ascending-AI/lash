@@ -19,11 +19,11 @@ pub fn emit_provider_trace(tx: Option<&LlmProviderTraceSender>, provider: &'stat
                 .map(str::to_string)
         })
         .unwrap_or_else(|| "provider_event".to_string());
-    tx.send(LlmProviderTraceEvent {
+    tx.send(LlmProviderTraceEvent::response(
         provider,
         event_name,
-        raw: raw.to_string(),
-    });
+        raw.to_string(),
+    ));
 }
 
 /// Forward the exact serialized provider request body to the extended trace

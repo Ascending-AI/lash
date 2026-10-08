@@ -70,7 +70,7 @@ impl SpanMeter {
 #[derive(Default)]
 pub(crate) struct TurnTail {
     pub(crate) phase_profile: BTreeMap<String, RuntimePerfPhaseRunResult>,
-    pub(crate) turn_usage: TokenUsage,
+    pub(crate) turn_usage: LlmUsage,
 }
 
 pub(crate) struct TurnRun<T> {

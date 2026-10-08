@@ -2,8 +2,8 @@ use lash_sansio::SessionId;
 use std::sync::Arc;
 
 use lash_core::{
-    DeploymentStore, Message, MessageRole, Part, RuntimeCommit, RuntimeSessionState, SessionPolicy,
-    TokenUsage, facade_support::LashRuntime,
+    DeploymentStore, LlmUsage, Message, MessageRole, Part, RuntimeCommit, RuntimeSessionState,
+    SessionPolicy, facade_support::LashRuntime,
 };
 use lash_sqlite_store::SqliteStoreSet;
 
@@ -49,7 +49,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
             )
         },
         turn_index: 3,
-        token_usage: TokenUsage {
+        token_usage: LlmUsage {
             input_tokens: 20,
             output_tokens: 5,
             cache_read_input_tokens: 2,

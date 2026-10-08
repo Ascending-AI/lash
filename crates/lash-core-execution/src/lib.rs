@@ -434,19 +434,19 @@ pub use lash_sansio::{
     CheckpointKind, CompactToolContract, DeclarationRefusal, DegradedBinding, ExecCodeFailure,
     ExecCodeFailureReason, ExecResponse, ExecutedCall, ExecutedCallOutcome, ExecutionBudgets,
     ExecutionBudgetsConfig, ExecutionBudgetsError, ExecutionLimit, ExecutionPolicy, FrameKey,
-    FrameKeyError, InputId, JsonSchema, LimitCause, LlmCallError, MediaType, Message,
+    FrameKeyError, InputId, JsonSchema, LimitCause, LlmCallError, LlmUsage, MediaType, Message,
     MessageOrigin, MessageRole, NodeId, Observation, ObservedProcessFailure, OmittedToolCalls,
     OutcomeShape, OutputRetentionPolicy, OutputValue, ParkBound, Part, PartKind, PluginMessage,
     PluginRuntimeEvent, ProjectionMode, ProviderAttemptLimits, RegistrationRefused, RetainedOutput,
     SchemaAdmissionError, SchemaContract, SchemaDialect, SchemaProjectionOverride,
-    SchemaProjectionPolicy, SessionAppendNode, TextProjectionMetadata, TokenUsage,
-    TokenUsageOverflow, ToolAdmissionRefusal, ToolArgumentProjectionPolicy, ToolBound, ToolBounds,
-    ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog,
-    ToolCatalogBuildError, ToolCatalogEntry, ToolContract, ToolControl, ToolDeclaration,
-    ToolDefinition, ToolDiscovery, ToolFailure, ToolFailureCause, ToolFailureClass,
-    ToolFailureSource, ToolId, ToolIntentIdentity, ToolIntentKind, ToolManifest, ToolModule,
-    ToolOutputContract, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnId, TurnOutputSource,
-    ValueMismatch,
+    SchemaProjectionPolicy, SessionAppendNode, TextProjectionMetadata, TokenUsageOverflow,
+    ToolAdmissionRefusal, ToolArgumentProjectionPolicy, ToolBound, ToolBounds, ToolCallOutcome,
+    ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog, ToolCatalogBuildError,
+    ToolCatalogEntry, ToolCheckConflict, ToolCheckPhase, ToolCheckReply, ToolCheckVerdictKind,
+    ToolContract, ToolControl, ToolDeclaration, ToolDefinition, ToolDiscovery, ToolFailure,
+    ToolFailureCause, ToolFailureClass, ToolFailureSource, ToolId, ToolIntentIdentity,
+    ToolIntentKind, ToolManifest, ToolModule, ToolOutputContract, ToolValue, ToolView,
+    ToolViewBlock, ToolViewMeta, TurnId, TurnOutputSource, ValueMismatch,
 };
 pub use tool_provider::{ToolAttachmentClient, ToolDirectCompletionClient, ToolSessionLlmProfile};
 /// Project a successful tool control into its terminal turn outcome.
@@ -616,9 +616,9 @@ pub use lash_trace::{
     TraceAttachment, TraceContentBlock, TraceContext, TraceEffectEnvelopeDiffEntry,
     TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue, TraceError, TraceEvent,
     TraceLlmMessage, TraceLlmRequest, TraceLlmResponse, TracePromptComponent,
-    TraceProviderReplayDropEvent, TraceProviderReplayDropReason, TraceProviderReplayKind,
-    TraceProviderRequestEvent, TraceProviderRouteIdentity, TraceProviderStreamEvent,
-    TraceRuntimeStreamEvent, TraceTokenUsage, TraceToolResultBlock, TraceToolSpec,
+    TraceProviderBodyOmission, TraceProviderEvent, TraceProviderReplayDropEvent,
+    TraceProviderReplayDropReason, TraceProviderReplayKind, TraceProviderRouteIdentity,
+    TraceRuntimeStreamEvent, TraceToolResultBlock, TraceToolSpec,
 };
 pub use llm::transport::ProviderFailureKind;
 pub use llm_profile::{

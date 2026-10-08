@@ -753,15 +753,15 @@ async fn retry_ladder_survives_a_later_pending_completion(tier: Tier) {
     };
     let outcomes = attempts
         .iter()
-        .map(|attempt| match &attempt.detail {
-            lash::tracing::TraceRetryAttemptDetail::Tool { outcome } => (
+        .map(|attempt| {
+            let lash::tracing::TraceRetryAttemptDetail::Tool { outcome } = &attempt.detail;
+            (
                 attempt.ordinal,
                 matches!(
                     outcome,
                     lash::tracing::TraceToolAttemptOutcome::Failed { .. }
                 ),
-            ),
-            other => panic!("a tool attempt, got {other:?}"),
+            )
         })
         .collect::<Vec<_>>();
     assert_eq!(

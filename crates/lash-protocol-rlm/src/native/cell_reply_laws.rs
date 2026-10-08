@@ -108,9 +108,9 @@ fn answer(native: bool, parts: Vec<LlmOutputPart>, reason: LlmTerminalReason) ->
 
 fn last_decision(machine: &TurnMachine, native: bool) -> String {
     let phase = if native {
-        "native_extraction"
+        lash_rlm_types::RlmDiagnosticPhase::NativeExtraction
     } else {
-        "llm_extraction"
+        lash_rlm_types::RlmDiagnosticPhase::LlmExtraction
     };
     machine
         .events()

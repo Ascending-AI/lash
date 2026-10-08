@@ -1,6 +1,7 @@
 use super::*;
 use crate::telemetry::{TraceAttemptId, TraceRecordIdentity, TraceScopeOwner, TraceTransitionKind};
-use crate::{TraceContext, TraceDomainCompletion, TraceLlmAttempt, TraceTurnCompletionReason};
+use crate::{TraceContext, TraceDomainCompletion, TraceTurnCompletionReason};
+use lash_sansio::llm::types::{AttemptRecord, ExecutionEvidence, ProtocolPosition};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::trace::{InMemorySpanExporter, Sampler, SdkTracerProvider};
 use registry::{ATTRIBUTES, AttributeType, METRICS, SPANS};
@@ -303,22 +304,31 @@ fn emitted_domain_shape_matches_registry() {
     let model = record(
         &scope,
         TraceEvent::LlmAttemptCompleted {
-            attempt: TraceLlmAttempt {
+            attempt: AttemptRecord {
                 ordinal: 1,
-                provider: Some("vendor-x".into()),
-                request_model: "model-x".into(),
-                response_model: Some("observed-model".into()),
-                started_at_ms: Some(2500),
-                ended_at_ms: Some(3000),
-                outcome: TraceLlmAttemptOutcome::Completed,
+                outcome: AttemptOutcome::Completed,
+                protocol_position: ProtocolPosition::TerminalObserved,
+                retry_budget_consumed: true,
+                retry_decision: None,
                 error: None,
-                usage: Some(TraceTokenUsage {
+                evidence: Some(ExecutionEvidence {
+                    served_model: Some("observed-model".into()),
+                    ..Default::default()
+                }),
+                generation_disposition: None,
+                usage: Some(LlmUsage {
                     input_tokens: 10,
                     output_tokens: 4,
                     cache_read_input_tokens: 3,
                     cache_write_input_tokens: 2,
                     reasoning_output_tokens: 1,
                 }),
+            },
+            observation: crate::TraceAttemptObservation {
+                provider: Some("vendor-x".into()),
+                request_model: "model-x".into(),
+                started_at_ms: Some(2500),
+                ended_at_ms: Some(3000),
             },
         },
         3000,
@@ -722,23 +732,29 @@ fn provider_attempts_use_reported_identity_and_never_project_aggregate_calls() {
     let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
     let scope = admit(&adapter, TraceCause::Root);
     for (ordinal, served_by, outcome) in [
-        (1, Some("provider-a"), TraceLlmAttemptOutcome::Failed),
-        (2, Some("provider-b"), TraceLlmAttemptOutcome::Completed),
-        (3, None, TraceLlmAttemptOutcome::Interrupted),
+        (1, Some("provider-a"), AttemptOutcome::Failed),
+        (2, Some("provider-b"), AttemptOutcome::Completed),
+        (3, None, AttemptOutcome::Interrupted),
     ] {
         let event = record(
             &scope,
             TraceEvent::LlmAttemptCompleted {
-                attempt: TraceLlmAttempt {
+                attempt: AttemptRecord {
                     ordinal,
+                    outcome,
+                    protocol_position: ProtocolPosition::TerminalObserved,
+                    retry_budget_consumed: true,
+                    retry_decision: None,
+                    error: None,
+                    evidence: None,
+                    generation_disposition: None,
+                    usage: None,
+                },
+                observation: crate::TraceAttemptObservation {
                     provider: served_by.map(str::to_owned),
                     request_model: "same-alias".into(),
-                    response_model: None,
                     started_at_ms: None,
                     ended_at_ms: None,
-                    outcome,
-                    error: None,
-                    usage: None,
                 },
             },
             9000,
@@ -756,7 +772,7 @@ fn provider_attempts_use_reported_identity_and_never_project_aggregate_calls() {
         assert_eq!(span.start_time, epoch_ms(9000));
         assert_eq!(
             matches!(span.status, Status::Error { .. }),
-            outcome == TraceLlmAttemptOutcome::Failed
+            outcome == AttemptOutcome::Failed
         );
         let reported = span
             .attributes

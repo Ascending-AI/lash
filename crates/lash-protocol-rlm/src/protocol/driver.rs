@@ -539,7 +539,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 finish_retained = response.terminal_finish_retained;
                 if !response.degraded_bindings.is_empty() {
                     actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
-                        "projection_rehydration",
+                        lash_rlm_types::RlmDiagnosticPhase::ProjectionRehydration,
                         serde_json::json!({
                             "degraded_bindings": response.degraded_bindings,
                         }),
@@ -991,12 +991,13 @@ fn trajectory_event(entry: RlmTrajectoryEntry, schema_version: u32) -> SessionHi
     ))
 }
 
-fn diagnostic_event(phase: &str, payload: Value, schema_version: u32) -> SessionHistoryRecord {
+fn diagnostic_event(
+    phase: lash_rlm_types::RlmDiagnosticPhase,
+    payload: Value,
+    schema_version: u32,
+) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(rlm_protocol_event(
-        RlmProtocolEvent::RlmDiagnostic(RlmDiagnosticEvent {
-            phase: phase.to_string(),
-            payload,
-        }),
+        RlmProtocolEvent::RlmDiagnostic(RlmDiagnosticEvent { phase, payload }),
         schema_version,
     ))
 }

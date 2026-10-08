@@ -603,7 +603,7 @@ async fn no_credentials_reach_request_debug_recordings_or_traces() {
         for exported in [
             std::fs::read_to_string(&paths[0]).unwrap(),
             serde_json::to_string(&exchanges).unwrap(),
-            serde_json::to_string(&trace_events.iter().map(|event| json!({"provider":event.provider, "event_name":event.event_name, "raw":event.raw})).collect::<Vec<_>>()).unwrap(),
+            serde_json::to_string(&trace_events.iter().map(|event| json!({"provider":event.provider, "direction":event.direction, "raw":event.raw})).collect::<Vec<_>>()).unwrap(),
             format!("{trace_events:?}"),
         ] {
             assert!(!exported.contains(MARKER), "{lane} credential leaked");

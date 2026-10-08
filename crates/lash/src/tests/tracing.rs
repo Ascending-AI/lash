@@ -927,12 +927,11 @@ async fn standard_runtime_trace_records_stream_event_entries() -> Result<()> {
         Some("mock-model")
     );
     assert_eq!(
-        response_entry["attempts"][0]["detail"]["execution_evidence"]["served_model"].as_str(),
+        response_entry["attempts"][0]["evidence"]["served_model"].as_str(),
         Some("served-model")
     );
     assert_eq!(
-        response_entry["attempts"][0]["detail"]["execution_evidence"]["reasoning_output_tokens"]
-            .as_u64(),
+        response_entry["attempts"][0]["evidence"]["reasoning_output_tokens"].as_u64(),
         Some(0)
     );
     let stream_summary = response_entry["stream_summary"]
@@ -978,16 +977,16 @@ async fn extended_runtime_trace_records_provider_request_and_stream_events() -> 
                     "not-json".to_owned(),
                 ));
                 for (index, id) in ["msg_1", "msg_2"].into_iter().enumerate() {
-                    tx.send(LlmProviderTraceEvent {
-                        provider: "mock",
-                        event_name: "response.output_item.done".to_owned(),
-                        raw: serde_json::json!({
+                    tx.send(LlmProviderTraceEvent::response(
+                        "mock",
+                        "response.output_item.done".to_owned(),
+                        serde_json::json!({
                             "type": "response.output_item.done",
                             "output_index": index,
                             "item": { "id": id }
                         })
                         .to_string(),
-                    });
+                    ));
                 }
             }
             Ok(text_response("Hello"))
@@ -1008,11 +1007,20 @@ async fn extended_runtime_trace_records_provider_request_and_stream_events() -> 
     assert!(completed(&turn), "{:?}", turn.result.outcome);
 
     let entries = traced.entries();
-    let provider_requests = of_type(&entries, "provider_request");
+    // Both directions are one event kind; the typed direction tells them apart.
+    let observations = of_type(&entries, "provider_event");
+    let in_direction = |direction: &str| {
+        observations
+            .iter()
+            .filter(|entry| entry["event"]["direction"]["direction"] == direction)
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let provider_requests = in_direction("request");
     assert_eq!(provider_requests.len(), 3, "provider traces: {entries:?}");
     let request_event = &provider_requests
         .iter()
-        .find(|entry| entry["event"]["endpoint"] == "responses")
+        .find(|entry| entry["event"]["direction"]["endpoint"] == "responses")
         .expect("large provider request")["event"];
     let expected_serialized = serde_json::json!({
         "model": "mock-model",
@@ -1020,36 +1028,40 @@ async fn extended_runtime_trace_records_provider_request_and_stream_events() -> 
     })
     .to_string();
     assert_eq!(request_event["provider"], "mock");
-    assert!(request_event.get("body_json").is_none());
-    assert_eq!(request_event["body_json_omitted_reason"], "size_limit");
-    assert_eq!(request_event["body_len"], expected_serialized.len());
-    assert!(request_event["body_len"].as_u64().expect("body length") > 32);
+    assert!(request_event.get("raw_json").is_none());
+    assert_eq!(request_event["raw_json_omitted_reason"], "size_limit");
+    assert_eq!(request_event["raw_len"], expected_serialized.len());
+    assert!(request_event["raw_len"].as_u64().expect("body length") > 32);
     assert_eq!(
-        request_event["body_sha256"],
+        request_event["raw_sha256"],
         lash_trace::sha256_hex(expected_serialized.as_bytes())
     );
     let small_request = &provider_requests
         .iter()
-        .find(|entry| entry["event"]["endpoint"] == "chat/completions")
+        .find(|entry| entry["event"]["direction"]["endpoint"] == "chat/completions")
         .expect("small provider request")["event"];
-    assert_eq!(small_request["body_json"]["model"], "small");
-    assert!(small_request.get("body_json_omitted_reason").is_none());
+    assert_eq!(small_request["raw_json"]["model"], "small");
+    assert!(small_request.get("raw_json_omitted_reason").is_none());
     let invalid_request = &provider_requests
         .iter()
-        .find(|entry| entry["event"]["endpoint"] == "invalid")
+        .find(|entry| entry["event"]["direction"]["endpoint"] == "invalid")
         .expect("invalid provider request")["event"];
-    assert!(invalid_request.get("body_json").is_none());
-    assert_eq!(invalid_request["body_json_omitted_reason"], "invalid_json");
-    assert_eq!(invalid_request["body_len"], "not-json".len());
+    assert!(invalid_request.get("raw_json").is_none());
+    assert_eq!(invalid_request["raw_json_omitted_reason"], "invalid_json");
+    assert_eq!(invalid_request["raw_len"], "not-json".len());
     assert_eq!(
-        invalid_request["body_sha256"],
+        invalid_request["raw_sha256"],
         lash_trace::sha256_hex(b"not-json")
     );
-    let provider_events = of_type(&entries, "provider_stream_event");
+    let provider_events = in_direction("response");
     assert_eq!(
         provider_events.len(),
         2,
         "provider trace entries: {entries:?}"
+    );
+    assert_eq!(
+        provider_events[0]["event"]["direction"]["event_name"],
+        "response.output_item.done"
     );
     assert_eq!(provider_events[0]["event"]["item_id"], "msg_1");
     assert_eq!(provider_events[0]["event"]["output_index"], 0);

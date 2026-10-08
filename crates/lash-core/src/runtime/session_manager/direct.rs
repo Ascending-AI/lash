@@ -224,7 +224,7 @@ impl DirectCompletionCapability {
         prompt: DirectPromptInput,
         usage_source: &str,
         replay_position: DirectReplayPosition<'_>,
-    ) -> Result<(crate::LlmResponse, crate::TokenUsage, crate::LlmCallRecord), crate::PluginError>
+    ) -> Result<(crate::LlmResponse, crate::LlmUsage, crate::LlmCallRecord), crate::PluginError>
     {
         let DirectPromptInput { purpose, facts } = prompt;
         let current = context.current;

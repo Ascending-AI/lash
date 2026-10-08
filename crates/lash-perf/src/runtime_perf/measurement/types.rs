@@ -250,7 +250,7 @@ pub(crate) struct RuntimePerfTurnResult {
     pub(crate) stages: BTreeMap<String, RuntimePerfStageRunResult>,
     pub(crate) memory: RuntimePerfMemoryRunResult,
     pub(crate) phase_profile: BTreeMap<String, RuntimePerfPhaseRunResult>,
-    pub(crate) turn_usage: TokenUsage,
+    pub(crate) turn_usage: LlmUsage,
 }
 
 impl RuntimePerfTurnResult {

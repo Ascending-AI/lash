@@ -13,8 +13,9 @@ pub fn recorded_extraction_decisions(
             continue;
         };
         if !matches!(
-            diagnostic.phase.as_str(),
-            "llm_extraction" | "native_extraction"
+            diagnostic.phase,
+            lash_rlm_types::RlmDiagnosticPhase::LlmExtraction
+                | lash_rlm_types::RlmDiagnosticPhase::NativeExtraction
         ) {
             continue;
         }

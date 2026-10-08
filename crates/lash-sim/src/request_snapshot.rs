@@ -170,14 +170,17 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
     .expect("trace entries");
     let requests = entries
         .iter()
-        .filter(|entry| entry["type"] == "provider_request")
+        .filter(|entry| {
+            entry["type"] == "provider_event"
+                && entry["event"]["direction"]["direction"] == "request"
+        })
         .collect::<Vec<_>>();
     assert_eq!(
         requests.len(),
         2,
         "provider request trace entries: {entries:?}"
     );
-    let assembled = requests[1]["event"]["body_json"].clone();
+    let assembled = requests[1]["event"]["raw_json"].clone();
     assert_eq!(
         assembled,
         json!({
@@ -242,9 +245,9 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
             }]
         })
     );
-    assert_eq!(requests[1]["event"]["body_len"], 1162);
+    assert_eq!(requests[1]["event"]["raw_len"], 1162);
     assert_eq!(
-        requests[1]["event"]["body_sha256"],
+        requests[1]["event"]["raw_sha256"],
         "563f5dbe2fe6ddd4cdceb55052daf6e259aa8d502098f05d4249a43b589fcc1c"
     );
 }

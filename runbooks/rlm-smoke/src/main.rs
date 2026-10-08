@@ -413,13 +413,11 @@ fn judge_trace(records: &[Value]) -> Result<TraceJudgement, String> {
                     .and_then(Value::as_array)
                     .ok_or_else(|| "llm_call_completed record carries no attempts".to_string())?;
                 for attempt in attempts {
-                    if attempt.pointer("/detail/outcome").and_then(Value::as_str)
-                        != Some("completed")
-                    {
+                    if attempt.pointer("/outcome").and_then(Value::as_str) != Some("completed") {
                         continue;
                     }
                     let model = attempt
-                        .pointer("/detail/execution_evidence/served_model")
+                        .pointer("/evidence/served_model")
                         .and_then(Value::as_str)
                         .ok_or_else(|| {
                             "completed LLM attempt carries no provider-reported served model"
@@ -691,18 +689,16 @@ mod tests {
             Some(model) => json!({ "served_model": model }),
             None => json!({ "provider_finish_reason": "stop" }),
         };
-        // The shape a live row's trace carries: each attempt's outcome and
-        // evidence sit under its tagged `detail` (FIG-5150).
+        // The shape a live row's trace carries: each attempt is the call's
+        // sealed attempt record.
         json!({
             "type": "llm_call_completed",
             "attempts": [{
                 "ordinal": 1,
-                "detail": {
-                    "kind": "llm",
-                    "outcome": "completed",
-                    "execution_evidence": evidence,
-                    "usage_disposition": "reported",
-                },
+                "outcome": "completed",
+                "protocol_position": "terminal_observed",
+                "retry_budget_consumed": true,
+                "evidence": evidence,
             }],
         })
     }

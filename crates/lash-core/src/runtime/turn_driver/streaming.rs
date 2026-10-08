@@ -10,8 +10,7 @@ use std::sync::Arc;
 use futures_util::FutureExt as _;
 
 use lash_trace::{
-    TraceError, TraceEvent, TraceProviderRequestEvent, TraceProviderStreamEvent,
-    TraceRuntimeStreamEvent,
+    TraceError, TraceEvent, TraceProviderBodyOmission, TraceProviderEvent, TraceRuntimeStreamEvent,
 };
 
 use super::*;
@@ -733,10 +732,10 @@ impl RuntimeTurnDriver<'_> {
                                     .wire_model()
                                     .to_string(),
                                 None,
-                                response_parts,
+                                &response_parts,
                                 None,
                             ),
-                            usage: Some(crate::trace::trace_usage_from_session(&usage)),
+                            usage: Some(usage.clone()),
                             provider_usage,
                             // The call's own trace carries its stream summary.
                             stream_summary: None,
@@ -807,7 +806,7 @@ impl RuntimeTurnDriver<'_> {
             call_id: None,
             tool_name: None,
             input_json: None,
-            usage: log.usage.map(crate::trace::trace_usage_from_llm),
+            usage: log.usage.cloned(),
         };
 
         if let Some(tool_call) = log.tool_call {
@@ -852,53 +851,45 @@ impl RuntimeTurnDriver<'_> {
                     .now()
                     .saturating_duration_since(created_at)
                     .as_millis() as u64;
-                if let Some(endpoint) = provider_event.request_endpoint() {
-                    let body_len = provider_event.raw.len();
-                    let (body_json, body_json_omitted_reason) =
-                        if body_len > trace.runtime().limits().provider_request_body_json_bytes {
-                            (None, Some("size_limit".to_string()))
-                        } else {
-                            match serde_json::from_str(&provider_event.raw) {
-                                Ok(body_json) => (Some(body_json), None),
-                                Err(_) => (None, Some("invalid_json".to_string())),
-                            }
-                        };
-                    let event = TraceProviderRequestEvent {
-                        provider: provider_event.provider.to_string(),
-                        sequence,
-                        elapsed_ms,
-                        endpoint: endpoint.to_string(),
-                        body_len,
-                        body_sha256: lash_trace::sha256_hex(provider_event.raw.as_bytes()),
-                        body_json,
-                        body_json_omitted_reason,
-                    };
-                    trace.observe(|| {
-                        (
-                            context.clone().for_llm_call(llm_call_id.clone()),
-                            TraceEvent::ProviderRequest { event },
-                        )
-                    });
-                    return;
-                }
-                let raw_json = serde_json::from_str::<serde_json::Value>(&provider_event.raw).ok();
-                let item_id = raw_json.as_ref().and_then(provider_item_id);
-                let output_index = raw_json.as_ref().and_then(provider_output_index);
-                let event = TraceProviderStreamEvent {
-                    provider: provider_event.provider.to_string(),
+                let LlmProviderTraceEvent {
+                    provider,
+                    direction,
+                    raw,
+                } = provider_event;
+                // Only a request body is bounded: a response event is one
+                // provider frame.
+                let oversized = matches!(direction, LlmProviderTraceDirection::Request { .. })
+                    && raw.len() > trace.runtime().limits().provider_request_body_json_bytes;
+                let (raw_json, raw_json_omitted_reason) = if oversized {
+                    (None, Some(TraceProviderBodyOmission::SizeLimit))
+                } else {
+                    match serde_json::from_str::<serde_json::Value>(&raw) {
+                        Ok(raw_json) => (Some(raw_json), None),
+                        Err(_) => (None, Some(TraceProviderBodyOmission::InvalidJson)),
+                    }
+                };
+                let (item_id, output_index) = match (&direction, &raw_json) {
+                    (LlmProviderTraceDirection::Response { .. }, Some(raw_json)) => {
+                        (provider_item_id(raw_json), provider_output_index(raw_json))
+                    }
+                    _ => (None, None),
+                };
+                let event = TraceProviderEvent {
+                    provider: provider.to_string(),
                     sequence,
                     elapsed_ms,
-                    event_name: provider_event.event_name,
+                    direction,
                     item_id,
                     output_index,
-                    raw_len: provider_event.raw.len(),
-                    raw_sha256: lash_trace::sha256_hex(provider_event.raw.as_bytes()),
+                    raw_len: raw.len(),
+                    raw_sha256: lash_trace::sha256_hex(raw.as_bytes()),
                     raw_json,
+                    raw_json_omitted_reason,
                 };
                 trace.observe(|| {
                     (
                         context.clone().for_llm_call(llm_call_id.clone()),
-                        TraceEvent::ProviderStreamEvent { event },
+                        TraceEvent::ProviderEvent { event },
                     )
                 });
             },

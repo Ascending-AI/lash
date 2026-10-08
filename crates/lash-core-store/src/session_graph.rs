@@ -28,7 +28,7 @@ use crate::session_graph_integrity::{
     ancestry_indices, graph_node_indices, validate_graph_parent_topology,
 };
 use crate::session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord};
-use crate::{BaseRenderCache, ClockWallTime, Message, TokenUsage};
+use crate::{BaseRenderCache, ClockWallTime, LlmUsage, Message};
 use facade_ops::{SessionGraphFacadeOps, SessionNodeProjection};
 use lash_sansio::AppendVec;
 use lash_sansio::core_support::MessageCoreSupport;
@@ -310,7 +310,7 @@ pub struct SessionNodeRecord {
 /// rather than degrade the record.
 ///
 /// Version 21 (FIG-1961) retypes `PersistedTurnState.last_prompt_usage` to the
-/// checked `TokenUsage` shape; generation-20 bodies carrying the retired
+/// checked `LlmUsage` shape; generation-20 bodies carrying the retired
 /// `PromptUsage` snapshot fields are refused rather than remapped.
 ///
 /// Version 22 (FIG-3515) answers each tool call with one `ToolResult` part
@@ -499,9 +499,9 @@ pub use crate::persisted_session_config::{PersistedSessionConfig, UndeliveredCon
 pub struct PersistedTurnState {
     pub turn_index: usize,
     #[serde(default)]
-    pub token_usage: TokenUsage,
+    pub token_usage: LlmUsage,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_prompt_usage: Option<TokenUsage>,
+    pub last_prompt_usage: Option<LlmUsage>,
 }
 
 #[derive(Clone, Debug)]

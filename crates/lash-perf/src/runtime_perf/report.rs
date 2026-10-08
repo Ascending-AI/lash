@@ -702,7 +702,7 @@ mod tests {
             ),
             memory: memory_run(),
             phase_profile: BTreeMap::new(),
-            turn_usage: lash_core::TokenUsage::default(),
+            turn_usage: lash_core::LlmUsage::default(),
         }
     }
 

@@ -14,8 +14,8 @@ use std::sync::Arc;
 
 use crate::runtime::RuntimeSessionState;
 use crate::{
-    ExecRequest, ExecResponse, LlmRequest, RuntimeExecutionContext, SessionAppendNode,
-    SessionReadView, TokenUsage,
+    ExecRequest, ExecResponse, LlmRequest, LlmUsage, RuntimeExecutionContext, SessionAppendNode,
+    SessionReadView,
 };
 
 /// Session-scoped plugin that initializes, restores, and extends protocol
@@ -165,7 +165,7 @@ pub struct ProtocolBeforeLlmCallContext {
     pub session_graph: Arc<dyn crate::plugin::SessionGraphService>,
     pub processes: Arc<dyn crate::ProcessService>,
     pub state: SessionReadView,
-    pub latest_prompt_usage: Option<TokenUsage>,
+    pub latest_prompt_usage: Option<LlmUsage>,
 }
 
 /// Minimum encoded body size at which a composite protocol-owned

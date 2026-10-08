@@ -12,7 +12,7 @@ use crate::SessionId;
 use crate::TurnId;
 use crate::facade_support::{SessionGraphFacadeOps, ToolStateFacadeOps};
 
-use crate::session_model::{Message, SessionPolicy, TokenUsage, plugin_message_to_message};
+use crate::session_model::{LlmUsage, Message, SessionPolicy, plugin_message_to_message};
 use crate::{PersistedTurnState, SessionSnapshot};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
@@ -820,9 +820,9 @@ pub struct RuntimeSessionState {
     #[serde(default)]
     pub turn_index: usize,
     #[serde(default)]
-    pub token_usage: TokenUsage,
+    pub token_usage: LlmUsage,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_prompt_usage: Option<TokenUsage>,
+    pub last_prompt_usage: Option<LlmUsage>,
     /// Durable authority used to rebuild the session's Tool Catalog policy.
     #[serde(flatten)]
     pub authority: Box<RuntimeSessionAuthority>,
@@ -867,7 +867,7 @@ impl RuntimeSessionState {
             current_frame_node_id: None,
             session_graph: crate::SessionGraph::default(),
             turn_index: 0,
-            token_usage: TokenUsage::default(),
+            token_usage: LlmUsage::default(),
             last_prompt_usage: None,
             authority: Box::default(),
             checkpoint_components: RuntimeCheckpointComponents::complete_empty(),
@@ -1382,13 +1382,13 @@ fn validate_restored_turn_index(turn_index: usize) -> Result<(), crate::StoreErr
 
 /// Admits durable turn usage before the runtime adopts it.
 ///
-/// Restored usage feeds bare aggregations — `TokenUsage::total` in protocol
+/// Restored usage feeds bare aggregations — `LlmUsage::total` in protocol
 /// budget policy, `input_total` in context-window policy — and it is the base
 /// the next turn's checked merge accumulates onto. Validating both aggregations
 /// once here keeps every one of those sites safe by invariant, the same
 /// contract [`validate_restored_turn_index`] gives the bare next-turn
 /// increments.
-fn validate_restored_token_usage(usage: &TokenUsage) -> Result<(), crate::StoreError> {
+fn validate_restored_token_usage(usage: &LlmUsage) -> Result<(), crate::StoreError> {
     let checkpoint_overflow = |overflow: lash_sansio::session_model::TokenUsageOverflow| {
         crate::StoreError::CheckpointTokenUsageOutOfRange {
             counter: overflow.counter(),

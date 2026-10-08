@@ -40,7 +40,7 @@ use lash_core::plugin::{
     ContextPressureHook, HistoryPartId, PluginError, PluginFactory, PluginRegistrar,
     PluginSessionContext, SessionPlugin, omit_part_attachments,
 };
-use lash_core::{Message, MessageOrigin, MessageRole, Part, PartKind, SessionSnapshot, TokenUsage};
+use lash_core::{LlmUsage, Message, MessageOrigin, MessageRole, Part, PartKind, SessionSnapshot};
 
 /// Marker `plugin_id` stamped on compaction summary messages so the
 /// history pipeline can recognize them on subsequent turns.
@@ -271,10 +271,7 @@ struct ContextPressure {
 }
 
 impl ContextPressure {
-    fn derive(
-        prompt_usage: Option<&TokenUsage>,
-        max_context_tokens: Option<usize>,
-    ) -> Option<Self> {
+    fn derive(prompt_usage: Option<&LlmUsage>, max_context_tokens: Option<usize>) -> Option<Self> {
         Some(Self {
             used_tokens: prompt_usage?.total().max(0) as usize,
             max_context_tokens: max_context_tokens.filter(|value| *value > 0)?,
@@ -347,8 +344,8 @@ struct CompactionSnapshotIdentity<'a> {
     graph_leaf: Option<CompactionGraphAddress<'a>>,
     current_frame: Option<CompactionGraphAddress<'a>>,
     turn_index: usize,
-    token_usage: &'a lash_core::TokenUsage,
-    last_prompt_usage: &'a Option<TokenUsage>,
+    token_usage: &'a lash_core::LlmUsage,
+    last_prompt_usage: &'a Option<LlmUsage>,
     plugin_config: &'a lash_core::PluginConfig,
     tool_state_ref: &'a Option<lash_core::store::BlobRef>,
     tool_state_generation: Option<u64>,

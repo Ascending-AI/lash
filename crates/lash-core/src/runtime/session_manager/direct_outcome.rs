@@ -1,6 +1,5 @@
 use crate::runtime::DecodedEffectOutcome as _;
-use crate::runtime::effect::token_usage_from_llm;
-use crate::{LlmResponse, PluginError, RuntimeEffectOutcome, TokenUsage};
+use crate::{LlmResponse, LlmUsage, PluginError, RuntimeEffectOutcome};
 
 // =============================================================================
 // Direct-completion outcome plumbing
@@ -15,13 +14,13 @@ use crate::{LlmResponse, PluginError, RuntimeEffectOutcome, TokenUsage};
 /// projection runs on every replay and reports nothing.
 pub(crate) fn apply_direct_outcome(
     outcome: RuntimeEffectOutcome,
-) -> Result<(LlmResponse, TokenUsage, crate::LlmCallRecord), PluginError> {
+) -> Result<(LlmResponse, LlmUsage, crate::LlmCallRecord), PluginError> {
     let (result, call_record) = outcome
         .into_direct_response()
         .map_err(|err| PluginError::Session(err.to_string()))?;
     let (response, usage) = match result {
         Ok(response) => {
-            let usage = token_usage_from_llm(&response.usage);
+            let usage = response.usage.clone();
             (response, usage)
         }
         Err(err) => {

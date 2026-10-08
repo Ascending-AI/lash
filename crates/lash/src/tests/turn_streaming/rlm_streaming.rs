@@ -496,7 +496,7 @@ pub(super) fn rlm_abort_drain_deadline_proceeds_with_default_usage() -> Result<(
         // never look free: the sealed attempt says its usage is unreported
         // after the abort, and the session ledger carries a typed hole for
         // it even though every counter is zero.
-        assert_eq!(result.result.usage, lash_core::TokenUsage::default());
+        assert_eq!(result.result.usage, lash_core::LlmUsage::default());
         let attempt = result
             .result
             .llm_calls

@@ -24,8 +24,8 @@ the first complete TypeScript cell, and never executes content after that bounda
    - **Request body JSON.** The trace retains exact request JSON only up to
      `MAX_PROVIDER_REQUEST_BODY_JSON_BYTES` (2 KiB); an RLM system prompt is an
      order of magnitude larger, so every real row carries
-     `body_json_omitted_reason: "size_limit"` with `body_len` and
-     `body_sha256`. Gate on those three. Do not treat the omission as a defect
+     `raw_json_omitted_reason: "size_limit"` with `raw_len` and
+     `raw_sha256`. Gate on those three. Do not treat the omission as a defect
      and do not raise the bound to make a gate fire: the cap exists so every
      JSONL record and OTEL attribute is not inflated by a full prompt on every
      request, which is a durable cost paid by every user of tracing.
@@ -83,12 +83,12 @@ unobservable. Require:
   request options;
 - response and attempt dispositions both report the stop-sequence disposition
   this host honestly produces — `not_requested` — and both are present;
-- the request record carries `body_len`, `body_sha256`, and, for any real RLM
-  prompt, `body_json_omitted_reason: "size_limit"`; a present `body_json` is
-  acceptable only if `body_len` is genuinely under 2 KiB;
+- the request record carries `raw_len`, `raw_sha256`, and, for any real RLM
+  prompt, `raw_json_omitted_reason: "size_limit"`; a present `raw_json` is
+  acceptable only if `raw_len` is genuinely under 2 KiB;
 - the response has typed execution evidence;
-- the honest usage disposition (`usage_disposition`) is present on both the response and the
-  attempt, and matches what was actually observed. Do not gate on "usage reported before a
+- the honest usage disposition (each attempt's `outcome` with its `usage`, present or absent)
+  is readable on both the response and the attempt, and matches what was actually observed. Do not gate on "usage reported before a
   protocol abort", which is unfalsifiable when the provider reports none before the abort:
   gate on the disposition being present and honest, exactly as the stop-sequence gate was
   re-anchored by FIG-1306/FIG-1402;
@@ -105,7 +105,7 @@ Stop everything started by this run and confirm teardown. Record PASS/FAIL for:
 | --- | --- | --- |
 | Zero wire stops | | `02-boundary-trace.json` |
 | Honest stop disposition (`not_requested`, present) | | `02-boundary-trace.json` |
-| Request body accounted for (`body_len` + `body_sha256`, omission reason when over the cap) | | `02-boundary-trace.json` |
+| Request body accounted for (`raw_len` + `raw_sha256`, omission reason when over the cap) | | `02-boundary-trace.json` |
 | Caller-stop suppression law green (deterministic; unreachable live) | | exact test command and exit |
 | First cell executed once | | rendered activity + trajectory |
 | Suffix never executed | | rendered activity + trajectory |
@@ -119,6 +119,6 @@ Stop everything started by this run and confirm teardown. Record PASS/FAIL for:
 - **FIG-1306 / FIG-1402**: Re-anchored unreachable live gates onto what the Workbench
   can honestly observe: gated on `not_requested` stop disposition rather than unreachable
   `suppressed_protocol_owned` (since the Workbench exposes no caller stop-sequence controls),
-  gated on `body_len` + `body_sha256` and size-limit omission rather than requiring full
+  gated on `raw_len` + `raw_sha256` and size-limit omission rather than requiring full
   request JSON when exceeding `MAX_PROVIDER_REQUEST_BODY_JSON_BYTES`, and delegated caller-stop
   suppression to deterministic laws per ADR 0074 disposition honesty.

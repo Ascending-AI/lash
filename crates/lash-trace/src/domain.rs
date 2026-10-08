@@ -5,35 +5,27 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{TraceFailureCode, TraceLlmAttemptOutcome, TraceNormalizedError};
+use lash_sansio::llm::types::LlmUsage;
 
-/// One provider request attempt, as the provider seam reported it.
+use crate::TraceFailureCode;
+
+/// What the provider seam observed around one dispatched attempt. The
+/// attempt's facts are its sealed `AttemptRecord`, reported beside this.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct TraceLlmAttempt {
-    /// The attempt's ordinal within its call, from 1.
-    pub ordinal: u32,
+pub struct TraceAttemptObservation {
     /// The provider that served the attempt, when the provider seam named it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
     /// The model the request named.
     pub request_model: String,
-    /// The model the response named, when it named one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub response_model: Option<String>,
     /// Wall-clock epoch milliseconds the attempt was dispatched, when the
     /// provider seam timed it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_at_ms: Option<u64>,
-    /// Wall-clock epoch milliseconds the attempt ended, when the provider
-    /// seam timed it.
+    /// Wall-clock epoch milliseconds the attempt was sealed, when the
+    /// provider seam timed it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ended_at_ms: Option<u64>,
-    pub outcome: TraceLlmAttemptOutcome,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<TraceNormalizedError>,
-    /// Provider-reported usage only. Absence is not zero usage.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage: Option<TraceTokenUsage>,
 }
 
 /// The durable domain operation a [`TraceEvent::DomainCompleted`] ends.
@@ -85,7 +77,7 @@ pub struct TraceDomainCompletion {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_code: Option<TraceFailureCode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage: Option<TraceTokenUsage>,
+    pub usage: Option<LlmUsage>,
 }
 
 impl TraceDomainCompletion {
@@ -107,15 +99,6 @@ impl TraceDomainCompletion {
             usage: None,
         }
     }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct TraceTokenUsage {
-    pub input_tokens: i64,
-    pub output_tokens: i64,
-    pub cache_read_input_tokens: i64,
-    pub cache_write_input_tokens: i64,
-    pub reasoning_output_tokens: i64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -143,5 +126,5 @@ pub struct TraceRuntimeStreamEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_json: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage: Option<TraceTokenUsage>,
+    pub usage: Option<LlmUsage>,
 }

@@ -227,14 +227,14 @@ impl SessionReadView {
 
     /// Borrows the session's accumulated prompt and completion usage for protocol and observation
     /// embedders without recomputing it from message history.
-    pub fn token_usage(&self) -> &crate::TokenUsage {
+    pub fn token_usage(&self) -> &crate::LlmUsage {
         &self.0.meta.token_usage
     }
 
     /// The pinned basis may be `None`.
     /// Current-call feedback is available through
     /// `ProtocolBeforeLlmCallContext.latest_prompt_usage`.
-    pub fn last_prompt_usage(&self) -> Option<&crate::TokenUsage> {
+    pub fn last_prompt_usage(&self) -> Option<&crate::LlmUsage> {
         self.0.meta.last_prompt_usage.as_ref()
     }
 
@@ -289,8 +289,8 @@ pub struct SessionReadMeta {
     durable_relation: Option<crate::SessionRelation>,
     policy: SessionPolicy,
     turn_index: usize,
-    token_usage: crate::TokenUsage,
-    last_prompt_usage: Option<crate::TokenUsage>,
+    token_usage: crate::LlmUsage,
+    last_prompt_usage: Option<crate::LlmUsage>,
     /// The session's recorded plugin configuration, projected onto snapshots.
     plugin_config: crate::PluginConfig,
     /// The protocol turn options this view runs under: the config's

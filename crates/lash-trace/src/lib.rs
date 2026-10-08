@@ -49,8 +49,8 @@ pub mod telemetry;
 
 pub use content_block::{TraceContentBlock, TraceToolResultBlock};
 pub use domain::{
-    TraceDomainCompletion, TraceDomainOperation, TraceDomainStatus, TraceLlmAttempt,
-    TraceRuntimeStreamEvent, TraceTokenUsage,
+    TraceAttemptObservation, TraceDomainCompletion, TraceDomainOperation, TraceDomainStatus,
+    TraceRuntimeStreamEvent,
 };
 pub use event::{TraceEvent, TraceEventKind};
 use jsonl_records::truncate_torn_tail;
@@ -62,6 +62,7 @@ pub use language_execution::{
 };
 pub use language_execution_failure::TraceLanguageExecutionFailure;
 pub use lash_sansio::llm::types::GenerationReceipt;
+use lash_sansio::llm::types::{LlmOutputPart, LlmProviderTraceDirection};
 pub use lash_sansio::{
     CellFailure, CellFailureKind, ExecCodeFailureReason, TextProjectionMetadata,
 };
@@ -139,9 +140,8 @@ pub use telemetry::{
 /// Version 21 gives a context-window overflow its own turn failure reason so
 /// a trace reader can tell a recoverable overflow from a provider error.
 /// Version 22 types the last free-form outcome string in the crate — a retry
-/// attempt's `usage_disposition` becomes a closed
-/// [`TraceAttemptUsageOutcome`], so a record spelling it any other way is
-/// refused instead of decoded — and drops the unreachable `rejected` branch-edge
+/// attempt's `usage_disposition` becomes a closed enum, so a record spelling
+/// it any other way is refused instead of decoded — and drops the unreachable `rejected` branch-edge
 /// selection, replacing it with the typed arm the `branch_selected` event
 /// already carried.
 /// Version 23 adds a closed [`ExecCodeFailureReason`] to `exec_code_failed` so
@@ -178,7 +178,11 @@ pub use telemetry::{
 /// `:incarnation:` segment, and child links drop `incarnation` and
 /// `child_incarnation`. It changes in place under the pre-1.0 version freeze
 /// (FIG-3846): FIG-4029 drops `prompt_view_pruned`, because context-pressure
-/// compaction starts a frame instead of pruning the prompt view.
+/// compaction starts a frame instead of pruning the prompt view. FIG-5528
+/// reports model calls in the runtime's own types: one `LlmUsage`, the sealed
+/// `AttemptRecord` for every attempt, typed terminal reason, output parts and
+/// generation receipt, and one `provider_event` whose typed direction
+/// replaces `provider_request` and `provider_stream_event`.
 ///
 /// version_guard(
 ///     shapes(
@@ -190,7 +194,7 @@ pub use telemetry::{
 ///             TraceLashlangGraph, TraceNodeWaitKind, TraceNodeAwaited, TraceNodeWaitResolution,
 ///             TraceLashlangNodeObservation, TraceLashlangGraphNode,
 ///             TraceLashlangNodeTerminalStatus, TraceLanguageExecutionMapNode,
-///             TraceLashlangEventIdentity, TraceBranchMembership, TraceAttemptUsageOutcome,
+///             TraceLashlangEventIdentity, TraceBranchMembership,
 ///         ),
 ///     ),
 ///     items(path = "crates/lash-trace/src/lashlang_graph.rs", fold_lashlang_graph),
@@ -490,13 +494,13 @@ pub enum TraceProgramStepOutcome {
 
 pub use lash_sansio::FailureCode as TraceFailureCode;
 pub use lash_sansio::llm::types::{
-    AttemptOutcome as TraceLlmAttemptOutcome, LlmTerminalReason as TraceLlmTerminalReason,
-    NormalizedError as TraceNormalizedError, ProviderFailureKind as TraceProviderFailureKind,
-    RetryClass as TraceRetryClass, RetryDeclineCause as TraceRetryDeclineCause,
-    RetryWait as TraceRetryWait,
+    LlmTerminalReason as TraceLlmTerminalReason, NormalizedError as TraceNormalizedError,
+    ProviderFailureKind as TraceProviderFailureKind, RetryClass as TraceRetryClass,
+    RetryDeclineCause as TraceRetryDeclineCause, RetryWait as TraceRetryWait,
 };
 
-/// One attempt projected from its retry owner's sealed record.
+/// One tool attempt projected from its retry owner's sealed record. A model
+/// call's attempts are its sealed `AttemptRecord`s, carried as they are.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TraceRetryAttempt {
@@ -509,33 +513,7 @@ pub struct TraceRetryAttempt {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TraceRetryAttemptDetail {
-    Llm {
-        outcome: TraceLlmAttemptOutcome,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        error: Option<TraceNormalizedError>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        retry_decision: Option<TraceRetryDecision>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        execution_evidence: Option<Box<TraceExecutionEvidence>>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        generation_disposition: Option<GenerationReceipt>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        usage: Option<TraceTokenUsage>,
-        usage_disposition: TraceAttemptUsageOutcome,
-    },
-    Tool {
-        outcome: TraceToolAttemptOutcome,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
-pub enum TraceRetryDecision {
-    Scheduled {
-        wait: TraceRetryWait,
-        class: TraceRetryClass,
-    },
-    Declined(TraceRetryDeclineCause),
+    Tool { outcome: TraceToolAttemptOutcome },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -571,45 +549,6 @@ impl TraceStoreErrorClass {
             Self::MonotonicCounterOverflow => "monotonic_counter_overflow",
         }
     }
-}
-
-/// Why an attempt's provider-reported usage is present or absent.
-///
-/// Mirrors `lash_sansio::llm::types::AttemptUsageOutcome`, the vocabulary's
-/// owner, with the same wire spellings; the trace layer was the only one that
-/// flattened it to a free-form string.
-///
-/// # Integrator class
-///
-/// Reporting integrations exhaustively render these outcomes when
-/// explaining a call whose usage never arrived.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum TraceAttemptUsageOutcome {
-    /// The provider reported usage for this attempt.
-    Reported,
-    /// The provider completed the attempt without reporting usage.
-    UnreportedByProvider,
-    /// The attempt was aborted before usage could be collected.
-    UnreportedAfterAbort,
-    /// The attempt failed before usage could be collected.
-    UnreportedAfterFailure,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct TraceExecutionEvidence {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub served_model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider_response_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider_request_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning_output_tokens: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider_finish_reason: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub collection_interruption: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -744,32 +683,48 @@ pub struct TraceLlmResponse {
     /// The model identifier requested for the corresponding LLM call.
     pub request_model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub terminal_reason: Option<String>,
+    pub terminal_reason: Option<TraceLlmTerminalReason>,
+    /// The model's output parts. Opaque provider replay payloads (encrypted
+    /// reasoning, signatures, provider-owned replay blobs) are not captured;
+    /// every other field is the part as the runtime holds it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parts: Option<Value>,
-    /// Which of the caller's generation options the adapter put on the wire,
-    /// as the runtime's `GenerationReceipt` serializes. Absent when the
-    /// adapter does not report, which is not the same as reporting that
-    /// nothing was requested.
+    pub parts: Option<Vec<LlmOutputPart>>,
+    /// Which of the caller's generation options the adapter put on the wire.
+    /// Absent when the adapter does not report, which is not the same as
+    /// reporting that nothing was requested.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub generation_disposition: Option<Value>,
+    pub generation_disposition: Option<GenerationReceipt>,
 }
 
+/// Why a provider observation's parsed `raw_json` view is absent although the
+/// raw bytes were observed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceProviderBodyOmission {
+    SizeLimit,
+    InvalidJson,
+}
+
+/// One raw provider observation of a model call: the request Lash sent or
+/// one event of the provider's response.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct TraceProviderRequestEvent {
+pub struct TraceProviderEvent {
     pub provider: String,
     pub sequence: u64,
     pub elapsed_ms: u64,
-    pub endpoint: String,
-    pub body_len: usize,
-    /// SHA-256 of the exact serialized wire bytes. `body_json` is a parsed
-    /// structured view whose re-serialization may not reproduce these bytes.
-    pub body_sha256: String,
+    pub direction: LlmProviderTraceDirection,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub body_json: Option<Value>,
-    /// Why `body_json` is absent when the request body itself was observed.
+    pub item_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub body_json_omitted_reason: Option<String>,
+    pub output_index: Option<i64>,
+    pub raw_len: usize,
+    /// SHA-256 of the exact wire bytes. `raw_json` is a parsed structured
+    /// view whose re-serialization may not reproduce these bytes.
+    pub raw_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_json: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_json_omitted_reason: Option<TraceProviderBodyOmission>,
 }
 
 /// Opaque replay state rejected before an LLM Provider request was serialized.
@@ -859,22 +814,6 @@ pub enum TraceEffectEnvelopeDiffValue {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         value_json_omitted_reason: Option<String>,
     },
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct TraceProviderStreamEvent {
-    pub provider: String,
-    pub sequence: u64,
-    pub elapsed_ms: u64,
-    pub event_name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub item_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_index: Option<i64>,
-    pub raw_len: usize,
-    pub raw_sha256: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub raw_json: Option<Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

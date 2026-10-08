@@ -22,7 +22,7 @@ pub(crate) use lash_core::{
     facade_support::TurnActivitySink, facade_support::TurnExecutionMetrics,
     facade_support::TurnOutcome,
 };
-pub(crate) use lash_core::{InputItem, TokenUsage};
+pub(crate) use lash_core::{InputItem, LlmUsage};
 pub(crate) use lash_core::{TurnActivity, TurnInput};
 
 pub(crate) use crate::admin::{PluginOperations, SessionAdmin};

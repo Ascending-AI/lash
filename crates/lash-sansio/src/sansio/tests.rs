@@ -1197,7 +1197,7 @@ fn provider_prompt_subtotal_overflow_fails_the_turn_at_ingress() {
     assert!(
         !effects
             .iter()
-            .any(|effect| matches!(effect, Effect::Emit(SessionStreamEvent::TokenUsage { .. })))
+            .any(|effect| matches!(effect, Effect::Emit(SessionStreamEvent::LlmUsage { .. })))
     );
 }
 

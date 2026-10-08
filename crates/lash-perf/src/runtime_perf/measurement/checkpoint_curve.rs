@@ -396,7 +396,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
             ),
             memory: memory_span(turn_before_memory, after_await_memory),
             phase_profile,
-            turn_usage: TokenUsage::default(),
+            turn_usage: LlmUsage::default(),
         });
     }
 

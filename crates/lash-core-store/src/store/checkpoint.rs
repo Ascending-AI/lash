@@ -22,7 +22,7 @@ mod arc_serde_bytes {
 }
 
 /// Version 4 (FIG-1961) retypes `PersistedTurnState.last_prompt_usage` to the
-/// checked `TokenUsage` shape; v3 roots carrying the retired `PromptUsage`
+/// checked `LlmUsage` shape; v3 roots carrying the retired `PromptUsage`
 /// snapshot fields are refused rather than remapped.
 ///
 #[cfg(not(feature = "synthetic-next"))]

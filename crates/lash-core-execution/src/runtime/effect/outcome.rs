@@ -1,23 +1,13 @@
+use crate::LlmRequest as CoreLlmRequest;
 use crate::LlmResponse;
 use crate::llm::transport::LlmTransportError;
 use crate::sansio::LlmCallError;
-use crate::{LlmRequest as CoreLlmRequest, session_model::TokenUsage};
 
 use super::CausalRef;
 
 // =============================================================================
 // LLM trace helpers
 // =============================================================================
-
-pub fn token_usage_from_llm(usage: &crate::llm::types::LlmUsage) -> TokenUsage {
-    TokenUsage {
-        input_tokens: usage.input_tokens,
-        output_tokens: usage.output_tokens,
-        cache_read_input_tokens: usage.cache_read_input_tokens,
-        cache_write_input_tokens: usage.cache_write_input_tokens,
-        reasoning_output_tokens: usage.reasoning_output_tokens,
-    }
-}
 
 pub fn emit_llm_trace_started(
     standing: &crate::trace::TraceStanding,
@@ -53,10 +43,10 @@ pub fn emit_llm_trace_completed(
                     duration_ms,
                     request_model.to_string(),
                     Some(response.terminal_reason),
-                    crate::trace::trace_output_parts(&response.parts),
+                    &response.parts,
                     response.generation_disposition,
                 ),
-                usage: Some(crate::trace::trace_usage_from_llm(&response.usage)),
+                usage: Some(response.usage.clone()),
                 provider_usage: response.provider_usage.clone(),
                 stream_summary,
                 attempts: crate::trace::trace_llm_attempts(call_record),

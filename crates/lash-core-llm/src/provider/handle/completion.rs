@@ -8,7 +8,13 @@ struct ProviderCompletionSidebandState {
     replay_drops: Vec<crate::ProviderReplayDrop>,
     origin_conflict: Option<ProviderReplayOriginConflict>,
     attempts: Vec<AttemptRecord>,
+    /// The dispatched attempt that has not been sealed yet, when an observer
+    /// is installed.
+    open_attempt: Option<lash_trace::TraceAttemptObservation>,
 }
+
+type AttemptObserver =
+    Arc<dyn Fn(AttemptRecord, lash_trace::TraceAttemptObservation) + Send + Sync>;
 
 /// Replay safety and sealed attempt facts shared with the runtime independently
 /// of the spawned LLM Provider task's terminal return. This is in-process
@@ -16,8 +22,8 @@ struct ProviderCompletionSidebandState {
 #[derive(Clone)]
 pub struct ProviderCompletionSideband {
     state: Arc<Mutex<ProviderCompletionSidebandState>>,
-    pub(super) attempt_observer: Option<Arc<dyn Fn(lash_trace::TraceLlmAttempt) + Send + Sync>>,
-    pub(super) attempt_clock: Option<Arc<dyn crate::Clock>>,
+    attempt_observer: Option<AttemptObserver>,
+    attempt_clock: Option<Arc<dyn crate::Clock>>,
 }
 
 impl std::fmt::Debug for ProviderCompletionSideband {
@@ -30,10 +36,12 @@ impl std::fmt::Debug for ProviderCompletionSideband {
 }
 
 impl ProviderCompletionSideband {
+    /// Report each dispatched provider attempt once, when it is sealed: the
+    /// observer receives the same [`AttemptRecord`] the call record keeps.
     #[must_use]
     pub fn with_attempt_observer(
         mut self,
-        observer: Arc<dyn Fn(lash_trace::TraceLlmAttempt) + Send + Sync>,
+        observer: AttemptObserver,
         clock: Arc<dyn crate::Clock>,
     ) -> Self {
         self.attempt_observer = Some(observer);
@@ -53,6 +61,7 @@ impl ProviderCompletionSideband {
                 replay_drops,
                 origin_conflict: None,
                 attempts: Vec::new(),
+                open_attempt: None,
             })),
         }
     }
@@ -82,17 +91,15 @@ impl ProviderCompletionSideband {
         retry_budget_consumed: bool,
         protocol_position: ProtocolPosition,
     ) -> LlmCallRecord {
-        self.with_state(|state| {
-            let mut attempt = failure_attempt_record(
-                state.attempts.len() as u32 + 1,
-                failure,
-                retry_budget_consumed,
-                protocol_position,
-                None,
-            );
-            attempt.outcome = outcome;
-            state.attempts.push(attempt);
-        });
+        let mut attempt = failure_attempt_record(
+            self.next_attempt_ordinal(),
+            failure,
+            retry_budget_consumed,
+            protocol_position,
+            None,
+        );
+        attempt.outcome = outcome;
+        self.seal_attempt(attempt);
         self.call_record(call_id)
     }
 
@@ -100,8 +107,35 @@ impl ProviderCompletionSideband {
         self.with_state(|state| state.attempts.len() as u32 + 1)
     }
 
+    /// Open the observation of an attempt that is about to be dispatched.
+    pub(super) fn begin_attempt(&self, provider: &str, request_model: &str) {
+        let Some(clock) = &self.attempt_clock else {
+            return;
+        };
+        let observation = lash_trace::TraceAttemptObservation {
+            provider: Some(provider.to_string()),
+            request_model: request_model.to_string(),
+            started_at_ms: Some(clock.timestamp_ms()),
+            ended_at_ms: None,
+        };
+        self.with_state(|state| state.open_attempt = Some(observation));
+    }
+
+    /// Seal an attempt into the call record and report it to the observer.
+    /// A record sealed with no dispatched attempt open (a call cut between
+    /// attempts) is ledger-only: no provider request stands behind it.
     pub(super) fn seal_attempt(&self, attempt: AttemptRecord) {
-        self.with_state(|state| state.attempts.push(attempt));
+        let observation = self.with_state(|state| {
+            state.attempts.push(attempt.clone());
+            state.open_attempt.take()
+        });
+        if let (Some(observer), Some(mut observation)) = (&self.attempt_observer, observation) {
+            observation.ended_at_ms = self
+                .attempt_clock
+                .as_ref()
+                .map(|clock| clock.timestamp_ms());
+            observer(attempt, observation);
+        }
     }
 
     pub(super) fn call_record(&self, call_id: LlmCallId) -> LlmCallRecord {

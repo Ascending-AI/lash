@@ -2,8 +2,10 @@ use lash_core::{DriverAction, DriverContextView, Part, PartKind};
 
 use crate::protocol::stall::reply_fingerprint;
 
-pub(super) const LLM_EXTRACTION_PHASE: &str = "native_extraction";
-pub(super) const NO_PROGRESS_BUDGET_PHASE: &str = "no_progress_budget";
+pub(super) const LLM_EXTRACTION_PHASE: lash_rlm_types::RlmDiagnosticPhase =
+    lash_rlm_types::RlmDiagnosticPhase::NativeExtraction;
+pub(super) const NO_PROGRESS_BUDGET_PHASE: lash_rlm_types::RlmDiagnosticPhase =
+    lash_rlm_types::RlmDiagnosticPhase::NoProgressBudget;
 pub(super) fn stalled_attempts(
     ctx: &DriverContextView<'_>,
     actions: &[DriverAction],

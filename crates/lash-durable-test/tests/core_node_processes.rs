@@ -977,10 +977,10 @@ async fn a_childs_model_usage_stays_on_the_childs_own_turn(tier: Tier) {
     );
     assert_eq!(
         parent.result.usage,
-        lash_core::TokenUsage {
+        lash_core::LlmUsage {
             input_tokens: 16,
             output_tokens: 4,
-            ..lash_core::TokenUsage::default()
+            ..lash_core::LlmUsage::default()
         },
         "the parent report excludes its child's usage"
     );
@@ -1013,9 +1013,9 @@ async fn a_childs_model_usage_stays_on_the_childs_own_turn(tier: Tier) {
     );
     assert_eq!(
         cached.result.usage,
-        lash_core::TokenUsage {
+        lash_core::LlmUsage {
             cache_read_input_tokens: 9,
-            ..lash_core::TokenUsage::default()
+            ..lash_core::LlmUsage::default()
         },
         "the linked child report includes its own cache-only usage"
     );
@@ -1040,10 +1040,10 @@ async fn a_turn_report_sums_its_own_model_calls_usage(tier: Tier) {
     assert_eq!(call_usage(&output), vec![reported], "{output:?}");
     assert_eq!(
         output.result.usage,
-        lash_core::TokenUsage {
+        lash_core::LlmUsage {
             input_tokens: 11,
             output_tokens: 3,
-            ..lash_core::TokenUsage::default()
+            ..lash_core::LlmUsage::default()
         },
         "the report sums its own call's usage"
     );
@@ -1087,7 +1087,7 @@ async fn a_turn_report_sums_two_model_calls_usage(tier: Tier) {
     assert_eq!(call_usage(&output), vec![first, second], "{output:?}");
     assert_eq!(
         output.result.usage,
-        lash_core::TokenUsage {
+        lash_core::LlmUsage {
             input_tokens: 16,
             output_tokens: 5,
             cache_read_input_tokens: 16,

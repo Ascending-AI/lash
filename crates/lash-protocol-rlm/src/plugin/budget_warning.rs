@@ -3,12 +3,12 @@ pub(crate) const BUDGET_WARNING_STATUS: &str = "rlm_context_budget_warning";
 #[cfg(test)]
 mod tests {
     use crate::rlm_support::{effective_budget_tokens, format_budget_suffix_with_vocabulary};
-    use lash_core::TokenUsage;
+    use lash_core::LlmUsage;
 
-    fn prompt_usage(used_tokens: usize) -> TokenUsage {
-        TokenUsage {
+    fn prompt_usage(used_tokens: usize) -> LlmUsage {
+        LlmUsage {
             input_tokens: used_tokens as i64,
-            ..TokenUsage::default()
+            ..LlmUsage::default()
         }
     }
 
@@ -18,9 +18,9 @@ mod tests {
             let vocabulary =
                 crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect);
             for used in [60, 90, 100, 110] {
-                let usage = TokenUsage {
+                let usage = LlmUsage {
                     input_tokens: used as i64,
-                    ..TokenUsage::default()
+                    ..LlmUsage::default()
                 };
                 let text = format_budget_suffix_with_vocabulary(
                     2,

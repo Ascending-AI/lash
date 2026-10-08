@@ -844,7 +844,7 @@ pub(crate) fn skipped_runtime_perf_result(
         stages: BTreeMap::new(),
         memory: empty_memory.clone(),
         phase_profile: BTreeMap::new(),
-        turn_usage: TokenUsage::default(),
+        turn_usage: LlmUsage::default(),
     };
     let mut extra_counters = BTreeMap::new();
     extra_counters.insert("skipped.no_database_url".to_string(), 1);

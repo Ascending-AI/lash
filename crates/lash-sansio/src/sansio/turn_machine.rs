@@ -54,7 +54,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             events,
             protocol_iteration: protocol_run_offset,
             protocol_run_offset,
-            cumulative_usage: TokenUsage::default(),
+            cumulative_usage: LlmUsage::default(),
             last_call_usage: None,
             environment: None,
             observed_cancellation: None,
@@ -232,13 +232,13 @@ impl<M: TurnProtocol> TurnMachine<M> {
 
     /// The usage admitted across this turn's model calls, restored with the
     /// turn so a resumed pass reads the same total as an uninterrupted one.
-    pub fn cumulative_usage(&self) -> &TokenUsage {
+    pub fn cumulative_usage(&self) -> &LlmUsage {
         &self.cumulative_usage
     }
 
     /// The usage the turn's last completed model call reported, restored
     /// with the turn: a pass that resumes it after that call reads it here.
-    pub fn last_call_usage(&self) -> Option<&TokenUsage> {
+    pub fn last_call_usage(&self) -> Option<&LlmUsage> {
         self.last_call_usage.as_ref()
     }
 
@@ -911,43 +911,13 @@ impl<M: TurnProtocol> TurnMachine<M> {
         true
     }
 
-    fn llm_response_debug_parts(&self, llm_response: &LlmResponse) -> Option<Value> {
-        let parts = llm_response
+    fn llm_response_debug_parts(&self, llm_response: &LlmResponse) -> Vec<LlmOutputPart> {
+        llm_response
             .parts
             .iter()
-            .filter_map(|part| match part {
-                LlmOutputPart::Text { text, .. } if !text.is_empty() => Some(serde_json::json!({
-                    "type": "text",
-                    "text": text,
-                })),
-                LlmOutputPart::Text { .. } => None,
-                LlmOutputPart::Reasoning {
-                    text,
-                    replay,
-                } => Some(serde_json::json!({
-                    "type": "reasoning",
-                    "id": replay.as_ref().and_then(|meta| meta.item_id.as_ref()),
-                    "summary": replay.as_ref().map(|meta| &meta.summary),
-                    "text": text,
-                    "has_encrypted": replay.as_ref().is_some_and(|meta| meta.encrypted_content.is_some() || meta.signature.is_some()),
-                    "redacted": replay.as_ref().is_some_and(|meta| meta.redacted),
-                })),
-                LlmOutputPart::ToolCall {
-                    call_id,
-                    tool_name,
-                    input_json,
-                    replay,
-                } => Some(serde_json::json!({
-                    "type": "tool_call",
-                    "call_id": call_id,
-                    "tool_name": tool_name,
-                    "input_json": input_json,
-                    "id": replay.as_ref().and_then(|meta| meta.item_id.as_ref()),
-                    "has_opaque": replay.as_ref().is_some_and(|meta| meta.opaque.is_some()),
-                })),
-            })
-            .collect::<Vec<_>>();
-        (!parts.is_empty()).then_some(Value::Array(parts))
+            .filter(|part| !matches!(part, LlmOutputPart::Text { text, .. } if text.is_empty()))
+            .map(LlmOutputPart::without_replay_payloads)
+            .collect()
     }
 
     /// Accumulates the turn's usage from counters already admitted by
@@ -955,12 +925,12 @@ impl<M: TurnProtocol> TurnMachine<M> {
     fn record_llm_usage(
         &mut self,
         llm_response: &LlmResponse,
-        usage: TokenUsage,
+        usage: LlmUsage,
         response_text: &str,
     ) -> Result<(), TokenUsageOverflow> {
         self.cumulative_usage = self.cumulative_usage.checked_add(&usage)?;
         self.last_call_usage = Some(usage.clone());
-        self.emit(SessionStreamEvent::TokenUsage {
+        self.emit(SessionStreamEvent::LlmUsage {
             protocol_iteration: self.protocol_iteration,
             usage: usage.clone(),
             cumulative: self.cumulative_usage.clone(),

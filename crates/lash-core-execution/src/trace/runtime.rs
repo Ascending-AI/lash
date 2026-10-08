@@ -900,8 +900,16 @@ impl TraceStanding {
         }
         let standing = self.clone();
         sideband.with_attempt_observer(
-            Arc::new(move |attempt| {
-                standing.observe(|| (context.clone(), TraceEvent::LlmAttemptCompleted { attempt }));
+            Arc::new(move |attempt, observation| {
+                standing.observe(|| {
+                    (
+                        context.clone(),
+                        TraceEvent::LlmAttemptCompleted {
+                            attempt,
+                            observation,
+                        },
+                    )
+                });
             }),
             self.runtime.clock().clone(),
         )

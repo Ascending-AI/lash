@@ -119,7 +119,7 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::Deployme
         .expect("create read-session writer");
     let mut state = crate::RuntimeSessionState {
         session_id: SessionId::fixture(SESSION_ID.to_string()),
-        token_usage: crate::TokenUsage {
+        token_usage: crate::LlmUsage {
             input_tokens: 11,
             output_tokens: 7,
             ..Default::default()
@@ -196,7 +196,7 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::Deployme
     );
     assert_eq!(
         view.token_usage(),
-        &crate::TokenUsage {
+        &crate::LlmUsage {
             input_tokens: 11,
             output_tokens: 7,
             ..Default::default()

@@ -1,8 +1,8 @@
 use lash_sansio::TurnId;
 
 use crate::support::{
-    Arc, LlmCallRecord, SessionSnapshot, TokenUsage, ToolCallRecord, TurnActivity,
-    TurnActivitySink, TurnExecutionMetrics, TurnOutcome, async_trait,
+    Arc, LlmCallRecord, LlmUsage, SessionSnapshot, ToolCallRecord, TurnActivity, TurnActivitySink,
+    TurnExecutionMetrics, TurnOutcome, async_trait,
 };
 
 pub use lash_core::facade_support::{TurnIssue, TurnIssueSeverity};
@@ -27,7 +27,7 @@ pub struct TurnReport {
     /// usage; child-session tokens live on each child's own turn report.
     /// A durable report sums reported usage from the attempts in `llm_calls`;
     /// observation gaps can leave this sum incomplete.
-    pub usage: TokenUsage,
+    pub usage: LlmUsage,
     /// Provider calls made by the parent session during this turn, in protocol
     /// order. Child-session calls remain on each child's result. This is the
     /// complete lash-side model attribution surface: a turn has no single

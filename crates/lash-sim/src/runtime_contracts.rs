@@ -630,7 +630,7 @@ pub fn runtime_final_value_invariant_facts(
 }
 
 impl RuntimeUsageTotals {
-    pub fn from_usage(usage: &lash_core::TokenUsage) -> Self {
+    pub fn from_usage(usage: &lash_core::LlmUsage) -> Self {
         Self::new(
             usage.input_tokens,
             usage.output_tokens,
@@ -785,7 +785,7 @@ mod tests {
 
     #[test]
     fn usage_totals_reject_negative_fields() {
-        let totals = RuntimeUsageTotals::from_usage(&lash_core::TokenUsage {
+        let totals = RuntimeUsageTotals::from_usage(&lash_core::LlmUsage {
             input_tokens: -1,
             output_tokens: 0,
             cache_read_input_tokens: 0,

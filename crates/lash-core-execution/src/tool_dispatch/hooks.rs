@@ -53,7 +53,13 @@ pub(super) async fn check_prepared_call(
             return BeforeSelection::Terminal(ToolCallOutput::failure(*failure));
         }
     };
-    publish_check_evidence(context, "tool_args_check", &record, before_kind).await;
+    publish_check_evidence(
+        context,
+        crate::ToolCheckPhase::ToolArgsCheck,
+        &record,
+        before_kind,
+    )
+    .await;
     crate::plugin::before_selection(&record)
 }
 
@@ -119,7 +125,13 @@ pub async fn finalize_tool_result_with_execution_context(
             contribution.events,
         );
     }
-    publish_check_evidence(context, "tool_result_check", &checks.record, after_kind).await;
+    publish_check_evidence(
+        context,
+        crate::ToolCheckPhase::ToolResultCheck,
+        &checks.record,
+        after_kind,
+    )
+    .await;
     if let Err(failure) = carry_result_check_state(context, checks.proposals) {
         return ToolOutcome::failure(*failure);
     }
@@ -169,65 +181,66 @@ pub(crate) fn deferred_occurrence(attempt: u32) -> ToolHookOccurrence {
     }
 }
 
-fn before_kind(verdict: &BeforeToolDecision) -> &'static str {
+fn before_kind(verdict: &BeforeToolDecision) -> crate::ToolCheckVerdictKind {
     match verdict {
-        BeforeToolDecision::Allow => "allow",
-        BeforeToolDecision::Cached(_) => "cached",
-        BeforeToolDecision::Deny(_) => "deny",
-        BeforeToolDecision::Cancel(_) => "cancel",
-        BeforeToolDecision::AbortRun(_) => "abort_run",
+        BeforeToolDecision::Allow => crate::ToolCheckVerdictKind::Allow,
+        BeforeToolDecision::Cached(_) => crate::ToolCheckVerdictKind::Cached,
+        BeforeToolDecision::Deny(_) => crate::ToolCheckVerdictKind::Deny,
+        BeforeToolDecision::Cancel(_) => crate::ToolCheckVerdictKind::Cancel,
+        BeforeToolDecision::AbortRun(_) => crate::ToolCheckVerdictKind::AbortRun,
     }
 }
 
-fn after_kind(verdict: &AfterToolDecision) -> &'static str {
+fn after_kind(verdict: &AfterToolDecision) -> crate::ToolCheckVerdictKind {
     match verdict {
-        AfterToolDecision::Allow => "allow",
-        AfterToolDecision::Deny(_) => "deny",
-        AfterToolDecision::Cancel(_) => "cancel",
-        AfterToolDecision::AbortRun(_) => "abort_run",
+        AfterToolDecision::Allow => crate::ToolCheckVerdictKind::Allow,
+        AfterToolDecision::Deny(_) => crate::ToolCheckVerdictKind::Deny,
+        AfterToolDecision::Cancel(_) => crate::ToolCheckVerdictKind::Cancel,
+        AfterToolDecision::AbortRun(_) => crate::ToolCheckVerdictKind::AbortRun,
     }
 }
 
-fn attributed_json<V>(
+fn attributed_reply<V>(
     reply: &AttributedVerdict<V>,
-    kind: fn(&V) -> &'static str,
-) -> serde_json::Value {
-    serde_json::json!({
-        "plugin_id": reply.callback.owner.plugin,
-        "callback": reply.callback.key,
-        "verdict": kind(&reply.verdict),
-    })
+    kind: fn(&V) -> crate::ToolCheckVerdictKind,
+) -> crate::ToolCheckReply {
+    crate::ToolCheckReply {
+        plugin_id: reply.callback.owner.plugin.to_string(),
+        callback: reply.callback.key.to_string(),
+        verdict: kind(&reply.verdict),
+    }
 }
 
 /// When a reduction selected one terminal reply over others, publish the
 /// winner and every displaced terminal, in reduction order, as one
-/// composition event attributed to the winner's plugin.
+/// conflict fact attributed to the winner's plugin: once on the trace and
+/// once to the session's observers.
 async fn publish_check_evidence<V: RankedVerdict>(
     context: &ToolDispatchContext<'_>,
-    phase: &'static str,
+    phase: crate::ToolCheckPhase,
     record: &CheckRecord<V>,
-    kind: fn(&V) -> &'static str,
+    kind: fn(&V) -> crate::ToolCheckVerdictKind,
 ) {
     let displaced = crate::plugin::displaced_terminals(record);
     let Some(winner) = record.winner().filter(|_| !displaced.is_empty()) else {
         return;
     };
-    let name = format!("{phase}.conflict");
-    let payload = serde_json::json!({
-        "winner": attributed_json(winner, kind),
-        "displaced": displaced
+    let conflict = crate::ToolCheckConflict {
+        phase,
+        winner: attributed_reply(winner, kind),
+        displaced: displaced
             .iter()
-            .map(|reply| attributed_json(reply, kind))
-            .collect::<Vec<_>>(),
-    });
+            .map(|reply| attributed_reply(reply, kind))
+            .collect(),
+    };
     let plugin_id = winner.callback.owner.plugin.as_str();
     if let Err(error) = context
         .session_graph
         .emit_trace_event(
             crate::plugin::owner_trace_context(&context.owner.runtime_owner()),
-            lash_trace::TraceEvent::Custom {
-                name: format!("plugin.{plugin_id}.{name}"),
-                payload: payload.clone(),
+            lash_trace::TraceEvent::ToolCheckConflict {
+                plugin_id: plugin_id.to_string(),
+                conflict: conflict.clone(),
             },
         )
         .await
@@ -236,17 +249,17 @@ async fn publish_check_evidence<V: RankedVerdict>(
             target: "lash::plugin_composition",
             plugin_id,
             error = %error,
-            phase,
+            phase = phase.code(),
             "failed to emit tool check conflict trace"
         );
     }
     context
-        .observation_cursor(&format!("checks:{phase}"))
+        .observation_cursor(&format!("checks:{}", phase.code()))
         .observe(
             context.observer.as_ref(),
             crate::engine::ObservedEvent::Session(crate::SessionStreamEvent::PluginEvent {
                 plugin_id: plugin_id.to_string(),
-                event: crate::PluginRuntimeEvent::Custom { name, payload },
+                event: crate::PluginRuntimeEvent::ToolCheckConflict(conflict),
             }),
         );
 }

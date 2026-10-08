@@ -1,15 +1,5 @@
 use super::*;
 
-fn token_usage_from_llm_usage(usage: &crate::llm::types::LlmUsage) -> TokenUsage {
-    TokenUsage {
-        input_tokens: usage.input_tokens,
-        output_tokens: usage.output_tokens,
-        cache_read_input_tokens: usage.cache_read_input_tokens,
-        cache_write_input_tokens: usage.cache_write_input_tokens,
-        reasoning_output_tokens: usage.reasoning_output_tokens,
-    }
-}
-
 /// Ingress seam for a provider's raw usage counters.
 ///
 /// Everything downstream aggregates these counters on the assumption that they sum in range:
@@ -17,8 +7,8 @@ fn token_usage_from_llm_usage(usage: &crate::llm::types::LlmUsage) -> TokenUsage
 /// the durable turn commit, and host-side bare sums such as `LlmUsage::total`.
 pub(super) fn checked_turn_usage_from_llm_usage(
     usage: &crate::llm::types::LlmUsage,
-) -> Result<(TokenUsage, i64), TokenUsageOverflow> {
-    let usage = token_usage_from_llm_usage(usage);
+) -> Result<(LlmUsage, i64), TokenUsageOverflow> {
+    let usage = usage.clone();
     usage.checked_total()?;
     let input_total = usage.checked_input_total()?;
     Ok((usage, input_total))

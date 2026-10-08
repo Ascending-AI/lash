@@ -273,11 +273,11 @@ pub struct TurnCheckpoint<M: TurnProtocol = UnitTurnProtocol> {
     pub(super) progress_event_cursor: usize,
     pub(super) protocol_iteration: usize,
     pub(super) protocol_run_offset: usize,
-    pub(super) cumulative_usage: TokenUsage,
+    pub(super) cumulative_usage: LlmUsage,
     /// The usage the turn's last completed model call reported; `None`
     /// before its first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) last_call_usage: Option<TokenUsage>,
+    pub(super) last_call_usage: Option<LlmUsage>,
     /// The environment the machine last synced, and the iteration it was
     /// synced for. `None` only before the protocol-start sync is answered.
     pub(super) environment: Option<SyncedEnvironment>,
@@ -592,9 +592,9 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     pub(super) progress_event_cursor: usize,
     pub(super) protocol_iteration: usize,
     pub(super) protocol_run_offset: usize,
-    pub(super) cumulative_usage: TokenUsage,
+    pub(super) cumulative_usage: LlmUsage,
     /// The usage the turn's last completed model call reported.
-    pub(super) last_call_usage: Option<TokenUsage>,
+    pub(super) last_call_usage: Option<LlmUsage>,
     /// The one home of the turn's execution environment: the last recorded
     /// sync, with the protocol iteration it was synced for.
     pub(super) environment: Option<SyncedEnvironment>,

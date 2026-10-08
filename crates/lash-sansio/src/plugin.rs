@@ -40,10 +40,57 @@ pub enum PluginRuntimeEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         detail: Option<String>,
     },
+    /// A built-in tool check selected one terminal reply over others.
+    ToolCheckConflict(ToolCheckConflict),
     Custom {
         name: String,
         payload: serde_json::Value,
     },
+}
+
+/// The built-in tool check phase a reply was given in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCheckPhase {
+    ToolArgsCheck,
+    ToolResultCheck,
+}
+
+impl ToolCheckPhase {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::ToolArgsCheck => "tool_args_check",
+            Self::ToolResultCheck => "tool_result_check",
+        }
+    }
+}
+
+/// What a tool check callback decided, without the decision's payload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCheckVerdictKind {
+    Allow,
+    Cached,
+    Deny,
+    Cancel,
+    AbortRun,
+}
+
+/// One callback's reply to a tool check, attributed to its plugin.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ToolCheckReply {
+    pub plugin_id: String,
+    pub callback: String,
+    pub verdict: ToolCheckVerdictKind,
+}
+
+/// The terminal reply a tool check's reduction selected and every terminal
+/// reply it displaced, in reduction order.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ToolCheckConflict {
+    pub phase: ToolCheckPhase,
+    pub winner: ToolCheckReply,
+    pub displaced: Vec<ToolCheckReply>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

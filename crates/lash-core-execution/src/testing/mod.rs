@@ -419,7 +419,7 @@ use crate::plugin::{PluginError, SessionCreateRequest, SessionHandle, SessionSna
 use crate::provider::{Provider, ProviderComponents, ProviderHandle};
 use crate::session_model::{ConversationRecord, SessionHistoryRecord};
 use crate::{
-    AssembledTurn, ProviderOptions, RuntimeSessionState, SessionPolicy, TokenUsage,
+    AssembledTurn, LlmUsage, ProviderOptions, RuntimeSessionState, SessionPolicy,
     TurnExecutionMetrics, TurnFinish, TurnOutcome, TurnStop,
 };
 
@@ -1918,7 +1918,7 @@ pub fn mock_assembled_turn(session_id: &SessionId, summary: &str) -> AssembledTu
             text: summary.to_string(),
         }),
         execution: TurnExecutionMetrics::default(),
-        token_usage: TokenUsage::default(),
+        token_usage: LlmUsage::default(),
         llm_calls: Vec::new(),
         tool_calls: Vec::new(),
         omitted: None,

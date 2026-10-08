@@ -68,9 +68,9 @@ structure rather than exact assistant wording.
   FIG-3927 amendment). An admitted row names its run in `admitted_run` and `admitted_by`;
   there are no claim columns and no `claimed_turn_id` column, and selecting one fails with
   `no such column`.
-- Provider truth is the `llm_call_started` trace record, **not** `provider_request`. A
-  `provider_request` record drops its body once the assembled request exceeds the trace's
-  inline limit — it then carries `body_json_omitted_reason: "size_limit"` and a `body_len`
+- Provider truth is the `llm_call_started` trace record, **not** `provider_event` (direction `request`). A
+  `provider_event` (direction `request`) record drops its body once the assembled request exceeds the trace's
+  inline limit — it then carries `raw_json_omitted_reason: "size_limit"` and a `raw_len`
   with no body — which is routine on a frontier run and makes every marker count read 0. A
   0 count across every iteration means the evidence was omitted, not that the marker was
   absent; re-read the same iterations from `llm_call_started`, which carries the assembled

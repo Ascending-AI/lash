@@ -1,3 +1,4 @@
+use lash_sansio::llm::types::{LlmProviderTraceDirection, LlmUsage};
 use lash_trace::{
     TraceBranchSelection, TraceContext, TraceDurableTimerStatus, TraceDurableWaitResolution,
     TraceEffectEnvelopeDiffEntry, TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue,
@@ -5,11 +6,10 @@ use lash_trace::{
     TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionIdentity,
     TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,
     TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceLlmRequest, TraceLlmResponse,
-    TraceProviderReplayDropEvent, TraceProviderReplayDropReason, TraceProviderReplayKind,
-    TraceProviderRequestEvent, TraceProviderRouteIdentity, TraceProviderStreamEvent, TraceRecord,
-    TraceRuntimeScope, TraceRuntimeStreamEvent, TraceRuntimeSubject, TraceTokenUsage,
-    TraceToolCallOutcome, TraceToolCallOutput, TraceToolCallStatus, TraceTurnCompletionReason,
-    TraceTurnOutcome,
+    TraceProviderEvent, TraceProviderReplayDropEvent, TraceProviderReplayDropReason,
+    TraceProviderReplayKind, TraceProviderRouteIdentity, TraceRecord, TraceRuntimeScope,
+    TraceRuntimeStreamEvent, TraceRuntimeSubject, TraceToolCallOutcome, TraceToolCallOutput,
+    TraceToolCallStatus, TraceTurnCompletionReason, TraceTurnOutcome,
 };
 use serde_json::json;
 
@@ -127,8 +127,8 @@ fn documented_trace_record_decode_rejects_schema_3_before_payload_interpretation
     );
 }
 
-fn token_usage_sample() -> TraceTokenUsage {
-    TraceTokenUsage {
+fn token_usage_sample() -> LlmUsage {
+    LlmUsage {
         input_tokens: 10,
         output_tokens: 5,
         cache_read_input_tokens: 1,
@@ -233,7 +233,7 @@ fn event_samples() -> Vec<TraceEvent> {
                 text: "hello".to_string(),
                 duration_ms: 12,
                 request_model: "request-model".to_string(),
-                terminal_reason: Some("stop".to_string()),
+                terminal_reason: Some(lash_trace::TraceLlmTerminalReason::Stop),
                 parts: None,
                 generation_disposition: None,
             },
@@ -253,16 +253,22 @@ fn event_samples() -> Vec<TraceEvent> {
             attempts: None,
         },
         TraceEvent::LlmAttemptCompleted {
-            attempt: lash_trace::TraceLlmAttempt {
+            attempt: lash_sansio::llm::types::AttemptRecord {
                 ordinal: 1,
+                outcome: lash_sansio::llm::types::AttemptOutcome::Completed,
+                protocol_position: lash_sansio::llm::types::ProtocolPosition::TerminalObserved,
+                retry_budget_consumed: true,
+                retry_decision: None,
+                error: None,
+                evidence: None,
+                generation_disposition: None,
+                usage: None,
+            },
+            observation: lash_trace::TraceAttemptObservation {
                 provider: Some("test".to_string()),
                 request_model: "m".to_string(),
-                response_model: None,
                 started_at_ms: Some(1),
                 ended_at_ms: Some(2),
-                outcome: lash_trace::TraceLlmAttemptOutcome::Completed,
-                error: None,
-                usage: None,
             },
         },
         TraceEvent::DomainCompleted {
@@ -272,16 +278,48 @@ fn event_samples() -> Vec<TraceEvent> {
                 lash_trace::TraceDomainStatus::Completed,
             ),
         },
-        TraceEvent::ProviderRequest {
-            event: TraceProviderRequestEvent {
+        TraceEvent::ProviderEvent {
+            event: TraceProviderEvent {
                 provider: "test".to_string(),
                 sequence: 0,
                 elapsed_ms: 0,
-                endpoint: "chat/completions".to_string(),
-                body_len: 13,
-                body_sha256: "abcd".to_string(),
-                body_json: Some(json!({ "model": "m" })),
-                body_json_omitted_reason: None,
+                direction: LlmProviderTraceDirection::Request {
+                    endpoint: "chat/completions".to_string(),
+                },
+                item_id: None,
+                output_index: None,
+                raw_len: 13,
+                raw_sha256: "abcd".to_string(),
+                raw_json: Some(json!({ "model": "m" })),
+                raw_json_omitted_reason: None,
+            },
+        },
+        TraceEvent::ProviderEvent {
+            event: TraceProviderEvent {
+                provider: "test".to_string(),
+                sequence: 1,
+                elapsed_ms: 0,
+                direction: LlmProviderTraceDirection::Response {
+                    event_name: "delta".to_string(),
+                },
+                item_id: None,
+                output_index: None,
+                raw_len: 4,
+                raw_sha256: "abcd".to_string(),
+                raw_json: None,
+                raw_json_omitted_reason: Some(lash_trace::TraceProviderBodyOmission::InvalidJson),
+            },
+        },
+        TraceEvent::ToolCheckConflict {
+            plugin_id: "alpha".to_string(),
+            conflict: lash_sansio::ToolCheckConflict {
+                phase: lash_sansio::ToolCheckPhase::ToolArgsCheck,
+                winner: lash_sansio::ToolCheckReply {
+                    plugin_id: "alpha".to_string(),
+                    callback: "tool_args_check:check".to_string(),
+                    verdict: lash_sansio::ToolCheckVerdictKind::Deny,
+                },
+                displaced: Vec::new(),
             },
         },
         TraceEvent::ProviderReplayDropped {
@@ -314,19 +352,6 @@ fn event_samples() -> Vec<TraceEvent> {
                     },
                     reconstructed: TraceEffectEnvelopeDiffValue::Missing,
                 }],
-            },
-        },
-        TraceEvent::ProviderStreamEvent {
-            event: TraceProviderStreamEvent {
-                provider: "test".to_string(),
-                sequence: 1,
-                elapsed_ms: 0,
-                event_name: "delta".to_string(),
-                item_id: None,
-                output_index: None,
-                raw_len: 4,
-                raw_sha256: "abcd".to_string(),
-                raw_json: None,
             },
         },
         TraceEvent::RuntimeStreamEvent {
@@ -470,35 +495,6 @@ fn trace_event_vocabulary_names_no_seam_implementation() {
             );
         }
     }
-}
-
-#[test]
-fn unknown_attempt_usage_disposition_is_refused() {
-    // The four legal spellings are the vocabulary `AttemptUsageOutcome`
-    // owns upstream; the trace layer was the only one that flattened them to a
-    // free-form string, so any capitalisation or invention decoded silently.
-    let attempt = json!({
-        "ordinal": 1,
-        "detail": {"kind": "llm", "outcome": "aborted", "usage_disposition": "REPORTED"},
-    });
-    let error = serde_json::from_value::<lash_trace::TraceRetryAttempt>(attempt)
-        .expect_err("an unknown usage disposition must be refused");
-    assert_eq!(
-        error.to_string(),
-        "unknown variant `REPORTED`, expected one of `reported`, `unreported_by_provider`, \
-         `unreported_after_abort`, `unreported_after_failure`",
-    );
-
-    let legal = json!({
-        "ordinal": 1,
-        "detail": {"kind": "llm", "outcome": "aborted", "usage_disposition": "unreported_after_abort"},
-    });
-    let decoded =
-        serde_json::from_value::<lash_trace::TraceRetryAttempt>(legal).expect("legal spelling");
-    assert_eq!(
-        serde_json::to_value(&decoded).expect("re-encode")["detail"]["usage_disposition"],
-        json!("unreported_after_abort"),
-    );
 }
 
 /// FIG-2362: `exec_code_failed` carries a closed `reason` code beside the

@@ -154,7 +154,6 @@ use lash::tools::object_schema as _;
 use lash::tools::parse_optional_usize_arg as _;
 use lash::tracing::TraceContext as _;
 use lash::tracing::TracePromptComponent as _;
-use lash::tracing::TraceTokenUsage as _;
 use lash::tracing::TraceToolCallOutcome as _;
 use lash::tracing::TraceToolCallOutput as _;
 use lash::tracing::TraceToolCallStatus as _;

@@ -562,7 +562,7 @@ async fn cumulative_usage_overflow_publishes_no_turn_terminal_or_usage(tier: Tie
         view.as_ref()
             .expect("the created session has a head")
             .token_usage(),
-        &lash_core::TokenUsage::default(),
+        &lash_core::LlmUsage::default(),
         "the overflowing turn publishes no durable usage"
     );
     let turns = session

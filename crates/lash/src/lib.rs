@@ -981,6 +981,7 @@ pub mod plugins {
     pub use lash_core::{ExecutableGeneration, RecordedRender};
     pub use lash_core::{
         PluginError, PluginErrorClass, PluginMessage, PluginRuntimeEvent, ToolCatalog,
+        ToolCheckConflict, ToolCheckPhase, ToolCheckReply, ToolCheckVerdictKind,
         facade_support::PluginFactory, facade_support::PluginHost, facade_support::PluginRegistrar,
         facade_support::PluginSession, facade_support::PluginSessionContext,
         facade_support::PluginSpec, facade_support::PluginSpecFactory,
@@ -1387,7 +1388,8 @@ pub mod provider {
         RequestTemplateBuilder, SlotCodec, TemplateError, TemplateJson, TransientJson,
     };
     pub use lash_sansio::llm::types::{
-        LlmProviderTraceEvent, LlmProviderTraceSender, ProviderReasoningRetentionSupport,
+        LlmProviderTraceDirection, LlmProviderTraceEvent, LlmProviderTraceSender,
+        ProviderReasoningRetentionSupport,
     };
     /// What a provider's `send` reads its response under, beside the body:
     /// the call's scope, its recorded contract and the send's live senders.

@@ -9,7 +9,7 @@ struct LocalTurnEffectRunner {
     messages: crate::MessageSequence,
     prompt_messages: crate::MessageSequence,
     /// The machine's admitted last-call usage at this effect's boundary.
-    last_call_usage: Option<crate::TokenUsage>,
+    last_call_usage: Option<crate::LlmUsage>,
     active_events: lash_sansio::AppendVec<crate::SessionHistoryRecord>,
     event_tx: TurnObserver,
 }

@@ -363,8 +363,8 @@ fn the_required_output_section_renders_the_finish_contract() {
     assert!(!late.contains("=== FINAL ANSWER FORMAT ==="), "{late}");
 }
 
-fn usage(tokens: i64) -> lash_core::TokenUsage {
-    lash_core::TokenUsage {
+fn usage(tokens: i64) -> lash_core::LlmUsage {
+    lash_core::LlmUsage {
         input_tokens: tokens,
         ..Default::default()
     }

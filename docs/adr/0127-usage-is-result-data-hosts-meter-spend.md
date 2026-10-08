@@ -14,7 +14,7 @@ can make catalogue estimates differ from the account debit.
 
 Figments, Lash's production host, already meters at the `Provider` boundary.
 Its `CostTrackingProvider` reserves spend before dispatch and settles receipts
-from successes and failed partial responses. It reads turn `TokenUsage`
+from successes and failed partial responses. It reads turn `LlmUsage`
 summaries and does not consume the ADR 0125 ledger. That ledger adds a SQL
 admission and a recorded delivery per model call, duplicates host metering,
 and would freeze unnecessary storage and host APIs at 1.0.
@@ -28,7 +28,7 @@ each attempt
 Resume loads that result. Absence stays absent and
 explicit zero stays zero, as ADRs 0031 and 0032 require. Lash uses this data
 for context-window and compaction decisions, configured token budgets,
-turn-result summaries (`TokenUsage`) and trace attributes.
+turn-result summaries (`LlmUsage`) and trace attributes.
 
 Spend metering, caps, pricing and billing belong to the host at the `Provider`
 seam. Lash owns no authorization policy, rate limiting or cost accounting.

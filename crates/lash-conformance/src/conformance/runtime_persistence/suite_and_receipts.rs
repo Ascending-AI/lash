@@ -544,7 +544,7 @@ pub async fn checkpoint_restore_rejects_turn_index_without_increment_headroom(
 pub async fn checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows(
     store: Arc<dyn RuntimeStore>,
 ) {
-    let token_usage = crate::TokenUsage {
+    let token_usage = crate::LlmUsage {
         input_tokens: i64::MAX,
         output_tokens: i64::MIN,
         cache_read_input_tokens: i64::MAX,

@@ -117,11 +117,11 @@ pub enum LogEvent {
     LlmDebug {
         session_id: SessionId,
         protocol_iteration: usize,
-        usage: TokenUsage,
+        usage: LlmUsage,
         provider_usage: Option<Value>,
         request_body: Option<String>,
         response_text: String,
-        response_parts: Option<Value>,
+        response_parts: Vec<crate::llm::types::LlmOutputPart>,
     },
     LlmError {
         session_id: SessionId,

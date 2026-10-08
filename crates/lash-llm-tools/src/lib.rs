@@ -493,7 +493,7 @@ mod tests {
                     .push((request, usage_source));
                 Ok(lash_core::facade_support::DirectCompletion {
                     text: manager.response_text.clone(),
-                    usage: lash_core::TokenUsage::default(),
+                    usage: lash_core::LlmUsage::default(),
                     llm_call: lash_core::LlmCallRecord {
                         call_id: lash_core::LlmCallId("llm-tools-test".to_string()),
                         label: None,

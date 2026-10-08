@@ -23,12 +23,12 @@ use lash_core::runtime::QueuedWorkBatchDraft;
 use lash_core::store::{GraphAppend, RuntimeCommitReceipt};
 use lash_core::{
     AttachmentId, BlobRef, Clock, DeliveryPolicy, DeploymentStore, EffectAddress, ExecutionScope,
-    ForkSessionRequest, HydratedSessionCheckpoint, PendingTurnInputDraft, PluginNamespaceState,
-    PluginState, ProcessEventLog as _, ProcessRegistrar as _, ProtocolEvent, QueuedWorkAuthority,
-    RuntimeCommit, RuntimeSessionState, RuntimeStore, RuntimeTurnCommitStamp,
+    ForkSessionRequest, HydratedSessionCheckpoint, LlmUsage, PendingTurnInputDraft,
+    PluginNamespaceState, PluginState, ProcessEventLog as _, ProcessRegistrar as _, ProtocolEvent,
+    QueuedWorkAuthority, RuntimeCommit, RuntimeSessionState, RuntimeStore, RuntimeTurnCommitStamp,
     SessionCatalogStore as _, SessionCreationHead, SessionHistoryRecord, SessionMeta,
     SessionNodePayload, SessionNodeRecord, SessionRelation, SessionStoreCreateRequest, StoreError,
-    TokenUsage, ToolState, TurnInput, TurnInputApplication, TurnInputIngress, TurnInputStateKind,
+    ToolState, TurnInput, TurnInputApplication, TurnInputIngress, TurnInputStateKind,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
@@ -653,7 +653,7 @@ fn checkpoint_bodies() -> HydratedSessionCheckpoint {
     HydratedSessionCheckpoint {
         turn_state: lash_core::PersistedTurnState {
             turn_index: 37,
-            token_usage: TokenUsage {
+            token_usage: LlmUsage {
                 input_tokens: 13,
                 output_tokens: 8,
                 cache_read_input_tokens: 5,

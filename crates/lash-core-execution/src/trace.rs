@@ -9,21 +9,19 @@ const LASH_MODEL_FACING_COMPOSITION_DOMAIN_VERSION: &str = "lash-model-facing-co
 
 use lash_trace::{
     TraceAttachment, TraceContentBlock, TraceContext, TraceEvent, TraceLlmMessage, TraceLlmRequest,
-    TraceRetryAttempt, TraceRetryAttemptDetail, TraceTokenUsage, TraceToolAttemptOutcome,
-    TraceToolResultBlock, TraceToolSpec, llm_node_id, session_node_id, tool_node_id, turn_node_id,
+    TraceRetryAttempt, TraceRetryAttemptDetail, TraceToolAttemptOutcome, TraceToolResultBlock,
+    TraceToolSpec, llm_node_id, session_node_id, tool_node_id, turn_node_id,
 };
 
 use crate::llm::types::{
-    LlmContentBlock, LlmMessage, LlmOutputPart, LlmOutputSpec, LlmRequest, LlmRole, LlmToolChoice,
-    LlmToolSpec,
+    LlmContentBlock, LlmMessage, LlmOutputSpec, LlmRequest, LlmRole, LlmToolChoice, LlmToolSpec,
 };
-use crate::session_model::TokenUsage;
 use crate::{ToolCallOutcome, ToolCallOutput};
 use lash_sansio::core_support::Blake3DomainHasher;
 
 /// LLM-call trace projections, re-exported at their original path from
 /// `lash-core-llm`, which owns the provider records they project.
-pub use lash_core_llm::trace::{trace_llm_attempts, trace_llm_response, trace_usage_from_llm};
+pub use lash_core_llm::trace::{trace_llm_attempts, trace_llm_response};
 
 #[cfg(any(test, feature = "testing"))]
 thread_local! {
@@ -177,9 +175,8 @@ fn assign_span_identity(context: &mut TraceContext, event: &TraceEvent) {
         | TraceEvent::ToolReceipt { call_id, .. } => {
             set_span(context, Some(tool_node_id(call_id.as_str())), turn_node);
         }
-        TraceEvent::ProviderRequest { .. }
+        TraceEvent::ProviderEvent { .. }
         | TraceEvent::ProviderReplayDropped { .. }
-        | TraceEvent::ProviderStreamEvent { .. }
         | TraceEvent::RuntimeStreamEvent { .. } => {
             let parent = context
                 .llm_call_id
@@ -568,23 +565,6 @@ fn trace_output_spec(spec: &LlmOutputSpec) -> serde_json::Value {
     }
 }
 
-pub fn trace_usage_from_session(usage: &TokenUsage) -> TraceTokenUsage {
-    let TokenUsage {
-        input_tokens,
-        output_tokens,
-        cache_read_input_tokens,
-        cache_write_input_tokens,
-        reasoning_output_tokens,
-    } = usage;
-    TraceTokenUsage {
-        input_tokens: *input_tokens,
-        output_tokens: *output_tokens,
-        cache_read_input_tokens: *cache_read_input_tokens,
-        cache_write_input_tokens: *cache_write_input_tokens,
-        reasoning_output_tokens: *reasoning_output_tokens,
-    }
-}
-
 pub(crate) fn trace_tool_attempt(
     ordinal: u32,
     record: &crate::ToolCallRecord,
@@ -610,40 +590,6 @@ pub(crate) fn trace_tool_attempt(
         delay_ms,
         detail: TraceRetryAttemptDetail::Tool { outcome },
     }
-}
-
-pub(crate) fn trace_output_parts(parts: &[LlmOutputPart]) -> Option<serde_json::Value> {
-    let parts = parts
-        .iter()
-        .map(|part| match part {
-            LlmOutputPart::Text { text, .. } => serde_json::json!({
-                "type": "text",
-                "text": text,
-            }),
-            LlmOutputPart::Reasoning { text, replay } => serde_json::json!({
-                "type": "reasoning",
-                "id": replay.as_ref().and_then(|meta| meta.item_id.as_ref()),
-                "summary": replay.as_ref().map(|meta| &meta.summary),
-                "text": text,
-                "has_encrypted": replay.as_ref().is_some_and(|meta| meta.encrypted_content.is_some() || meta.signature.is_some()),
-                "redacted": replay.as_ref().is_some_and(|meta| meta.redacted),
-            }),
-            LlmOutputPart::ToolCall {
-                call_id,
-                tool_name,
-                input_json,
-                replay,
-            } => serde_json::json!({
-                "type": "tool_call",
-                "call_id": call_id,
-                "tool_name": tool_name,
-                "input_json": input_json,
-                "id": replay.as_ref().and_then(|meta| meta.item_id.as_ref()),
-                "has_opaque": replay.as_ref().is_some_and(|meta| meta.opaque.is_some()),
-            }),
-        })
-        .collect::<Vec<_>>();
-    (!parts.is_empty()).then_some(serde_json::Value::Array(parts))
 }
 
 #[cfg(test)]
@@ -926,7 +872,11 @@ mod span_identity_tests {
                     }),
                     evidence: None,
                     generation_disposition: None,
-                    usage: None,
+                    usage: Some(crate::LlmUsage {
+                        input_tokens: 7,
+                        output_tokens: 0,
+                        ..crate::LlmUsage::default()
+                    }),
                 },
                 crate::AttemptRecord {
                     ordinal: 2,
@@ -937,7 +887,11 @@ mod span_identity_tests {
                     error: None,
                     evidence: None,
                     generation_disposition: None,
-                    usage: None,
+                    usage: Some(crate::LlmUsage {
+                        input_tokens: 11,
+                        output_tokens: 5,
+                        ..crate::LlmUsage::default()
+                    }),
                 },
             ],
         };
@@ -974,37 +928,32 @@ mod span_identity_tests {
         let TraceEvent::LlmCallFailed { attempts, .. } = emitted.event else {
             panic!("expected emitted LLM failure");
         };
+        // The emitted ladder is the sealed record, attempt for attempt: each
+        // ordinal, the retry decision with its delay, and reported usage.
         let ladder = attempts.expect("emitted attempt ladder");
-        assert_eq!(ladder.len(), 2);
-        assert_eq!(ladder[0].ordinal, 1);
-        let TraceRetryAttemptDetail::Llm {
-            outcome,
-            error: Some(error),
-            retry_decision: Some(lash_trace::TraceRetryDecision::Scheduled { wait, class }),
-            ..
-        } = &ladder[0].detail
-        else {
-            panic!("typed failed LLM attempt")
-        };
-        assert_eq!(*outcome, lash_trace::TraceLlmAttemptOutcome::Failed);
-        assert_eq!(error.class, crate::ProviderFailureKind::Http);
-        assert_eq!(error.http_status, Some(429));
+        assert_eq!(ladder, record.attempts);
         assert_eq!(
-            error.code,
-            Some(crate::FailureCode::provider("rate_limit_exceeded"))
+            ladder
+                .iter()
+                .map(|attempt| attempt.ordinal)
+                .collect::<Vec<_>>(),
+            [1, 2]
         );
-        assert_eq!(*wait, lash_trace::TraceRetryWait::Throttle);
-        assert_eq!(*class, lash_trace::TraceRetryClass::RejectedHttpResponse);
-        assert_eq!(ladder[0].delay_ms, Some(250));
-        assert_eq!(ladder[1].ordinal, 2);
-        assert!(matches!(
-            ladder[1].detail,
-            TraceRetryAttemptDetail::Llm {
-                outcome: lash_trace::TraceLlmAttemptOutcome::Completed,
-                ..
-            }
-        ));
-        assert_eq!(ladder[1].delay_ms, None);
+        assert_eq!(
+            ladder[0]
+                .retry_decision
+                .as_ref()
+                .and_then(|decision| decision.delay()),
+            Some(std::time::Duration::from_millis(250))
+        );
+        assert_eq!(ladder[1].retry_decision, None);
+        assert_eq!(
+            ladder
+                .iter()
+                .map(|attempt| attempt.usage.as_ref().map(|usage| usage.input_tokens))
+                .collect::<Vec<_>>(),
+            [Some(7), Some(11)]
+        );
     }
 
     #[test]

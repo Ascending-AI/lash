@@ -29,8 +29,8 @@ mod runtime {
         pub(crate) use lash_core::runtime::*;
         pub(crate) use lash_core::sansio::{LlmCallError, Response};
         pub(crate) use lash_core::session_model::{
-            Message, MessageRole, Part, RuntimeSessionPolicy, SessionPolicy, SessionStreamEvent,
-            TokenUsage, make_error_event, reassign_part_ids, shared_parts,
+            LlmUsage, Message, MessageRole, Part, RuntimeSessionPolicy, SessionPolicy,
+            SessionStreamEvent, make_error_event, reassign_part_ids, shared_parts,
         };
         pub(crate) use lash_core::testing::runtime_internals::*;
         pub(crate) use lash_core::*;
@@ -48,7 +48,7 @@ mod runtime {
             unbound_recording_store, unbound_recording_store_with_clock, unbound_store,
         };
         pub(crate) use lash_core::llm::transport::LlmTransportError;
-        pub(crate) use lash_core::llm::types::{LlmProviderTraceEvent, LlmUsage};
+        pub(crate) use lash_core::llm::types::LlmProviderTraceEvent;
         pub(crate) use lash_core::plugin::StaticPluginFactory;
         pub(crate) use lash_core::testing::TestProvider;
         pub(crate) use lash_core::testing::runtime_helpers as helpers;

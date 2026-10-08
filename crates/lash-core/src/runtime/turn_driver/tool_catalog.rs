@@ -133,7 +133,7 @@ impl RuntimeTurnDriver<'_> {
         messages: crate::MessageSequence,
         protocol_iteration: usize,
         request: &LlmRequest,
-        last_call_usage: Option<crate::TokenUsage>,
+        last_call_usage: Option<crate::LlmUsage>,
     ) -> Result<Option<crate::ProtocolLlmCallAction>, PluginError> {
         self.session
             .plugins()

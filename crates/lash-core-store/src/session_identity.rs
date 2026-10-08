@@ -602,9 +602,9 @@ pub struct SessionSnapshot {
     #[serde(default)]
     pub turn_index: usize,
     #[serde(default)]
-    pub token_usage: crate::TokenUsage,
+    pub token_usage: crate::LlmUsage,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_prompt_usage: Option<crate::TokenUsage>,
+    pub last_prompt_usage: Option<crate::LlmUsage>,
     /// Read-only projection of the session's recorded plugin configuration
     /// (FIG-4379). Applying a snapshot does not write this field: config
     /// changes only through a config patch.
@@ -641,7 +641,7 @@ impl SessionSnapshot {
             current_frame_node_id: None,
             session_graph: crate::SessionGraph::default(),
             turn_index: 0,
-            token_usage: crate::TokenUsage::default(),
+            token_usage: crate::LlmUsage::default(),
             last_prompt_usage: None,
             plugin_config: PluginConfig::default(),
             tool_state_ref: None,

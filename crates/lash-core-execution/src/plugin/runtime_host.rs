@@ -132,14 +132,14 @@ pub trait SessionGraphService: Send + Sync {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DirectCompletion {
     pub text: String,
-    pub usage: crate::TokenUsage,
+    pub usage: crate::LlmUsage,
     pub llm_call: crate::LlmCallRecord,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DirectLlmCompletion {
     pub response: crate::LlmResponse,
-    pub usage: crate::TokenUsage,
+    pub usage: crate::LlmUsage,
     pub llm_call: crate::LlmCallRecord,
 }
 

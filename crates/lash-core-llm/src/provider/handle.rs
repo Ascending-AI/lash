@@ -403,10 +403,7 @@ impl ProviderHandle {
                     None,
                 ));
             };
-            let attempt_started_at_ms = sideband
-                .attempt_clock
-                .as_ref()
-                .map(|clock| clock.timestamp_ms());
+            sideband.begin_attempt(self.kind(), context.model().wire_model());
             // Every bound of this attempt is clipped to what remains of the
             // total; the route's own bounds come back after.
             let window = reliability.for_window(remaining(clock.as_ref()));
@@ -505,44 +502,6 @@ impl ProviderHandle {
                     (Err(sideband.fence_error(error)), Some(original_failure))
                 }
             };
-            if let Some(observer) = &sideband.attempt_observer {
-                let (outcome, error, response) = match &result {
-                    Ok(response) => (
-                        success_outcome(response.terminal_reason),
-                        None,
-                        Some(response),
-                    ),
-                    Err(error) => (
-                        AttemptOutcome::Failed,
-                        Some(NormalizedError {
-                            class: error.kind,
-                            code: error.code.clone(),
-                            http_status: error.http_status,
-                            provider_request_id: None,
-                            retry_after: error.retry_after(),
-                        }),
-                        error.partial_response.as_deref(),
-                    ),
-                };
-                observer(lash_trace::TraceLlmAttempt {
-                    ordinal: attempt_ordinal,
-                    provider: Some(self.kind().to_string()),
-                    request_model: context.model().wire_model().to_string(),
-                    response_model: response
-                        .and_then(|response| response.execution_evidence.as_ref())
-                        .and_then(|evidence| evidence.served_model.clone()),
-                    started_at_ms: attempt_started_at_ms,
-                    ended_at_ms: sideband
-                        .attempt_clock
-                        .as_ref()
-                        .map(|clock| clock.timestamp_ms()),
-                    outcome,
-                    error,
-                    usage: response
-                        .filter(|response| response.provider_usage.is_some())
-                        .map(|response| crate::trace::trace_usage_from_llm(&response.usage)),
-                });
-            }
             match result {
                 Ok(response) => {
                     let outcome = success_outcome(response.terminal_reason);

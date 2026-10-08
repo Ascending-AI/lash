@@ -197,9 +197,9 @@ pub(crate) fn single_llm_extraction_payload(machine: &TurnMachine) -> serde_json
         .iter()
         .filter_map(|event| match event {
             lash_core::SessionHistoryRecord::Protocol(event) => match recorded_rlm_event(event) {
-                Some(RlmProtocolEvent::RlmDiagnostic(diagnostic)) => {
-                    (diagnostic.phase == "llm_extraction").then_some(diagnostic.payload)
-                }
+                Some(RlmProtocolEvent::RlmDiagnostic(diagnostic)) => (diagnostic.phase
+                    == lash_rlm_types::RlmDiagnosticPhase::LlmExtraction)
+                    .then_some(diagnostic.payload),
                 _ => None,
             },
             _ => None,

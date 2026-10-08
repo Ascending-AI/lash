@@ -30,8 +30,8 @@ use lash_core::runtime::TurnInputAcceptanceReceipt;
 use lash_core::store::PhysicalTurn;
 use lash_core::{
     InputId, LiveReplayGapReason, LiveReplayOutcome, LiveReplaySubscribeOutcome,
-    LiveReplaySubscription, LlmCallRecord, SessionCursor, SessionObservationEvent,
-    SessionObservationEventPayload, SessionRevision, TokenUsage, TurnActivity, TurnEvent, TurnId,
+    LiveReplaySubscription, LlmCallRecord, LlmUsage, SessionCursor, SessionObservationEvent,
+    SessionObservationEventPayload, SessionRevision, TurnActivity, TurnEvent, TurnId,
 };
 use tokio::sync::mpsc;
 
@@ -714,8 +714,8 @@ pub(super) async fn durable_report(
         .iter()
         .flat_map(|call| &call.attempts)
         .filter_map(|attempt| attempt.usage.as_ref())
-        .try_fold(TokenUsage::default(), |total, usage| {
-            total.checked_add(&TokenUsage {
+        .try_fold(LlmUsage::default(), |total, usage| {
+            total.checked_add(&LlmUsage {
                 input_tokens: usage.input_tokens,
                 output_tokens: usage.output_tokens,
                 cache_read_input_tokens: usage.cache_read_input_tokens,

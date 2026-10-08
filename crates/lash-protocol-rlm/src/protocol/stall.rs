@@ -19,9 +19,11 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 use serde_json::Value;
 
 /// Diagnostic phase emitted exactly once per provider attempt.
-pub(super) const LLM_EXTRACTION_PHASE: &str = "llm_extraction";
+pub(super) const LLM_EXTRACTION_PHASE: lash_rlm_types::RlmDiagnosticPhase =
+    lash_rlm_types::RlmDiagnosticPhase::LlmExtraction;
 /// Diagnostic phase that records a turn stopped by its no-progress budget.
-pub(super) const NO_PROGRESS_BUDGET_PHASE: &str = "no_progress_budget";
+pub(super) const NO_PROGRESS_BUDGET_PHASE: lash_rlm_types::RlmDiagnosticPhase =
+    lash_rlm_types::RlmDiagnosticPhase::NoProgressBudget;
 /// Consecutive provider attempts *in this turn*, ending at its latest record,
 /// that committed no error-free execution.
 ///
@@ -55,7 +57,7 @@ pub(super) fn stalled_attempts(
 pub(crate) fn stalled_attempts_in_phase(
     ctx: &DriverContextView<'_>,
     actions: &[DriverAction],
-    extraction_phase: &str,
+    extraction_phase: lash_rlm_types::RlmDiagnosticPhase,
 ) -> Result<usize, lash_core::StoredDataCorruption> {
     let turn_id = ctx.turn_id();
     let trajectory_prefix = trajectory_entry_turn_prefix(turn_id);
@@ -98,7 +100,7 @@ fn count_pending_attempts(
     actions: &[DriverAction],
     trajectory_prefix: &str,
     attempts: &mut usize,
-    extraction_phase: &str,
+    extraction_phase: lash_rlm_types::RlmDiagnosticPhase,
 ) -> Result<(), lash_core::StoredDataCorruption> {
     for action in actions {
         let DriverAction::AppendEvents(records) = action else {

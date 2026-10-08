@@ -11,16 +11,15 @@ use opentelemetry::trace::{
 };
 use opentelemetry::{Context, KeyValue};
 
+use lash_sansio::llm::types::{AttemptOutcome, LlmUsage};
+
 use crate::telemetry::{
     AttemptObservation, DurableTraceScope, EmissionSource, TraceAdmissionCandidate, TraceAnchor,
     TraceCandidateOutcome, TraceCarrier, TraceCause, TraceDomainProjector, TraceHostOperation,
     TraceScopeFactory, TraceScopeId, TraceScopeKind, UntracedScopes, W3cSpanId, W3cTraceFlags,
     W3cTraceId, W3cTraceState,
 };
-use crate::{
-    TraceDomainOperation, TraceDomainStatus, TraceEvent, TraceLlmAttemptOutcome, TraceRecord,
-    TraceTokenUsage, TraceTurnOutcome,
-};
+use crate::{TraceDomainOperation, TraceDomainStatus, TraceEvent, TraceRecord, TraceTurnOutcome};
 
 /// Exact API namespace supported by this adapter.
 pub use opentelemetry as api;
@@ -630,19 +629,19 @@ impl<'a> Projection<'a> {
             TraceEvent::TurnCompleted { .. } => {
                 projection.operation = Some("invoke_agent");
             }
-            TraceEvent::LlmAttemptCompleted { attempt } => {
+            TraceEvent::LlmAttemptCompleted { observation, .. } => {
                 projection.span = DomainSpan::Model;
                 projection.operation = Some("chat");
-                projection.provider = attempt.provider.as_deref();
-                projection.model = Some(&attempt.request_model);
+                projection.provider = observation.provider.as_deref();
+                projection.model = Some(&observation.request_model);
                 // Missing provider timings describe an instantaneous observation,
                 // never the duration of the enclosing turn.
-                projection.started_at_ms = Some(attempt.started_at_ms.unwrap_or_else(|| {
-                    attempt.ended_at_ms.unwrap_or_else(|| {
+                projection.started_at_ms = Some(observation.started_at_ms.unwrap_or_else(|| {
+                    observation.ended_at_ms.unwrap_or_else(|| {
                         u64::try_from(record.timestamp.timestamp_millis()).unwrap_or(0)
                     })
                 }));
-                projection.ended_at_ms = attempt.ended_at_ms;
+                projection.ended_at_ms = observation.ended_at_ms;
             }
             TraceEvent::DomainCompleted { completion } => {
                 projection.span = match completion.operation {
@@ -704,8 +703,8 @@ impl<'a> Projection<'a> {
     }
     fn failed(&self, record: &TraceRecord) -> bool {
         match &record.event {
-            TraceEvent::LlmAttemptCompleted { attempt } => {
-                matches!(attempt.outcome, TraceLlmAttemptOutcome::Failed)
+            TraceEvent::LlmAttemptCompleted { attempt, .. } => {
+                matches!(attempt.outcome, AttemptOutcome::Failed)
             }
             TraceEvent::DomainCompleted { completion } => {
                 completion.status == TraceDomainStatus::Failed
@@ -715,15 +714,19 @@ impl<'a> Projection<'a> {
     }
     fn attributes(&self, record: &TraceRecord, out: &mut Vec<KeyValue>) {
         match &record.event {
-            TraceEvent::LlmAttemptCompleted { attempt } => {
+            TraceEvent::LlmAttemptCompleted { attempt, .. } => {
                 out.push(A::ModelAttemptOrdinal.value(i64::from(attempt.ordinal)));
                 out.push(A::Outcome.value(match attempt.outcome {
-                    TraceLlmAttemptOutcome::Completed => "completed",
-                    TraceLlmAttemptOutcome::Failed => "failed",
-                    TraceLlmAttemptOutcome::Aborted => "aborted",
-                    TraceLlmAttemptOutcome::Interrupted => "interrupted",
+                    AttemptOutcome::Completed => "completed",
+                    AttemptOutcome::Failed => "failed",
+                    AttemptOutcome::Aborted => "aborted",
+                    AttemptOutcome::Interrupted => "interrupted",
                 }));
-                if let Some(model) = &attempt.response_model {
+                if let Some(model) = attempt
+                    .evidence
+                    .as_ref()
+                    .and_then(|evidence| evidence.served_model.as_ref())
+                {
                     out.push(A::ResponseModel.value(model.clone()));
                 }
                 if let Some(usage) = &attempt.usage {
@@ -795,7 +798,7 @@ impl<'a> Projection<'a> {
         }
     }
 }
-fn usage_attributes(usage: &TraceTokenUsage, out: &mut Vec<KeyValue>) {
+fn usage_attributes(usage: &LlmUsage, out: &mut Vec<KeyValue>) {
     out.extend([
         A::InputTokens.value(usage.input_tokens),
         A::OutputTokens.value(usage.output_tokens),

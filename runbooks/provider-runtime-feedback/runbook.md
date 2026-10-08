@@ -71,10 +71,10 @@ it does not substitute for the judged browser row.
    `crates/lash-core/src/runtime/turn_driver/streaming.rs` with no capture
    selector), and a judged Workbench request carrying the host prompt and its
    tool contracts is an order of magnitude larger, so every real row records
-   `body_json_omitted_reason: "size_limit"` with `body_len` and `body_sha256`
-   instead of the text. Save the first `provider_request` event as
+   `raw_json_omitted_reason: "size_limit"` with `raw_len` and `raw_sha256`
+   instead of the text. Save the first `provider_event` (direction `request`) event as
    `01-initial-request.json` and require those three fields; a present
-   `body_json` is usable evidence only when `body_len` is genuinely under
+   `raw_json` is usable evidence only when `raw_len` is genuinely under
    2 KiB. Do not raise the cap to make a gate fire: it is paid on every JSONL
    record and OpenTelemetry attribute by every user of tracing.
    Take the composition and conversation evidence from the records that do
@@ -87,7 +87,7 @@ it does not substitute for the judged browser row.
    them), not in the obvious slot. Save the paired `llm_call_started` request as
    `01-logical-request.json`. Expect an initial instruction slot and a
    conversation list that contains no duplicate of it. Abort as a
-   capture/configuration gap only if the `provider_request` accounting fields
+   capture/configuration gap only if the `provider_event` (direction `request`) accounting fields
    or those two records are missing.
 
 ## Phase 1: cause and observe an output-limit retry
@@ -98,7 +98,7 @@ it does not substitute for the judged browser row.
    `output_token_cap` must be `applied` (or `clamped_to_capacity`, where the
    model's capacity is the smaller number and the caller's bound still holds).
    `not_requested` means the row was misconfigured, not that the runtime
-   failed. Where `body_json` is genuinely present under the 2 KiB cap,
+   failed. Where `raw_json` is genuinely present under the 2 KiB cap,
    `max_tokens` (or the selected Chat dialect's token-cap field) must agree
    with it. Submit an outcome request that requires more output than the cap, with a
    unique marker such as `feedback-position-2505-<run nonce>`. Do not request
@@ -124,7 +124,7 @@ it does not substitute for the judged browser row.
    check to that, and do not report assistant blocks after a successful cell as a defect. Save
    `02-truncated-response.json` (the `llm_call_completed` record with its
    attempts) and `03-retry-request.json` (the retry's `llm_call_started`
-   request together with the `provider_request` accounting fields for the same
+   request together with the `provider_event` (direction `request`) accounting fields for the same
    `llm_call_id`). If the model finishes
    within the cap, the fault was not exercised: record that and use a fresh row
    with a smaller cap; never count a normal response as a retry witness.
@@ -168,7 +168,7 @@ it does not substitute for the judged browser row.
 | Host and dialect | Fresh judged Workbench; served model and `dialect` from `agent_workbench.startup`, agreeing with the dialect in `composition_changed.rendered_system_prompt` | | |
 | Fault exercised | Output-limit response and a later retry request | | |
 | Cap on the wire | `generation_disposition.output_token_cap` is `applied` or `clamped_to_capacity` on the response and its attempts | | |
-| Request accounted for | `body_len` + `body_sha256` present; `body_json_omitted_reason: "size_limit"` whenever `body_len` exceeds the 2 KiB cap | | |
+| Request accounted for | `raw_len` + `raw_sha256` present; `raw_json_omitted_reason: "size_limit"` whenever `raw_len` exceeds the 2 KiB cap | | |
 | Instructions | One `composition_changed` fingerprint spans both calls; retry text absent from `rendered_system_prompt` | | |
 | Position | Retry instruction follows its turn's user content and precedes the next user frame; `protocol_step` `retry_output_limit_cell` or `retry_output_limit_prose` witnesses the partial; the partial answer itself never appears as a wire message | | |
 | Product agreement | Rendered outcome, API state, and trace identities agree | | |

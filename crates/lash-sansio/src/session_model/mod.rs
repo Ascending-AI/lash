@@ -1,6 +1,8 @@
 pub mod failure;
 pub mod message;
 
+pub use crate::llm::types::{LlmUsage, TokenUsageOverflow};
+
 pub use failure::{
     FailureCode, HostNamespace, InvalidNamespace, Namespace, TurnFailureCode, TurnFailureKind,
 };
@@ -377,152 +379,6 @@ impl ConversationRecord {
     }
 }
 
-/// Token usage statistics from an LLM call.
-#[derive(
-    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-pub struct TokenUsage {
-    pub input_tokens: i64,
-    pub output_tokens: i64,
-    pub cache_read_input_tokens: i64,
-    pub cache_write_input_tokens: i64,
-    pub reasoning_output_tokens: i64,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TokenUsageOverflow {
-    counter: &'static str,
-}
-
-impl TokenUsageOverflow {
-    pub fn counter(self) -> &'static str {
-        self.counter
-    }
-}
-
-impl TokenUsage {
-    pub fn is_zero(&self) -> bool {
-        self.input_tokens == 0
-            && self.output_tokens == 0
-            && self.cache_read_input_tokens == 0
-            && self.cache_write_input_tokens == 0
-            && self.reasoning_output_tokens == 0
-    }
-
-    pub fn total(&self) -> i64 {
-        self.input_tokens
-            + self.output_tokens
-            + self.cache_read_input_tokens
-            + self.cache_write_input_tokens
-    }
-
-    /// Bare prompt-side sum, valid only for counters already admitted through
-    /// a checked seam. Use [`Self::checked_input_total`] on any value that
-    /// still carries raw provider or durable input.
-    pub fn input_total(&self) -> i64 {
-        self.input_tokens + self.cache_read_input_tokens + self.cache_write_input_tokens
-    }
-
-    /// Returns a new usage value with every counter added atomically.
-    ///
-    /// `reasoning_output_tokens` is checked as a counter but excluded from
-    /// `total_tokens` because it is a subset of `output_tokens`.
-    pub fn checked_add(&self, other: &TokenUsage) -> Result<Self, TokenUsageOverflow> {
-        let merged = Self {
-            input_tokens: self.input_tokens.checked_add(other.input_tokens).ok_or(
-                TokenUsageOverflow {
-                    counter: "input_tokens",
-                },
-            )?,
-            output_tokens: self.output_tokens.checked_add(other.output_tokens).ok_or(
-                TokenUsageOverflow {
-                    counter: "output_tokens",
-                },
-            )?,
-            cache_read_input_tokens: self
-                .cache_read_input_tokens
-                .checked_add(other.cache_read_input_tokens)
-                .ok_or(TokenUsageOverflow {
-                    counter: "cache_read_input_tokens",
-                })?,
-            cache_write_input_tokens: self
-                .cache_write_input_tokens
-                .checked_add(other.cache_write_input_tokens)
-                .ok_or(TokenUsageOverflow {
-                    counter: "cache_write_input_tokens",
-                })?,
-            reasoning_output_tokens: self
-                .reasoning_output_tokens
-                .checked_add(other.reasoning_output_tokens)
-                .ok_or(TokenUsageOverflow {
-                    counter: "reasoning_output_tokens",
-                })?,
-        };
-        merged.checked_total()?;
-        Ok(merged)
-    }
-
-    /// The `(value, saturated)` pair is the reportable counterpart of
-    /// [`Self::checked_add`]: writes that must not lie use the checked seam,
-    /// while reads that must not fail use this one and propagate the flag.
-    /// `reasoning_output_tokens` is summed as a counter like `checked_add`.
-    pub fn saturating_add(&self, other: &TokenUsage) -> (Self, bool) {
-        let mut saturated = false;
-        let mut merge = |left: i64, right: i64| match left.checked_add(right) {
-            Some(value) => value,
-            None => {
-                saturated = true;
-                left.saturating_add(right)
-            }
-        };
-        (
-            Self {
-                input_tokens: merge(self.input_tokens, other.input_tokens),
-                output_tokens: merge(self.output_tokens, other.output_tokens),
-                cache_read_input_tokens: merge(
-                    self.cache_read_input_tokens,
-                    other.cache_read_input_tokens,
-                ),
-                cache_write_input_tokens: merge(
-                    self.cache_write_input_tokens,
-                    other.cache_write_input_tokens,
-                ),
-                reasoning_output_tokens: merge(
-                    self.reasoning_output_tokens,
-                    other.reasoning_output_tokens,
-                ),
-            },
-            saturated,
-        )
-    }
-
-    pub fn checked_total(&self) -> Result<i64, TokenUsageOverflow> {
-        self.input_tokens
-            .checked_add(self.output_tokens)
-            .and_then(|total| total.checked_add(self.cache_read_input_tokens))
-            .and_then(|total| total.checked_add(self.cache_write_input_tokens))
-            .ok_or(TokenUsageOverflow {
-                counter: "total_tokens",
-            })
-    }
-
-    /// Checked prompt-side subtotal, the value context-window policy compares
-    /// against a model's window.
-    ///
-    /// [`Self::checked_total`] does not subsume it: counters are signed, so a
-    /// negative `output_tokens` can hold the canonical total in range while the
-    /// prompt-side counters alone overflow. Both aggregations are validated
-    /// wherever raw counters are admitted.
-    pub fn checked_input_total(&self) -> Result<i64, TokenUsageOverflow> {
-        self.input_tokens
-            .checked_add(self.cache_read_input_tokens)
-            .and_then(|total| total.checked_add(self.cache_write_input_tokens))
-            .ok_or(TokenUsageOverflow {
-                counter: "input_total_tokens",
-            })
-    }
-}
-
 /// Structured error payload carried on [`SessionStreamEvent::Error`] (and
 /// [`SessionStreamEvent::RetryStatus`]).
 ///
@@ -643,10 +499,10 @@ pub enum SessionStreamEvent {
         content: String,
     },
     #[serde(rename = "token_usage")]
-    TokenUsage {
+    LlmUsage {
         protocol_iteration: usize,
-        usage: TokenUsage,
-        cumulative: TokenUsage,
+        usage: LlmUsage,
+        cumulative: LlmUsage,
     },
     #[serde(rename = "retry_status")]
     RetryStatus {
@@ -1001,30 +857,30 @@ mod stream_event_tests;
 
 #[cfg(test)]
 mod tests {
-    use super::TokenUsage;
+    use super::LlmUsage;
     use crate::llm::types::ProviderFailureKind;
 
     #[test]
     fn checked_token_usage_add_is_atomic_and_reasoning_is_not_additive_total() {
-        let existing = TokenUsage {
+        let existing = LlmUsage {
             input_tokens: 1,
             output_tokens: i64::MAX,
             reasoning_output_tokens: i64::MAX,
-            ..TokenUsage::default()
+            ..LlmUsage::default()
         };
         let overflow = existing
-            .checked_add(&TokenUsage {
+            .checked_add(&LlmUsage {
                 input_tokens: 1,
-                ..TokenUsage::default()
+                ..LlmUsage::default()
             })
             .expect_err("canonical total must be checked");
         assert_eq!(overflow.counter(), "total_tokens");
         assert_eq!(existing.input_tokens, 1);
 
-        let reasoning_subset = TokenUsage {
+        let reasoning_subset = LlmUsage {
             output_tokens: i64::MAX,
             reasoning_output_tokens: i64::MAX,
-            ..TokenUsage::default()
+            ..LlmUsage::default()
         };
         assert_eq!(reasoning_subset.checked_total(), Ok(i64::MAX));
     }
@@ -1033,11 +889,11 @@ mod tests {
     fn checked_input_total_is_not_subsumed_by_the_canonical_total() {
         // Counters are signed, so a negative `output_tokens` keeps the
         // canonical total in range while the prompt-side counters overflow.
-        let prompt_overflow = TokenUsage {
+        let prompt_overflow = LlmUsage {
             input_tokens: i64::MAX,
             output_tokens: i64::MIN,
             cache_read_input_tokens: i64::MAX,
-            ..TokenUsage::default()
+            ..LlmUsage::default()
         };
         assert_eq!(prompt_overflow.checked_total(), Ok(i64::MAX - 1));
         assert_eq!(
@@ -1048,7 +904,7 @@ mod tests {
             "input_total_tokens"
         );
 
-        let in_range = TokenUsage {
+        let in_range = LlmUsage {
             input_tokens: 7,
             output_tokens: 3,
             cache_read_input_tokens: 5,

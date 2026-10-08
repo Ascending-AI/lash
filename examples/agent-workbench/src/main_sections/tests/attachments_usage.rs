@@ -309,7 +309,7 @@ async fn assert_retrieved_attachment(
     assert_eq!(bytes.as_ref(), expected);
 }
 
-fn trace_usage_total(usage: &lash::tracing::TraceTokenUsage) -> i64 {
+fn trace_usage_total(usage: &lash::usage::LlmUsage) -> i64 {
     usage.input_tokens
         + usage.output_tokens
         + usage.cache_read_input_tokens

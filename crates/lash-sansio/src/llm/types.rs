@@ -100,7 +100,7 @@ impl ProviderFailureKind {
 /// Provider replay phase tag: the two-value vocabulary the kernel interprets
 /// (`"commentary"`/`"final_answer"` on the wire). An unknown spelling fails
 /// decoding rather than silently meaning "neither".
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ResponsePhase {
     Commentary,
@@ -127,7 +127,9 @@ impl ResponsePhase {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema,
+)]
 pub struct ResponseTextMeta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
@@ -193,7 +195,7 @@ impl ResponseTextMeta {
 /// identity nor safe trace metadata. Explicit default ports remain distinct
 /// from implicit ports. Scheme and host case, plus an empty path versus `/`,
 /// normalize; path case and query strings remain identity-significant.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, JsonSchema)]
 pub struct ProviderRouteIdentity {
     pub provider: Box<str>,
     pub endpoint: Box<str>,
@@ -208,7 +210,9 @@ pub use super::provider_route::ProviderEndpointError;
 pub use super::response_context::{
     AdmittedSend, ResponseContext, ResponseContract, ToolCallContract,
 };
-pub use super::stream_senders::{LlmEventSender, LlmProviderTraceEvent, LlmProviderTraceSender};
+pub use super::stream_senders::{
+    LlmEventSender, LlmProviderTraceDirection, LlmProviderTraceEvent, LlmProviderTraceSender,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LlmToolSpec {
@@ -226,7 +230,9 @@ pub enum LlmToolChoice {
     Required,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize, JsonSchema,
+)]
 pub struct ProviderReplayMeta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub item_id: Option<String>,
@@ -244,7 +250,9 @@ impl ProviderReplayMeta {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize, JsonSchema,
+)]
 pub struct ProviderReasoningReplay {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub item_id: Option<String>,
@@ -320,7 +328,7 @@ impl std::fmt::Display for ProviderReplayOriginConflict {
 
 impl std::error::Error for ProviderReplayOriginConflict {}
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema)]
 pub enum LlmOutputPart {
     Text {
         text: String,
@@ -347,6 +355,33 @@ pub enum LlmOutputPart {
 }
 
 impl LlmOutputPart {
+    /// This part without its opaque provider replay payloads: the provider
+    /// payload of a text part, a reasoning part's encrypted content and
+    /// signature, and a tool call's opaque replay state. Identity, text and
+    /// provenance stay. Observation channels report this form.
+    pub fn without_replay_payloads(&self) -> Self {
+        let mut part = self.clone();
+        match &mut part {
+            Self::Text { response_meta, .. } => {
+                if let Some(meta) = response_meta {
+                    meta.provider_payload = None;
+                }
+            }
+            Self::Reasoning { replay, .. } => {
+                if let Some(replay) = replay {
+                    replay.encrypted_content = None;
+                    replay.signature = None;
+                }
+            }
+            Self::ToolCall { replay, .. } => {
+                if let Some(replay) = replay {
+                    replay.opaque = None;
+                }
+            }
+        }
+        part
+    }
+
     pub fn stamp_replay_origin(
         &mut self,
         route: &ProviderRouteIdentity,
@@ -1187,7 +1222,26 @@ pub struct LlmUsage {
     pub reasoning_output_tokens: i64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TokenUsageOverflow {
+    counter: &'static str,
+}
+
+impl TokenUsageOverflow {
+    pub fn counter(self) -> &'static str {
+        self.counter
+    }
+}
+
 impl LlmUsage {
+    pub fn is_zero(&self) -> bool {
+        self.input_tokens == 0
+            && self.output_tokens == 0
+            && self.cache_read_input_tokens == 0
+            && self.cache_write_input_tokens == 0
+            && self.reasoning_output_tokens == 0
+    }
+
     pub fn total(&self) -> i64 {
         self.input_tokens
             + self.output_tokens
@@ -1195,8 +1249,110 @@ impl LlmUsage {
             + self.cache_write_input_tokens
     }
 
+    /// Bare prompt-side sum, valid only for counters already admitted through
+    /// a checked seam. Use [`Self::checked_input_total`] on any value that
+    /// still carries raw provider or durable input.
     pub fn input_total(&self) -> i64 {
         self.input_tokens + self.cache_read_input_tokens + self.cache_write_input_tokens
+    }
+
+    /// Returns a new usage value with every counter added atomically.
+    ///
+    /// `reasoning_output_tokens` is checked as a counter but excluded from
+    /// `total_tokens` because it is a subset of `output_tokens`.
+    pub fn checked_add(&self, other: &LlmUsage) -> Result<Self, TokenUsageOverflow> {
+        let merged = Self {
+            input_tokens: self.input_tokens.checked_add(other.input_tokens).ok_or(
+                TokenUsageOverflow {
+                    counter: "input_tokens",
+                },
+            )?,
+            output_tokens: self.output_tokens.checked_add(other.output_tokens).ok_or(
+                TokenUsageOverflow {
+                    counter: "output_tokens",
+                },
+            )?,
+            cache_read_input_tokens: self
+                .cache_read_input_tokens
+                .checked_add(other.cache_read_input_tokens)
+                .ok_or(TokenUsageOverflow {
+                    counter: "cache_read_input_tokens",
+                })?,
+            cache_write_input_tokens: self
+                .cache_write_input_tokens
+                .checked_add(other.cache_write_input_tokens)
+                .ok_or(TokenUsageOverflow {
+                    counter: "cache_write_input_tokens",
+                })?,
+            reasoning_output_tokens: self
+                .reasoning_output_tokens
+                .checked_add(other.reasoning_output_tokens)
+                .ok_or(TokenUsageOverflow {
+                    counter: "reasoning_output_tokens",
+                })?,
+        };
+        merged.checked_total()?;
+        Ok(merged)
+    }
+
+    /// The `(value, saturated)` pair is the reportable counterpart of
+    /// [`Self::checked_add`]: writes that must not lie use the checked seam,
+    /// while reads that must not fail use this one and propagate the flag.
+    /// `reasoning_output_tokens` is summed as a counter like `checked_add`.
+    pub fn saturating_add(&self, other: &LlmUsage) -> (Self, bool) {
+        let mut saturated = false;
+        let mut merge = |left: i64, right: i64| match left.checked_add(right) {
+            Some(value) => value,
+            None => {
+                saturated = true;
+                left.saturating_add(right)
+            }
+        };
+        (
+            Self {
+                input_tokens: merge(self.input_tokens, other.input_tokens),
+                output_tokens: merge(self.output_tokens, other.output_tokens),
+                cache_read_input_tokens: merge(
+                    self.cache_read_input_tokens,
+                    other.cache_read_input_tokens,
+                ),
+                cache_write_input_tokens: merge(
+                    self.cache_write_input_tokens,
+                    other.cache_write_input_tokens,
+                ),
+                reasoning_output_tokens: merge(
+                    self.reasoning_output_tokens,
+                    other.reasoning_output_tokens,
+                ),
+            },
+            saturated,
+        )
+    }
+
+    pub fn checked_total(&self) -> Result<i64, TokenUsageOverflow> {
+        self.input_tokens
+            .checked_add(self.output_tokens)
+            .and_then(|total| total.checked_add(self.cache_read_input_tokens))
+            .and_then(|total| total.checked_add(self.cache_write_input_tokens))
+            .ok_or(TokenUsageOverflow {
+                counter: "total_tokens",
+            })
+    }
+
+    /// Checked prompt-side subtotal, the value context-window policy compares
+    /// against a model's window.
+    ///
+    /// [`Self::checked_total`] does not subsume it: counters are signed, so a
+    /// negative `output_tokens` can hold the canonical total in range while the
+    /// prompt-side counters alone overflow. Both aggregations are validated
+    /// wherever raw counters are admitted.
+    pub fn checked_input_total(&self) -> Result<i64, TokenUsageOverflow> {
+        self.input_tokens
+            .checked_add(self.cache_read_input_tokens)
+            .and_then(|total| total.checked_add(self.cache_write_input_tokens))
+            .ok_or(TokenUsageOverflow {
+                counter: "input_total_tokens",
+            })
     }
 }
 
@@ -1370,7 +1526,9 @@ impl LlmStreamEvidence {
 ///
 /// These fields must never be filled from request intent. In particular,
 /// `reasoning_output_tokens: Some(0)` is distinct from an unreported value.
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema,
+)]
 pub struct ExecutionEvidence {
     #[serde(default)]
     pub served_model: Option<String>,
@@ -1503,7 +1661,7 @@ impl ExecutionEvidence {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutionEvidenceCollectionInterruption {
     ProtocolAbort,
@@ -1680,7 +1838,7 @@ impl AttemptUsageOutcome {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema)]
 pub struct AttemptRecord {
     pub ordinal: u32,
     pub outcome: AttemptOutcome,

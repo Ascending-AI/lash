@@ -311,7 +311,7 @@ impl LashRuntime {
             empty.persisted_node_ids.clear();
             empty.head_revision = 0;
             empty.turn_index = 0;
-            empty.token_usage = crate::TokenUsage::default();
+            empty.token_usage = crate::LlmUsage::default();
             empty.last_prompt_usage = None;
             Box::pin(self.adopt_resident_state(empty)).await?;
             self.resident_session.mark_graph_loaded();

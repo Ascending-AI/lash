@@ -365,7 +365,7 @@ pub(crate) async fn run_once_writer_contention(
         ),
         memory: memory_span(after_build_memory, after_turn_memory),
         phase_profile: phase_profile.clone(),
-        turn_usage: TokenUsage::default(),
+        turn_usage: LlmUsage::default(),
     };
     Ok(RuntimePerfRunResult {
         scenario: scenario.name().to_string(),

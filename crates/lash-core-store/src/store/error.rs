@@ -487,7 +487,7 @@ pub enum StoreError {
         usage_source: String,
         /// Model identifier for the overflowing ledger row.
         model: String,
-        /// Name of the overflowing [`crate::TokenUsage`] counter.
+        /// Name of the overflowing [`crate::LlmUsage`] counter.
         counter: &'static str,
     },
     /// A checkpoint carried a turn index too close to the platform limit for

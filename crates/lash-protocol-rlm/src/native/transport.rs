@@ -25,7 +25,8 @@ pub const NATIVE_TRANSPORT_VERSION: u32 = 1;
 /// format_manifest = "NativeRlmTransport"
 pub const NATIVE_TRANSPORT_VERSION: u32 = 2;
 
-const PHASE: &str = "native_transport";
+const PHASE: lash_rlm_types::RlmDiagnosticPhase =
+    lash_rlm_types::RlmDiagnosticPhase::NativeTransport;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -71,7 +72,7 @@ struct Envelope {
 fn event(transport: Transport, schema_version: u32, history_version: u32) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(crate::projection::rlm_protocol_event(
         RlmProtocolEvent::RlmDiagnostic(RlmDiagnosticEvent {
-            phase: PHASE.to_string(),
+            phase: PHASE,
             payload: serde_json::to_value(Envelope {
                 schema_version,
                 transport,
@@ -242,7 +243,7 @@ pub(super) fn repair_parts(
 
 pub(super) fn degraded_binding(error: impl std::fmt::Display) -> lash_core::DegradedBinding {
     lash_core::DegradedBinding {
-        name: PHASE.to_string(),
+        name: "native_transport".to_string(),
         reason: error.to_string(),
     }
 }
@@ -301,7 +302,7 @@ mod tests {
     fn recorded(payload: serde_json::Value) -> lash_core::ProtocolEvent {
         crate::projection::rlm_protocol_event(
             RlmProtocolEvent::RlmDiagnostic(RlmDiagnosticEvent {
-                phase: "native_transport".into(),
+                phase: PHASE,
                 payload,
             }),
             lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(

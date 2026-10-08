@@ -9,6 +9,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
+use lash_sansio::llm::types::{AttemptOutcome, AttemptRecord, ProtocolPosition};
 
 /// A sink that fails every call, standing in for a closed stderr.
 struct FailingSink;
@@ -322,16 +323,22 @@ fn trace_reader_preserves_attempt_and_domain_completions() {
         fixture_record(
             TraceContext::default(),
             TraceEvent::LlmAttemptCompleted {
-                attempt: TraceLlmAttempt {
+                attempt: AttemptRecord {
                     ordinal: 1,
+                    outcome: AttemptOutcome::Completed,
+                    protocol_position: ProtocolPosition::TerminalObserved,
+                    retry_budget_consumed: true,
+                    retry_decision: None,
+                    error: None,
+                    evidence: None,
+                    generation_disposition: None,
+                    usage: None,
+                },
+                observation: crate::TraceAttemptObservation {
                     provider: None,
                     request_model: "model".to_string(),
-                    response_model: None,
                     started_at_ms: None,
                     ended_at_ms: None,
-                    outcome: TraceLlmAttemptOutcome::Completed,
-                    error: None,
-                    usage: None,
                 },
             },
         ),

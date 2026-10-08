@@ -17,7 +17,7 @@ use crate::llm::types::{
     ProviderReplayMeta,
 };
 use crate::session_model::{
-    Message, MessageSequence, SessionHistoryRecord, SessionStreamEvent, TokenUsage,
+    LlmUsage, Message, MessageSequence, SessionHistoryRecord, SessionStreamEvent,
     TokenUsageOverflow, make_error_event,
 };
 use crate::{CheckpointKind, ModelToolReturn, ToolCallOutput, TurnOutcome, TurnStop};

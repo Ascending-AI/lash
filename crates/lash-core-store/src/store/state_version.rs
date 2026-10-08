@@ -6,7 +6,7 @@ pub const OLDEST_SUPPORTED_SESSION_STATE_VERSION: u32 = 1;
 
 /// Complete mutable-continuation generation emitted and admitted by this runtime.
 /// ADR 0078 refuses the snapshot generation; no converter crosses this cutover.
-/// Version 2 (FIG-1961) carries `last_prompt_usage` as the checked `TokenUsage`
+/// Version 2 (FIG-1961) carries `last_prompt_usage` as the checked `LlmUsage`
 /// shape; generation-1 snapshots holding the retired `PromptUsage` fields are
 /// refused rather than remapped.
 /// Version 3 (FIG-3571) is the carrier IR cutover. A generation-2 session's

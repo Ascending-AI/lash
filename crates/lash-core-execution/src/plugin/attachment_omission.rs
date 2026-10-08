@@ -32,7 +32,7 @@ pub struct AttachmentOmissionContext {
     /// The running run's admitted plugin configuration.
     pub plugin_config: super::AdmittedPluginConfig,
     pub state: SessionReadView,
-    pub prompt_usage: Option<crate::TokenUsage>,
+    pub prompt_usage: Option<crate::LlmUsage>,
     pub max_context_tokens: Option<usize>,
     pub traces: PluginTraceEmitter,
     /// The trace context of the turn the policy decides for.

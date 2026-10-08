@@ -33,19 +33,7 @@ async fn authorizes_bounded_duplicate_billing_and_projects_typed_trace() {
     );
     let trace =
         crate::trace::trace_llm_attempts(Some(&completion.call_record)).expect("typed retry trace");
-    assert_eq!(
-        match &trace[0].detail {
-            lash_trace::TraceRetryAttemptDetail::Llm {
-                retry_decision: Some(lash_trace::TraceRetryDecision::Scheduled { class, .. }),
-                ..
-            } => Some(*class),
-            _ => None,
-        },
-        Some(lash_sansio::llm::types::RetryClass::ChargeAuthorized {
-            tokens_at_stake: 10,
-            attempt_number: 1
-        })
-    );
+    assert_eq!(trace, completion.call_record.attempts);
 }
 
 #[tokio::test]
@@ -79,20 +67,7 @@ async fn duplicate_cost_bound_denies_and_projects_typed_trace() {
     );
     let trace =
         crate::trace::trace_llm_attempts(Some(&failure.call_record)).expect("typed retry trace");
-    assert_eq!(
-        match &trace[0].detail {
-            lash_trace::TraceRetryAttemptDetail::Llm {
-                retry_decision: Some(lash_trace::TraceRetryDecision::Declined(cause)),
-                ..
-            } => Some(*cause),
-            _ => None,
-        },
-        Some(lash_sansio::llm::types::RetryDeclineCause::ChargeSafety {
-            tokens_at_stake: 10,
-            attempt_number: 1,
-            reason: crate::ChargeSafetyDenialReason::DuplicateCostLimitExceeded
-        })
-    );
+    assert_eq!(trace, failure.call_record.attempts);
 }
 
 #[tokio::test]

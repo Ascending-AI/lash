@@ -344,11 +344,11 @@ mod tests {
             )
         };
         let state = lash_core::SessionSnapshot {
-            token_usage: lash_core::TokenUsage {
+            token_usage: lash_core::LlmUsage {
                 input_tokens: 120,
                 ..Default::default()
             },
-            last_prompt_usage: Some(lash_core::TokenUsage {
+            last_prompt_usage: Some(lash_core::LlmUsage {
                 input_tokens: 8,
                 ..Default::default()
             }),
@@ -394,7 +394,7 @@ mod tests {
             )
         };
         let state = lash_core::SessionSnapshot {
-            last_prompt_usage: Some(lash_core::TokenUsage {
+            last_prompt_usage: Some(lash_core::LlmUsage {
                 input_tokens: 40_999,
                 ..Default::default()
             }),
@@ -445,7 +445,7 @@ mod tests {
             )
         };
         let state = lash_core::SessionSnapshot {
-            last_prompt_usage: Some(lash_core::TokenUsage {
+            last_prompt_usage: Some(lash_core::LlmUsage {
                 input_tokens: used,
                 ..Default::default()
             }),

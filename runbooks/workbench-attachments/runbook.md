@@ -52,7 +52,7 @@ cross-surface identity, not the quality of the model's image description.
    retrieval URL must agree. Durable effects normalize inline bytes to a stored source
    before `llm_call_started`, so correlate three trace records: the upload event carries
    id/byte length/MIME, `llm_call_started` carries the stored source/MIME and the exact
-   reference in the rendered prompt, and `provider_request` carries the serialized wire
+   reference in the rendered prompt, and `provider_event` (direction `request`) carries the serialized wire
    body's length and SHA-256. `bytes_sha256`/`bytes_len` on a trace attachment are
    inline-source fields and are intentionally absent after this normalization.
 3. **Compare bytes, not availability.** Save the source and both retrievals; SHA-256 and
@@ -153,11 +153,11 @@ payload fields are `attachment_id` / `byte_len` / `mime` / `name` — and requir
 and byte length to match the source. The host's `attachment_acceptance` snapshot this runbook
 spends four paragraphs on is observable on the sibling `custom` record
 `agent_workbench.api.turn.request`; save it too if the acceptance contract is in question.
-Save the `provider_request` record with the same `llm_call_id` as `02-provider-wire.json`;
-its fields are nested under `event` (`body_len`, `body_sha256`,
-`body_json_omitted_reason`). On a real attachment turn the body itself is **expected to be
-absent** with `body_json_omitted_reason: "size_limit"`, so require a positive `body_len` and
-a non-empty `body_sha256` rather than a serialized body. These correlated records prove the exact
+Save the `provider_event` (direction `request`) record with the same `llm_call_id` as `02-provider-wire.json`;
+its fields are nested under `event` (`raw_len`, `raw_sha256`,
+`raw_json_omitted_reason`). On a real attachment turn the body itself is **expected to be
+absent** with `raw_json_omitted_reason: "size_limit"`, so require a positive `raw_len` and
+a non-empty `raw_sha256` rather than a serialized body. These correlated records prove the exact
 stored source reached a real provider request while the upload/retrieval/blob checks prove
 its content facts. A plausible visual answer without this trace chain is not a pass. Save
 `/api/state` as `02-state.json` and screenshot the settled scrolled transcript as

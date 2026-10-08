@@ -991,25 +991,23 @@ fn drain_area_witnesses() {
             let _ = wait_seconds;
         }
     });
-    // W0354: lash_core::facade_support::SessionStreamEvent::TokenUsage [variant]
+    // W0354: lash_core::facade_support::SessionStreamEvent::LlmUsage [variant]
     variant_witness(|value: &lash_core::facade_support::SessionStreamEvent| {
         matches!(
             value,
-            lash_core::facade_support::SessionStreamEvent::TokenUsage { .. }
+            lash_core::facade_support::SessionStreamEvent::LlmUsage { .. }
         )
     });
-    // W0355: lash_core::facade_support::SessionStreamEvent::TokenUsage::cumulative [field]
+    // W0355: lash_core::facade_support::SessionStreamEvent::LlmUsage::cumulative [field]
     field_witness(|value: &lash_core::facade_support::SessionStreamEvent| {
-        if let lash_core::facade_support::SessionStreamEvent::TokenUsage { cumulative, .. } = value
-        {
+        if let lash_core::facade_support::SessionStreamEvent::LlmUsage { cumulative, .. } = value {
             let _ = cumulative;
         }
     });
-    // W0356: lash_core::facade_support::SessionStreamEvent::TokenUsage::protocol_iteration [field]
+    // W0356: lash_core::facade_support::SessionStreamEvent::LlmUsage::protocol_iteration [field]
     field_witness(|value: &lash_core::facade_support::SessionStreamEvent| {
-        if let lash_core::facade_support::SessionStreamEvent::TokenUsage {
-            protocol_iteration,
-            ..
+        if let lash_core::facade_support::SessionStreamEvent::LlmUsage {
+            protocol_iteration, ..
         } = value
         {
             let _ = protocol_iteration;

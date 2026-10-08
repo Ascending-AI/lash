@@ -676,7 +676,9 @@ fn native_normalization_covers_every_schema_refusal() {
                 match crate::projection::decode_rlm_protocol_event(event)
                     .expect("valid history fixture")
                 {
-                    Some(RlmProtocolEvent::RlmDiagnostic(d)) if d.phase == "native_extraction" => {
+                    Some(RlmProtocolEvent::RlmDiagnostic(d))
+                        if d.phase == lash_rlm_types::RlmDiagnosticPhase::NativeExtraction =>
+                    {
                         Some(d.payload["decision"].clone())
                     }
                     _ => None,
@@ -1022,7 +1024,7 @@ fn output_limit_calls_repair_without_execution_until_stall_budget() {
                         .expect("valid history fixture")
                     {
                         Some(RlmProtocolEvent::RlmDiagnostic(d))
-                            if d.phase == "native_extraction" =>
+                            if d.phase == lash_rlm_types::RlmDiagnosticPhase::NativeExtraction =>
                         {
                             Some(d.payload["decision"].clone())
                         }
@@ -1167,7 +1169,9 @@ fn cell_channel_tool_call_on_a_tool_less_request_repairs_then_stops_on_budget() 
                 match crate::projection::decode_rlm_protocol_event(event)
                     .expect("valid history fixture")
                 {
-                    Some(RlmProtocolEvent::RlmDiagnostic(d)) if d.phase == "llm_extraction" => {
+                    Some(RlmProtocolEvent::RlmDiagnostic(d))
+                        if d.phase == lash_rlm_types::RlmDiagnosticPhase::LlmExtraction =>
+                    {
                         Some(d.payload["decision"].clone())
                     }
                     _ => None,
@@ -1446,7 +1450,9 @@ fn native_extraction_payloads(machine: &TurnMachine) -> Vec<serde_json::Value> {
             match crate::projection::decode_rlm_protocol_event(event)
                 .expect("valid history fixture")
             {
-                Some(RlmProtocolEvent::RlmDiagnostic(d)) if d.phase == "native_extraction" => {
+                Some(RlmProtocolEvent::RlmDiagnostic(d))
+                    if d.phase == lash_rlm_types::RlmDiagnosticPhase::NativeExtraction =>
+                {
                     Some(d.payload)
                 }
                 _ => None,

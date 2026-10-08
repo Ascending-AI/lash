@@ -97,8 +97,8 @@ pub(crate) use lash_sansio::tool_contract::{ToolDefinition, ToolId, ToolManifest
 pub(crate) use lash_sansio::{
     AttachmentId, AttachmentMaterializationNotice, AttachmentRef, AttachmentTypeMetadata, BatchId,
     BlankIdentity, CausalRef, CheckpointKind, EffectAddress, ExecutionScope, FrameKey, InputId,
-    Message, MessageOrigin, MessageRole, NodeId, Part, PartKind, PluginMessage, ProcessId,
-    SessionAppendNode, SessionId, TokenUsage, TurnId, TurnOutputSource, TurnReply, shared_parts,
+    LlmUsage, Message, MessageOrigin, MessageRole, NodeId, Part, PartKind, PluginMessage,
+    ProcessId, SessionAppendNode, SessionId, TurnId, TurnOutputSource, TurnReply, shared_parts,
 };
 
 pub(crate) type SessionHistoryRecord =
@@ -175,8 +175,8 @@ pub(crate) mod facade_support {
 /// `crate::session_model`.
 pub(crate) mod session_model {
     pub(crate) use crate::{
-        ConversationRecord, Message, ProtocolEvent, SessionHistoryRecord, SessionPolicy,
-        TokenUsage, plugin_message_to_message,
+        ConversationRecord, LlmUsage, Message, ProtocolEvent, SessionHistoryRecord, SessionPolicy,
+        plugin_message_to_message,
     };
     pub(crate) use lash_sansio::session_model::message;
 }

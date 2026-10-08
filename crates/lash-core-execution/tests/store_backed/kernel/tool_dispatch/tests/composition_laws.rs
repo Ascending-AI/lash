@@ -714,22 +714,33 @@ async fn displaced_terminals_are_published_as_composition_evidence() {
         panic!("expected plugin runtime event");
     };
     assert_eq!(plugin_id, "alpha");
-    let crate::PluginRuntimeEvent::Custom { name, payload } = event else {
-        panic!("expected custom composition event");
+    let crate::PluginRuntimeEvent::ToolCheckConflict(conflict) = event else {
+        panic!("expected tool check conflict event");
     };
-    assert_eq!(name, "tool_args_check.conflict");
-    let expected = json!({
-        "winner": { "plugin_id": "alpha", "callback": "tool_args_check:check", "verdict": "deny" },
-        "displaced": [{ "plugin_id": "zeta", "callback": "tool_args_check:check", "verdict": "cached" }],
-    });
-    assert_eq!(payload, expected);
+    let reply = |plugin: &str, verdict| crate::ToolCheckReply {
+        plugin_id: plugin.to_string(),
+        callback: "tool_args_check:check".to_string(),
+        verdict,
+    };
+    let expected = crate::ToolCheckConflict {
+        phase: crate::ToolCheckPhase::ToolArgsCheck,
+        winner: reply("alpha", crate::ToolCheckVerdictKind::Deny),
+        displaced: vec![reply("zeta", crate::ToolCheckVerdictKind::Cached)],
+    };
+    assert_eq!(conflict, expected);
     {
         let trace_events = session_graph.events.lock_recover();
-        let [lash_trace::TraceEvent::Custom { name, payload }] = trace_events.as_slice() else {
+        let [
+            lash_trace::TraceEvent::ToolCheckConflict {
+                plugin_id,
+                conflict,
+            },
+        ] = trace_events.as_slice()
+        else {
             panic!("expected one durable composition trace event: {trace_events:?}");
         };
-        assert_eq!(name, "plugin.alpha.tool_args_check.conflict");
-        assert_eq!(payload, &expected);
+        assert_eq!(plugin_id, "alpha");
+        assert_eq!(conflict, &expected);
     }
     drop(context);
 }

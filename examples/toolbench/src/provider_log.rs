@@ -435,8 +435,13 @@ impl lash::tracing::TraceSink for Capture {
             return Ok(());
         };
         match &record.event {
-            TraceEvent::ProviderRequest { event } => {
-                let body = self.redact(event.body_json.clone().unwrap_or(Value::Null));
+            TraceEvent::ProviderEvent { event }
+                if matches!(
+                    event.direction,
+                    lash::provider::LlmProviderTraceDirection::Request { .. }
+                ) =>
+            {
+                let body = self.redact(event.raw_json.clone().unwrap_or(Value::Null));
                 if body.is_null() {
                     return Ok(());
                 }
@@ -449,7 +454,7 @@ impl lash::tracing::TraceSink for Capture {
                 tracing::debug!(target: "toolbench", parent: &self.span(), attempt, request = %body, sizes = %row["request_sizes"], "wire request");
                 self.dump(attempt, "request", &body);
             }
-            TraceEvent::ProviderStreamEvent { event } => {
+            TraceEvent::ProviderEvent { event } => {
                 let body = self.redact(event.raw_json.clone().unwrap_or(Value::Null));
                 if !row["wire_responses"].is_array() {
                     row["wire_responses"] = json!([]);

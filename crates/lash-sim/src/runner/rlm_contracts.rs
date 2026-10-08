@@ -940,7 +940,9 @@ fn rlm_contract_llm_extraction_diagnostics(events: &[RlmProtocolEvent]) -> Vec<V
     events
         .iter()
         .filter_map(|event| match event {
-            RlmProtocolEvent::RlmDiagnostic(diagnostic) if diagnostic.phase == "llm_extraction" => {
+            RlmProtocolEvent::RlmDiagnostic(diagnostic)
+                if diagnostic.phase == lash_rlm_types::RlmDiagnosticPhase::LlmExtraction =>
+            {
                 Some(diagnostic.payload.clone())
             }
             _ => None,

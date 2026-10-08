@@ -83,7 +83,7 @@ pub struct ContextPressureContext<'run> {
     /// The committed session, as it stood when the turn was admitted.
     pub state: SessionReadView,
     /// The previous turn's provider-reported prompt usage, if any.
-    pub prompt_usage: Option<crate::TokenUsage>,
+    pub prompt_usage: Option<crate::LlmUsage>,
     /// The context window the turn's model runs under.
     pub max_context_tokens: Option<usize>,
     pub traces: PluginTraceEmitter,

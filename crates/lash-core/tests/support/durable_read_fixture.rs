@@ -71,15 +71,15 @@ use lash_core::runtime::{
 };
 use lash_core::{
     ArtifactReferrer, AttachmentId, AttachmentReferrers, AttachmentWrite, Clock, DeploymentStore,
-    ExecutionScope, MessageOrigin, MessageRole, OperationId, PartKind, PendingTurnInputDraft,
-    PluginNamespaceState, PluginState, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
-    ProcessCompletionAuthority, ProcessEventLogTestSupport as _, ProcessExecutionEnvRef,
-    ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
-    ProcessIdentity, ProcessInput, ProcessProvenance, ProcessRecord, ProcessRegistration,
-    ProcessRegistry, ProcessStatus, ProjectionWatermark, ReferrerClaim, RuntimeCommit,
-    RuntimeSessionState, SessionAppendNode, SessionCreationHead, SessionNodePayload, SessionPolicy,
-    SessionRelation, SessionStoreCreateRequest, StoreError, TokenUsage, TurnInput,
-    TurnInputIngress, WaitKind, WaitState,
+    ExecutionScope, LlmUsage, MessageOrigin, MessageRole, OperationId, PartKind,
+    PendingTurnInputDraft, PluginNamespaceState, PluginState, ProcessAwaitOutput, ProcessChange,
+    ProcessChangeCursor, ProcessCompletionAuthority, ProcessEventLogTestSupport as _,
+    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
+    ProcessExecutionWriteAuthority, ProcessIdentity, ProcessInput, ProcessProvenance,
+    ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStatus, ProjectionWatermark,
+    ReferrerClaim, RuntimeCommit, RuntimeSessionState, SessionAppendNode, SessionCreationHead,
+    SessionNodePayload, SessionPolicy, SessionRelation, SessionStoreCreateRequest, StoreError,
+    TurnInput, TurnInputIngress, WaitKind, WaitState,
 };
 use serde::{Deserialize, Serialize};
 
@@ -314,7 +314,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
 
     let mut loaded = load_fixture_state(&session).await;
     loaded.turn_index = 7;
-    loaded.token_usage = TokenUsage {
+    loaded.token_usage = LlmUsage {
         input_tokens: 13,
         output_tokens: 8,
         cache_read_input_tokens: 5,
@@ -568,7 +568,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     );
     assert_eq!(
         checkpoint.turn_state.token_usage,
-        TokenUsage {
+        LlmUsage {
             input_tokens: 13,
             output_tokens: 8,
             cache_read_input_tokens: 5,

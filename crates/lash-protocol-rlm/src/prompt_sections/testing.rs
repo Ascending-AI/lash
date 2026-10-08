@@ -67,7 +67,7 @@ pub(crate) struct Call {
     pub(crate) catalog: lash_core::ToolCatalog,
     pub(crate) facts: Option<RlmPromptFacts>,
     pub(crate) options: RlmTurnOptions,
-    pub(crate) committed_usage: Option<lash_core::TokenUsage>,
+    pub(crate) committed_usage: Option<lash_core::LlmUsage>,
     pub(crate) context_window_tokens: Option<u64>,
     pub(crate) iteration: u32,
     pub(crate) purpose: PromptPurpose,

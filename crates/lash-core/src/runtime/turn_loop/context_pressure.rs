@@ -111,7 +111,7 @@ pub(super) struct ContextPressureOutcome {
 /// Everything the step reads from the turn being prepared.
 pub(super) struct ContextPressureStep<'a, 'run> {
     pub(super) trace_turn_id: &'a TurnId,
-    pub(super) previous_prompt_usage: Option<crate::TokenUsage>,
+    pub(super) previous_prompt_usage: Option<crate::LlmUsage>,
     pub(super) scoped_effect_controller: &'a ActorContext,
     /// The lifetime this value is bound to; the context it carries is `'static`.
     pub(crate) run: std::marker::PhantomData<&'run ()>,

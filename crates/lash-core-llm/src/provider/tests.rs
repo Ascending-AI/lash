@@ -1547,9 +1547,9 @@ impl Provider for ReportingProvider {
                 ..LlmUsage::default()
             },
             provider_usage: Some(serde_json::json!({ "input": 11, "output": 5 })),
-            execution_evidence: Some(crate::ExecutionEvidence {
+            execution_evidence: Some(ExecutionEvidence {
                 served_model: Some("vendor-model-1".to_string()),
-                ..crate::ExecutionEvidence::default()
+                ..ExecutionEvidence::default()
             }),
             ..LlmResponse::default()
         })
@@ -1623,7 +1623,7 @@ fn trace_consumer_reads_completed_attempt_disposition_and_usage() {
                 0,
                 "model".to_string(),
                 Some(crate::LlmTerminalReason::Stop),
-                None,
+                &[],
                 None,
             ),
             usage: None,
@@ -1636,9 +1636,9 @@ fn trace_consumer_reads_completed_attempt_disposition_and_usage() {
     let wire = serde_json::to_string(&record).expect("serialize trace stream record");
     let consumed: serde_json::Value =
         serde_json::from_str(&wire).expect("trace consumer decodes JSONL record");
-    assert_eq!(consumed["attempts"][0]["detail"]["outcome"], "completed");
+    assert_eq!(consumed["attempts"][0]["outcome"], "completed");
     assert_eq!(
-        consumed["attempts"][0]["detail"]["generation_disposition"],
+        consumed["attempts"][0]["generation_disposition"],
         serde_json::json!({
             "output_token_cap": "not_requested",
             "temperature": "applied",
@@ -1655,7 +1655,7 @@ fn trace_consumer_reads_completed_attempt_disposition_and_usage() {
         "the trace stream must carry the completed attempt's generation disposition",
     );
     assert_eq!(
-        consumed["attempts"][0]["detail"]["usage"],
+        consumed["attempts"][0]["usage"],
         serde_json::json!({
             "input_tokens": 11,
             "output_tokens": 5,

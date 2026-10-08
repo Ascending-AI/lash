@@ -17,8 +17,8 @@ use lash_core::TurnId;
 use std::collections::BTreeSet;
 
 use lash_core::{
-    AttemptOutcome, AttemptRecord, CheckpointKind, LlmCallId, LlmCallRecord, PluginRuntimeEvent,
-    ProtocolPosition, TokenUsage, ToolCallOutput, ToolFailure, ToolFailureClass,
+    AttemptOutcome, AttemptRecord, CheckpointKind, LlmCallId, LlmCallRecord, LlmUsage,
+    PluginRuntimeEvent, ProtocolPosition, ToolCallOutput, ToolFailure, ToolFailureClass,
     ToolIntentExecutionOutcome, ToolIntentIdentity, TurnActivity, TurnActivityId, TurnEvent,
     TurnInputApplication,
 };
@@ -76,8 +76,8 @@ fn block_identity(
         .with_item_id(item_id.map(str::to_string))
 }
 
-fn token_usage_sample() -> TokenUsage {
-    TokenUsage {
+fn token_usage_sample() -> LlmUsage {
+    LlmUsage {
         input_tokens: 10,
         output_tokens: 5,
         cache_read_input_tokens: 1,

@@ -1147,13 +1147,13 @@ pub(crate) fn zero_allocation_delta() -> RuntimePerfAllocationDelta {
     }
 }
 
-pub(crate) fn mean_token_usage<'a>(usages: impl IntoIterator<Item = &'a TokenUsage>) -> TokenUsage {
+pub(crate) fn mean_token_usage<'a>(usages: impl IntoIterator<Item = &'a LlmUsage>) -> LlmUsage {
     let usages = usages.into_iter().collect::<Vec<_>>();
     if usages.is_empty() {
-        return TokenUsage::default();
+        return LlmUsage::default();
     }
     let count = usages.len() as i64;
-    TokenUsage {
+    LlmUsage {
         input_tokens: usages.iter().map(|usage| usage.input_tokens).sum::<i64>() / count,
         output_tokens: usages.iter().map(|usage| usage.output_tokens).sum::<i64>() / count,
         cache_read_input_tokens: usages
@@ -1171,16 +1171,6 @@ pub(crate) fn mean_token_usage<'a>(usages: impl IntoIterator<Item = &'a TokenUsa
             .map(|usage| usage.reasoning_output_tokens)
             .sum::<i64>()
             / count,
-    }
-}
-
-pub(super) fn token_usage_from_llm_usage(usage: &LlmUsage) -> TokenUsage {
-    TokenUsage {
-        input_tokens: usage.input_tokens,
-        output_tokens: usage.output_tokens,
-        cache_read_input_tokens: usage.cache_read_input_tokens,
-        cache_write_input_tokens: usage.cache_write_input_tokens,
-        reasoning_output_tokens: usage.reasoning_output_tokens,
     }
 }
 

@@ -26,6 +26,83 @@
       ],
       "type": "string"
     },
+    "AttemptRecord": {
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NormalizedError"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExecutionEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "generation_disposition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GenerationReceipt"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Which of the caller's generation options this attempt's request\ncarried, as reported by the adapter that built it."
+        },
+        "ordinal": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "outcome": {
+          "$ref": "#/$defs/AttemptOutcome"
+        },
+        "protocol_position": {
+          "$ref": "#/$defs/ProtocolPosition"
+        },
+        "retry_budget_consumed": {
+          "type": "boolean"
+        },
+        "retry_decision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RetryDecision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LlmUsage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Provider-reported usage only. Absence is not zero usage."
+        }
+      },
+      "required": [
+        "ordinal",
+        "outcome",
+        "protocol_position",
+        "retry_budget_consumed"
+      ],
+      "type": "object"
+    },
     "CancelOrigin": {
       "description": "The runtime or actor decision that requested cancellation of a process\nor of a tool call's attempt. `RunClosing` is a call's owning tool Run\ndischarging its cancellation at Closing while the turn itself runs on.",
       "enum": [
@@ -206,6 +283,68 @@
           "type": "string"
         }
       ]
+    },
+    "ExecutionEvidence": {
+      "description": "Facts reported by the provider about the execution that produced a response.\n\nThese fields must never be filled from request intent. In particular,\n`reasoning_output_tokens: Some(0)` is distinct from an unreported value.",
+      "properties": {
+        "collection_interruption": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExecutionEvidenceCollectionInterruption"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why provider evidence is partial even though the Lash response is\naccepted. Present only when Lash deliberately preempted collection."
+        },
+        "provider_finish_reason": {
+          "default": null,
+          "description": "Provider-reported terminal reason in that provider's own vocabulary.\nCompatible gateways prefer their native reason over a normalized\nOpenAI-compatible `finish_reason` when both are present.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider_request_id": {
+          "default": null,
+          "description": "Transport request identifier reported by the provider (for example,\nOpenRouter's `x-request-id`). This is distinct from the response's\nprotocol-level identifier and may be present on failed attempts.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider_response_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reasoning_output_tokens": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "served_model": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ExecutionEvidenceCollectionInterruption": {
+      "enum": [
+        "protocol_abort"
+      ],
+      "type": "string"
     },
     "ExecutionNodeKind": {
       "description": "Closed vocabulary of executable workflow sites.\n\nThis describes the site, not its current observation. A workflow node may\nexpose more than one site kind. Declaration order is the canonical order:\na node's execution sites sort by it, so reordering the variants changes\nthe serialized workflow graph and needs a graph schema bump.",
@@ -426,6 +565,149 @@
       ],
       "type": "string"
     },
+    "LlmOutputPart": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Text": {
+              "properties": {
+                "response_meta": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ResponseTextMeta"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "text"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "Text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Model \"thinking\" / reasoning output from providers that expose a\nchain-of-thought channel.\n\n* `text` \u2014 human-readable summary for display.\n* `replay` \u2014 opaque provider replay state. Provider crates decide\n  how to map it back to their wire format on the next turn.",
+          "properties": {
+            "Reasoning": {
+              "properties": {
+                "replay": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ProviderReasoningReplay"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "text"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "Reasoning"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "ToolCall": {
+              "properties": {
+                "call_id": {
+                  "type": "string"
+                },
+                "input_json": {
+                  "type": "string"
+                },
+                "replay": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ProviderReplayMeta"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Opaque provider replay state. Core may use `item_id` for stable\ncorrelation, but provider crates own the wire semantics."
+                },
+                "tool_name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call_id",
+                "tool_name",
+                "input_json"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "ToolCall"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "LlmProviderTraceDirection": {
+      "description": "Which way a raw provider observation travelled, with the name its side\nof the wire gives it.",
+      "oneOf": [
+        {
+          "description": "The serialized request Lash sent to `endpoint`.",
+          "properties": {
+            "direction": {
+              "const": "request",
+              "type": "string"
+            },
+            "endpoint": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "direction",
+            "endpoint"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "One event of the provider's response. `event_name` is the vendor's\nown spelling, kept as raw evidence and never interpreted.",
+          "properties": {
+            "direction": {
+              "const": "response",
+              "type": "string"
+            },
+            "event_name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "direction",
+            "event_name"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "LlmTerminalReason": {
       "enum": [
         "stop",
@@ -438,6 +720,38 @@
         "unknown"
       ],
       "type": "string"
+    },
+    "LlmUsage": {
+      "properties": {
+        "cache_read_input_tokens": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "cache_write_input_tokens": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "input_tokens": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "output_tokens": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "reasoning_output_tokens": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "input_tokens",
+        "output_tokens",
+        "cache_read_input_tokens",
+        "cache_write_input_tokens",
+        "reasoning_output_tokens"
+      ],
+      "type": "object"
     },
     "MaxToolCalls": {
       "description": "The number of tool calls one execution may make: the host's required\ndecision, with no default and no built-in ceiling (FIG-4546).\n\nWhat it counts depends on the execution. A cell \u2014 one code cell of a turn,\nor one tool step of a protocol without cells \u2014 may make at most this many\ntool calls in total. A process may hold at most this many at once: a call\ncounts from its acceptance until the process no longer depends on it, so\na long-running process is bounded in what it retains, never in what it\ndoes over its life. The call that passes the limit fails with\n[`ToolCallLimitExceeded`]; every call under it runs untouched. The limit\npaces nothing: rate limits and throttling are the host's own.",
@@ -493,6 +807,15 @@
       ],
       "type": "object"
     },
+    "ProtocolPosition": {
+      "enum": [
+        "no_response",
+        "response_observed",
+        "output_started",
+        "terminal_observed"
+      ],
+      "type": "string"
+    },
     "ProviderFailureKind": {
       "description": "Classification of a provider/transport failure.\n\nThis is the single canonical failure-kind vocabulary: provider transports\nclassify failures into it (`lash-core` re-exports it from\n`llm::transport`), the turn machine carries it on\n[`ErrorEnvelope`](crate::session_model::ErrorEnvelope), and hosts read it\nback from `TurnIssue`s without scraping traces.\n\n`Unknown` is an explicit classification, never a decoder fallback.\nPersisted failure records reject unrecognized kind literals.",
       "enum": [
@@ -507,6 +830,165 @@
         "unknown"
       ],
       "type": "string"
+    },
+    "ProviderReasoningReplay": {
+      "properties": {
+        "encrypted_content": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "item_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProviderRouteIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact LLM Provider route that minted this reasoning replay state.\nMissing on sessions persisted before replay provenance was introduced."
+        },
+        "redacted": {
+          "type": "boolean"
+        },
+        "signature": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ProviderReplayMeta": {
+      "properties": {
+        "item_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "opaque": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProviderRouteIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact LLM Provider route that minted this opaque replay state. Missing\non sessions persisted before replay provenance was introduced."
+        }
+      },
+      "type": "object"
+    },
+    "ProviderRouteIdentity": {
+      "description": "Stable identity of one configured LLM Provider route.\n\n`endpoint` is either a normalized base URL or a host-supplied opaque route\nid. Together with the LLM Provider kind and requested model it is the replay\ncontract. Model aliases behind one endpoint are intentionally out of scope:\nhosts must use the exact model string they want included in route equality.\nHTTP(S) endpoints reject userinfo because credentials are neither route\nidentity nor safe trace metadata. Explicit default ports remain distinct\nfrom implicit ports. Scheme and host case, plus an empty path versus `/`,\nnormalize; path case and query strings remain identity-significant.",
+      "properties": {
+        "endpoint": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "endpoint",
+        "model"
+      ],
+      "type": "object"
+    },
+    "ResponsePhase": {
+      "description": "Provider replay phase tag: the two-value vocabulary the kernel interprets\n(`\"commentary\"`/`\"final_answer\"` on the wire). An unknown spelling fails\ndecoding rather than silently meaning \"neither\".",
+      "enum": [
+        "commentary",
+        "final_answer"
+      ],
+      "type": "string"
+    },
+    "ResponseTextMeta": {
+      "properties": {
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProviderRouteIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact LLM Provider route that minted this provider-owned response\nmetadata. Missing on sessions persisted before replay provenance was\nintroduced."
+        },
+        "origin_model": {
+          "description": "Model decoded from the pre-route-identity JSON vocabulary. See\n[`ResponseTextMeta::legacy_origin_provider`].",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "origin_provider": {
+          "description": "LLM Provider kind decoded from the pre-route-identity JSON vocabulary.\n\nThis is identity-compatibility material only. Because the legacy pair\nhas no endpoint, it never certifies replay for a current route.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phase": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResponsePhase"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Provider replay phase tag; see [`ResponsePhase`]."
+        },
+        "provider_payload": {
+          "description": "Provider-owned payload needed to replay this text part on a future\nrequest. The kernel stores it opaquely and providers decide whether it\nis valid for their next wire request.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
     },
     "RetryClass": {
       "description": "Evidence that permits another provider attempt.",
@@ -599,6 +1081,132 @@
             "class",
             "tokens_at_stake",
             "attempt_number"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RetryDecision": {
+      "description": "The sealed decision for a prospective provider retry.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "class": {
+              "$ref": "#/$defs/RetryClass"
+            },
+            "delay": {
+              "$ref": "#/$defs/Duration"
+            },
+            "outcome": {
+              "const": "scheduled",
+              "type": "string"
+            },
+            "wait": {
+              "$ref": "#/$defs/RetryWait"
+            }
+          },
+          "required": [
+            "outcome",
+            "delay",
+            "wait",
+            "class"
+          ],
+          "type": "object"
+        },
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "cause": {
+                  "const": "not_retryable",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cause"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "cause": {
+                  "const": "retry_budget_exhausted",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cause"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "cause": {
+                  "const": "retry_after_exceeds_cap",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cause"
+              ],
+              "type": "object"
+            },
+            {
+              "description": "The call's limit expired: the model total ends every further attempt.",
+              "properties": {
+                "cause": {
+                  "const": "timed_out",
+                  "type": "string"
+                },
+                "limit": {
+                  "$ref": "#/$defs/LimitCause"
+                }
+              },
+              "required": [
+                "cause",
+                "limit"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "attempt_number": {
+                  "format": "uint8",
+                  "maximum": 255,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "cause": {
+                  "const": "charge_safety",
+                  "type": "string"
+                },
+                "reason": {
+                  "$ref": "#/$defs/ChargeSafetyDenialReason"
+                },
+                "tokens_at_stake": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "cause",
+                "tokens_at_stake",
+                "attempt_number",
+                "reason"
+              ],
+              "type": "object"
+            }
+          ],
+          "properties": {
+            "outcome": {
+              "const": "declined",
+              "type": "string"
+            }
+          },
+          "required": [
+            "outcome"
           ],
           "type": "object"
         }
@@ -767,6 +1375,68 @@
         }
       ]
     },
+    "ToolCheckConflict": {
+      "description": "The terminal reply a tool check's reduction selected and every terminal\nreply it displaced, in reduction order.",
+      "properties": {
+        "displaced": {
+          "items": {
+            "$ref": "#/$defs/ToolCheckReply"
+          },
+          "type": "array"
+        },
+        "phase": {
+          "$ref": "#/$defs/ToolCheckPhase"
+        },
+        "winner": {
+          "$ref": "#/$defs/ToolCheckReply"
+        }
+      },
+      "required": [
+        "phase",
+        "winner",
+        "displaced"
+      ],
+      "type": "object"
+    },
+    "ToolCheckPhase": {
+      "description": "The built-in tool check phase a reply was given in.",
+      "enum": [
+        "tool_args_check",
+        "tool_result_check"
+      ],
+      "type": "string"
+    },
+    "ToolCheckReply": {
+      "description": "One callback's reply to a tool check, attributed to its plugin.",
+      "properties": {
+        "callback": {
+          "type": "string"
+        },
+        "plugin_id": {
+          "type": "string"
+        },
+        "verdict": {
+          "$ref": "#/$defs/ToolCheckVerdictKind"
+        }
+      },
+      "required": [
+        "plugin_id",
+        "callback",
+        "verdict"
+      ],
+      "type": "object"
+    },
+    "ToolCheckVerdictKind": {
+      "description": "What a tool check callback decided, without the decision's payload.",
+      "enum": [
+        "allow",
+        "cached",
+        "deny",
+        "cancel",
+        "abort_run"
+      ],
+      "type": "string"
+    },
     "ToolFailureClass": {
       "enum": [
         "invalid_request",
@@ -835,30 +1505,43 @@
       ],
       "type": "object"
     },
-    "TraceAttemptUsageOutcome": {
-      "description": "Why an attempt's provider-reported usage is present or absent.\n\nMirrors `lash_sansio::llm::types::AttemptUsageOutcome`, the vocabulary's\nowner, with the same wire spellings; the trace layer was the only one that\nflattened it to a free-form string.\n\n# Integrator class\n\nReporting integrations exhaustively render these outcomes when\nexplaining a call whose usage never arrived.",
-      "oneOf": [
-        {
-          "const": "reported",
-          "description": "The provider reported usage for this attempt.",
+    "TraceAttemptObservation": {
+      "description": "What the provider seam observed around one dispatched attempt. The\nattempt's facts are its sealed `AttemptRecord`, reported beside this.",
+      "properties": {
+        "ended_at_ms": {
+          "description": "Wall-clock epoch milliseconds the attempt was sealed, when the\nprovider seam timed it.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "provider": {
+          "description": "The provider that served the attempt, when the provider seam named it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request_model": {
+          "description": "The model the request named.",
           "type": "string"
         },
-        {
-          "const": "unreported_by_provider",
-          "description": "The provider completed the attempt without reporting usage.",
-          "type": "string"
-        },
-        {
-          "const": "unreported_after_abort",
-          "description": "The attempt was aborted before usage could be collected.",
-          "type": "string"
-        },
-        {
-          "const": "unreported_after_failure",
-          "description": "The attempt failed before usage could be collected.",
-          "type": "string"
+        "started_at_ms": {
+          "description": "Wall-clock epoch milliseconds the attempt was dispatched, when the\nprovider seam timed it.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
-      ]
+      },
+      "required": [
+        "request_model"
+      ],
+      "type": "object"
     },
     "TraceBranchMembership": {
       "properties": {
@@ -1185,7 +1868,7 @@
         "usage": {
           "anyOf": [
             {
-              "$ref": "#/$defs/TraceTokenUsage"
+              "$ref": "#/$defs/LlmUsage"
             },
             {
               "type": "null"
@@ -1428,49 +2111,6 @@
         "name",
         "status"
       ],
-      "type": "object"
-    },
-    "TraceExecutionEvidence": {
-      "properties": {
-        "collection_interruption": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "provider_finish_reason": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "provider_request_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "provider_response_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "reasoning_output_tokens": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "served_model": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
       "type": "object"
     },
     "TraceJournaledEffectStatus": {
@@ -2070,83 +2710,6 @@
       ],
       "type": "string"
     },
-    "TraceLlmAttempt": {
-      "description": "One provider request attempt, as the provider seam reported it.",
-      "properties": {
-        "ended_at_ms": {
-          "description": "Wall-clock epoch milliseconds the attempt ended, when the provider\nseam timed it.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "error": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/NormalizedError"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "ordinal": {
-          "description": "The attempt's ordinal within its call, from 1.",
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "outcome": {
-          "$ref": "#/$defs/AttemptOutcome"
-        },
-        "provider": {
-          "description": "The provider that served the attempt, when the provider seam named it.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "request_model": {
-          "description": "The model the request named.",
-          "type": "string"
-        },
-        "response_model": {
-          "description": "The model the response named, when it named one.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "started_at_ms": {
-          "description": "Wall-clock epoch milliseconds the attempt was dispatched, when the\nprovider seam timed it.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "usage": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/TraceTokenUsage"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Provider-reported usage only. Absence is not zero usage."
-        }
-      },
-      "required": [
-        "ordinal",
-        "request_model",
-        "outcome"
-      ],
-      "type": "object"
-    },
     "TraceLlmMessage": {
       "properties": {
         "blocks": {
@@ -2212,17 +2775,38 @@
           "type": "integer"
         },
         "generation_disposition": {
-          "description": "Which of the caller's generation options the adapter put on the wire,\nas the runtime's `GenerationReceipt` serializes. Absent when the\nadapter does not report, which is not the same as reporting that\nnothing was requested."
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GenerationReceipt"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Which of the caller's generation options the adapter put on the wire.\nAbsent when the adapter does not report, which is not the same as\nreporting that nothing was requested."
         },
-        "parts": true,
+        "parts": {
+          "description": "The model's output parts. Opaque provider replay payloads (encrypted\nreasoning, signatures, provider-owned replay blobs) are not captured;\nevery other field is the part as the runtime holds it.",
+          "items": {
+            "$ref": "#/$defs/LlmOutputPart"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "request_model": {
           "description": "The model identifier requested for the corresponding LLM call.",
           "type": "string"
         },
         "terminal_reason": {
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LlmTerminalReason"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "text": {
@@ -2382,6 +2966,77 @@
       ],
       "type": "object"
     },
+    "TraceProviderBodyOmission": {
+      "description": "Why a provider observation's parsed `raw_json` view is absent although the\nraw bytes were observed.",
+      "enum": [
+        "size_limit",
+        "invalid_json"
+      ],
+      "type": "string"
+    },
+    "TraceProviderEvent": {
+      "description": "One raw provider observation of a model call: the request Lash sent or\none event of the provider's response.",
+      "properties": {
+        "direction": {
+          "$ref": "#/$defs/LlmProviderTraceDirection"
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "item_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "output_index": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "provider": {
+          "type": "string"
+        },
+        "raw_json": true,
+        "raw_json_omitted_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceProviderBodyOmission"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "raw_len": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "raw_sha256": {
+          "description": "SHA-256 of the exact wire bytes. `raw_json` is a parsed structured\nview whose re-serialization may not reproduce these bytes.",
+          "type": "string"
+        },
+        "sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "provider",
+        "sequence",
+        "elapsed_ms",
+        "direction",
+        "raw_len",
+        "raw_sha256"
+      ],
+      "type": "object"
+    },
     "TraceProviderReplayDropEvent": {
       "properties": {
         "minting_route": {
@@ -2427,52 +3082,6 @@
       ],
       "type": "string"
     },
-    "TraceProviderRequestEvent": {
-      "properties": {
-        "body_json": true,
-        "body_json_omitted_reason": {
-          "description": "Why `body_json` is absent when the request body itself was observed.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "body_len": {
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "body_sha256": {
-          "description": "SHA-256 of the exact serialized wire bytes. `body_json` is a parsed\nstructured view whose re-serialization may not reproduce these bytes.",
-          "type": "string"
-        },
-        "elapsed_ms": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "endpoint": {
-          "type": "string"
-        },
-        "provider": {
-          "type": "string"
-        },
-        "sequence": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "provider",
-        "sequence",
-        "elapsed_ms",
-        "endpoint",
-        "body_len",
-        "body_sha256"
-      ],
-      "type": "object"
-    },
     "TraceProviderRouteIdentity": {
       "properties": {
         "endpoint": {
@@ -2492,60 +3101,9 @@
       ],
       "type": "object"
     },
-    "TraceProviderStreamEvent": {
-      "properties": {
-        "elapsed_ms": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "event_name": {
-          "type": "string"
-        },
-        "item_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "output_index": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "provider": {
-          "type": "string"
-        },
-        "raw_json": true,
-        "raw_len": {
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "raw_sha256": {
-          "type": "string"
-        },
-        "sequence": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "provider",
-        "sequence",
-        "elapsed_ms",
-        "event_name",
-        "raw_len",
-        "raw_sha256"
-      ],
-      "type": "object"
-    },
     "TraceRetryAttempt": {
       "additionalProperties": false,
-      "description": "One attempt projected from its retry owner's sealed record.",
+      "description": "One tool attempt projected from its retry owner's sealed record. A model\ncall's attempts are its sealed `AttemptRecord`s, carried as they are.",
       "properties": {
         "delay_ms": {
           "format": "uint64",
@@ -2575,77 +3133,6 @@
         {
           "additionalProperties": false,
           "properties": {
-            "error": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/NormalizedError"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "execution_evidence": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/TraceExecutionEvidence"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "generation_disposition": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/GenerationReceipt"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "kind": {
-              "const": "llm",
-              "type": "string"
-            },
-            "outcome": {
-              "$ref": "#/$defs/AttemptOutcome"
-            },
-            "retry_decision": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/TraceRetryDecision"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "usage": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/TraceTokenUsage"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "usage_disposition": {
-              "$ref": "#/$defs/TraceAttemptUsageOutcome"
-            }
-          },
-          "required": [
-            "kind",
-            "outcome",
-            "usage_disposition"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
             "kind": {
               "const": "tool",
               "type": "string"
@@ -2656,127 +3143,6 @@
           },
           "required": [
             "kind",
-            "outcome"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "TraceRetryDecision": {
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "class": {
-              "$ref": "#/$defs/RetryClass"
-            },
-            "outcome": {
-              "const": "scheduled",
-              "type": "string"
-            },
-            "wait": {
-              "$ref": "#/$defs/RetryWait"
-            }
-          },
-          "required": [
-            "outcome",
-            "wait",
-            "class"
-          ],
-          "type": "object"
-        },
-        {
-          "oneOf": [
-            {
-              "properties": {
-                "cause": {
-                  "const": "not_retryable",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "cause"
-              ],
-              "type": "object"
-            },
-            {
-              "properties": {
-                "cause": {
-                  "const": "retry_budget_exhausted",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "cause"
-              ],
-              "type": "object"
-            },
-            {
-              "properties": {
-                "cause": {
-                  "const": "retry_after_exceeds_cap",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "cause"
-              ],
-              "type": "object"
-            },
-            {
-              "description": "The call's limit expired: the model total ends every further attempt.",
-              "properties": {
-                "cause": {
-                  "const": "timed_out",
-                  "type": "string"
-                },
-                "limit": {
-                  "$ref": "#/$defs/LimitCause"
-                }
-              },
-              "required": [
-                "cause",
-                "limit"
-              ],
-              "type": "object"
-            },
-            {
-              "properties": {
-                "attempt_number": {
-                  "format": "uint8",
-                  "maximum": 255,
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "cause": {
-                  "const": "charge_safety",
-                  "type": "string"
-                },
-                "reason": {
-                  "$ref": "#/$defs/ChargeSafetyDenialReason"
-                },
-                "tokens_at_stake": {
-                  "format": "uint64",
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "cause",
-                "tokens_at_stake",
-                "attempt_number",
-                "reason"
-              ],
-              "type": "object"
-            }
-          ],
-          "properties": {
-            "outcome": {
-              "const": "declined",
-              "type": "string"
-            }
-          },
-          "required": [
             "outcome"
           ],
           "type": "object"
@@ -2875,7 +3241,7 @@
         "usage": {
           "anyOf": [
             {
-              "$ref": "#/$defs/TraceTokenUsage"
+              "$ref": "#/$defs/LlmUsage"
             },
             {
               "type": "null"
@@ -2942,38 +3308,6 @@
         "monotonic_counter_overflow"
       ],
       "type": "string"
-    },
-    "TraceTokenUsage": {
-      "properties": {
-        "cache_read_input_tokens": {
-          "format": "int64",
-          "type": "integer"
-        },
-        "cache_write_input_tokens": {
-          "format": "int64",
-          "type": "integer"
-        },
-        "input_tokens": {
-          "format": "int64",
-          "type": "integer"
-        },
-        "output_tokens": {
-          "format": "int64",
-          "type": "integer"
-        },
-        "reasoning_output_tokens": {
-          "format": "int64",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "input_tokens",
-        "output_tokens",
-        "cache_read_input_tokens",
-        "cache_write_input_tokens",
-        "reasoning_output_tokens"
-      ],
-      "type": "object"
     },
     "TraceToolAttemptOutcome": {
       "oneOf": [
@@ -3749,7 +4083,7 @@
       "properties": {
         "attempts": {
           "items": {
-            "$ref": "#/$defs/TraceRetryAttempt"
+            "$ref": "#/$defs/AttemptRecord"
           },
           "type": [
             "array",
@@ -3768,7 +4102,7 @@
         "usage": {
           "anyOf": [
             {
-              "$ref": "#/$defs/TraceTokenUsage"
+              "$ref": "#/$defs/LlmUsage"
             },
             {
               "type": "null"
@@ -3786,7 +4120,7 @@
       "properties": {
         "attempts": {
           "items": {
-            "$ref": "#/$defs/TraceRetryAttempt"
+            "$ref": "#/$defs/AttemptRecord"
           },
           "type": [
             "array",
@@ -3809,10 +4143,13 @@
       "type": "object"
     },
     {
-      "description": "One real provider request attempt of a model call, made by the body\nthat dispatched it. A call that retried reports one per attempt.",
+      "description": "One real provider request attempt of a model call, reported by the\nbody that dispatched it when the attempt is sealed. `attempt` is the\nrecord the call's `attempts` ledger carries under the same ordinal. A\ncall that retried reports one per attempt.",
       "properties": {
         "attempt": {
-          "$ref": "#/$defs/TraceLlmAttempt"
+          "$ref": "#/$defs/AttemptRecord"
+        },
+        "observation": {
+          "$ref": "#/$defs/TraceAttemptObservation"
         },
         "type": {
           "const": "llm_attempt_completed",
@@ -3821,7 +4158,8 @@
       },
       "required": [
         "type",
-        "attempt"
+        "attempt",
+        "observation"
       ],
       "type": "object"
     },
@@ -3845,10 +4183,10 @@
     {
       "properties": {
         "event": {
-          "$ref": "#/$defs/TraceProviderRequestEvent"
+          "$ref": "#/$defs/TraceProviderEvent"
         },
         "type": {
-          "const": "provider_request",
+          "const": "provider_event",
           "type": "string"
         }
       },
@@ -3881,22 +4219,6 @@
         },
         "type": {
           "const": "effect_envelope_diff",
-          "type": "string"
-        }
-      },
-      "required": [
-        "type",
-        "event"
-      ],
-      "type": "object"
-    },
-    {
-      "properties": {
-        "event": {
-          "$ref": "#/$defs/TraceProviderStreamEvent"
-        },
-        "type": {
-          "const": "provider_stream_event",
           "type": "string"
         }
       },
@@ -4433,6 +4755,28 @@
       "required": [
         "type",
         "outcome"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A built-in tool check selected one terminal reply over others. The\nsame fact reaches session observers as a plugin runtime event.",
+      "properties": {
+        "conflict": {
+          "$ref": "#/$defs/ToolCheckConflict"
+        },
+        "plugin_id": {
+          "description": "The plugin whose reply won.",
+          "type": "string"
+        },
+        "type": {
+          "const": "tool_check_conflict",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "plugin_id",
+        "conflict"
       ],
       "type": "object"
     },

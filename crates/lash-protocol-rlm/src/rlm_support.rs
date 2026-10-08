@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::dialect::Dialect;
 use crate::render::CodeRenderer;
-use lash_core::TokenUsage;
+use lash_core::LlmUsage;
 use lash_render::{RenderNode, RenderParams, RenderValue, truncate_chars};
 use lash_rlm_types::{RlmTermination, RlmTurnOptions};
 use lash_sansio::{ExtraKeys, ObjectShape, SchemaShape, ShapeField, ShapeKind};
@@ -39,7 +39,7 @@ pub(crate) fn decode_rlm_termination_options(
 pub fn format_budget_suffix(
     dialect: &dyn crate::dialect::Dialect,
     turn_index: usize,
-    usage: Option<&TokenUsage>,
+    usage: Option<&LlmUsage>,
     max_budget_tokens: Option<usize>,
 ) -> Option<String> {
     format_budget_suffix_with_vocabulary(
@@ -62,7 +62,7 @@ pub(crate) fn effective_budget_tokens(
 
 pub(crate) fn format_budget_suffix_with_vocabulary(
     turn_index: usize,
-    usage: Option<&TokenUsage>,
+    usage: Option<&LlmUsage>,
     max_budget_tokens: Option<usize>,
     vocabulary: crate::dialect::DialectPromptVocabulary,
     decomposition: bool,

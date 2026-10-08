@@ -4,4 +4,4 @@
 //! sealed attempt history are journaled with the model call result. Traces
 //! and turn summaries report observations, not billing evidence.
 
-pub use lash_core::{TokenUsage, TokenUsageOverflow};
+pub use lash_core::{LlmUsage, TokenUsageOverflow};

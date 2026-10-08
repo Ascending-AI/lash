@@ -137,8 +137,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tokio_util::sync::CancellationToken;
 
 use crate::llm::types::{
-    LlmOutputPart, LlmProviderTraceEvent, LlmProviderTraceSender, LlmRequest, LlmResponse,
-    LlmStreamEvent, LlmUsage, StreamBlockIdentity, StreamBlockKind,
+    LlmOutputPart, LlmProviderTraceDirection, LlmProviderTraceEvent, LlmProviderTraceSender,
+    LlmRequest, LlmResponse, LlmStreamEvent, LlmUsage, StreamBlockIdentity, StreamBlockKind,
 };
 use crate::plugin::{CheckpointHookContext, SessionConfigChangedContext, SessionRelation};
 use crate::sansio::{LlmCallError, Response};

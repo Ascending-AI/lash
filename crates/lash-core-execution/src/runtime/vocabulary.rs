@@ -1,6 +1,6 @@
 use super::*;
 use crate::session_model::SessionStreamEvent;
-use crate::{SessionSnapshot, TokenUsage, ToolCallRecord};
+use crate::{LlmUsage, SessionSnapshot, ToolCallRecord};
 use lash_sansio::sync::MutexExt;
 use std::collections::HashMap;
 use std::fmt;
@@ -92,7 +92,7 @@ pub struct AssembledTurn {
     pub outcome: crate::TurnOutcome,
     pub execution: TurnExecutionMetrics,
     #[serde(default)]
-    pub token_usage: TokenUsage,
+    pub token_usage: LlmUsage,
     /// Provider calls made by this session during the turn, in protocol order.
     /// Child-session calls remain on the child turn result.
     #[serde(default)]
@@ -348,8 +348,8 @@ pub enum TurnEvent {
     },
     Usage {
         protocol_iteration: usize,
-        usage: TokenUsage,
-        cumulative: TokenUsage,
+        usage: LlmUsage,
+        cumulative: LlmUsage,
     },
     RetryStatus {
         wait_seconds: u64,

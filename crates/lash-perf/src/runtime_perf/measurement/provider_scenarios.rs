@@ -51,7 +51,7 @@ pub(super) async fn run_once_openai_responses_sse_parse(
                     value: (),
                     tail: TurnTail {
                         phase_profile,
-                        turn_usage: token_usage_from_llm_usage(state.usage()),
+                        turn_usage: state.usage().clone(),
                     },
                 })
             },
@@ -135,7 +135,7 @@ pub(super) async fn run_once_direct_llm_client(
                 Ok(TurnRun {
                     value: (),
                     tail: TurnTail {
-                        turn_usage: token_usage_from_llm_usage(&response.usage),
+                        turn_usage: response.usage.clone(),
                         ..TurnTail::default()
                     },
                 })

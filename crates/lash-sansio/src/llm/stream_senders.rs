@@ -21,29 +21,51 @@ impl LlmEventSender {
     }
 }
 
+/// Which way a raw provider observation travelled, with the name its side
+/// of the wire gives it.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(tag = "direction", rename_all = "snake_case")]
+pub enum LlmProviderTraceDirection {
+    /// The serialized request Lash sent to `endpoint`.
+    Request { endpoint: String },
+    /// One event of the provider's response. `event_name` is the vendor's
+    /// own spelling, kept as raw evidence and never interpreted.
+    Response { event_name: String },
+}
+
 #[derive(Clone, Debug)]
 pub struct LlmProviderTraceEvent {
     pub provider: &'static str,
-    pub event_name: String,
+    pub direction: LlmProviderTraceDirection,
     pub raw: String,
 }
 
-const PROVIDER_REQUEST_EVENT_PREFIX: &str = "\0lash.provider_request:";
-
 impl LlmProviderTraceEvent {
-    /// Request traces share the provider trace channel with response events,
-    /// while the reserved event-name prefix lets the runtime persist them as
-    /// a distinct durable trace event without wrapping or changing `raw`.
     pub fn request(provider: &'static str, endpoint: &str, body: String) -> Self {
         Self {
             provider,
-            event_name: format!("{PROVIDER_REQUEST_EVENT_PREFIX}{endpoint}"),
+            direction: LlmProviderTraceDirection::Request {
+                endpoint: endpoint.to_string(),
+            },
             raw: body,
         }
     }
 
+    pub fn response(provider: &'static str, event_name: String, raw: String) -> Self {
+        Self {
+            provider,
+            direction: LlmProviderTraceDirection::Response { event_name },
+            raw,
+        }
+    }
+
     pub fn request_endpoint(&self) -> Option<&str> {
-        self.event_name.strip_prefix(PROVIDER_REQUEST_EVENT_PREFIX)
+        match &self.direction {
+            LlmProviderTraceDirection::Request { endpoint } => Some(endpoint),
+            LlmProviderTraceDirection::Response { .. } => None,
+        }
     }
 }
 
