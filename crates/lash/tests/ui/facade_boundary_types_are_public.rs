@@ -4,9 +4,9 @@ use async_trait::async_trait;
 use lash::SessionId;
 use lash::TurnId;
 use lash::direct::{
-    AttachmentSource, DirectLlmClient, DirectLlmError, DirectLlmOutcome, DirectRequest,
-    GenerationOptionOutcome, GenerationOptions, GenerationReceipt, LlmEventSender, LlmOutputPart,
-    LlmUsage, NonNegativeFiniteF64, NonNegativeFiniteF64Error,
+    DirectLlmClient, DirectLlmError, DirectLlmOutcome, DirectRequest, GenerationOptionOutcome,
+    GenerationOptions, GenerationReceipt, LlmEventSender, LlmOutputPart, LlmUsage,
+    NonNegativeFiniteF64, NonNegativeFiniteF64Error,
 };
 use lash::durability::RuntimeHostConfig;
 use lash::messages::MessageRole;
@@ -123,7 +123,7 @@ async fn direct_response_type_is_nameable(
 }
 
 fn direct_payload_types_are_nameable(
-    attachment: AttachmentSource,
+    attachment: lash::attachments::AttachmentRef,
     event_sender: LlmEventSender,
     output: LlmOutputPart,
     usage: LlmUsage,

@@ -1,18 +1,13 @@
 //! Compile-time witnesses for attachment-area facade and integrator contracts.
 //!
-//! FIG-2107 drains the ledger's remaining `unused-justify` slices: at the
-//! dispatch-time recount this area held 136 rows. The 120 rows whose item
-//! still exists are type-checked here through the path a host or integrator
-//! would name — `lash::` for facade surface, `lash_core::` for internal seams
-//! the integrator classes consume directly. The 16 rows whose item no longer
-//! exists anywhere in this workspace are listed in the pull request rather
-//! than witnessed here.
+//! Hosts name durable refs and transient delivery contracts through `lash::`.
+//! The witnesses retain the storage and referrer seams used by integrators.
 
 #![cfg(feature = "testing")]
 #![allow(dead_code, unreachable_code, unused_variables, unused_imports)]
 #![allow(clippy::all)]
 
-fn type_witness<T>() {}
+fn type_witness<T: ?Sized>() {}
 fn member_witness<T>(_: T) {}
 fn field_witness<T>(_: impl FnOnce(&T)) {}
 fn variant_witness<T>(_: impl FnOnce(&T) -> bool) {}
@@ -20,10 +15,10 @@ fn variant_witness<T>(_: impl FnOnce(&T) -> bool) {}
 fn drain_area_witnesses() {
     // W0001: lash::InputItem::Attachment [variant]
     variant_witness(|value: &lash::InputItem| matches!(value, lash::InputItem::Attachment { .. }));
-    // W0002: lash::InputItem::Attachment::source [field]
+    // W0002: lash::InputItem::Attachment::reference [field]
     field_witness(|value: &lash::InputItem| {
-        if let lash::InputItem::Attachment { source, .. } = value {
-            let _ = source;
+        if let lash::InputItem::Attachment { reference, .. } = value {
+            let _: &lash::attachments::AttachmentRef = reference;
         }
     });
     // W0003: lash::InputItem::attachment [function]
@@ -34,77 +29,6 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::attachments::AttachmentCreateMeta| {
         let _ = &value.label;
     });
-    // W0006: lash::direct::AttachmentSource::ExternalUrl [variant]
-    variant_witness(|value: &lash::direct::AttachmentSource| {
-        matches!(value, lash::direct::AttachmentSource::ExternalUrl { .. })
-    });
-    // W0007: lash::direct::AttachmentSource::ExternalUrl::media_type [field]
-    field_witness(|value: &lash::direct::AttachmentSource| {
-        if let lash::direct::AttachmentSource::ExternalUrl { media_type, .. } = value {
-            let _ = media_type;
-        }
-    });
-    // W0008: lash::direct::AttachmentSource::ExternalUrl::url [field]
-    field_witness(|value: &lash::direct::AttachmentSource| {
-        if let lash::direct::AttachmentSource::ExternalUrl { url, .. } = value {
-            let _ = url;
-        }
-    });
-    // W0009: lash::direct::AttachmentSource::Inline [variant]
-    variant_witness(|value: &lash::direct::AttachmentSource| {
-        matches!(value, lash::direct::AttachmentSource::Inline { .. })
-    });
-    // W0010: lash::direct::AttachmentSource::Inline::bytes [field]
-    field_witness(|value: &lash::direct::AttachmentSource| {
-        if let lash::direct::AttachmentSource::Inline { bytes, .. } = value {
-            let _ = bytes;
-        }
-    });
-    // W0011: lash::direct::AttachmentSource::Inline::media_type [field]
-    field_witness(|value: &lash::direct::AttachmentSource| {
-        if let lash::direct::AttachmentSource::Inline { media_type, .. } = value {
-            let _ = media_type;
-        }
-    });
-    // W0012: lash::direct::AttachmentSource::ProviderFile [variant]
-    variant_witness(|value: &lash::direct::AttachmentSource| {
-        matches!(value, lash::direct::AttachmentSource::ProviderFile { .. })
-    });
-    // W0013: lash::direct::AttachmentSource::ProviderFile::id [field]
-    field_witness(|value: &lash::direct::AttachmentSource| {
-        if let lash::direct::AttachmentSource::ProviderFile { id, .. } = value {
-            let _ = id;
-        }
-    });
-    // W0014: lash::direct::AttachmentSource::ProviderFile::media_type [field]
-    field_witness(|value: &lash::direct::AttachmentSource| {
-        if let lash::direct::AttachmentSource::ProviderFile { media_type, .. } = value {
-            let _ = media_type;
-        }
-    });
-    // W0015: lash::direct::AttachmentSource::ProviderFile::provider_scope [field]
-    field_witness(|value: &lash::direct::AttachmentSource| {
-        if let lash::direct::AttachmentSource::ProviderFile { provider_scope, .. } = value {
-            let _ = provider_scope;
-        }
-    });
-    // W0016: lash::direct::AttachmentSource::Stored::attachment_ref [field]
-    field_witness(|value: &lash::direct::AttachmentSource| {
-        if let lash::direct::AttachmentSource::Stored { attachment_ref, .. } = value {
-            let _ = attachment_ref;
-        }
-    });
-    // W0017: lash::direct::AttachmentSource::external_url [function]
-    let _: fn(lash::attachments::MediaType, String) -> lash::direct::AttachmentSource =
-        lash::direct::AttachmentSource::external_url;
-    // W0018: lash::direct::AttachmentSource::inline [function]
-    let _ = lash::direct::AttachmentSource::inline;
-    // W0019: lash::direct::AttachmentSource::provider_file [function]
-    let _: fn(
-        lash::direct::ProviderFileScope,
-        String,
-        Option<lash::attachments::MediaType>,
-    ) -> lash::direct::AttachmentSource = lash::direct::AttachmentSource::provider_file;
     // W0020: lash::direct::DirectPart::Attachment [variant]
     variant_witness(|value: &lash::direct::DirectPart| {
         matches!(value, lash::direct::DirectPart::Attachment(..))
@@ -112,7 +36,7 @@ fn drain_area_witnesses() {
     // W0021: lash::direct::DirectPart::Attachment::0 [field]
     field_witness(|value: &lash::direct::DirectPart| {
         if let lash::direct::DirectPart::Attachment(f0) = value {
-            let _ = f0;
+            let _: &Box<lash::attachments::AttachmentRef> = f0;
         }
     });
     // W0025: lash::persistence::AttachmentRootSet::has_live_attachment_ref [function]
@@ -253,8 +177,8 @@ fn drain_area_witnesses() {
     let _ = lash::persistence::RuntimeAttachmentStore::delete;
     // W0052: lash::persistence::RuntimeAttachmentStore::ephemeral [function]
     let _ = lash::persistence::RuntimeAttachmentStore::ephemeral;
-    // W0053: lash::persistence::RuntimeAttachmentStore::get [function]
-    let _ = lash::persistence::RuntimeAttachmentStore::get;
+    // Explicit reads validate the ref's content claims.
+    let _ = lash::persistence::RuntimeAttachmentStore::read;
     // W0055: lash::persistence::RuntimeAttachmentStore::referrers [function]
     let _ = lash::persistence::RuntimeAttachmentStore::referrers;
     // W0056: lash::persistence::RuntimeAttachmentStore::new [function]
@@ -297,31 +221,16 @@ fn drain_area_witnesses() {
     });
     // W0071: lash::tools::ToolCallOutput::attachments [function]
     let _ = lash::tools::ToolCallOutput::attachments;
-    // W0072: lash::tools::ToolCallOutput::replace_attachment_source [function]
-    let _ = lash::tools::ToolCallOutput::replace_attachment_source;
     // W0073: lash::tools::AttemptContext::attachments [function]
     let _ = lash::tools::AttemptContext::attachments;
     // W0074: lash::tracing::TraceAttachment [struct]
     type_witness::<lash::tracing::TraceAttachment>();
-    // W0075: lash::tracing::TraceAttachment::bytes_len [field]
     field_witness(|value: &lash::tracing::TraceAttachment| {
-        let _ = &value.bytes_len;
-    });
-    // W0076: lash::tracing::TraceAttachment::bytes_sha256 [field]
-    field_witness(|value: &lash::tracing::TraceAttachment| {
-        let _ = &value.bytes_sha256;
-    });
-    // W0077: lash::tracing::TraceAttachment::filename [field]
-    field_witness(|value: &lash::tracing::TraceAttachment| {
-        let _ = &value.filename;
-    });
-    // W0078: lash::tracing::TraceAttachment::mime [field]
-    field_witness(|value: &lash::tracing::TraceAttachment| {
-        let _ = &value.mime;
-    });
-    // W0079: lash::tracing::TraceAttachment::source [field]
-    field_witness(|value: &lash::tracing::TraceAttachment| {
-        let _ = &value.source;
+        let _: &String = &value.id;
+        let _: &String = &value.media_type;
+        let _: &u64 = &value.byte_len;
+        let _ = &value.position;
+        let _: &Option<String> = &value.delivery_form;
     });
     // W0080: lash::tracing::TraceContentBlock::Attachment [variant]
     variant_witness(|value: &lash::tracing::TraceContentBlock| {
@@ -377,9 +286,9 @@ fn drain_area_witnesses() {
     });
     // W0111: lash::messages::PartAttachment [struct]
     type_witness::<lash::messages::PartAttachment>();
-    // W0112: lash::messages::PartAttachment::source [field]
+    // W0112: lash::messages::PartAttachment::reference [field]
     field_witness(|value: &lash::messages::PartAttachment| {
-        let _ = &value.source;
+        let _: &lash::attachments::AttachmentRef = &value.reference;
     });
     // W0113: lash::messages::Part::attachment [field]
     field_witness(|value: &lash::messages::Part| {
@@ -466,3 +375,39 @@ fn drain_area_witnesses() {
 } // W0120: lash_core::impl_noop_attachment_referrers [macro]
 struct NoopManifestWitness;
 lash_core::impl_noop_attachment_referrers!(NoopManifestWitness);
+
+// Host uploads finish before an input can name the ref. The operation retains
+// typed store failures and uses the session's guarded upload holder.
+async fn host_upload_is_ref_only(
+    session: &lash::LashSession,
+    bytes: Vec<u8>,
+    meta: lash::attachments::AttachmentCreateMeta,
+) -> Result<lash::InputItem, lash::persistence::AttachmentStoreError> {
+    let reference: lash::attachments::AttachmentRef = session.put_attachment(bytes, meta).await?;
+    Ok(lash::InputItem::attachment(reference))
+}
+
+fn host_store_delivery_contracts() {
+    type_witness::<lash::attachments::AttachmentPosition>();
+    type_witness::<lash::attachments::DeliveryForms>();
+    type_witness::<lash::attachments::ProviderAccepts>();
+    type_witness::<lash::attachments::ProviderFileScope>();
+    type_witness::<lash::attachments::Delivery>();
+    type_witness::<lash::attachments::DeliverySecret>();
+    type_witness::<lash::attachments::DeliveryLimits>();
+    type_witness::<lash::attachments::DeliveryContext>();
+    type_witness::<lash::persistence::ContentMismatchDetail>();
+    type_witness::<lash::persistence::ProviderFileDelivery>();
+    type_witness::<lash::persistence::ProviderFileCacheLimits>();
+    type_witness::<lash::persistence::UploadedProviderFile>();
+    type_witness::<dyn lash::persistence::ProviderFileUploader>();
+    type_witness::<lash::provider::AttachmentDeliveryError>();
+    type_witness::<lash::provider::NoSlotDeliveries>();
+    type_witness::<dyn lash::provider::SlotDeliveries>();
+    let _ = lash::persistence::ProviderFileDelivery::new;
+    let _ = lash::LashCoreBuilder::provider_file_uploaders;
+    fn store_methods<T: lash::persistence::AttachmentStore>() {
+        let _ = T::deliver;
+        let _ = T::invalidate_delivery;
+    }
+}

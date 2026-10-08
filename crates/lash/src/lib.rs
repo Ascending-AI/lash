@@ -469,11 +469,10 @@ pub mod direct {
     };
 
     pub use lash_core::llm::types::{
-        AttachmentSource, GenerationOptionOutcome, GenerationOptions, GenerationReceipt,
-        LlmEventSender, LlmOutputPart, LlmStreamEvent, LlmTerminalReason, LlmUsage,
-        NonNegativeFiniteF64, NonNegativeFiniteF64Error, ProviderFileScope,
-        ProviderReasoningReplay, ProviderReplayDrop, ProviderReplayDropReason, ProviderReplayKind,
-        ProviderRouteIdentity, StreamBlockIdentity,
+        GenerationOptionOutcome, GenerationOptions, GenerationReceipt, LlmEventSender,
+        LlmOutputPart, LlmStreamEvent, LlmTerminalReason, LlmUsage, NonNegativeFiniteF64,
+        NonNegativeFiniteF64Error, ProviderReasoningReplay, ProviderReplayDrop,
+        ProviderReplayDropReason, ProviderReplayKind, ProviderRouteIdentity, StreamBlockIdentity,
     };
     pub use lash_core::{
         facade_support::DirectCompletion, facade_support::DirectJsonSchema,
@@ -669,6 +668,11 @@ pub mod persistence {
     pub use lash_core::{
         facade_support::ChronologicalEntry, facade_support::ChronologicalPayload,
         facade_support::ChronologicalProjection,
+    };
+    /// Content validation and optional provider-file delivery behind the host store.
+    pub use lash_core_store::attachments::{
+        ContentMismatchDetail, ProviderFileCacheLimits, ProviderFileDelivery, ProviderFileUploader,
+        UploadedProviderFile,
     };
     /// The typed view an RLM host reads and writes its module artifacts through.
     #[cfg(feature = "rlm")]
@@ -1012,12 +1016,11 @@ pub mod messages {
     pub use serde_json::Value as JsonValue;
 }
 
-/// Attachment values: identity, media type, and the metadata that travels with
-/// bytes. This is the vocabulary shared by the three places a host meets an
-/// attachment — [`InputItem::attachment`](crate::InputItem), the direct-LLM
-/// [`AttachmentSource`](crate::direct::AttachmentSource), and the
-/// [`AttachmentStore`](crate::persistence::AttachmentStore) contract — so it
-/// has its own home rather than being duplicated into each.
+/// Attachment identity, metadata, acceptance and transient delivery values.
+/// Hosts upload through [`LashSession::put_attachment`](crate::LashSession::put_attachment)
+/// before sending an [`InputItem::attachment`](crate::InputItem::attachment).
+/// The durable ref also names attachments in direct model calls and tool results;
+/// the host store chooses a delivery form for each provider attempt.
 ///
 /// Where the bytes live is a persistence concern:
 /// [`persistence`] carries the store trait, its errors, and reclamation.
@@ -1034,6 +1037,10 @@ pub mod attachments {
     /// configures, the witness and reference history keeps in an oversized
     /// output's place, and a value that is one or the other.
     pub use lash_core::{OutputRetentionPolicy, OutputValue, RetainedOutput};
+    pub use lash_sansio::llm::attachment_delivery::{
+        AttachmentPosition, Delivery, DeliveryContext, DeliveryForms, DeliveryLimits,
+        DeliverySecret, ProviderAccepts, ProviderFileScope,
+    };
     pub use lash_sansio::{InvalidAttachmentId, InvalidMediaType};
 }
 
@@ -1337,9 +1344,13 @@ pub mod provider {
     pub use lash_llm_transport::ExtraHeaders;
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::llm::transport::HttpFailureContext;
-    /// The exact body a provider lowers a request to, and that every send of
-    /// an admitted call sends (ADR 0133 §6).
-    pub use lash_sansio::llm::types::ProviderRequestBody;
+    pub use lash_core::provider::{AttachmentDeliveryError, NoSlotDeliveries, SlotDeliveries};
+    /// The admitted request template and the transient body filled for one attempt
+    /// (ADR 0133 §6). Only literals, refs, acceptance and codecs are recorded.
+    pub use lash_sansio::llm::types::{
+        AttachmentSlot, LiveRequestBody, RecordedRequestTemplate, RequestSegment,
+        RequestTemplateBuilder, SlotCodec, TemplateError, TransientJson,
+    };
     pub use lash_sansio::llm::types::{
         LlmProviderTraceEvent, LlmProviderTraceSender, ProviderReasoningRetentionSupport,
     };
@@ -1366,9 +1377,9 @@ pub mod provider {
     };
     pub use lash_core::{
         AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,
-        AttachmentCapabilitySnapshot, AttachmentMimeSource, CacheControlDialect, GoogleDialect,
-        InstructionRole, LlmProfileCapability, OpenAiReasoningContext, ReasoningCapability,
-        ReasoningEncoding, ReasoningIntent, ReasoningRetentionCapability, ReasoningRetentionPolicy,
+        AttachmentCapabilitySnapshot, CacheControlDialect, GoogleDialect, InstructionRole,
+        LlmProfileCapability, OpenAiReasoningContext, ReasoningCapability, ReasoningEncoding,
+        ReasoningIntent, ReasoningRetentionCapability, ReasoningRetentionPolicy,
         ReasoningRetentionSelection, ReasoningRetentionValidationCategory,
         ReasoningRetentionValidationError, ReasoningSelection, SamplingCapability,
         StreamTermination, facade_support::GenerationRetryGuarantee, facade_support::LlmTimeouts,
