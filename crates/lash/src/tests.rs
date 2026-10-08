@@ -447,6 +447,7 @@ mod aggregate_await_comprehension;
 mod aggregate_oracle;
 mod plugin_build_refusal;
 mod plugin_operations;
+mod plugin_lifecycle;
 mod plugin_reopen;
 mod provider_attempts;
 mod replay_origin;
