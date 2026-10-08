@@ -96,13 +96,14 @@ async fn observer_failure_is_advisory_and_keeps_committed_state() -> Result<()> 
         .send(TurnInput::text("turn 3"))
         .output()
         .await?;
-    let requests = requests.lock_recover();
-    let third = requests.last().expect("the third turn called the model");
-    assert!(
-        third.contains("reply-1") && third.contains("reply-2"),
-        "both observed turns' replies are committed history: {third}"
-    );
-    drop(requests);
+    {
+        let requests = requests.lock_recover();
+        let third = requests.last().expect("the third turn called the model");
+        assert!(
+            third.contains("reply-1") && third.contains("reply-2"),
+            "both observed turns' replies are committed history: {third}"
+        );
+    }
     core.shutdown().await?;
     Ok(())
 }

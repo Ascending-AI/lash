@@ -929,15 +929,13 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     let backend = sqlite_memory_store_backend().await;
     let (calls, seen) = (Arc::default(), Arc::<StdMutex<Vec<String>>>::default());
     let deploy = |tool: TokenWatchingTool| -> Result<LashCore> {
-        Ok(
-            explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-                .serve_test_llm_profile(
-                    tool_calling_model(WATCH, &calls, &seen),
-                    mock_llm_profile_spec(),
-                )
-                .tools(Arc::new(tool))
-                .build(crate::testing::runtime_lease_owner())?,
-        )
+        explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+            .serve_test_llm_profile(
+                tool_calling_model(WATCH, &calls, &seen),
+                mock_llm_profile_spec(),
+            )
+            .tools(Arc::new(tool))
+            .build(crate::testing::runtime_lease_owner())
     };
     // The first owner's tool never finishes: the owner is lost with the
     // request recorded and the turn unfinished.
@@ -1015,15 +1013,13 @@ async fn an_accepted_cancel_survives_its_owners_loss_in_a_retry_backoff_without_
     let tool = RetryOnceTool::default();
     let (calls, seen) = (Arc::default(), Arc::<StdMutex<Vec<String>>>::default());
     let deploy = || -> Result<LashCore> {
-        Ok(
-            explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-                .serve_test_llm_profile(
-                    tool_calling_model(RETRY, &calls, &seen),
-                    mock_llm_profile_spec(),
-                )
-                .tools(Arc::new(tool.clone()))
-                .build(crate::testing::runtime_lease_owner())?,
-        )
+        explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+            .serve_test_llm_profile(
+                tool_calling_model(RETRY, &calls, &seen),
+                mock_llm_profile_spec(),
+            )
+            .tools(Arc::new(tool.clone()))
+            .build(crate::testing::runtime_lease_owner())
     };
     let core = deploy()?;
     let session_id = crate::SessionId::parse(ID).expect("nonblank host identity");

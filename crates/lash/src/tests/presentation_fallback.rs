@@ -38,6 +38,9 @@ impl ToolProvider for Answering {
     }
 }
 
+/// The previous return and the tool name one step was handed.
+type Handed = (Vec<lash_core::facade_support::ModelToolReturnPart>, String);
+
 /// What the presentation chain and the model saw, shared by every
 /// deployment over one session.
 #[derive(Clone, Default)]
@@ -45,7 +48,7 @@ struct Seen {
     /// Each step's runs, in order.
     calls: Arc<StdMutex<Vec<String>>>,
     /// The previous return and tool name the second step was handed.
-    handed: Arc<StdMutex<Vec<(Vec<lash_core::facade_support::ModelToolReturnPart>, String)>>>,
+    handed: Arc<StdMutex<Vec<Handed>>>,
     /// Every request the model was sent, rendered.
     requests: Arc<StdMutex<Vec<String>>>,
     /// Opens when the model is asked after the call.
@@ -127,13 +130,11 @@ fn deploy(backend: &lash_core::Backend, seen: &Seen, hold: bool) -> Result<LashC
             .build()
             .into_handle()
     };
-    Ok(
-        explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-            .serve_test_llm_profile(provider, mock_llm_profile_spec())
-            .tools(Arc::new(Answering))
-            .plugin(Arc::new(chain(seen)))
-            .build(crate::testing::runtime_lease_owner())?,
-    )
+    explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
+        .tools(Arc::new(Answering))
+        .plugin(Arc::new(chain(seen)))
+        .build(crate::testing::runtime_lease_owner())
 }
 
 /// A presentation step that fails is skipped with the runtime's fallback:

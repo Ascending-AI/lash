@@ -47,12 +47,10 @@ fn hooked_core(
         })
         .build()
         .into_handle();
-    Ok(
-        explicit_ephemeral_facets(LashCore::standard_builder(backend))
-            .serve_test_llm_profile(provider, mock_llm_profile_spec())
-            .plugin(Arc::new(hook))
-            .build(crate::testing::runtime_lease_owner())?,
-    )
+    explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
+        .plugin(Arc::new(hook))
+        .build(crate::testing::runtime_lease_owner())
 }
 
 /// The committed transcript of `id`'s session: role and text per message.

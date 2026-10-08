@@ -76,15 +76,13 @@ fn race_core(
         &backend,
     )
     .with_worker_service(untimed_fixture_workers());
-    Ok(
-        explicit_ephemeral_facets(LashCore::rlm_builder(backend, factory))
-            .serve_test_llm_profile(
-                queued_text_provider(vec![typescript_block(source)]),
-                mock_llm_profile_spec(),
-            )
-            .tools(tools)
-            .build(crate::testing::runtime_lease_owner())?,
-    )
+    explicit_ephemeral_facets(LashCore::rlm_builder(backend, factory))
+        .serve_test_llm_profile(
+            queued_text_provider(vec![typescript_block(source)]),
+            mock_llm_profile_spec(),
+        )
+        .tools(tools)
+        .build(crate::testing::runtime_lease_owner())
 }
 
 /// A race loser's body progresses while the program sleeps: the cell races
