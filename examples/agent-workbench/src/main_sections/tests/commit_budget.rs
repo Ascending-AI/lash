@@ -51,12 +51,16 @@ async fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback
         )
     };
 
-    let error = match LashCore::standard_builder(backend())
-        .llm_profiles(profiles())
+    let stated = || {
+        LashCore::standard_builder(backend())
+            .llm_profiles(profiles())
+            .data_retention(lash::DataRetention::standard())
+            .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
+            .execution_budgets(lash::ExecutionBudgets::recommended())
+            .delta_coalescing(lash::DeltaCoalescing::recommended())
+    };
+    let error = match stated()
         .queued_work_batching(batching.clone())
-        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
-        .execution_budgets(lash::ExecutionBudgets::recommended())
-        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(owner())
     {
         Ok(_) => panic!("the builder must not invent a commit budget"),
@@ -64,25 +68,15 @@ async fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback
     };
     assert!(matches!(error, lash::EmbedError::MissingCommitBudget));
 
-    let error = match LashCore::standard_builder(backend())
-        .llm_profiles(profiles())
-        .commit_budget(bounded)
-        .data_retention(lash::DataRetention::standard())
-        .build(owner())
-    {
+    let error = match stated().commit_budget(bounded).build(owner()) {
         Ok(_) => panic!("the builder must not invent a queued-work action reserve"),
         Err(error) => error,
     };
     assert!(matches!(error, lash::EmbedError::MissingQueuedWorkBatching));
 
-    let core = LashCore::standard_builder(backend())
-        .llm_profiles(profiles())
+    let core = stated()
         .commit_budget(bounded)
-        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(batching)
-        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
-        .execution_budgets(lash::ExecutionBudgets::recommended())
-        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(owner())
         .expect("an explicit commit budget and batching build");
     core.shutdown().await.expect("the core shuts down");

@@ -478,7 +478,7 @@ pub mod direct {
 
     pub use lash_core::llm::types::{
         GenerationOptionOutcome, GenerationOptions, GenerationReceipt, LlmEventSender,
-        LlmOutputPart, LlmStreamEvent, LlmTerminalReason, LlmUsage, NonNegativeFiniteF64,
+        LlmOutputPart, LlmStreamEvent, LlmTerminalReason, NonNegativeFiniteF64,
         NonNegativeFiniteF64Error, ProviderReasoningReplay, ProviderReplayDrop,
         ProviderReplayDropReason, ProviderReplayKind, ProviderRouteIdentity, StreamBlockIdentity,
     };
@@ -1050,10 +1050,6 @@ pub mod attachments {
     pub use lash_core::{
         AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, MediaType,
     };
-    /// The attachment half of a host's data-retention statement: the put
-    /// bound, the read budgets, the upload expiry and the retained-output
-    /// policy.
-    pub use lash_core::{AttachmentPolicy, AttachmentReadPolicy};
     /// Output kept out of session history (FIG-1643): the byte policy a host
     /// states in [`DataRetention::attachments`](crate::DataRetention::attachments),
     /// the witness and reference history keeps in an oversized output's

@@ -5,8 +5,8 @@ use lash::SessionId;
 use lash::TurnId;
 use lash::direct::{
     DirectLlmClient, DirectLlmError, DirectLlmOutcome, DirectRequest, GenerationOptionOutcome,
-    GenerationOptions, GenerationReceipt, LlmEventSender, LlmOutputPart, LlmUsage,
-    NonNegativeFiniteF64, NonNegativeFiniteF64Error,
+    GenerationOptions, GenerationReceipt, LlmEventSender, LlmOutputPart, NonNegativeFiniteF64,
+    NonNegativeFiniteF64Error,
 };
 use lash::durability::RuntimeHostConfig;
 use lash::messages::MessageRole;
@@ -27,6 +27,7 @@ use lash::plugins::{
 use lash::provider::{ProviderRateLimitPolicy, ProviderReliability, ProviderRetryPolicy};
 use lash::tools::{ToolCallRecord, ToolOutputContract};
 use lash::turn::{TurnFailureCode, TurnFailureKind, TurnIssue};
+use lash::usage::LlmUsage;
 use lash::{
     EmptyLlmProfiles, LlmProfileConfig, LlmProfileKey, LlmProfileLimits, LlmProfileMetadata,
     LlmProfileRegistry, LlmProfileUnavailable, LlmProfileUnavailableReason, LlmProfiles,

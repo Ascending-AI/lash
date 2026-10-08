@@ -263,7 +263,7 @@ fn assert_snapshot_attachment(
 fn usage_gate_response() -> lash::provider::LlmResponse {
     let mut response =
         text_response("<typescript>\nfinish(\"attachment accounted\");\n</typescript>");
-    response.usage = lash::direct::LlmUsage {
+    response.usage = lash::usage::LlmUsage {
         input_tokens: 21,
         output_tokens: 8,
         cache_read_input_tokens: 3,

@@ -61,7 +61,6 @@ use lash::direct::GenerationOptions as _;
 use lash::direct::GenerationOptions as _;
 use lash::direct::LlmOutputPart as _;
 use lash::direct::LlmTerminalReason as _;
-use lash::direct::LlmUsage as _;
 use lash::observe::InMemoryLiveReplayStore as _;
 use lash::persistence::CheckpointKind as _;
 use lash::persistence::ContentMismatchDetail as _;
@@ -133,6 +132,7 @@ use lash::provider::StreamTermination as _;
 use lash::provider::TemplateError as _;
 use lash::provider::TransientJson as _;
 use lash::secrets::Redacted as _;
+use lash::usage::LlmUsage as _;
 // `async_trait` is an attribute macro re-exported at the facade root so
 // `#[async_trait]` facade traits can be implemented without a host-side
 // `async-trait` dependency.

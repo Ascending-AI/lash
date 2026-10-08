@@ -118,7 +118,7 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
                     cache: lash::direct::GenerationOptionOutcome::OmittedUnsupported,
                     ..Default::default()
                 }),
-                usage: Some(lash::direct::LlmUsage {
+                usage: Some(lash::usage::LlmUsage {
                     input_tokens: 11,
                     output_tokens: 7,
                     cache_read_input_tokens: 3,

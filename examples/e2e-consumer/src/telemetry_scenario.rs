@@ -235,7 +235,7 @@ fn answer(text: &str) -> LlmResponse {
             text: text.into(),
             response_meta: None,
         }],
-        usage: lash::direct::LlmUsage {
+        usage: lash::usage::LlmUsage {
             input_tokens: 7,
             output_tokens: 3,
             ..Default::default()

@@ -5,14 +5,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Result, bail};
 use async_trait::async_trait;
-use lash::direct::{
-    LlmOutputPart, LlmStreamEvent, LlmUsage, ProviderReasoningReplay, ProviderRouteIdentity,
-};
+use lash::direct::{LlmOutputPart, LlmStreamEvent, ProviderReasoningReplay, ProviderRouteIdentity};
 use lash::provider::{
     FailureCode, GenerationRetryGuarantee, LlmContentBlock, LlmMessage, LlmRequest, LlmResponse,
     LlmRole, LlmTransportError, Provider, ProviderComponents, ProviderFailureKind, ProviderHandle,
     ProviderOptions, ProviderReliability, RecordedRequestTemplate, TransportRetryVerdict,
 };
+use lash::usage::LlmUsage;
 
 pub(crate) const DEV_PROVIDER_SCENARIO_ENV: &str = "AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO";
 

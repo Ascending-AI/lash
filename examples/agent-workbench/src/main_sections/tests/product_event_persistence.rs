@@ -168,7 +168,7 @@ fn persisted_attempt_rows_round_trip_non_default_outcomes_positions_and_facts() 
                     cache: lash::direct::GenerationOptionOutcome::OmittedUnsupported,
                     ..Default::default()
                 }),
-                usage: Some(lash::direct::LlmUsage {
+                usage: Some(lash::usage::LlmUsage {
                     input_tokens: 11,
                     output_tokens: 7,
                     cache_read_input_tokens: 3,

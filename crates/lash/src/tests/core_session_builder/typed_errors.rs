@@ -293,24 +293,26 @@ async fn a_core_without_a_tool_loss_choice_is_refused() {
     ));
 }
 
+fn stated_commit_and_retention(backend: crate::Backend) -> crate::LashCoreBuilder {
+    LashCore::standard_builder(backend)
+        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(crate::DataRetention::standard())
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
+}
+
 /// FIG-5491: execution budgets and delta coalescing are host decisions with
 /// no default, so a core that lacks either is refused.
 #[tokio::test]
 async fn a_core_without_its_budgets_or_coalescing_choice_is_refused() {
-    let stated = |backend| {
-        LashCore::standard_builder(backend)
-            .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-            .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
-    };
     assert!(matches!(
-        stated(sqlite_memory_store_backend().await)
+        stated_commit_and_retention(sqlite_memory_store_backend().await)
             .delta_coalescing(crate::DeltaCoalescing::recommended())
             .build(crate::testing::runtime_lease_owner()),
         Err(EmbedError::MissingExecutionBudgets)
     ));
     assert!(matches!(
-        stated(sqlite_memory_store_backend().await)
+        stated_commit_and_retention(sqlite_memory_store_backend().await)
             .execution_budgets(crate::ExecutionBudgets::recommended())
             .build(crate::testing::runtime_lease_owner()),
         Err(EmbedError::MissingDeltaCoalescing)
@@ -336,10 +338,7 @@ async fn a_core_runs_under_the_budgets_and_coalescing_its_host_states() {
     })
     .expect("valid budgets");
     assert_ne!(budgets, crate::ExecutionBudgets::recommended());
-    let core = LashCore::standard_builder(sqlite_memory_store_backend().await)
-        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
+    let core = stated_commit_and_retention(sqlite_memory_store_backend().await)
         .execution_budgets(budgets.clone())
         .delta_coalescing(crate::DeltaCoalescing::off())
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())

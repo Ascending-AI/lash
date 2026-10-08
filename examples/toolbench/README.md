@@ -238,7 +238,7 @@ metered response are treated as zero, following the adapter's convention.
 | `cost_usd` | `cost` | `LlmResponse.provider_usage["cost"]` |
 
 Source: `crates/lash-llm-transport/src/normalize.rs`,
-`openai_usage_from_usage_value`; facade types `lash::direct::LlmUsage` and
+`openai_usage_from_usage_value`; facade types `lash::usage::LlmUsage` and
 `lash::provider::LlmResponse`. Reasoning is a **subset of completion**, so it is
 never added again. Cache writes are part of total input, not cache reads. An
 impossible cache sum leaves `prompt_uncached` unknown rather than clamping it.
