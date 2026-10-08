@@ -17,8 +17,26 @@ use lash_core::provider::{ProviderToken, TokenRequest, TokenRequestReason, Token
 use lash_core::runtime::{Clock, SystemClock};
 use lash_sansio::sync::MutexExt;
 
-/// How close to its expiry a token may be before lash asks for another.
-pub const TOKEN_EXPIRY_SKEW: Duration = Duration::from_secs(30);
+/// Proactive token renewal policy, configurable on each provider constructor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TokenPolicy {
+    /// Renew when expiry is at most this far away. Zero renews only expired tokens.
+    pub expiry_skew: Duration,
+}
+impl TokenPolicy {
+    /// Renew 30 seconds before expiry. This historical cushion avoids expiry
+    /// during a call; no provider-neutral workload measurement backs 30 seconds.
+    pub fn standard() -> Self {
+        Self {
+            expiry_skew: Duration::from_secs(30),
+        }
+    }
+}
+impl Default for TokenPolicy {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
 
 /// One attempt's token and the epoch the gate numbered it with.
 #[derive(Clone, Debug)]
@@ -64,10 +82,18 @@ impl TokenGate {
             source,
             provider,
             clock,
-            skew: TOKEN_EXPIRY_SKEW,
+            skew: TokenPolicy::standard().expiry_skew,
             replace: tokio::sync::Mutex::new(()),
             seen: std::sync::Mutex::new(None),
         }
+    }
+
+    /// Configure a new gate for the same source and clock, with fresh token epochs.
+    /// Provider builders call this before use; existing provider clones retain their policy.
+    pub fn configured(&self, policy: TokenPolicy) -> Self {
+        let mut gate = Self::with_clock(self.source.clone(), self.provider, self.clock.clone());
+        gate.skew = policy.expiry_skew;
+        gate
     }
 
     /// The token for one attempt: one host call, plus one `Expiring` call when
@@ -149,9 +175,10 @@ impl TokenGate {
 
     fn expiring(&self, token: &ProviderToken) -> bool {
         let now = UNIX_EPOCH + Duration::from_millis(self.clock.timestamp_ms());
-        token
-            .expires_at()
-            .is_some_and(|expires_at| expires_at <= now + self.skew)
+        token.expires_at().is_some_and(|expires_at| {
+            now.checked_add(self.skew)
+                .is_none_or(|refresh_at| expires_at <= refresh_at)
+        })
     }
 }
 

@@ -44,13 +44,15 @@ impl AnthropicProvider {
     }
 
     /// A provider that asks `tokens` for a token before every attempt.
+    /// Uses [`ProviderOptions::standard`] and [`lash_llm_transport::TokenPolicy::standard`];
+    /// both policies can be configured before use.
     pub fn with_token_source(tokens: Arc<dyn TokenSource>) -> Self {
         Self {
             tokens: Arc::new(TokenGate::new(tokens, "anthropic")),
             attachment_credential_scope: None,
             auth_scheme: AnthropicAuthScheme::default(),
             base_url: None,
-            options: ProviderOptions::default(),
+            options: ProviderOptions::standard(),
             extra_headers: Default::default(),
             stream_termination: StreamTermination::default(),
             transport: Arc::clone(&DEFAULT_HTTP_TRANSPORT),
@@ -70,6 +72,12 @@ impl AnthropicProvider {
     /// Bind uploaded file ids to a host-owned, non-secret credential identity.
     pub fn with_attachment_credential_scope(mut self, scope: impl Into<String>) -> Self {
         self.attachment_credential_scope = Some(scope.into());
+        self
+    }
+
+    /// Configure proactive renewal before this provider is used.
+    pub fn with_token_policy(mut self, policy: lash_llm_transport::TokenPolicy) -> Self {
+        self.tokens = Arc::new(self.tokens.configured(policy));
         self
     }
 

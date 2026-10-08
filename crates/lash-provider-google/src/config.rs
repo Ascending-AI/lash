@@ -41,6 +41,8 @@ impl GoogleOAuthProvider {
     }
 
     /// A provider that asks `tokens` for an access token before every attempt.
+    /// Uses [`ProviderOptions::standard`] and [`lash_llm_transport::TokenPolicy::standard`];
+    /// both policies can be configured before use.
     pub fn new(tokens: Arc<dyn TokenSource>) -> Self {
         Self {
             tokens: Arc::new(TokenGate::new(tokens, Self::PROVIDER_KIND)),
@@ -49,7 +51,7 @@ impl GoogleOAuthProvider {
             api_version: CODE_ASSIST_API_VERSION.to_string(),
             project_id: None,
             resolved_project_id: Arc::new(OnceLock::new()),
-            options: ProviderOptions::default(),
+            options: ProviderOptions::standard(),
             extra_headers: Default::default(),
             stream_termination: StreamTermination::default(),
             transport: Arc::clone(&DEFAULT_HTTP_TRANSPORT),
@@ -83,6 +85,12 @@ impl GoogleOAuthProvider {
     /// Bind uploaded file ids to a host-owned, non-secret credential identity.
     pub fn with_attachment_credential_scope(mut self, scope: impl Into<String>) -> Self {
         self.attachment_credential_scope = Some(scope.into());
+        self
+    }
+
+    /// Configure proactive renewal before this provider is used.
+    pub fn with_token_policy(mut self, policy: lash_llm_transport::TokenPolicy) -> Self {
+        self.tokens = Arc::new(self.tokens.configured(policy));
         self
     }
 

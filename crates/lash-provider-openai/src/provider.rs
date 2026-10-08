@@ -7,6 +7,8 @@ impl OpenAiCompatibleProvider {
     }
 
     /// A provider that asks `tokens` for a token before every attempt.
+    /// Uses [`ProviderOptions::standard`] and [`lash_llm_transport::TokenPolicy::standard`];
+    /// both policies can be configured before use.
     pub fn with_token_source(tokens: Arc<dyn TokenSource>, base_url: impl Into<String>) -> Self {
         Self::with_gate(tokens, "openai-compatible", base_url)
     }
@@ -20,13 +22,25 @@ impl OpenAiCompatibleProvider {
         Self {
             tokens: Arc::new(TokenGate::new(tokens, kind)),
             base_url: base_url.into(),
-            options: ProviderOptions::default(),
+            options: ProviderOptions::standard(),
+            request_work: crate::RequestWorkPolicy::standard(),
             attachment_credential_scope: None,
             compat: OpenAiCompat::default(),
             wire: OpenAiWireConfig::default(),
             transport: DEFAULT_HTTP_TRANSPORT.clone(),
             responses_resume: None,
         }
+    }
+
+    /// Configure proactive renewal before this provider is used.
+    pub fn with_token_policy(mut self, policy: lash_llm_transport::TokenPolicy) -> Self {
+        self.tokens = Arc::new(self.tokens.configured(policy));
+        self
+    }
+
+    pub fn with_request_work_policy(mut self, policy: crate::RequestWorkPolicy) -> Self {
+        self.request_work = policy;
+        self
     }
 
     pub fn with_options(mut self, options: ProviderOptions) -> Self {
@@ -76,6 +90,8 @@ impl OpenAiProvider {
     }
 
     /// A provider that asks `tokens` for a token before every attempt.
+    /// Uses [`ProviderOptions::standard`] and [`lash_llm_transport::TokenPolicy::standard`];
+    /// both policies can be configured before use.
     pub fn with_token_source(tokens: Arc<dyn TokenSource>) -> Self {
         let compat = OpenAiCompat {
             reasoning: Some(OpenAiReasoningDialect::OpenAi),
@@ -92,6 +108,17 @@ impl OpenAiProvider {
     /// Bind the Files namespace to a host-owned, non-secret credential identity.
     pub fn with_attachment_credential_scope(mut self, scope: impl Into<String>) -> Self {
         self.inner.attachment_credential_scope = Some(scope.into());
+        self
+    }
+
+    /// Configure proactive renewal before this provider is used.
+    pub fn with_token_policy(mut self, policy: lash_llm_transport::TokenPolicy) -> Self {
+        self.inner = self.inner.with_token_policy(policy);
+        self
+    }
+
+    pub fn with_request_work_policy(mut self, policy: crate::RequestWorkPolicy) -> Self {
+        self.inner.request_work = policy;
         self
     }
 

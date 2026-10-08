@@ -41,6 +41,7 @@ use lash_llm_transport::{
 
 use failure::CodexFailureClassifier;
 use session::CodexWebsocketSessionCache;
+pub use session::WebSocketCachePolicy;
 
 /// Provider name used in shared-machinery error messages and trace events.
 const PROVIDER: &str = "Codex";
@@ -81,6 +82,7 @@ pub struct CodexProvider {
     pub extra_headers: lash_llm_transport::ExtraHeaders,
     pub(crate) transport: CodexTransport,
     websocket_sessions: CodexWebsocketSessionCache,
+    websocket_cache_policy: WebSocketCachePolicy,
     responses_url: String,
     websocket_url: String,
     http_transport: Arc<dyn LlmHttpTransport>,
@@ -103,15 +105,19 @@ impl CodexProvider {
             extra_headers: Default::default(),
             transport: CodexTransport::Auto,
             websocket_sessions: CodexWebsocketSessionCache::default(),
+            websocket_cache_policy: WebSocketCachePolicy::standard(),
             responses_url: Self::CODEX_RESPONSES_URL.to_string(),
             websocket_url: Self::CODEX_RESPONSES_WS_URL.to_string(),
             http_transport: DEFAULT_HTTP_TRANSPORT.clone(),
         }
     }
 
-    /// The Codex route's reliability: shorter backoff with no jitter, a
-    /// one-minute `Retry-After` cap and a 90 s throttle-wait budget, and the
-    /// runtime's own timeouts and attempt count.
+    /// The route's standard reliability preset: retries enabled, 1 s base and
+    /// 4 s maximum backoff, zero jitter, a 60 s `Retry-After` cap, and a 90 s
+    /// courtesy wait budget. Eight courtesy calls qualify at a 1 s minimum wait.
+    /// All three timeouts and the attempt count inherit the runtime's limits;
+    /// no rate gates are installed. These historical choices have no workload
+    /// measurements.
     #[must_use]
     pub fn reliability() -> ProviderReliability {
         ProviderReliability {
@@ -123,6 +129,7 @@ impl CodexProvider {
                 jitter_ms: 0,
                 retry_after_cap_ms: Some(60_000),
                 throttle_wait_budget_ms: lash_core::provider::DEFAULT_THROTTLE_WAIT_BUDGET_MS,
+                ..lash_core::provider::ProviderRetryPolicy::standard()
             },
             ..ProviderReliability::default()
         }
@@ -130,6 +137,21 @@ impl CodexProvider {
 
     pub fn with_attachment_credential_scope(mut self, scope: impl Into<String>) -> Self {
         self.attachment_credential_scope = Some(scope.into());
+        self
+    }
+
+    /// Configure proactive token renewal before use. Existing clones retain their gate.
+    pub fn with_token_policy(mut self, policy: lash_llm_transport::TokenPolicy) -> Self {
+        self.tokens = Arc::new(self.tokens.configured(policy));
+        self.websocket_sessions = CodexWebsocketSessionCache::default();
+        self
+    }
+
+    /// Configure stream reuse, fallback and drain before use. Existing clones
+    /// retain their cache; this provider begins with an empty cache.
+    pub fn with_websocket_cache_policy(mut self, policy: WebSocketCachePolicy) -> Self {
+        self.websocket_cache_policy = policy;
+        self.websocket_sessions = CodexWebsocketSessionCache::default();
         self
     }
 

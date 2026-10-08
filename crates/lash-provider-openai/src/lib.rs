@@ -20,16 +20,17 @@ pub mod testing;
 #[cfg(test)]
 mod tests;
 
-pub use codex::CodexProvider;
+pub use codex::{CodexProvider, WebSocketCachePolicy};
 pub use common::{OPENAI_BASE_URL, OPENROUTER_BASE_URL};
 pub use config::{
     OpenAiCompat, OpenAiCompatMaxTokensField, OpenAiCompatibleProvider, OpenAiProvider,
     OpenAiReasoningDialect, OpenAiWireConfig, ProviderRoutingPrefs,
 };
 pub use driver::CompletionEndpoint;
+pub use request_work::RequestWorkPolicy;
 // The vocabulary this crate's exported signatures name (the facade-completeness
 // rule): hosts write `extra_headers` on `OpenAiWireConfig` and `CodexProvider`.
-pub use lash_llm_transport::ExtraHeaders;
+pub use lash_llm_transport::{ExtraHeaders, TokenPolicy};
 
 #[cfg(test)]
 mod attachment_capability_fixture;

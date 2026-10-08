@@ -311,6 +311,16 @@ impl fmt::Debug for HttpTransportPolicy {
 
 impl Default for HttpTransportPolicy {
     fn default() -> Self {
+        Self::standard()
+    }
+}
+
+impl HttpTransportPolicy {
+    /// Standard connections: 10 s connect deadline, 60 s TCP keepalive,
+    /// 90 s idle pooling, unlimited idle connections per host, system proxy
+    /// behavior and no additional roots. Idle pooling follows reqwest conventions;
+    /// connect and keepalive values are historical choices without measurements.
+    pub fn standard() -> Self {
         Self {
             connect_timeout: Duration::from_secs(10),
             tcp_keepalive: Duration::from_secs(60),

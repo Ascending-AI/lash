@@ -243,6 +243,7 @@ pub(crate) async fn lower(
         tokens: std::sync::Arc::clone(&provider.tokens),
         base_url: provider.base_url.clone(),
         options: provider.options.clone(),
+        request_work: provider.request_work,
         attachment_credential_scope: provider.attachment_credential_scope.clone(),
         compat: provider.compat.clone(),
         wire: provider.wire.clone(),
@@ -251,10 +252,11 @@ pub(crate) async fn lower(
     };
     let build_route = route.clone();
     let stream = req.stream_events.is_some();
-    let BuiltRequest { body, receipt } = run(needs_blocking(req), move || {
-        build_request_body(&builder, &safe, endpoint, stream, &build_route)
-    })
-    .await??;
+    let BuiltRequest { body, receipt } =
+        run(needs_blocking(req, provider.request_work), move || {
+            build_request_body(&builder, &safe, endpoint, stream, &build_route)
+        })
+        .await??;
     let codec = match endpoint {
         CompletionEndpoint::Responses => crate::attachment_delivery::RESPONSES_CODEC,
         CompletionEndpoint::ChatCompletions => crate::attachment_delivery::CHAT_CODEC,
@@ -402,7 +404,7 @@ async fn send_attempt(
         .unwrap_or(compat.stream_termination);
     let request_id = context.scope.request_id.clone();
     let wire = body.wire();
-    let blocking = crate::request_work::bytes_need_blocking(wire.len());
+    let blocking = crate::request_work::bytes_need_blocking(wire.len(), provider.request_work);
     let body_bytes = wire.as_bytes();
     let generation_disposition = body.generation();
     let fingerprint = responses_request_fingerprint(body.template());
@@ -563,7 +565,7 @@ async fn send_attempt(
             }
         };
         let mut failure = run(
-            crate::request_work::bytes_need_blocking(text.len()),
+            crate::request_work::bytes_need_blocking(text.len(), provider.request_work),
             move || {
                 let message = format!("{} with {}", endpoint.request_failed_prefix(), status);
                 let diagnostic = body_excerpt(&text);

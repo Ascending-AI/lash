@@ -1341,7 +1341,7 @@ pub mod provider {
         ProviderToken, TokenError, TokenErrorKind, TokenRequest, TokenRequestReason, TokenSource,
     };
     #[cfg(any(feature = "anthropic", feature = "google", feature = "openai"))]
-    pub use lash_llm_transport::ExtraHeaders;
+    pub use lash_llm_transport::{ExtraHeaders, TokenPolicy};
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::llm::transport::HttpFailureContext;
     /// Read the request a canonical body says, for an in-process model that
@@ -1378,8 +1378,8 @@ pub mod provider {
     pub use lash_core::provider::{
         CacheRetention, DefaultProviderFailureClassifier, LlmProfileRequestDefaults,
         ProviderCompletion, ProviderCompletionError, ProviderFailureClassifier,
-        ProviderRateLimitPermit, ProviderRateLimitPolicy, ProviderRateLimiter, ProviderReliability,
-        ProviderRetryPolicy, RouteBound, RouteBoundAboveBudget,
+        ProviderRateLimitPermit, ProviderRateLimitPolicy, ProviderRateLimiter, ProviderRateWindow,
+        ProviderReliability, ProviderRetryPolicy, RouteBound, RouteBoundAboveBudget,
     };
     pub use lash_core::{
         AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,

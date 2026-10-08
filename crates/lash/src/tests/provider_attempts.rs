@@ -557,3 +557,338 @@ async fn authentication_failure_stops_unretried_and_permits_the_next_turn() {
     );
     core.shutdown().await.expect("shutdown");
 }
+
+/// D-DEFAULTS2: facade-configured courtesy count and minimum wait reach the retry owner.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn facade_courtesy_policy_controls_short_waits_and_call_cap() {
+    for (cap, minimum, expected) in [(0, 1, 1), (1, 1, 2), (2, 1, 3), (2, 2, 1)] {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut options = reliability(1);
+        let mut retry = serde_json::to_value(&options.reliability.retry).unwrap();
+        retry["courtesy_call_limit"] = serde_json::json!(cap);
+        retry["courtesy_min_wait_ms"] = serde_json::json!(minimum);
+        options.reliability.retry = serde_json::from_value(retry).unwrap();
+        let model = crate::testing::TestProvider::builder()
+            .kind("openai-compatible")
+            .options(options)
+            .complete({
+                let calls = Arc::clone(&calls);
+                move |_| {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    async {
+                        Err(LlmTransportError::new("throttled")
+                            .with_http_status(429)
+                            .with_retry_verdict(TransportRetryVerdict::RetryableThrottle {
+                                retry_after: Some(std::time::Duration::from_millis(1)),
+                            }))
+                    }
+                }
+            })
+            .build()
+            .into_handle();
+        let core = core_over(sqlite_memory_store_backend().await, model);
+        let session = created(&core, "facade-courtesy-policy").await;
+        let _output = session
+            .send(crate::TurnInput::text("throttle"))
+            .output()
+            .await
+            .unwrap();
+        core.shutdown().await.unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), expected);
+    }
+}
+
+#[cfg(all(feature = "openai", feature = "http-transport"))]
+mod facade_settings {
+    use crate::http_transport::{HttpRequest, HttpResponse, HttpResponseBody, HttpTransport};
+    use crate::provider::{
+        LlmRequest, LlmRequestScope, LlmTransportError, NoSlotDeliveries, Provider,
+        ProviderOptions, ProviderRateWindow, ProviderReliability, ProviderToken, TokenError,
+        TokenPolicy, TokenRequest, TokenRequestReason, TokenSource,
+    };
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant, SystemTime};
+
+    // These fixtures intentionally name only facade vocabulary.
+    fn request() -> LlmRequest {
+        LlmRequest {
+            instructions: None,
+            model: crate::testing::test_llm_profile_config(
+                "facade-policy",
+                crate::testing::test_llm_profile_metadata("gpt-5.4"),
+            ),
+            messages: vec![crate::provider::LlmMessage::text(
+                crate::provider::LlmRole::User,
+                "hello policy",
+            )],
+            tools: Arc::new(Vec::new()),
+            tool_choice: crate::provider::LlmToolChoice::None,
+            attachment_acceptance: Default::default(),
+            scope: LlmRequestScope::new("facade-policy", "frame", "request"),
+            output_spec: None,
+            stream_events: None,
+            generation: crate::direct::GenerationOptions::default(),
+            provider_trace: None,
+        }
+    }
+
+    #[derive(Debug)]
+    struct ReplyTransport {
+        body: &'static str,
+        sse: bool,
+        timeouts: Arc<Mutex<Vec<Option<Duration>>>>,
+    }
+
+    #[crate::async_trait]
+    impl HttpTransport for ReplyTransport {
+        async fn send(
+            &self,
+            _: HttpRequest,
+            timeout: Option<Duration>,
+        ) -> Result<HttpResponse, LlmTransportError> {
+            self.timeouts
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .push(timeout);
+            Ok(HttpResponse {
+                status: 200,
+                headers: if self.sse {
+                    vec![("content-type".into(), "text/event-stream".into())]
+                } else {
+                    Vec::new()
+                },
+                body: HttpResponseBody::buffered(self.body.as_bytes().to_vec()),
+            })
+        }
+    }
+
+    const CHAT: &str = r#"{"choices":[{"message":{"content":"done"},"finish_reason":"stop"}]}"#;
+    const SSE: &str = "data: {\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
+
+    /// D-DEFAULTS2: adapter constructors keep a preset and execute overrides of it.
+    #[tokio::test]
+    async fn facade_reliability_and_transport_byte_budgets_reach_execution() {
+        for (sse, body_limit, event_limit, total_limit, expected) in [
+            (false, Some(1), None, None, "body"),
+            (true, None, Some(1), None, "event"),
+            (true, None, None, Some(1), "total"),
+            (false, Some(1024), None, None, "ok"),
+        ] {
+            let timeouts = Arc::new(Mutex::new(Vec::new()));
+            let mut options = ProviderOptions::standard();
+            options.reliability = ProviderReliability::standard()
+                .response_start_timeout_ms(Some(7))
+                .request_timeout_ms(Some(7));
+            options.response_body_bytes = body_limit;
+            options.sse_event_bytes = event_limit;
+            options.sse_total_bytes = total_limit;
+            let mut provider =
+                crate::openai::OpenAiCompatibleProvider::new("key", "https://provider.test")
+                    .with_options(options)
+                    .with_request_work_policy(crate::openai::RequestWorkPolicy { inline_bytes: 1 })
+                    .with_transport(Arc::new(ReplyTransport {
+                        body: if sse { SSE } else { CHAT },
+                        sse,
+                        timeouts: timeouts.clone(),
+                    }));
+            let result = provider.complete(request(), &NoSlotDeliveries).await;
+            match expected {
+                "body" => assert!(matches!(
+                    result.unwrap_err().context.as_ref(),
+                    crate::provider::HttpFailureContext::ResponseBodyTooLarge { limit: 1, .. }
+                )),
+                "event" => assert_eq!(
+                    result.unwrap_err().code.unwrap().spelling(),
+                    "sse_event_too_large"
+                ),
+                "total" => assert_eq!(
+                    result.unwrap_err().code.unwrap().spelling(),
+                    "sse_response_too_large"
+                ),
+                _ => assert_eq!(result.unwrap().full_text(), "done"),
+            }
+            assert_eq!(*timeouts.lock().unwrap(), [Some(Duration::from_millis(7))]);
+        }
+    }
+
+    #[derive(Debug)]
+    struct ExpiringSource(Arc<Mutex<Vec<TokenRequestReason>>>);
+    #[crate::async_trait]
+    impl TokenSource for ExpiringSource {
+        async fn token(&self, request: TokenRequest<'_>) -> Result<ProviderToken, TokenError> {
+            self.0
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .push(request.reason);
+            Ok(ProviderToken::new("key").expiring_at(SystemTime::now() + Duration::from_secs(300)))
+        }
+    }
+
+    /// D-DEFAULTS2: facade token skew reaches the gate that calls the host source.
+    #[tokio::test]
+    async fn facade_token_expiry_skew_controls_proactive_renewal() {
+        for (skew, expected) in [
+            (Duration::ZERO, vec![TokenRequestReason::Current]),
+            (
+                Duration::from_secs(600),
+                vec![TokenRequestReason::Current, TokenRequestReason::Expiring],
+            ),
+        ] {
+            let reasons = Arc::new(Mutex::new(Vec::new()));
+            let mut provider = crate::openai::OpenAiCompatibleProvider::with_token_source(
+                Arc::new(ExpiringSource(reasons.clone())),
+                "https://provider.test",
+            )
+            .with_token_policy(TokenPolicy { expiry_skew: skew })
+            .with_transport(Arc::new(ReplyTransport {
+                body: CHAT,
+                sse: false,
+                timeouts: Default::default(),
+            }));
+            assert_eq!(
+                provider
+                    .complete(request(), &NoSlotDeliveries)
+                    .await
+                    .unwrap()
+                    .full_text(),
+                "done"
+            );
+            assert_eq!(*reasons.lock().unwrap(), expected);
+        }
+    }
+
+    /// D-DEFAULTS2: a rate cannot invent its window, and a chosen short window is honored.
+    #[tokio::test]
+    async fn facade_rate_counts_require_windows_and_use_them() {
+        for malformed in [
+            serde_json::json!({"requests_per_window": {"count": 1}}),
+            serde_json::json!({"tokens_per_window": {"count": 1, "window_ms": 0}}),
+            serde_json::json!({"requests_per_window": {"count": 0, "window_ms": 20}}),
+        ] {
+            assert!(
+                serde_json::from_value::<crate::provider::ProviderRateLimitPolicy>(malformed)
+                    .is_err()
+            );
+        }
+        use futures_util::FutureExt as _;
+        let mut unrestricted = crate::testing::TestProvider::builder().build();
+        let template = unrestricted.lower(&request()).await.unwrap();
+        let limiter = crate::provider::ProviderRateLimiter::new();
+        for _ in 0..2 {
+            assert!(
+                limiter
+                    .admit(&unrestricted, &template)
+                    .now_or_never()
+                    .is_some()
+            );
+        }
+        for tokens in [false, true] {
+            let rate = ProviderRateWindow {
+                count: 1.try_into().unwrap(),
+                window_ms: 20.try_into().unwrap(),
+            };
+            let reliability = if tokens {
+                ProviderReliability::standard().tokens_per_window(Some(rate))
+            } else {
+                ProviderReliability::standard().requests_per_window(Some(rate))
+            };
+            let mut provider = crate::testing::TestProvider::builder()
+                .options(ProviderOptions {
+                    reliability,
+                    ..ProviderOptions::standard()
+                })
+                .build();
+            let limiter = crate::provider::ProviderRateLimiter::new();
+            let template = provider.lower(&request()).await.unwrap();
+            let start = Instant::now();
+            drop(limiter.admit(&provider, &template).await);
+            drop(
+                tokio::time::timeout(Duration::from_secs(2), limiter.admit(&provider, &template))
+                    .await
+                    .unwrap(),
+            );
+            assert!(start.elapsed() >= Duration::from_millis(20));
+        }
+    }
+
+    /// D-DEFAULTS2: disabling reuse through either cache bound opens a new stream each call.
+    #[tokio::test]
+    async fn facade_websocket_cache_policy_controls_stream_reuse() {
+        use crate::openai::codex::ws_testing::{ScriptedWsAction, spawn_scripted_websocket};
+        for (ttl, cap) in [(Duration::ZERO, 32), (Duration::from_secs(300), 0)] {
+            let server = spawn_scripted_websocket(vec![
+                ScriptedWsAction::Complete {
+                    response_id: "r1",
+                    message_id: "m1",
+                    text: "first",
+                },
+                ScriptedWsAction::Complete {
+                    response_id: "r2",
+                    message_id: "m2",
+                    text: "second",
+                },
+            ])
+            .await;
+            let mut provider =
+                crate::openai::CodexProvider::new(Arc::new(ProviderToken::new("key")))
+                    .with_endpoint_urls("https://provider.test", server.url.clone())
+                    .force_websocket_transport()
+                    .with_websocket_cache_policy(crate::openai::WebSocketCachePolicy {
+                        idle_ttl: ttl,
+                        max_entries: cap,
+                        ..crate::openai::WebSocketCachePolicy::standard()
+                    });
+            for expected in ["first", "second"] {
+                assert_eq!(
+                    provider
+                        .complete(request(), &NoSlotDeliveries)
+                        .await
+                        .unwrap()
+                        .full_text(),
+                    expected
+                );
+            }
+            assert_eq!(server.handshakes().len(), 2);
+            provider.close().await.unwrap();
+        }
+    }
+
+    /// D-DEFAULTS2: a non-default HTTP pool policy is consumed by the facade-built client.
+    #[tokio::test]
+    async fn facade_http_pool_policy_disables_idle_connections() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            // Keep both sockets alive. A client reusing the first cannot complete the second request.
+            let mut sockets = Vec::new();
+            for _ in 0..2 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = [0; 4096];
+                assert!(socket.read(&mut request).await.unwrap() > 0);
+                socket
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                    .await
+                    .unwrap();
+                sockets.push(socket);
+            }
+            sockets
+        });
+        let policy = crate::http_transport::HttpTransportPolicy {
+            pool_max_idle_per_host: 0,
+            ..crate::http_transport::HttpTransportPolicy::standard()
+        };
+        let client = crate::http_transport::http_client_builder_with(&policy)
+            .build()
+            .unwrap();
+        for _ in 0..2 {
+            let body = tokio::time::timeout(Duration::from_secs(2), async {
+                client.get(&url).send().await.unwrap().text().await.unwrap()
+            })
+            .await
+            .unwrap();
+            assert_eq!(body, "ok");
+        }
+        assert_eq!(server.await.unwrap().len(), 2);
+    }
+}

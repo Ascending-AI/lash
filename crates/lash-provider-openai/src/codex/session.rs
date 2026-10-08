@@ -27,13 +27,38 @@ use super::CodexProvider;
 use super::continuation::CodexContinuation;
 use super::shared::ResponsesStreamState;
 
-pub(super) const SESSION_WEBSOCKET_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
-const SESSION_WEBSOCKET_FALLBACK_TTL: Duration = Duration::from_secs(60);
-pub(super) const MAX_SESSION_WEBSOCKET_CACHE_ENTRIES: usize = 32;
-/// Per-socket bound on the closing handshake during shutdown drain. A half-dead
-/// peer that never returns its Close frame must not stall the remaining cached
-/// sockets, so each close is best-effort and abandoned after this elapses.
-const SESSION_WEBSOCKET_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
+/// Operational policy for reusable WebSocket streams and SSE fallback memory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WebSocketCachePolicy {
+    /// Idle sockets expire after this duration. Zero disables idle reuse.
+    pub idle_ttl: Duration,
+    /// How long Auto remembers a failed WebSocket before trying again. Zero disables memory.
+    pub fallback_ttl: Duration,
+    /// Cache entry capacity. Only idle sockets are evicted; in-flight reservations
+    /// may temporarily exceed the bound.
+    /// Zero disables idle reuse.
+    pub max_entries: usize,
+    /// Best-effort close handshake deadline per idle socket during drain.
+    pub close_timeout: Duration,
+}
+impl WebSocketCachePolicy {
+    /// Standard cache: 300 s idle TTL, 60 s fallback TTL, 32 cache entries,
+    /// and 2 s per close handshake. These historical choices have no workload
+    /// measurements; the deadline prevents a dead peer from stalling drain.
+    pub fn standard() -> Self {
+        Self {
+            idle_ttl: Duration::from_secs(300),
+            fallback_ttl: Duration::from_secs(60),
+            max_entries: 32,
+            close_timeout: Duration::from_secs(2),
+        }
+    }
+}
+impl Default for WebSocketCachePolicy {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
 
 type CodexWsStream = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 
@@ -63,7 +88,7 @@ pub(super) struct CodexWebsocketSessions {
 }
 
 pub(super) struct CodexWebsocketFallbackState {
-    until: Instant,
+    until: Option<Instant>,
     reason: String,
 }
 
@@ -192,14 +217,17 @@ impl CodexProvider {
         }
     }
 
-    pub(super) fn prune_idle_websocket_sessions(sessions: &mut CodexWebsocketSessions) {
+    pub(super) fn prune_idle_websocket_sessions(
+        sessions: &mut CodexWebsocketSessions,
+        policy: &WebSocketCachePolicy,
+    ) {
         let now = Instant::now();
         Self::prune_expired_websocket_fallbacks(sessions, now);
         // Dropping a cached WebSocketStream closes the socket. This prune path is
         // deliberately synchronous because the cache lock is provider-local.
         sessions.by_scope.retain(|_, entry| {
             entry.prunable().is_none_or(|idle| {
-                now.duration_since(idle.last_used) <= SESSION_WEBSOCKET_CACHE_TTL
+                !policy.idle_ttl.is_zero() && now.duration_since(idle.last_used) <= policy.idle_ttl
             })
         });
     }
@@ -207,14 +235,14 @@ impl CodexProvider {
     fn prune_expired_websocket_fallbacks(sessions: &mut CodexWebsocketSessions, now: Instant) {
         sessions
             .fallback_by_scope
-            .retain(|_, fallback| fallback.until > now);
+            .retain(|_, fallback| fallback.until.is_none_or(|until| until > now));
     }
 
-    pub(super) fn enforce_websocket_session_cache_cap(sessions: &mut CodexWebsocketSessions) {
-        let excess = sessions
-            .by_scope
-            .len()
-            .saturating_sub(MAX_SESSION_WEBSOCKET_CACHE_ENTRIES);
+    pub(super) fn enforce_websocket_session_cache_cap(
+        sessions: &mut CodexWebsocketSessions,
+        policy: &WebSocketCachePolicy,
+    ) {
+        let excess = sessions.by_scope.len().saturating_sub(policy.max_entries);
         if excess == 0 {
             return;
         }
@@ -275,8 +303,11 @@ impl CodexProvider {
             // and shutdown must not fail because one socket is already gone. Bound
             // each close so a half-dead peer that never returns its Close frame
             // cannot stall the drain of the sockets still queued behind it.
-            let _ =
-                tokio::time::timeout(SESSION_WEBSOCKET_CLOSE_TIMEOUT, websocket.close(None)).await;
+            let _ = tokio::time::timeout(
+                self.websocket_cache_policy.close_timeout,
+                websocket.close(None),
+            )
+            .await;
         }
     }
 
@@ -317,7 +348,7 @@ impl CodexProvider {
         sessions.fallback_by_scope.insert(
             scope_key,
             CodexWebsocketFallbackState {
-                until: now + SESSION_WEBSOCKET_FALLBACK_TTL,
+                until: now.checked_add(self.websocket_cache_policy.fallback_ttl),
                 reason,
             },
         );
@@ -463,8 +494,8 @@ impl CodexProvider {
 
         let decision = {
             let mut sessions = self.websocket_sessions.inner.lock_recover();
-            Self::prune_idle_websocket_sessions(&mut sessions);
-            Self::enforce_websocket_session_cache_cap(&mut sessions);
+            Self::prune_idle_websocket_sessions(&mut sessions, &self.websocket_cache_policy);
+            Self::enforce_websocket_session_cache_cap(&mut sessions, &self.websocket_cache_policy);
             Self::evict_websocket_sessions_for_epoch(&mut sessions, token_epoch);
             match sessions.by_scope.remove(&scope_key) {
                 Some(CodexWebsocketSessionEntry::Reserved {
@@ -574,8 +605,8 @@ impl CodexProvider {
                 token_epoch: lease.token_epoch,
             },
         );
-        Self::prune_idle_websocket_sessions(&mut sessions);
-        Self::enforce_websocket_session_cache_cap(&mut sessions);
+        Self::prune_idle_websocket_sessions(&mut sessions, &self.websocket_cache_policy);
+        Self::enforce_websocket_session_cache_cap(&mut sessions, &self.websocket_cache_policy);
     }
 }
 

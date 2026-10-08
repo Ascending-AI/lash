@@ -1,7 +1,4 @@
-use super::session::{
-    CodexWebsocketLease, CodexWebsocketSessionEntry, CodexWebsocketSessions,
-    MAX_SESSION_WEBSOCKET_CACHE_ENTRIES, SESSION_WEBSOCKET_CACHE_TTL,
-};
+use super::session::{CodexWebsocketLease, CodexWebsocketSessionEntry, CodexWebsocketSessions};
 use super::*;
 use lash_core::llm::transport::ProviderFailureKind;
 use lash_core::llm::types::{
@@ -497,6 +494,11 @@ fn codex_request_history_preserves_assistant_message_metadata() {
 #[tokio::test]
 async fn codex_websocket_scope_cache_prunes_idle_entries_and_caps_oldest() {
     let ws = spawn_scripted_websocket(Vec::new()).await;
+    let policy = super::WebSocketCachePolicy {
+        idle_ttl: Duration::from_secs(10),
+        max_entries: 2,
+        ..Default::default()
+    };
     let now = Instant::now();
     let mut sessions = CodexWebsocketSessions::default();
     let (idle_connection, _) = tokio_tungstenite::connect_async(&ws.url)
@@ -507,7 +509,7 @@ async fn codex_websocket_scope_cache_prunes_idle_entries_and_caps_oldest() {
         CodexWebsocketSessionEntry::Idle {
             connection: Box::new(idle_connection),
             continuation: None,
-            last_used: now - SESSION_WEBSOCKET_CACHE_TTL - Duration::from_secs(1),
+            last_used: now - policy.idle_ttl - Duration::from_secs(1),
             token_epoch: 0,
         },
     );
@@ -516,13 +518,13 @@ async fn codex_websocket_scope_cache_prunes_idle_entries_and_caps_oldest() {
         CodexWebsocketSessionEntry::Reserved { token_epoch: 0 },
     );
 
-    CodexProvider::prune_idle_websocket_sessions(&mut sessions);
+    CodexProvider::prune_idle_websocket_sessions(&mut sessions, &policy);
 
     assert!(!sessions.by_scope.contains_key("idle"));
     assert!(sessions.by_scope.contains_key("busy"));
 
     sessions.by_scope.clear();
-    for index in 0..(MAX_SESSION_WEBSOCKET_CACHE_ENTRIES + 3) {
+    for index in 0..(policy.max_entries + 3) {
         let (connection, _) = tokio_tungstenite::connect_async(&ws.url)
             .await
             .expect("connect capacity-test websocket");
@@ -537,14 +539,15 @@ async fn codex_websocket_scope_cache_prunes_idle_entries_and_caps_oldest() {
         );
     }
 
-    CodexProvider::enforce_websocket_session_cache_cap(&mut sessions);
+    CodexProvider::enforce_websocket_session_cache_cap(&mut sessions, &policy);
 
-    assert_eq!(sessions.by_scope.len(), MAX_SESSION_WEBSOCKET_CACHE_ENTRIES);
+    assert_eq!(sessions.by_scope.len(), policy.max_entries);
     assert!(!sessions.by_scope.contains_key("scope-0"));
-    assert!(sessions.by_scope.contains_key(&format!(
-        "scope-{}",
-        MAX_SESSION_WEBSOCKET_CACHE_ENTRIES + 2
-    )));
+    assert!(
+        sessions
+            .by_scope
+            .contains_key(&format!("scope-{}", policy.max_entries + 2))
+    );
 }
 
 #[tokio::test]

@@ -5,19 +5,6 @@ use std::hash::{BuildHasher, Hasher};
 
 pub const DEFAULT_THROTTLE_WAIT_BUDGET_MS: u64 = 90_000;
 
-/// A shorter `Retry-After` (including a past HTTP-date) consumes the ordinary retry ladder and
-/// uses its backoff instead of spinning the courtesy loop.
-/// A delay above [`retry_after_cap_ms`] fails immediately; a zero cap therefore refuses every
-/// positive server-stated delay.
-///
-/// [`retry_after_cap_ms`]: ProviderRetryPolicy::retry_after_cap_ms
-pub(crate) const MIN_FREE_THROTTLE_WAIT: Duration = Duration::from_secs(1);
-
-/// Maximum provider calls that may honor a throttle without consuming an
-/// ordinary retry attempt. Together with `max_attempts`, this bounds total
-/// provider calls independently of the server's `Retry-After` duration.
-pub(crate) const MAX_COURTESY_THROTTLE_CALLS: usize = 8;
-
 /// One attempt's transport timeouts, read from the attempt's
 /// [`ProviderReliability`]. [`ProviderHandle`](super::ProviderHandle)
 /// resolves every one against the runtime's provider attempt limits before
@@ -100,6 +87,14 @@ pub struct ProviderOptions {
 }
 
 impl ProviderOptions {
+    /// Standard reliability and transport byte guards: 8 MiB per SSE event/line,
+    /// 64 MiB total SSE bytes and 16 MiB per buffered HTTP response. The `None`
+    /// fields resolve to these guards. These historical values have no workload
+    /// measurements; each field is configurable independently.
+    pub fn standard() -> Self {
+        Self::default()
+    }
+
     /// Effective raw byte budget, clamped to the addressable size on this target.
     pub fn response_body_limit(&self) -> usize {
         usize::try_from(self.response_body_bytes.unwrap_or(16 * 1024 * 1024)).unwrap_or(usize::MAX)
@@ -443,6 +438,13 @@ fn whole_millis(duration: Duration) -> u64 {
 }
 
 impl ProviderReliability {
+    /// Standard retry policy, no rate gates, and timeouts inherited from the
+    /// host's runtime attempt limits. See [`ProviderRetryPolicy::standard`] for values
+    /// and their lack of workload measurements.
+    pub fn standard() -> Self {
+        Self::default()
+    }
+
     pub fn disabled() -> Self {
         Self {
             retry: ProviderRetryPolicy::disabled(),
@@ -580,15 +582,13 @@ impl ProviderReliability {
         self
     }
 
-    pub fn requests_per_window(mut self, requests: Option<u32>, window_ms: Option<u64>) -> Self {
-        self.rate_limits.requests_per_window = requests;
-        self.rate_limits.request_window_ms = window_ms;
+    pub fn requests_per_window(mut self, rate: Option<ProviderRateWindow>) -> Self {
+        self.rate_limits.requests_per_window = rate;
         self
     }
 
-    pub fn tokens_per_window(mut self, tokens: Option<u32>, window_ms: Option<u64>) -> Self {
-        self.rate_limits.tokens_per_window = tokens;
-        self.rate_limits.token_window_ms = window_ms;
+    pub fn tokens_per_window(mut self, rate: Option<ProviderRateWindow>) -> Self {
+        self.rate_limits.tokens_per_window = rate;
         self
     }
 }
@@ -615,9 +615,9 @@ pub struct ProviderRetryPolicy {
     /// Cumulative time [`ProviderHandle::complete`](super::ProviderHandle::complete)
     /// may spend honoring provider throttle waits — a retryable [`ProviderFailureKind::Quota`]
     /// failure carrying `Retry-After` — without consuming retry attempts.
-    /// Only waits of at least one second qualify, and each deferred wait
-    /// charges what it actually waits. No more than eight calls are deferred;
-    /// total provider calls are therefore bounded by eight plus
+    /// Waits at least `courtesy_min_wait_ms` qualify, and each deferred wait
+    /// charges what it actually waits. At most `courtesy_call_limit` calls are deferred;
+    /// total provider calls are therefore bounded by that limit plus
     /// `max_attempts`, independently of `Retry-After`. Once either bound is
     /// spent, throttled failures consume attempts like any other retryable
     /// failure. `0` disables the deference entirely.
@@ -626,6 +626,20 @@ pub struct ProviderRetryPolicy {
         skip_serializing_if = "is_default_throttle_wait_budget_ms"
     )]
     pub throttle_wait_budget_ms: u64,
+    /// Additional calls allowed outside the counted attempt ladder. Zero disables courtesy calls.
+    #[serde(default = "default_courtesy_call_limit")]
+    pub courtesy_call_limit: usize,
+    /// Minimum provider wait eligible for courtesy handling and direct Retry-After backoff.
+    /// Zero accepts even a zero wait; the courtesy call limit still bounds calls.
+    #[serde(default = "default_courtesy_min_wait_ms")]
+    pub courtesy_min_wait_ms: u64,
+}
+
+fn default_courtesy_call_limit() -> usize {
+    8
+}
+fn default_courtesy_min_wait_ms() -> u64 {
+    1_000
 }
 
 fn default_throttle_wait_budget_ms() -> u64 {
@@ -638,6 +652,16 @@ fn is_default_throttle_wait_budget_ms(budget_ms: &u64) -> bool {
 
 impl Default for ProviderRetryPolicy {
     fn default() -> Self {
+        Self::standard()
+    }
+}
+
+impl ProviderRetryPolicy {
+    /// Standard retry preset: enabled; attempts inherit the runtime; 2 s base,
+    /// 10 s maximum backoff plus up to 500 ms jitter; 60 s Retry-After cap;
+    /// 90 s courtesy wait budget, eight courtesy calls and a 1 s minimum wait.
+    /// These are historical operational choices without workload measurements.
+    pub fn standard() -> Self {
         Self {
             enabled: true,
             max_attempts: None,
@@ -646,6 +670,8 @@ impl Default for ProviderRetryPolicy {
             jitter_ms: 500,
             retry_after_cap_ms: Some(60_000),
             throttle_wait_budget_ms: DEFAULT_THROTTLE_WAIT_BUDGET_MS,
+            courtesy_call_limit: default_courtesy_call_limit(),
+            courtesy_min_wait_ms: default_courtesy_min_wait_ms(),
         }
     }
 }
@@ -660,6 +686,8 @@ impl ProviderRetryPolicy {
             jitter_ms: 0,
             retry_after_cap_ms: None,
             throttle_wait_budget_ms: 0,
+            courtesy_call_limit: 0,
+            courtesy_min_wait_ms: 0,
         }
     }
 
@@ -680,7 +708,7 @@ impl ProviderRetryPolicy {
     ) -> Option<Duration> {
         if let Some(retry_after) = retry_after {
             let retry_after = self.retry_after_within_cap(retry_after)?;
-            if retry_after >= MIN_FREE_THROTTLE_WAIT {
+            if retry_after >= Duration::from_millis(self.courtesy_min_wait_ms) {
                 return Some(retry_after);
             }
         }
@@ -723,18 +751,33 @@ impl ProviderRetryPolicy {
     }
 }
 
+/// A configured rate always states both its count and its positive window.
+/// There is no implicit one-minute window and no zero-as-disabled encoding.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderRateWindow {
+    pub count: std::num::NonZeroU32,
+    pub window_ms: std::num::NonZeroU64,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct ProviderRateLimitPolicy {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_concurrency: Option<usize>,
+    /// None disables request-rate limiting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub requests_per_window: Option<u32>,
+    pub requests_per_window: Option<ProviderRateWindow>,
+    /// None disables token-rate limiting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub request_window_ms: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tokens_per_window: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub token_window_ms: Option<u64>,
+    pub tokens_per_window: Option<ProviderRateWindow>,
+}
+
+impl ProviderRateLimitPolicy {
+    /// No concurrency, request or token gate. This neutral preset selects no rate.
+    pub fn standard() -> Self {
+        Self::default()
+    }
 }
 
 /// Per-call retry accounting; courtesy calls never consume the counted ladder.
@@ -759,8 +802,8 @@ impl RetryBudget {
             return None;
         };
         let wait = policy.retry_after_within_cap(wait)?;
-        (wait >= MIN_FREE_THROTTLE_WAIT
-            && self.courtesy_calls < MAX_COURTESY_THROTTLE_CALLS
+        (wait >= Duration::from_millis(policy.courtesy_min_wait_ms)
+            && self.courtesy_calls < policy.courtesy_call_limit
             && self.throttle_waited.saturating_add(wait)
                 <= Duration::from_millis(policy.throttle_wait_budget_ms))
         .then_some(wait)

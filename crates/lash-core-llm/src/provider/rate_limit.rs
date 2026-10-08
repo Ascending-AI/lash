@@ -160,16 +160,10 @@ impl ProviderRateLimiter {
                     &state.request_bucket,
                     now,
                     policy.requests_per_window,
-                    policy.request_window_ms,
                     requests,
                 );
-                let token_decision = bucket_decision(
-                    &state.token_bucket,
-                    now,
-                    policy.tokens_per_window,
-                    policy.token_window_ms,
-                    tokens,
-                );
+                let token_decision =
+                    bucket_decision(&state.token_bucket, now, policy.tokens_per_window, tokens);
                 let waits = (request_decision.wait, token_decision.wait);
                 let admitted = waits == (None, None);
                 state.request_bucket = request_decision.commit(admitted);
@@ -209,8 +203,7 @@ impl BucketDecision {
 fn bucket_decision(
     bucket: &WindowBucket,
     now: std::time::Instant,
-    limit: Option<u32>,
-    window_ms: Option<u64>,
+    rate: Option<super::ProviderRateWindow>,
     cost: u32,
 ) -> BucketDecision {
     let mut decision = BucketDecision {
@@ -218,10 +211,11 @@ fn bucket_decision(
         debit: 0,
         wait: None,
     };
-    let Some(limit) = limit.filter(|limit| *limit > 0) else {
+    let Some(rate) = rate else {
         return decision;
     };
-    let window = Duration::from_millis(window_ms.unwrap_or(60_000).max(1));
+    let limit = rate.count.get();
+    let window = Duration::from_millis(rate.window_ms.get());
     if now >= decision.refreshed.reset_at {
         decision.refreshed.used = 0;
         decision.refreshed.reset_at = now + window;
@@ -238,29 +232,22 @@ fn bucket_decision(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn disabled_and_zero_limits_admit_without_consuming_a_bucket() {
-        let now = std::time::Instant::now();
-        for limit in [None, Some(0)] {
-            let bucket = WindowBucket::new(now);
-            let decision = bucket_decision(&bucket, now, limit, Some(10), 1);
-            assert_eq!(decision.wait, None);
-            let committed = decision.commit(true);
-            assert_eq!(committed.used, 0);
-            assert_eq!(committed.reset_at, now);
-        }
+    fn rate(count: u32, window_ms: u64) -> Option<super::super::ProviderRateWindow> {
+        Some(super::super::ProviderRateWindow {
+            count: std::num::NonZeroU32::new(count).expect("test rate count is nonzero"),
+            window_ms: std::num::NonZeroU64::new(window_ms).expect("test rate window is nonzero"),
+        })
     }
 
     #[test]
     fn an_oversized_single_cost_consumes_one_full_window_without_deadlock() {
         let now = std::time::Instant::now();
         let bucket = WindowBucket::new(now);
-        let decision = bucket_decision(&bucket, now, Some(3), Some(20), 99);
+        let decision = bucket_decision(&bucket, now, rate(3, 20), 99);
         assert_eq!(decision.wait, None);
         let bucket = decision.commit(true);
         assert_eq!(bucket.used, 3);
-        let decision = bucket_decision(&bucket, now, Some(3), Some(20), 1);
+        let decision = bucket_decision(&bucket, now, rate(3, 20), 1);
         assert_eq!(decision.wait, Some(Duration::from_millis(20)));
     }
 }
@@ -268,6 +255,12 @@ mod tests {
 #[cfg(test)]
 mod admission_tests {
     use super::*;
+    fn rate(count: u32, window_ms: u64) -> Option<super::super::ProviderRateWindow> {
+        Some(super::super::ProviderRateWindow {
+            count: std::num::NonZeroU32::new(count).expect("test rate count is nonzero"),
+            window_ms: std::num::NonZeroU64::new(window_ms).expect("test rate window is nonzero"),
+        })
+    }
     use crate::Clock;
     use crate::ClockWallTime as _;
     use futures_util::FutureExt as _;
@@ -361,10 +354,8 @@ mod admission_tests {
         let clock = Arc::new(ManualClock::new());
         let mut components = components(false).with_clock(clock.clone());
         let policy = ProviderRateLimitPolicy {
-            requests_per_window: Some(2),
-            request_window_ms: Some(if tokens_block { 100 } else { 300 }),
-            tokens_per_window: Some(2),
-            token_window_ms: Some(if tokens_block { 300 } else { 100 }),
+            requests_per_window: rate(2, if tokens_block { 100 } else { 300 }),
+            tokens_per_window: rate(2, if tokens_block { 300 } else { 100 }),
             max_concurrency: Some(1),
         };
         let mut options = components.provider.options();
@@ -467,10 +458,8 @@ mod admission_tests {
         let mut components = components(false).with_clock(clock.clone());
         let mut options = components.provider.options();
         options.reliability.rate_limits = ProviderRateLimitPolicy {
-            requests_per_window: Some(3),
-            request_window_ms: Some(100),
-            tokens_per_window: Some(1),
-            token_window_ms: Some(300),
+            requests_per_window: rate(3, 100),
+            tokens_per_window: rate(1, 300),
             max_concurrency: None,
         };
         components.provider.set_options(options);
@@ -536,7 +525,7 @@ mod admission_tests {
             _body: &lash_sansio::llm::types::LiveRequestBody,
             _context: lash_sansio::llm::types::ResponseContext,
         ) -> Result<LlmResponse, LlmTransportError> {
-            self.0.reliability.rate_limits.requests_per_window = Some(1);
+            self.0.reliability.rate_limits.requests_per_window = rate(1, 1000);
             if std::mem::take(&mut self.1) {
                 return Err(LlmTransportError::new("retry after option mutation")
                     .with_retry_verdict(TransportRetryVerdict::RetryableTransient));
@@ -559,8 +548,7 @@ mod admission_tests {
                     ..Default::default()
                 },
                 rate_limits: ProviderRateLimitPolicy {
-                    requests_per_window: Some(2),
-                    request_window_ms: Some(1000),
+                    requests_per_window: rate(2, 1000),
                     max_concurrency: Some(1),
                     ..Default::default()
                 },
@@ -588,7 +576,7 @@ mod admission_tests {
         assert_eq!(completion.call_record.attempts.len(), 2);
         assert_eq!(
             handle.options().reliability.rate_limits.requests_per_window,
-            Some(1)
+            rate(1, 1000)
         );
         assert_eq!(
             clock.timestamp_ms(),

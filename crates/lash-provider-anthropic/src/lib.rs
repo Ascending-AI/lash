@@ -1341,3 +1341,6 @@ mod tests {
 mod attachment_capability_fixture;
 #[cfg(test)]
 pub(crate) use attachment_capability_fixture::attachment_test_acceptance;
+
+// Vocabulary named by provider configuration.
+pub use lash_llm_transport::TokenPolicy;

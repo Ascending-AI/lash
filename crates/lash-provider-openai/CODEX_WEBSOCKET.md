@@ -1,7 +1,7 @@
 # Codex WebSocket Notes
 
 The Codex provider owns a provider-local WebSocket session cache. The cache is
-bounded by `MAX_SESSION_WEBSOCKET_CACHE_ENTRIES` and pruned by idle TTL; the idle
+bounded by `WebSocketCachePolicy::max_entries` and pruned by idle TTL; the idle
 prune closes sockets by dropping the stream (a TCP-level close).
 
 ## Shutdown Hook

@@ -30,5 +30,5 @@ pub use passthrough::{
 };
 pub use response_metadata::ResponseMetadataCapture;
 pub use timeouts::{build_http_client, header_pairs, response_start_timeout, run_with_timeout};
-pub use token_gate::{TOKEN_EXPIRY_SKEW, TokenGate, TokenLease, rejected_before_output};
+pub use token_gate::{TokenGate, TokenLease, TokenPolicy, rejected_before_output};
 pub use util::{emit_provider_request_trace, emit_provider_trace, extract_error_detail, parse_i64};

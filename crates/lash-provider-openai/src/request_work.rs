@@ -4,9 +4,28 @@ use std::io::{self, Write};
 
 mod raw_budget;
 
-// 64 KiB of source JSON (or resolved bytes) is enough to warrant a blocking task.
-// The bounded sizing pass stops at this limit; small requests avoid the scheduling hop.
-const BLOCKING_THRESHOLD: usize = 64 * 1024;
+/// Scheduling policy for OpenAI-compatible request construction and decoding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RequestWorkPolicy {
+    /// Source/encoded bytes prepared inline before offloading to the blocking pool.
+    /// Zero offloads all nonempty work. This is a scheduling threshold, not a refusal limit.
+    pub inline_bytes: usize,
+}
+impl RequestWorkPolicy {
+    /// Prepare at most 64 KiB inline. This historical scheduling threshold has
+    /// no workload measurement; small work avoids a blocking-task hop.
+    pub fn standard() -> Self {
+        Self {
+            inline_bytes: 64 * 1024,
+        }
+    }
+}
+impl Default for RequestWorkPolicy {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+
 const EXCERPT_BYTES: usize = 4096;
 
 pub(crate) fn attachment_data_url(media_type: &str, bytes: &[u8]) -> String {
@@ -44,17 +63,20 @@ impl Write for SizeProbe {
     }
 }
 
-pub(crate) fn needs_blocking(request: &crate::support::LlmRequest) -> bool {
+pub(crate) fn needs_blocking(
+    request: &crate::support::LlmRequest,
+    policy: RequestWorkPolicy,
+) -> bool {
     // The traversal charges every node and stops at the same budget, including for many empty
     // fields or large byte sequences.
-    if !raw_budget::RawBudget::fits(request, BLOCKING_THRESHOLD) {
+    if !raw_budget::RawBudget::fits(request, policy.inline_bytes) {
         return true;
     }
     // Only bounded, small raw fields reach the escaping JSON writer. Keep
     // its aggregate check for punctuation and escape expansion.
     serde_json::to_writer(
         &mut SizeProbe {
-            remaining: BLOCKING_THRESHOLD,
+            remaining: policy.inline_bytes,
         },
         request,
     )
@@ -174,8 +196,8 @@ pub(crate) fn error_metadata(value: &serde_json::Value) -> Option<String> {
     Some(metadata.to_string())
 }
 
-pub(crate) fn bytes_need_blocking(len: usize) -> bool {
-    len > BLOCKING_THRESHOLD
+pub(crate) fn bytes_need_blocking(len: usize, policy: RequestWorkPolicy) -> bool {
+    len > policy.inline_bytes
 }
 
 #[cfg(test)]
@@ -195,7 +217,7 @@ mod tests {
             assert_eq!(url, format!("data:image/png;base64,{expected}"));
             assert_eq!(url.capacity(), url.len());
         }
-        let bytes = vec![255; BLOCKING_THRESHOLD * 2];
+        let bytes = vec![255; RequestWorkPolicy::standard().inline_bytes * 2];
         let url = attachment_data_url("application/pdf", &bytes);
         assert_eq!(url.capacity(), url.len());
         assert_eq!(
@@ -226,11 +248,21 @@ mod tests {
     async fn large_work_leaves_the_async_worker_and_small_work_stays_inline() {
         let worker = std::thread::current().id();
         assert_eq!(
-            run(false, || std::thread::current().id()).await.unwrap(),
+            run(
+                bytes_need_blocking(4, RequestWorkPolicy { inline_bytes: 8 }),
+                || std::thread::current().id()
+            )
+            .await
+            .unwrap(),
             worker
         );
         assert_ne!(
-            run(true, || std::thread::current().id()).await.unwrap(),
+            run(
+                bytes_need_blocking(4, RequestWorkPolicy { inline_bytes: 1 }),
+                || std::thread::current().id()
+            )
+            .await
+            .unwrap(),
             worker
         );
     }
