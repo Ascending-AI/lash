@@ -14,6 +14,7 @@ use tokio::sync::Notify;
 
 mod arrival;
 mod pins;
+mod replay_lag;
 
 /// The text the scripted provider holds its answer on until released.
 const HELD: &str = "held until released";

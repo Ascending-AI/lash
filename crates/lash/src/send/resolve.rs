@@ -25,8 +25,14 @@ pub(super) enum Resolution {
     /// No record of the input exists: it was never accepted, or its
     /// withdrawal was reclaimed.
     NotAccepted,
-    /// The run's final physical turn committed with `outcome`.
-    Settled { run: TurnId, outcome: TurnOutcome },
+    /// The run's final physical turn committed with `outcome`. `head` is
+    /// the session head that commit made; `None` when the run ended without
+    /// moving the head (a cancel honoured before the turn committed).
+    Settled {
+        run: TurnId,
+        outcome: TurnOutcome,
+        head: Option<lash_core::SessionRevision>,
+    },
     OperationSettled {
         run: TurnId,
         outcome: Box<lash_core::runtime::PluginOperationCommandOutcome>,
@@ -125,17 +131,18 @@ async fn unbound_input(parts: &SendParts, input: &InputId) -> Result<Resolution>
 /// the outcome that commit wrote. A run whose execution
 /// ended with a typed refusal is refused. Any other run is undecided.
 pub(super) async fn resolve_run(parts: &SendParts, run: &TurnId) -> Result<Resolution> {
-    let cause = parts
-        .store
-        .run_terminal(run)
-        .await
-        .map_err(store_error)?
-        .map(|terminal| terminal.cause);
+    let terminal = parts.store.run_terminal(run).await.map_err(store_error)?;
+    let head = terminal
+        .as_ref()
+        .and_then(|terminal| terminal.head_revision)
+        .map(lash_core::SessionRevision::new);
+    let cause = terminal.map(|terminal| terminal.cause);
     match &cause {
         Some(RunTerminalCause::Committed { outcome, .. }) => {
             return Ok(Resolution::Settled {
                 run: run.clone(),
                 outcome: TurnOutcome::from(outcome.clone()),
+                head,
             });
         }
         // A cancel the session actor honoured before the turn committed: the
@@ -146,6 +153,7 @@ pub(super) async fn resolve_run(parts: &SendParts, run: &TurnId) -> Result<Resol
                 outcome: TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled {
                     evidence: evidence.clone(),
                 }),
+                head: None,
             });
         }
         _ => {}
@@ -218,6 +226,7 @@ pub(super) async fn resolve_run(parts: &SendParts, run: &TurnId) -> Result<Resol
             return Ok(Resolution::Settled {
                 run: run.clone(),
                 outcome: TurnOutcome::from(outcome),
+                head,
             });
         }
         Some(RunTerminalCause::Cancelled { evidence }) => {
@@ -226,6 +235,7 @@ pub(super) async fn resolve_run(parts: &SendParts, run: &TurnId) -> Result<Resol
                 outcome: TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled {
                     evidence,
                 }),
+                head: None,
             });
         }
         // The structured cause is the refusal's type: a session-retirement

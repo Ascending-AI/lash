@@ -113,6 +113,23 @@ impl Mirror {
         self.incarnation.cursor(session_id, revision, position)
     }
 
+    /// The cursor before everything `session_id`'s generation still
+    /// retains, as far as this replica has learned: a read that gapped
+    /// taught it the generation and the window (`observed`).
+    pub(super) fn earliest_cursor(
+        &self,
+        session_id: &SessionId,
+        revision: SessionRevision,
+    ) -> SessionCursor {
+        let position = self
+            .sessions
+            .get(session_id)
+            .map_or(self.incarnation.watermark, |session| {
+                session.first_retained.max(session.floor + 1) - 1
+            });
+        self.incarnation.cursor(session_id, revision, position)
+    }
+
     /// Adopt `incarnation`, forgetting every session when it is new.
     pub(super) fn adopt(&mut self, incarnation: Incarnation) {
         if incarnation.id != self.incarnation.id {
@@ -260,6 +277,36 @@ mod tests {
             .parse_for_session(&SessionId::from(session))
             .expect("a mirror cursor parses")
             .live_position
+    }
+
+    /// An observer whose cursor gapped resumes before everything its
+    /// session's generation still retains (FIG-5486): past the generation
+    /// boundary of an invalidated stream, however much was published since,
+    /// and at the window's start once it trimmed.
+    #[test]
+    fn the_earliest_cursor_sits_before_everything_the_generation_retains() {
+        let earliest = |mirror: &Mirror| {
+            mirror
+                .earliest_cursor(&SessionId::from("s"), SessionRevision::new(1))
+                .parse_for_session(&SessionId::from("s"))
+                .expect("a mirror cursor parses")
+                .live_position
+        };
+        let mut mirror = mirror();
+        assert_eq!(earliest(&mirror), 7, "an unknown session: the watermark");
+        mirror.ring(&published("s", 0, 1, 5, 1));
+        mirror.ring(&Doorbell::Invalidated {
+            session: "s".into(),
+            floor: 10,
+        });
+        mirror.ring(&published("s", 10, 11, 14, 1));
+        assert_eq!(position(&mirror, "s", 1), 14);
+        assert_eq!(earliest(&mirror), 10);
+        mirror.ring(&Doorbell::Trimmed {
+            session: "s".into(),
+            first_retained: 13,
+        });
+        assert_eq!(earliest(&mirror), 12);
     }
 
     /// P12 against partial knowledge: a cursor sits before the first

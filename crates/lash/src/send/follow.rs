@@ -10,6 +10,12 @@
 //! never answers from events or from the wait: a follower whose replay window
 //! is gone still answers from the store, and so does one whose engine cannot
 //! answer the wait (FIG-4345).
+//!
+//! A run's commit is durable before its last activity is published: the
+//! node that made it publishes what the turn queued, then the commit's
+//! `Committed` observation. A follower that watched the run and reads it
+//! settled first lets its replay reach that committed head, within
+//! [`SETTLE_GRACE`], before it answers (FIG-5486).
 
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -39,6 +45,11 @@ const POLL_FLOOR: Duration = Duration::from_millis(25);
 const POLL_CEILING: Duration = Duration::from_secs(1);
 /// Unadopted activities a follower buffers before dropping the oldest.
 const BUFFER_CAPACITY: usize = 4096;
+/// How long a follower that watched its run lets the replay reach the
+/// run's committed head once the store shows it settled. A replay that does
+/// not (the committing node died before it published, or its publication
+/// was refused) is reported as a gap.
+const SETTLE_GRACE: Duration = Duration::from_secs(5);
 
 /// A terminal wait in flight.
 type AwaitedTerminal =
@@ -100,6 +111,10 @@ struct Adoption {
     run: Option<TurnId>,
     buffered: VecDeque<(TurnId, TurnActivity)>,
     collected: Vec<TurnActivity>,
+    /// The newest session head whose `Committed` observation this follower
+    /// read: the node that made a commit publishes it after everything the
+    /// turn queued.
+    committed: Option<SessionRevision>,
 }
 
 impl Adoption {
@@ -112,7 +127,14 @@ impl Adoption {
             subject: subject.clone(),
             buffered: VecDeque::new(),
             collected: Vec::new(),
+            committed: None,
         }
+    }
+
+    /// Whether the replay this follower read holds the commit that made
+    /// session head `head`, and so everything published before it.
+    fn reached(&self, head: SessionRevision) -> bool {
+        self.committed.is_some_and(|committed| committed >= head)
     }
 
     fn adopts(&self, turn: &TurnId) -> bool {
@@ -163,8 +185,11 @@ impl Adoption {
                 }
                 applied
             }
-            SessionObservationEventPayload::Committed { .. }
-            | SessionObservationEventPayload::QueueChanged { .. } => true,
+            SessionObservationEventPayload::Committed { .. } => {
+                self.committed = self.committed.max(Some(event.revision()));
+                true
+            }
+            SessionObservationEventPayload::QueueChanged { .. } => true,
             _ => false,
         }
     }
@@ -333,8 +358,9 @@ pub(super) enum Followed {
 
 /// A follower's live replay: its subscription, the cursor it last read, and
 /// the gaps it met in this follow. A gap is reported, then the follower
-/// resubscribes at the replay's current head, so a gap is bounded to what the
-/// replay lost.
+/// resubscribes before everything the replay still retains, so a gap is
+/// bounded to what the replay lost: what a restarted stream published before
+/// the follower resubscribed is delivered, not skipped (FIG-5486).
 struct Observation {
     replay: Replay,
     last_cursor: SessionCursor,
@@ -352,9 +378,10 @@ impl Observation {
         observation
     }
 
-    /// Subscribe after `last_cursor`, or past a gap at the replay's head: a
-    /// trimmed window, or a cursor this process's replay cannot place (one
-    /// taken in another process, before a restart).
+    /// Subscribe after `last_cursor`, or past a gap from the start of what
+    /// the replay retains: a trimmed window, a restarted stream, or a cursor
+    /// this process's replay cannot place (one taken in another process,
+    /// before a restart).
     async fn resubscribe(&mut self, ctx: &SendContext, tap: &mut Tap<'_>) {
         let store = &ctx.parts.live_replay_store;
         let reason = match store.subscribe_after_cursor(&self.last_cursor).await {
@@ -373,7 +400,7 @@ impl Observation {
             }
         };
         let gap = replay_gap(ctx, &self.last_cursor, reason);
-        self.last_cursor = gap.latest_cursor.clone();
+        self.last_cursor = store.earliest_cursor(&ctx.parts.session_id, gap.latest_revision);
         self.report(gap, tap).await;
         self.replay = match store.subscribe_after_cursor(&self.last_cursor).await {
             Ok(LiveReplaySubscribeOutcome::Subscribed(subscription)) => Replay::Live(subscription),
@@ -386,12 +413,10 @@ impl Observation {
         self.gaps.push(gap);
     }
 
-    /// The subscription ended under the follower: report the loss, then
-    /// resubscribe at the replay's head.
+    /// The subscription ended under the follower: resubscribe from its
+    /// cursor. A follower that only lagged loses nothing; one whose cursor
+    /// the replay no longer holds reports the gap.
     async fn lost(&mut self, ctx: &SendContext, tap: &mut Tap<'_>) {
-        let gap = replay_gap(ctx, &self.last_cursor, LiveReplayGapReason::Unavailable);
-        self.last_cursor = gap.latest_cursor.clone();
-        self.report(gap, tap).await;
         self.replay = Replay::Ended;
         self.resubscribe(ctx, tap).await;
     }
@@ -449,8 +474,11 @@ pub(super) async fn follow(
                         },
                     )));
                 }
-                Resolution::Settled { run, outcome } => {
+                Resolution::Settled { run, outcome, head } => {
                     adoption.adopt(run.clone(), tap).await;
+                    if let Some(head) = head {
+                        reach_head(ctx, &mut adoption, &mut observation, head, tap).await;
+                    }
                     drain(ctx, &mut adoption, &mut observation, tap).await;
                     ctx.refresh().await?;
                     let observed = observed_before || !adoption.collected.is_empty();
@@ -621,6 +649,48 @@ async fn next_event(
             })
         }),
         Replay::Ended => std::future::pending().await,
+    }
+}
+
+/// Read the replay of a run the store shows settled until it holds the
+/// commit that made session head `head`: the committing node publishes that
+/// after the turn's last activity, so a follower that answered at the store
+/// read alone would drop whatever was still on its way. Only a follower that
+/// watched the run waits: one that saw none of it has no replay to complete
+/// and answers its gap at once. A replay that gaps, ends or stays short of
+/// the head for [`SETTLE_GRACE`] is reported as a gap.
+async fn reach_head(
+    ctx: &SendContext,
+    adoption: &mut Adoption,
+    observation: &mut Observation,
+    head: SessionRevision,
+    tap: &mut Tap<'_>,
+) {
+    if adoption.collected.is_empty() {
+        return;
+    }
+    let deadline = tokio::time::Instant::now() + SETTLE_GRACE;
+    let gaps = observation.gaps.len();
+    while !adoption.reached(head) && observation.gaps.len() == gaps {
+        if matches!(observation.replay, Replay::Ended) {
+            return;
+        }
+        match tokio::time::timeout_at(deadline, next_event(&mut observation.replay)).await {
+            Ok(Some(Ok(event))) => {
+                observation.last_cursor = event.cursor.clone();
+                let _ = adoption.observe(&event, tap).await;
+            }
+            Ok(Some(Err(_))) => observation.lost(ctx, tap).await,
+            Ok(None) => observation.replay = Replay::Ended,
+            Err(_) => {
+                let gap = replay_gap(
+                    ctx,
+                    &observation.last_cursor,
+                    LiveReplayGapReason::Unavailable,
+                );
+                observation.report(gap, tap).await;
+            }
+        }
     }
 }
 
