@@ -2,7 +2,7 @@
 //! laws every dialect keeps (`lash_durable::laws::node_wakes`), each node on
 //! store handles of its own over the one file; and the laws only separate OS
 //! processes can show, run by this test binary re-executing itself as a
-//! node: a wake crosses processes in about a poll, a killed process's lock
+//! node: a wake crosses processes, a killed process's lock
 //! is released at once, processes writing one file at once lose and double
 //! no work, and a sweep pass's liveness lock is seen from every process.
 
@@ -13,13 +13,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use lash_core_execution::StoreSet as _;
 use lash_durable::laws::node_wakes::{NodeWakeTier, serve_node};
 use lash_durable::runner::{Activation, Exit, Owned, Runner, RunnerConfig};
 use lash_durable::{
-    CommitLabel, DurableSettings, DurableStore, FormatSet, LeaseSettings, MailKind, MailTx, NodeId,
+    BootLiveness, CommitLabel, DurableError, DurableSettings, DurableStore, FormatSet,
+    LeaseSettings, MailKind, MailTx, NodeId, NodeLease, NodeWakeEvent, NodeWakeFeed, NodeWakes,
+    Owner, Reaped, WakeBatch,
 };
 use tokio::io::AsyncBufReadExt as _;
 use tokio::sync::mpsc;
@@ -104,12 +106,11 @@ fn actor(name: &str) -> ActorKey {
     ActorKey::session(name).expect("a law's actor key")
 }
 
-fn wall_micros() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("the clock is past the epoch")
-        .as_micros()
-}
+/// The cross-process law never advances store time: a lease cannot expire,
+/// so takeover must use the released liveness lock.
+const STORE_TIME: u64 = 1_700_000_000_000;
+/// A hang guard, never an assertion about latency.
+const WATCHDOG: Duration = Duration::from_secs(60);
 
 fn report(line: &str) {
     println!("{REPORT}{line}");
@@ -174,8 +175,7 @@ impl Child {
     }
 }
 
-/// Holds every actor it claims hot and reports each mail it acknowledged,
-/// with the wall-clock instant it read it.
+/// Holds every actor it claims hot and reports each mail it acknowledged.
 struct Report;
 
 #[async_trait::async_trait]
@@ -187,14 +187,13 @@ impl Activation for Report {
                 return Exit::Released;
             };
             if !tx.mail().is_empty() {
-                let read = wall_micros();
                 let seqs: Vec<i64> = tx.mail().iter().map(|mail| mail.seq.0).collect();
                 tx.ack_seen();
                 if owned.commit(tx, CommitLabel::new("law.ack")).await.is_err() {
                     return Exit::Released;
                 }
                 for seq in seqs {
-                    report(&format!("acked {} {seq} {read}", owned.actor()));
+                    report(&format!("acked {} {seq}", owned.actor()));
                 }
             }
             owned.wait_for_mail().await;
@@ -231,12 +230,105 @@ fn swept() -> lash_core_execution::AttachmentId {
     lash_core_execution::AttachmentId::parse("swept-elsewhere").expect("an attachment id")
 }
 
+/// Facts observed at the production runner's node-wake boundary.
+#[derive(Debug)]
+enum WakeEvidence {
+    Watched(Vec<BootLiveness>),
+    Woke(Vec<ActorKey>),
+    Reaped(Vec<Reaped>),
+}
+
+/// Forwards every operation unchanged and records what the runner actually
+/// observed, rather than guessing its progress from elapsed wall time.
+struct ObservedWakes {
+    inner: Arc<dyn NodeWakes>,
+    evidence: mpsc::UnboundedSender<WakeEvidence>,
+}
+
+struct ObservedFeed {
+    inner: Box<dyn NodeWakeFeed>,
+    evidence: mpsc::UnboundedSender<WakeEvidence>,
+}
+
+#[async_trait::async_trait]
+impl NodeWakeFeed for ObservedFeed {
+    async fn next(&mut self) -> NodeWakeEvent {
+        let event = self.inner.next().await;
+        if let NodeWakeEvent::Owned(actors) = &event {
+            let _ = self.evidence.send(WakeEvidence::Woke(actors.clone()));
+        }
+        event
+    }
+
+    fn session(&self) -> u64 {
+        self.inner.session()
+    }
+}
+
+#[async_trait::async_trait]
+impl NodeWakes for ObservedWakes {
+    async fn publish(&self, batch: &WakeBatch) -> Result<(), DurableError> {
+        self.inner.publish(batch).await
+    }
+
+    async fn listen(&self, lease: &NodeLease) -> Result<Box<dyn NodeWakeFeed>, DurableError> {
+        Ok(Box::new(ObservedFeed {
+            inner: self.inner.listen(lease).await?,
+            evidence: self.evidence.clone(),
+        }))
+    }
+
+    async fn liveness(&self) -> Result<Vec<BootLiveness>, DurableError> {
+        let boots = self.inner.liveness().await?;
+        let _ = self.evidence.send(WakeEvidence::Watched(boots.clone()));
+        Ok(boots)
+    }
+
+    async fn reap_released(
+        &self,
+        reaper: &NodeLease,
+        boot: &Owner,
+    ) -> Result<Vec<Reaped>, DurableError> {
+        let reaped = self.inner.reap_released(reaper, boot).await?;
+        if !reaped.is_empty() {
+            let _ = self.evidence.send(WakeEvidence::Reaped(reaped.clone()));
+        }
+        Ok(reaped)
+    }
+}
+
+async fn evidence_until(
+    evidence: &mut mpsc::UnboundedReceiver<WakeEvidence>,
+    reached: impl Fn(&WakeEvidence) -> bool,
+) -> WakeEvidence {
+    tokio::time::timeout(WATCHDOG, async {
+        loop {
+            let event = evidence
+                .recv()
+                .await
+                .expect("the runner keeps its evidence channel open");
+            if reached(&event) {
+                return event;
+            }
+        }
+    })
+    .await
+    .expect("hang guard: the runner never produced the required node-wake evidence")
+}
+
 /// Serve child node `role` over `database` until killed; the `sweeper`
 /// instead holds a sweep pass that condemned one attachment.
 async fn run_child(role: &str, database: &Path) {
-    let stores = SqliteStoreSet::open(database)
+    let stores = if role == "hot" {
+        SqliteStoreSet::open_with_clock(
+            database,
+            Arc::new(lash_core::testing::TestClock::new(STORE_TIME)),
+        )
         .await
-        .expect("the child opens the database file");
+    } else {
+        SqliteStoreSet::open(database).await
+    }
+    .expect("the child opens the database file");
     if role == "sweeper" {
         let store = stores.session_store_factory();
         let pass = store
@@ -250,9 +342,27 @@ async fn run_child(role: &str, database: &Path) {
         report("condemned");
         std::future::pending::<()>().await;
     }
-    let node_wakes = stores.node_wakes();
+    let node_wakes = if role == "hot" {
+        let (send, mut evidence) = mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            while let Some(event) = evidence.recv().await {
+                if let WakeEvidence::Woke(actors) = event {
+                    for actor in actors {
+                        report(&format!("woke {actor}"));
+                    }
+                }
+            }
+        });
+        let observed: Arc<dyn NodeWakes> = Arc::new(ObservedWakes {
+            inner: stores.node_wakes().expect("file node wakes"),
+            evidence: send,
+        });
+        Some(observed)
+    } else {
+        stores.node_wakes()
+    };
     let (activation, settings): (Arc<dyn Activation>, DurableSettings) = match role {
-        // A slow mail poll: mail that reaches it sooner came by its hint.
+        // Wake delivery is observed explicitly, independently of the mail poll.
         "hot" => (
             Arc::new(Report),
             DurableSettings {
@@ -287,33 +397,29 @@ async fn run_child(role: &str, database: &Path) {
     report(&format!("stopped {stopped:?}"));
 }
 
-/// The child's CPU time so far, from `/proc`, on Linux.
-fn cpu_time(pid: u32) -> Option<Duration> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    let fields: Vec<&str> = stat.rsplit_once(')')?.1.split_whitespace().collect();
-    let ticks: u64 = fields.get(11)?.parse::<u64>().ok()? + fields.get(12)?.parse::<u64>().ok()?;
-    // The kernel's USER_HZ is 100 on every Linux lash runs on.
-    Some(Duration::from_millis(ticks * 10))
-}
+const CROSS_PROCESS: &str = "durable::node_wakes::tests::a_wake_crosses_processes_and_a_killed_process_is_reaped_by_its_lock";
 
-const CROSS_PROCESS: &str = "durable::node_wakes::tests::a_wake_crosses_processes_in_about_a_poll_and_a_killed_process_is_reaped_by_its_lock";
-
-/// Two processes serve one database file as two nodes. Mail the parent's
-/// node writes to an actor hot on the child's node reaches it through the
-/// wake row in about one listener poll, far inside the child's ten-second
-/// mail poll; an idle child costs little CPU; and when the child is killed
-/// with SIGKILL the kernel drops its liveness lock, so the parent's node
-/// reaps it and takes its actor over in a small fraction of the
-/// fifteen-second lease.
+/// Two processes serve one database file. Each mail produces an Owned wake
+/// on the child's listener and is acknowledged by its actor. After the
+/// survivor has observed the child's held lock, SIGKILL releases it and the
+/// runner reaps that exact boot through reap_released, then claims its actor
+/// at a later epoch. Store time is fixed in both processes: lease expiry
+/// cannot satisfy the takeover. Timeouts only guard hangs.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_wake_crosses_processes_in_about_a_poll_and_a_killed_process_is_reaped_by_its_lock() {
+async fn a_wake_crosses_processes_and_a_killed_process_is_reaped_by_its_lock() {
     if let Some((role, database)) = child_role() {
         return run_child(&role, &database).await;
     }
     const WAKES: usize = 20;
-    let tier = SqliteTier::open().await;
-    let database = tier._dir.path().join("lash.db");
-    let store = tier.stores.durable_store();
+    let dir = tempfile::tempdir().expect("a database directory");
+    let database = dir.path().join("lash.db");
+    let stores = SqliteStoreSet::open_with_clock(
+        &database,
+        Arc::new(lash_core::testing::TestClock::new(STORE_TIME)),
+    )
+    .await
+    .expect("open the database file on frozen store time");
+    let store = stores.durable_store();
     let hot = actor("hot");
     let mut tx = MailTx::new();
     tx.create_actor(hot.clone(), formats());
@@ -322,100 +428,87 @@ async fn a_wake_crosses_processes_in_about_a_poll_and_a_killed_process_is_reaped
         .await
         .expect("create the actor");
     let mut child = Child::start(CROSS_PROCESS, "hot", &database);
-    assert_eq!(child.next(Duration::from_secs(30)).await, "serving");
-    assert_eq!(
-        child.next(Duration::from_secs(10)).await,
-        format!("owns {hot}")
-    );
+    assert_eq!(child.next(WATCHDOG).await, "serving");
+    assert_eq!(child.next(WATCHDOG).await, format!("owns {hot}"));
+    let claimed = store.actor(&hot).await.expect("read the actor").unwrap();
+    let child_boot = claimed.owner.expect("the child owns the actor");
+    let (send, mut evidence) = mpsc::unbounded_channel();
     let parent = serve_node(
         Arc::new(store.clone()),
-        tier.stores.node_wakes(),
+        Some(Arc::new(ObservedWakes {
+            inner: stores.node_wakes().expect("file node wakes"),
+            evidence: send,
+        })),
         "parent",
         DurableSettings::default(),
     );
-    let node_wakes = tier.stores.node_wakes().expect("node wakes");
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !node_wakes
-        .liveness()
-        .await
-        .expect("probe")
-        .iter()
-        .any(|liveness| liveness.boot.node.as_str() == "parent" && liveness.held)
-    {
-        assert!(Instant::now() < deadline, "the parent's node listens");
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
+    // This is the survivor's actual probe, not a separate observer's probe.
+    // Once it has returned, the runner records the held boot before it can
+    // process the next probe, so killing now cannot race initial discovery.
+    evidence_until(&mut evidence, |event| {
+        matches!(event, WakeEvidence::Watched(boots)
+            if boots.iter().any(|boot| boot.boot == child_boot && boot.held)
+                && boots.iter().any(|boot| boot.boot.node.as_str() == "parent" && boot.held))
+    })
+    .await;
 
-    let mut latencies = Vec::with_capacity(WAKES);
     for _ in 0..WAKES {
         let mut tx = MailTx::new();
         tx.append(hot.clone(), MailKind::new("law.note"), "note");
-        let sent = wall_micros();
         let commit = store
             .commit_mail(tx, CommitLabel::MAIL_SESSION)
             .await
             .expect("mail the hot actor");
+        assert_eq!(commit.appended.len(), 1, "one mail per wake");
+        let (actor, seq) = &commit.appended[0];
+        assert_eq!(actor, &hot);
         parent.hints.woke(&commit);
-        let acked = child.next(Duration::from_secs(5)).await;
-        let read: u128 = acked
-            .rsplit(' ')
-            .next()
-            .and_then(|read| read.parse().ok())
-            .unwrap_or_else(|| panic!("an ack report: {acked}"));
-        latencies.push(Duration::from_micros(
-            u64::try_from(read.saturating_sub(sent)).unwrap_or(u64::MAX),
-        ));
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    latencies.sort();
-    let p50 = latencies[WAKES / 2];
-    let max = latencies[WAKES - 1];
-    eprintln!(
-        "cross-process wake over {WAKES} mails: p50 {p50:?}, max {max:?}, listener poll {POLL:?}"
-    );
-    assert!(
-        max < Duration::from_secs(1),
-        "a cross-process wake took {max:?}, as long as a poll: {latencies:?}"
-    );
-
-    let pid = child.process.id().expect("the child's pid");
-    if let Some(before) = cpu_time(pid) {
-        let idle = Duration::from_secs(5);
-        tokio::time::sleep(idle).await;
-        if let Some(after) = cpu_time(pid) {
-            let spent = after.saturating_sub(before);
-            eprintln!(
-                "an idle child node spent {spent:?} of CPU in {idle:?} ({:.2}% of a core)",
-                spent.as_secs_f64() * 100.0 / idle.as_secs_f64()
-            );
+        let mut woke = false;
+        let mut acked = false;
+        while !woke || !acked {
+            let line = child.next(WATCHDOG).await;
+            if line == format!("woke {hot}") {
+                assert!(!woke, "one cross-process wake per mail");
+                woke = true;
+            } else {
+                assert_eq!(line, format!("acked {hot} {}", seq.0));
+                assert!(!acked, "one acknowledgement per mail");
+                acked = true;
+            }
         }
     }
 
-    // Let the parent's watch see the child's lock held.
-    tokio::time::sleep(Duration::from_millis(600)).await;
     child.kill().await;
-    let killed = Instant::now();
-    loop {
-        let owner = store
-            .actor(&hot)
-            .await
-            .expect("read the actor")
-            .and_then(|snapshot| snapshot.owner)
-            .map(|owner| owner.node.as_str().to_owned());
-        if owner.as_deref() == Some("parent") {
-            break;
+    let WakeEvidence::Reaped(reaped) = evidence_until(&mut evidence, |event| {
+        matches!(event, WakeEvidence::Reaped(_))
+    })
+    .await
+    else {
+        unreachable!("the predicate selects reaping evidence");
+    };
+    assert_eq!(reaped.len(), 1, "one actor released through the dead lock");
+    assert_eq!(reaped[0].actor, hot);
+    assert_eq!(reaped[0].from, child_boot);
+    assert!(reaped[0].epoch > claimed.epoch, "the reap fences the child");
+    tokio::time::timeout(WATCHDOG, async {
+        loop {
+            let snapshot = store.actor(&hot).await.expect("read the actor").unwrap();
+            if snapshot
+                .owner
+                .as_ref()
+                .is_some_and(|owner| owner.node.as_str() == "parent")
+            {
+                assert!(snapshot.epoch > claimed.epoch, "takeover fences the child");
+                break;
+            }
+            tokio::time::sleep(POLL).await;
         }
-        assert!(
-            killed.elapsed() < Duration::from_secs(10),
-            "the parent never took the killed child's actor over"
-        );
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-    let failover = killed.elapsed();
-    eprintln!("cross-process lock failover: the parent owns the actor {failover:?} after SIGKILL");
-    assert!(
-        failover < Duration::from_secs(3),
-        "the takeover took {failover:?}, near the lease"
+    })
+    .await
+    .expect("hang guard: the parent never took the killed child's actor over");
+    assert_eq!(
+        store.now().await.expect("read frozen store time").0,
+        i64::try_from(STORE_TIME).expect("the law's timestamp fits")
     );
     parent.kill().await;
 }
