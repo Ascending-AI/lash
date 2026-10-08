@@ -32,6 +32,9 @@ pub(in crate::runtime) struct RuntimeDrive {
     opening_work: usize,
     /// The turn's before-turn decisions, which every phase commits.
     before_turn: Vec<crate::plugin::RecordedTurnContribution>,
+    /// The trace scope the turn's admission retained, which every phase
+    /// commits.
+    trace_scope: lash_trace::DurableTraceScope,
     live: Arc<dyn crate::LiveReplayStore>,
     /// Publishes the turn's activity to the live stream: drained once the
     /// turn committed, aborted when the drive is dropped without a commit.
@@ -83,6 +86,7 @@ impl RuntimeDrive {
             mut driver,
             messages,
             before_turn,
+            trace_scope,
             invalid_input,
             attachments,
         } = turn;
@@ -94,6 +98,7 @@ impl RuntimeDrive {
             opening_work,
             before_turn,
             attachments,
+            trace_scope,
             parts,
         ))
     }
@@ -109,6 +114,7 @@ impl RuntimeDrive {
             mut driver,
             messages,
             before_turn,
+            trace_scope,
             invalid_input,
             attachments,
         } = turn;
@@ -169,6 +175,7 @@ impl RuntimeDrive {
                 opening_work,
                 before_turn,
                 attachments,
+                trace_scope,
                 parts,
             )),
             pending,
@@ -182,6 +189,7 @@ impl RuntimeDrive {
         opening_work: usize,
         before_turn: Vec<crate::plugin::RecordedTurnContribution>,
         attachments: Option<crate::attachments::AttachmentExecutionBinding>,
+        trace_scope: lash_trace::DurableTraceScope,
         parts: DriveParts,
     ) -> Self {
         let DriveParts {
@@ -205,6 +213,7 @@ impl RuntimeDrive {
             settlement,
             opening_work,
             before_turn,
+            trace_scope,
             live,
             publisher,
             commit,
@@ -374,6 +383,10 @@ impl TurnDrive for RuntimeDrive {
 
     fn before_turn(&self) -> Vec<crate::plugin::RecordedTurnContribution> {
         self.before_turn.clone()
+    }
+
+    fn trace_scope(&self) -> Option<lash_trace::DurableTraceScope> {
+        Some(self.trace_scope.clone())
     }
 
     fn run_changes(&self) -> Vec<lash_durable::domain::TurnNamespace> {

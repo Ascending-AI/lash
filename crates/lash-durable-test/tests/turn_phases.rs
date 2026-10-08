@@ -2084,6 +2084,7 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
         delivered: Vec::new(),
         delivered_work: Vec::new(),
         before_turn: Vec::new(),
+        trace: None,
     })
     .expect("checkpoint encodes");
 

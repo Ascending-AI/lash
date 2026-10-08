@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 53,
-  "cargo_target_count": 209,
+  "cargo_target_count": 210,
   "facade_production_check_targets": [
     "//crates/lash-core-effect:lash-core-effect__fv_48d34494[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_e38b9031[check]",
@@ -43520,7 +43520,7 @@
       "//crates/lashlang:lashlang__unit_test__fv_fc3b3750"
     ]
   },
-  "generated_label_count": 270,
+  "generated_label_count": 271,
   "packages": [
     {
       "declared_features": [
@@ -44639,6 +44639,17 @@
           "kind": "test",
           "label": "//crates/lash-durable-test:turn_terminal_refusals__test",
           "tags": []
+        },
+        {
+          "build_label": "//crates/lash-durable-test:turn_trace_scope_laws__test",
+          "cargo": "turn_trace_scope_laws",
+          "check_label": "//crates/lash-durable-test:turn_trace_scope_laws__test[check]",
+          "clippy_label": "//crates/lash-durable-test:turn_trace_scope_laws__test__clippy[clippy.txt]",
+          "kind": "test",
+          "label": "//crates/lash-durable-test:turn_trace_scope_laws__test",
+          "tags": [
+            "hermetic-postgres"
+          ]
         },
         {
           "build_label": "//crates/lash-durable-test:vertical_crash_proof__test",
@@ -48036,6 +48047,7 @@
       "//crates/lash-durable-test:tool_surface_laws__test",
       "//crates/lash-durable-test:trigger_start_proof__test",
       "//crates/lash-durable-test:turn_phases__test",
+      "//crates/lash-durable-test:turn_trace_scope_laws__test",
       "//crates/lash-durable-test:vertical_crash_proof__test",
       "//crates/lash-postgres-store:conformance__test",
       "//crates/lash-postgres-store:conformance__test__fv_c830723d",
@@ -48168,6 +48180,7 @@
     "//crates/lash-durable-test:turn_phases__test": 300,
     "//crates/lash-durable-test:turn_round_crash_matrix__test": 300,
     "//crates/lash-durable-test:turn_terminal_refusals__test": 300,
+    "//crates/lash-durable-test:turn_trace_scope_laws__test": 300,
     "//crates/lash-durable-test:vertical_crash_proof__test": 300,
     "//crates/lash-durable-test:worker_crashes__test": 300,
     "//crates/lash-durable:lash-durable__unit_test": 300,
@@ -48632,6 +48645,7 @@
     "//crates/lash-durable-test:turn_phases__test",
     "//crates/lash-durable-test:turn_round_crash_matrix__test",
     "//crates/lash-durable-test:turn_terminal_refusals__test",
+    "//crates/lash-durable-test:turn_trace_scope_laws__test",
     "//crates/lash-durable-test:vertical_crash_proof__test",
     "//crates/lash-durable-test:worker_crashes__test",
     "//crates/lash-durable:lash-durable[static]",
@@ -48918,6 +48932,7 @@
     "//crates/lash-durable-test:turn_phases__test[check]",
     "//crates/lash-durable-test:turn_round_crash_matrix__test[check]",
     "//crates/lash-durable-test:turn_terminal_refusals__test[check]",
+    "//crates/lash-durable-test:turn_trace_scope_laws__test[check]",
     "//crates/lash-durable-test:vertical_crash_proof__test[check]",
     "//crates/lash-durable-test:worker_crashes__test[check]",
     "//crates/lash-durable:lash-durable[check]",
@@ -49224,6 +49239,7 @@
     "//crates/lash-durable-test:turn_phases__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:turn_round_crash_matrix__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:turn_terminal_refusals__test__clippy[clippy.txt]",
+    "//crates/lash-durable-test:turn_trace_scope_laws__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:vertical_crash_proof__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:worker_crashes__test__clippy[clippy.txt]",
     "//crates/lash-durable:lash-durable__clippy[clippy.txt]",
@@ -49495,6 +49511,7 @@
     "//crates/lash-durable-test:turn_phases__test",
     "//crates/lash-durable-test:turn_round_crash_matrix__test",
     "//crates/lash-durable-test:turn_terminal_refusals__test",
+    "//crates/lash-durable-test:turn_trace_scope_laws__test",
     "//crates/lash-durable-test:vertical_crash_proof__test",
     "//crates/lash-durable-test:worker_crashes__test",
     "//crates/lash-durable:lash-durable",
@@ -49766,6 +49783,7 @@
     "//crates/lash-durable-test:turn_phases__test",
     "//crates/lash-durable-test:turn_round_crash_matrix__test",
     "//crates/lash-durable-test:turn_terminal_refusals__test",
+    "//crates/lash-durable-test:turn_trace_scope_laws__test",
     "//crates/lash-durable-test:vertical_crash_proof__test",
     "//crates/lash-durable-test:worker_crashes__test",
     "//crates/lash-durable:lash-durable",
@@ -50020,6 +50038,7 @@
     "//crates/lash-durable-test:turn_phases__test",
     "//crates/lash-durable-test:turn_round_crash_matrix__test",
     "//crates/lash-durable-test:turn_terminal_refusals__test",
+    "//crates/lash-durable-test:turn_trace_scope_laws__test",
     "//crates/lash-durable-test:vertical_crash_proof__test",
     "//crates/lash-durable-test:worker_crashes__test",
     "//crates/lash-durable:lash-durable__unit_test",
@@ -50162,6 +50181,7 @@
     "//crates/lash-durable-test:turn_phases__test",
     "//crates/lash-durable-test:turn_round_crash_matrix__test",
     "//crates/lash-durable-test:turn_terminal_refusals__test",
+    "//crates/lash-durable-test:turn_trace_scope_laws__test",
     "//crates/lash-durable-test:vertical_crash_proof__test",
     "//crates/lash-durable-test:worker_crashes__test",
     "//crates/lash-durable:lash-durable__unit_test",
@@ -50318,6 +50338,7 @@
     "//crates/lash-durable-test:turn_phases__test",
     "//crates/lash-durable-test:turn_round_crash_matrix__test",
     "//crates/lash-durable-test:turn_terminal_refusals__test",
+    "//crates/lash-durable-test:turn_trace_scope_laws__test",
     "//crates/lash-durable-test:vertical_crash_proof__test",
     "//crates/lash-durable-test:worker_crashes__test",
     "//crates/lash-durable:lash-durable__unit_test",
@@ -50683,6 +50704,7 @@
     "//crates/lash-durable-test:turn_phases__test",
     "//crates/lash-durable-test:turn_round_crash_matrix__test",
     "//crates/lash-durable-test:turn_terminal_refusals__test",
+    "//crates/lash-durable-test:turn_trace_scope_laws__test",
     "//crates/lash-durable-test:vertical_crash_proof__test",
     "//crates/lash-durable-test:worker_crashes__test",
     "//crates/lash-durable:lash-durable__unit_test",
@@ -50847,6 +50869,7 @@
     "//crates/lash-durable-test:turn_phases__test",
     "//crates/lash-durable-test:turn_round_crash_matrix__test",
     "//crates/lash-durable-test:turn_terminal_refusals__test",
+    "//crates/lash-durable-test:turn_trace_scope_laws__test",
     "//crates/lash-durable-test:vertical_crash_proof__test",
     "//crates/lash-durable-test:worker_crashes__test",
     "//crates/lash-durable:lash-durable__unit_test",

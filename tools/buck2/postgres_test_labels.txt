@@ -24,6 +24,7 @@
 //crates/lash-durable-test:tool_surface_laws__test
 //crates/lash-durable-test:trigger_start_proof__test
 //crates/lash-durable-test:turn_phases__test
+//crates/lash-durable-test:turn_trace_scope_laws__test
 //crates/lash-durable-test:vertical_crash_proof__test
 //crates/lash-postgres-store:conformance__test
 //crates/lash-postgres-store:conformance__test__fv_c830723d

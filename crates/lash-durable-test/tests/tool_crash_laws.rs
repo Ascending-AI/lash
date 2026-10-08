@@ -47,6 +47,10 @@
 //!   execution, never by an upload: once the turn ended and the cleanup
 //!   relay ran, the answered blob is held by the session alone and survives
 //!   a sweep, and the other has no referrer and is swept.
+//! - **Trace scope (FIG-5363):** a step of one native call cut at its
+//!   `model.done` or `round.outcome` resumes from its checkpoint under the
+//!   trace scope its admission retained: its scope is admitted once, and
+//!   every record of the turn carries that admission's trace.
 //! - The turn committed once and ended, and a zombie's writes after its reap
 //!   are refused.
 
@@ -64,6 +68,8 @@ mod dialect;
 mod served;
 #[path = "support/sim.rs"]
 mod sim;
+#[path = "support/telemetry.rs"]
+mod telemetry;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
@@ -90,6 +96,8 @@ const INPUT: &str = "tool-crash-turn";
 const PROBE: &str = "crash_probe";
 /// The label of the [`Turn::Activity`] call.
 const ACTIVITY: &str = "activity";
+/// The label of the [`Turn::Trace`] call.
+const TRACE: &str = "trace";
 /// The plugin whose namespace the state scenarios change.
 const STATE_PLUGIN: &str = "crash-state-law";
 /// The plugin's tool that sets the namespace's key to its entry's value.
@@ -146,6 +154,9 @@ enum Turn {
     StatePairCell,
     /// One step of one [`PUT`] call.
     Put,
+    /// One step of one native call, the core served with a recording
+    /// telemetry adapter (FIG-5363).
+    Trace,
 }
 
 impl Turn {
@@ -205,6 +216,11 @@ impl Turn {
                 PUT,
                 serde_json::json!({}),
             )])],
+            Self::Trace => vec![served::response(vec![served::call(
+                &format!("call-{TRACE}"),
+                PROBE,
+                serde_json::json!({ "label": TRACE }),
+            )])],
             Self::State => vec![served::response(vec![served::call(
                 "call-state",
                 STATE_SET,
@@ -250,6 +266,7 @@ impl Turn {
             ),
             Self::Activity => (vec![ACTIVITY.to_owned()], Vec::new()),
             Self::Put => (vec![PUT.to_owned()], Vec::new()),
+            Self::Trace => (vec![TRACE.to_owned()], Vec::new()),
             Self::State => (vec!["T".to_owned()], Vec::new()),
             Self::StateCell => (vec!["C".to_owned()], Vec::new()),
             Self::StatePair | Self::StatePairCell => {
@@ -283,7 +300,8 @@ impl Turn {
             | Self::State
             | Self::StatePair
             | Self::StateCell
-            | Self::StatePairCell => return None,
+            | Self::StatePairCell
+            | Self::Trace => return None,
         };
         let exceeded = lash::ToolCallLimitExceeded {
             scope: lash::ToolCallLimitScope::Cell,
@@ -314,7 +332,8 @@ impl Turn {
             | Self::State
             | Self::StatePair
             | Self::StateCell
-            | Self::StatePairCell => 64,
+            | Self::StatePairCell
+            | Self::Trace => 64,
         }
     }
 }
@@ -607,6 +626,8 @@ struct Crash {
     /// worker calls hold.
     clock: Mutex<Option<Arc<SimClock>>>,
     core: Mutex<Option<lash::LashCore>>,
+    /// The telemetry adapter the core of [`Turn::Trace`] is served with.
+    telemetry: telemetry::Telemetry,
     /// The host's session and its send, which [`Turn::Activity`] follows.
     host: Mutex<Option<(lash::DurableSession, lash::SendHandle)>>,
     /// The session opened for observation, and the updates of its
@@ -635,6 +656,7 @@ impl Crash {
             backend: Mutex::default(),
             clock: Mutex::default(),
             core: Mutex::default(),
+            telemetry: telemetry::Telemetry::default(),
             host: Mutex::default(),
             chat: Mutex::default(),
             keep: Mutex::default(),
@@ -672,6 +694,11 @@ impl Crash {
                     builder.tools(Arc::new(Puts {
                         world: Arc::clone(&self.world),
                     }))
+                } else {
+                    builder
+                };
+                let builder = if self.turn == Turn::Trace {
+                    builder.trace_runtime(self.telemetry.runtime())
                 } else {
                     builder
                 };
@@ -765,6 +792,9 @@ impl Crash {
         }
         if self.turn == Turn::Put {
             violations.extend(self.put_laws().await);
+        }
+        if self.turn == Turn::Trace {
+            violations.extend(self.telemetry.first_turn_violations(SESSION));
         }
         if let Some(cut) = cut {
             violations.extend(zombie_laws(cut, &trace));
@@ -1741,6 +1771,20 @@ async fn a_turns_puts_are_held_by_its_execution_across_a_crash(tier: Tier) {
     prove(Turn::Put, tier).await;
 }
 
+/// A turn cut at a phase commit after its first, under every fault, and
+/// resumed from its checkpoint on the other node reads back the trace scope
+/// its admission retained: its scope is admitted once, and every record of
+/// the turn carries that admission's trace (FIG-5363). A cut before the
+/// first phase commit leaves no checkpoint to resume from.
+async fn a_turn_cut_at_a_phase_commit_resumes_under_its_trace_scope(tier: Tier) {
+    prove_at(
+        Turn::Trace,
+        tier,
+        &[CommitLabel::MODEL_DONE, CommitLabel::ROUND_OUTCOME],
+    )
+    .await;
+}
+
 /// A tool's plugin-state change cut at its `round.outcome`, before or after
 /// the commit, its acknowledgement or its owner lost: once the turn
 /// resumes, the session's committed state is the value the call's committed
@@ -1880,6 +1924,7 @@ tiered_laws!(
     tool_call_limit_refuses_the_same_call_across_a_crash,
     tool_call_limit_refuses_the_same_call_across_a_crash_in_a_cell,
     code_cells_keep_identity_and_distinguish_fresh_calls_across_a_kill,
+    a_turn_cut_at_a_phase_commit_resumes_under_its_trace_scope,
 );
 
 /// [`a_turns_puts_are_held_by_its_execution_across_a_crash`] on the SQLite

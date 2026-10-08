@@ -207,6 +207,14 @@ pub trait TurnDrive: Send {
         Vec::new()
     }
 
+    /// The trace scope the turn's admission retained. Every phase commits it
+    /// with its checkpoint, and a resume's admission reads it back: the turn
+    /// is admitted once, and every node's records of it share its trace
+    /// (FIG-5363). `None` for a drive that admits no trace scope.
+    fn trace_scope(&self) -> Option<lash_trace::DurableTraceScope> {
+        None
+    }
+
     /// The plugin namespaces the turn's run changed that its rows do not
     /// record yet (FIG-5301): each phase commits them beside its checkpoint,
     /// the pending checkpoint-callback decisions among them, and a resume
@@ -841,9 +849,10 @@ pub struct ComposedCall {
 
 /// What a phase row's checkpoint holds: the machine's saved turn, the
 /// steering input and queued turn work its checkpoints delivered, which the
-/// phase bound to the run, and the turn's before-turn decisions, which a
-/// resume serves. It carries no plugin state: the run's changed namespaces
-/// are rows of their own (FIG-5301). Encoded by the phase runner, its owner.
+/// phase bound to the run, and the turn's before-turn decisions and retained
+/// trace scope, which a resume serves. It carries no plugin state: the run's
+/// changed namespaces are rows of their own (FIG-5301). Encoded by the phase
+/// runner, its owner.
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PhaseCheckpoint {
@@ -862,6 +871,22 @@ pub struct PhaseCheckpoint {
     /// running the callbacks again.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub before_turn: Vec<crate::plugin::RecordedTurnContribution>,
+    /// The trace scope the turn's admission retained
+    /// ([`TurnDrive::trace_scope`]), which a resume's admission reads back
+    /// instead of proposing another (FIG-5363).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace: Option<lash_trace::DurableTraceScope>,
+}
+
+/// What a resumed turn's preparation serves from its checkpoint instead of
+/// deciding again: its before-turn callback decisions (ADR 0133 §6) and the
+/// trace scope its admission retained, so no before-turn callback runs and
+/// no admission is proposed once a phase has committed.
+pub struct RecordedPreparation {
+    /// The before-turn callback decisions.
+    pub before_turn: Vec<crate::plugin::RecordedTurnContribution>,
+    /// The retained trace scope; `None` for a drive that retains none.
+    pub trace: Option<lash_trace::DurableTraceScope>,
 }
 
 /// A turn restored from its rows: the machine, the effect it re-delivers,
@@ -1061,30 +1086,34 @@ impl<'a> TurnRestore<'a> {
         self.row
     }
 
-    /// The before-turn callback decisions the turn's checkpoint records:
-    /// what preparing the resumed turn serves, so no before-turn callback
-    /// runs once a phase has committed (ADR 0133 §6).
+    /// What the turn's checkpoint records for preparing the resumed turn:
+    /// its before-turn callback decisions and its retained trace scope, so no
+    /// before-turn callback runs and no admission is proposed once a phase
+    /// has committed (ADR 0133 §6, FIG-5363).
     ///
     /// # Errors
     ///
     /// [`TurnRestoreError`] when the row holds no checkpoint or it does not
     /// decode.
-    pub fn recorded_before_turn(
-        &self,
-    ) -> Result<Vec<crate::plugin::RecordedTurnContribution>, TurnRestoreError> {
-        /// The checkpoint's before-turn decisions, the rest left undecoded.
+    pub fn recorded_preparation(&self) -> Result<RecordedPreparation, TurnRestoreError> {
+        /// The checkpoint's preparation, the rest left undecoded.
         #[derive(serde::Deserialize)]
-        struct BeforeTurn {
+        struct Preparation {
             #[serde(default)]
             before_turn: Vec<crate::plugin::RecordedTurnContribution>,
+            #[serde(default)]
+            trace: Option<lash_trace::DurableTraceScope>,
         }
         let row = self.row;
         let stored = row
             .phase
             .checkpoint()
             .ok_or_else(|| TurnRestoreError::NoCheckpoint(row.run.clone()))?;
-        serde_json::from_str::<BeforeTurn>(stored)
-            .map(|checkpoint| checkpoint.before_turn)
+        serde_json::from_str::<Preparation>(stored)
+            .map(|checkpoint| RecordedPreparation {
+                before_turn: checkpoint.before_turn,
+                trace: checkpoint.trace,
+            })
             .map_err(|error| TurnRestoreError::Undecodable {
                 run: row.run.clone(),
                 reason: error.to_string(),
@@ -1114,6 +1143,7 @@ impl<'a> TurnRestore<'a> {
             delivered,
             delivered_work,
             before_turn: _,
+            trace: _,
         } = serde_json::from_str(stored).map_err(|error| TurnRestoreError::Undecodable {
             run: row.run.clone(),
             reason: error.to_string(),

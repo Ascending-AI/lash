@@ -9,7 +9,8 @@ use tokio_util::sync::CancellationToken;
 use super::commit_publication::{CommitBase, PublishedHeads, announce_head};
 use super::head::SessionHead;
 use super::session::{
-    AdmittedInputs, OpenTurn, TurnDrive, TurnError, TurnRestore, TurnRow, TurnServices,
+    AdmittedInputs, OpenTurn, RecordedPreparation, TurnDrive, TurnError, TurnRestore, TurnRow,
+    TurnServices,
 };
 use super::session_mail::{InputAdmission, InputBatching, SessionMailError};
 use crate::runtime::logical_turn::LogicalTurnAdmissions;
@@ -139,14 +140,14 @@ impl RuntimeTurnServices {
     }
 
     /// Open `row`'s session and prepare its turn under the turn's own scope
-    /// of `cx`. A resumed turn passes the before-turn decisions its
-    /// checkpoint recorded, which preparation serves instead of running the
-    /// callbacks again.
+    /// of `cx`. A resumed turn passes what its checkpoint recorded, which
+    /// preparation serves: its before-turn decisions instead of running the
+    /// callbacks again, and its trace scope instead of a new admission.
     async fn prepare(
         &self,
         cx: &ActorContext,
         row: &TurnRow,
-        recorded_before_turn: Option<Vec<crate::plugin::RecordedTurnContribution>>,
+        recorded: Option<RecordedPreparation>,
     ) -> Result<(DurableTurn, DriveParts), TurnError> {
         let mut runtime = self.runtimes.open(&row.session).await?;
         let _prepared = crate::runtime::turn_driver::TurnPhaseSpan::begin(
@@ -162,13 +163,7 @@ impl RuntimeTurnServices {
         // changes from here is what its phases record (FIG-5301).
         runtime.services.plugins.begin_run();
         let turn = runtime
-            .prepare_durable_turn(
-                &controller,
-                &row.run,
-                admissions,
-                recorded_before_turn,
-                &observer,
-            )
+            .prepare_durable_turn(&controller, &row.run, admissions, recorded, &observer)
             .await?;
         // The turn's commit settles its inputs and queued work from the
         // driver once it finishes: those its run took, the inputs with the
@@ -213,7 +208,7 @@ impl TurnServices for RuntimeTurnServices {
         cx: &ActorContext,
         restore: TurnRestore<'_>,
     ) -> Result<OpenTurn, TurnError> {
-        let recorded = restore.recorded_before_turn()?;
+        let recorded = restore.recorded_preparation()?;
         let (turn, parts) = self.prepare(cx, restore.row(), Some(recorded)).await?;
         RuntimeDrive::resume(turn, parts, restore).await
     }

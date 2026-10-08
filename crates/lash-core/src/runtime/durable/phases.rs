@@ -68,6 +68,7 @@ fn encode_phase(
         delivered: drive.delivered_inputs(),
         delivered_work: drive.delivered_work(),
         before_turn: drive.before_turn(),
+        trace: drive.trace_scope(),
     };
     serde_json::to_string(&checkpoint)
         .map_err(|error| TurnError::Exec(format!("the turn checkpoint does not encode: {error}")))

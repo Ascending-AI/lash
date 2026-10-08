@@ -328,7 +328,27 @@ impl World {
         let scripts = Arc::new(Scripts::default());
         Self::serving(
             tier,
+            None,
             engines,
+            model(Arc::clone(&scripts)),
+            scripts,
+            lash::QueuedWorkBatchingConfig::new(1),
+            builder,
+        )
+        .await
+    }
+
+    /// [`World::new`] over a backend configured with `settings`.
+    pub async fn configured(
+        tier: Tier,
+        settings: lash_core_execution::DurableSettings,
+        builder: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
+    ) -> Option<Self> {
+        let scripts = Arc::new(Scripts::default());
+        Self::serving(
+            tier,
+            Some(settings),
+            Vec::new(),
             model(Arc::clone(&scripts)),
             scripts,
             lash::QueuedWorkBatchingConfig::new(1),
@@ -347,6 +367,7 @@ impl World {
     ) -> Option<Self> {
         Self::serving(
             tier,
+            None,
             engines,
             model,
             Arc::default(),
@@ -364,11 +385,21 @@ impl World {
         model: ProviderHandle,
         builder: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
     ) -> Option<Self> {
-        Self::serving(tier, Vec::new(), model, Arc::default(), batching, builder).await
+        Self::serving(
+            tier,
+            None,
+            Vec::new(),
+            model,
+            Arc::default(),
+            batching,
+            builder,
+        )
+        .await
     }
 
     async fn serving(
         tier: Tier,
+        settings: Option<lash_core_execution::DurableSettings>,
         engines: Vec<Arc<dyn lash_core::ProcessEngine>>,
         model: ProviderHandle,
         scripts: Arc<Scripts>,
@@ -379,7 +410,10 @@ impl World {
             eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
             return None;
         };
-        let backend = backend_with(stores, engines);
+        let backend = match settings {
+            Some(settings) => configured_backend(stores, settings, engines),
+            None => backend_with(stores, engines),
+        };
         let core = builder(&backend)
             .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
             .queued_work_batching(batching)
