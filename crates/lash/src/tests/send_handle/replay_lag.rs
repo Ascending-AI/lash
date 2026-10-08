@@ -226,10 +226,7 @@ impl lash_core::LiveReplayStore for FaultyReplay {
 /// A core over a fresh SQLite memory store set whose node publishes to
 /// `replay`.
 fn core_publishing_to(backend: lash_core::Backend, replay: Arc<FaultyReplay>) -> Result<LashCore> {
-    LashCore::standard_builder(backend)
-        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
+    explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .serve_test_llm_profile(
             scripted_provider(Arc::new(Notify::new()), Arc::new(AtomicUsize::new(0))),
             mock_llm_profile_spec(),

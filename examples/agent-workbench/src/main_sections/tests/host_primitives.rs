@@ -892,6 +892,9 @@ async fn a_settled_occurrence_is_pruned_after_its_retention_and_its_process_stay
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_cron_tick_is_recorded_once_across_a_restart_after_its_occurrence_was_pruned() {
     let (clock, stores) = frozen_stores().await;
+    // Cross the tick without expiring a running node's lease: the store
+    // uses this wall clock too, while heartbeats run on monotonic time.
+    clock.set(TICK_MS - 1);
     let triggers = host_triggers::HostTriggers::in_memory().expect("open the trigger tables");
     let first = Workbench::builder(cells_then_noted(vec![CRON_REGISTRATION.to_string()]))
         .stores(Arc::clone(&stores))
@@ -903,7 +906,7 @@ async fn a_cron_tick_is_recorded_once_across_a_restart_after_its_occurrence_was_
     let id = the_registration(&triggers);
     let occurrence = format!("cron:{id}:{TICK_MS}");
 
-    clock.set(TICK_MS + 10_000);
+    clock.set(TICK_MS);
     let bound = eventually("the tick's delivery", || {
         triggers
             .bound_process(&occurrence, &id)
@@ -917,11 +920,12 @@ async fn a_cron_tick_is_recorded_once_across_a_restart_after_its_occurrence_was_
         |(role, text)| role == "assistant" && text == "noted",
     )
     .await;
+    first.shutdown().await;
     let retention_ms = u64::try_from(host_triggers::OCCURRENCE_RETENTION.as_millis())
         .expect("a retention in range");
-    clock.set(TICK_MS + 10_000 + retention_ms);
+    // Let retention elapse while no node is running on the frozen clock.
+    clock.set(TICK_MS + retention_ms);
     assert_eq!(triggers.prune_settled().expect("prune"), 1);
-    first.shutdown().await;
 
     let second = Workbench::builder(cells_then_noted(Vec::new()))
         .stores(stores)
