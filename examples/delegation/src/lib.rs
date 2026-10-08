@@ -33,7 +33,6 @@ use lash::plugins::{
     SessionToolAccess,
 };
 use lash::process::{Lifetime, LifetimePolicy, StartCx};
-use lash::rlm::RlmFinalAnswerFormat;
 
 pub use tool::{
     SESSION_TURN_DEFINITION, SPAWN_HOST_ORIGINATED_PROCESS, spawn_agent_tool_definition,
@@ -115,9 +114,8 @@ pub(crate) struct ChildConfig {
     pub(crate) tool_access: SessionToolAccess,
     /// The child's initial prompt plan; `None` is the neutral default.
     pub(crate) prompt_plan: Option<lash::prompt::PromptPlan>,
-    /// The final-answer format of an RLM child; `None` for a host whose
-    /// children run another protocol.
-    pub(crate) rlm: Option<RlmFinalAnswerFormat>,
+    /// Whether children run the RLM protocol.
+    pub(crate) rlm: bool,
     /// How long a child's process lives, decided against the spawn's
     /// admitted start context, never by the model (FIG-3607).
     pub(crate) lifetime: LifetimePolicy,
@@ -143,7 +141,7 @@ impl DelegationPluginFactory {
                 spec: child_spec,
                 tool_access: SessionToolAccess::default(),
                 prompt_plan: None,
-                rlm: None,
+                rlm: false,
                 lifetime: Arc::new(lifetime),
             }),
         }
@@ -167,10 +165,10 @@ impl DelegationPluginFactory {
 
     /// Children run the RLM protocol: each must finish through `finish`,
     /// with a value of the call's `output` shape when it states one, written
-    /// in `format`. Only an RLM child accepts a `seed`.
+    /// by the program. Only an RLM child accepts a `seed`.
     #[must_use]
-    pub fn with_rlm_children(mut self, format: RlmFinalAnswerFormat) -> Self {
-        self.config_mut().rlm = Some(format);
+    pub fn with_rlm_children(mut self) -> Self {
+        self.config_mut().rlm = true;
         self
     }
 

@@ -232,26 +232,21 @@ impl SpawnAgent {
         )
         .map_err(|error| invalid(error.to_string()))?;
         let mut initial_nodes = Vec::new();
-        match self.child.rlm.clone() {
-            Some(final_answer_format) => {
-                options
-                    .insert_typed(
-                        RLM_PROTOCOL_PLUGIN_ID,
-                        RlmCreateExtras {
-                            termination: Some(RlmTermination::FinishRequired {
-                                schema: output_schema,
-                            }),
-                            final_answer_format: Some(final_answer_format),
-                            render: None,
-                        },
-                    )
-                    .map_err(|error| invalid(error.to_string()))?;
-                initial_nodes = lash::rlm::rlm_seed_initial_nodes(seed, fleet);
-            }
-            None if !seed.is_empty() => {
-                return Err(invalid("spawn_agent: `seed` needs an RLM child"));
-            }
-            None => {}
+        if self.child.rlm {
+            options
+                .insert_typed(
+                    RLM_PROTOCOL_PLUGIN_ID,
+                    RlmCreateExtras {
+                        termination: Some(RlmTermination::FinishRequired {
+                            schema: output_schema,
+                        }),
+                        render: None,
+                    },
+                )
+                .map_err(|error| invalid(error.to_string()))?;
+            initial_nodes = lash::rlm::rlm_seed_initial_nodes(seed, fleet);
+        } else if !seed.is_empty() {
+            return Err(invalid("spawn_agent: `seed` needs an RLM child"));
         }
         let mut request = SessionCreateRequest::child_session(
             parent,

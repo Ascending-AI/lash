@@ -776,7 +776,7 @@ fn benchmark_plugin_factories(
             lash_core::lifetime::starter,
         );
         factories.push(Arc::new(if scenario.execution_mode().is_rlm() {
-            delegation.with_rlm_children(lash::rlm::RlmFinalAnswerFormat::RawFinalValue)
+            delegation.with_rlm_children()
         } else {
             delegation
         }));

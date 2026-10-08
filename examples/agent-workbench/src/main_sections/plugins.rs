@@ -293,30 +293,25 @@ fn recorded_prompt(
         .map_err(|error| lash::plugins::PromptRenderError::new(error.to_string()))
 }
 
-/// The workbench's prompt sections. Its identity replaces the standard
-/// protocol's intro. Its host text, the standing instructions and the
+/// The workbench's prompt sections. Its identity is a host section. Its host text, the standing instructions and the
 /// connected accounts, renders from the run's admitted config. The
 /// context budget states the shape of the call's projected history back to
 /// the model, late and outside the history, as an annotation: durable
 /// compaction is an explicit Agent Frame transition, not a rewrite of the
 /// request.
 pub(crate) fn register_workbench_sections(reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-    reg.prompt().wrap(
-        lash::plugins::PromptWrapSpec::new(
-            lash::prompt::PromptWrapKey::new("intro")
-                .map_err(|error| PluginError::Registration(error.to_string()))?,
-            lash::prompt::PromptSectionId::new(
-                lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
-                section_key(lash::standard::standard_section_keys::INTRO)?,
-            ),
-        ),
-        Arc::new(
-            |_: &lash::plugins::PromptInput<'_>,
-             _: lash::plugins::PromptWrapTarget<'_>,
-             _: lash::plugins::SectionText| {
-                Ok(lash::plugins::SectionText::text(WORKBENCH_INTRO))
-            },
-        ),
+    reg.prompt().section(
+        lash::plugins::PromptSectionSpec::new(
+            section_key("intro")?,
+            lash::prompt::PromptPlacement::InitialInstructions,
+        )
+        .purposes([
+            lash::prompt::PromptPurpose::Turn,
+            lash::prompt::PromptPurpose::Compaction,
+        ]),
+        Arc::new(|_: &lash::plugins::PromptInput<'_>| {
+            Ok(lash::plugins::SectionText::text(WORKBENCH_INTRO))
+        }),
     )?;
     reg.prompt().section(
         lash::plugins::PromptSectionSpec::new(

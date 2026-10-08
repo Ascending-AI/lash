@@ -11,7 +11,6 @@ fn a_turn_cannot_name_a_dialect() {
     let _ = RlmTurnOptions {
         dialect: Some("typescript"),
         termination: Some(RlmTermination::Natural { schema: None }),
-        final_answer_format: None,
     };
 }
 

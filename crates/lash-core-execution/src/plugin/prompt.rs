@@ -594,8 +594,9 @@ impl PromptInput<'_> {
         self.cut.history
     }
 
-    /// The protocol's committed facts for this call, when the session's
-    /// protocol derived facts of type `T`.
+    /// The call owner's derived facts of type `T`: a turn's protocol facts,
+    /// or an owned call's purpose-specific section inputs. They are frozen
+    /// for composition; admission records the resulting text.
     pub fn protocol_facts<T: std::any::Any>(&self) -> Option<&T> {
         self.cut.protocol.as_deref()?.downcast_ref::<T>()
     }

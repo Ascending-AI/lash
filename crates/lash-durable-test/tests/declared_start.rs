@@ -763,7 +763,7 @@ fn delegation(
         }),
     };
     Arc::new(if rlm {
-        factory.with_rlm_children(lash::rlm::RlmFinalAnswerFormat::RawFinalValue)
+        factory.with_rlm_children()
     } else {
         factory
     })

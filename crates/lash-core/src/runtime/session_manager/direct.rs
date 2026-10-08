@@ -55,6 +55,7 @@ impl DirectCompletionService for RuntimeSessionServices {
         &self,
         request: crate::LlmRequest,
         purpose: crate::prompt_sections::PromptPurpose,
+        facts: Option<Arc<dyn std::any::Any + Send + Sync>>,
         usage_source: &str,
         effect_controller: crate::ActorContext,
         turn_id: Option<&crate::TurnId>,
@@ -72,6 +73,7 @@ impl DirectCompletionService for RuntimeSessionServices {
                 ),
                 request,
                 purpose,
+                facts,
                 usage_source,
                 caused_by,
             )
@@ -158,12 +160,16 @@ impl CurrentOwnerCapability {
     /// What an owned call of these services composes its prompt from: the
     /// session's recorded plan, config and committed view, or, for a
     /// process, its captured config under the default plan.
-    fn owned_prompt(&self) -> crate::runtime::owned_call::OwnedPrompt {
+    fn owned_prompt(
+        &self,
+        facts: Option<Arc<dyn std::any::Any + Send + Sync>>,
+    ) -> crate::runtime::owned_call::OwnedPrompt {
         let config = self.plugins.admitted_plugin_config();
         match self.session() {
             Some(session) => {
                 let state = session.snapshot.to_runtime_state();
                 crate::runtime::owned_call::OwnedPrompt {
+                    facts,
                     plugins: Arc::clone(&self.plugins),
                     plan: state.authority.prompt_plan.clone(),
                     config,
@@ -176,6 +182,7 @@ impl CurrentOwnerCapability {
                 }
             }
             None => crate::runtime::owned_call::OwnedPrompt {
+                facts,
                 plugins: Arc::clone(&self.plugins),
                 plan: Default::default(),
                 config,
@@ -197,6 +204,12 @@ impl CurrentOwnerCapability {
     }
 }
 
+/// The purpose and derived inputs a call's section composition uses.
+struct DirectPromptInput {
+    purpose: crate::prompt_sections::PromptPurpose,
+    facts: Option<Arc<dyn std::any::Any + Send + Sync>>,
+}
+
 impl DirectCompletionCapability {
     /// Admit one direct call (ADR 0133 §8) and run its send across the
     /// effect boundary, yielding the raw provider response. The call is
@@ -208,11 +221,12 @@ impl DirectCompletionCapability {
         context: &DirectInvocationContext<'_>,
         binding: crate::LlmProfileBinding,
         request: crate::LlmRequest,
-        purpose: crate::prompt_sections::PromptPurpose,
+        prompt: DirectPromptInput,
         usage_source: &str,
         replay_position: DirectReplayPosition<'_>,
     ) -> Result<(crate::LlmResponse, crate::TokenUsage, crate::LlmCallRecord), crate::PluginError>
     {
+        let DirectPromptInput { purpose, facts } = prompt;
         let current = context.current;
         let DirectReplayPosition {
             replay,
@@ -238,7 +252,7 @@ impl DirectCompletionCapability {
             cx: &context.effect_controller,
             key,
             purpose,
-            prompt: current.owned_prompt(),
+            prompt: current.owned_prompt(facts),
             request,
             binding: binding.clone(),
             attachment_store: Arc::clone(&current.host.core.durability.attachment_store),
@@ -344,8 +358,11 @@ impl DirectCompletionCapability {
                 &context,
                 binding,
                 normalized,
-                crate::prompt_sections::PromptPurpose::Direct {
-                    name: usage_source.to_string(),
+                DirectPromptInput {
+                    purpose: crate::prompt_sections::PromptPurpose::Direct {
+                        name: usage_source.to_string(),
+                    },
+                    facts: None,
                 },
                 usage_source,
                 DirectReplayPosition {
@@ -367,6 +384,7 @@ impl DirectCompletionCapability {
         context: DirectInvocationContext<'_>,
         mut request: crate::LlmRequest,
         purpose: crate::prompt_sections::PromptPurpose,
+        facts: Option<Arc<dyn std::any::Any + Send + Sync>>,
         usage_source: &str,
         caused_by: Option<crate::CausalRef>,
     ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
@@ -388,7 +406,7 @@ impl DirectCompletionCapability {
                 &context,
                 binding,
                 request,
-                purpose,
+                DirectPromptInput { purpose, facts },
                 usage_source,
                 DirectReplayPosition {
                     replay: Some(&replay),

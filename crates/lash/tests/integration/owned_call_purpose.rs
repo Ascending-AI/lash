@@ -13,9 +13,12 @@ use std::sync::{Arc, Mutex};
 
 use lash::plugins::{
     PluginDeclaration, PluginDefinition, PluginError, PluginRegistrar, PromptInput,
-    PromptRenderError, PromptSectionSpec, SectionText,
+    PromptRenderError, PromptSectionSpec, PromptWrapSpec, PromptWrapTarget, SectionText,
 };
-use lash::prompt::{PromptPlacement, PromptPurpose, PromptSectionKey};
+use lash::prompt::{
+    PromptPlacement, PromptPlan, PromptPurpose, PromptSectionId, PromptSectionKey,
+    PromptSectionPlacement, PromptWrapKey,
+};
 use lash::tools::{StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolCall};
 
 const PLUGIN: &str = "purpose-probe";
@@ -71,11 +74,19 @@ impl lash::plugins::SessionPlugin for Probe {
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
         section(reg, "turn", PromptPurpose::Turn, TURN_TEXT)?;
-        section(
-            reg,
-            "compaction",
-            PromptPurpose::Compaction,
-            COMPACTION_TEXT,
+        reg.prompt().wrap(
+            PromptWrapSpec::new(
+                PromptWrapKey::new("summary").expect("valid wrap key"),
+                PromptSectionId::new(
+                    "standard_compaction",
+                    PromptSectionKey::new("summary_instruction").expect("valid section key"),
+                ),
+            ),
+            Arc::new(
+                |_: &PromptInput<'_>, _: PromptWrapTarget<'_>, _: SectionText| {
+                    Ok(SectionText::text(COMPACTION_TEXT))
+                },
+            ),
         )?;
         section(
             reg,
@@ -125,6 +136,7 @@ impl StaticToolExecute for Probe {
 struct Received {
     instructions: String,
     tools: Vec<String>,
+    body: String,
 }
 
 fn answer(parts: Vec<lash::direct::LlmOutputPart>) -> lash::provider::LlmResponse {
@@ -153,6 +165,7 @@ async fn compaction_and_direct_calls_compose_only_their_own_purpose() {
                 async move {
                     let received = Received {
                         instructions: request.instructions.as_deref().unwrap_or("").to_owned(),
+                        body: serde_json::to_string(&request.messages).expect("request encodes"),
                         tools: request.tools.iter().map(|tool| tool.name.clone()).collect(),
                     };
                     let turns = {
@@ -211,11 +224,32 @@ async fn compaction_and_direct_calls_compose_only_their_own_purpose() {
             "purpose-probe-boot",
         ))
         .expect("core");
-    let session = crate::created_session(&core, MODEL, "purpose-probe-session")
+    core.session(lash::SessionId::from("purpose-probe-session"))
+        .create(lash::SessionCreation {
+            parent: None,
+            spec: lash::SessionSpec::new(
+                MODEL,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            ),
+            prompt_plan: Some(PromptPlan {
+                placements: vec![PromptSectionPlacement {
+                    section: PromptSectionId::new(
+                        "standard_compaction",
+                        PromptSectionKey::new("summary_instruction").expect("valid section key"),
+                    ),
+                    placement: PromptPlacement::InitialInstructions,
+                }],
+                ..Default::default()
+            }),
+        })
         .await
+        .expect("session created");
+    let session = core
+        .session(lash::SessionId::from("purpose-probe-session"))
         .open()
         .await
-        .expect("the session opens");
+        .expect("session opens");
 
     let turn = session
         .send(lash::TurnInput::text("ask the probe"))
@@ -227,7 +261,7 @@ async fn compaction_and_direct_calls_compose_only_their_own_purpose() {
         session
             .admin()
             .state()
-            .compact_context(None)
+            .compact_context(Some("host-focus-to-replace".to_owned()))
             .await
             .expect("the compaction settles"),
         "the compaction opened a frame"
@@ -254,6 +288,18 @@ async fn compaction_and_direct_calls_compose_only_their_own_purpose() {
             .all(|turn| turn.tools.iter().any(|tool| tool == TOOL)),
         "the turn offers the probe: {turns:?}"
     );
+    assert_eq!(compactions[0].instructions, COMPACTION_TEXT);
+    for replaced in [
+        "Relevant files / directories",
+        "Provide a detailed summary",
+        "host-focus-to-replace",
+    ] {
+        assert!(!compactions[0].body.contains(replaced), "{compactions:?}");
+        assert!(
+            !compactions[0].instructions.contains(replaced),
+            "{compactions:?}"
+        );
+    }
     assert!(
         compactions[0].tools.is_empty(),
         "a compaction call offers no tools: {compactions:?}"

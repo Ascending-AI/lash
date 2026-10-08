@@ -285,9 +285,7 @@ pub(crate) async fn workbench_core_builder(
         delegation::DelegationPluginFactory::new(child_spec, lash::process::lifetime::starter);
     let delegation: Arc<dyn PluginFactory> = match protocol {
         crate::session_protocol::SessionProtocol::Standard => Arc::new(delegation),
-        crate::session_protocol::SessionProtocol::Rlm => {
-            Arc::new(delegation.with_rlm_children(lash::rlm::RlmFinalAnswerFormat::RawFinalValue))
-        }
+        crate::session_protocol::SessionProtocol::Rlm => Arc::new(delegation.with_rlm_children()),
     };
     let mut builder = match protocol {
         crate::session_protocol::SessionProtocol::Standard => {

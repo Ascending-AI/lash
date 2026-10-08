@@ -275,27 +275,6 @@ fn request_text(request: &LlmRequest) -> String {
         .join("\n")
 }
 
-/// An RLM provider that finishes every turn and records each request's
-/// instructions and message text.
-#[cfg(feature = "rlm")]
-fn recording_request_provider(seen: Arc<StdMutex<Vec<String>>>) -> ProviderHandle {
-    crate::testing::TestProvider::builder()
-        .kind("request-test")
-        .complete(move |request| {
-            let seen = Arc::clone(&seen);
-            async move {
-                seen.lock_recover().push(format!(
-                    "{}\n{}",
-                    system_text(&request),
-                    request_text(&request)
-                ));
-                Ok(text_response(&typescript_block("finish(\"ok\");")))
-            }
-        })
-        .build()
-        .into_handle()
-}
-
 /// Every node of `durable`'s ancestry from its head, newest first, paged
 /// through the history reader: prior frames stay durable but not resident.
 pub(crate) async fn durable_history(

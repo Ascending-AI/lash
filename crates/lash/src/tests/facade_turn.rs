@@ -977,24 +977,14 @@ impl lash_core::plugin::SessionPlugin for HostSections {
         &self,
         reg: &mut lash_core::plugin::PluginRegistrar,
     ) -> std::result::Result<(), lash_core::PluginError> {
-        use crate::plugins::{
-            PromptInput, PromptSectionSpec, PromptWrapSpec, PromptWrapTarget, SectionText,
-        };
-        use crate::prompt::{PromptPlacement, PromptSectionId, PromptSectionKey, PromptWrapKey};
-        reg.prompt().wrap(
-            PromptWrapSpec::new(
-                PromptWrapKey::new("intro").expect("valid wrap key"),
-                PromptSectionId::new(
-                    crate::standard::STANDARD_PROTOCOL_PLUGIN_ID,
-                    PromptSectionKey::new(crate::standard::standard_section_keys::INTRO)
-                        .expect("valid section key"),
-                ),
+        use crate::plugins::{PromptInput, PromptSectionSpec, SectionText};
+        use crate::prompt::{PromptPlacement, PromptSectionKey};
+        reg.prompt().section(
+            PromptSectionSpec::new(
+                PromptSectionKey::new("intro").expect("valid section key"),
+                PromptPlacement::InitialInstructions,
             ),
-            Arc::new(
-                |_: &PromptInput<'_>, _: PromptWrapTarget<'_>, _: SectionText| {
-                    Ok(SectionText::text("You are the release desk."))
-                },
-            ),
+            Arc::new(|_: &PromptInput<'_>| Ok(SectionText::text("You are the release desk."))),
         )?;
         reg.prompt().section(
             PromptSectionSpec::new(
@@ -1009,7 +999,7 @@ impl lash_core::plugin::SessionPlugin for HostSections {
 /// FIG-5257: a turn's model call composes its sections at its admission
 /// (FIG-5255) and places them on the model request: the standard
 /// protocol's in the instructions, over the offered tools, with a host
-/// wrapper's replacement intro, and a host's late section after the
+/// section's identity, and a host's late section after the
 /// projected conversation, outside it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_turns_request_carries_its_sections_where_they_are_placed() {
@@ -1055,12 +1045,13 @@ async fn a_turns_request_carries_its_sections_where_they_are_placed() {
         .expect("one model call");
     let instructions = request.instructions.as_deref().expect("instructions");
     assert!(
-        instructions.starts_with("You are the release desk.\n\n## Execution\n\n"),
+        instructions.starts_with("## Execution\n\n")
+            && instructions.ends_with("You are the release desk."),
         "{instructions}"
     );
     assert!(
-        instructions.contains("Ask only when progress is blocked."),
-        "the offered `ask` tool reaches the guidance: {instructions}"
+        !instructions.contains("Ask only when progress is blocked."),
+        "interaction guidance belongs to the host: {instructions}"
     );
     assert!(!instructions.contains("Release 4.2"), "{instructions}");
     let late = request.messages.last().expect("the late context");

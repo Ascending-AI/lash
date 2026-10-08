@@ -47,7 +47,7 @@ fn spawner() -> SpawnAgent {
                 .with_hidden_tools(["write_file"])
                 .expect("a hidden tool name"),
             prompt_plan: None,
-            rlm: Some(RlmFinalAnswerFormat::RawFinalValue),
+            rlm: true,
             lifetime: Arc::new(lash::process::lifetime::starter),
         }),
     }
@@ -200,10 +200,6 @@ async fn a_childs_request_states_only_the_hosts_configuration_and_the_call() {
             .clone(),
     )
     .expect("the RLM extras decode");
-    assert_eq!(
-        rlm.final_answer_format,
-        Some(RlmFinalAnswerFormat::RawFinalValue)
-    );
     assert!(matches!(
         rlm.termination,
         Some(lash::rlm::RlmTermination::FinishRequired { schema: Some(_) })

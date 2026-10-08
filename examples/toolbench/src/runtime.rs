@@ -519,7 +519,6 @@ fn profile_metadata(model: &str) -> Result<lash::LlmProfileMetadata> {
 
 fn session_options() -> lash::rlm::RlmCreateExtras {
     lash::rlm::RlmCreateExtras {
-        final_answer_format: Some(lash::rlm::RlmFinalAnswerFormat::RawFinalValue),
         ..lash::rlm::RlmCreateExtras::default()
     }
 }

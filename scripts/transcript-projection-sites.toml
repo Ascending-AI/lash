@@ -14,6 +14,7 @@ roles = ["Assistant", "Event", "Tool", "User"]
 
 
 [sites]
+"crates/lash/src/tests/core_session_builder/session_lifecycle.rs#rlm_cell_answer_preserves_the_exact_string_without_presentation_policy" = { reads = 0, outputs = 1, kind = "output-read", reason = "The exact-string law reads the settled cell final value to assert byte-for-byte preservation (FIG-5432)." }
 "crates/lash/src/turn.rs#assistant_message" = { reads = 0, outputs = 1, kind = "output-read", reason = "assistant_message exposes programmatic execution results or provider data, not a transcript renderer." }
 "crates/lash/src/turn.rs#final_value" = { reads = 0, outputs = 1, kind = "output-read", reason = "final_value exposes programmatic execution results or provider data, not a transcript renderer." }
 "crates/lash/src/turn.rs#tool_value" = { reads = 0, outputs = 1, kind = "output-read", reason = "tool_value exposes programmatic execution results or provider data, not a transcript renderer." }

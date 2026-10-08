@@ -20,6 +20,7 @@ pub trait DirectCompletionService: Send + Sync {
         &self,
         request: crate::LlmRequest,
         purpose: crate::prompt_sections::PromptPurpose,
+        facts: Option<Arc<dyn std::any::Any + Send + Sync>>,
         usage_source: &str,
         effect_controller: crate::ActorContext,
         turn_id: Option<&crate::TurnId>,
@@ -249,6 +250,7 @@ impl<'run> DirectCompletionClient<'run> {
             crate::prompt_sections::PromptPurpose::Direct {
                 name: usage_source.to_owned(),
             },
+            None,
             usage_source,
             None,
         )
@@ -258,6 +260,9 @@ impl<'run> DirectCompletionClient<'run> {
     /// Same as [`Self::direct_llm_completion`] for an explicit `purpose`
     /// (ADR 0133 §8): only the sections that declare it compose into the
     /// request, and a [`PromptPurpose::Compaction`] call offers no tools.
+    /// `facts` are the owning plugin's derived section inputs, read through
+    /// `PromptInput::protocol_facts`; admission records the rendered text,
+    /// not these process-local inputs. A resend never renders them again.
     /// `caused_by` is the call's causal trace linkage, folded into the
     /// replay lane.
     ///
@@ -266,6 +271,7 @@ impl<'run> DirectCompletionClient<'run> {
         &self,
         request: crate::LlmRequest,
         purpose: crate::prompt_sections::PromptPurpose,
+        facts: Option<Arc<dyn std::any::Any + Send + Sync>>,
         usage_source: &str,
         caused_by: Option<crate::CausalRef>,
     ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
@@ -276,6 +282,7 @@ impl<'run> DirectCompletionClient<'run> {
                     .complete_llm(
                         request,
                         purpose,
+                        facts,
                         usage_source,
                         source.effect_controller.clone(),
                         source.turn_id.as_ref(),
@@ -295,7 +302,7 @@ impl<'run> DirectCompletionClient<'run> {
             )),
             #[cfg(any(test, feature = "testing"))]
             DirectCompletionSource::TestLlmFn(invoke) => {
-                let _ = purpose;
+                let _ = (purpose, facts);
                 invoke(request, usage_source.to_string())
             }
         }

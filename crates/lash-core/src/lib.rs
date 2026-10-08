@@ -124,11 +124,7 @@ pub use lash_core_execution::tool_registry;
 pub(crate) use lash_core_execution::tool_result;
 pub use lash_core_execution::trace;
 
-mod protocol_copy;
-
 pub mod facade_support {
-    pub use crate::protocol_copy::{PROTOCOL_INTRO, protocol_guidance};
-
     pub use crate::runtime::effect::scope_status;
     pub use crate::runtime::{DurableSessionOps, EMPTY_HEAD_REVISION, QueueWithdrawalObservation};
     /// The shift-tracing seam a durable substrate implements against (the trace runtime,

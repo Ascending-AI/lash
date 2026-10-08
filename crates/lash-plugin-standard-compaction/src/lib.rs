@@ -51,6 +51,11 @@ const PRUNE_CONTEXT_THRESHOLD: f64 = 0.6;
 pub(crate) const STANDARD_COMPACTION_PLUGIN_ID: &str = "standard_compaction";
 pub(crate) const COMPACTION_SUMMARY_TITLE: &str = "Compaction summary:";
 const COMPACTION_PROMPT: &str = "Provide a detailed summary of the conversation above so a later session can continue the work without the full history.\n\nUse this template:\n---\n## Goal\n[What is the user trying to accomplish?]\n\n## Instructions\n- [Relevant instructions or constraints]\n\n## Discoveries\n[Important findings, failures, or decisions]\n\n## Accomplished\n[What is done, what is in progress, what remains]\n\n## Relevant files / directories\n[List important files or directories]\n---";
+/// The section carrying standard compaction's summary instruction.
+pub const SUMMARY_INSTRUCTION_SECTION: &str = "summary_instruction";
+
+struct SummaryInstruction(String);
+
 const COMPACTED_ATTACHMENT_PLACEHOLDER: &str = "[Attachment omitted during compaction]";
 
 /// Maximum summarization attempts one open context-overflow recovery may
@@ -522,13 +527,7 @@ async fn summarize_compaction_prefix(
         scoped_effect_controller.execution_scope(),
     )?;
     let read_view = snapshot.read_view();
-    let mut rendered = lash_sansio::session_model::render_prompt(read_view.messages());
-    let mut directive = lash_sansio::llm::types::LlmMessage::text(
-        lash_sansio::llm::types::LlmRole::User,
-        prompt_text,
-    );
-    directive.starts_user_segment = true;
-    rendered.messages.push(directive);
+    let rendered = lash_sansio::session_model::render_prompt(read_view.messages());
 
     let model = snapshot.policy.model.as_ref().ok_or_else(|| {
         ContextError::Session("compaction needs the session's model, and it selects none".into())
@@ -564,6 +563,7 @@ async fn summarize_compaction_prefix(
         .direct_llm_completion_for(
             request,
             lash_core::prompt_sections::PromptPurpose::Compaction,
+            Some(Arc::new(SummaryInstruction(prompt_text))),
             "compaction",
             caused_by,
         )
@@ -687,6 +687,27 @@ impl SessionPlugin for StandardCompactionPlugin {
     }
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
+        use lash_core::plugin::prompt::{
+            PromptInput, PromptPlacement, PromptPurpose, PromptRenderError, PromptSectionKey,
+            PromptSectionSpec, SectionText,
+        };
+        reg.prompt().section(
+            PromptSectionSpec::new(
+                PromptSectionKey::new(SUMMARY_INSTRUCTION_SECTION)
+                    .map_err(|error| PluginError::Registration(error.to_string()))?,
+                PromptPlacement::CurrentContext,
+            )
+            .purposes([PromptPurpose::Compaction]),
+            Arc::new(|input: &PromptInput<'_>| {
+                let instruction =
+                    input
+                        .protocol_facts::<SummaryInstruction>()
+                        .ok_or_else(|| {
+                            PromptRenderError::new("compaction summary inputs are absent")
+                        })?;
+                Ok(SectionText::text(&instruction.0))
+            }),
+        )?;
         let config = self.config.clone();
         reg.context().pressure(
             100,

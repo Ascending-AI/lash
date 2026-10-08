@@ -858,7 +858,7 @@ fn agent_contract_delegation_plugin(
             ),
             lash_core::lifetime::starter,
         )
-        .with_rlm_children(lash::rlm::RlmFinalAnswerFormat::RawFinalValue),
+        .with_rlm_children(),
     )
 }
 

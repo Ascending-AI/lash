@@ -440,162 +440,6 @@ fn standard_compaction_policy_at_compaction_pressure_only_omits_old_attachments(
     );
 }
 
-#[tokio::test]
-async fn standard_compactor_returns_summary_seed_for_new_frame() {
-    let trace = Arc::new(RecordingTraces::default());
-    let messages = vec![
-        text_message("u1", MessageRole::User, "old work"),
-        text_message("a1", MessageRole::Assistant, "assistant old"),
-        text_message("u2", MessageRole::User, "latest request"),
-    ];
-    let state = SessionSnapshot {
-        session_id: SessionId::from("root"),
-        policy: lash_core::testing::mock_session_policy(),
-        session_graph: SessionGraph::from_active_read_state(&messages),
-        ..SessionSnapshot::new(
-            SessionId::from("root"),
-            lash_core::testing::mock_session_policy(),
-        )
-    };
-    let compaction_scope =
-        lash_core::ExecutionScope::runtime_operation("standard-compaction-compact-test");
-    let instructions = "focus on latest request";
-    let (request_snapshot, prompt_text) =
-        prepare_compaction_request(&state, messages.clone(), Some(instructions))
-            .expect("prepare compaction request");
-    let expected_child_ids = compaction_request_ids(
-        &SessionId::from("root"),
-        &state,
-        &request_snapshot,
-        &prompt_text,
-        &compaction_scope,
-    )
-    .expect("derive compaction child identity");
-    let (retry_snapshot, retry_prompt_text) =
-        prepare_compaction_request(&state, messages.clone(), Some(instructions))
-            .expect("prepare retry compaction request");
-    assert_eq!(prompt_text, retry_prompt_text);
-    assert_eq!(
-        expected_child_ids,
-        compaction_request_ids(
-            &SessionId::from("root"),
-            &state,
-            &retry_snapshot,
-            &retry_prompt_text,
-            &compaction_scope,
-        )
-        .expect("rederive compaction child identity"),
-        "retrying the same physical compaction must preserve child identity"
-    );
-    let (same_snapshot, changed_prompt_text) =
-        prepare_compaction_request(&state, messages.clone(), Some("different focus"))
-            .expect("prepare changed-prompt compaction request");
-    assert_ne!(
-        expected_child_ids,
-        compaction_request_ids(
-            &SessionId::from("root"),
-            &state,
-            &same_snapshot,
-            &changed_prompt_text,
-            &compaction_scope,
-        )
-        .expect("derive changed-prompt compaction child identity"),
-        "different compaction prompts under one physical parent need distinct child identity"
-    );
-    let changed_messages = vec![
-        text_message("u1", MessageRole::User, "different old work"),
-        text_message("a1", MessageRole::Assistant, "assistant old"),
-        text_message("u2", MessageRole::User, "latest request"),
-    ];
-    let mut changed_state = state.clone();
-    changed_state.replace_active_read_state(&changed_messages);
-    let (changed_snapshot, changed_prompt_text) =
-        prepare_compaction_request(&changed_state, changed_messages, Some(instructions))
-            .expect("prepare changed-state compaction request");
-    assert_eq!(prompt_text, changed_prompt_text);
-    assert_ne!(
-        expected_child_ids,
-        compaction_request_ids(
-            &SessionId::from("root"),
-            &changed_state,
-            &changed_snapshot,
-            &changed_prompt_text,
-            &compaction_scope,
-        )
-        .expect("derive changed-snapshot compaction child identity"),
-        "different request snapshots under one physical parent need distinct child identity"
-    );
-    let captured = Arc::new(RecordingLlmCompletions {
-        summary: "Compacted work summary".to_string(),
-        ..Default::default()
-    });
-    let ctx = build_compaction_ctx(
-        state,
-        Some(instructions.to_string()),
-        &trace,
-        RecordingLlmCompletions::client(&captured),
-    );
-    let compactor = StandardContextCompactor::new(StandardCompactionConfig);
-
-    let compaction = compactor
-        .compact(&ctx)
-        .await
-        .expect("compact")
-        .expect("compaction");
-
-    assert_eq!(compaction.initial_nodes.len(), 1);
-    let lash_core::SessionAppendNode::Message { message, .. } = &compaction.initial_nodes[0] else {
-        panic!("expected summary message seed");
-    };
-    assert_eq!(message.role, MessageRole::Assistant);
-    assert!(
-        message
-            .parts
-            .first()
-            .map(Part::content)
-            .expect("summary text")
-            .contains("Compacted work summary")
-    );
-    assert!(matches!(
-        message.origin.as_ref(),
-        Some(MessageOrigin::Plugin { plugin_id, .. }) if plugin_id == STANDARD_COMPACTION_PLUGIN_ID
-    ));
-
-    // FIG-3374: compaction is one direct completion on the calling session;
-    // its context holds no lifecycle service to create one with.
-    let requests = captured.requests();
-    assert_eq!(requests.len(), 1, "exactly one direct provider call");
-    let request = &requests[0];
-    assert_eq!(request.scope.session_id, SessionId::from("root"));
-    assert_eq!(request.scope.agent_frame_id, expected_child_ids.0.as_str());
-    assert_eq!(request.scope.request_id, expected_child_ids.1.as_str());
-    let request_text = RecordingLlmCompletions::request_text(request);
-    assert!(request_text.contains("old work"));
-    assert!(request_text.contains("assistant old"));
-    assert!(request_text.contains("latest request"));
-    assert!(request_text.contains("## Goal"));
-    assert!(
-        request_text.contains(instructions),
-        "the focus instruction rides the summarization directive"
-    );
-
-    let events = trace.events();
-    assert_eq!(events.len(), 2);
-    assert_eq!(events[0].0.session_id.as_deref(), Some("root"));
-    assert_eq!(events[0].0.turn_id, None);
-    assert_eq!(
-        events[0].1,
-        lash_core::TraceEvent::CompactionStarted {
-            source_messages: 3,
-            instructions_present: true,
-        }
-    );
-    assert_eq!(
-        events[1].1,
-        lash_core::TraceEvent::CompactionCompleted { summary_nodes: 1 }
-    );
-}
-
 #[test]
 fn compaction_request_identity_is_stable_across_reconstructed_nested_maps() {
     let mut state = SessionSnapshot::new(
@@ -998,8 +842,8 @@ async fn recovery_runs_unasked_elides_oversized_result_and_decides_a_recovery_fr
     let decision = decide_recovery(&ctx).await;
 
     // One direct completion ran as the summarizer: the provider-visible
-    // request carries the rendered history plus the standard compaction ask
-    // and the recovery instructions, never the oversized body.
+    // request carries the elided history, never the oversized body.
+    // Purpose-section instructions are composed by the runtime at admission.
     let requests = direct.requests();
     assert_eq!(requests.len(), 1, "exactly one direct summarizer call");
     let request = &requests[0];
@@ -1010,15 +854,6 @@ async fn recovery_runs_unasked_elides_oversized_result_and_decides_a_recovery_fr
         request.scope.request_id
     );
     let request_text = RecordingLlmCompletions::request_text(request);
-    assert!(
-        request_text.contains("##") && request_text.contains("the conversation above"),
-        "the recovery summarizer runs the standard compaction prompt: {}",
-        request_text
-    );
-    assert!(
-        request_text.contains(OVERFLOW_RECOVERY_INSTRUCTIONS),
-        "the recovery summarizer must carry the recovery instructions"
-    );
     assert!(
         request_text.len() < 40_000,
         "the summarizer request itself must fit its window: {}",

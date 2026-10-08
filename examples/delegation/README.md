@@ -28,7 +28,7 @@ let delegation = delegation::DelegationPluginFactory::new(
     lash::SessionSpec::new("child-model", lash::TurnBudget::bounded(8), lash::MaxToolCalls::new(64)),
     lash::process::lifetime::starter,
 )
-.with_rlm_children(lash::rlm::RlmFinalAnswerFormat::RawFinalValue);
+.with_rlm_children();
 ```
 
 Register the factory as a host plugin. Cancel delegated work through its

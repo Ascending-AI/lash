@@ -1534,7 +1534,6 @@ fn complete_through_checkpoint(machine: &mut TurnMachine, effects: &[Effect]) ->
 fn finish_required_options() -> lash_core::ProtocolTurnOptions {
     recorded_namespace(RlmTurnOptions {
         termination: Some(RlmTermination::FinishRequired { schema: None }),
-        final_answer_format: None,
         render: None,
     })
 }

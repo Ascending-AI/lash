@@ -17,7 +17,7 @@ pub use native::{NATIVE_EXECUTE_TOOL_NAME, NATIVE_TRANSPORT_VERSION, RlmNativeTo
 mod projection;
 mod prompt_sections;
 mod protocol;
-pub use prompt_sections::{RLM_BUILTIN_INTRO, section_id, section_keys};
+pub use prompt_sections::{section_id, section_keys};
 pub mod render;
 pub use render::{BuiltinCodeRenderer, CodeRenderer, CodeRendererSlot, ResolvedRlmRender};
 mod rlm_support;

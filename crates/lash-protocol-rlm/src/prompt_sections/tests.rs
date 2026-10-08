@@ -5,15 +5,14 @@
 use std::sync::Arc;
 
 use lash_core::plugin::prompt::{
-    ComposedPrompt, PromptInput, PromptSectionSpec, PromptWrapSpec, PromptWrapTarget, SectionText,
+    ComposedPrompt, PromptInput, PromptWrapSpec, PromptWrapTarget, SectionText,
 };
 use lash_core::plugin::{PluginError, PluginRegistrar, SessionPlugin};
 use lash_core::prompt_sections::{
-    PromptPlacement, PromptPlan, PromptPurpose, PromptSectionKey, PromptSectionPlacement,
-    PromptWrapKey,
+    PromptPlacement, PromptPlan, PromptSectionPlacement, PromptWrapKey,
 };
 use lash_lashlang_runtime::{LashlangSurface, ToolBinding, ToolDefinitionBindingExt};
-use lash_rlm_types::{RlmFinalAnswerFormat, RlmTermination, RlmTurnOptions};
+use lash_rlm_types::{RlmTermination, RlmTurnOptions};
 
 use super::testing::{Call, RlmSections, compose, compose_rlm};
 use super::*;
@@ -99,10 +98,6 @@ fn current(composed: &ComposedPrompt) -> &str {
     composed.current_context.as_deref().unwrap_or("")
 }
 
-fn key(key: &str) -> PromptSectionKey {
-    PromptSectionKey::new(key).expect("valid section key")
-}
-
 /// A host plugin whose wrappers replace or omit RLM sections.
 struct HostWrappers(Vec<(&'static str, Option<&'static str>)>);
 
@@ -171,11 +166,8 @@ These read-only values are already in scope. Access them directly in `<typescrip
 
 Read-only variables:
 - `current_query`: `string`, read-only (descriptor: `string`)"##;
-const BUILTIN_GUIDANCE_SECTION: &str = "## Guidance\n\n- Be concise; no filler, hedging, or performative tone.\n- Act as soon as the next step is clear; do not restate conclusions.\n- Prefer the simplest correct solution.";
 
-/// The initial instructions, whole: the intro, the guidance, the execution
-/// prose and the declarations with the session's read-only variables, in
-/// that order.
+/// Initial instructions contain execution and the offered declarations.
 #[test]
 fn the_initial_sections_render_the_protocol_prompt_around_the_declarations() {
     let catalog = catalog();
@@ -189,77 +181,9 @@ fn the_initial_sections_render_the_protocol_prompt_around_the_declarations() {
     assert_eq!(
         initial(&composed),
         format!(
-            "{RLM_BUILTIN_INTRO}\n\n{BUILTIN_GUIDANCE_SECTION}\n\n\
-             ## TypeScript execution\n\n{EXECUTION_PROSE}\n\n{DECLARATIONS}\n\n\
+            "## TypeScript execution\n\n{EXECUTION_PROSE}\n\n{DECLARATIONS}\n\n\
              {READ_ONLY_VARIABLES}"
         )
-    );
-}
-
-/// A host replaces or omits each built-in text with a trusted wrapper, and
-/// adds its own text as its own sections; no wrapper over the prose removes
-/// a declaration.
-#[test]
-fn a_host_replaces_or_omits_each_built_in_text_and_keeps_the_declarations() {
-    let catalog = catalog();
-    let default = initial(&compose_rlm(sections(&catalog), turn(catalog.clone()))).to_string();
-    let wrapped = |wrappers: Vec<(&'static str, Option<&'static str>)>| {
-        let plugins: [Arc<dyn SessionPlugin>; 2] = [
-            Arc::new(sections(&catalog)),
-            Arc::new(HostWrappers(wrappers)),
-        ];
-        initial(&compose(&plugins, turn(catalog.clone()))).to_string()
-    };
-
-    assert_eq!(
-        wrapped(vec![(
-            section_keys::INTRO,
-            Some("You are the release assistant.")
-        )]),
-        default.replacen(RLM_BUILTIN_INTRO, "You are the release assistant.", 1)
-    );
-    assert_eq!(
-        wrapped(vec![(section_keys::INTRO, None)]),
-        default
-            .strip_prefix(&format!("{RLM_BUILTIN_INTRO}\n\n"))
-            .expect("the default opens with the built-in intro")
-    );
-    assert_eq!(
-        wrapped(vec![(section_keys::GUIDANCE, None)]),
-        default.replace(&format!("{BUILTIN_GUIDANCE_SECTION}\n\n"), "")
-    );
-    let no_prose = wrapped(vec![(section_keys::EXECUTION, None)]);
-    assert!(!no_prose.contains(EXECUTION_PROSE));
-    assert!(no_prose.contains(DECLARATIONS));
-    assert_eq!(
-        wrapped(vec![
-            (section_keys::INTRO, None),
-            (section_keys::GUIDANCE, None),
-            (section_keys::EXECUTION, None),
-        ]),
-        DECLARATIONS
-    );
-
-    struct HostText;
-    impl SessionPlugin for HostText {
-        fn id(&self) -> &'static str {
-            "host"
-        }
-        fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-            reg.prompt().section(
-                PromptSectionSpec::new(key("context"), PromptPlacement::InitialInstructions),
-                Arc::new(|_: &PromptInput<'_>| {
-                    Ok(SectionText::text(
-                        "## Context\n\nRelease 4.2 freezes on Friday.",
-                    ))
-                }),
-            )
-        }
-    }
-    let plugins: [Arc<dyn SessionPlugin>; 2] = [Arc::new(sections(&catalog)), Arc::new(HostText)];
-    assert_eq!(
-        initial(&compose(&plugins, turn(catalog.clone()))),
-        format!("{default}\n\n## Context\n\nRelease 4.2 freezes on Friday.")
     );
 }
 
@@ -383,7 +307,7 @@ fn a_section_with_nothing_to_say_renders_nothing() {
     assert!(!rendered.contains("Read-Only Variables"));
     assert!(!rendered.contains("\n\n\n"));
     // Late, only the finalization: no bound values, no required output, no
-    // answer format and no budget.
+    // budget.
     assert_eq!(
         current(&composed),
         format!(
@@ -393,25 +317,6 @@ fn a_section_with_nothing_to_say_renders_nothing() {
                 .finalization_copy(&RlmTermination::default(), RlmChannel::Cell)
         )
     );
-}
-
-/// A compaction's summarizer call offers no tools and runs no code: the
-/// intro and the guidance render, nothing of execution or the late tail.
-#[test]
-fn the_compaction_prompt_keeps_intro_and_guidance_only() {
-    let composed = compose_rlm(
-        sections(&catalog()),
-        Call {
-            purpose: PromptPurpose::Compaction,
-            facts: Some(facts()),
-            ..Call::default()
-        },
-    );
-    assert_eq!(
-        initial(&composed),
-        format!("{RLM_BUILTIN_INTRO}\n\n{BUILTIN_GUIDANCE_SECTION}")
-    );
-    assert_eq!(composed.current_context, None);
 }
 
 /// The values a program has bound render late, in name order, from the
@@ -464,7 +369,6 @@ fn the_required_output_section_renders_the_finish_contract() {
                 termination: Some(RlmTermination::FinishRequired {
                     schema: Some(lash_sansio::JsonSchema::admit(schema).expect("valid schema")),
                 }),
-                final_answer_format: Some(RlmFinalAnswerFormat::Markdown),
                 render: None,
             },
             ..Call::default()
@@ -705,9 +609,6 @@ fn the_late_sections_keep_one_user_message_with_the_expected_tail() {
                             .expect("valid schema"),
                         ),
                     }),
-                    final_answer_format: Some(RlmFinalAnswerFormat::Custom {
-                        guidance: "Write one sentence.".to_string(),
-                    }),
                     render: None,
                 }
             };
@@ -717,7 +618,7 @@ fn the_late_sections_keep_one_user_message_with_the_expected_tail() {
                 String::new()
             } else {
                 format!(
-                    "\n\n=== REQUIRED OUTPUT ===\n\n{}\n\n=== FINAL ANSWER FORMAT ===\n\nWrite one sentence.\n\n=== CONTEXT BUDGET ===\n\nTurn: 1 · Tokens: 10000 · frame switch threshold: 200000 (5%).",
+                    "\n\n=== REQUIRED OUTPUT ===\n\n{}\n\n=== CONTEXT BUDGET ===\n\nTurn: 1 · Tokens: 10000 · frame switch threshold: 200000 (5%).",
                     crate::driver::required_output_block(&sections.dialect, &termination)
                         .expect("required output")
                 )
@@ -782,5 +683,33 @@ fn the_late_sections_keep_one_user_message_with_the_expected_tail() {
                 }]
             ));
         }
+    }
+}
+
+/// Tool names declare a callable surface, not host interaction policy (FIG-5432).
+#[test]
+fn an_ask_tool_declares_its_surface_without_interaction_policy() {
+    let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool(
+        "ask",
+        "user",
+        "ask",
+        "Collect a response.",
+    )]);
+    for channel in [RlmChannel::Cell, RlmChannel::NativeTool] {
+        let composed = compose_rlm(
+            RlmSections {
+                channel,
+                ..sections(&catalog)
+            },
+            turn(catalog.clone()),
+        );
+        let prompt = initial(&composed);
+        assert!(prompt.contains("user.ask"), "{prompt}");
+        assert!(
+            !prompt.contains("Ask only when progress is blocked"),
+            "{prompt}"
+        );
+        assert!(!prompt.contains("Be concise"), "{prompt}");
+        assert!(!prompt.contains("You are an assistant"), "{prompt}");
     }
 }

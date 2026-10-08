@@ -10,7 +10,7 @@ use lash_core::{
     LlmRequest, ProjectorContext, ProtocolBuildInput, TurnDriverConfig, TurnDriverPreamble,
 };
 use lash_lashlang_runtime::LashlangSurface;
-use lash_rlm_types::{RlmFinalAnswerFormat, RlmTermination, RlmTurnOptions};
+use lash_rlm_types::RlmTermination;
 
 use crate::dialect::SessionDialect;
 #[cfg(test)]
@@ -150,44 +150,6 @@ pub(crate) fn required_output_block(
     termination
         .finish_schema()
         .map(|schema| dialect.required_output_contract(schema.as_value()))
-}
-
-/// The FINAL ANSWER FORMAT guidance. A finish-required schema defines the
-/// whole answer, so it has none; a natural schema leaves prose to the format
-/// and keeps `finish` to its contract unless that contract is text.
-pub(crate) fn final_answer_format_prompt(
-    options: &RlmTurnOptions,
-    vocabulary: crate::dialect::DialectPromptVocabulary,
-) -> Option<String> {
-    let termination = options.effective_termination();
-    if matches!(
-        termination,
-        RlmTermination::FinishRequired { schema: Some(_) }
-    ) {
-        return None;
-    }
-    match options.final_answer_format.as_ref()? {
-        RlmFinalAnswerFormat::Markdown => Some(match &termination {
-            RlmTermination::FinishRequired { .. } => format!(
-                "When finishing, call `{}` with a nicely formatted Markdown string, not a raw record/list/tool-result value.",
-                vocabulary.finish_statement
-            ),
-            RlmTermination::Natural {
-                schema: Some(schema),
-            } if !crate::dialect::schema_is_text(schema) => {
-                "Write prose-only final answers as nicely formatted Markdown.".to_string()
-            }
-            RlmTermination::Natural { .. } => format!(
-                "Write prose-only final answers as nicely formatted Markdown. If you intentionally use `{}`, use a Markdown string for user-facing answers, not a raw record/list/tool-result value.",
-                vocabulary.finish_statement
-            ),
-        }),
-        RlmFinalAnswerFormat::Custom { guidance } => {
-            let guidance = guidance.trim();
-            (!guidance.is_empty()).then(|| guidance.to_string())
-        }
-        RlmFinalAnswerFormat::RawFinalValue => None,
-    }
 }
 
 impl RlmContextProjector {

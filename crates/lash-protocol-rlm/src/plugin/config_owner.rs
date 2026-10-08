@@ -1,8 +1,7 @@
 //! The RLM protocol's session config owner (FIG-4379).
 //!
 //! A session records its RLM namespace once, at creation: the creator's
-//! stated facts, the presentation format the prompt is written against
-//! (`Markdown` when the creator states none), the channel and dialect this
+//! stated facts, the channel and dialect this
 //! host selected (ADR 0096), and this host's configured behaviour
 //! ([`RlmRecordedBehaviour`], FIG-4398). Creation reads no other session: a
 //! child records what its creator states, like a root, and only a fork copies
@@ -12,8 +11,8 @@
 //! A session may change one setting: its render preferences, through
 //! [`SetRlmRender`]. Its prompt is not config: the protocol contributes keyed
 //! sections, and a host adds or wraps sections of its own (ADR 0133).
-//! The termination and the final-answer format are fixed at creation: no
-//! command changes them, and a turn states them again through its run's options
+//! The termination is fixed at creation: no
+//! command changes it, and a turn states it again through its run's options
 //! ([`RlmRunOptions`]), which this owner applies over the recorded namespace.
 //! The channel, the dialect and the behaviour are the session's pins: a
 //! candidate that changes any of them is refused, and a run's options have
@@ -30,9 +29,7 @@ use lash_core::plugin::{
     OwnerChange,
 };
 use lash_render::RenderParamsPatch;
-use lash_rlm_types::{
-    RlmCreateExtras, RlmFinalAnswerFormat, RlmRenderPatch, RlmTermination, RlmTurnOptions,
-};
+use lash_rlm_types::{RlmCreateExtras, RlmRenderPatch, RlmTermination, RlmTurnOptions};
 
 use super::RlmProtocolPluginConfig;
 use super::channel::RlmChannel;
@@ -52,9 +49,6 @@ pub struct RlmRecordedConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<serde_json::Value>")]
     pub termination: Option<RlmTermination>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<serde_json::Value>")]
-    pub final_answer_format: Option<RlmFinalAnswerFormat>,
     /// The channel the session's programs run over.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<String>")]
@@ -83,7 +77,6 @@ impl RlmRecordedConfig {
     pub fn turn_options(&self) -> RlmTurnOptions {
         RlmTurnOptions {
             termination: self.termination.clone(),
-            final_answer_format: self.final_answer_format.clone(),
             render: self.render.clone(),
         }
     }
@@ -102,7 +95,6 @@ impl RlmRecordedConfig {
         lash_core::ProtocolTurnOptions::typed(Self {
             render: options.render,
             termination: options.termination,
-            final_answer_format: options.final_answer_format,
             channel: Some(RlmChannel::Cell),
             dialect: None,
             behaviour: RlmProtocolPluginConfig::builder()
@@ -122,8 +114,7 @@ impl RlmRecordedConfig {
 #[serde(transparent)]
 pub struct RlmCreateConfig(#[schemars(with = "serde_json::Value")] pub RlmCreateExtras);
 
-/// What a run states for the RLM namespace: its termination, its final
-/// answer format and its render preferences.
+/// What a run states for the RLM namespace: termination and render preferences.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, JsonSchema)]
 #[schemars(crate = "lash_core::facade_support::schemars")]
 #[serde(transparent)]
@@ -208,8 +199,7 @@ impl ConfigOwner for RlmConfigOwner {
     type Refusal = RlmConfigRefusal;
     type RunOptions = RlmRunOptions;
 
-    /// The creator's stated facts, the presentation format a session
-    /// defaults to, this host's channel and dialect, and this host's
+    /// The creator's stated facts, this host's channel and dialect, and its
     /// behaviour (FIG-4527). Nothing is read from another session.
     fn create(
         &self,
@@ -222,13 +212,9 @@ impl ConfigOwner for RlmConfigOwner {
                 .get()
                 .ok_or(RlmConfigRefusal::ProcessLifecycleUndeclared)?,
         );
-        let final_answer_format = stated
-            .final_answer_format
-            .unwrap_or(RlmFinalAnswerFormat::Markdown);
         Ok(Some(RlmRecordedConfig {
             render: stated.render,
             termination: stated.termination,
-            final_answer_format: Some(final_answer_format),
             channel: Some(self.channel),
             dialect: Some(self.dialect.to_string()),
             behaviour,
@@ -271,7 +257,7 @@ impl ConfigOwner for RlmConfigOwner {
         Ok(())
     }
 
-    /// A stated termination or final-answer format replaces the recorded
+    /// A stated termination replaces the recorded
     /// one for the run, and stated render preferences apply field by field
     /// over the recorded ones. The pins stay as recorded: a run's options
     /// cannot name them.
@@ -282,7 +268,6 @@ impl ConfigOwner for RlmConfigOwner {
     ) -> Result<RlmRecordedConfig, RlmConfigRefusal> {
         let RlmTurnOptions {
             termination,
-            final_answer_format,
             render,
         } = options.0;
         let render = match (render, recorded.render.as_ref()) {
@@ -295,8 +280,6 @@ impl ConfigOwner for RlmConfigOwner {
         Ok(RlmRecordedConfig {
             render,
             termination: termination.or_else(|| recorded.termination.clone()),
-            final_answer_format: final_answer_format
-                .or_else(|| recorded.final_answer_format.clone()),
             ..recorded.clone()
         })
     }
@@ -393,20 +376,6 @@ mod tests {
         })
     }
 
-    /// Every session defaults to `Markdown`, whatever its lineage, and
-    /// records this host's channel and dialect.
-    #[test]
-    fn creation_defaults_the_format_and_records_the_pins() {
-        let run = created(None);
-        assert_eq!(
-            run.final_answer_format,
-            Some(RlmFinalAnswerFormat::Markdown)
-        );
-        assert_eq!(run.channel, Some(RlmChannel::Cell));
-        assert_eq!(run.dialect.as_deref(), Some("typescript"));
-        assert_eq!(run.behaviour, config().recorded_behaviour(false));
-    }
-
     /// FIG-4652: the owner lays a run's options over its recorded namespace.
     /// Stated render fields apply over the session's field by field, a
     /// stated termination replaces the session's for the run, and nothing a
@@ -424,7 +393,6 @@ mod tests {
         let recorded = created(Some(RlmCreateExtras {
             render: Some(print(Some(5), None)),
             termination: Some(RlmTermination::FinishRequired { schema: None }),
-            ..RlmCreateExtras::default()
         }));
         let applied = owner()
             .apply_run_options(
@@ -456,7 +424,6 @@ mod tests {
                 &recorded,
                 RlmRunOptions(RlmTurnOptions {
                     termination: Some(RlmTermination::Natural { schema: None }),
-                    final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
                     render: None,
                 }),
             )
@@ -464,10 +431,6 @@ mod tests {
         assert_eq!(
             run.termination,
             Some(RlmTermination::Natural { schema: None })
-        );
-        assert_eq!(
-            run.final_answer_format,
-            Some(RlmFinalAnswerFormat::RawFinalValue)
         );
         assert_eq!(run.render, recorded.render);
         assert_eq!(
@@ -488,7 +451,6 @@ mod tests {
         let recorded = serde_json::to_value(created(Some(RlmCreateExtras {
             render: Some(RlmRenderPatch::default()),
             termination: Some(RlmTermination::Natural { schema: None }),
-            ..RlmCreateExtras::default()
         })))
         .expect("the recorded namespace encodes");
         let stated: std::collections::BTreeSet<&str> = recorded
@@ -502,8 +464,8 @@ mod tests {
             .collect();
         assert_eq!(
             stated,
-            std::collections::BTreeSet::from(["final_answer_format", "render", "termination"]),
-            "a run states only its termination, its answer format and its render"
+            std::collections::BTreeSet::from(["render", "termination"]),
+            "a run states only its termination and its render"
         );
     }
 

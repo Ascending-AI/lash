@@ -218,16 +218,12 @@ impl ConfigOwner for TestCodeConfigOwner {
 struct TestCodeCreateExtras {
     #[schemars(with = "serde_json::Value")]
     termination: serde_json::Value,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<serde_json::Value>")]
-    final_answer_format: Option<serde_json::Value>,
 }
 
 impl Default for TestCodeCreateExtras {
     fn default() -> Self {
         Self {
             termination: default_test_code_termination(),
-            final_answer_format: None,
         }
     }
 }

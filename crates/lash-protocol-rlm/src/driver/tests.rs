@@ -1,14 +1,7 @@
 use lash_core::llm::types::LlmRole;
+use lash_rlm_types::RlmTurnOptions;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
-/// These fixtures cover the prompt wording; the walker in
-/// `dialect::prompt_walker_tests` covers the whole contract.
-fn final_answer_format_prompt_test(options: &RlmTurnOptions) -> Option<String> {
-    final_answer_format_prompt(
-        options,
-        crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
-    )
-}
 
 use super::*;
 use lash_core::session_model::{ConversationRecord, MessageRole, Part, SessionHistoryRecord};
@@ -692,68 +685,6 @@ fn rlm_prompt_projects_history_as_chat_messages_with_rolling_cache_breakpoint() 
             ..
         }) if text.contains("=== CURRENT ITERATION: 2 ===")
     ));
-}
-
-#[test]
-fn final_answer_format_guidance_honors_custom_text_and_raw_suppression() {
-    let custom = final_answer_format_prompt_test(&RlmTurnOptions {
-        termination: Some(RlmTermination::Natural { schema: None }),
-        final_answer_format: Some(RlmFinalAnswerFormat::Custom {
-            guidance: "  Finish concise release-note Markdown.  ".to_string(),
-        }),
-        render: None,
-    })
-    .expect("custom guidance");
-    assert_eq!(custom, "Finish concise release-note Markdown.");
-
-    assert!(
-        final_answer_format_prompt_test(&RlmTurnOptions {
-            termination: Some(RlmTermination::FinishRequired { schema: None }),
-            final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
-            render: None,
-        })
-        .is_none()
-    );
-}
-
-#[test]
-fn required_output_schema_suppresses_final_answer_format_guidance() {
-    let guidance = final_answer_format_prompt_test(&RlmTurnOptions {
-        termination: Some(RlmTermination::FinishRequired {
-            schema: Some(
-                lash_sansio::JsonSchema::admit(serde_json::json!({ "type": "object" }))
-                    .expect("valid finish schema"),
-            ),
-        }),
-        final_answer_format: Some(RlmFinalAnswerFormat::Markdown),
-        render: None,
-    });
-
-    assert!(guidance.is_none());
-}
-
-/// FIG-5104: on a Natural turn the Markdown preference still shapes prose, and
-/// it names a Markdown `finish` string only where the finish schema is text: a
-/// structured contract is not overruled by "use a Markdown string".
-#[test]
-fn natural_finish_schema_keeps_markdown_guidance_to_what_the_schema_allows() {
-    let guidance = |schema: serde_json::Value| {
-        final_answer_format_prompt_test(&RlmTurnOptions {
-            termination: Some(RlmTermination::Natural {
-                schema: Some(lash_sansio::JsonSchema::admit(schema).expect("valid finish schema")),
-            }),
-            final_answer_format: Some(RlmFinalAnswerFormat::Markdown),
-            render: None,
-        })
-        .expect("Markdown guidance")
-    };
-    let text = guidance(serde_json::json!({ "type": "string" }));
-    assert!(text.contains("use a Markdown string"), "{text}");
-    let structured = guidance(serde_json::json!({ "type": "object" }));
-    assert_eq!(
-        structured,
-        "Write prose-only final answers as nicely formatted Markdown."
-    );
 }
 
 fn required_output_contract(schema: serde_json::Value) -> String {

@@ -2,7 +2,6 @@
 //! pass, on the core's node over SQLite memory stores (FIG-5307).
 
 use super::*;
-use crate::rlm::RlmSessionExt as _;
 use crate::support::TurnInput;
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmResponse};
@@ -39,37 +38,17 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
             spec: mock_session_spec().plugin_options(
                 lash_core::PluginOptions::typed(
                     lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
-                    lash_rlm_types::RlmCreateExtras {
-                        final_answer_format: Some(crate::rlm::RlmFinalAnswerFormat::Markdown),
-                        ..Default::default()
-                    },
+                    lash_rlm_types::RlmCreateExtras::default(),
                 )
                 .map_err(EmbedError::ProtocolTurnOptions)?,
             ),
         })
         .await?;
-    for (id, format) in [
-        (
-            "materialize-run",
-            crate::rlm::RlmFinalAnswerFormat::Markdown,
-        ),
-        (
-            "materialize-child",
-            crate::rlm::RlmFinalAnswerFormat::Markdown,
-        ),
-        (
-            "materialize-stated",
-            crate::rlm::RlmFinalAnswerFormat::Markdown,
-        ),
-    ] {
+    for id in ["materialize-run", "materialize-child", "materialize-stated"] {
         let session = core
             .session(crate::SessionId::parse(id).expect("nonblank host identity"))
             .open()
             .await?;
-        assert_eq!(
-            session.rlm_config().unwrap().final_answer_format,
-            Some(format)
-        );
         assert_eq!(
             session.runtime.process_engines.require("lashlang")?.kind(),
             "lashlang"
@@ -81,24 +60,11 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
         cold.host_process_engines.require("lashlang")?.kind(),
         "lashlang"
     );
-    for (id, format) in [
-        (
-            "materialize-run",
-            crate::rlm::RlmFinalAnswerFormat::Markdown,
-        ),
-        (
-            "materialize-child",
-            crate::rlm::RlmFinalAnswerFormat::Markdown,
-        ),
-    ] {
+    for id in ["materialize-run", "materialize-child"] {
         let session = cold
             .session(crate::SessionId::parse(id).expect("nonblank host identity"))
             .open()
             .await?;
-        assert_eq!(
-            session.rlm_config().unwrap().final_answer_format,
-            Some(format)
-        );
         assert_eq!(
             session.runtime.process_engines.require("lashlang")?.kind(),
             "lashlang"

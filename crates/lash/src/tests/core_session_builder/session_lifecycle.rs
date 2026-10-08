@@ -15,6 +15,65 @@ fn session(text: &str) -> crate::SessionId {
 
 #[cfg(feature = "rlm")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rlm_cell_answer_preserves_the_exact_string_without_presentation_policy() {
+    let answer = "  <raw>\n# literal\n\ttrailing spaces  ";
+    let seen = Arc::new(StdMutex::new(Vec::new()));
+    let provider = crate::testing::TestProvider::builder()
+        .kind("rlm-string-answer")
+        .complete({
+            let seen = Arc::clone(&seen);
+            move |request| {
+                let seen = Arc::clone(&seen);
+                async move {
+                    seen.lock_recover().push(format!(
+                        "{}\n{}",
+                        system_text(&request),
+                        request_text(&request)
+                    ));
+                    Ok(text_response(&typescript_block(&format!(
+                        "finish({});",
+                        serde_json::to_string(answer).expect("string encodes")
+                    ))))
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let backend = sqlite_memory_store_backend().await;
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend))
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
+        .build(crate::testing::runtime_lease_owner())
+        .expect("rlm core");
+    let created = core
+        .session(session("rlm-exact-string"))
+        .create(crate::SessionCreation::root(mock_session_spec()))
+        .await
+        .expect("created");
+    let result = created
+        .send(crate::TurnInput::text("return the literal string"))
+        .output()
+        .await
+        .expect("cell answers");
+    assert_eq!(result.final_value(), Some(&serde_json::json!(answer)));
+    {
+        let prompts = seen.lock_recover();
+        assert_eq!(prompts.len(), 1);
+        assert!(
+            !prompts[0].contains("FINAL ANSWER FORMAT"),
+            "{}",
+            prompts[0]
+        );
+        assert!(
+            !prompts[0].contains("nicely formatted Markdown"),
+            "{}",
+            prompts[0]
+        );
+    }
+    core.shutdown().await.expect("shutdown");
+}
+
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn rlm_protocol_config_sleep_ability_drives_prompt_surface() {
     let seen = Arc::new(StdMutex::new(Vec::new()));
     let provider = crate::testing::TestProvider::builder()
@@ -81,65 +140,6 @@ async fn rlm_protocol_config_sleep_ability_drives_prompt_surface() {
             "the prompt still advertises `{retired}`"
         );
     }
-    core.shutdown().await.expect("shutdown");
-}
-
-#[cfg(feature = "rlm")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rlm_root_session_final_answer_format_defaults_to_markdown_and_can_be_raw() {
-    let seen = Arc::new(StdMutex::new(Vec::new()));
-    let backend = sqlite_memory_store_backend().await;
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend))
-        .serve_test_llm_profile(
-            recording_request_provider(Arc::clone(&seen)),
-            mock_llm_profile_spec(),
-        )
-        .build(crate::testing::runtime_lease_owner())
-        .expect("rlm core");
-    let markdown = core
-        .session(session("rlm-root-markdown"))
-        .create(crate::SessionCreation::root(mock_session_spec()))
-        .await
-        .expect("created");
-    markdown
-        .send(crate::TurnInput::text("hello"))
-        .output()
-        .await
-        .expect("the markdown turn answers");
-    let raw = core
-        .session(session("rlm-root-raw"))
-        .create(crate::SessionCreation::root(
-            mock_session_spec().plugin_options(
-                lash_core::PluginOptions::typed(
-                    lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
-                    lash_rlm_types::RlmCreateExtras {
-                        final_answer_format: Some(
-                            lash_rlm_types::RlmFinalAnswerFormat::RawFinalValue,
-                        ),
-                        ..lash_rlm_types::RlmCreateExtras::default()
-                    },
-                )
-                .expect("typed rlm extras"),
-            ),
-        ))
-        .await
-        .expect("created");
-    raw.send(crate::TurnInput::text("hello"))
-        .require_finish()
-        .expect("finish required")
-        .output()
-        .await
-        .expect("the raw turn answers");
-
-    let prompts = seen.lock_recover().clone();
-    assert!(prompts[0].contains("FINAL ANSWER FORMAT"), "{}", prompts[0]);
-    assert!(prompts[0].contains("Markdown string"), "{}", prompts[0]);
-    assert!(
-        !prompts[1].contains("FINAL ANSWER FORMAT"),
-        "{}",
-        prompts[1]
-    );
-    assert!(!prompts[1].contains("Markdown string"), "{}", prompts[1]);
     core.shutdown().await.expect("shutdown");
 }
 

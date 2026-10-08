@@ -36,6 +36,7 @@ use lash_core_execution::{AdmittedDirectSend, ProviderRequestBody};
 /// config and plugins, and its committed session view when a session owns
 /// it.
 pub(in crate::runtime) struct OwnedPrompt {
+    pub(in crate::runtime) facts: Option<Arc<dyn std::any::Any + Send + Sync>>,
     pub(in crate::runtime) plugins: Arc<crate::PluginSession>,
     pub(in crate::runtime) plan: PromptPlan,
     pub(in crate::runtime) config: crate::AdmittedPluginConfig,
@@ -220,6 +221,7 @@ async fn compose(
     request: &LlmRequest,
 ) -> Result<Result<Option<crate::plugin::prompt::ComposedPrompt>, LlmCallError>, PluginError> {
     let OwnedPrompt {
+        facts,
         plugins,
         plan,
         config,
@@ -256,7 +258,7 @@ async fn compose(
             },
             namespaces: plugins.committed_namespaces(),
         },
-        None,
+        facts,
     );
     match compose_prompt(
         &catalog,

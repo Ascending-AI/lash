@@ -135,12 +135,9 @@ pub mod config {
 /// replaces or omits a built-in section by wrapping it (ADR 0133):
 ///
 /// ```ignore
-/// reg.prompt().wrap(
-///     PromptWrapSpec::new(key("support-intro"), PromptSectionId::new(
-///         lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
-///         key(lash::standard::standard_section_keys::INTRO),
-///     )),
-///     Arc::new(|_: &PromptInput<'_>, _: PromptWrapTarget<'_>, _: SectionText| {
+/// reg.prompt().section(
+///     PromptSectionSpec::new(key("support-intro"), PromptPlacement::InitialInstructions),
+///     Arc::new(|_: &PromptInput<'_>| {
 ///         Ok(SectionText::text("You are the support desk's assistant."))
 ///     }),
 /// )?;
@@ -149,10 +146,9 @@ pub mod config {
 /// A run's options are [`StandardRunOptions`].
 pub mod standard {
     pub use lash_protocol_standard::{
-        STANDARD_INTRO, STANDARD_PROTOCOL_PLUGIN_ID, SetStandardRender, StandardConfigOwner,
-        StandardConfigRefusal, StandardRecordedBehaviour, StandardRecordedConfig,
-        StandardRenderRefusal, StandardRunOptions, StandardTurnOptions,
-        section_keys as standard_section_keys,
+        STANDARD_PROTOCOL_PLUGIN_ID, SetStandardRender, StandardConfigOwner, StandardConfigRefusal,
+        StandardRecordedBehaviour, StandardRecordedConfig, StandardRenderRefusal,
+        StandardRunOptions, StandardTurnOptions, section_keys as standard_section_keys,
     };
 }
 pub mod render {

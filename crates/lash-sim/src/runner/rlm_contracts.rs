@@ -730,7 +730,6 @@ fn rlm_contract_config(
     rlm_contract_config_with_turn_options(lash_protocol_rlm::RlmRecordedConfig::for_testing(
         RlmTurnOptions {
             termination: Some(termination),
-            final_answer_format: None,
             render: None,
         },
     ))

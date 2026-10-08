@@ -139,7 +139,6 @@ pub fn rlm_session_config(
         .map_err(|err| RlmSessionConfigDecodeError::Invalid(err.to_string()))?;
     Ok(recorded
         .map(|recorded| RlmSessionConfig {
-            final_answer_format: recorded.final_answer_format,
             termination: recorded.termination,
         })
         .unwrap_or_default())
@@ -481,7 +480,6 @@ mod tests {
             serde_json::to_value(crate::RlmRecordedConfig {
                 render: None,
                 termination: None,
-                final_answer_format: None,
                 channel: Some(crate::RlmChannel::Cell),
                 dialect: Some("typescript".to_string()),
                 behaviour: creating.recorded_behaviour(false),

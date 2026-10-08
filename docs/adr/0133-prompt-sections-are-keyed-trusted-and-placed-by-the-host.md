@@ -45,7 +45,7 @@ does, compaction included.
 Every piece of model-facing instruction text is a prompt section, owned as
 `(plugin id, local key)` (`PromptSectionId`):
 
-- the protocol's intro, guidance, execution and output text;
+- the protocol's execution and output mechanics;
 - tool and MCP guidance;
 - host text;
 - add-on plugin content.
@@ -70,19 +70,24 @@ stay history. Section text never enters the conversation graph.
 
 The protocols' sections, with their default placements:
 
-- Standard (`standard_protocol`): `intro`, `execution` and `guidance`, all
-  in the initial instructions;
-- RLM (`rlm_protocol`, both channels): `intro`, `guidance`, `execution`,
+- Standard (`standard_protocol`): `execution` in the initial instructions;
+- RLM (`rlm_protocol`, both channels): `execution`,
   `declarations` (over exactly the offered callable surface) in the initial
   instructions; `bound_variables`, `finalization`, `required_output`,
-  `final_answer_format` and `context_budget` late.
+  `context_budget` late.
 
 No protocol renders text for a delegated child: core has no subagent concept
 ([ADR 0134](0134-creating-a-session-is-explicit-only-a-fork-clones.md)). A
 plugin that delegates registers its own section, which reads its own
 namespace.
 
-Only `intro` and `guidance` render for a compaction. A protocol has no host
+Protocols contribute execution mechanics only, with no persona, work style,
+interaction policy selected by a tool name, or answer presentation setting.
+No protocol section renders for compaction. The optional standard-compaction
+plugin contributes `standard_compaction/summary_instruction` for that purpose,
+late by default: its summary template, previous-summary update and explicit
+focus instructions all follow this section's wrappers and host placement.
+A host can replace or exclude the entire instruction. A protocol has no host
 prompt config: a host adds its text as its own sections and replaces or omits
 a protocol section with a wrapper.
 
@@ -347,6 +352,13 @@ the `Direct { name }` sections of its explicit purpose; neither composes a
 turn's sections, and both are offered no tools (a request that names tools
 is refused unsent). Their text is kept byte for byte. `llm_query`'s
 instructions are its plugin's `Direct { name: "llm_query" }` section.
+
+An owned caller may supply opaque derived section inputs, frozen for that
+composition (the standard summarizer's requested focus, for example). They
+are renderer inputs, never extra messages; the admission records their
+composed text and exact request body. A resend reads that admission and
+renders nothing again. The compaction request's derived identity still
+includes its source snapshot and requested instruction.
 
 Each call is admitted under the execution that owns it: a compaction under
 its session command's run, a direct call under its tool attempt or process

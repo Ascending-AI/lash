@@ -1,45 +1,17 @@
-//! The RLM protocol's prompt sections (ADR 0133, FIG-5257).
+//! The RLM protocol's keyed execution sections (ADR 0133).
 //!
-//! The protocol contributes its prompt as keyed sections under its plugin
-//! id, on both channels. The default placements keep the layout a session
-//! has always had; the host's plan may move any of them:
-//!
-//! In the initial instructions, what changes least:
-//!
-//! 1. `intro`: the identity statement;
-//! 2. `guidance`: the behavioural bullets, with the interactive one when the
-//!    offered surface has the `ask` tool;
-//! 3. `execution`: the channel's prose on writing and running programs,
-//!    titled by the dialect;
-//! 4. `declarations`: the generated declarations over exactly the offered
-//!    callable surface (tools, host surface) and the read-only variables.
-//!
-//! Late, after the projected conversation and outside history, what the
-//! current call needs:
-//!
-//! 5. `bound_variables`: the values the session's programs have bound;
-//! 6. `finalization`: how to finish under the run's termination;
-//! 7. `required_output`: the contract a finish value must match;
-//! 8. `final_answer_format`: the presentation the answer is written in;
-//! 9. `context_budget`: the soft context budget, omitted without a
-//!    configured threshold or committed usage, its threshold clamped below
-//!    the context window, and read against the previous turn's committed
-//!    prompt usage.
-//!
-//! A session's role among others is not the protocol's concern: a host
-//! plugin that creates child sessions registers its own section for them
-//! (ADR 0134).
-//!
-//! `intro` and `guidance` also render for a compaction's summarizer call,
-//! which offers no tools and runs no code. The declarations never depend on
-//! the prose: a wrapper that omits every built-in text leaves what the
-//! session can call. Host text is the host's own sections.
+//! `execution` and `declarations` render in the initial instructions.
+//! `bound_variables`, `finalization`, `required_output` and `context_budget`
+//! render late, outside history. The host's plan may move or exclude them,
+//! and trusted wrappers may replace their text. Hosts supply their own
+//! identity, interaction guidance and answer presentation through sections.
+//! Compaction calls run no code and select none of these turn sections.
 
 use std::sync::Arc;
 
 use lash_core::plugin::prompt::{
-    PromptInput, PromptPlacement, PromptPurpose, PromptRenderError, PromptSection,
-    PromptSectionKey, PromptSectionSpec, SectionText,
+    PromptInput, PromptPlacement, PromptRenderError, PromptSection, PromptSectionKey,
+    PromptSectionSpec, SectionText,
 };
 use lash_core::plugin::{PluginError, PluginRegistrar};
 
@@ -47,19 +19,13 @@ use crate::dialect::{ExecutionSection, SessionDialect};
 use crate::plugin::{RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmRecordedConfig};
 use crate::rlm_support::{effective_budget_tokens, format_budget_suffix_with_vocabulary};
 
-/// The identity statement a code-mode prompt opens with.
-pub use lash_core::facade_support::PROTOCOL_INTRO as RLM_BUILTIN_INTRO;
-
 /// The keys the RLM protocol registers its sections under.
 pub mod section_keys {
-    pub const INTRO: &str = "intro";
-    pub const GUIDANCE: &str = "guidance";
     pub const EXECUTION: &str = "execution";
     pub const DECLARATIONS: &str = "declarations";
     pub const BOUND_VARIABLES: &str = "bound_variables";
     pub const FINALIZATION: &str = "finalization";
     pub const REQUIRED_OUTPUT: &str = "required_output";
-    pub const FINAL_ANSWER_FORMAT: &str = "final_answer_format";
     pub const CONTEXT_BUDGET: &str = "context_budget";
 }
 
@@ -169,33 +135,11 @@ fn late_block(title: &str, body: Option<impl AsRef<str>>) -> SectionText {
     }
 }
 
-/// The run's recorded RLM options: its termination and answer format.
+/// The run's recorded RLM options.
 fn recorded(input: &PromptInput<'_>) -> Result<Option<RlmRecordedConfig>, PromptRenderError> {
     input.config::<RlmRecordedConfig>().map_err(|error| {
         PromptRenderError::new(format!("invalid recorded RLM session config: {error}"))
     })
-}
-
-fn intro(_: &RlmSectionBehaviour, _: &PromptInput<'_>) -> Result<SectionText, PromptRenderError> {
-    Ok(SectionText::text(RLM_BUILTIN_INTRO))
-}
-
-fn guidance(
-    _: &RlmSectionBehaviour,
-    input: &PromptInput<'_>,
-) -> Result<SectionText, PromptRenderError> {
-    // The whole offered catalog decides whether a user can be asked, not
-    // only the tools shown inline.
-    let interactive = input
-        .offered()
-        .catalog()
-        .tool_names()
-        .iter()
-        .any(|name| name == "ask");
-    Ok(SectionText::Text(format!(
-        "## Guidance\n\n{}",
-        lash_core::facade_support::protocol_guidance(interactive)
-    )))
 }
 
 fn execution(
@@ -286,19 +230,6 @@ fn required_output(
     ))
 }
 
-fn final_answer_format(
-    behaviour: &RlmSectionBehaviour,
-    input: &PromptInput<'_>,
-) -> Result<SectionText, PromptRenderError> {
-    let options = recorded(input)?
-        .map(|recorded| recorded.turn_options())
-        .unwrap_or_default();
-    Ok(late_block(
-        "FINAL ANSWER FORMAT",
-        crate::driver::final_answer_format_prompt(&options, behaviour.dialect.prompt_vocabulary()),
-    ))
-}
-
 fn context_budget(
     behaviour: &RlmSectionBehaviour,
     input: &PromptInput<'_>,
@@ -347,27 +278,16 @@ pub(crate) fn register_sections(
     use PromptPlacement::{CurrentContext, InitialInstructions};
     use section_keys::*;
     let behaviour = Arc::new(behaviour);
-    let sections: [(&str, PromptPlacement, bool, Render); 9] = [
-        (INTRO, InitialInstructions, true, intro),
-        (GUIDANCE, InitialInstructions, true, guidance),
-        (EXECUTION, InitialInstructions, false, execution),
-        (DECLARATIONS, InitialInstructions, false, declarations),
-        (BOUND_VARIABLES, CurrentContext, false, bound_variables),
-        (FINALIZATION, CurrentContext, false, finalization),
-        (REQUIRED_OUTPUT, CurrentContext, false, required_output),
-        (
-            FINAL_ANSWER_FORMAT,
-            CurrentContext,
-            false,
-            final_answer_format,
-        ),
-        (CONTEXT_BUDGET, CurrentContext, false, context_budget),
+    let sections: [(&str, PromptPlacement, Render); 6] = [
+        (EXECUTION, InitialInstructions, execution),
+        (DECLARATIONS, InitialInstructions, declarations),
+        (BOUND_VARIABLES, CurrentContext, bound_variables),
+        (FINALIZATION, CurrentContext, finalization),
+        (REQUIRED_OUTPUT, CurrentContext, required_output),
+        (CONTEXT_BUDGET, CurrentContext, context_budget),
     ];
-    for (local, placement, compaction, render) in sections {
-        let mut spec = PromptSectionSpec::new(key(local), placement);
-        if compaction {
-            spec = spec.purposes([PromptPurpose::Turn, PromptPurpose::Compaction]);
-        }
+    for (local, placement, render) in sections {
+        let spec = PromptSectionSpec::new(key(local), placement);
         reg.prompt().section(spec, renderer(&behaviour, render))?;
     }
     Ok(())

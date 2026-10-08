@@ -103,7 +103,6 @@ mod tests {
         RlmRecordedConfig {
             render: None,
             termination: None,
-            final_answer_format: None,
             channel,
             dialect: dialect.map(str::to_string),
             behaviour: super::super::RlmProtocolPluginConfig::builder()

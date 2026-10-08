@@ -899,20 +899,10 @@ impl RlmTermination {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum RlmFinalAnswerFormat {
-    Markdown,
-    Custom { guidance: String },
-    RawFinalValue,
-}
-
 /// RLM protocol session config. Natural turns finish with prose-only model
 /// responses or the RLM language's explicit `finish` operation. Programmatic
 /// turns can require an explicit finish value. Either termination can validate
 /// a finish value against a schema.
-/// `final_answer_format` is a session presentation preference; schema-required
-/// turns ignore it.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RlmCreateExtras {
@@ -926,8 +916,6 @@ pub struct RlmCreateExtras {
     /// set-if-unset guard (ADR 0066).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub termination: Option<RlmTermination>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub final_answer_format: Option<RlmFinalAnswerFormat>,
 }
 
 /// The RLM options a *single turn* may state again (FIG-1979).
@@ -946,9 +934,6 @@ pub struct RlmTurnOptions {
     /// default, and leaves whatever the session recorded alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub termination: Option<RlmTermination>,
-    /// Presentation preference for this turn's final answer.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub final_answer_format: Option<RlmFinalAnswerFormat>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render: Option<RlmRenderPatch>,
 }
@@ -987,7 +972,6 @@ impl RlmTurnOptions {
 /// protocol turn options.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RlmSessionConfig {
-    pub final_answer_format: Option<RlmFinalAnswerFormat>,
     pub termination: Option<RlmTermination>,
 }
 
@@ -997,25 +981,19 @@ impl RlmSessionConfig {
         Self::default()
     }
 
-    pub fn final_answer_format(mut self, format: RlmFinalAnswerFormat) -> Self {
-        self.final_answer_format = Some(format);
-        self
-    }
-
     pub fn termination(mut self, termination: RlmTermination) -> Self {
         self.termination = Some(termination);
         self
     }
 
     pub fn is_empty(&self) -> bool {
-        self.final_answer_format.is_none() && self.termination.is_none()
+        self.termination.is_none()
     }
 }
 
 impl From<&RlmCreateExtras> for RlmSessionConfig {
     fn from(extras: &RlmCreateExtras) -> Self {
         Self {
-            final_answer_format: extras.final_answer_format.clone(),
             termination: extras.termination.clone(),
         }
     }
@@ -1026,7 +1004,6 @@ impl From<&RlmSessionConfig> for RlmCreateExtras {
         Self {
             render: None,
             termination: config.termination.clone(),
-            final_answer_format: config.final_answer_format.clone(),
         }
     }
 }

@@ -38,7 +38,6 @@ pub(crate) fn test_config() -> TurnMachineConfig {
 pub(crate) fn test_config_with_termination(rlm_termination: RlmTermination) -> TurnMachineConfig {
     test_config_with_protocol_turn_options(recorded_namespace(RlmTurnOptions {
         termination: Some(rlm_termination),
-        final_answer_format: None,
         render: None,
     }))
 }
@@ -54,7 +53,6 @@ pub(crate) fn recorded_namespace(options: RlmTurnOptions) -> lash_core::Protocol
     lash_core::ProtocolTurnOptions::typed(lash_protocol_rlm::RlmRecordedConfig {
         render: options.render,
         termination: options.termination,
-        final_answer_format: options.final_answer_format,
         channel: Some(lash_protocol_rlm::RlmChannel::Cell),
         dialect: None,
         behaviour: lash_protocol_rlm::RlmProtocolPluginConfig::builder()

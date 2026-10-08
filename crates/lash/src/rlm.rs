@@ -180,11 +180,6 @@ pub use lash_protocol_rlm::{
     ExtraKeys, ObjectShape, ProcessParamShape, ProcessShape, SchemaShape, ShapeConstraints,
     ShapeField, ShapeKind, ShapeRow,
 };
-/// The code-mode prompt sections (ADR 0133): the keys the protocol
-/// registers its sections under, and its built-in intro.
-pub use lash_protocol_rlm::{
-    RLM_BUILTIN_INTRO, RlmProjectorConfig, section_id, section_keys as rlm_section_keys,
-};
 /// The config groups and builder state an [`RlmProtocolPluginConfig`] is
 /// assembled from.
 pub use lash_protocol_rlm::{RlmAbilities, RlmLanguageFeatures, RlmPromptFeatures, UnsetChannel};
@@ -197,6 +192,9 @@ pub use lash_protocol_rlm::{
 /// [`rlm_session_projection_extension`], a durable session extension the
 /// session's command lane records as an [`RlmSeed`] event (FIG-5134).
 pub use lash_protocol_rlm::{RlmProjectedBindings, RlmSeed, rlm_session_projection_extension};
+/// The code-mode prompt sections (ADR 0133): the keys the protocol
+/// registers its sections under, and its built-in intro.
+pub use lash_protocol_rlm::{RlmProjectorConfig, section_id, section_keys as rlm_section_keys};
 pub use lash_render::{RenderParams, RenderParamsPatch};
 /// The committed RLM event variants the protocol owns and
 /// the record types their fields name.
@@ -206,8 +204,7 @@ pub use lash_rlm_types::{
     RlmTrajectoryEntry,
 };
 pub use lash_rlm_types::{
-    RlmCreateExtras, RlmFinalAnswerFormat, RlmRenderPatch, RlmSessionConfig, RlmTermination,
-    RlmTurnOptions,
+    RlmCreateExtras, RlmRenderPatch, RlmSessionConfig, RlmTermination, RlmTurnOptions,
 };
 pub use lash_rlm_types::{RlmProjectedSeedEntry, RlmProjectedSeedSnapshot, RlmSeedPluginBody};
 pub use lashlang::LinkedModule;

@@ -130,6 +130,7 @@ async fn admit(world: &World) -> OwnedAdmission {
         },
         purpose: PromptPurpose::Compaction,
         prompt: OwnedPrompt {
+            facts: None,
             plugins,
             plan: PromptPlan::default(),
             config: crate::AdmittedPluginConfig::default(),

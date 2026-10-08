@@ -62,7 +62,6 @@ pub(super) fn config(native: bool, termination: RlmTermination) -> TurnMachineCo
         writer_formats: lash_core::build_newest_writer_formats(),
         termination: crate::plugin::RlmRecordedConfig::for_testing(RlmTurnOptions {
             termination: Some(termination),
-            final_answer_format: None,
             render: None,
         }),
     }

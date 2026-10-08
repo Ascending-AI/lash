@@ -36,7 +36,7 @@ use lash_core::session_model::{
 
 mod batch;
 mod prompt;
-pub use prompt::{STANDARD_INTRO, section_keys};
+pub use prompt::section_keys;
 pub mod render;
 pub use batch::BatchResultRow;
 pub use render::{
@@ -500,7 +500,6 @@ impl SessionPlugin for StandardProtocolPlugin {
             reg,
             prompt::StandardPromptBehaviour {
                 batch: self.config.batch,
-                discovery: self.config.discovery.is_some(),
             },
         )?;
         reg.protocol()

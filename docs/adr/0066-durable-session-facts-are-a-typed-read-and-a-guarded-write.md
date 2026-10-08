@@ -21,8 +21,7 @@ registered (ADR 0126), and a fact with no command never changes.
 
 ### Read the recorded facts
 
-`RlmSessionConfig` carries `final_answer_format` and `termination`, both as
-`Option`. `None` means the session records no statement for that fact, which is
+`RlmSessionConfig` carries `termination` as an `Option`. `None` means the session records no statement for that fact, which is
 different from explicitly recording its default value. Read it through
 `RlmSessionReadViewExt::rlm_config` or `RlmSessionExt::rlm_config`.
 
@@ -46,10 +45,8 @@ the tool-source policy; it carries no replacement
 session config. A registry that cannot bind the recorded model key refuses
 its requests with `LlmProfileUnavailable`.
 
-The protocol fills a missing final-answer format at creation: `Markdown` for a
-root and `RawFinalValue` for a child. Termination has no default fill, so its
-absence survives. The fill runs once, in `RlmConfigOwner::create`, and the
-result is recorded as the RLM namespace of the session's plugin config
+Termination has no default fill, so its absence survives creation.
+`RlmConfigOwner::create` records the RLM namespace in the session's plugin config
 (FIG-4379). Recorded options are read strictly and
 delivered unchanged on every open, which never defaults again. The kernel's creation path
 admits with `SessionCreationHead::Config` too: the catalog records the complete
@@ -64,7 +61,7 @@ the protocol contributes keyed sections that the host's `SetPromptPlan`
 orders and places, and a host adds or wraps sections of its own
 ([ADR 0133](0133-prompt-sections-are-keyed-trusted-and-placed-by-the-host.md),
 FIG-5257). Termination, the
-final-answer format, the channel and the dialect have no command, so a
+channel and the dialect have no command, so a
 transaction cannot name them: a host that states one is refused
 `UnknownCommand` at submission. The owner's validation refuses a candidate
 that moves the recorded channel or dialect with `RlmConfigRefusal::PinChanged`.
@@ -75,8 +72,7 @@ Refusals travel as data in the transaction's `Refused` outcome, where only the
 `owner` reason carries the owner's refusal type; error prose is presentation.
 
 Assertion remains host code: read the fact, compare it with the host's
-requirement, and fail if it differs. A host that needs a particular
-presentation format states it at creation. The protocol does not interpret
+requirement, and fail if it differs. A host that needs presentation guidance supplies its own prompt section. The protocol does not interpret
 environment variables or decide host policy.
 
 ## Alternatives considered
@@ -98,12 +94,12 @@ information directly.
 
 Creation facts exist before the first facade runtime opens. A reopen cannot
 change them through builder defaults, and no config command changes them after.
-Hosts that need a particular presentation format state it at creation.
+Hosts supply presentation guidance through prompt sections.
 
 ## Executable evidence
 
-- [Recorded facts](../../crates/lash-rlm-types/src/lib.rs#L960) define the two
-  fields.
+- [Recorded facts](../../crates/lash-rlm-types/src/lib.rs#L960) define the recorded
+  termination.
 - [The RLM owner](../../crates/lash-protocol-rlm/src/plugin/config_owner.rs)
   creates, validates and registers `SetRlmRender`.
 - [Facade creation](../../crates/lash/src/session.rs#L257) records the config head;
