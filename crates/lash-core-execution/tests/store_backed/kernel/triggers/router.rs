@@ -330,4 +330,129 @@ mod tests {
         assert_eq!(world.store.list_deliveries().await.unwrap().len(), 1);
         assert!(world.processes().await.is_empty());
     }
+
+    /// FIG-2913: a delivery validates its occurrence against the source
+    /// contract its subscription captured, not against the live catalog: an
+    /// occurrence that leaves the contract is refused with its typed value
+    /// mismatch, kept in the receipt and in a recorded emission's error, and
+    /// one on the contract starts.
+    #[tokio::test]
+    async fn delivery_refuses_an_occurrence_that_leaves_the_captured_contract() {
+        let world = router_world().await;
+        let source_key = empty_trigger_source_key("ui.button.pressed").expect("source key");
+        register(
+            world.store.as_ref(),
+            "contract-register",
+            trigger_process_draft(&source_key, "contract", world.env_ref.clone())
+                .with_source_capture(captured_provider_source()),
+        )
+        .await;
+        let router = router_with_restorer(&world, StubRestorer::new(None));
+
+        let request = TriggerOccurrenceRequest::new(
+            "ui.button.pressed",
+            source_key.clone(),
+            serde_json::json!({"button": "Blue"}),
+            "off-contract",
+        )
+        .with_source(serde_json::json!({"unexpected": true}));
+        let report = router
+            .emit(request.clone(), &world.emitter())
+            .await
+            .expect("emit");
+        assert!(
+            serde_json::to_value(&report.deliveries[0].outcome)
+                .expect("the delivery report serializes")["failed"]["value_mismatch"]
+                .is_object(),
+            "a trigger delivery report must retain its typed value mismatch"
+        );
+        assert!(
+            matches!(
+                &report.deliveries[0].outcome,
+                TriggerDeliveryEmitOutcome::Failed { value_mismatch: Some(source), .. }
+                    if source.instance_path.is_empty() && source.message.contains("account")
+            ),
+            "off-contract occurrence must refuse, got {:?}",
+            report.deliveries[0].outcome
+        );
+
+        let refusal = router
+            .emit_recorded(request, &world.emitter())
+            .await
+            .expect_err("recorded emission refuses an unstarted delivery");
+        let refusal = crate::RuntimeEffectControllerError::from(refusal);
+        assert!(
+            matches!(refusal.cause,
+            Some(crate::RuntimeErrorCause::ValueMismatch { source, .. })
+                if source.instance_path.is_empty() && source.message.contains("account")),
+            "recorded emission retains the typed value mismatch"
+        );
+
+        let on_contract = router
+            .emit(pressed(&source_key, "on-contract"), &world.emitter())
+            .await
+            .expect("emit on-contract");
+        assert!(matches!(
+            on_contract.deliveries[0].outcome,
+            TriggerDeliveryEmitOutcome::Started { .. }
+        ));
+        assert_eq!(world.processes().await.len(), 1);
+    }
+
+    /// The session that registers a trigger observes every process its
+    /// occurrences start.
+    #[tokio::test]
+    async fn session_trigger_process_is_observed_by_its_registrant() {
+        let world = router_world().await;
+        let source_key = empty_trigger_source_key("ui.button.pressed").expect("source key");
+        let owner = crate::SessionId::from("session-owner");
+        let outcome = world
+            .store
+            .execute_command(
+                "session-register",
+                TriggerCommand::Register {
+                    owner_scope: TriggerOwnerScope::session(&owner),
+                    actor: crate::ProcessOriginator::session(crate::SessionScope::new(&owner)),
+                    draft: trigger_process_draft(
+                        &source_key,
+                        "session-owned",
+                        world.env_ref.clone(),
+                    ),
+                },
+            )
+            .await
+            .expect("execute session registration")
+            .expect("register session subscription");
+        assert!(matches!(outcome, TriggerCommandOutcome::Mutation { .. }));
+        let router = TriggerRouter::new(
+            Arc::clone(&world.store),
+            crate::testing::process_work_wiring_for_registry(Arc::clone(&world.registry)),
+        )
+        .with_process_artifacts(
+            Arc::clone(&world.process_env_store),
+            crate::testing::process_engine_fixture(),
+        );
+
+        let report = router
+            .emit(
+                TriggerOccurrenceRequest::new(
+                    "ui.button.pressed",
+                    source_key,
+                    serde_json::json!({ "button": "Blue" }),
+                    "session-button-blue",
+                ),
+                &world.emitter(),
+            )
+            .await
+            .expect("emit session trigger");
+        let process_id = report.deliveries[0]
+            .process_id()
+            .expect("the delivery started a process");
+        assert!(
+            crate::ProcessObserverRegistry::is_observer(&*world.registry, &owner, process_id)
+                .await
+                .expect("read the observer edge"),
+            "the session that registered the trigger observes its process"
+        );
+    }
 }

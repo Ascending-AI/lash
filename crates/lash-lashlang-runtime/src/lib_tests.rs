@@ -1061,7 +1061,10 @@ fn remote_tool_grant(name: &str) -> lash_remote_protocol::RemoteToolGrant {
     }
 }
 
-fn test_start_site(node_id: &str, occurrence: u64) -> lashlang::LashlangExecutionCallSite {
+pub(crate) fn test_start_site(
+    node_id: &str,
+    occurrence: u64,
+) -> lashlang::LashlangExecutionCallSite {
     lashlang::LashlangExecutionCallSite {
         site: lashlang::LashlangExecutionSite {
             node_id: node_id.to_string(),

@@ -197,7 +197,6 @@ async fn execute_with_deferred_trigger(
 }
 
 #[test]
-#[ignore = "blocked: L6 (FIG-5175): ActorContext::process_effect refuses process and process-definition commands (RuntimeEffectLocalExecutorMismatch); repro testing::cell_conformance::persistence::a_cell_binding_a_process_literal_publishes_its_definition"]
 fn deferred_trigger_constructor_and_event_schema_link() {
     block_on(async {
         let cases = [(
@@ -245,7 +244,6 @@ fn deferred_trigger_constructor_and_event_schema_link() {
 }
 
 #[test]
-#[ignore = "blocked: L6 (FIG-5175): ActorContext::process_effect refuses process and process-definition commands (RuntimeEffectLocalExecutorMismatch); repro testing::cell_conformance::persistence::a_cell_binding_a_process_literal_publishes_its_definition"]
 fn deferred_trigger_record_and_provider_route_survive_snapshot_restore() {
     block_on(async {
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -293,7 +291,6 @@ fn deferred_trigger_record_and_provider_route_survive_snapshot_restore() {
 }
 
 #[test]
-#[ignore = "blocked: L6 (FIG-5175): ActorContext::process_effect refuses process and process-definition commands (RuntimeEffectLocalExecutorMismatch); repro testing::cell_conformance::persistence::a_cell_binding_a_process_literal_publishes_its_definition"]
 fn deferred_trigger_references_inside_helpers_and_processes_are_gathered() {
     block_on(async {
         let cases = [(
@@ -368,7 +365,6 @@ fn deferred_trigger_zero_and_ambiguous_results_fail_before_target_mapping() {
 }
 
 #[test]
-#[ignore = "blocked: L6 (FIG-5175): ActorContext::process_effect refuses process and process-definition commands (RuntimeEffectLocalExecutorMismatch); repro testing::cell_conformance::persistence::a_cell_binding_a_process_literal_publishes_its_definition"]
 fn mixed_deferred_trigger_and_tool_links_keep_provider_records_separate() {
     block_on(async {
         let mut state = RlmExecutionState::for_engine("typescript");
@@ -549,7 +545,6 @@ pub(super) async fn execute_with_trigger_environment(code: &str) -> ExecResponse
 }
 
 #[test]
-#[ignore = "blocked: L6 (FIG-5175): ActorContext::process_effect refuses process and process-definition commands (RuntimeEffectLocalExecutorMismatch); repro testing::cell_conformance::persistence::a_cell_binding_a_process_literal_publishes_its_definition"]
 pub(super) fn typescript_register_trigger_executes_end_to_end() {
     block_on(async {
         let response = execute_with_trigger_environment(
@@ -625,7 +620,6 @@ fn trigger_registration_failure_prevents_foreground_execution() {
 }
 
 #[test]
-#[ignore = "blocked: L6 (FIG-5175): ActorContext::process_effect refuses process and process-definition commands (RuntimeEffectLocalExecutorMismatch); repro testing::cell_conformance::persistence::a_cell_binding_a_process_literal_publishes_its_definition"]
 pub(super) fn trigger_registry_operations_execute_foreground_code() {
     block_on(async {
         let response = execute_with_trigger_environment(
@@ -726,8 +720,203 @@ pub(super) fn trigger_registry_operations_execute_foreground_code() {
     });
 }
 
+/// Run `code` in one cell under the trigger tool surface and answer the
+/// subscriptions its registrations installed in the trigger store.
+async fn registered_subscriptions(code: &str) -> Vec<lash_core::TriggerSubscriptionRecord> {
+    let trigger_store = crate::testing::sqlite_memory_trigger_store().await;
+    let host = crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
+    let artifact_store = host.artifacts();
+    let mut state = RlmExecutionState::new();
+    let response = execute_code_unbounded_with_test_render(
+        &mut state,
+        trigger_tool_context(host.ports(), trigger_store.clone(), &artifact_store, None).await,
+        ExecRequest {
+            code: code.to_string(),
+        },
+        artifact_store,
+        LashlangSurface::new(
+            lashlang::LashlangAbilities::default(),
+            lashlang::LashlangLanguageFeatures::default(),
+            timer_trigger_resources(),
+        ),
+        None,
+        RlmProjectedBindings::default(),
+        None,
+    )
+    .await;
+    assert!(response.error.is_none(), "{:?}", response.error);
+    lash_core::TriggerStore::list_subscriptions(
+        trigger_store.as_ref(),
+        lash_core::TriggerSubscriptionFilter::for_session("test-session"),
+    )
+    .await
+    .expect("list the cell's registrations")
+}
+
+/// A registration that names no subscription key derives it from its source:
+/// a module that makes the same two registrations in the other order installs
+/// the same key for each source, though its regenerated artifact gives the
+/// targets another definition.
 #[test]
-#[ignore = "blocked: L6 (FIG-5175): ActorContext::process_effect refuses process and process-definition commands (RuntimeEffectLocalExecutorMismatch); repro testing::cell_conformance::persistence::a_cell_binding_a_process_literal_publishes_its_definition"]
+pub(super) fn reordered_keyless_registration_calls_keep_derived_keys_across_module_regeneration() {
+    block_on(async {
+        let program = |first: &str, second: &str| {
+            format!(
+                r#"
+                const remember = async (tick: timer.Tick) => tick.fired_at;
+                const morning = timer.Schedule({{ expr: "0 8 * * *", tz: "UTC" }});
+                const evening = timer.Schedule({{ expr: "0 18 * * *", tz: "UTC" }});
+                await triggers.register({{ source: {first}, target: {{ definition: remember }}, inputs: (event) => ({{ tick: event }}) }});
+                await triggers.register({{ source: {second}, target: {{ definition: remember }}, inputs: (event) => ({{ tick: event }}) }});
+                finish(true);
+                "#
+            )
+        };
+        let first = Box::pin(registered_subscriptions(&program("morning", "evening"))).await;
+        let second = Box::pin(registered_subscriptions(&program("evening", "morning"))).await;
+
+        let keys = |records: &[lash_core::TriggerSubscriptionRecord]| {
+            records
+                .iter()
+                .map(|record| (record.source_key.clone(), record.subscription_key.clone()))
+                .collect::<BTreeMap<_, _>>()
+        };
+        assert_eq!(keys(&first).len(), 2, "two sources, two subscriptions");
+        assert_eq!(keys(&first), keys(&second));
+        let definitions = |records: &[lash_core::TriggerSubscriptionRecord]| {
+            records
+                .iter()
+                .map(|record| record.target_identity.definition_id.clone())
+                .collect::<std::collections::BTreeSet<_>>()
+        };
+        assert_ne!(
+            definitions(&first),
+            definitions(&second),
+            "the reordered module's artifact was regenerated"
+        );
+    });
+}
+
+/// A trigger command issued inside a process a bare host started is refused
+/// before it reaches the trigger store: a bare host owns no trigger
+/// namespace. The handler a process body's trigger operation runs through
+/// refuses the listing and the deletion of a live session subscription, and
+/// the subscription stays as it was.
+#[test]
+pub(super) fn bare_host_process_trigger_is_refused_before_store_mutation() {
+    use lash_core::core_internal::RuntimeExecutionContextRuntimeOps as _;
+
+    block_on(async {
+        let trigger_store = crate::testing::sqlite_memory_trigger_store().await;
+        let host = crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
+        let artifact_store = host.artifacts();
+        let mut state = RlmExecutionState::new();
+        let registered = execute_code_unbounded_with_test_render(
+            &mut state,
+            trigger_tool_context(host.ports(), trigger_store.clone(), &artifact_store, None).await,
+            ExecRequest {
+                code: r#"
+                        const remember = async (tick: timer.Tick) => tick.fired_at;
+                        const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
+                        finish(await triggers.register({
+                          source,
+                          target: { definition: remember },
+                          inputs: (event) => ({ tick: event }),
+                          subscription_key: "session-owned"
+                        }));
+                    "#
+                .to_string(),
+            },
+            artifact_store.clone(),
+            LashlangSurface::new(
+                lashlang::LashlangAbilities::default(),
+                lashlang::LashlangLanguageFeatures::default(),
+                timer_trigger_resources(),
+            ),
+            None,
+            RlmProjectedBindings::default(),
+            None,
+        )
+        .await;
+        assert!(registered.error.is_none(), "{:?}", registered.error);
+        let handle = registered
+            .terminal_finish
+            .expect("the registration's handle");
+        let all = || async {
+            lash_core::TriggerStore::list_subscriptions(
+                trigger_store.as_ref(),
+                lash_core::TriggerSubscriptionFilter::default(),
+            )
+            .await
+            .expect("list every subscription")
+        };
+        let before = all().await;
+        assert_eq!(before.len(), 1);
+
+        let registration = lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
+            lash_core::ProcessProvenance::host(),
+            lash_core::Lifetime::Detached,
+        );
+        let context = lash_core::testing::TestExecutionContextBuilder::new(host.ports())
+            .trigger_router(Some(lash_core::testing::test_trigger_router(
+                trigger_store.clone(),
+                crate::testing::sqlite_memory_process_registry().await,
+            )))
+            .build()
+            .into_runtime()
+            .with_process_execution(
+                lash_core::ProcessId::fixture("bare-host-process"),
+                &registration,
+                None,
+            );
+        for (operation, payload) in [
+            (lashlang::TriggerHostOperation::List, serde_json::json!({})),
+            (
+                lashlang::TriggerHostOperation::Delete,
+                serde_json::json!({
+                    "subscription_key": "session-owned",
+                    "expected_revision": handle["revision"],
+                }),
+            ),
+        ] {
+            let refused = lash_lashlang_runtime::execute_trigger_operation(
+                &lash_vm_client::service::Service::default(),
+                &context,
+                &artifact_store,
+                operation,
+                payload,
+                format!("bare-host:{}", operation.host_operation()),
+            )
+            .await
+            .expect_err("a bare host process owns no trigger namespace");
+            assert!(
+                refused.to_string().contains("bare host authority"),
+                "{operation:?}: {refused}"
+            );
+        }
+        assert_eq!(
+            all().await,
+            before,
+            "a refused command leaves the store as it was"
+        );
+    });
+}
+
+/// The invocation of the cell `effect` of the test turn: each cell of a
+/// session is its own execution, whose snapshots hold only its own source.
+fn cell_invocation(effect: &str) -> lash_core::RuntimeInvocation {
+    lash_core::testing::exec_code_invocation(
+        "test-session",
+        "test-turn",
+        0,
+        0,
+        effect,
+        format!("exec-code:trigger-registration:{effect}"),
+    )
+}
+
+#[test]
 pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregister() {
     block_on(async {
         let trigger_store = crate::testing::sqlite_memory_trigger_store().await;
@@ -747,7 +936,7 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
                 handler.ports(),
                 trigger_store.clone(),
                 &artifact_store,
-                None,
+                Some(cell_invocation("register")),
             )
             .await,
             ExecRequest {
@@ -793,7 +982,7 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
                 handler.ports(),
                 trigger_store.clone(),
                 &artifact_store,
-                None,
+                Some(cell_invocation("unrelated")),
             )
             .await,
             ExecRequest {
@@ -893,7 +1082,6 @@ pub(super) fn triggerless_execution_requires_no_trigger_namespace() {
 }
 
 #[test]
-#[ignore = "blocked: L6 (FIG-5175): ActorContext::process_effect refuses process and process-definition commands (RuntimeEffectLocalExecutorMismatch); repro testing::cell_conformance::persistence::a_cell_binding_a_process_literal_publishes_its_definition"]
 pub(super) fn trigger_disable_is_revision_checked_and_keeps_registry_entry() {
     block_on(async {
         let response = execute_with_trigger_environment(

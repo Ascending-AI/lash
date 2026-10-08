@@ -918,3 +918,375 @@ async fn a_snapshot_of_another_program_identity_is_refused_before_it_resumes() {
         "{outcome:?}"
     );
 }
+
+// ---- vm_run's admission and artifact refusals ----
+
+/// Run one `vm_run` step of `engine` on `input`, under the recorded
+/// `settings` and the deployment's `catalog`, and answer how it settled.
+async fn vm_step(
+    engine: &crate::LashlangProcessEngine,
+    settings: &serde_json::Value,
+    catalog: lash_core::ToolCatalog,
+    input: VmRunInput,
+) -> SettledOutput {
+    super::vm_run::run_vm_step(
+        engine,
+        EngineStepRun {
+            process: process(),
+            engine_config: Some(settings.clone()),
+            tool_catalog: Arc::new(catalog),
+            now: lash_core::durable_port::DurableInstant(NOW_MS),
+            clock: Arc::new(lash_core::testing::TestClock::new(0)),
+            projection_providers: None,
+            kind: EngineStepKind::new(VM_RUN_STEP),
+            input: serde_json::to_value(input).expect("encode the input"),
+        },
+        CancellationToken::new(),
+    )
+    .await
+}
+
+/// The process outcome a completed `vm_run` ended with.
+fn ended_with(settled: &SettledOutput) -> lash_core::ProcessOutcome {
+    assert!(
+        matches!(settled, SettledOutput::Completed(_)),
+        "vm_run completes: {settled:?}"
+    );
+    let output: VmRunOutput =
+        serde_json::from_str(settled.payload().expect("a completion carries its output"))
+            .expect("the output decodes");
+    match output {
+        VmRunOutput::Ended { outcome } => *outcome,
+        other => panic!("the process ends before its VM runs, got {other:?}"),
+    }
+}
+
+/// A first `vm_run` of `input`.
+fn first_run(input: &crate::LashlangProcessInput) -> VmRunInput {
+    VmRunInput {
+        payload: serde_json::to_value(input).expect("encode the payload"),
+        program_hash: None,
+        vm: None,
+        inject: None,
+    }
+}
+
+/// The fixture echo tool under the `tools` module binding.
+fn bound_echo() -> lash_core::ToolDefinition {
+    use lash_core::ToolDefinitionBindingExt as _;
+    lash_core::testing::fixture_echo_definition()
+        .with_tool_binding(lash_core::ToolBinding::new(["tools"], "echo"))
+}
+
+/// A start the artifact or the live host does not admit ends at its first
+/// `vm_run` with its typed refusal, before the VM runs: a start naming
+/// other host requirements than the artifact's, a start naming a process
+/// the module does not export, a host whose catalog does not convert, and a
+/// host that lacks the surface the artifact requires. The start preparation
+/// refuses the two immutable mismatches with the same codes and leaves the
+/// live host to the run.
+#[tokio::test(flavor = "current_thread")]
+async fn a_start_its_artifact_or_host_does_not_admit_ends_with_its_typed_refusal() {
+    use lash_core_execution::StoreSet as _;
+
+    let stores = crate::lib_tests::sqlite_memory_store_set().await;
+    let artifacts = crate::LashlangArtifacts::new(stores.module_artifacts());
+    let bounds = lashlang::ExecutionBounds::new(
+        lashlang::ExecutionBound::Unbounded,
+        lashlang::ExecutionBound::Unbounded,
+    );
+    let settings = serde_json::to_value(crate::LashlangRecordedSettings::new(
+        crate::LashlangSurface::default(),
+        bounds,
+    ))
+    .expect("encode the settings");
+    let echo_catalog = lash_core::ToolCatalog::from_tool_definitions(vec![bound_echo()]);
+    let environment = crate::LashlangSurface::default()
+        .for_process_registry(true)
+        .host_environment(&echo_catalog)
+        .expect("the host environment");
+    let echo = b::unwrap(b::receiver_call(
+        b::resource(&["tools"]),
+        "echo",
+        vec![b::record(vec![("value", b::string("hi"))])],
+    ));
+    let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
+        source: "process scan() -> any { finish tools.echo({value: 'hi'})? }",
+        program: b::module(
+            vec![b::process(
+                "scan",
+                Vec::new(),
+                b::block(vec![b::finish(echo)]),
+            )],
+            Vec::new(),
+        ),
+        environment: &environment,
+    })
+    .expect("the module compiles");
+    artifacts
+        .publish_module_artifact(&crate::lib_tests::host_claim(), &output.artifact)
+        .await
+        .expect("the artifact publishes");
+    let process_ref = output
+        .artifact
+        .process_ref("scan")
+        .expect("the export")
+        .clone();
+    let input = crate::LashlangProcessInput {
+        module_ref: output.module_ref.clone(),
+        process_ref: process_ref.clone(),
+        host_requirements_ref: output.host_requirements_ref.clone(),
+        process_name: "scan".to_owned(),
+        args: serde_json::Map::new(),
+    };
+    let mut requirements_mismatch = input.clone();
+    requirements_mismatch.host_requirements_ref =
+        lashlang::HostRequirementsRef::new(&lashlang::ContentHash::new("other-requirements"));
+    let mut process_mismatch = input.clone();
+    process_mismatch.process_ref =
+        lashlang::ProcessRef::new(lashlang::ContentHash::new("other-process"), 0);
+    let mut malformed = bound_echo();
+    malformed.manifest.bindings.insert(
+        lash_core::TOOL_BINDING_KEY.to_owned(),
+        serde_json::json!({ "not": "a tool binding" }),
+    );
+    let engine =
+        crate::LashlangProcessEngine::new(artifacts.clone(), crate::LashlangSurface::default());
+    for (start, catalog, code) in [
+        (
+            &requirements_mismatch,
+            echo_catalog.clone(),
+            crate::LashlangProcessFailureCode::ProcessHostRequirementsMismatch,
+        ),
+        (
+            &process_mismatch,
+            echo_catalog.clone(),
+            crate::LashlangProcessFailureCode::ProcessRefMismatch,
+        ),
+        (
+            &input,
+            lash_core::ToolCatalog::from_tool_definitions(vec![malformed]),
+            crate::LashlangProcessFailureCode::ProcessHostEnvironmentInvalid,
+        ),
+        (
+            &input,
+            lash_core::ToolCatalog::default(),
+            crate::LashlangProcessFailureCode::ProcessHostEnvironmentIncompatible,
+        ),
+    ] {
+        let settled = vm_step(&engine, &settings, catalog, first_run(start)).await;
+        assert_eq!(failure_code(&ended_with(&settled)), code.as_str());
+    }
+    // The admitted start runs: the VM parks at its tool call.
+    let settled = vm_step(&engine, &settings, echo_catalog, first_run(&input)).await;
+    assert!(
+        matches!(
+            serde_json::from_str::<VmRunOutput>(settled.payload().expect("an output")),
+            Ok(VmRunOutput::Parked { .. })
+        ),
+        "the admitted start runs its VM: {settled:?}"
+    );
+
+    let prepared = |host_requirements_ref: &lashlang::HostRequirementsRef,
+                    process_ref: &lashlang::ProcessRef| lashlang::ProcessStart {
+        module_ref: output.module_ref.clone(),
+        process_ref: process_ref.clone(),
+        host_requirements_ref: host_requirements_ref.clone(),
+        start_site: crate::lib_tests::test_start_site("child_process:scan", 1),
+        process_name: "scan".to_owned(),
+        args: lashlang::Record::new(),
+    };
+    for (start, code) in [
+        (
+            prepared(&requirements_mismatch.host_requirements_ref, &process_ref),
+            crate::LashlangProcessFailureCode::ProcessHostRequirementsMismatch,
+        ),
+        (
+            prepared(&output.host_requirements_ref, &process_mismatch.process_ref),
+            crate::LashlangProcessFailureCode::ProcessRefMismatch,
+        ),
+    ] {
+        let error = crate::prepare_lashlang_process_start(
+            &lash_vm_client::service::Service::default(),
+            artifacts.clone(),
+            Some("parent:admission"),
+            start,
+            lash_core::ProcessOriginator::host(),
+            lash_core::LifetimeDecision::Detached,
+        )
+        .await
+        .expect_err("the preparation refuses an immutable mismatch");
+        let crate::LashlangRuntimeError::ProcessAdmission(refusal) = error else {
+            panic!("the preparation keeps the typed refusal: {error:?}");
+        };
+        assert_eq!(refusal.failure_code(), code);
+    }
+    crate::prepare_lashlang_process_start(
+        &lash_vm_client::service::Service::default(),
+        artifacts,
+        Some("parent:admission"),
+        prepared(&output.host_requirements_ref, &process_ref),
+        lash_core::ProcessOriginator::host(),
+        lash_core::LifetimeDecision::Detached,
+    )
+    .await
+    .expect("the preparation leaves the live host to the run");
+}
+
+/// How the fault store answers a read of its one artifact.
+#[derive(Clone, Copy, Debug)]
+enum ArtifactFault {
+    Missing,
+    MissingStore,
+    CorruptBytes,
+    CorruptStore,
+    /// Unavailable on the first read, then the bytes.
+    Unavailable,
+}
+
+/// A module store holding one artifact's bytes behind `fault`, counting its
+/// reads. A `vm_run` only reads.
+struct FaultArtifacts {
+    fault: ArtifactFault,
+    bytes: Vec<u8>,
+    reads: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl lash_core::ModuleArtifactStore for FaultArtifacts {
+    async fn publish_module_artifact(
+        &self,
+        _: &lash_core::ReferrerClaim,
+        _: &str,
+        _: &[u8],
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        panic!("a vm_run publishes no artifact")
+    }
+
+    async fn acquire_module_artifact(
+        &self,
+        _: &lash_core::ReferrerClaim,
+        _: &str,
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        panic!("a vm_run acquires no artifact")
+    }
+
+    async fn end_module_referrer(
+        &self,
+        _: &lash_core::ResolvedArtifactCleanup,
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        panic!("a vm_run ends no referrer")
+    }
+
+    async fn get_module_artifact(
+        &self,
+        module_ref: &str,
+    ) -> Result<Option<Vec<u8>>, lash_core::ArtifactStoreError> {
+        let read = self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        match self.fault {
+            ArtifactFault::Missing => Ok(None),
+            ArtifactFault::MissingStore => Err(lash_core::ArtifactStoreError::ArtifactMissing {
+                artifact_ref: module_ref.into(),
+            }),
+            ArtifactFault::CorruptBytes => Ok(Some(b"not an artifact".to_vec())),
+            ArtifactFault::CorruptStore => Err(lash_core::ArtifactStoreError::StoredDataCorrupt {
+                source: lashlang::ModuleArtifactCorruption::Storage {
+                    record_kind: "module artifact".into(),
+                    message: "corrupt store row".into(),
+                },
+            }),
+            ArtifactFault::Unavailable if read == 0 => Err(lash_core::ArtifactStoreError::Backend(
+                "storage unavailable".into(),
+            )),
+            ArtifactFault::Unavailable => Ok(Some(self.bytes.clone())),
+        }
+    }
+}
+
+/// A process whose module artifact is gone or corrupt ends at its `vm_run`
+/// for good, typed: a missing artifact settles the process failed, and a
+/// corrupt one abandons it as a refused resume naming the artifact, never
+/// as a retired generation. A store outage is no outcome: the step faults,
+/// and asked again once the store answers, it reads the artifact and goes
+/// on to the start's admission, here refused, before its VM runs.
+#[tokio::test(flavor = "current_thread")]
+async fn an_unreadable_artifact_ends_the_process_but_a_store_outage_faults_the_step() {
+    let fixture = vm_fixture().await;
+    let mut input: crate::LashlangProcessInput =
+        serde_json::from_value(fixture.payload.clone()).expect("the fixture's payload");
+    let bytes = lash_core::ModuleArtifactStore::get_module_artifact(
+        fixture.engine.artifact_store.store().as_ref(),
+        input.module_ref.as_str(),
+    )
+    .await
+    .expect("read the fixture's artifact")
+    .expect("the fixture's artifact is published");
+    input.host_requirements_ref = lashlang::HostRequirementsRef::new(&lashlang::ContentHash::new(
+        "admission-runs-after-the-read",
+    ));
+    for fault in [
+        ArtifactFault::Missing,
+        ArtifactFault::MissingStore,
+        ArtifactFault::CorruptBytes,
+        ArtifactFault::CorruptStore,
+        ArtifactFault::Unavailable,
+    ] {
+        let store = Arc::new(FaultArtifacts {
+            fault,
+            bytes: bytes.clone(),
+            reads: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let engine = crate::LashlangProcessEngine::new(
+            crate::LashlangArtifacts::new(store.clone()),
+            crate::LashlangSurface::default(),
+        );
+        let step = || {
+            vm_step(
+                &engine,
+                &fixture.settings,
+                lash_core::ToolCatalog::default(),
+                first_run(&input),
+            )
+        };
+        let settled = step().await;
+        match fault {
+            ArtifactFault::Missing | ArtifactFault::MissingStore => assert_eq!(
+                failure_code(&ended_with(&settled)),
+                crate::LashlangProcessFailureCode::ProcessModuleArtifactMissing.as_str(),
+                "{fault:?}"
+            ),
+            ArtifactFault::CorruptBytes | ArtifactFault::CorruptStore => {
+                let outcome = ended_with(&settled);
+                assert!(
+                    matches!(
+                        &outcome,
+                        lash_core::ProcessAwaitOutput::Abandoned { evidence, .. }
+                            if matches!(
+                                &evidence.writer,
+                                lash_core::AbandonWriter::ResumeRefused {
+                                    reason: lash_core::ProcessResumeRefusal::StoredArtifactCorrupt {
+                                        artifact_ref,
+                                        ..
+                                    }
+                                } if artifact_ref == input.module_ref.as_str()
+                            )
+                    ),
+                    "{fault:?}: {outcome:?}"
+                );
+            }
+            ArtifactFault::Unavailable => {
+                assert!(
+                    matches!(settled, SettledOutput::Failed(_)),
+                    "an outage faults the step: {settled:?}"
+                );
+                let retried = step().await;
+                assert_eq!(
+                    failure_code(&ended_with(&retried)),
+                    crate::LashlangProcessFailureCode::ProcessHostRequirementsMismatch.as_str(),
+                    "the step asked again reads the artifact and reaches the admission"
+                );
+                assert_eq!(store.reads.load(std::sync::atomic::Ordering::SeqCst), 2);
+            }
+        }
+    }
+}

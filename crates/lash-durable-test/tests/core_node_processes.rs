@@ -1543,28 +1543,46 @@ fn rlm_core(backend: &lash::Backend) -> lash::LashCoreBuilder {
 /// of its `worker` process.
 async fn worker_payload(backend: &lash::Backend) -> serde_json::Value {
     use lashlang::testing::ast_builders as b;
+    lashlang_payload(
+        backend,
+        LASHLANG_SOURCE,
+        b::process_returning(
+            "worker",
+            Vec::new(),
+            lashlang::TypeExpr::Str,
+            b::block(vec![
+                b::sleep_for(b::num(5.0)),
+                b::sleep_for(b::num(7.0)),
+                b::finish(b::string("done")),
+            ]),
+        ),
+    )
+    .await
+}
+
+/// Compile the module of the one process `declaration` declares from
+/// `source`, publish it under a host pin, and answer that process's start
+/// payload.
+async fn lashlang_payload(
+    backend: &lash::Backend,
+    source: &str,
+    declaration: lashlang::Declaration,
+) -> serde_json::Value {
+    use lashlang::testing::ast_builders as b;
+    let lashlang::Declaration::Process(process) = &declaration else {
+        panic!("the module declares a process");
+    };
+    let name = process.name.to_string();
     let environment = lash_lashlang_runtime::LashlangSurface::default()
         .for_process_registry(true)
         .host_environment(&lash_core::ToolCatalog::default())
         .expect("the host environment");
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
-        source: LASHLANG_SOURCE,
-        program: b::module(
-            vec![b::process_returning(
-                "worker",
-                Vec::new(),
-                lashlang::TypeExpr::Str,
-                b::block(vec![
-                    b::sleep_for(b::num(5.0)),
-                    b::sleep_for(b::num(7.0)),
-                    b::finish(b::string("done")),
-                ]),
-            )],
-            Vec::new(),
-        ),
+        source,
+        program: b::module(vec![declaration], Vec::new()),
         environment: &environment,
     })
-    .expect("the worker module compiles");
+    .expect("the process module compiles");
     lashlang::LashlangArtifacts::of_backend(backend)
         .publish_module_artifact(
             &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
@@ -1574,16 +1592,16 @@ async fn worker_payload(backend: &lash::Backend) -> serde_json::Value {
             &output.artifact,
         )
         .await
-        .expect("the worker module publishes");
+        .expect("the process module publishes");
     serde_json::to_value(lash_lashlang_runtime::LashlangProcessInput {
         module_ref: output.module_ref.clone(),
         process_ref: output
             .artifact
-            .process_ref("worker")
-            .expect("the worker export")
+            .process_ref(&name)
+            .expect("the process export")
             .clone(),
         host_requirements_ref: output.host_requirements_ref.clone(),
-        process_name: "worker".to_owned(),
+        process_name: name,
         args: serde_json::Map::new(),
     })
     .expect("the input encodes")
@@ -1618,3 +1636,50 @@ async fn lashlang_process_runs_to_its_terminal(tier: Tier) {
 }
 
 on_every_tier!(lashlang_process_runs_to_its_terminal);
+
+/// A lashlang process waiting on its signal parks idle on its process
+/// actor; a host's signal through the core's process API is the process's
+/// mail, and its VM resumes with the signal's payload as the wait's value
+/// and ends with it.
+async fn lashlang_signal_wait_resolves_with_the_hosts_signal(tier: Tier) {
+    use lashlang::testing::ast_builders as b;
+    let deployment = deploy_with(tier, Vec::new(), rlm_core).await;
+    let payload = lashlang_payload(
+        &deployment.backend,
+        "process listen() signals { ready: any } { let payload = wait_signal(ready); finish payload }",
+        b::process_with_signals(
+            "listen",
+            Vec::new(),
+            vec![b::signal("ready", lashlang::TypeExpr::Any)],
+            b::block(vec![
+                b::assign("payload", b::wait_signal("ready")),
+                b::finish(b::var("payload")),
+            ]),
+        ),
+    )
+    .await;
+    let process = start_as(
+        &deployment.core,
+        lash_lashlang_runtime::LASHLANG_ENGINE_KIND,
+        payload,
+        |request| request.with_event_types([signal_type("ready")]),
+    )
+    .await;
+    parked(&deployment.backend, &process).await;
+    let identity =
+        lash_core::ProcessSignalIdentity::new(process.clone(), "ready", "lashlang-signal")
+            .expect("a signal identity");
+    deployment
+        .core
+        .processes()
+        .signal(
+            lash_core::ProcessSignal::new(identity, serde_json::json!({ "received": true })),
+            deployment.core.effect_host(),
+        )
+        .await
+        .expect("the signal is delivered");
+    let answer = success(&ended(&deployment.core, &process).await);
+    assert_eq!(answer, serde_json::json!({ "received": true }));
+}
+
+on_every_tier!(lashlang_signal_wait_resolves_with_the_hosts_signal);

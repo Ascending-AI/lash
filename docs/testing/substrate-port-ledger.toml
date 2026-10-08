@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1611 rows over 873 files, 3984 laws.
-# By class: mechanical 164, semantic 111, delete 871, replace 465.
-# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 73, L9c 342, L9d 79, L9e 131, L9f 125, L9g 98, L9h 106, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
-# By status: todo 402, ported 91, deleted 1118.
+# 1615 rows over 873 files, 3988 laws.
+# By class: mechanical 164, semantic 115, delete 871, replace 465.
+# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 73, L9c 342, L9d 83, L9e 131, L9f 125, L9g 98, L9h 106, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
+# By status: todo 384, ported 102, deleted 1129.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -839,8 +839,64 @@ laws = [
   "an_emit_whose_bind_meets_an_outage_binds_when_its_attempt_runs_again",
 ]
 disposition = "port"
-status = "todo"
-note = "FIG-5175 rewrote the file on trigger.start: an emission commits its occurrence, its processes and its bound deliveries in one mailbox commit, and its two laws run (rows of their own); the other laws listed here were already gone from the file and stay L9d's to disposition"
+status = "ported"
+note = "FIG-5309 ported delivery_refuses_an_occurrence_that_leaves_the_captured_contract and session_trigger_process_is_observed_by_its_registrant into the file over SQLite memory; every other law listed here has a row of its own"
+
+[[row]]
+path = "crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs"
+test = "transient_route_failure_retries_the_same_identity_and_revocation_refuses"
+area = "triggers"
+needs = ["process"]
+class = "semantic"
+lane = "L9d"
+laws = [
+  "transient_route_failure_retries_the_same_identity_and_revocation_refuses",
+]
+disposition = "covered-by:crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs::an_unavailable_route_records_nothing_before_a_successful_retry"
+status = "deleted"
+note = "an unavailable route records nothing, so the retry is a fresh emission of the same occurrence; the revoked half is a_held_occurrence_keeps_its_revoked_route_refusal"
+
+[[row]]
+path = "crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs"
+test = "a_replayed_trigger_emission_reports_the_delivery_its_first_emission_started"
+area = "triggers"
+needs = ["process"]
+class = "semantic"
+lane = "L9d"
+laws = [
+  "a_replayed_trigger_emission_reports_the_delivery_its_first_emission_started",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/trigger_start_proof.rs::held_emissions_preserve_refusals_on_sqlite_memory"
+status = "deleted"
+note = "a held occurrence's emission answers the receipt its first emission recorded, its started and refused dispositions alike (FIG-5236)"
+
+[[row]]
+path = "crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs"
+test = "an_emit_whose_bind_is_lost_pins_its_child_until_recovery_binds_it"
+area = "triggers"
+needs = ["process"]
+class = "semantic"
+lane = "L9d"
+laws = [
+  "an_emit_whose_bind_is_lost_pins_its_child_until_recovery_binds_it",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5175 (4ff06e18f6) deleted the delivery bind, its pins and its recovery: an occurrence's deliveries commit bound to their processes in its trigger.start transaction, so no bind can be lost (TS1, TS2)"
+
+[[row]]
+path = "crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs"
+test = "an_emit_whose_bind_meets_an_outage_binds_when_its_attempt_runs_again"
+area = "triggers"
+needs = ["process"]
+class = "semantic"
+lane = "L9d"
+laws = [
+  "an_emit_whose_bind_meets_an_outage_binds_when_its_attempt_runs_again",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5175 (4ff06e18f6) deleted the separate bind: a store outage before trigger.start commits leaves nothing, and the store holds the whole start or none of it (TS2)"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/support.rs"
@@ -2024,9 +2080,9 @@ lane = "L9e"
 laws = [
   "real_process_sleep_for_emits_wait_and_completion",
 ]
-disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; and no durable ProcessSteps runs a lashlang process body (run_lashlang_process and its run context were deleted by FIG-5198), so the law is not written yet"
+disposition = "covered-by:crates/lash-durable-test/tests/core_node_processes.rs::lashlang_process_runs_to_its_terminal"
+status = "deleted"
+note = "a lashlang process sleeping twice runs to its terminal on the core's node; the trace half (a NodeWaiting event for the sleep) is subject-deleted: FIG-5198 (96558d9d7b) deleted lashlang process execution traces with the segment run path"
 
 [[row]]
 path = "crates/lash-lashlang-runtime/src/lib_tests.rs"
@@ -2038,9 +2094,9 @@ lane = "L9e"
 laws = [
   "real_process_signal_wait_names_the_durable_key_and_resolves",
 ]
-disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; and no durable ProcessSteps runs a lashlang process body (run_lashlang_process and its run context were deleted by FIG-5198), so the law is not written yet"
+disposition = "replaced-by:crates/lash-durable-test/tests/core_node_processes.rs::lashlang_signal_wait_resolves_with_the_hosts_signal"
+status = "deleted"
+note = "FIG-5309 re-wrote the law on the core's node: a lashlang process waiting on its signal parks idle, and a host's signal through the core's process API resumes its VM with the payload. The journaled signal-wait key and its trace event went with FIG-5198 (96558d9d7b): a signal is the process's mail"
 
 [[row]]
 path = "crates/lash-lashlang-runtime/src/lib_tests.rs"
@@ -2052,9 +2108,9 @@ lane = "L9e"
 laws = [
   "real_process_tool_batch_wait_uses_the_dispatch_batch_id",
 ]
-disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; and no durable ProcessSteps runs a lashlang process body (run_lashlang_process and its run context were deleted by FIG-5198), so the law is not written yet"
+disposition = "covered-by:crates/lash-durable-test/tests/process_tool_calls.rs::process_tool_call_limit_admits_the_limit_and_refuses_the_group_past_it"
+status = "deleted"
+note = "a process's Promise.all group of catalog tools runs whole on the core's node; the trace half (the dispatch batch id on a NodeWaiting event) is subject-deleted with lashlang process execution traces (FIG-5198, 96558d9d7b)"
 
 [[row]]
 path = "crates/lash-lashlang-runtime/src/lib_tests.rs"
@@ -2066,9 +2122,9 @@ lane = "L9e"
 laws = [
   "process_admission_four_shape_table_preserves_codes_and_prepare_omission",
 ]
-disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; and no durable ProcessSteps runs a lashlang process body (run_lashlang_process and its run context were deleted by FIG-5198), so the law is not written yet"
+disposition = "replaced-by:crates/lash-lashlang-runtime/src/engine/advance_tests.rs::a_start_its_artifact_or_host_does_not_admit_ends_with_its_typed_refusal"
+status = "deleted"
+note = "FIG-5309 re-wrote the law at vm_run, the run-time admission recheck since FIG-5198: the four refusals end the process with their codes before the VM runs, and the start preparation refuses the two immutable mismatches and omits the live host"
 
 [[row]]
 path = "crates/lash-lashlang-runtime/src/lib_tests.rs"
@@ -2080,9 +2136,9 @@ lane = "L9e"
 laws = [
   "process_rebuild_failure_is_terminal_but_artifact_io_failure_retries",
 ]
-disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; and no durable ProcessSteps runs a lashlang process body (run_lashlang_process and its run context were deleted by FIG-5198), so the law is not written yet"
+disposition = "replaced-by:crates/lash-lashlang-runtime/src/engine/advance_tests.rs::an_unreadable_artifact_ends_the_process_but_a_store_outage_faults_the_step"
+status = "deleted"
+note = "FIG-5309 re-wrote the law at vm_run: a missing artifact settles the process failed, a corrupt one abandons it as a refused resume, and a store outage faults the step, which asked again reads the artifact and reaches admission before the VM runs"
 
 [[row]]
 path = "crates/lash-lashlang-runtime/src/worker_execution.rs"
@@ -2769,8 +2825,8 @@ laws = [
   "deferred_trigger_constructor_and_event_schema_link",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; the law is written and #[ignore]d"
+status = "ported"
+note = "FIG-5309: FIG-5175 fixed ActorContext::process_effect, so the law runs un-ignored on a claimed cell context over SQLite memory"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
@@ -2783,8 +2839,8 @@ laws = [
   "deferred_trigger_record_and_provider_route_survive_snapshot_restore",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; the law is written and #[ignore]d"
+status = "ported"
+note = "FIG-5309: FIG-5175 fixed ActorContext::process_effect, so the law runs un-ignored on a claimed cell context over SQLite memory"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
@@ -2797,8 +2853,8 @@ laws = [
   "deferred_trigger_references_inside_helpers_and_processes_are_gathered",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; the law is written and #[ignore]d"
+status = "ported"
+note = "FIG-5309: FIG-5175 fixed ActorContext::process_effect, so the law runs un-ignored on a claimed cell context over SQLite memory"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
@@ -2811,8 +2867,8 @@ laws = [
   "mixed_deferred_trigger_and_tool_links_keep_provider_records_separate",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; the law is written and #[ignore]d"
+status = "ported"
+note = "FIG-5309: FIG-5175 fixed ActorContext::process_effect, so the law runs un-ignored on a claimed cell context over SQLite memory"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
@@ -2825,8 +2881,8 @@ laws = [
   "typescript_register_trigger_executes_end_to_end",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; the law is written and #[ignore]d"
+status = "ported"
+note = "FIG-5309: FIG-5175 fixed ActorContext::process_effect, so the law runs un-ignored on a claimed cell context over SQLite memory"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
@@ -2839,8 +2895,8 @@ laws = [
   "trigger_registry_operations_execute_foreground_code",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; the law is written and #[ignore]d"
+status = "ported"
+note = "FIG-5309: FIG-5175 fixed ActorContext::process_effect, so the law runs un-ignored on a claimed cell context over SQLite memory"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
@@ -2853,8 +2909,8 @@ laws = [
   "removing_a_declaration_and_running_unrelated_code_does_not_unregister",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; the law is written and #[ignore]d"
+status = "ported"
+note = "FIG-5309: FIG-5175 fixed ActorContext::process_effect, so the law runs un-ignored on a claimed cell context over SQLite memory; each of its two cells now runs under its own invocation, since a cell's snapshots hold only its own source"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
@@ -2867,8 +2923,8 @@ laws = [
   "trigger_disable_is_revision_checked_and_keeps_registry_entry",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; the law is written and #[ignore]d"
+status = "ported"
+note = "FIG-5309: FIG-5175 fixed ActorContext::process_effect, so the law runs un-ignored on a claimed cell context over SQLite memory"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
@@ -2881,8 +2937,8 @@ laws = [
   "reordered_keyless_registration_calls_keep_derived_keys_across_module_regeneration",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; not written yet: its keys were read off an effect-seam capture, and are to be read off the trigger store's registrations once a registration runs"
+status = "ported"
+note = "FIG-5309 re-wrote the law over SQLite memory: each module runs in one cell on its own trigger store, and the derived keys and regenerated definitions are read off the store's registrations instead of an effect-seam capture"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
@@ -2895,8 +2951,8 @@ laws = [
   "bare_host_process_trigger_is_refused_before_store_mutation",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; and no durable ProcessSteps runs a lashlang process body (run_lashlang_process and its run context were deleted by FIG-5198), so the law is not written yet"
+status = "ported"
+note = "FIG-5309 re-wrote the law at the trigger command handler a process body's trigger operation runs through (execute_trigger_operation): in a host-originated process context, a list and the delete of a live session subscription are refused naming bare host authority, and the store is unchanged. The end-to-end route from a lashlang process body is broken (FIG-5313)"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
@@ -2908,9 +2964,9 @@ lane = "L9e"
 laws = [
   "typescript_process_body_uses_trigger_command_handler",
 ]
-disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; and no durable ProcessSteps runs a lashlang process body (run_lashlang_process and its run context were deleted by FIG-5198), so the law is not written yet"
+disposition = "replaced-by:crates/lash-durable-test/tests/process_tool_calls.rs::process_body_uses_trigger_command_handler"
+status = "deleted"
+note = "FIG-5309 re-wrote the law through a host's send() on the core's served node: an RLM cell starts a process whose body lists triggers. It exposed a bug: the worker refuses a process body's trigger operation as a tool its catalog does not hold. The law is #[ignore]d (sqlite_memory_triggers) against FIG-5313"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
@@ -2922,9 +2978,9 @@ lane = "L9e"
 laws = [
   "typescript_process_local_helper_reaches_trigger_command_handler",
 ]
-disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; and no durable ProcessSteps runs a lashlang process body (run_lashlang_process and its run context were deleted by FIG-5198), so the law is not written yet"
+disposition = "replaced-by:crates/lash-durable-test/tests/process_tool_calls.rs::process_local_helper_reaches_trigger_command_handler"
+status = "deleted"
+note = "FIG-5309 re-wrote the law through a host's send() on the core's served node: an RLM cell starts a process whose body lists triggers. It exposed a bug: the worker refuses a process body's trigger operation as a tool its catalog does not hold. The law is #[ignore]d (sqlite_memory_triggers) against FIG-5313"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
