@@ -4,37 +4,13 @@
 # 1615 rows over 873 files, 3988 laws.
 # By class: mechanical 164, semantic 115, delete 871, replace 465.
 # By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 73, L9c 342, L9d 83, L9e 131, L9f 125, L9g 98, L9h 106, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
-# By status: todo 384, ported 102, deleted 1129.
+# By status: todo 372, ported 102, deleted 1141.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
 #   an operator can inspect and act on the process-operations surface on a multi-node PostgreSQL and S3 deployment, and every outcome stays truthful in durable state across a node kill (judged runbook)
 # - L8: runbooks/session-operator/runbook.md
 #   session operator verbs (withdraw an input, cancel a running run, redrive, cancel or fork parked work, repeat a lost reply) act once on live PostgreSQL and refuse stale repeats with unchanged receipts
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::attempt_context_provider_realizes_every_v2_intent_through_the_coordinator
-#   attempt context provider realizes every v2 intent through the coordinator
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::before_tool_hook_receives_resolved_argument_projection_policy
-#   before tool hook receives resolved argument projection policy
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::dispatch_allows_unknown_mcp_args_when_schema_does_not_forbid_them
-#   dispatch allows unknown mcp args when schema does not forbid them
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::explicit_execution_grant_runs_non_catalog_tool_with_binding
-#   explicit execution grant runs non catalog tool with binding
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::retry_ladder_survives_a_later_pending_completion
-#   retry ladder survives a later pending completion
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/attachment_normalization.rs
-#   denied second source records no manifest intent for the first; and 4 more law(s) of the file, by test name
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::after_checks_fail_or_abort_but_never_replace
-#   after checks fail or abort but never replace
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::argument_transforms_chain_once_in_registration_order
-#   argument transforms chain once in registration order
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::checks_inspect_the_provider_prepared_call
-#   checks inspect the provider prepared call
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::displaced_terminals_are_published_as_composition_evidence
-#   displaced terminals are published as composition evidence
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::result_checks_without_a_decision_record_publish_no_state_before_settlement
-#   result checks without a decision record publish no state before settlement
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::result_transforms_chain_and_checks_see_the_final_result
-#   result transforms chain and checks see the final result
 # - L9c: crates/lash-protocol-standard/src/discovery_tests.rs::all_discovery_refusals_are_reported_and_accounted_before_continuing
 #   all discovery refusals are reported and accounted before continuing
 # - L9c: crates/lash-protocol-standard/src/discovery_tests.rs::mixed_discovery_refusals_and_admitted_calls_are_each_reported_once
@@ -11085,10 +11061,10 @@ lane = "L9c"
 laws = [
   "retry_ladder_survives_a_later_pending_completion",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-durable-test/tests/tool_call_identity.rs::retry_ladder_survives_a_later_pending_completion"
+status = "deleted"
 owed = "retry ladder survives a later pending completion"
-note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
+note = "FIG-5309 re-wrote the law through a host's send() on the core's served node: a deferring Repeatable probe fails its first attempt and parks its second. The retry and park half runs as a_retried_call_may_park_and_its_resolution_answers; the trace half exposed a bug, a durable turn's round tool calls are never traced, and is #[ignore]d (sqlite_memory_traced) against FIG-5319"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs"
@@ -11100,10 +11076,10 @@ lane = "L9c"
 laws = [
   "before_tool_hook_receives_resolved_argument_projection_policy",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::before_tool_hook_receives_resolved_argument_projection_policy"
+status = "deleted"
 owed = "before tool hook receives resolved argument projection policy"
-note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
+note = "FIG-5309 re-wrote the law in the file over SQLite memory: the call's attempt runs in place through the actor context's tool effect, as a round member's does"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs"
@@ -11130,10 +11106,10 @@ lane = "L9c"
 laws = [
   "explicit_execution_grant_runs_non_catalog_tool_with_binding",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::explicit_execution_grant_runs_non_catalog_tool_with_binding"
+status = "deleted"
 owed = "explicit execution grant runs non catalog tool with binding"
-note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
+note = "FIG-5309 re-wrote the law in the file over SQLite memory: the call's attempt runs in place through the actor context's tool effect, as a round member's does"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs"
@@ -11160,10 +11136,10 @@ lane = "L9c"
 laws = [
   "dispatch_allows_unknown_mcp_args_when_schema_does_not_forbid_them",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::dispatch_allows_unknown_mcp_args_when_schema_does_not_forbid_them"
+status = "deleted"
 owed = "dispatch allows unknown mcp args when schema does not forbid them"
-note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
+note = "FIG-5309 re-wrote the law in the file over SQLite memory: the call's attempt runs in place through the actor context's tool effect, as a round member's does"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs"
@@ -11175,10 +11151,10 @@ lane = "L9c"
 laws = [
   "attempt_context_provider_realizes_every_v2_intent_through_the_coordinator",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:INTENT1"
+status = "deleted"
 owed = "attempt context provider realizes every v2 intent through the coordinator"
-note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round; planned:INTENT1 (L4)"
+note = "every declared intent kind realizes once in its call's settle transaction: INTENT1's law (L4), which certification lands"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/attachment_normalization.rs"
@@ -11194,10 +11170,10 @@ laws = [
   "deferred_completion_after_hook_attachment_is_normalized_before_recording",
   "transient_manifest_publication_failure_never_reexecutes_the_tool",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/attachment_normalization.rs"
+status = "deleted"
 owed = "denied second source records no manifest intent for the first; and 4 more law(s) of the file, by test name"
-note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
+note = "FIG-5309 re-wrote the file's four laws over a SQLite memory session's attachment store, each call's attempt run in place; transient_manifest_publication_failure_never_reexecutes_the_tool was already deleted by FIG-5165 (4b37797805), its execution policy covered by L-B1 and L-B2"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs"
@@ -11209,10 +11185,10 @@ lane = "L9c"
 laws = [
   "result_checks_without_a_decision_record_publish_no_state_before_settlement",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::result_checks_without_a_decision_record_publish_no_state_before_settlement"
+status = "deleted"
 owed = "result checks without a decision record publish no state before settlement"
-note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
+note = "FIG-5309 re-wrote the law in the file over SQLite memory: the call's attempt runs in place through the actor context's tool effect, as a round member's does; the journal half (no state-only journal entry) went with the journal (ADR 0132): the law pins instead that the plugin state is unchanged and no reducer ran, before and after a preparation that misses the cache"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs"
@@ -11224,10 +11200,10 @@ lane = "L9c"
 laws = [
   "argument_transforms_chain_once_in_registration_order",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::argument_transforms_chain_once_in_registration_order"
+status = "deleted"
 owed = "argument transforms chain once in registration order"
-note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
+note = "FIG-5309 re-wrote the law in the file over SQLite memory: the call's attempt runs in place through the actor context's tool effect, as a round member's does"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs"
@@ -11254,10 +11230,10 @@ lane = "L9c"
 laws = [
   "checks_inspect_the_provider_prepared_call",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::checks_inspect_the_provider_prepared_call"
+status = "deleted"
 owed = "checks inspect the provider prepared call"
-note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
+note = "FIG-5309 re-wrote the law in the file over SQLite memory: the call's attempt runs in place through the actor context's tool effect, as a round member's does"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs"
@@ -11314,10 +11290,10 @@ lane = "L9c"
 laws = [
   "displaced_terminals_are_published_as_composition_evidence",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::displaced_terminals_are_published_as_composition_evidence"
+status = "deleted"
 owed = "displaced terminals are published as composition evidence"
-note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
+note = "FIG-5309 re-wrote the law in the file over SQLite memory: the call's attempt runs in place through the actor context's tool effect, as a round member's does"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs"
@@ -11344,10 +11320,10 @@ lane = "L9c"
 laws = [
   "result_transforms_chain_and_checks_see_the_final_result",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::result_transforms_chain_and_checks_see_the_final_result"
+status = "deleted"
 owed = "result transforms chain and checks see the final result"
-note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
+note = "FIG-5309 re-wrote the law in the file over SQLite memory: the call's attempt runs in place through the actor context's tool effect, as a round member's does"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs"
@@ -11359,10 +11335,10 @@ lane = "L9c"
 laws = [
   "after_checks_fail_or_abort_but_never_replace",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::after_checks_fail_or_abort_but_never_replace"
+status = "deleted"
 owed = "after checks fail or abort but never replace"
-note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
+note = "FIG-5309 re-wrote the law in the file over SQLite memory: the call's attempt runs in place through the actor context's tool effect, as a round member's does"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs"

@@ -8,6 +8,8 @@ async fn empty_batch_dispatches_predecessor_and_unknown_versions_to_a_typed_prot
     let provider: Arc<dyn ToolProvider> = Arc::new(ExactDispatchTools {
         contracts_resolved: Arc::new(AtomicUsize::new(0)),
         executed: Arc::new(AtomicUsize::new(0)),
+        contract_available: true,
+        observed_execution_bindings: None,
     });
     let context = refusing_dispatch_context(provider_plugins(provider, Default::default())).await;
     for recorded in [0, 1, 2, 4] {

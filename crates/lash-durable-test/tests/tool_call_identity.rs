@@ -142,6 +142,21 @@ impl lash_core::ToolProvider for Probes {
         let hold = call.args["hold"].as_bool().unwrap_or(false);
         let fail_first = call.args["fail_first"].as_bool().unwrap_or(false);
         let attempt = call.context.attempt_number();
+        if call.name() == DEFERRED && fail_first && attempt == 1 {
+            self.witness.executions.lock_recover().push(Execution {
+                label: label.clone(),
+                call_id: call.context.call_id().clone(),
+                attempt,
+                completion_key: None,
+            });
+            return ToolOutcome::failure(lash_core::ToolFailure::with_suggested_delay(
+                lash_core::ToolFailureClass::External,
+                "identity_deferred_transient",
+                "the deferred probe's first attempt failed before it parked",
+                Some(1),
+            ))
+            .into();
+        }
         if call.name() == DEFERRED {
             let key = call
                 .context
@@ -623,6 +638,128 @@ async fn code_cells_keep_identity_and_distinguish_fresh_calls(tier: Tier) {
     world.shutdown().await;
 }
 
+/// Every trace record the core wrote, in order.
+#[derive(Default)]
+struct Records(Mutex<Vec<lash::tracing::TraceRecord>>);
+
+impl lash::tracing::TraceSink for Records {
+    fn append(
+        &self,
+        record: &lash::tracing::TraceRecord,
+    ) -> Result<(), lash::tracing::TraceSinkError> {
+        self.0.lock_recover().push(record.clone());
+        Ok(())
+    }
+}
+
+/// Run a turn whose one call is a deferring probe that fails its first
+/// attempt and parks its second, on a core whose trace records go to
+/// `records`; the probe's executions of the call, checked: the first
+/// attempt failed and the second parked, under one call id, and the
+/// resolution is the call's answer.
+async fn retry_into_a_park(tier: Tier, records: &Arc<Records>) -> Option<(World, Vec<Execution>)> {
+    let witness = Arc::new(Witness::default());
+    let probes = Arc::clone(&witness);
+    let sink = Arc::clone(records);
+    let world = World::new(tier, move |backend| {
+        lash::LashCore::standard_builder(backend.clone())
+            .trace_sink(sink)
+            .trace_level(lash::tracing::TraceLevel::Extended)
+            .tools(Arc::new(Probes {
+                witness: probes,
+                backend: backend.clone(),
+            }))
+    })
+    .await?;
+    let name = "retry-into-a-park";
+    let output = world
+        .run(
+            name,
+            served::spec(64),
+            vec![probe(
+                "call_ladder",
+                DEFERRED,
+                serde_json::json!({ "label": "laddered", "fail_first": true }),
+            )],
+        )
+        .await;
+    served::assert_answered(name, &output);
+    let executions = witness.of("laddered");
+    assert_eq!(
+        executions
+            .iter()
+            .map(|execution| (execution.attempt, execution.completion_key.is_some()))
+            .collect::<Vec<_>>(),
+        vec![(1, false), (2, true)],
+        "the first attempt failed and the second parked"
+    );
+    assert!(
+        executions
+            .iter()
+            .all(|execution| execution.call_id == executions[0].call_id),
+        "every attempt of one call saw one call id: {executions:?}"
+    );
+    assert_eq!(answered_labels(&output), vec!["laddered"]);
+    Some((world, executions))
+}
+
+/// A deferring call whose first attempt reports a retryable failure is
+/// retried under the same call id, and its second attempt may park: the
+/// host's resolution of that park is the call's answer.
+async fn a_retried_call_may_park_and_its_resolution_answers(tier: Tier) {
+    let records = Arc::new(Records::default());
+    let Some((world, _)) = retry_into_a_park(tier, &records).await else {
+        return;
+    };
+    world.shutdown().await;
+}
+
+/// The retry ladder of such a call survives its park: once the host
+/// resolves the completion, the call's completion record carries both
+/// attempts, the failed first and the completed second.
+async fn retry_ladder_survives_a_later_pending_completion(tier: Tier) {
+    let records = Arc::new(Records::default());
+    let Some((world, executions)) = retry_into_a_park(tier, &records).await else {
+        return;
+    };
+    let call_id = executions[1].call_id.clone();
+    let completions = records
+        .0
+        .lock_recover()
+        .iter()
+        .filter_map(|record| match &record.event {
+            lash::tracing::TraceEvent::ToolCallCompleted {
+                call_id: completed,
+                attempts,
+                ..
+            } if *completed == call_id => Some(attempts.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let [Some(attempts)] = completions.as_slice() else {
+        panic!("the call completed once, with its attempts: {completions:?}");
+    };
+    let outcomes = attempts
+        .iter()
+        .map(|attempt| match &attempt.detail {
+            lash::tracing::TraceRetryAttemptDetail::Tool { outcome } => (
+                attempt.ordinal,
+                matches!(
+                    outcome,
+                    lash::tracing::TraceToolAttemptOutcome::Failed { .. }
+                ),
+            ),
+            other => panic!("a tool attempt, got {other:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        outcomes,
+        vec![(1, true), (2, false)],
+        "the ladder keeps the failed first attempt and completes the second: {attempts:?}"
+    );
+    world.shutdown().await;
+}
+
 tiered_laws!(
     repeated_provider_id_across_turns_is_distinct,
     same_scope_completion_collision,
@@ -631,4 +768,16 @@ tiered_laws!(
     suspended_tool_keeps_turn_and_history_head_until_resolution,
     fork_inherits_history_without_execution_queues_waits_or_journals,
     code_cells_keep_identity_and_distinguish_fresh_calls,
+    a_retried_call_may_park_and_its_resolution_answers,
 );
+
+/// The traced law, on SQLite memory until FIG-5319 lands: a durable turn's
+/// round tool calls are not traced at all today.
+mod sqlite_memory_traced {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    #[ignore = "FIG-5319: a durable turn's round tool calls emit no ToolCallCompleted trace"]
+    async fn retry_ladder_survives_a_later_pending_completion() {
+        super::retry_ladder_survives_a_later_pending_completion(super::served::Tier::SqliteMemory)
+            .await;
+    }
+}

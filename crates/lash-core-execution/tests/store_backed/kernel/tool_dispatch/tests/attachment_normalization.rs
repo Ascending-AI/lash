@@ -1,0 +1,409 @@
+//! The attachments a call's final result carries are normalized before the
+//! call records it (ADR 0118): each passes the attachment source policy, and
+//! a denied one fails the call with no manifest write and no blob, whatever
+//! produced it — the body, a before-check's cached success, a result
+//! transform, or a Deferred completion's result transform.
+use super::*;
+use crate::SessionId;
+use crate::tool_dispatch::ToolDispatchOutcome;
+use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
+use lash_sansio::sync::MutexExt as _;
+
+const FIRST_BYTES: &[u8] = b"authorized attachment";
+const DENIED_BYTES: &[u8] = b"denied attachment";
+
+fn inline_attachment(bytes: &[u8]) -> crate::AttachmentSource {
+    crate::AttachmentSource::inline(
+        crate::MediaType::parse("text/plain").expect("literal media type"),
+        bytes.to_vec(),
+    )
+}
+
+fn attachment_output(sources: impl IntoIterator<Item = crate::AttachmentSource>) -> ToolOutcome {
+    ToolOutcome::from_output(crate::ToolCallOutput::success_tool_value(
+        crate::ToolValue::Array(
+            sources
+                .into_iter()
+                .map(crate::ToolValue::Attachment)
+                .collect(),
+        ),
+    ))
+}
+
+fn attachment_call_output(
+    sources: impl IntoIterator<Item = crate::AttachmentSource>,
+) -> crate::ToolCallOutput {
+    attachment_output(sources)
+        .into_done_output()
+        .expect("attachment probe returns a completed output")
+}
+
+/// A before-check that serves a cached success carrying `bytes` as an
+/// inline attachment.
+fn before_attachment_hook(bytes: &'static [u8]) -> crate::plugin::ToolArgsCheckHook {
+    Arc::new(move |_input| {
+        Box::pin(async move {
+            let output = attachment_call_output([inline_attachment(bytes)]);
+            let crate::ToolCallOutcome::Success(value) = output.outcome else {
+                panic!("the attachment probe output is a success");
+            };
+            Ok(crate::plugin::BeforeToolDecision::Cached(
+                crate::plugin::CachedToolSuccess {
+                    value,
+                    view: output.view,
+                    projection_value: output.projection_value,
+                },
+            ))
+        })
+    })
+}
+
+/// A result transform that replaces every result with one carrying `bytes`
+/// as an inline attachment.
+fn after_attachment_hook(bytes: &'static [u8]) -> crate::plugin::ToolResultTransformHook {
+    Arc::new(move |_input| {
+        Box::pin(async move {
+            let output = attachment_call_output([inline_attachment(bytes)]);
+            Ok(crate::plugin::ToolResultCandidate {
+                outcome: output.outcome,
+                view: output.view,
+                projection_value: output.projection_value,
+            })
+        })
+    })
+}
+
+#[derive(Clone)]
+struct AttachmentProbeTools {
+    definition: crate::ToolDefinition,
+    sources: Vec<crate::AttachmentSource>,
+}
+
+#[async_trait::async_trait]
+impl ToolProvider for AttachmentProbeTools {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        manifests(vec![self.definition.clone()])
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
+    }
+
+    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        attachment_output(self.sources.clone()).into()
+    }
+}
+
+struct DenySecondInlinePolicy {
+    authorized: Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
+}
+
+impl crate::AttachmentSourcePolicy for DenySecondInlinePolicy {
+    fn authorize(
+        &self,
+        producer: &crate::AttachmentProducer,
+        source: &crate::AttachmentSource,
+    ) -> Result<(), crate::test_support::AttachmentSourcePolicyError> {
+        let crate::AttachmentSource::Inline { bytes, .. } = source else {
+            return Ok(());
+        };
+        self.authorized.lock_recover().push(bytes.clone());
+        if bytes == DENIED_BYTES {
+            return Err(crate::test_support::AttachmentSourcePolicyError {
+                producer: producer.clone(),
+                reason: "literal second source is denied".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// A dispatch context whose attachments go to a durable session's
+/// attachment store over SQLite memory, its manifest store and its blobs.
+async fn durable_attachment_context(
+    plugins: Arc<PluginSession>,
+) -> (
+    ToolDispatchContext<'static>,
+    Arc<dyn crate::RuntimeStore>,
+    Arc<dyn crate::AttachmentStore>,
+) {
+    let backend = crate::support::sqlite_memory_store_backend().await;
+    let factory = backend.session_store_factory();
+    let request = crate::SessionStoreCreateRequest {
+        owning_process_id: None,
+        pending_observer_intents: Vec::new(),
+        session_id: SessionId::from("session"),
+        relation: crate::SessionRelation::Root,
+        config: crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        )
+        .into(),
+        head: crate::SessionCreationHead::Config,
+    };
+    crate::SessionCatalogStore::admit_session(factory.as_ref(), &request)
+        .await
+        .expect("create the manifest store");
+    let persistence: Arc<dyn crate::RuntimeStore> = factory.clone();
+    let backend: Arc<dyn crate::AttachmentStore> = backend.attachment_store();
+    let attachment_store = Arc::new(crate::RuntimeAttachmentStore::new(
+        Arc::clone(&backend),
+        Arc::new(crate::attachments::PersistenceReferrersAdapter(Arc::clone(
+            &persistence,
+        ))),
+        crate::RuntimeOwner::Session(request.session_id),
+    ));
+    let mut context = refusing_dispatch_context(plugins).await;
+    context.attachment_store = attachment_store;
+    (context, persistence, backend)
+}
+
+/// Whether neither probe digest has a referrer: no pending write and no
+/// edge was recorded for either.
+async fn no_attachment_referrers(persistence: &dyn crate::RuntimeStore) -> bool {
+    for bytes in [FIRST_BYTES, DENIED_BYTES] {
+        let referrers = persistence
+            .attachment_referrers(&crate::attachments::content_id(bytes))
+            .await
+            .unwrap();
+        if !referrers.is_empty() {
+            return false;
+        }
+    }
+    true
+}
+
+fn deny_probe_attachment(
+    context: &mut ToolDispatchContext<'_>,
+) -> Arc<std::sync::Mutex<Vec<Vec<u8>>>> {
+    let authorized = Arc::new(std::sync::Mutex::new(Vec::new()));
+    context.attachment_source_policy = Arc::new(DenySecondInlinePolicy {
+        authorized: Arc::clone(&authorized),
+    });
+    authorized
+}
+
+async fn assert_policy_denial_left_no_attachment_state(
+    outcome: &ToolDispatchOutcome,
+    persistence: &Arc<dyn crate::RuntimeStore>,
+    backend: &Arc<dyn crate::AttachmentStore>,
+    authorized: &Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
+) {
+    let crate::ToolCallOutcome::Failure(failure) = &outcome.record.output.outcome else {
+        panic!("the denied hook attachment must replace the result with failure");
+    };
+    assert_eq!(failure.code, "attachment_source_policy_denied");
+    assert_eq!(
+        *authorized.lock_recover(),
+        vec![DENIED_BYTES.to_vec()],
+        "the final hook output must pass through attachment policy"
+    );
+    assert!(
+        no_attachment_referrers(persistence.as_ref()).await,
+        "authorization rejection must leave no pending write"
+    );
+    assert!(
+        backend.list().await.unwrap().is_empty(),
+        "authorization rejection must leave no physical blob"
+    );
+}
+
+/// A tool output whose second attachment the source policy denies fails the
+/// call, and its first, authorized attachment leaves no referrer and no blob.
+#[tokio::test]
+async fn denied_second_source_records_no_manifest_intent_for_the_first() {
+    let definition = named_beta_tool("atomic_attachment_probe");
+    let provider: Arc<dyn ToolProvider> = Arc::new(AttachmentProbeTools {
+        definition: definition.clone(),
+        sources: vec![
+            inline_attachment(FIRST_BYTES),
+            inline_attachment(DENIED_BYTES),
+        ],
+    });
+    let (mut context, persistence, backend) =
+        durable_attachment_context(provider_plugins(provider, Default::default())).await;
+    let authorized = Arc::new(std::sync::Mutex::new(Vec::new()));
+    context.attachment_source_policy = Arc::new(DenySecondInlinePolicy {
+        authorized: Arc::clone(&authorized),
+    });
+    assert!(
+        no_attachment_referrers(persistence.as_ref()).await,
+        "precondition: no digest has a referrer"
+    );
+    assert!(
+        backend.list().await.unwrap().is_empty(),
+        "precondition: the blob store starts empty"
+    );
+    let outcome = dispatch_tool_call(
+        &context,
+        definition.name().to_string(),
+        json!({ "value": "valid" }),
+    )
+    .await;
+
+    let crate::ToolCallOutcome::Failure(failure) = outcome.record.output.outcome else {
+        panic!("the denied second attachment must fail the recorded call");
+    };
+    assert_eq!(failure.code, "attachment_source_policy_denied");
+    assert_eq!(
+        *authorized.lock_recover(),
+        vec![FIRST_BYTES.to_vec(), DENIED_BYTES.to_vec()],
+        "precondition: policy reaches and denies the second source"
+    );
+    assert!(
+        no_attachment_referrers(persistence.as_ref()).await,
+        "authorization rejection must leave no pending write"
+    );
+    assert!(
+        backend.list().await.unwrap().is_empty(),
+        "authorization rejection must leave no physical blob"
+    );
+    drop(context);
+}
+
+/// A before-check's cached success passes through attachment normalization
+/// before the call records it: a denied attachment fails the call and leaves
+/// nothing behind.
+#[tokio::test]
+async fn before_tool_attachment_replacement_is_normalized_before_leaf_recording() {
+    let definition = named_beta_tool("before_hook_attachment_probe");
+    let provider: Arc<dyn ToolProvider> = Arc::new(AttachmentProbeTools {
+        definition: definition.clone(),
+        sources: Vec::new(),
+    });
+    let plugins = crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
+        lash_core_execution::plugin::PluginDeclaration::initial("before_hook_attachment_probe"),
+        crate::PluginSpec::new()
+            .with_tool_provider(provider)
+            .with_tool_args_check(
+                lash_core_execution::hook_key!("cache"),
+                before_attachment_hook(DENIED_BYTES),
+            ),
+    ))])
+    .build_session(PluginSessionRequest::creation("root", Default::default()))
+    .expect("plugin session");
+    let (mut context, persistence, backend) = durable_attachment_context(plugins).await;
+    let authorized = deny_probe_attachment(&mut context);
+    assert!(no_attachment_referrers(persistence.as_ref()).await);
+    assert!(backend.list().await.unwrap().is_empty());
+
+    let outcome = dispatch_tool_call(
+        &context,
+        definition.name().to_string(),
+        json!({ "value": "valid" }),
+    )
+    .await;
+
+    assert_policy_denial_left_no_attachment_state(&outcome, &persistence, &backend, &authorized)
+        .await;
+    drop(context);
+}
+
+/// A result transform's replacement passes through attachment normalization
+/// before the call records it.
+#[tokio::test]
+async fn after_tool_attachment_replacement_is_normalized_before_leaf_recording() {
+    let definition = named_beta_tool("after_hook_leaf_attachment_probe");
+    let provider: Arc<dyn ToolProvider> = Arc::new(AttachmentProbeTools {
+        definition: definition.clone(),
+        sources: Vec::new(),
+    });
+    let plugins = crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
+        lash_core_execution::plugin::PluginDeclaration::initial("after_hook_leaf_attachment_probe"),
+        crate::PluginSpec::new()
+            .with_tool_provider(provider)
+            .with_tool_result_transform(
+                lash_core_execution::hook_key!("attach"),
+                after_attachment_hook(DENIED_BYTES),
+            ),
+    ))])
+    .build_session(PluginSessionRequest::creation("root", Default::default()))
+    .expect("plugin session");
+    let (mut context, persistence, backend) = durable_attachment_context(plugins).await;
+    let authorized = deny_probe_attachment(&mut context);
+    assert!(no_attachment_referrers(persistence.as_ref()).await);
+    assert!(backend.list().await.unwrap().is_empty());
+
+    let outcome = dispatch_tool_call(
+        &context,
+        definition.name().to_string(),
+        json!({ "value": "valid" }),
+    )
+    .await;
+
+    assert_policy_denial_left_no_attachment_state(&outcome, &persistence, &backend, &authorized)
+        .await;
+    drop(context);
+}
+
+/// A Deferred completion's result transform passes through attachment
+/// normalization before the completion is recorded under the parked call.
+#[tokio::test]
+async fn deferred_completion_after_hook_attachment_is_normalized_before_recording() {
+    let plugins = crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
+        lash_core_execution::plugin::PluginDeclaration::initial(
+            "deferred_completion_attachment_probe",
+        ),
+        crate::PluginSpec::new().with_tool_result_transform(
+            lash_core_execution::hook_key!("attach"),
+            after_attachment_hook(DENIED_BYTES),
+        ),
+    ))])
+    .build_session(PluginSessionRequest::creation("root", Default::default()))
+    .expect("plugin session");
+    let (mut context, persistence, backend) = durable_attachment_context(plugins).await;
+    let authorized = deny_probe_attachment(&mut context);
+    assert!(
+        no_attachment_referrers(persistence.as_ref()).await,
+        "precondition: no deferred completion digest has a referrer"
+    );
+    assert!(
+        backend.list().await.unwrap().is_empty(),
+        "precondition: the deferred completion blob store starts empty"
+    );
+    let attachment_store = Arc::clone(&context.attachment_store);
+    let execution = crate::RuntimeExecutionContext::new(
+        Arc::new(context),
+        crate::support::sqlite_memory_store_set()
+            .await
+            .process_env_store(),
+        attachment_store,
+        Arc::new(crate::ChronologicalProjection::default()),
+        crate::TurnContext::default(),
+        crate::ProcessExecutionEnvSpec::new(
+            crate::AdmittedPluginConfig::default(),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
+        ),
+    );
+
+    let outcome = execution
+        .pending_completion_dispatch_outcome(
+            &crate::tool_dispatch::ToolCallIds {
+                call_id: crate::ToolCallId::fixture("deferred-attachment-call"),
+                provider_call_id: None,
+            },
+            "test:deferred-attachment-call",
+            "deferred_attachment_probe".to_string(),
+            json!({ "value": "valid" }),
+            crate::Resolution::Ok(json!({ "completed": true })),
+            None,
+            Vec::new(),
+            Vec::new(),
+        )
+        .await;
+
+    assert_eq!(
+        outcome.attempts.len(),
+        1,
+        "precondition: this is the deferred-completion attempt-recording exit"
+    );
+    assert_eq!(outcome.attempts[0].ordinal, 1);
+    assert_eq!(
+        outcome.record.call_id,
+        crate::ToolCallId::fixture("deferred-attachment-call"),
+        "the deferred completion is recorded under the parked call's id"
+    );
+    assert_policy_denial_left_no_attachment_state(&outcome, &persistence, &backend, &authorized)
+        .await;
+    drop(execution);
+}
