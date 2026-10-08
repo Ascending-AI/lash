@@ -104,7 +104,10 @@ async fn l06_race_loser_body_progresses_while_the_program_sleeps() -> Result<()>
     )?;
     let session = core
         .session(crate::SessionId::parse("race-loser-progress").expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await?;
     let sent = Instant::now();
     let handle = session.send(TurnInput::text("race then sleep")).await?;
@@ -213,7 +216,10 @@ async fn closing_race(loser: Loser) -> Result<(bool, lash_core::ToolCallOutput)>
     )?;
     let session = core
         .session(crate::SessionId::parse("closing-race").expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await?;
     let events = RecordingEvents::default();
     let report = tokio::time::timeout(
@@ -378,7 +384,10 @@ async fn closing_in_backoff() -> Result<(Duration, usize, Option<lash_core::Tool
     )?;
     let session = core
         .session(crate::SessionId::parse("closing-backoff").expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await?;
     let events = RecordingEvents::default();
     let sent = Instant::now();

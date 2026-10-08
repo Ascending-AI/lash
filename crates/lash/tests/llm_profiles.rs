@@ -248,6 +248,8 @@ fn core_serving(double: &Double, entries: &[Entry<'_>], worker: &str, serve: boo
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "model-keys-worker",
             worker,
@@ -258,6 +260,7 @@ fn core_serving(double: &Double, entries: &[Entry<'_>], worker: &str, serve: boo
 async fn created_on(core: &LashCore, id: &str, key: &str) -> lash::LashSession {
     core.session(lash::SessionId::parse(id).expect("nonblank host identity"))
         .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 key,
                 lash::TurnBudget::Unbounded,
@@ -372,7 +375,9 @@ fn core_over(
         .llm_profiles(Arc::clone(catalog) as Arc<dyn lash::LlmProfiles>)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate);
+        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended());
     for plugin in plugins {
         builder = builder.plugin(plugin);
     }
@@ -700,6 +705,7 @@ async fn an_unknown_key_is_refused_before_anything_changes(tier: Tier) {
     let created = core
         .session(lash::SessionId::parse("keys-unknown-create").expect("nonblank host identity"))
         .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 unregistered,
                 lash::TurnBudget::Unbounded,
@@ -819,6 +825,8 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(tier: 
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "model-keys-worker",
             "keys-reasoning",
@@ -829,6 +837,7 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(tier: 
     let created = core
         .session(lash::SessionId::parse("keys-reasoning-refused").expect("nonblank host identity"))
         .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 GLM,
                 lash::TurnBudget::Unbounded,
@@ -861,6 +870,7 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(tier: 
     // Send: the session records `high` on the thinking model.
     core.session(lash::SessionId::parse("keys-reasoning").expect("nonblank host identity"))
         .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 THINKER,
                 lash::TurnBudget::Unbounded,

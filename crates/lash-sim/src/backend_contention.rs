@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use lash_core::{
     DeploymentStore, RuntimeCommit, RuntimeSessionState, RuntimeStore, SessionCreationHead,
-    SessionPolicy, SessionRelation, SessionStoreCreateRequest, StoreError,
+    SessionRelation, SessionStoreCreateRequest, StoreError,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -212,12 +212,12 @@ fn store_request(session_id: &SessionId) -> SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
         relation: SessionRelation::Root,
-        config: SessionPolicy::new(
+        config: lash_core::PersistedSessionConfig::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-        )
-        .into(),
+            lash_core::SessionToolAccess::ambient(),
+        ),
         head: SessionCreationHead::Config,
     }
 }

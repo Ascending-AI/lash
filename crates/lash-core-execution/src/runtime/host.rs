@@ -103,10 +103,10 @@ pub enum DeltaCoalescingError {
 }
 
 impl DeltaCoalescing {
-    /// The default frame interval.
-    pub const DEFAULT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
-    /// The default frame cap, in bytes of text.
-    pub const DEFAULT_MAX_FRAME_BYTES: usize = 8 * 1024;
+    /// The frame interval of [`recommended`](Self::recommended).
+    pub const RECOMMENDED_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+    /// The frame cap of [`recommended`](Self::recommended), in bytes of text.
+    pub const RECOMMENDED_MAX_FRAME_BYTES: usize = 8 * 1024;
     /// The longest frame interval: a frame must stay well inside the live
     /// replay window.
     pub const MAX_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
@@ -140,12 +140,28 @@ impl DeltaCoalescing {
         })
     }
 
+    /// The named preset a host may choose: frames of
+    /// [`RECOMMENDED_INTERVAL`](Self::RECOMMENDED_INTERVAL) (50 ms) holding at
+    /// most [`RECOMMENDED_MAX_FRAME_BYTES`](Self::RECOMMENDED_MAX_FRAME_BYTES)
+    /// (8 KiB), the first delta of a block published at once. No measurement
+    /// backs these values. Coalescing trades stream latency against event
+    /// volume, so nothing installs this preset for a host: it is passed
+    /// explicitly, as is [`off`](Self::off).
+    #[must_use]
+    pub const fn recommended() -> Self {
+        Self {
+            interval: Self::RECOMMENDED_INTERVAL,
+            max_frame_bytes: Self::RECOMMENDED_MAX_FRAME_BYTES,
+            first_delta_immediate: true,
+        }
+    }
+
     /// No coalescing: every delta is its own event.
     #[must_use]
     pub const fn off() -> Self {
         Self {
             interval: std::time::Duration::ZERO,
-            max_frame_bytes: Self::DEFAULT_MAX_FRAME_BYTES,
+            max_frame_bytes: Self::RECOMMENDED_MAX_FRAME_BYTES,
             first_delta_immediate: true,
         }
     }
@@ -176,16 +192,6 @@ impl DeltaCoalescing {
     }
 }
 
-impl Default for DeltaCoalescing {
-    fn default() -> Self {
-        Self {
-            interval: Self::DEFAULT_INTERVAL,
-            max_frame_bytes: Self::DEFAULT_MAX_FRAME_BYTES,
-            first_delta_immediate: true,
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct RuntimeControlConfig {
     pub effect_host: ActorContext,
@@ -196,12 +202,12 @@ pub struct RuntimeControlConfig {
     /// stream abort (ADR 0036) keeps draining the provider stream, so a
     /// cooperative provider's trailing usage still lands on the aborted
     /// attempt; past it the attempt is sealed with a typed unreported
-    /// disposition (ADR 0031). Defaults to [`crate::ExecutionBudgets::default`].
+    /// disposition (ADR 0031). A host decision with no default:
+    /// [`RuntimeHostConfig::new`] takes it.
     pub execution_budgets: crate::ExecutionBudgets,
     /// How a turn coalesces its stream deltas into frames before they reach
-    /// the host sinks and the live replay store (FIG-5098). Defaults to
-    /// [`DeltaCoalescing::default`]: 50 ms frames of at most 8 KiB, the first
-    /// delta of a block published at once.
+    /// the host sinks and the live replay store (FIG-5098). A host decision with
+    /// no default: [`RuntimeHostConfig::new`] takes it.
     pub delta_coalescing: DeltaCoalescing,
     /// Optional narrow-only policy for the model-facing session process tools.
     pub process_tool_visibility_filter: Option<Arc<dyn crate::ProcessToolVisibilityFilter>>,
@@ -242,8 +248,9 @@ impl RuntimeControlConfig {
 
 impl RuntimeHostConfig {
     /// A config over `backend`: its effect host, attachment port,
-    /// process-exec-env store and clock, with the commit budget and queued-work
-    /// batching named explicitly.
+    /// process-exec-env store and clock, with the commit budget, queued-work
+    /// batching, tool-source policy, execution budgets and delta coalescing
+    /// named explicitly.
     ///
     /// There is intentionally no `Default` and no in-memory constructor. The
     /// backend and the commit limits decide a runtime's durability envelope,
@@ -255,6 +262,8 @@ impl RuntimeHostConfig {
         commit_budget: crate::CommitBudget,
         queued_work_batching: crate::QueuedWorkBatchingConfig,
         tool_source_policy: crate::ToolSourcePolicy,
+        execution_budgets: crate::ExecutionBudgets,
+        delta_coalescing: DeltaCoalescing,
     ) -> Self {
         let effect_host = crate::ActorContext::detached(backend.clone());
         let attachment_store = backend.attachment_store();
@@ -288,8 +297,8 @@ impl RuntimeHostConfig {
                 run_definitions: crate::RunDefinitions::default(),
             },
             control: RuntimeControlConfig {
-                execution_budgets: crate::ExecutionBudgets::default(),
-                delta_coalescing: DeltaCoalescing::default(),
+                execution_budgets,
+                delta_coalescing,
                 effect_host,
                 process_tool_visibility_filter: None,
                 tool_source_policy,

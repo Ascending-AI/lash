@@ -192,7 +192,10 @@ async fn cancelled_sibling(answer: Answer) -> Result<CancelledRound> {
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(crate::SessionId::parse(&id).expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await?;
     let handle = session.send(TurnInput::text("set both")).await?;
     let mut events = handle.events();

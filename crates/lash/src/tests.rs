@@ -27,7 +27,10 @@ impl CreatedSession for crate::SessionBuilder {
         match self
             .core
             .session(self.session_id.clone())
-            .create(crate::SessionCreation::root(spec))
+            .create(crate::SessionCreation::root(
+                crate::plugins::SessionToolAccess::ambient(),
+                spec,
+            ))
             .await
         {
             Ok(_)

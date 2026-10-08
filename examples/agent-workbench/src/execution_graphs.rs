@@ -571,6 +571,7 @@ mod tests {
         let (observer, registry, _workbench) = test_process_observer().await;
         let child_session_id = "child-session";
         let create_request = lash::SessionCreateRequest::child_session(
+            lash::plugins::SessionToolAccess::ambient(),
             "root",
             lash::SessionStartPoint::Empty,
             lash::plugins::PluginOptions::default(),
@@ -706,6 +707,7 @@ mod tests {
         let child_session_id = &SessionId::from("child-session");
         let old_session_id = &SessionId::from("old-session");
         let create_request = lash::SessionCreateRequest::child_session(
+            lash::plugins::SessionToolAccess::ambient(),
             current_session_id,
             lash::SessionStartPoint::Empty,
             lash::plugins::PluginOptions::default(),
@@ -1041,6 +1043,7 @@ mod tests {
                         definition_key: "agent-workbench-subagent:v1".to_string(),
                         create_request: Box::new(
                             lash::SessionCreateRequest::child_session(
+                                lash::plugins::SessionToolAccess::ambient(),
                                 "root",
                                 lash::SessionStartPoint::Empty,
                                 lash::plugins::PluginOptions::default(),

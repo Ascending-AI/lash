@@ -65,7 +65,13 @@ fn drain_area_witnesses() {
     // W0021: lash::SessionCommand::source_key [function]
     let _: fn(&lash::SessionCommand, &'static str) -> String = lash::SessionCommand::source_key;
     // W0022: lash::SessionCreateRequest::child [function]
-    let _ = lash::SessionCreateRequest::child("", todo!(), todo!(), todo!());
+    let _ = lash::SessionCreateRequest::child(
+        lash::plugins::SessionToolAccess::ambient(),
+        "",
+        todo!(),
+        todo!(),
+        todo!(),
+    );
     // W0023: lash::SessionCreateRequest::root [function]
     let _ = lash::SessionCreateRequest::root;
     // W0024: lash::SessionCreateRequest::with_caused_by [function]

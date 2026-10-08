@@ -287,6 +287,7 @@ mod semantic_boundary_request_identity_tests {
             crate::TurnBudget::bounded(7),
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
+            crate::SessionToolAccess::ambient(),
         );
         let (_, changed) = semantic_boundary_request_identity(
             &changed_config,
@@ -316,6 +317,7 @@ mod semantic_boundary_request_identity_tests {
             crate::TurnBudget::bounded(3),
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
+            crate::SessionToolAccess::ambient(),
         );
         let error = stale
             .validate_operation_session()

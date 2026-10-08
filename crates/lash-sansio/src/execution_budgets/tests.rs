@@ -5,14 +5,14 @@ use super::*;
 const MIN: Duration = Duration::from_secs(60);
 
 fn config() -> ExecutionBudgetsConfig {
-    ExecutionBudgetsConfig::default()
+    ExecutionBudgetsConfig::recommended()
 }
 
 /// Budget validation: the defaults construct, and every refusal fires.
 #[test]
 fn default_budgets_construct_and_every_refusal_fires() {
     let defaults = ExecutionBudgets::new(config()).expect("the defaults are valid");
-    assert_eq!(defaults, ExecutionBudgets::default());
+    assert_eq!(defaults, ExecutionBudgets::recommended());
     assert_eq!(defaults.model_total(), 10 * MIN);
     assert_eq!(defaults.control_phase(), MIN);
     assert_eq!(defaults.stop_grace(), Duration::from_secs(2));
@@ -102,7 +102,7 @@ fn default_budgets_construct_and_every_refusal_fires() {
 /// remains of it, and an un-nested one gets the whole model total.
 #[test]
 fn a_nested_model_call_is_clipped_to_the_enclosing_remaining_time() {
-    let budgets = ExecutionBudgets::default();
+    let budgets = ExecutionBudgets::recommended();
     let start = 1_000_000;
     let own = budgets.model_call_limit(start, None);
     assert_eq!(own.remaining(start), 10 * MIN);
@@ -125,7 +125,7 @@ fn a_nested_model_call_is_clipped_to_the_enclosing_remaining_time() {
 /// many checks it runs; no check gets a bound of its own.
 #[test]
 fn one_control_phase_bound_covers_every_check_in_the_phase() {
-    let budgets = ExecutionBudgets::default();
+    let budgets = ExecutionBudgets::recommended();
     let start = 5_000;
     let phase = budgets.control_phase_limit(start);
     let check_cost_ms = 7_000;

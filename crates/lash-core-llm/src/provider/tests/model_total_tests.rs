@@ -109,7 +109,7 @@ fn budgets() -> lash_sansio::ExecutionBudgets {
         model_total: 60 * SECOND,
         provider: lash_sansio::ProviderAttemptLimits::new(40 * SECOND, 20 * SECOND, 20 * SECOND, 4)
             .expect("valid provider limits"),
-        ..lash_sansio::ExecutionBudgetsConfig::default()
+        ..lash_sansio::ExecutionBudgetsConfig::recommended()
     })
     .expect("valid budgets")
 }
@@ -303,7 +303,7 @@ async fn complete_route(
         model_total: 600 * SECOND,
         provider: lash_sansio::ProviderAttemptLimits::new(40 * SECOND, 15 * SECOND, 10 * SECOND, 3)
             .expect("valid provider limits"),
-        ..lash_sansio::ExecutionBudgetsConfig::default()
+        ..lash_sansio::ExecutionBudgetsConfig::recommended()
     })
     .expect("valid budgets");
     let sent = Arc::new(Mutex::new(Vec::new()));

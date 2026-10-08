@@ -807,10 +807,15 @@ impl SessionNodeRecord {
     }
 
     /// Provider, model and plugin configuration (the protocol's namespace
-    /// included) captured by this frame boundary.
-    pub fn frame_config(&self) -> Option<PersistedSessionConfig> {
+    /// included) captured by this frame boundary, under `tool_access`. A
+    /// frame records no tool authority: it is the session's, so the reader
+    /// passes the one the session's head records.
+    pub fn frame_config(
+        &self,
+        tool_access: crate::SessionToolAccess,
+    ) -> Option<PersistedSessionConfig> {
         let (_, assignment) = self.frame_open()?;
-        let mut config = PersistedSessionConfig::from(&assignment.policy);
+        let mut config = PersistedSessionConfig::from_policy(&assignment.policy, tool_access);
         config.plugin_config = assignment.plugin_config.clone();
         Some(config)
     }

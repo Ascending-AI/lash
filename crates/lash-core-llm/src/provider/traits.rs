@@ -102,8 +102,8 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
         deliveries: &dyn super::SlotDeliveries,
     ) -> Result<LlmResponse, LlmTransportError> {
         let timeout = self.options().llm_timeouts().request_timeout;
-        let horizon =
-            timeout.unwrap_or_else(|| lash_sansio::ProviderAttemptLimits::default().per_request());
+        let horizon = timeout
+            .unwrap_or_else(|| lash_sansio::ProviderAttemptLimits::recommended().per_request());
         let prepare = async {
             let template = std::sync::Arc::new(self.lower(&request).await?);
             let slots: Vec<_> = template.slots().cloned().collect();

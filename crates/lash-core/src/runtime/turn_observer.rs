@@ -174,7 +174,7 @@ impl TurnObserver {
             false,
             DeltaFraming {
                 clock: Arc::new(crate::SystemClock),
-                coalescing: crate::runtime::DeltaCoalescing::default(),
+                coalescing: crate::runtime::DeltaCoalescing::recommended(),
             },
         )
     }

@@ -81,6 +81,8 @@ async fn embedded_runtime_builder_loads_state_from_store() {
                 lash_core::CommitBudget::bounded(1024 * 1024, 512),
                 lash_core::QueuedWorkBatchingConfig::new(1),
                 lash_core::ToolSourcePolicy::Tolerate,
+                lash_core::ExecutionBudgets::recommended(),
+                lash_core::runtime::DeltaCoalescing::recommended(),
             ),
             lash_core::LeaseOwnerIdentity::opaque("protocol-test-worker", "protocol-test-boot"),
         )
@@ -146,6 +148,8 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
                 lash_core::CommitBudget::bounded(1024 * 1024, 512),
                 lash_core::QueuedWorkBatchingConfig::new(1),
                 lash_core::ToolSourcePolicy::Tolerate,
+                lash_core::ExecutionBudgets::recommended(),
+                lash_core::runtime::DeltaCoalescing::recommended(),
             ),
             lash_core::LeaseOwnerIdentity::opaque("protocol-test-worker", "protocol-test-boot"),
         )

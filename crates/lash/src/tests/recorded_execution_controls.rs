@@ -78,6 +78,7 @@ fn core_over(backend: lash_core::Backend, provider: ProviderHandle) -> Result<La
 async fn create_with_budget(core: &LashCore, id: &str, budget: crate::TurnBudget) -> Result<()> {
     core.session(SessionId::fixture(id.to_string()))
         .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
             mock_session_spec().turn_budget(budget),
         ))
         .await?;
@@ -175,7 +176,10 @@ async fn reopened_config(core: &LashCore, id: &str) -> Result<lash_core::Persist
     .await?
     .expect("a recorded session has a current window")
     .state;
-    Ok(lash_core::PersistedSessionConfig::from(&state.policy))
+    Ok(lash_core::PersistedSessionConfig::from_policy(
+        &state.policy,
+        lash_core::SessionToolAccess::ambient(),
+    ))
 }
 
 /// Apply `transaction` to `session`, written against `revision` under `id`.
@@ -217,6 +221,7 @@ async fn creation_refuses_charge_safety_above_the_ceiling_without_recording_a_se
         let error = core
             .session(crate::SessionId::parse(ID).expect("nonblank host identity"))
             .create(crate::SessionCreation::root(
+                crate::plugins::SessionToolAccess::ambient(),
                 mock_session_spec().charge_safety(
                     crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
                         max_unsafe_retries: requested,
@@ -285,6 +290,7 @@ async fn creation_refuses_charge_safety_above_the_ceiling_without_recording_a_se
     }
     core.session(crate::SessionId::parse(ID).expect("nonblank host identity"))
         .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
             mock_session_spec().charge_safety(crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
                 max_unsafe_retries: crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES,
                 max_duplicate_cost_tokens: None,
@@ -897,7 +903,10 @@ async fn a_creation_without_max_tool_calls_is_refused() -> Result<()> {
     unstated.max_tool_calls = None;
     let error = core
         .session(crate::SessionId::parse(ID).expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(unstated))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            unstated,
+        ))
         .await
         .err()
         .expect("a creation without max_tool_calls must be refused");
@@ -942,7 +951,10 @@ async fn a_fork_records_its_fork_points_config_whatever_the_host_passes_now() ->
         });
     let core = core_over(backend.clone(), mock_provider())?;
     core.session(crate::SessionId::parse(SOURCE).expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(stated))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            stated,
+        ))
         .await?;
     engine_executed_turn(&core, SOURCE, "before the fork").await?;
     let source = recorded_config(&core, SOURCE).await?;
@@ -965,7 +977,10 @@ async fn a_fork_records_its_fork_points_config_whatever_the_host_passes_now() ->
         });
     later
         .session(crate::SessionId::parse(LATER).expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(changed))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            changed,
+        ))
         .await?;
     later
         .fork_at(

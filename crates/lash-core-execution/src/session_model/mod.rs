@@ -574,7 +574,10 @@ mod tests {
             crate::MaxToolCalls::new(8),
             crate::NoProgressBudget::bounded(12),
         );
-        let head = crate::PersistedSessionConfig::from(&policy);
+        let head = crate::PersistedSessionConfig::from_policy(
+            &policy,
+            crate::SessionToolAccess::ambient(),
+        );
         for (name, complete) in [
             (
                 "policy",
@@ -649,7 +652,11 @@ mod tests {
             ("policy", serde_json::to_value(&policy).expect("policy")),
             (
                 "head",
-                serde_json::to_value(crate::PersistedSessionConfig::from(&policy)).expect("head"),
+                serde_json::to_value(crate::PersistedSessionConfig::from_policy(
+                    &policy,
+                    crate::SessionToolAccess::ambient(),
+                ))
+                .expect("head"),
             ),
         ] {
             assert_eq!(record["no_progress_budget"], "unbounded");

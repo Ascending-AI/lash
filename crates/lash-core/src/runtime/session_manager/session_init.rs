@@ -1136,6 +1136,7 @@ mod tests {
 
     fn root_request() -> SessionCreateRequest {
         SessionCreateRequest::root(
+            crate::SessionToolAccess::ambient(),
             crate::SessionStartPoint::Empty,
             crate::PluginOptions::default(),
         )
@@ -1262,6 +1263,7 @@ mod tests {
     #[test]
     fn a_child_records_only_what_its_request_states() {
         let unstated = SessionCreateRequest::child_session(
+            crate::SessionToolAccess::ambient(),
             "parent",
             crate::SessionStartPoint::Empty,
             crate::PluginOptions::default(),
@@ -1282,6 +1284,7 @@ mod tests {
         );
 
         let keyed = SessionCreateRequest::child(
+            crate::SessionToolAccess::ambient(),
             "parent",
             crate::SessionStartPoint::Empty,
             stated_policy(),
@@ -1298,6 +1301,7 @@ mod tests {
         assert_eq!(
             facts.plugin_config,
             child_facts(&SessionCreateRequest::child(
+                crate::SessionToolAccess::ambient(),
                 "another-parent",
                 crate::SessionStartPoint::Empty,
                 stated_policy(),
@@ -1315,6 +1319,7 @@ mod tests {
     #[test]
     fn a_refused_child_creation_config_carries_its_typed_cause() {
         let mut request = SessionCreateRequest::root(
+            crate::SessionToolAccess::ambient(),
             crate::SessionStartPoint::Empty,
             crate::PluginOptions::typed("no-such-plugin", serde_json::json!({ "k": 1 }))
                 .expect("options"),

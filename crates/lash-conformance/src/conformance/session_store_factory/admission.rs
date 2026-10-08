@@ -98,16 +98,19 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
     assert_eq!(created_head.checkpoint_ref, None);
     assert_eq!(created_head.leaf_node_id, None);
     let rebinding = crate::SessionStoreCreateRequest {
-        config: crate::PersistedSessionConfig::from(&crate::SessionPolicy {
-            model: Some(crate::testing::test_llm_profile_config(
-                "a-rebinding-model",
-                crate::LlmProfileMetadata::builder("a-rebinding-model")
-                    .context_window_tokens(1_000)
-                    .build()
-                    .expect("valid test model"),
-            )),
-            ..request.config.session_policy()
-        }),
+        config: crate::PersistedSessionConfig::from_policy(
+            &crate::SessionPolicy {
+                model: Some(crate::testing::test_llm_profile_config(
+                    "a-rebinding-model",
+                    crate::LlmProfileMetadata::builder("a-rebinding-model")
+                        .context_window_tokens(1_000)
+                        .build()
+                        .expect("valid test model"),
+                )),
+                ..request.config.session_policy()
+            },
+            lash_core::SessionToolAccess::ambient(),
+        ),
         ..request.clone()
     };
     assert_eq!(

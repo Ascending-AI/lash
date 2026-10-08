@@ -449,12 +449,10 @@ enum SessionToolAccessWire {
         hidden_tools: Vec<String>,
     },
 }
-impl Default for SessionToolAccess {
-    fn default() -> Self {
-        Self::ambient()
-    }
-}
 impl SessionToolAccess {
+    /// Ambient authority: the session may call every tool its host
+    /// registers, now and later. Tool authority is a host decision with no
+    /// default; a creator states this or [`restricted`](Self::restricted).
     pub fn ambient() -> Self {
         Self {
             resident: SessionResidentToolAccess::Ambient,

@@ -109,7 +109,7 @@ async fn provider_handle_enforces_the_supplied_retry_limit_without_a_second_ceil
             lash_sansio::MAX_PROVIDER_ATTEMPTS,
         )
         .expect("valid provider limits"),
-        ..lash_sansio::ExecutionBudgetsConfig::default()
+        ..lash_sansio::ExecutionBudgetsConfig::recommended()
     })
     .expect("valid budgets");
     let mut request = empty_request();

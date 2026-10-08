@@ -413,7 +413,7 @@ impl SimServices {
 #[async_trait::async_trait]
 impl TurnServices for SimServices {
     fn execution_budgets(&self, _session: &SessionId) -> ExecutionBudgets {
-        ExecutionBudgets::default()
+        ExecutionBudgets::recommended()
     }
 
     async fn start(

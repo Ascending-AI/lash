@@ -207,13 +207,25 @@ pub struct DirectLlmClient {
     /// What delivers a request's attachment slots on each attempt. A client
     /// with none refuses an attachment-bearing request unsent.
     deliveries: Arc<dyn SlotDeliveries>,
+    /// The bounds every completion of this client runs under.
+    budgets: crate::ExecutionBudgets,
 }
 
 impl DirectLlmClient {
-    pub fn new(provider: ProviderHandle, model: crate::LlmProfileConfig) -> Self {
+    /// A client over `provider` and `model` whose completions run under
+    /// `budgets`. A host's own completion runs under no lash execution, so
+    /// nothing else bounds it: the model total, the provider attempt limits
+    /// and the attempt count are the host's stated spend decision, and there
+    /// is no default.
+    pub fn new(
+        provider: ProviderHandle,
+        model: crate::LlmProfileConfig,
+        budgets: crate::ExecutionBudgets,
+    ) -> Self {
         Self {
             provider,
             model,
+            budgets,
             instructions: None,
             trace_sink: None,
             trace_context: TraceContext::default(),
@@ -309,8 +321,8 @@ impl DirectLlmClient {
                 .as_ref()
                 .and_then(|(standing, _)| standing.body_permit()),
             // A host's own completion runs under no lash execution, so the
-            // default budgets bound it.
-            lash_core_llm::core_internal::ModelCallBounds::default(),
+            // budgets its client was created with bound it.
+            lash_core_llm::core_internal::ModelCallBounds::unnested(self.budgets.clone()),
         )
         .await
         {
@@ -606,6 +618,7 @@ mod tests {
         DirectLlmClient::new(
             provider.into_handle().with_clock(Arc::clone(&clock)),
             profile("trace-model"),
+            crate::ExecutionBudgets::recommended(),
         )
         .with_trace_sink(Some(trace_sink))
         .with_clock(clock)
@@ -787,7 +800,11 @@ mod tests {
             })
             .build()
             .into_handle();
-        let mut client = DirectLlmClient::new(provider, profile("direct-model"));
+        let mut client = DirectLlmClient::new(
+            provider,
+            profile("direct-model"),
+            crate::ExecutionBudgets::recommended(),
+        );
         let request = DirectRequest::json_schema(
             "return items",
             DirectJsonSchema {
@@ -862,7 +879,11 @@ mod tests {
             })
             .build()
             .into_handle();
-        let mut client = DirectLlmClient::new(provider, profile("direct-model"));
+        let mut client = DirectLlmClient::new(
+            provider,
+            profile("direct-model"),
+            crate::ExecutionBudgets::recommended(),
+        );
 
         let request = DirectRequest::text("hi");
         // Effort names match exactly: no alias, case folding or clamping.
@@ -910,7 +931,11 @@ mod tests {
             })
             .build()
             .into_handle();
-        let mut client = DirectLlmClient::new(provider, profile("direct-model"));
+        let mut client = DirectLlmClient::new(
+            provider,
+            profile("direct-model"),
+            crate::ExecutionBudgets::recommended(),
+        );
 
         let request = DirectRequest::text("hi");
         client.model.reasoning = crate::ReasoningSelection::Effort("max".to_string());
@@ -935,7 +960,11 @@ mod tests {
             .complete(|_request| async { Ok(LlmResponse::default()) })
             .build()
             .into_handle();
-        let mut client = DirectLlmClient::new(provider, profile("direct-model"));
+        let mut client = DirectLlmClient::new(
+            provider,
+            profile("direct-model"),
+            crate::ExecutionBudgets::recommended(),
+        );
 
         let request = DirectRequest::text("hi");
         client.model.reasoning = crate::ReasoningSelection::Effort("high".to_string());
@@ -961,7 +990,11 @@ mod tests {
             .complete(|_request| async { Ok(LlmResponse::default()) })
             .build()
             .into_handle();
-        let mut client = DirectLlmClient::new(provider, profile("direct-model"));
+        let mut client = DirectLlmClient::new(
+            provider,
+            profile("direct-model"),
+            crate::ExecutionBudgets::recommended(),
+        );
 
         let mut capability = reasoning_capability();
         capability.reasoning.as_mut().expect("reasoning").mandatory = true;
@@ -1018,6 +1051,44 @@ mod tests {
             "providers that require streaming need a no-op sender even when direct caller did not request one"
         );
     }
+
+    /// FIG-5491: a direct client's completions run under the budgets its
+    /// host stated at creation. A model total far below the recommended
+    /// preset's ends a call the provider never answers.
+    #[tokio::test]
+    async fn direct_completion_runs_under_the_budgets_its_client_states() {
+        let short = std::time::Duration::from_millis(50);
+        let budgets = crate::ExecutionBudgets::new(crate::ExecutionBudgetsConfig {
+            model_total: short,
+            provider: crate::ProviderAttemptLimits::new(short, short, short, 1)
+                .expect("valid provider limits"),
+            ..crate::ExecutionBudgetsConfig::recommended()
+        })
+        .expect("valid budgets");
+        let provider = TestProvider::builder()
+            .kind("direct-unanswered")
+            .complete(|_request| std::future::pending::<Result<LlmResponse, LlmTransportError>>())
+            .build()
+            .into_handle();
+        let mut client = DirectLlmClient::new(provider, profile("direct-model"), budgets);
+
+        let error = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            client.complete(DirectRequest::text("hi")),
+        )
+        .await
+        .expect("the stated model total ends the call")
+        .expect_err("an unanswered call fails");
+        let DirectLlmError::Transport(error) = error else {
+            panic!("expected a transport error, got {error:?}");
+        };
+        assert_eq!(
+            error.code,
+            Some(crate::FailureCode::lash(
+                crate::TurnFailureCode::ModelTotalExceeded
+            )),
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1027,7 +1098,11 @@ mod runtime_feedback_tests {
     #[tokio::test]
     async fn direct_leading_system_is_refused_with_instructions_error() {
         let provider = crate::testing::TestProvider::default().into_handle();
-        let mut client = DirectLlmClient::new(provider, profile("direct-model"));
+        let mut client = DirectLlmClient::new(
+            provider,
+            profile("direct-model"),
+            crate::ExecutionBudgets::recommended(),
+        );
         let mut request = DirectRequest::text("user");
         request.messages.insert(
             0,

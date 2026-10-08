@@ -202,6 +202,8 @@ impl FrameSwitch {
                     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
                     .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+                    .execution_budgets(lash::ExecutionBudgets::recommended())
+                    .delta_coalescing(lash::DeltaCoalescing::recommended())
                     .serve_test_llm_profile(model(Arc::clone(&self.seen)), metadata())
                     .tools(switch_frame())
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -220,6 +222,7 @@ impl FrameSwitch {
             .core()
             .session(session())
             .create(lash::SessionCreation::root(
+                lash::plugins::SessionToolAccess::ambient(),
                 lash::SessionSpec::new(
                     MODEL,
                     lash::TurnBudget::Unbounded,

@@ -52,6 +52,7 @@ fn session_turn_input(definition_key: &str) -> ProcessInput {
         definition_key: definition_key.to_string(),
         create_request: Box::new(
             crate::SessionCreateRequest::root(
+                crate::SessionToolAccess::ambient(),
                 crate::SessionStartPoint::Empty,
                 crate::PluginOptions::default(),
             )

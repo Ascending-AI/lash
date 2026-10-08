@@ -389,6 +389,8 @@ fn rlm_core_with_plugins(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .plugin(Arc::new(
             lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
                 lash_core::lifetime::session_or_starter,
@@ -1187,6 +1189,7 @@ async fn created_session(
     match core
         .session(session_id.clone())
         .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 "artifact-referrers",
                 lash::TurnBudget::Unbounded,

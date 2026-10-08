@@ -96,11 +96,13 @@ checkpoint, and never feeds it back
   process without a shared live replay store loses the tail, and nothing can
   recover it. A slow sink loses nothing: the deltas it has not taken yet pile
   into the frame of their block, including across a cancellation.
-- **A delta is appended text, often several tokens.** By default the first
+- **A delta is appended text, often several tokens.** The host chooses how
+  deltas are coalesced with the required `LashCoreBuilder::delta_coalescing`:
+  the interval, the frame size cap and the first-delta flush, or
+  `DeltaCoalescing::off()`. Under `DeltaCoalescing::recommended()` the first
   prose or reasoning delta of a block arrives at once, and the block's later
   deltas arrive coalesced into frames of about 50 ms, cut early by any other
-  event. `LashCoreBuilder::delta_coalescing` sets the interval, the frame size
-  cap and the first-delta flush, or turns coalescing off. Append each delta's text to its block, as
+  event. Append each delta's text to its block, as
   for a single token. A frame's activity ID names the delta range it covers,
   so a redrive never repeats or drops streamed text on the live stream.
 - **`Stopped` is published only after its commit.** A stopped turn's terminal

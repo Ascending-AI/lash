@@ -8,7 +8,10 @@ use super::*;
 async fn opened(core: &LashCore, id: &str) -> Result<crate::LashSession> {
     let id = crate::SessionId::parse(id).expect("nonblank host identity");
     core.session(id.clone())
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await?;
     core.session(id).open().await
 }

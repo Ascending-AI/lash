@@ -303,7 +303,11 @@ fn route_headers_stay_out_of_the_persisted_session_config() {
     policy.model = Some(lash_core::LlmProfileConfig::new(
         lash_core::LlmProfiles::snapshot(&models, &lash_core::LlmProfileKey::new("model")).unwrap(),
     ));
-    let row = serde_json::to_value(lash_core::PersistedSessionConfig::from(&policy)).unwrap();
+    let row = serde_json::to_value(lash_core::PersistedSessionConfig::from_policy(
+        &policy,
+        lash_core::SessionToolAccess::ambient(),
+    ))
+    .unwrap();
     assert_eq!(
         row["model"]["model"]["metadata"]["extra_body"],
         json!({"host_route":{"enabled":true}})

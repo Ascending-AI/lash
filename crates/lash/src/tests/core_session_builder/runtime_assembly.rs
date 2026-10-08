@@ -11,7 +11,10 @@ async fn assert_runtime_assembly_refuses_without_writes(
     let catalog = backend.session_store_factory();
     if deleted {
         core.session(session_id.clone())
-            .create(crate::SessionCreation::root(mock_session_spec()))
+            .create(crate::SessionCreation::root(
+                crate::plugins::SessionToolAccess::ambient(),
+                mock_session_spec(),
+            ))
             .await
             .expect("create the deletion fixture explicitly");
         catalog
@@ -47,6 +50,8 @@ async fn assert_runtime_assembly_refuses_without_writes(
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
             crate::tools::ToolSourcePolicy::Tolerate,
+            lash_core::ExecutionBudgets::recommended(),
+            lash_core::runtime::DeltaCoalescing::recommended(),
         );
         let result = if builder {
             Box::pin(
@@ -123,6 +128,8 @@ fn peer_core(backend: lash_core::Backend) -> LashCore {
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
+        .execution_budgets(crate::ExecutionBudgets::recommended())
+        .delta_coalescing(crate::DeltaCoalescing::recommended())
         .build(crate::testing::runtime_lease_owner())
         .expect("fixture core")
 }

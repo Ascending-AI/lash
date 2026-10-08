@@ -212,7 +212,7 @@ impl Holding {
                 lash::LashCore::rlm_builder(backend.clone(), served::rlm(&backend, None, sim::workers(&clock)))
                     .serve_sessions(false)
                     .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
-                    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1)).tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+                    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1)).tool_source_policy(lash_core::ToolSourcePolicy::Tolerate).execution_budgets(lash::ExecutionBudgets::recommended()).delta_coalescing(lash::DeltaCoalescing::recommended())
                     .serve_test_llm_profile(
                         served::model(Arc::clone(&self.scripts)),
                         served::metadata(),
@@ -376,7 +376,10 @@ impl Scenario for Holding {
         let session = self
             .core()
             .session(session())
-            .create(lash::SessionCreation::root(served::spec(LIMIT)))
+            .create(lash::SessionCreation::root(
+                lash::plugins::SessionToolAccess::ambient(),
+                served::spec(LIMIT),
+            ))
             .await
             .map_err(|error| format!("create the session: {error}"))?;
         session
@@ -546,7 +549,10 @@ async fn an_aggregate_sleep_past_every_step_bound_wakes_at_its_deadline_across_a
     let session = deployment
         .core()
         .session(session())
-        .create(lash::SessionCreation::root(served::spec(LIMIT)))
+        .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
+            served::spec(LIMIT),
+        ))
         .await
         .expect("the session is created");
     session

@@ -274,7 +274,7 @@ mod tests {
     }
 
     fn budgets() -> ExecutionBudgets {
-        ExecutionBudgets::default()
+        ExecutionBudgets::recommended()
     }
 
     #[test]

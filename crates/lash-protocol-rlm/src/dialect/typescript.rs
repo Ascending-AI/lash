@@ -553,7 +553,7 @@ mod tests {
                     owner: lash_core::RuntimeOwner::Session(SessionId::from("session")),
                     tools: vec![tool.manifest()],
                     resolve_contract: None,
-                    tool_access: lash_core::SessionToolAccess::default(),
+                    tool_access: lash_core::SessionToolAccess::ambient(),
                     extensions: Default::default(),
                 },
                 &dialect,

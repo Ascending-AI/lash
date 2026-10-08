@@ -40,7 +40,10 @@ fn core_over(backend: lash_core::Backend, model: ProviderHandle) -> LashCore {
 
 async fn created(core: &LashCore, id: &'static str) -> crate::DurableSession {
     core.session(crate::SessionId::from(id))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await
         .expect("created")
 }

@@ -65,6 +65,19 @@ pub enum EmbedError {
     /// The host must choose how to handle a missing tool source.
     #[error("tool source policy is required; provide .tool_source_policy(...)")]
     MissingToolSourcePolicy,
+    /// The host must state every execution bound the runtime enforces. They
+    /// are its spend decision; the named preset is
+    /// `ExecutionBudgets::recommended()`.
+    #[error(
+        "execution budgets are required; provide .execution_budgets(...), for example ExecutionBudgets::recommended()"
+    )]
+    MissingExecutionBudgets,
+    /// The host must choose how stream deltas are coalesced, or that they
+    /// are not.
+    #[error(
+        "delta coalescing is required; provide .delta_coalescing(...), for example DeltaCoalescing::recommended() or DeltaCoalescing::off()"
+    )]
+    MissingDeltaCoalescing,
     #[error(
         "a host session-turn start must state its session's {unstated}: build its create request with SessionCreateRequest::with_spec, or start it under a captured environment"
     )]
@@ -355,6 +368,8 @@ impl EmbedError {
             | Self::MissingMaxToolCalls
             | Self::MissingNoProgressBudget
             | Self::MissingToolSourcePolicy
+            | Self::MissingExecutionBudgets
+            | Self::MissingDeltaCoalescing
             | Self::SessionTurnStartUnspecified { .. }
             | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching
@@ -408,6 +423,8 @@ impl EmbedError {
             | Self::MissingMaxToolCalls
             | Self::MissingNoProgressBudget
             | Self::MissingToolSourcePolicy
+            | Self::MissingExecutionBudgets
+            | Self::MissingDeltaCoalescing
             | Self::SessionTurnStartUnspecified { .. }
             | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching

@@ -448,12 +448,12 @@ async fn measure_store_hardening_history_reads(
                     head_revision: head.head_revision,
                     relation: lash_core::SessionRelation::Root,
                     pending_observer_intents: Vec::new(),
-                    config: lash_core::SessionPolicy::new(
+                    config: lash_core::PersistedSessionConfig::new(
                         lash_core::TurnBudget::Unbounded,
                         lash_core::MaxToolCalls::new(1024),
                         lash_core::NoProgressBudget::bounded(12),
-                    )
-                    .into(),
+                        lash_core::SessionToolAccess::ambient(),
+                    ),
                 })
                 .await?;
             let mut state = load_store_hardening_state(store, &fork_session_id).await?;
@@ -585,12 +585,12 @@ pub(super) fn runtime_perf_session_create_request(
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
         relation: lash_core::SessionRelation::Root,
-        config: lash_core::SessionPolicy::new(
+        config: lash_core::PersistedSessionConfig::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-        )
-        .into(),
+            lash_core::SessionToolAccess::ambient(),
+        ),
         head: lash_core::SessionCreationHead::Config,
     }
 }

@@ -31,6 +31,7 @@ async fn every_tool_a_standard_workbench_turn_offers_projects_under_every_provid
         None,
     );
     let delegation: Arc<dyn PluginFactory> = Arc::new(delegation::DelegationPluginFactory::new(
+        lash::plugins::SessionToolAccess::ambient(),
         session_defaults.clone(),
         lash::process::lifetime::starter,
     ));
@@ -55,6 +56,8 @@ async fn every_tool_a_standard_workbench_turn_offers_projects_under_every_provid
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .llm_profiles(Arc::new(WorkbenchLlmProfiles { provider }))
         .configure_plugins(move |plugins| {
             configure_workbench_plugins(
@@ -74,7 +77,10 @@ async fn every_tool_a_standard_workbench_turn_offers_projects_under_every_provid
         .expect("build the Standard workbench core");
     let session_id = lash::SessionId::from("workbench-tool-projection");
     core.session(session_id.clone())
-        .create(lash::SessionCreation::root(session_defaults))
+        .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
+            session_defaults,
+        ))
         .await
         .expect("create the session");
     let session = core

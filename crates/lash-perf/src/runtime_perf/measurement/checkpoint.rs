@@ -220,6 +220,7 @@ impl CheckpointBindingFixture {
         )?;
         let session_id = SessionId::fixture(format!("checkpoint-worker-{}", uuid::Uuid::new_v4()));
         let creation = lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 "mock-model",
                 lash::TurnBudget::Unbounded,
@@ -979,7 +980,10 @@ pub(crate) async fn run_once_embed(
             let session = core
                 .create_and_open_session(
                     session_id.clone(),
-                    lash::SessionCreation::root(core.session_spec()),
+                    lash::SessionCreation::root(
+                        lash::plugins::SessionToolAccess::ambient(),
+                        core.session_spec(),
+                    ),
                 )
                 .await
                 .with_context(|| format!("open embed session for {}", scenario.name()))?;

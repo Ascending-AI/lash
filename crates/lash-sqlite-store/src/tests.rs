@@ -325,12 +325,12 @@ async fn session_listing_statement_count_is_session_count_invariant() {
                 },
                 session_id: session_id.clone(),
                 relation: relation.clone(),
-                config: lash_core_execution::SessionPolicy::new(
+                config: lash_core_execution::PersistedSessionConfig::new(
                     lash_core_execution::TurnBudget::Unbounded,
                     lash_core_execution::MaxToolCalls::new(1024),
                     lash_core::NoProgressBudget::bounded(12),
-                )
-                .into(),
+                    lash_core_execution::SessionToolAccess::ambient(),
+                ),
                 head: lash_core_execution::SessionCreationHead::Config,
             })
             .await
@@ -423,7 +423,10 @@ async fn durable_state(
         .admit_session(&SessionStoreCreateRequest {
             session_id: session_id.clone(),
             relation: lash_core_execution::SessionRelation::Root,
-            config: state.policy.clone().into(),
+            config: lash_core_execution::PersistedSessionConfig::from_policy(
+                &state.policy.clone(),
+                lash_core_execution::SessionToolAccess::ambient(),
+            ),
             head: lash_core_execution::SessionCreationHead::Config,
             pending_observer_intents: Vec::new(),
             owning_process_id: None,
@@ -581,12 +584,12 @@ async fn catalog_lookup_and_repeated_admission_share_a_readable_snapshot() {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("catalog-lookup"),
         relation: lash_core_execution::SessionRelation::Root,
-        config: lash_core_execution::SessionPolicy::new(
+        config: lash_core_execution::PersistedSessionConfig::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-        )
-        .into(),
+            lash_core_execution::SessionToolAccess::ambient(),
+        ),
         head: lash_core_execution::SessionCreationHead::Config,
     };
     assert!(matches!(
@@ -619,12 +622,12 @@ async fn lookup_session_aborts_on_unreadable_requested_session_meta() {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("corrupt-session-meta"),
         relation: lash_core_execution::SessionRelation::Root,
-        config: lash_core_execution::SessionPolicy::new(
+        config: lash_core_execution::PersistedSessionConfig::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-        )
-        .into(),
+            lash_core_execution::SessionToolAccess::ambient(),
+        ),
         head: lash_core_execution::SessionCreationHead::Config,
     };
 
@@ -768,12 +771,12 @@ async fn concurrent_admission_creates_both_sessions_in_one_catalog() {
     let request = |session_id: &str| SessionStoreCreateRequest {
         session_id: SessionId::fixture(session_id),
         relation: lash_core_execution::SessionRelation::Root,
-        config: lash_core_execution::SessionPolicy::new(
+        config: lash_core_execution::PersistedSessionConfig::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-        )
-        .into(),
+            lash_core_execution::SessionToolAccess::ambient(),
+        ),
         head: lash_core_execution::SessionCreationHead::Config,
         pending_observer_intents: Vec::new(),
         owning_process_id: None,
@@ -872,12 +875,12 @@ async fn a_session_delete_and_fork_answer_inline_on_the_store_connection() {
         source_session_id: SessionId::from("never-made-either"),
         head_revision: 0,
         relation: lash_core_execution::SessionRelation::Root,
-        config: lash_core_execution::SessionPolicy::new(
+        config: lash_core_execution::PersistedSessionConfig::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-        )
-        .into(),
+            lash_core_execution::SessionToolAccess::ambient(),
+        ),
     };
     let mut forked = std::pin::pin!(store.fork_session(&request));
     assert!(

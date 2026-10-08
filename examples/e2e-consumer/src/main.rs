@@ -63,7 +63,10 @@ async fn submit(
     match host
         .core
         .session(session_id.clone())
-        .create(SessionCreation::root(spec))
+        .create(SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
+            spec,
+        ))
         .await
     {
         Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}
@@ -367,6 +370,8 @@ async fn main() -> Result<()> {
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .plugin(Arc::new(fixture::ConsumerPlugin(controls.clone())))
         .trace_sink(Arc::new(lash::tracing::JsonlTraceSink::new(trace)))
         .trace_level(lash::tracing::TraceLevel::Extended);

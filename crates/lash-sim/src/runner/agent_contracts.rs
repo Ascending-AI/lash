@@ -483,6 +483,8 @@ async fn facade_final_value_execution_inner(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(
             fixed_texts_provider(provider_kind, provider_responses),
             lash_core::LlmProfileMetadata::builder(provider_kind)
@@ -829,7 +831,7 @@ async fn agent_process_contract_core_with_options(
             lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_core::lifetime::session_or_starter),
         ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024)).tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024)).tool_source_policy(lash_core::ToolSourcePolicy::Tolerate).execution_budgets(lash::ExecutionBudgets::recommended()).delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(fixed_texts_provider(provider_kind, provider_responses), lash_core::LlmProfileMetadata::builder(provider_kind)
                 .context_window_tokens(200_000)
                 .build()
@@ -854,6 +856,7 @@ fn agent_contract_delegation_plugin(
 ) -> Arc<dyn lash_core::facade_support::PluginFactory> {
     Arc::new(
         delegation::DelegationPluginFactory::new(
+            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 provider_kind,
                 lash::TurnBudget::bounded(1),

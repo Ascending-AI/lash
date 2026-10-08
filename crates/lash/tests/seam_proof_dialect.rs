@@ -234,6 +234,8 @@ fn core(double: &Double, dialect: Arc<dyn Dialect>, script: &Script) -> LashCore
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .tools(Arc::new(Probe {
             calls: Arc::clone(&script.tool_calls),
         }))
@@ -252,6 +254,7 @@ async fn session(core: &LashCore, id: &str) -> lash::LashSession {
     match core
         .session(lash_core::SessionId::fixture(id))
         .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 "seam-proof-dialect",
                 lash::TurnBudget::Unbounded,

@@ -100,7 +100,10 @@ async fn an_assistant_hook_session_fault_retries_the_step_without_recording_it()
     )?;
     let session = core
         .session(crate::SessionId::parse(ID).expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await?;
     let output = tokio::time::timeout(
         ANSWERS_WITHIN,
@@ -155,7 +158,10 @@ async fn a_deterministic_assistant_hook_failure_is_the_steps_recorded_outcome() 
     )?;
     let session = core
         .session(crate::SessionId::parse(ID).expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await?;
     let answered = tokio::time::timeout(
         ANSWERS_WITHIN,

@@ -73,14 +73,18 @@ note: if you're trying to build a new `SessionCreation` consider using one of th
       SessionCreation::child_of
   --> src/session.rs
    |
-   |     pub fn root(spec: SessionSpec) -> Self {
-   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |       pub fn root(tool_access: lash_core::SessionToolAccess, spec: SessionSpec) -> Self {
+   |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 ...
-   |     pub fn child_of(parent: SessionId, spec: SessionSpec) -> Self {
-   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   | /     pub fn child_of(
+   | |         tool_access: lash_core::SessionToolAccess,
+   | |         parent: SessionId,
+   | |         spec: SessionSpec,
+   | |     ) -> Self {
+   | |_____________^
 
-error[E0063]: missing field `spec` in initializer of `SessionCreation`
+error[E0063]: missing fields `spec` and `tool_access` in initializer of `SessionCreation`
   --> tests/ui/session_spec_requires_its_required_parts.rs:27:13
    |
 27 |     let _ = lash::SessionCreation {
-   |             ^^^^^^^^^^^^^^^^^^^^^ missing `spec`
+   |             ^^^^^^^^^^^^^^^^^^^^^ missing `spec` and `tool_access`

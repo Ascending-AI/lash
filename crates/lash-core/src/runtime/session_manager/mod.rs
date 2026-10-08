@@ -626,6 +626,8 @@ mod process_visibility_tests {
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
             crate::ToolSourcePolicy::Tolerate,
+            crate::ExecutionBudgets::recommended(),
+            crate::runtime::DeltaCoalescing::recommended(),
         )
         .with_process_tool_visibility_filter(filter.clone());
         let env = crate::RuntimeEnvironment::builder(core)

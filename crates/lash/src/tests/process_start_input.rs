@@ -15,7 +15,10 @@ async fn upload_core(backend: lash_core::Backend) -> Result<LashCore> {
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     core.session(crate::SessionId::parse(SESSION).expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await?;
     Ok(core)
 }
@@ -36,6 +39,7 @@ fn request(input: lash_core::AttachmentRef) -> lash_core::ProcessStartRequest {
         lash_core::ProcessInput::SessionTurn {
             definition_key: "uploaded-start-input".into(),
             create_request: Box::new(lash_core::SessionCreateRequest::child(
+                crate::plugins::SessionToolAccess::ambient(),
                 SESSION,
                 lash_core::SessionStartPoint::Empty,
                 lash_core::SessionPolicy {

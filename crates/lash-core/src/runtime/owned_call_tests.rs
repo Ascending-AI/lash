@@ -118,7 +118,7 @@ async fn world() -> World {
 fn budgets() -> ExecutionBudgets {
     ExecutionBudgets::new(ExecutionBudgetsConfig {
         model_total: MODEL_TOTAL,
-        ..ExecutionBudgetsConfig::default()
+        ..ExecutionBudgetsConfig::recommended()
     })
     .expect("valid budgets")
 }

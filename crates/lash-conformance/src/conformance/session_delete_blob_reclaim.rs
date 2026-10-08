@@ -373,7 +373,10 @@ where
                 )
                 .await,
                 relation: crate::SessionRelation::Root,
-                config: source.request.config.session_policy().into(),
+                config: crate::PersistedSessionConfig::from_policy(
+                    &source.request.config.session_policy(),
+                    crate::SessionToolAccess::ambient(),
+                ),
             })
             .await
             .expect("fork the admission's base");
@@ -591,7 +594,10 @@ async fn session_delete_keeps_fork_shared_checkpoint_blobs(
         source_session_id: committed.request.session_id.clone(),
         head_revision,
         relation: crate::SessionRelation::Root,
-        config: committed.request.config.session_policy().into(),
+        config: crate::PersistedSessionConfig::from_policy(
+            &committed.request.config.session_policy(),
+            crate::SessionToolAccess::ambient(),
+        ),
     };
     handles
         .factory
@@ -826,7 +832,10 @@ async fn attachment_prefix_retention(backend_name: &str, handles: SessionDeleteB
         source_session_id: request.session_id.clone(),
         head_revision: receipt.head_revision,
         relation: crate::SessionRelation::Root,
-        config: request.config.session_policy().into(),
+        config: crate::PersistedSessionConfig::from_policy(
+            &request.config.session_policy(),
+            crate::SessionToolAccess::ambient(),
+        ),
     };
     handles
         .factory

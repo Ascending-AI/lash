@@ -520,6 +520,8 @@ impl Storage {
                     .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
                     .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+                    .execution_budgets(lash::ExecutionBudgets::recommended())
+                    .delta_coalescing(lash::DeltaCoalescing::recommended())
                     .serve_test_llm_profile(
                         served::model(Arc::clone(&self.scripts)),
                         served::metadata(),
@@ -705,7 +707,10 @@ impl Scenario for Storage {
         let session = self
             .core()
             .session(session())
-            .create(lash::SessionCreation::root(served::spec(64)))
+            .create(lash::SessionCreation::root(
+                lash::plugins::SessionToolAccess::ambient(),
+                served::spec(64),
+            ))
             .await
             .map_err(|error| format!("create the session: {error}"))?;
         *self.host.lock_recover() = Some(session);

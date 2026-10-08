@@ -184,6 +184,8 @@ async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
         crate::ToolSourcePolicy::Tolerate,
+        crate::ExecutionBudgets::recommended(),
+        crate::runtime::DeltaCoalescing::recommended(),
     ));
     // The refusal lands before any turn runs: no provider call is made.
     let transport = mock_provider(Vec::new());
@@ -194,6 +196,7 @@ async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
         .runtime_session_services()
         .expect("runtime session services");
     let create_request = crate::SessionCreateRequest::child_session(
+        crate::SessionToolAccess::ambient(),
         runtime.session_id(),
         crate::SessionStartPoint::Empty,
         crate::PluginOptions::default(),

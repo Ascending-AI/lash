@@ -292,6 +292,8 @@ async fn send(url: bool, tools: bool) -> Sent {
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "ref-law", "node",
         ))
@@ -305,7 +307,10 @@ async fn send(url: bool, tools: bool) -> Sent {
     .no_progress_budget(lash_core::NoProgressBudget::bounded(12))
     .attachment_acceptance(Arc::new(catalogue()));
     core.session(id.clone())
-        .create(lash::SessionCreation::root(spec))
+        .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
+            spec,
+        ))
         .await
         .unwrap();
     let session = core.session(id).open().await.unwrap();

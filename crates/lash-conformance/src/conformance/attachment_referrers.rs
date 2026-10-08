@@ -606,12 +606,12 @@ pub async fn session_referrer_waits_for_graph_retirement(h: AttachmentReferrerHa
             head_revision: receipt.head_revision,
             relation: SessionRelation::Root,
             pending_observer_intents: Vec::new(),
-            config: SessionPolicy::new(
+            config: crate::PersistedSessionConfig::new(
                 TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
-            )
-            .into(),
+                crate::SessionToolAccess::ambient(),
+            ),
         })
         .await
         .unwrap();

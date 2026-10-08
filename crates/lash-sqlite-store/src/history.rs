@@ -405,7 +405,7 @@ pub(crate) fn window(
             config = graph
                 .nodes
                 .first()
-                .and_then(|node| node.frame_config())
+                .and_then(|node| node.frame_config(config.tool_access.clone()))
                 .ok_or_else(|| corrupt("SessionGraph", "frame has no config"))?;
         }
         graph

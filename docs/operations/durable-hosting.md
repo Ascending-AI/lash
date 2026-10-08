@@ -87,6 +87,7 @@ let backend = DurableBackendBuilder::new(stores)
     .build()?;
 let core = lash::LashCore::builder(backend)
     .execution_budgets(budgets)
+    .delta_coalescing(lash::DeltaCoalescing::recommended())
     // providers, plugins, models, tracing ...
     .build(lash::persistence::LeaseOwnerIdentity::opaque(node_name, boot_id))?;
 ```
@@ -632,11 +633,16 @@ A webhook that receives callbacks retries until it gets an answer and treats
 
 ## 6. Execution budgets
 
-`lash::ExecutionBudgets` is the one source of every execution bound. Set it
-with `LashCoreBuilder::execution_budgets`. `ExecutionBudgets::new(config)`
-validates an `ExecutionBudgetsConfig`:
+`lash::ExecutionBudgets` is the one source of every execution bound. It is the
+host's spend decision and has no default: state it with
+`LashCoreBuilder::execution_budgets`, or `build` refuses with
+`EmbedError::MissingExecutionBudgets`. A direct client takes it too:
+`DirectLlmClient::new(provider, model, budgets)`. A host with no numbers of its
+own passes the named preset, `ExecutionBudgets::recommended()`; no measurement
+backs the preset's values. `ExecutionBudgets::new(config)` validates an
+`ExecutionBudgetsConfig`, whose every field is stated:
 
-| Field | Default | Bounds |
+| Field | `recommended()` | Bounds |
 | --- | --- | --- |
 | `model_total` | 10 min | One model call, over throttle, backoff and every provider attempt. |
 | `control_phase` | 60 s | One admission or checkpoint phase, all its checks together. |
@@ -645,8 +651,9 @@ validates an `ExecutionBudgetsConfig`:
 | `agent_frame_switch_limit` | 16 | A chain of agent frame switches; the follow-on at this depth stops with `AgentFrameSwitchLimit` before calling the model. |
 
 `ProviderAttemptLimits::new(per_request, response_start, chunk_idle,
-max_attempts)` defaults to 5 min per request, 2 min to the response start,
-2 min of chunk silence and 4 attempts. Each bound is clipped to the call's
+max_attempts)` states the attempt limits; `ProviderAttemptLimits::recommended()`
+is 5 min per request, 2 min to the response start, 2 min of chunk silence and
+4 attempts. Each bound is clipped to the call's
 remaining `model_total`.
 
 `new` refuses with `ExecutionBudgetsError`:

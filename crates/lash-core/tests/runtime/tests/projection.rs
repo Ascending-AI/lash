@@ -138,7 +138,10 @@ async fn preopened_store_binds_without_remapping_initial_frame() {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("preopened-session"),
             relation: lash_core::SessionRelation::Root,
-            config: policy.clone().into(),
+            config: lash_core::PersistedSessionConfig::from_policy(
+                &policy.clone(),
+                lash_core::SessionToolAccess::ambient(),
+            ),
             head: lash_core::SessionCreationHead::Config,
         },
     )

@@ -25,6 +25,7 @@ fn started(model: &str, keyed: bool) -> lash_core::ProcessStartRequest {
         metadata,
     ));
     let mut create_request = lash_core::SessionCreateRequest::child(
+        crate::plugins::SessionToolAccess::ambient(),
         PARENT,
         lash_core::SessionStartPoint::Empty,
         lash_core::SessionPolicy {
@@ -100,7 +101,10 @@ async fn deploy(
     let core = builder.build(crate::testing::runtime_lease_owner())?;
     if first {
         core.session(crate::SessionId::parse(PARENT).expect("nonblank host identity"))
-            .create(crate::SessionCreation::root(mock_session_spec()))
+            .create(crate::SessionCreation::root(
+                crate::plugins::SessionToolAccess::ambient(),
+                mock_session_spec(),
+            ))
             .await?;
     }
     Ok(core)

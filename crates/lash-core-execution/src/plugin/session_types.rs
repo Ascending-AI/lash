@@ -108,7 +108,13 @@ pub struct SessionCreateRequest {
 }
 
 impl SessionCreateRequest {
-    pub fn root(start: SessionStartPoint, plugin_options: PluginOptions) -> Self {
+    /// A root session's request under `tool_access`. Tool authority is the
+    /// creator's decision, ambient or restricted, and has no default.
+    pub fn root(
+        tool_access: SessionToolAccess,
+        start: SessionStartPoint,
+        plugin_options: PluginOptions,
+    ) -> Self {
         Self {
             session_id: Some(SessionId::from_uuid(uuid::Uuid::new_v4().as_u128())),
             relation: SessionRelation::Root,
@@ -116,7 +122,7 @@ impl SessionCreateRequest {
             policy: None,
             initial_nodes: Vec::new(),
             observed_processes: Vec::new(),
-            tool_access: SessionToolAccess::default(),
+            tool_access,
             plugin_options,
             model: None,
             reasoning: None,
@@ -125,6 +131,7 @@ impl SessionCreateRequest {
     }
 
     pub fn child_session(
+        tool_access: SessionToolAccess,
         parent_session_id: impl Into<SessionId>,
         start: SessionStartPoint,
         plugin_options: PluginOptions,
@@ -139,7 +146,7 @@ impl SessionCreateRequest {
             policy: None,
             initial_nodes: Vec::new(),
             observed_processes: Vec::new(),
-            tool_access: SessionToolAccess::default(),
+            tool_access,
             plugin_options,
             model: None,
             reasoning: None,
@@ -148,6 +155,7 @@ impl SessionCreateRequest {
     }
 
     pub fn child(
+        tool_access: SessionToolAccess,
         parent_session_id: impl Into<SessionId>,
         start: SessionStartPoint,
         policy: SessionPolicy,
@@ -163,7 +171,7 @@ impl SessionCreateRequest {
             policy: Some(policy),
             initial_nodes: Vec::new(),
             observed_processes: Vec::new(),
-            tool_access: SessionToolAccess::default(),
+            tool_access,
             plugin_options,
             model: None,
             reasoning: None,
@@ -247,11 +255,6 @@ impl SessionCreateRequest {
         process_ids: impl IntoIterator<Item = impl Into<crate::ProcessId>>,
     ) -> Self {
         self.observed_processes = process_ids.into_iter().map(Into::into).collect();
-        self
-    }
-
-    pub fn with_tool_access(mut self, tool_access: SessionToolAccess) -> Self {
-        self.tool_access = tool_access;
         self
     }
 

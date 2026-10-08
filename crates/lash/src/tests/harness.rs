@@ -180,6 +180,8 @@ pub(crate) fn explicit_ephemeral_facets_with_budget(
         .commit_budget(commit_budget)
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
+        .execution_budgets(crate::ExecutionBudgets::recommended())
+        .delta_coalescing(crate::DeltaCoalescing::recommended())
 }
 
 fn capability_for_variant(variant: Option<&str>) -> lash_core::LlmProfileCapability {

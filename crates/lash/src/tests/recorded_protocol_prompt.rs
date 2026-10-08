@@ -188,7 +188,13 @@ fn assert_intro(request: &LlmRequest, expected: &str, how: &str) {
 /// Create `id` under the plan placing `key`.
 async fn create_placing(core: &LashCore, id: &str, key: &str) -> Result<()> {
     core.session(crate::SessionId::parse(id).expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(mock_session_spec()).with_prompt_plan(placing(key)))
+        .create(
+            crate::SessionCreation::root(
+                crate::plugins::SessionToolAccess::ambient(),
+                mock_session_spec(),
+            )
+            .with_prompt_plan(placing(key)),
+        )
         .await?;
     Ok(())
 }
@@ -486,7 +492,10 @@ async fn an_rlm_run_options_prompt_is_refused() -> Result<()> {
         .serve_test_llm_profile(scripted_provider(&served, &script), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     core.session(crate::SessionId::parse(ID).expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await?;
     let session = core
         .session(crate::SessionId::parse(ID).expect("nonblank host identity"))

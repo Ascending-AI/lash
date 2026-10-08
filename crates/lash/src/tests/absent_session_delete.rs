@@ -132,7 +132,10 @@ async fn a_delete_of_a_never_created_id_leaves_the_id_creatable_and_runnable(
     );
 
     core.session(SessionId::fixture(ID))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await?;
     runs_a_turn(&core, ID).await?;
     its_own_delete_deletes_it(&core, ID).await?;
@@ -155,7 +158,10 @@ async fn a_delete_racing_a_create_cleans_up_nothing_without_an_accepted_close(
     let (deletion, created) = tokio::join!(
         delete(&core, ID),
         core.session(SessionId::fixture(ID))
-            .create(crate::SessionCreation::root(mock_session_spec())),
+            .create(crate::SessionCreation::root(
+                crate::plugins::SessionToolAccess::ambient(),
+                mock_session_spec()
+            )),
     );
     created?;
     match deletion? {

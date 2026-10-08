@@ -45,6 +45,8 @@ async fn durable_transcript_projection_fixture() -> Vec<crate::ChatRow> {
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "transcript-projection",
             "transcript-projection-boot",
@@ -63,7 +65,10 @@ async fn durable_transcript_projection_fixture() -> Vec<crate::ChatRow> {
     )
     .expect("the RLM session options encode");
     core.session(session_id.clone())
-        .create(lash::SessionCreation::root(spec))
+        .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
+            spec,
+        ))
         .await
         .expect("the session is created");
     let session = core

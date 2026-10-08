@@ -434,7 +434,7 @@ impl TurnServices for L3Services {
                     model_total: total,
                     provider: ProviderAttemptLimits::new(total, total, total, 1)
                         .expect("provider limits"),
-                    ..ExecutionBudgetsConfig::default()
+                    ..ExecutionBudgetsConfig::recommended()
                 })
                 .expect("budgets")
             }
@@ -448,7 +448,7 @@ impl TurnServices for L3Services {
             | Mode::Slots
             | Mode::SlotHold
             | Mode::CollidingCommit
-            | Mode::OutsideWriterRange => ExecutionBudgets::default(),
+            | Mode::OutsideWriterRange => ExecutionBudgets::recommended(),
         }
     }
 

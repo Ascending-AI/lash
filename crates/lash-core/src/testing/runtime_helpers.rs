@@ -230,7 +230,7 @@ fn mock_provider_with_kind(kind: &'static str, calls: Vec<MockCall>) -> TestProv
 /// Send `admitted`, the call `request` was admitted as, on `handle` as the
 /// runtime sends an admitted call: every attempt fills its template's slots
 /// through `deliveries` and reads its response under the admitted context
-/// with `request`'s senders, under the default budgets and charge safety. A test that stands in for the runtime's model call
+/// with `request`'s senders, under the recommended budgets and charge safety. A test that stands in for the runtime's model call
 /// uses it to exercise the real attempt loop (WIRE-SLOTS).
 ///
 /// # Errors
@@ -259,7 +259,7 @@ pub async fn send_admitted(
         crate::ChargeSafetyPolicy::default(),
         &lash_trace::telemetry::metrics::TelemetryMetrics::default(),
         None,
-        crate::provider::ModelCallBounds::default(),
+        crate::provider::ModelCallBounds::unnested(lash_sansio::ExecutionBudgets::recommended()),
     )
     .await
 }
@@ -507,7 +507,7 @@ pub async fn create_runtime_fixture_session(
     create_runtime_fixture_session_with_config(
         store,
         session_id,
-        crate::PersistedSessionConfig::from(policy),
+        crate::PersistedSessionConfig::from_policy(policy, crate::SessionToolAccess::ambient()),
     )
     .await
 }
@@ -574,12 +574,12 @@ pub async fn recording_session_store(
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: crate::SessionRelation::Root,
-            config: crate::SessionPolicy::new(
+            config: crate::PersistedSessionConfig::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
-            )
-            .into(),
+                crate::SessionToolAccess::ambient(),
+            ),
             head: crate::SessionCreationHead::Config,
         })
         .await
@@ -599,6 +599,8 @@ pub fn test_runtime_host_config(backend: &crate::Backend) -> RuntimeHostConfig {
         test_commit_budget(),
         crate::QueuedWorkBatchingConfig::new(1),
         crate::ToolSourcePolicy::Tolerate,
+        crate::ExecutionBudgets::recommended(),
+        crate::runtime::DeltaCoalescing::recommended(),
     )
 }
 
@@ -762,7 +764,10 @@ impl TestRuntime {
         if let Some(store) = self.store.as_ref() {
             // The created head records the same plugin config the runtime's
             // initial state carries, so a reopen adopts it (FIG-4553).
-            let mut config = crate::PersistedSessionConfig::from(&policy);
+            let mut config = crate::PersistedSessionConfig::from_policy(
+                &policy,
+                crate::SessionToolAccess::ambient(),
+            );
             config.plugin_config = initial_state.authority.plugin_config.clone();
             create_runtime_fixture_session_with_config(
                 store.as_ref(),

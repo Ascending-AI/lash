@@ -59,7 +59,10 @@ async fn a_session_close_releases_its_running_runs_execution() -> Result<()> {
     let session_id = crate::SessionId::parse("held-close").expect("nonblank host identity");
     let session = core
         .session(session_id.clone())
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await?;
     let held = session
         .send(crate::TurnInput::text("hold this run"))

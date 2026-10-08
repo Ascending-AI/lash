@@ -56,7 +56,10 @@ async fn sleeping_cell_session(
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(crate::SessionId::parse(id).expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await?;
     Ok((core, session))
 }

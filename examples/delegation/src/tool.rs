@@ -249,6 +249,7 @@ impl SpawnAgent {
             return Err(invalid("spawn_agent: `seed` needs an RLM child"));
         }
         let mut request = SessionCreateRequest::child_session(
+            self.child.tool_access.clone(),
             parent,
             SessionStartPoint::Empty,
             Default::default(),
@@ -263,7 +264,6 @@ impl SpawnAgent {
             request = request.with_prompt_plan(plan);
         }
         Ok(request
-            .with_tool_access(self.child.tool_access.clone())
             .with_initial_nodes(initial_nodes)
             .with_caused_by(caused_by))
     }

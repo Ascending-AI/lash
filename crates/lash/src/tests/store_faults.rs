@@ -131,7 +131,10 @@ fn core_over(stores: &Arc<dyn lash_core::StoreSet>, serve: bool) -> LashCore {
 
 async fn create(core: &LashCore, id: &str) -> Result<()> {
     core.session(SessionId::fixture(id.to_string()))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await?;
     Ok(())
 }
@@ -740,6 +743,7 @@ mod sweep {
                         definition_key: "sweep-child".into(),
                         create_request: Box::new(
                             lash_core::SessionCreateRequest::root(
+                                crate::plugins::SessionToolAccess::ambient(),
                                 lash_core::SessionStartPoint::Empty,
                                 lash_core::PluginOptions::default(),
                             )
@@ -1355,6 +1359,7 @@ mod sweep {
                         definition_key: "fig4628-session-turn".into(),
                         create_request: Box::new(
                             lash_core::SessionCreateRequest::root(
+                                crate::plugins::SessionToolAccess::ambient(),
                                 lash_core::SessionStartPoint::Empty,
                                 lash_core::PluginOptions::default(),
                             )

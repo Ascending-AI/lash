@@ -92,7 +92,10 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
             pending_observer_intents: Vec::new(),
             session_id: state.session_id.clone(),
             relation: lash_core_execution::SessionRelation::Root,
-            config: state.policy.clone().into(),
+            config: lash_core_execution::PersistedSessionConfig::from_policy(
+                &state.policy.clone(),
+                lash_core_execution::SessionToolAccess::ambient(),
+            ),
             head: SessionCreationHead::Config,
         })
         .await
@@ -172,15 +175,17 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
             parent_session_id: SessionId::from("preserved-parent"),
             caused_by: None,
         },
-        config: SessionPolicy {
-            model: recorded_llm_profile("first-model"),
-            ..SessionPolicy::new(
-                lash_core_execution::TurnBudget::Unbounded,
-                lash_core_execution::MaxToolCalls::new(1024),
-                lash_core::NoProgressBudget::bounded(12),
-            )
-        }
-        .into(),
+        config: lash_core_execution::PersistedSessionConfig::from_policy(
+            &SessionPolicy {
+                model: recorded_llm_profile("first-model"),
+                ..SessionPolicy::new(
+                    lash_core_execution::TurnBudget::Unbounded,
+                    lash_core_execution::MaxToolCalls::new(1024),
+                    lash_core::NoProgressBudget::bounded(12),
+                )
+            },
+            lash_core_execution::SessionToolAccess::ambient(),
+        ),
         head: SessionCreationHead::Config,
     };
 
@@ -202,15 +207,17 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             relation: lash_core_execution::SessionRelation::Root,
-            config: SessionPolicy {
-                model: recorded_llm_profile("second-model"),
-                ..SessionPolicy::new(
-                    lash_core_execution::TurnBudget::Unbounded,
-                    lash_core_execution::MaxToolCalls::new(1024),
-                    lash_core::NoProgressBudget::bounded(12),
-                )
-            }
-            .into(),
+            config: lash_core_execution::PersistedSessionConfig::from_policy(
+                &SessionPolicy {
+                    model: recorded_llm_profile("second-model"),
+                    ..SessionPolicy::new(
+                        lash_core_execution::TurnBudget::Unbounded,
+                        lash_core_execution::MaxToolCalls::new(1024),
+                        lash_core::NoProgressBudget::bounded(12),
+                    )
+                },
+                lash_core_execution::SessionToolAccess::ambient(),
+            ),
             ..request
         },
     )
@@ -240,15 +247,17 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::fixture(session_id.to_string()),
         relation: lash_core_execution::SessionRelation::Root,
-        config: SessionPolicy {
-            model: recorded_llm_profile("model"),
-            ..SessionPolicy::new(
-                lash_core_execution::TurnBudget::Unbounded,
-                lash_core_execution::MaxToolCalls::new(1024),
-                lash_core::NoProgressBudget::bounded(12),
-            )
-        }
-        .into(),
+        config: lash_core_execution::PersistedSessionConfig::from_policy(
+            &SessionPolicy {
+                model: recorded_llm_profile("model"),
+                ..SessionPolicy::new(
+                    lash_core_execution::TurnBudget::Unbounded,
+                    lash_core_execution::MaxToolCalls::new(1024),
+                    lash_core::NoProgressBudget::bounded(12),
+                )
+            },
+            lash_core_execution::SessionToolAccess::ambient(),
+        ),
         head: SessionCreationHead::Config,
     };
     let deleted_store = admit_store(&factory, &request(&SessionId::from("delete/me")))
@@ -337,12 +346,12 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::fixture(session_id.to_string()),
         relation: lash_core_execution::SessionRelation::Root,
-        config: SessionPolicy::new(
+        config: lash_core_execution::PersistedSessionConfig::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-        )
-        .into(),
+            lash_core_execution::SessionToolAccess::ambient(),
+        ),
         head: SessionCreationHead::Config,
     };
     let first = admit_store(&factory, &store_for(&SessionId::from("first")))
@@ -438,12 +447,12 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::fixture(session_id.to_string()),
         relation: lash_core_execution::SessionRelation::Root,
-        config: SessionPolicy::new(
+        config: lash_core_execution::PersistedSessionConfig::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-        )
-        .into(),
+            lash_core_execution::SessionToolAccess::ambient(),
+        ),
         head: SessionCreationHead::Config,
     };
     let first = admit_store(&factory, &request(&SessionId::from("leaf-a")))
@@ -523,12 +532,12 @@ async fn sqlite_vacuum_is_scoped_to_the_bound_session() {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::fixture(session_id.to_string()),
         relation: lash_core_execution::SessionRelation::Root,
-        config: SessionPolicy::new(
+        config: lash_core_execution::PersistedSessionConfig::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-        )
-        .into(),
+            lash_core_execution::SessionToolAccess::ambient(),
+        ),
         head: SessionCreationHead::Config,
     };
     let first = admit_store(&factory, &request(&SessionId::from("maintenance-a")))
@@ -619,12 +628,12 @@ async fn commit_single_root_node(
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core_execution::SessionRelation::Root,
-            config: SessionPolicy::new(
+            config: lash_core_execution::PersistedSessionConfig::new(
                 lash_core_execution::TurnBudget::Unbounded,
                 lash_core_execution::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
-            )
-            .into(),
+                lash_core_execution::SessionToolAccess::ambient(),
+            ),
             head: SessionCreationHead::Config,
         },
     )
@@ -728,7 +737,10 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
             source_session_id: SessionId::from("orphan-fork-parent"),
             head_revision: 1,
             relation: lash_core_execution::SessionRelation::Root,
-            config: policy.clone().into(),
+            config: lash_core_execution::PersistedSessionConfig::from_policy(
+                &policy.clone(),
+                lash_core_execution::SessionToolAccess::ambient(),
+            ),
         })
         .await
         .expect("fork at the parent's live tip");

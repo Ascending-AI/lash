@@ -878,19 +878,25 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Set every execution bound the runtime enforces: the tool default and
+    /// Required host choice of every execution bound the runtime enforces: the tool default and
     /// inline ceiling, the model call's hard total, the control-phase bound,
     /// the stop grace, the wait bounds and the provider attempt limits. The
     /// stop grace also bounds how long a protocol-owned stream abort (an RLM
     /// cell boundary ending the model's turn) keeps draining the provider
     /// stream, so a cooperative provider's trailing usage lands on the
-    /// aborted attempt. Defaults to [`ExecutionBudgets::default`](lash_core::ExecutionBudgets::default).
+    /// aborted attempt.
+    ///
+    /// These bounds are the host's spend decision and have no default: a
+    /// build without them is refused with
+    /// [`EmbedError::MissingExecutionBudgets`]. A host with no numbers of its
+    /// own states the named preset,
+    /// [`ExecutionBudgets::recommended`](lash_core::ExecutionBudgets::recommended).
     pub fn execution_budgets(mut self, budgets: lash_core::ExecutionBudgets) -> Self {
         self.execution_budgets = Some(budgets);
         self
     }
 
-    /// Choose how a turn coalesces the prose and reasoning deltas of a
+    /// Required host choice of how a turn coalesces the prose and reasoning deltas of a
     /// stream block into frames before they reach the session's live feed:
     /// the frame interval, the frame size cap, whether a block's first delta
     /// is published at once, or [`DeltaCoalescing::off`](crate::DeltaCoalescing::off)
@@ -898,8 +904,12 @@ impl LashCoreBuilder {
     /// the live feed keeps its order. Each frame is one live replay event
     /// named by the delta range it covers, so a redrive never duplicates or
     /// loses streamed text. Applies whatever live replay store the core
-    /// uses. Defaults to [`DeltaCoalescing::default`]: 50 ms frames of at
-    /// most 8 KiB, with an immediate first delta.
+    /// uses.
+    ///
+    /// There is no default: a build without this choice is refused with
+    /// [`EmbedError::MissingDeltaCoalescing`]. The named preset is
+    /// [`DeltaCoalescing::recommended`](crate::DeltaCoalescing::recommended):
+    /// 50 ms frames of at most 8 KiB, with an immediate first delta.
     pub fn delta_coalescing(mut self, coalescing: crate::DeltaCoalescing) -> Self {
         self.delta_coalescing = Some(coalescing);
         self

@@ -43,6 +43,8 @@ async fn a_core_refuses_an_rlm_factory_built_over_another_backend() -> Result<()
             .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
             .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
+            .execution_budgets(crate::ExecutionBudgets::recommended())
+            .delta_coalescing(crate::DeltaCoalescing::recommended())
             .build(crate::testing::runtime_lease_owner())
     };
 
@@ -79,6 +81,8 @@ async fn the_backend_process_registry_stamps_from_the_backend_clock() {
         .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
+        .execution_budgets(crate::ExecutionBudgets::recommended())
+        .delta_coalescing(crate::DeltaCoalescing::recommended())
         .build(crate::testing::runtime_lease_owner())
         .expect("build core over a clocked memory backend");
     let registry = core.process_registry();
@@ -156,7 +160,10 @@ async fn fork_distinguishes_collected_revision_from_unknown_and_deleted_sources(
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("orphaned-fork-source"),
         relation: lash_core::SessionRelation::Root,
-        config: source_policy.clone().into(),
+        config: lash_core::PersistedSessionConfig::from_policy(
+            &source_policy.clone(),
+            lash_core::SessionToolAccess::ambient(),
+        ),
         head: lash_core::SessionCreationHead::Config,
     };
     let source = lash_core::runtime::admit_session_view(&factory, &source_request)
@@ -309,7 +316,10 @@ async fn fork_observer_selection_is_recoverable_and_selective() -> Result<()> {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("fork-observer-source"),
             relation: lash_core::SessionRelation::Root,
-            config: policy.clone().into(),
+            config: lash_core::PersistedSessionConfig::from_policy(
+                &policy.clone(),
+                lash_core::SessionToolAccess::ambient(),
+            ),
             head: lash_core::SessionCreationHead::Config,
         },
     )
@@ -703,7 +713,10 @@ async fn duplicate_only_fork_intents_are_canonical(
             pending_observer_intents: Vec::new(),
             session_id: source_session_id.clone(),
             relation: lash_core::SessionRelation::Root,
-            config: policy.clone().into(),
+            config: lash_core::PersistedSessionConfig::from_policy(
+                &policy.clone(),
+                lash_core::SessionToolAccess::ambient(),
+            ),
             head: lash_core::SessionCreationHead::Config,
         },
     )
@@ -805,15 +818,17 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
             ],
             session_id: SessionId::fixture(session_id.to_string()),
             relation: lash_core::SessionRelation::Root,
-            config: lash_core::SessionPolicy {
-                model: Some(recorded_llm_profile(mock_llm_profile_spec())),
-                ..lash_core::SessionPolicy::new(
-                    lash_core::TurnBudget::Unbounded,
-                    lash_core::MaxToolCalls::new(1024),
-                    crate::NoProgressBudget::bounded(12),
-                )
-            }
-            .into(),
+            config: lash_core::PersistedSessionConfig::from_policy(
+                &lash_core::SessionPolicy {
+                    model: Some(recorded_llm_profile(mock_llm_profile_spec())),
+                    ..lash_core::SessionPolicy::new(
+                        lash_core::TurnBudget::Unbounded,
+                        lash_core::MaxToolCalls::new(1024),
+                        crate::NoProgressBudget::bounded(12),
+                    )
+                },
+                lash_core::SessionToolAccess::ambient(),
+            ),
             head: lash_core::SessionCreationHead::Config,
         },
     )
@@ -938,15 +953,17 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
                         "nested-source-node-{case}"
                     ))),
                 },
-                config: lash_core::SessionPolicy {
-                    model: Some(recorded_llm_profile(mock_llm_profile_spec())),
-                    ..lash_core::SessionPolicy::new(
-                        lash_core::TurnBudget::Unbounded,
-                        lash_core::MaxToolCalls::new(1024),
-                        crate::NoProgressBudget::bounded(12),
-                    )
-                }
-                .into(),
+                config: lash_core::PersistedSessionConfig::from_policy(
+                    &lash_core::SessionPolicy {
+                        model: Some(recorded_llm_profile(mock_llm_profile_spec())),
+                        ..lash_core::SessionPolicy::new(
+                            lash_core::TurnBudget::Unbounded,
+                            lash_core::MaxToolCalls::new(1024),
+                            crate::NoProgressBudget::bounded(12),
+                        )
+                    },
+                    lash_core::SessionToolAccess::ambient(),
+                ),
                 head: lash_core::SessionCreationHead::Config,
             },
         )
@@ -1046,6 +1063,7 @@ async fn a_fork_runs_under_its_branch_points_generation_not_what_the_host_passes
         crate::SessionId::parse("generation-fork-host-default").expect("nonblank host identity"),
     )
     .create(crate::SessionCreation::root(
+        crate::plugins::SessionToolAccess::ambient(),
         mock_session_spec().generation(host_generation.clone()),
     ))
     .await?;
@@ -1075,7 +1093,10 @@ async fn a_fork_runs_under_its_branch_points_generation_not_what_the_host_passes
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("generation-fork-source"),
             relation: lash_core::SessionRelation::Root,
-            config: source_policy.clone().into(),
+            config: lash_core::PersistedSessionConfig::from_policy(
+                &source_policy.clone(),
+                lash_core::SessionToolAccess::ambient(),
+            ),
             head: lash_core::SessionCreationHead::Config,
         },
     )

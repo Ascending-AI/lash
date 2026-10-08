@@ -270,6 +270,8 @@ async fn delivered_values_stay_out_of_records_across_crash_and_resend() {
             .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+            .execution_budgets(lash::ExecutionBudgets::recommended())
+            .delta_coalescing(lash::DeltaCoalescing::recommended())
             .serve_test_llm_profile(
                 ProviderHandle::new(ProviderComponents::new(Box::new(provider))),
                 served::metadata(),
@@ -296,6 +298,7 @@ async fn delivered_values_stay_out_of_records_across_crash_and_resend() {
         let session = core
             .session(session_id.clone())
             .create(lash::SessionCreation::root(
+                lash::plugins::SessionToolAccess::ambient(),
                 served::spec(4).attachment_acceptance(Arc::new(catalogue())),
             ))
             .await

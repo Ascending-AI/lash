@@ -379,6 +379,8 @@ impl CutDelivery {
                     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
                     .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+                    .execution_budgets(lash::ExecutionBudgets::recommended())
+                    .delta_coalescing(lash::DeltaCoalescing::recommended())
                     .serve_test_llm_profile(served::model(Arc::default()), served::metadata())
                     .plugin(factory)
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -493,7 +495,10 @@ impl Scenario for CutDelivery {
         let session = self
             .core()
             .session(id.clone())
-            .create(lash::SessionCreation::root(served::spec(BEFORE)))
+            .create(lash::SessionCreation::root(
+                lash::plugins::SessionToolAccess::ambient(),
+                served::spec(BEFORE),
+            ))
             .await
             .map_err(|error| format!("create the session: {error}"))?;
         self.core()

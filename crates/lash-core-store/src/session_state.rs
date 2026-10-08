@@ -745,7 +745,7 @@ impl RuntimeCheckpointComponents {
 /// flag). Public serialization goes through [`RuntimeSessionState::to_snapshot`],
 /// which drops runtime-only fields by construction.
 /// Durable authority inputs required to reconstruct a session on another worker.
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeSessionAuthority {
     pub tool_access: crate::SessionToolAccess,
     /// The session's recorded plugin configuration (FIG-4379), as the
@@ -768,6 +768,20 @@ pub struct RuntimeSessionAuthority {
     /// carrying it costs resident state nothing.
     #[serde(skip)]
     run_view: Option<Box<InstalledRunView>>,
+}
+
+impl Default for RuntimeSessionAuthority {
+    /// The blank authority of a state no head has been adopted into yet.
+    /// It is not a host choice: [`adopt_durable_head`] replaces it with the
+    /// session's recorded authority before the state runs anything.
+    fn default() -> Self {
+        Self {
+            tool_access: crate::SessionToolAccess::ambient(),
+            plugin_config: crate::PluginConfig::default(),
+            prompt_plan: crate::prompt_sections::PromptPlan::default(),
+            run_view: None,
+        }
+    }
 }
 
 impl RuntimeSessionAuthority {

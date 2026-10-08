@@ -281,8 +281,11 @@ pub(crate) async fn workbench_core_builder(
     let protocol = crate::session_protocol::selected()?;
     // The workbench's delegation tool (`examples/delegation`): children run
     // the workbench's session defaults and live until their starter ends.
-    let delegation =
-        delegation::DelegationPluginFactory::new(child_spec, lash::process::lifetime::starter);
+    let delegation = delegation::DelegationPluginFactory::new(
+        lash::plugins::SessionToolAccess::ambient(),
+        child_spec,
+        lash::process::lifetime::starter,
+    );
     let delegation: Arc<dyn PluginFactory> = match protocol {
         crate::session_protocol::SessionProtocol::Standard => Arc::new(delegation),
         crate::session_protocol::SessionProtocol::Rlm => Arc::new(delegation.with_rlm_children()),
@@ -316,6 +319,7 @@ pub(crate) async fn workbench_core_builder(
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
     .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
+    .execution_budgets(lash::ExecutionBudgets::recommended())
     .live_replay_store(live_replay)
     .delta_coalescing(delta_coalescing_from_environment()?);
     if let Some(tool_provider) = tool_provider {
@@ -715,7 +719,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     //     .recovery_pass_budget(lash::RecoveryPassBudget {
     //         attempt: Duration::from_secs(30),
     //     })
-    //     .execution_budgets(lash::ExecutionBudgets::default())
+    //     .execution_budgets(lash::ExecutionBudgets::recommended())
     //     .process_observation_config(lash::process_observation::ProcessObservationConfig::default())
     //     .live_replay_store(Arc::new(lash::observe::InMemoryLiveReplayStore::new(
     //         lash::observe::InMemoryLiveReplayStoreConfig::default(),
@@ -1058,7 +1062,7 @@ pub(crate) fn delta_coalescing_from_environment() -> AnyhowResult<lash::DeltaCoa
 /// The live feed's delta coalescing: `AGENT_WORKBENCH_DELTA_FRAME_MS` (`off`
 /// or `0` for one event per delta), `AGENT_WORKBENCH_DELTA_FRAME_MAX_BYTES`
 /// and `AGENT_WORKBENCH_DELTA_FIRST_IMMEDIATE` (`true` or `false`), each
-/// defaulting to Lash's default. An out-of-range value refuses to start.
+/// defaulting to Lash's recommended preset. An out-of-range value refuses to start.
 pub(crate) fn delta_coalescing_from(
     read_env: impl Fn(&str) -> Result<String, std::env::VarError>,
 ) -> AnyhowResult<lash::DeltaCoalescing> {
@@ -1069,7 +1073,7 @@ pub(crate) fn delta_coalescing_from(
             Err(anyhow!("agent-workbench: {name} is not valid Unicode"))
         }
     };
-    let defaults = lash::DeltaCoalescing::default();
+    let defaults = lash::DeltaCoalescing::recommended();
     let interval = match read(AGENT_WORKBENCH_DELTA_FRAME_MS_ENV)? {
         None => defaults.interval(),
         Some(raw) if raw.eq_ignore_ascii_case("off") => std::time::Duration::ZERO,

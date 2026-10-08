@@ -99,6 +99,7 @@ pub(super) async fn run_once_direct_llm_client(
                     "runtime-perf",
                     lash::testing::test_llm_profile_metadata("runtime-perf"),
                 ),
+                lash::ExecutionBudgets::recommended(),
             ))
         })
         .await?;

@@ -665,12 +665,12 @@ pub(super) async fn verify_independent_session_meta_layout(
             pending_observer_intents: case.meta.pending_observer_intents.clone(),
             session_id: case.meta.session_id.clone(),
             relation: case.meta.relation.clone(),
-            config: lash_core::SessionPolicy::new(
+            config: lash_core::PersistedSessionConfig::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
-            )
-            .into(),
+                lash_core::SessionToolAccess::ambient(),
+            ),
             head: SessionCreationHead::Config,
         };
         sqlite_stores.push(

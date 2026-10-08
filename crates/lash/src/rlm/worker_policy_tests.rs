@@ -238,6 +238,8 @@ async fn facade_vm_segment_policy_reaches_engine_step_admission() {
                 crate::CommitBudget::bounded(8 * 1024 * 1024, 1024),
                 crate::QueuedWorkBatchingConfig::new(1),
                 crate::tools::ToolSourcePolicy::Tolerate,
+                crate::ExecutionBudgets::recommended(),
+                crate::DeltaCoalescing::recommended(),
             ),
             true,
         )

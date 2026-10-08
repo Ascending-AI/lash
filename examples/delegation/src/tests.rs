@@ -181,10 +181,13 @@ async fn a_childs_request_states_only_the_hosts_configuration_and_the_call() {
     let spawn = prepared(&spawn);
     let request = *spawn.create_request;
 
-    let expected =
-        lash::SessionCreateRequest::root(lash::SessionStartPoint::Empty, PluginOptions::default())
-            .with_spec(&child_spec())
-            .expect("the child spec states a session");
+    let expected = lash::SessionCreateRequest::root(
+        lash::plugins::SessionToolAccess::ambient(),
+        lash::SessionStartPoint::Empty,
+        PluginOptions::default(),
+    )
+    .with_spec(&child_spec())
+    .expect("the child spec states a session");
     assert_eq!(request.session_id, None);
     assert_eq!(request.policy, expected.policy);
     assert_eq!(request.model, expected.model);
@@ -211,6 +214,7 @@ async fn a_childs_request_states_only_the_hosts_configuration_and_the_call() {
 /// The tools a session built under `namespace` is offered.
 fn offered(namespace: Option<DelegatedChild>) -> Vec<String> {
     let factory: Arc<dyn PluginFactory> = Arc::new(DelegationPluginFactory::new(
+        lash::plugins::SessionToolAccess::ambient(),
         child_spec(),
         lash::process::lifetime::starter,
     ));

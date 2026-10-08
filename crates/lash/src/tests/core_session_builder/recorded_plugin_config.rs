@@ -289,6 +289,7 @@ async fn unknown_owner_is_refused_at_create_and_submit() -> Result<()> {
     let Err(error) = core
         .session(crate::SessionId::parse("probe-unknown-create").expect("nonblank host identity"))
         .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
             mock_session_spec().plugin_options(lash_core::PluginOptions::typed(
                 "no-such-plugin",
                 serde_json::json!({ "k": 1 }),
@@ -315,7 +316,10 @@ async fn unknown_owner_is_refused_at_create_and_submit() -> Result<()> {
         core.session(
             crate::SessionId::parse("probe-unknown-command").expect("nonblank host identity"),
         )
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await?,
     );
     let before = recorded_state(&core, "probe-unknown-command").await?;
@@ -364,6 +368,7 @@ async fn a_command_is_owner_reduced_and_revision_checked() -> Result<()> {
     drop(
         core.session(crate::SessionId::parse("probe-command").expect("nonblank host identity"))
             .create(crate::SessionCreation::root(
+                crate::plugins::SessionToolAccess::ambient(),
                 mock_session_spec().plugin_options(stating(12)?),
             ))
             .await?,
@@ -448,6 +453,7 @@ async fn a_transaction_across_owners_is_all_or_none() -> Result<()> {
     drop(
         core.session(crate::SessionId::parse("probe-atomic").expect("nonblank host identity"))
             .create(crate::SessionCreation::root(
+                crate::plugins::SessionToolAccess::ambient(),
                 mock_session_spec().plugin_options(stating(12)?),
             ))
             .await?,
@@ -538,6 +544,7 @@ async fn a_stale_transaction_publishes_nothing() -> Result<()> {
     drop(
         core.session(crate::SessionId::parse("probe-stale").expect("nonblank host identity"))
             .create(crate::SessionCreation::root(
+                crate::plugins::SessionToolAccess::ambient(),
                 mock_session_spec().plugin_options(stating(12)?),
             ))
             .await?,
@@ -573,6 +580,7 @@ async fn redriven_runs_see_their_admitted_revision() -> Result<()> {
     drop(
         core.session(crate::SessionId::parse("probe-admitted").expect("nonblank host identity"))
             .create(crate::SessionCreation::root(
+                crate::plugins::SessionToolAccess::ambient(),
                 mock_session_spec().plugin_options(stating(12)?),
             ))
             .await?,

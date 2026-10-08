@@ -20,7 +20,7 @@ fn persisted_state_hydrates_the_recorded_llm_profile_without_live_rebinding() {
             no_progress_budget: crate::NoProgressBudget::bounded(12),
             charge_safety: crate::ChargeSafetyPolicy::default(),
             generation: crate::GenerationOptions::default(),
-            tool_access: crate::SessionToolAccess::default(),
+            tool_access: crate::SessionToolAccess::ambient(),
             prompt_plan: crate::prompt_sections::PromptPlan::default(),
             config_revision: 0,
             undelivered_change: None,
@@ -231,6 +231,7 @@ fn fig1123_reasoning_retention_policy_survives_session_head_cold_decode() {
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
+        crate::SessionToolAccess::ambient(),
     );
     config.model = Some(crate::LlmProfileConfig::new(
         crate::RecordedLlmProfile::mint(

@@ -72,6 +72,8 @@ pub(super) fn runtime_core_for_scripts(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(world_queued_work_batching())
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .live_replay_store(world_live_replay_store())
         .serve_test_llm_profile(provider_handle, model.clone())
         .build(crate::sim_process_owner())

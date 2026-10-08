@@ -29,8 +29,8 @@ const LABEL: CommitLabel = CommitLabel::new("law.write");
 /// Admit session `session` to the catalog, with no durable actor yet.
 async fn admit(storage: &PostgresStorage, session: &lash_sansio::SessionId) {
     use lash_core_execution::{
-        MaxToolCalls, SessionCatalogStore as _, SessionCreationHead, SessionPolicy,
-        SessionRelation, SessionStoreCreateRequest, TurnBudget,
+        MaxToolCalls, SessionCatalogStore as _, SessionCreationHead, SessionRelation,
+        SessionStoreCreateRequest, TurnBudget,
     };
 
     storage
@@ -38,12 +38,12 @@ async fn admit(storage: &PostgresStorage, session: &lash_sansio::SessionId) {
         .admit_session(&SessionStoreCreateRequest {
             session_id: session.clone(),
             relation: SessionRelation::Root,
-            config: SessionPolicy::new(
+            config: lash_core_execution::PersistedSessionConfig::new(
                 TurnBudget::Unbounded,
                 MaxToolCalls::new(16),
                 lash_core::NoProgressBudget::bounded(12),
-            )
-            .into(),
+                lash_core_execution::SessionToolAccess::ambient(),
+            ),
             head: SessionCreationHead::Config,
             owning_process_id: None,
             pending_observer_intents: Vec::new(),

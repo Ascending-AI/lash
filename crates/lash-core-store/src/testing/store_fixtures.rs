@@ -151,7 +151,10 @@ pub fn session_store_request_with_policy(
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
         relation,
-        config: policy.into(),
+        config: crate::PersistedSessionConfig::from_policy(
+            &policy,
+            crate::SessionToolAccess::ambient(),
+        ),
         head: SessionCreationHead::Config,
     }
 }

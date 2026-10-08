@@ -181,12 +181,12 @@ impl BackendRunner {
                         )),
                         head_revision: 0,
                         relation: SessionRelation::Root,
-                        config: lash_core::SessionPolicy::new(
+                        config: lash_core::PersistedSessionConfig::new(
                             lash_core::TurnBudget::Unbounded,
                             lash_core::MaxToolCalls::new(1024),
                             lash_core::NoProgressBudget::bounded(12),
-                        )
-                        .into(),
+                            lash_core::SessionToolAccess::ambient(),
+                        ),
                     })
                     .await
                     .expect_err("existing fork target must be rejected");
@@ -219,12 +219,12 @@ impl BackendRunner {
                                 self.session_id
                             ))),
                         },
-                        config: lash_core::SessionPolicy::new(
+                        config: lash_core::PersistedSessionConfig::new(
                             lash_core::TurnBudget::Unbounded,
                             lash_core::MaxToolCalls::new(1024),
                             lash_core::NoProgressBudget::bounded(12),
-                        )
-                        .into(),
+                            lash_core::SessionToolAccess::ambient(),
+                        ),
                     })
                     .await
                     .expect("foreign lineage must not gate a retained revision");
@@ -259,12 +259,12 @@ impl BackendRunner {
                             source_session_id: self.session_id.clone(),
                             source_node_id: Some(lash_core::NodeId::fixture(node_id.clone())),
                         },
-                        config: lash_core::SessionPolicy::new(
+                        config: lash_core::PersistedSessionConfig::new(
                             lash_core::TurnBudget::Unbounded,
                             lash_core::MaxToolCalls::new(1024),
                             lash_core::NoProgressBudget::bounded(12),
-                        )
-                        .into(),
+                            lash_core::SessionToolAccess::ambient(),
+                        ),
                     })
                     .await
                     .expect("rewind must create its first branch");
@@ -299,12 +299,12 @@ impl BackendRunner {
                                 self.session_id
                             ))),
                         },
-                        config: lash_core::SessionPolicy::new(
+                        config: lash_core::PersistedSessionConfig::new(
                             lash_core::TurnBudget::Unbounded,
                             lash_core::MaxToolCalls::new(1024),
                             lash_core::NoProgressBudget::bounded(12),
-                        )
-                        .into(),
+                            lash_core::SessionToolAccess::ambient(),
+                        ),
                     })
                     .await
                     .expect("rewind must re-fork after deleting the superseded source");
@@ -430,12 +430,12 @@ pub(super) async fn selected_observer_intents(
                 source_node_id: Some("foreign-history-provenance".into()),
             },
             pending_observer_intents: vec![intent.clone()],
-            config: lash_core::SessionPolicy::new(
+            config: lash_core::PersistedSessionConfig::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
-            )
-            .into(),
+                lash_core::SessionToolAccess::ambient(),
+            ),
             head: SessionCreationHead::Config,
         };
         let source_id = SessionId::fixture(format!("selected-history-{nonce}-{index}"));
@@ -465,7 +465,10 @@ pub(super) async fn selected_observer_intents(
                 head_revision,
                 relation: request.relation.clone(),
                 pending_observer_intents: request.pending_observer_intents.clone(),
-                config: request.config.session_policy().into(),
+                config: lash_core::PersistedSessionConfig::from_policy(
+                    &request.config.session_policy(),
+                    lash_core::SessionToolAccess::ambient(),
+                ),
             })
             .await
             .expect("fork the writer's history with exact intent");

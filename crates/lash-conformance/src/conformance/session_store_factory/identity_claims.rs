@@ -74,7 +74,10 @@ pub async fn fork_inherits_history_without_execution_queues_waits_or_journals(
                 source_session_id: source_id.clone(),
                 source_node_id: Some(leaf.clone()),
             },
-            config: state.policy.clone().into(),
+            config: crate::PersistedSessionConfig::from_policy(
+                &state.policy.clone(),
+                crate::SessionToolAccess::ambient(),
+            ),
         })
         .await
         .expect("fork source leaf");
@@ -185,7 +188,10 @@ pub async fn reclaim_races_fork_and_unpin_without_using_process_roots(
         source_session_id: id.clone(),
         head_revision: state.head_revision,
         relation: crate::SessionRelation::Root,
-        config: state.policy.clone().into(),
+        config: crate::PersistedSessionConfig::from_policy(
+            &state.policy.clone(),
+            crate::SessionToolAccess::ambient(),
+        ),
     };
     let (fork, unpin, delete) = tokio::join!(
         factory.fork_session(&request),

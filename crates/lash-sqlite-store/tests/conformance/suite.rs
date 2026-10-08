@@ -137,12 +137,12 @@ fn root_session_request(session_id: &str) -> lash_core_execution::SessionStoreCr
         pending_observer_intents: Vec::new(),
         session_id: SessionId::fixture(session_id),
         relation: lash_core_execution::SessionRelation::Root,
-        config: lash_core_execution::SessionPolicy::new(
+        config: lash_core_execution::PersistedSessionConfig::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-        )
-        .into(),
+            lash_core_execution::SessionToolAccess::ambient(),
+        ),
         head: lash_core_execution::SessionCreationHead::Config,
     }
 }
@@ -207,12 +207,12 @@ async fn fork_session_rejects_a_malformed_target_session_id() {
         head_revision: 0,
         relation: lash_core_execution::SessionRelation::Root,
         pending_observer_intents: Vec::new(),
-        config: lash_core_execution::SessionPolicy::new(
+        config: lash_core_execution::PersistedSessionConfig::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-        )
-        .into(),
+            lash_core_execution::SessionToolAccess::ambient(),
+        ),
     };
     assert!(matches!(
         store.fork_session(&request).await,

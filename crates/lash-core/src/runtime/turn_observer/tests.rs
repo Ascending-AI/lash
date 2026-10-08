@@ -155,13 +155,13 @@ impl crate::Clock for HandClock {
     }
 }
 
-const INTERVAL: Duration = DeltaCoalescing::DEFAULT_INTERVAL;
-const MAX_FRAME_BYTES: usize = DeltaCoalescing::DEFAULT_MAX_FRAME_BYTES;
+const INTERVAL: Duration = DeltaCoalescing::RECOMMENDED_INTERVAL;
+const MAX_FRAME_BYTES: usize = DeltaCoalescing::RECOMMENDED_MAX_FRAME_BYTES;
 
 /// An observer whose host listens to both lanes, framing by default on
 /// `clock`.
 fn framed(clock: &Arc<HandClock>) -> (TurnObserver, TurnObservations) {
-    framed_with(clock, DeltaCoalescing::default(), false)
+    framed_with(clock, DeltaCoalescing::recommended(), false)
 }
 
 fn framed_with(
@@ -312,7 +312,7 @@ fn a_frame_is_cut_before_any_other_event_and_never_spans_blocks_kinds_or_turns()
 fn a_frame_names_the_observation_range_it_covers() {
     let clock = HandClock::new();
     // An activity-only host, as engine runs have.
-    let (observer, mut observations) = framed_with(&clock, DeltaCoalescing::default(), true);
+    let (observer, mut observations) = framed_with(&clock, DeltaCoalescing::recommended(), true);
     let mut cursor = ObservationCursor::new(ReplayKey::new("k"));
     for text in ["a", "b", "c", "d"] {
         delta(&observer, &mut cursor, false, "A", text);

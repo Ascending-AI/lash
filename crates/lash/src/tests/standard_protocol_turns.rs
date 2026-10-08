@@ -67,7 +67,10 @@ async fn whitespace_only_text_does_not_split_terminal_history() {
     .expect("standard core");
     let session = core
         .session(crate::SessionId::from("whitespace-response-session"))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await
         .expect("created");
     let output = session
@@ -195,7 +198,10 @@ async fn malformed_tool_arguments_are_refused_not_dispatched() {
     .expect("standard core");
     let session = core
         .session(crate::SessionId::from("malformed-args-session"))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await
         .expect("created");
     let output = session
@@ -412,7 +418,10 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
     };
     let session = core
         .session(crate::SessionId::from(session_id))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await
         .expect("created");
     let output = session
@@ -617,7 +626,10 @@ async fn persisted_provider_parts(
     .expect("standard core");
     let session = core
         .session(crate::SessionId::from(session_id))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await
         .expect("created");
     let output = session

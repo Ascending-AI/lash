@@ -181,6 +181,7 @@ impl BlobTools {
             .map_err(|error| error.to_string())?
             .clone();
         let mut create_request = lash_core::SessionCreateRequest::child_session(
+            lash::plugins::SessionToolAccess::ambient(),
             session_id.clone(),
             lash_core::SessionStartPoint::Empty,
             lash_core::PluginOptions::default(),
@@ -450,6 +451,8 @@ impl Law {
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .tools(Arc::new(BlobTools {
             witness: Arc::clone(witness),
         }))
@@ -473,7 +476,10 @@ impl Law {
     async fn session_on(core: &lash::LashCore, name: &str) -> lash::LashSession {
         let session_id = lash::SessionId::try_from(name.to_owned()).expect("a session id");
         core.session(session_id.clone())
-            .create(lash::SessionCreation::root(served::spec(1024)))
+            .create(lash::SessionCreation::root(
+                lash::plugins::SessionToolAccess::ambient(),
+                served::spec(1024),
+            ))
             .await
             .expect("the law's session is created");
         core.session(session_id)
@@ -509,6 +515,8 @@ impl Law {
                     lash::CommitBudget::bounded(16 * 1024 * 1024, 4096),
                     lash::QueuedWorkBatchingConfig::new(1),
                     lash_core::ToolSourcePolicy::Tolerate,
+                    lash::ExecutionBudgets::recommended(),
+                    lash::DeltaCoalescing::recommended(),
                 ),
                 true,
             )

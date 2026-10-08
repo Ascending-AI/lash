@@ -472,7 +472,7 @@ fn machine_config(session: &SessionId, run: &TurnId) -> TurnMachineConfig {
 #[async_trait::async_trait]
 impl TurnServices for L4Services {
     fn execution_budgets(&self, _session: &SessionId) -> ExecutionBudgets {
-        ExecutionBudgets::default()
+        ExecutionBudgets::recommended()
     }
 
     async fn start(

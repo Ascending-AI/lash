@@ -365,6 +365,8 @@ mod tests {
                     crate::CommitBudget::bounded(1024 * 1024, 512),
                     crate::QueuedWorkBatchingConfig::new(1),
                     crate::ToolSourcePolicy::Tolerate,
+                    crate::ExecutionBudgets::recommended(),
+                    crate::runtime::DeltaCoalescing::recommended(),
                 ),
                 crate::testing::runtime_lease_owner(),
             )

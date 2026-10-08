@@ -40,7 +40,10 @@ async fn a_send_to_a_finalized_store_is_refused_typed_and_writes_nothing(
         .expect("the core");
     let session = core
         .session(crate::SessionId::parse(ID).expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await
         .expect("create the session before the finalize");
     let recorded = finalize().await;

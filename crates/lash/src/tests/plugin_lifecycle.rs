@@ -83,7 +83,10 @@ async fn observer_failure_is_advisory_and_keeps_committed_state() -> Result<()> 
     let core = deploy()?;
     let session = core
         .session(id.clone())
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await?;
     for turn in 1..=2 {
         let output = session

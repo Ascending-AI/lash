@@ -153,6 +153,7 @@ async fn two_sessions_under_two_profile_keys_each_keep_their_request_defaults_ac
         creating
             .session(crate::SessionId::parse(*id).expect("nonblank host identity"))
             .create(crate::SessionCreation::root(
+                crate::plugins::SessionToolAccess::ambient(),
                 mock_session_spec().model(*key),
             ))
             .await?;

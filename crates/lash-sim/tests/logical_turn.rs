@@ -194,6 +194,8 @@ fn standard_core_on(
         .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .max_attachment_bytes(max_attachment_bytes)
         .trace_sink(trace)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -292,6 +294,8 @@ async fn admitted_switch_is_seeded_queued_after_earlier_work_and_exactly_once() 
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(provider, model())
         .tools(Arc::new(SeedSwitchTool { initial_nodes }))
         .trace_sink(trace.clone())
@@ -521,7 +525,7 @@ async fn admissions_settle_for_finish_cancel_and_error() {
 /// before the next model call, and settles every admitted input.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_frame_switch_chain_stops_at_its_bound() {
-    let limit = lash::ExecutionBudgets::default()
+    let limit = lash::ExecutionBudgets::recommended()
         .config()
         .agent_frame_switch_limit
         .get();
@@ -585,10 +589,11 @@ async fn assert_switch_chain(limit: usize, switches: usize, finishes: bool) {
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .execution_budgets(
             lash::ExecutionBudgets::new(lash_core::ExecutionBudgetsConfig {
                 agent_frame_switch_limit: std::num::NonZeroU32::new(limit as u32).unwrap(),
-                ..lash_core::ExecutionBudgetsConfig::default()
+                ..lash_core::ExecutionBudgetsConfig::recommended()
             })
             .expect("valid execution budgets"),
         )
@@ -754,6 +759,8 @@ finish({ baton: baton });
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(provider, model())
         .trace_sink(trace.clone())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -880,6 +887,8 @@ await control.continue_as({
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(provider, model())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "logical-turn-test",
@@ -953,6 +962,7 @@ async fn created_session(
     match core
         .session(session_id.clone())
         .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 model().wire_model,
                 lash::TurnBudget::Unbounded,

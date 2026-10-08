@@ -46,7 +46,10 @@ async fn rlm_cell_answer_preserves_the_exact_string_without_presentation_policy(
         .expect("rlm core");
     let created = core
         .session(session("rlm-exact-string"))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await
         .expect("created");
     let result = created
@@ -114,7 +117,10 @@ async fn rlm_protocol_config_sleep_ability_drives_prompt_surface() {
         .expect("rlm core");
     let created = core
         .session(session("rlm-abilities-prompt"))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await
         .expect("created");
     created
@@ -152,7 +158,10 @@ async fn malformed_rlm_create_extras_fail_child_session_creation() {
         .build(crate::testing::runtime_lease_owner())
         .expect("rlm core");
     core.session(session("rlm-root"))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await
         .expect("parent created");
     let mut plugin_options = lash_core::PluginOptions {
@@ -166,6 +175,7 @@ async fn malformed_rlm_create_extras_fail_child_session_creation() {
     let err = match core
         .session(session("rlm-child-bad-extras"))
         .create(crate::SessionCreation::child_of(
+            crate::plugins::SessionToolAccess::ambient(),
             SessionId::from("rlm-root"),
             mock_session_spec().plugin_options(plugin_options),
         ))
@@ -214,7 +224,10 @@ async fn public_session_state_appends_preserve_concurrent_retirement_refusals() 
         ("retired-append-plugin-body", true),
     ] {
         core.session(session(session_id))
-            .create(crate::SessionCreation::root(mock_session_spec()))
+            .create(crate::SessionCreation::root(
+                crate::plugins::SessionToolAccess::ambient(),
+                mock_session_spec(),
+            ))
             .await
             .expect("created");
         let opened = core
@@ -356,9 +369,10 @@ async fn a_native_model_patch_reaches_all_runtime_consumers() {
     .expect("standard core");
     let session_id = SessionId::from("reconcile-open");
     core.session(session("reconcile-open"))
-        .create(crate::SessionCreation::root(session_spec_for(
-            &historical_model,
-        )))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            session_spec_for(&historical_model),
+        ))
         .await
         .expect("created");
     let opened = core
@@ -542,9 +556,10 @@ async fn open_with_state_keeps_supplied_policy_without_rewriting_frame_history()
     .build(crate::testing::runtime_lease_owner())
     .expect("standard core");
     core.session(session("reconcile-open-with-state"))
-        .create(crate::SessionCreation::root(session_spec_for(
-            &builder_model,
-        )))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            session_spec_for(&builder_model),
+        ))
         .await
         .expect("created");
     let opened = core

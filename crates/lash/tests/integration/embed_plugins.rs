@@ -284,6 +284,8 @@ async fn core_with_responses(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .plugin(plugin)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "embed-plugins-test-worker",
@@ -307,6 +309,7 @@ async fn created_with_label(core: &LashCore, session_id: &str, label: Option<&st
     };
     core.session(lash_core::SessionId::fixture(session_id.to_string()))
         .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 "mock-model",
                 lash::TurnBudget::Unbounded,

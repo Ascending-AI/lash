@@ -14,6 +14,7 @@ pub(super) fn session_turn_start(
         key,
         text,
         lash_core::SessionCreateRequest::root(
+            lash::plugins::SessionToolAccess::ambient(),
             lash_core::SessionStartPoint::Empty,
             lash_core::PluginOptions::default(),
         )
@@ -116,6 +117,7 @@ pub(super) async fn a_session_turn_start_retried_after_the_host_changed_what_it_
     // A start that states no spec is refused typed, and so is one that
     // states a policy and names no model; neither registers anything.
     let bare = lash_core::SessionCreateRequest::root(
+        lash::plugins::SessionToolAccess::ambient(),
         lash_core::SessionStartPoint::Empty,
         lash_core::PluginOptions::default(),
     );
@@ -245,7 +247,10 @@ pub(super) async fn a_session_turn_start_retried_after_the_host_changed_what_it_
         .session(
             lash::SessionId::parse("keys-start-other-session").expect("nonblank host identity"),
         )
-        .create(lash::SessionCreation::root(changed.clone()))
+        .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
+            changed.clone(),
+        ))
         .await
         .expect("the host creates a session from its changed spec");
     let elsewhere = start_on(

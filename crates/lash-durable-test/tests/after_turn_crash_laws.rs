@@ -307,6 +307,8 @@ impl Crash {
                     .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
                     .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+                    .execution_budgets(lash::ExecutionBudgets::recommended())
+                    .delta_coalescing(lash::DeltaCoalescing::recommended())
                     .serve_test_llm_profile(
                         served::model(Arc::clone(&self.scripts)),
                         served::metadata(),
@@ -431,7 +433,10 @@ impl Scenario for Crash {
         let session = self
             .core()
             .session(session())
-            .create(lash::SessionCreation::root(served::spec(8)))
+            .create(lash::SessionCreation::root(
+                lash::plugins::SessionToolAccess::ambient(),
+                served::spec(8),
+            ))
             .await
             .map_err(|error| format!("create the session: {error}"))?;
         session

@@ -203,6 +203,8 @@ impl Deployment {
         lash::LashCore::standard_builder(self.backend.clone())
             .tools(tools)
             .tool_source_policy(policy)
+            .execution_budgets(lash::ExecutionBudgets::recommended())
+            .delta_coalescing(lash::DeltaCoalescing::recommended())
             .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .serve_test_llm_profile(model(&self.offered), served::metadata())
@@ -220,7 +222,10 @@ fn session_id(name: &str) -> lash::SessionId {
 
 async fn create(core: &lash::LashCore, name: &str) -> lash::DurableSession {
     core.session(session_id(name))
-        .create(lash::SessionCreation::root(served::spec(64)))
+        .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
+            served::spec(64),
+        ))
         .await
         .expect("the session is created")
 }

@@ -43,7 +43,9 @@ pub(super) async fn durable_core(
         ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate);
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended());
     let builder = match tools {
         Some(tools) => builder.tools(tools),
         None => builder,
@@ -64,6 +66,7 @@ pub(super) async fn session(
 ) -> lash::DurableSession {
     core.session(lash::SessionId::fixture(session_id.to_owned()))
         .create(lash::SessionCreation::root(
+            lash_core::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 model,
                 lash::TurnBudget::Unbounded,

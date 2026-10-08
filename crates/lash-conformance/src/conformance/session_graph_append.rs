@@ -188,7 +188,10 @@ async fn abandoned_branch_scenario(
         source_session_id: source_request.session_id.clone(),
         head_revision: fork_revision,
         relation: crate::SessionRelation::Root,
-        config: source_request.config.session_policy().into(),
+        config: crate::PersistedSessionConfig::from_policy(
+            &source_request.config.session_policy(),
+            crate::SessionToolAccess::ambient(),
+        ),
     };
     factory
         .fork_session(&branch_request)

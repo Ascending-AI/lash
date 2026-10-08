@@ -148,7 +148,10 @@ async fn presentation_step_failure_feeds_fallback_to_next_step() -> Result<()> {
     let core = deploy(&sqlite_memory_store_backend().await, &seen, false)?;
     let session = core
         .session(crate::SessionId::parse("presentation-fallback").expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await?;
     let report = session.send(TurnInput::text("call it")).output().await?;
     assert!(report.is_success(), "{:?}", report.result.outcome);
@@ -193,7 +196,10 @@ async fn a_recorded_presentation_is_served_after_its_owners_loss_without_its_ste
     let session_id = crate::SessionId::parse(ID).expect("nonblank host identity");
     let session = core
         .session(session_id.clone())
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await?;
     let run = crate::TurnId::parse("presented-turn").expect("nonblank host identity");
     session

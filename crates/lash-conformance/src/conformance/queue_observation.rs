@@ -15,12 +15,12 @@ pub async fn queue_head_read_failure_publishes_recoverable_gap(backend: crate::B
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: crate::SessionRelation::Root,
-                config: crate::SessionPolicy::new(
+                config: crate::PersistedSessionConfig::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
                     lash_core::NoProgressBudget::bounded(12),
-                )
-                .into(),
+                    crate::SessionToolAccess::ambient(),
+                ),
                 head: crate::SessionCreationHead::Config,
             })
             .await

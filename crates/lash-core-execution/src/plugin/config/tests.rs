@@ -191,6 +191,7 @@ fn head(registry: &ConfigRegistry, revision: u64) -> crate::PersistedSessionConf
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
+        crate::SessionToolAccess::ambient(),
     );
     config.plugin_config = registry
         .resolve_creation(
@@ -958,6 +959,7 @@ fn config_namespaces_are_written_in_the_admissions_recorded_format() {
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
+        crate::SessionToolAccess::ambient(),
     );
     base.plugin_config = created;
     base.config_revision = 7;

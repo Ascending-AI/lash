@@ -1249,7 +1249,10 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         source_session_id: source_id.clone(),
         head_revision: tip_revision,
         relation: crate::SessionRelation::Root,
-        config: source_request.config.session_policy().into(),
+        config: crate::PersistedSessionConfig::from_policy(
+            &source_request.config.session_policy(),
+            crate::SessionToolAccess::ambient(),
+        ),
     };
     factory
         .fork_session(&delete_first_request)
@@ -1275,7 +1278,10 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
             source_session_id: source_id.clone(),
             head_revision: unpinned_past_revision,
             relation: crate::SessionRelation::Root,
-            config: source_request.config.session_policy().into(),
+            config: crate::PersistedSessionConfig::from_policy(
+                &source_request.config.session_policy(),
+                crate::SessionToolAccess::ambient(),
+            ),
         })
         .await
         .expect("an unpinned past turn forks before any collection");
@@ -1297,7 +1303,10 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
             source_session_id: source_id.clone(),
             head_revision: tip_revision + 1,
             relation: crate::SessionRelation::Root,
-            config: source_request.config.session_policy().into(),
+            config: crate::PersistedSessionConfig::from_policy(
+                &source_request.config.session_policy(),
+                crate::SessionToolAccess::ambient(),
+            ),
         })
         .await
         .expect_err("a revision the source never published must not fork");
@@ -1320,7 +1329,10 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         source_session_id: source_id.clone(),
         head_revision: root_revision,
         relation: crate::SessionRelation::Root,
-        config: source_request.config.session_policy().into(),
+        config: crate::PersistedSessionConfig::from_policy(
+            &source_request.config.session_policy(),
+            crate::SessionToolAccess::ambient(),
+        ),
     };
     let forked = factory
         .fork_session(&fork_request)
@@ -1342,7 +1354,10 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
                 source_session_id: SessionId::from("no-such-session"),
                 source_node_id: Some("no-such-node".into()),
             },
-            config: source_request.config.session_policy().into(),
+            config: crate::PersistedSessionConfig::from_policy(
+                &source_request.config.session_policy(),
+                crate::SessionToolAccess::ambient(),
+            ),
         })
         .await
         .expect("fork relation lineage must not gate a retained revision");
@@ -1445,7 +1460,10 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
             source_session_id: fork_request.session_id.clone(),
             head_revision: 0,
             relation: crate::SessionRelation::Root,
-            config: source_request.config.session_policy().into(),
+            config: crate::PersistedSessionConfig::from_policy(
+                &source_request.config.session_policy(),
+                crate::SessionToolAccess::ambient(),
+            ),
         })
         .await
         .expect_err("forking must reject a previously deleted target session id");

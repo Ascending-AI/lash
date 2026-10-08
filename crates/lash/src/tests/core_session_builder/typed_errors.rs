@@ -30,7 +30,10 @@ async fn a_cold_open_refuses_a_head_without_identity_even_for_root() {
     for id in ["root", "host-chosen-session"] {
         creating
             .session(crate::SessionId::from(id))
-            .create(crate::SessionCreation::root(mock_session_spec()))
+            .create(crate::SessionCreation::root(
+                crate::plugins::SessionToolAccess::ambient(),
+                mock_session_spec(),
+            ))
             .await
             .expect("create with explicit identity");
     }
@@ -88,7 +91,10 @@ async fn a_native_tool_membership_refusal_preserves_its_cause() {
     use lash_core::facade_support::ToolStateFacadeOps as _;
     let core = standard_core_over(sqlite_memory_store_backend().await);
     core.session(crate::SessionId::parse("typed-tools").expect("id"))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await
         .expect("created")
         .send(crate::TurnInput::text("materialize the session"))
@@ -225,7 +231,10 @@ async fn a_native_cold_open_preserves_state_codec_refusals() {
             .expect("core");
         let session = core
             .session(crate::SessionId::parse(&id).expect("id"))
-            .create(crate::SessionCreation::root(mock_session_spec()))
+            .create(crate::SessionCreation::root(
+                crate::plugins::SessionToolAccess::ambient(),
+                mock_session_spec(),
+            ))
             .await
             .expect("created");
         session
@@ -280,6 +289,91 @@ async fn a_core_without_a_tool_loss_choice_is_refused() {
     ));
 }
 
+/// FIG-5491: execution budgets and delta coalescing are host decisions with
+/// no default, so a core that lacks either is refused.
+#[tokio::test]
+async fn a_core_without_its_budgets_or_coalescing_choice_is_refused() {
+    let stated = |backend| {
+        LashCore::standard_builder(backend)
+            .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+            .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
+    };
+    assert!(matches!(
+        stated(sqlite_memory_store_backend().await)
+            .delta_coalescing(crate::DeltaCoalescing::recommended())
+            .build(crate::testing::runtime_lease_owner()),
+        Err(EmbedError::MissingExecutionBudgets)
+    ));
+    assert!(matches!(
+        stated(sqlite_memory_store_backend().await)
+            .execution_budgets(crate::ExecutionBudgets::recommended())
+            .build(crate::testing::runtime_lease_owner()),
+        Err(EmbedError::MissingDeltaCoalescing)
+    ));
+}
+
+/// FIG-5491: the budgets and coalescing a host states are the ones its core
+/// runs under; nothing of the recommended preset stands in for them.
+#[tokio::test]
+async fn a_core_runs_under_the_budgets_and_coalescing_its_host_states() {
+    let budgets = crate::ExecutionBudgets::new(crate::ExecutionBudgetsConfig {
+        model_total: std::time::Duration::from_secs(90),
+        control_phase: std::time::Duration::from_secs(7),
+        stop_grace: std::time::Duration::from_secs(1),
+        provider: crate::ProviderAttemptLimits::new(
+            std::time::Duration::from_secs(30),
+            std::time::Duration::from_secs(10),
+            std::time::Duration::from_secs(10),
+            2,
+        )
+        .expect("valid provider limits"),
+        agent_frame_switch_limit: std::num::NonZeroU32::new(3).expect("nonzero"),
+    })
+    .expect("valid budgets");
+    assert_ne!(budgets, crate::ExecutionBudgets::recommended());
+    let core = LashCore::standard_builder(sqlite_memory_store_backend().await)
+        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
+        .execution_budgets(budgets.clone())
+        .delta_coalescing(crate::DeltaCoalescing::off())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+        .build(crate::testing::runtime_lease_owner())
+        .expect("core");
+    assert_eq!(core.env.core.control.execution_budgets, budgets);
+    assert_eq!(
+        core.env.core.control.delta_coalescing,
+        crate::DeltaCoalescing::off()
+    );
+    core.shutdown().await.expect("shutdown");
+}
+
+/// FIG-5491: tool authority is the creator's decision, and the session
+/// records the one it states.
+#[tokio::test]
+async fn a_session_records_the_tool_authority_its_creator_states() {
+    let core = standard_core_over(sqlite_memory_store_backend().await);
+    let restricted = crate::plugins::SessionToolAccess::restricted([]).expect("no tools");
+    assert_ne!(restricted, crate::plugins::SessionToolAccess::ambient());
+    let id = crate::SessionId::from("restricted-at-creation");
+    core.session(id.clone())
+        .create(crate::SessionCreation::root(
+            restricted.clone(),
+            mock_session_spec(),
+        ))
+        .await
+        .expect("created");
+    let recorded =
+        lash_core::SessionCommitStore::load_session_head_meta(core.store_factory.as_ref(), &id)
+            .await
+            .expect("head read")
+            .expect("persisted head")
+            .config;
+    assert_eq!(recorded.tool_access, restricted);
+    core.shutdown().await.expect("shutdown");
+}
+
 /// FIG-5431: a creator must choose the session's stall bound.
 #[tokio::test]
 async fn a_session_without_a_stall_bound_is_refused() {
@@ -291,7 +385,10 @@ async fn a_session_without_a_stall_bound_is_refused() {
     );
     assert!(matches!(
         core.session(crate::SessionId::from("no-stall-choice"))
-            .create(crate::SessionCreation::root(spec))
+            .create(crate::SessionCreation::root(
+                crate::plugins::SessionToolAccess::ambient(),
+                spec
+            ))
             .await,
         Err(EmbedError::MissingNoProgressBudget)
     ));
@@ -303,7 +400,10 @@ async fn a_session_without_a_stall_bound_is_refused() {
 async fn a_retried_admin_mutation_with_the_same_host_key_applies_once() {
     let core = standard_core_over(sqlite_memory_store_backend().await);
     core.session(crate::SessionId::from("retry-keyed-append"))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await
         .expect("create");
     let session = core

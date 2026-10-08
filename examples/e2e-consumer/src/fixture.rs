@@ -285,6 +285,8 @@ mod tests {
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
+            .execution_budgets(lash::ExecutionBudgets::recommended())
+            .delta_coalescing(lash::DeltaCoalescing::recommended())
             .plugin(Arc::new(super::ConsumerPlugin(controls.clone())))
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 "s30", "sqlite",
@@ -292,6 +294,7 @@ mod tests {
         let id = lash::SessionId::parse("s30").expect("nonblank host identity");
         core.session(id.clone())
             .create(lash::SessionCreation::root(
+                lash::plugins::SessionToolAccess::ambient(),
                 lash::SessionSpec::new(
                     "consumer",
                     lash::TurnBudget::Unbounded,

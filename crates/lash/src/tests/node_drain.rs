@@ -190,7 +190,10 @@ async fn a_drained_nodes_sessions_resume_on_the_next_builds_node(
     let old = build_core(Arc::clone(&stores), "drain-old-build", &script);
     for id in ["mid-turn", "idle"] {
         old.session(session_id(id))
-            .create(crate::SessionCreation::root(mock_session_spec()))
+            .create(crate::SessionCreation::root(
+                crate::plugins::SessionToolAccess::ambient(),
+                mock_session_spec(),
+            ))
             .await
             .expect("created");
         let first = answered(&old, id, "hello").await;

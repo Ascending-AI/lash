@@ -8,7 +8,10 @@ async fn a_second_create_of_a_session_id_is_refused_already_exists() -> Result<(
     let core = standard_core_over(sqlite_memory_store_backend().await);
     let id = crate::SessionId::parse("created-once").expect("nonblank host identity");
     core.session(id.clone())
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await?;
     let first = core.session(id.clone()).open().await?;
     first.send(TurnInput::text("hello")).output().await?;
@@ -16,7 +19,10 @@ async fn a_second_create_of_a_session_id_is_refused_already_exists() -> Result<(
 
     let Err(refused) = core
         .session(id.clone())
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await
     else {
         panic!("a second create of one id is refused");

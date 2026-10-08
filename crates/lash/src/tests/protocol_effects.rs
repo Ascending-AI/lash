@@ -159,7 +159,10 @@ async fn a_turn_without_a_code_executor() -> Result<(crate::TurnOutput, Vec<serd
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(crate::SessionId::parse("protocol-effects").expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await?;
     let output = session.send(TurnInput::text("run code")).output().await?;
     drop(session);

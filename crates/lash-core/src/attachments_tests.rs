@@ -241,12 +241,12 @@ async fn committed_factory_attachment() -> (
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("explicit-root-factory"),
         relation: crate::SessionRelation::Root,
-        config: crate::SessionPolicy::new(
+        config: crate::PersistedSessionConfig::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
-        )
-        .into(),
+            crate::SessionToolAccess::ambient(),
+        ),
         head: crate::SessionCreationHead::Config,
     };
     let store = crate::testing::runtime_helpers::create_session_store(&factory, &request)
@@ -1034,12 +1034,12 @@ async fn fenced_fixture(session_id: &SessionId) -> FencedFixture {
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
         relation: crate::SessionRelation::Root,
-        config: crate::SessionPolicy::new(
+        config: crate::PersistedSessionConfig::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
-        )
-        .into(),
+            crate::SessionToolAccess::ambient(),
+        ),
         head: crate::SessionCreationHead::Config,
     };
     let store = crate::testing::runtime_helpers::create_session_store(&factory, &request)
@@ -1596,7 +1596,8 @@ fn pinned_session_attachment_acceptance_survives_model_catalogue_change() {
     let transaction = registry
         .admit("upgrade-model", 0, entries)
         .expect("the model command is admitted");
-    let mut config = crate::PersistedSessionConfig::from(&policy);
+    let mut config =
+        crate::PersistedSessionConfig::from_policy(&policy, crate::SessionToolAccess::ambient());
     assert!(matches!(
         registry
             .resolve(

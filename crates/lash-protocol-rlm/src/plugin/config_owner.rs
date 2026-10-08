@@ -365,11 +365,14 @@ mod tests {
     }
 
     fn facts_for<T>(check: impl FnOnce(&CandidateFacts<'_>) -> T) -> T {
-        let config = lash_core::PersistedSessionConfig::from(&lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-            lash_core::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        ));
+        let config = lash_core::PersistedSessionConfig::from_policy(
+            &lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
+            ),
+            lash_core::SessionToolAccess::ambient(),
+        );
         let core = lash_core::CoreConfig::of(&config);
         check(&CandidateFacts {
             core: &core,
@@ -494,11 +497,14 @@ mod tests {
         .with_process_lifecycle(false);
         let registry =
             lash_core::ConfigRegistry::build(&[std::sync::Arc::new(factory)]).expect("registry");
-        let mut config = lash_core::PersistedSessionConfig::from(&lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-            lash_core::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        ));
+        let mut config = lash_core::PersistedSessionConfig::from_policy(
+            &lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
+            ),
+            lash_core::SessionToolAccess::ambient(),
+        );
         config.plugin_config = registry
             .resolve_creation(
                 Some(crate::RLM_PROTOCOL_PLUGIN_ID),

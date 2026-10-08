@@ -973,7 +973,8 @@ fn a_redriven_run_executes_under_its_admitted_plugin_config_revision() {
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
     );
-    let mut admitted = crate::PersistedSessionConfig::from(&policy);
+    let mut admitted =
+        crate::PersistedSessionConfig::from_policy(&policy, crate::SessionToolAccess::ambient());
     admitted.plugin_config = capped_plugin_config(12);
     admitted.config_revision = 4;
     let resolved = crate::run_spec::RunSpec::default()
@@ -1020,7 +1021,7 @@ fn a_frame_captures_the_installed_plugin_config() {
         .expect("the initial frame");
     assert_eq!(
         frame
-            .frame_config()
+            .frame_config(crate::SessionToolAccess::ambient())
             .expect("a frame carries its config")
             .plugin_config,
         capped_plugin_config(9)

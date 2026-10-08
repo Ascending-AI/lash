@@ -42,7 +42,10 @@ async fn take_population_sessions(
             uuid::Uuid::new_v4()
         ));
         core.session(session_id.clone())
-            .create(lash::SessionCreation::root(runtime.session_spec()))
+            .create(lash::SessionCreation::root(
+                lash::plugins::SessionToolAccess::ambient(),
+                runtime.session_spec(),
+            ))
             .await?;
         sessions.push(core.session(session_id).open().await?);
     }

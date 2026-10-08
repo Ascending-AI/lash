@@ -142,6 +142,8 @@ async fn deploy_with(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "core-node-deployment",
             "core-node-boot",
@@ -240,7 +242,10 @@ fn scripted(
 async fn settle(core: &lash::LashCore, session: &str, input: &str) -> lash::TurnOutput {
     let session = core
         .session(SessionId::try_from(session.to_owned()).unwrap())
-        .create(lash::SessionCreation::root(spec()))
+        .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
+            spec(),
+        ))
         .await
         .expect("the session is created");
     tokio::time::timeout(
@@ -262,7 +267,11 @@ const PARENT_DONE: &str = "the parent saw its child";
 /// The host's delegation tool (`examples/delegation`): children are created
 /// from [`spec`], stated explicitly, and live until their starter ends.
 fn delegation() -> delegation::DelegationPluginFactory {
-    delegation::DelegationPluginFactory::new(spec(), lash_core::lifetime::starter)
+    delegation::DelegationPluginFactory::new(
+        lash::plugins::SessionToolAccess::ambient(),
+        spec(),
+        lash_core::lifetime::starter,
+    )
 }
 
 /// A parent turn sent to the core calls `spawn_agent`: the core's node runs
@@ -424,7 +433,10 @@ async fn assert_child_creation_plan(
     let parent = deployment
         .core
         .session(parent_id.clone())
-        .create(lash::SessionCreation::root(spec()))
+        .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
+            spec(),
+        ))
         .await
         .unwrap();
     let plan = parent_prompt_plan();
@@ -487,7 +499,11 @@ async fn assert_child_creation_plan(
             child_id
         }
         PromptChild::Related => {
-            let mut creation = lash::SessionCreation::child_of(parent_id.clone(), spec());
+            let mut creation = lash::SessionCreation::child_of(
+                lash::plugins::SessionToolAccess::ambient(),
+                parent_id.clone(),
+                spec(),
+            );
             if let Some(plan) = explicit.clone() {
                 creation = creation.with_prompt_plan(plan);
             }
@@ -617,7 +633,10 @@ async fn a_linked_child_behaves_like_an_unlinked_session_and_outlives_its_parent
     deployment
         .core
         .session(parent_id.clone())
-        .create(lash::SessionCreation::root(spec()))
+        .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
+            spec(),
+        ))
         .await
         .unwrap();
     // The parent's own config differs from the neutral default.
@@ -633,9 +652,16 @@ async fn a_linked_child_behaves_like_an_unlinked_session_and_outlives_its_parent
     for (id, creation) in [
         (
             linked.clone(),
-            lash::SessionCreation::child_of(parent_id.clone(), spec()),
+            lash::SessionCreation::child_of(
+                lash::plugins::SessionToolAccess::ambient(),
+                parent_id.clone(),
+                spec(),
+            ),
         ),
-        (unlinked.clone(), lash::SessionCreation::root(spec())),
+        (
+            unlinked.clone(),
+            lash::SessionCreation::root(lash::plugins::SessionToolAccess::ambient(), spec()),
+        ),
     ] {
         deployment.core.session(id).create(creation).await.unwrap();
     }
@@ -805,10 +831,17 @@ async fn a_linked_childs_attachment_is_held_by_the_child_alone(tier: Tier) {
     let parent = SessionId::from("attachment-parent");
     let child = SessionId::from("attachment-child");
     for (id, creation) in [
-        (parent.clone(), lash::SessionCreation::root(spec())),
+        (
+            parent.clone(),
+            lash::SessionCreation::root(lash::plugins::SessionToolAccess::ambient(), spec()),
+        ),
         (
             child.clone(),
-            lash::SessionCreation::child_of(parent.clone(), spec()),
+            lash::SessionCreation::child_of(
+                lash::plugins::SessionToolAccess::ambient(),
+                parent.clone(),
+                spec(),
+            ),
         ),
     ] {
         deployment.core.session(id).create(creation).await.unwrap();
@@ -951,6 +984,7 @@ async fn a_childs_model_usage_stays_on_the_childs_own_turn(tier: Tier) {
         .core
         .session(child.clone())
         .create(lash::SessionCreation::child_of(
+            lash::plugins::SessionToolAccess::ambient(),
             SessionId::from("usage-parent"),
             spec(),
         ))

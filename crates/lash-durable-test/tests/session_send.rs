@@ -346,6 +346,8 @@ async fn coalesced_inputs_commit_distinct_user_rows(tier: Tier) {
                 lash::QueuedWorkBatchingConfig::new(1).with_drain_mode(lash::DrainMode::All),
             )
             .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+            .execution_budgets(lash::ExecutionBudgets::recommended())
+            .delta_coalescing(lash::DeltaCoalescing::recommended())
             .serve_test_llm_profile(served::model(Arc::clone(&scripts)), served::metadata())
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 "input-rows",
@@ -356,7 +358,10 @@ async fn coalesced_inputs_commit_distinct_user_rows(tier: Tier) {
     let producer = build(false);
     let session = producer
         .session(lash::SessionId::try_from("coalesced-input-rows".to_owned()).unwrap())
-        .create(lash::SessionCreation::root(served::spec(8)))
+        .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
+            served::spec(8),
+        ))
         .await
         .expect("create the session");
     tokio::time::timeout(WATCHDOG, async {
@@ -727,6 +732,8 @@ async fn sqlite_memory_cancelled_model_keeps_sealed_attempts() {
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(provider, served::metadata())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "cancel-backoff",
@@ -735,7 +742,10 @@ async fn sqlite_memory_cancelled_model_keeps_sealed_attempts() {
         .expect("core builds");
     let session = core
         .session(lash::SessionId::parse("cancel-model-backoff").unwrap())
-        .create(lash::SessionCreation::root(served::spec(8)))
+        .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
+            served::spec(8),
+        ))
         .await
         .expect("session created");
     tokio::time::timeout(std::time::Duration::from_secs(10), async {

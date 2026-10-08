@@ -38,6 +38,7 @@ async fn created_session(
     match core
         .session(session_id.clone())
         .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 model,
                 lash::TurnBudget::Unbounded,

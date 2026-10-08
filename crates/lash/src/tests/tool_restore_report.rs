@@ -222,6 +222,8 @@ async fn require_refuses_the_run_and_keeps_its_named_promises() -> Result<()> {
             counters: Arc::clone(&counters),
         }))
         .tool_source_policy(lash_core::ToolSourcePolicy::Require)
+        .execution_budgets(crate::ExecutionBudgets::recommended())
+        .delta_coalescing(crate::DeltaCoalescing::recommended())
         .build(crate::testing::runtime_lease_owner())?;
 
     let opened = strict_core
@@ -283,6 +285,8 @@ async fn require_refuses_a_cold_rebuild_that_lost_a_tool_source() -> Result<()> 
     let strict_core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .tool_source_policy(lash_core::ToolSourcePolicy::Require)
+        .execution_budgets(crate::ExecutionBudgets::recommended())
+        .delta_coalescing(crate::DeltaCoalescing::recommended())
         .build(crate::testing::runtime_lease_owner())?;
 
     let handle = strict_core

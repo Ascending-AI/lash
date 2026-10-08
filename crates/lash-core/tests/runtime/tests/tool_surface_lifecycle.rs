@@ -231,7 +231,7 @@ async fn broader_authority_fork_regains_parent_hidden_tool() {
     .await
     .expect("broader child session");
     let surface = session
-        .pin_tool_surface(&lash_core::SessionToolAccess::default())
+        .pin_tool_surface(&lash_core::SessionToolAccess::ambient())
         .expect("broader child request surface");
 
     assert!(

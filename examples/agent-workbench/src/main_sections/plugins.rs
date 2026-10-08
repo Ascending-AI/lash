@@ -457,7 +457,10 @@ impl AppState {
                 },
             )?,
         };
-        Ok(lash::SessionCreation::root(spec))
+        Ok(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
+            spec,
+        ))
     }
 }
 

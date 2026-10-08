@@ -168,7 +168,9 @@ async fn every_attempt_delivers_afresh_and_unsent_or_rejected_deliveries_are_ret
             crate::ChargeSafetyPolicy::default(),
             &lash_trace::telemetry::metrics::TelemetryMetrics::default(),
             None,
-            crate::provider::handle::ModelCallBounds::default(),
+            crate::provider::handle::ModelCallBounds::unnested(
+                lash_sansio::ExecutionBudgets::recommended(),
+            ),
         )
         .await
         .expect("the third attempt answers");

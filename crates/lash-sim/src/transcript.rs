@@ -451,12 +451,12 @@ mod tests {
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from("mutation-session"),
                 relation: SessionRelation::Root,
-                config: lash_core::SessionPolicy::new(
+                config: lash_core::PersistedSessionConfig::new(
                     lash_core::TurnBudget::Unbounded,
                     lash_core::MaxToolCalls::new(1024),
                     lash_core::NoProgressBudget::bounded(12),
-                )
-                .into(),
+                    lash_core::SessionToolAccess::ambient(),
+                ),
                 head: SessionCreationHead::Config,
             })
             .await

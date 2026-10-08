@@ -182,6 +182,8 @@ impl Deployment {
             .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+            .execution_budgets(lash::ExecutionBudgets::recommended())
+            .delta_coalescing(lash::DeltaCoalescing::recommended())
             .serve_test_llm_profile(model(requests, answer), served::metadata())
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 "recorded-behaviour-deployment",
@@ -208,7 +210,10 @@ async fn run_on_the_redeploying_core(
     let first = creating.core(&backend, &requests);
     let recorded = first
         .session(session_id.clone())
-        .create(lash::SessionCreation::root(served::spec(64)))
+        .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
+            served::spec(64),
+        ))
         .await
         .expect("the creating deployment records the session");
     first

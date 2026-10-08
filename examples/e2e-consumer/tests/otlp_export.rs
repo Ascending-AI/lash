@@ -43,6 +43,7 @@ async fn send(core: &lash::LashCore, id: &str) -> Result<()> {
     let session = core
         .session(lash::SessionId::fixture(id))
         .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 "socket",
                 lash::TurnBudget::Unbounded,
@@ -96,6 +97,8 @@ async fn socket_outage_is_counted_and_shutdown_drains_acknowledged_export() -> R
                 .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
                 .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
                 .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
+                .execution_budgets(lash::ExecutionBudgets::recommended())
+                .delta_coalescing(lash::DeltaCoalescing::recommended())
                 .trace_jsonl_path(trace.path()),
         )
         .build(lash::persistence::LeaseOwnerIdentity::opaque(

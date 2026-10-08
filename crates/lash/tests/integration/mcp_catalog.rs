@@ -515,6 +515,8 @@ async fn turn_witness(store: Store, failure_law: bool) {
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .plugin(factory.clone())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "mcp-catalog",

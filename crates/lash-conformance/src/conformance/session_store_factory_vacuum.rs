@@ -69,7 +69,10 @@ pub(super) async fn session_store_factory_delete_takes_the_sessions_pins(
             source_session_id: request.session_id.clone(),
             head_revision: pinned_revision,
             relation: crate::SessionRelation::Root,
-            config: request.config.session_policy().into(),
+            config: crate::PersistedSessionConfig::from_policy(
+                &request.config.session_policy(),
+                crate::SessionToolAccess::ambient(),
+            ),
         })
         .await
         .expect_err("a deleted session's pinned revision must not be forkable");

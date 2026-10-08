@@ -100,12 +100,24 @@ struct BuiltSessionContributions {
 /// The recorded facts a plugin session is built under: the session's tool
 /// authority and its recorded plugin configuration (or a process's captured
 /// one).
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct SessionAuthorityContext {
     pub tool_access: SessionToolAccess,
     /// The recorded plugin configuration the session is built with
     /// (FIG-4379).
     pub plugin_config: super::AdmittedPluginConfig,
+}
+
+impl Default for SessionAuthorityContext {
+    /// The blank context of a plugin session built for no recorded session:
+    /// ambient authority and no plugin configuration. It is not a host
+    /// choice; a session's own context carries its recorded authority.
+    fn default() -> Self {
+        Self {
+            tool_access: SessionToolAccess::ambient(),
+            plugin_config: super::AdmittedPluginConfig::default(),
+        }
+    }
 }
 
 impl PluginHost {
@@ -142,7 +154,7 @@ impl PluginHost {
             sessions: Arc::new(StdMutex::new(BTreeMap::new())),
             config_registry,
             trace_runtime: crate::trace::TraceRuntime::new(Arc::new(crate::SystemClock)),
-            execution_budgets: crate::ExecutionBudgets::default(),
+            execution_budgets: crate::ExecutionBudgets::recommended(),
         }
     }
 

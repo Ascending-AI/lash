@@ -879,12 +879,12 @@ impl BackendRunner {
             pending_observer_intents: Vec::new(),
             session_id: self.session_id.clone(),
             relation: SessionRelation::Root,
-            config: lash_core::SessionPolicy::new(
+            config: lash_core::PersistedSessionConfig::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
-            )
-            .into(),
+                lash_core::SessionToolAccess::ambient(),
+            ),
             head: SessionCreationHead::Config,
         }
     }
@@ -919,6 +919,8 @@ impl BackendRunner {
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+            .execution_budgets(lash::ExecutionBudgets::recommended())
+            .delta_coalescing(lash::DeltaCoalescing::recommended())
             .serve_test_llm_profile(provider, model)
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 "cross-backend-differential-test",
@@ -1041,12 +1043,12 @@ impl BackendRunner {
                             source_session_id: self.session_id.clone(),
                             source_node_id: Some(lash_core::NodeId::fixture(node_id)),
                         },
-                        config: lash_core::SessionPolicy::new(
+                        config: lash_core::PersistedSessionConfig::new(
                             lash_core::TurnBudget::Unbounded,
                             lash_core::MaxToolCalls::new(1024),
                             lash_core::NoProgressBudget::bounded(12),
-                        )
-                        .into(),
+                            lash_core::SessionToolAccess::ambient(),
+                        ),
                     })
                     .await?;
                 Ok(None)
@@ -1449,12 +1451,12 @@ async fn assert_storage_failure_mappings_agree(sqlite_root: &Path, postgres: &Po
         pending_observer_intents: Vec::new(),
         session_id: SessionId::fixture(format!("fig-1242-storage-failure:{}", run_nonce())),
         relation: SessionRelation::Root,
-        config: lash_core::SessionPolicy::new(
+        config: lash_core::PersistedSessionConfig::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-        )
-        .into(),
+            lash_core::SessionToolAccess::ambient(),
+        ),
         head: SessionCreationHead::Config,
     };
 
@@ -1604,12 +1606,12 @@ async fn runners_for_case_with_clock(
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
         relation: relation.clone(),
-        config: lash_core::SessionPolicy::new(
+        config: lash_core::PersistedSessionConfig::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-        )
-        .into(),
+            lash_core::SessionToolAccess::ambient(),
+        ),
         head: SessionCreationHead::Config,
     };
     let expected_meta = SessionMeta {

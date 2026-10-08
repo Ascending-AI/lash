@@ -128,31 +128,26 @@ pub struct DelegationPluginFactory {
 }
 
 impl DelegationPluginFactory {
-    /// Children created from `child_spec`, whose processes take `lifetime`,
-    /// for example [`lash::process::lifetime::starter`]. The spec must state
-    /// a model, a turn budget and a tool-call limit: a child has no other
-    /// source for them.
+    /// Children created from `child_spec` under `child_tool_access`, whose
+    /// processes take `lifetime`, for example
+    /// [`lash::process::lifetime::starter`]. The spec must state a model, a
+    /// turn budget and a tool-call limit, and the host states the children's
+    /// tool authority (ambient access resolves against the child's own
+    /// catalog): a child has no other source for them.
     pub fn new(
+        child_tool_access: SessionToolAccess,
         child_spec: SessionSpec,
         lifetime: impl Fn(&StartCx) -> Lifetime + Send + Sync + 'static,
     ) -> Self {
         Self {
             child: Arc::new(ChildConfig {
                 spec: child_spec,
-                tool_access: SessionToolAccess::default(),
+                tool_access: child_tool_access,
                 prompt_plan: None,
                 rlm: false,
                 lifetime: Arc::new(lifetime),
             }),
         }
-    }
-
-    /// The tool access every child is created with. The default is ambient
-    /// access, resolved against the child's own catalog.
-    #[must_use]
-    pub fn with_child_tool_access(mut self, tool_access: SessionToolAccess) -> Self {
-        self.config_mut().tool_access = tool_access;
-        self
     }
 
     /// The prompt plan every child starts with. Without one a child starts

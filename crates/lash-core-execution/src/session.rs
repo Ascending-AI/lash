@@ -930,7 +930,7 @@ mod tool_catalog_cache_tests {
     }
 
     async fn admission_probe_session(provider: Arc<dyn ToolProvider>) -> Session {
-        let plugins = admission_probe_plugins(provider, crate::SessionToolAccess::default());
+        let plugins = admission_probe_plugins(provider, crate::SessionToolAccess::ambient());
         Session::new(
             crate::testing::runtime_services_without_ports(plugins),
             &SessionId::from("admission-probe"),
@@ -1042,7 +1042,7 @@ mod tool_catalog_cache_tests {
 
     #[test]
     fn authority_fingerprint_covers_hidden_tools_and_explicit_definitions() {
-        let base = crate::SessionToolAccess::default();
+        let base = crate::SessionToolAccess::ambient();
         let hidden = base
             .clone()
             .with_hidden_tools(["hidden"])
@@ -1096,7 +1096,7 @@ mod tool_catalog_cache_tests {
         let reads_before_pin = manifest_reads.load(Ordering::SeqCst);
 
         let first = session
-            .pin_tool_surface(&crate::SessionToolAccess::default())
+            .pin_tool_surface(&crate::SessionToolAccess::ambient())
             .expect("first request surface");
         assert_eq!(
             manifest_reads.load(Ordering::SeqCst),
@@ -1115,7 +1115,7 @@ mod tool_catalog_cache_tests {
         );
 
         let second = session
-            .pin_tool_surface(&crate::SessionToolAccess::default())
+            .pin_tool_surface(&crate::SessionToolAccess::ambient())
             .expect("next request surface");
         assert_eq!(
             manifest_reads.load(Ordering::SeqCst),
@@ -1164,7 +1164,7 @@ mod tool_catalog_cache_tests {
         );
 
         let unhidden = session
-            .pin_tool_surface(&crate::SessionToolAccess::default())
+            .pin_tool_surface(&crate::SessionToolAccess::ambient())
             .expect("next request with broader authority");
         assert!(
             unhidden.tool_catalog().has_callable_tool("alpha"),
@@ -1228,7 +1228,7 @@ mod tool_catalog_cache_tests {
         .expect("runtime session");
 
         let old = session
-            .pin_tool_surface(&crate::SessionToolAccess::default())
+            .pin_tool_surface(&crate::SessionToolAccess::ambient())
             .expect("request pinned while provider A owns the id");
         let old_entries = old
             .tool_catalog()
@@ -1251,7 +1251,7 @@ mod tool_catalog_cache_tests {
         a_active.store(false, Ordering::SeqCst);
         b_active.store(true, Ordering::SeqCst);
         let fresh = session
-            .pin_tool_surface(&crate::SessionToolAccess::default())
+            .pin_tool_surface(&crate::SessionToolAccess::ambient())
             .expect("next request pinned after provider B owns the id");
         let fresh_entries = fresh
             .tool_catalog()
@@ -1382,7 +1382,7 @@ mod tool_catalog_cache_tests {
         }))
         .await;
 
-        let error = match session.pin_tool_surface(&crate::SessionToolAccess::default()) {
+        let error = match session.pin_tool_surface(&crate::SessionToolAccess::ambient()) {
             Ok(_) => panic!("missing resident contract must be refused before advertisement"),
             Err(error) => error,
         };

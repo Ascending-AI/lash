@@ -106,7 +106,10 @@ fn turn(text: &str) -> crate::TurnId {
 
 async fn create(core: &LashCore, session: &str) -> crate::DurableSession {
     core.session(id(session))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await
         .expect("create the session")
 }
@@ -356,7 +359,10 @@ async fn concurrent_creates_of_one_id_give_exactly_one_ok() {
             tokio::spawn(async move {
                 barrier.wait().await;
                 core.session(id("raced-create"))
-                    .create(crate::SessionCreation::root(mock_session_spec()))
+                    .create(crate::SessionCreation::root(
+                        crate::plugins::SessionToolAccess::ambient(),
+                        mock_session_spec(),
+                    ))
                     .await
                     .map(drop)
             })
@@ -1264,7 +1270,10 @@ async fn create_on_a_deleted_id_is_refused_with_the_tombstone() {
     .expect("delete the session");
     let error = core
         .session(id("create-deleted"))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await
         .err()
         .expect("creating a retired id is refused");

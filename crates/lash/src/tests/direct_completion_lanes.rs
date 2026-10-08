@@ -129,7 +129,10 @@ async fn compacted_with(provider: ProviderHandle, script: Script) -> Result<Answ
     .build(crate::testing::runtime_lease_owner())?;
     let id = crate::SessionId::parse("direct-lanes").expect("nonblank host identity");
     core.session(id.clone())
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await?;
     let session = core.session(id).open().await?;
     let compacted = session

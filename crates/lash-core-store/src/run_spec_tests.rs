@@ -117,6 +117,7 @@ fn snapshot() -> PersistedSessionConfig {
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
+        crate::SessionToolAccess::ambient(),
     );
     config.model = Some(
         LlmProfileConfig::new(recorded("session-model"))
@@ -396,6 +397,7 @@ fn a_reasoning_override_for_a_session_without_a_profile_is_refused() {
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
+        crate::SessionToolAccess::ambient(),
     );
     assert!(matches!(
         spec.resolve(&bare, None, &catalog(), &MapOwner),

@@ -1472,7 +1472,7 @@ async fn provider_handle_retries_retryable_failures_in_shared_executor() {
             crate::ChargeSafetyPolicy::default(),
             &instruments,
             Some(&permit),
-            super::handle::ModelCallBounds::default(),
+            super::handle::ModelCallBounds::unnested(lash_sansio::ExecutionBudgets::recommended()),
         )
         .await
         .expect("eventual success");
@@ -1733,7 +1733,7 @@ async fn provider_handle_throttle_with_retry_after_does_not_consume_attempts() {
             crate::ChargeSafetyPolicy::default(),
             &instruments,
             Some(&permit),
-            super::handle::ModelCallBounds::default(),
+            super::handle::ModelCallBounds::unnested(lash_sansio::ExecutionBudgets::recommended()),
         )
         .await
         .expect("success after deferred throttle waits");

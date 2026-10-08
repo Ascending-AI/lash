@@ -170,10 +170,14 @@ impl ProviderAttemptLimits {
     }
 }
 
-impl Default for ProviderAttemptLimits {
-    /// 5 min per request, 2 min to response start, 2 min of chunk silence,
-    /// 4 attempts.
-    fn default() -> Self {
+impl ProviderAttemptLimits {
+    /// The named preset a host may choose: 5 min per request, 2 min to
+    /// response start, 2 min of chunk silence, 4 attempts. No measurement
+    /// backs these values; they are lash's long-standing shipped numbers.
+    /// Attempt limits are a spend decision, so nothing installs this preset
+    /// for a host: it is passed explicitly.
+    #[must_use]
+    pub const fn recommended() -> Self {
         Self {
             per_request: Duration::from_secs(5 * 60),
             response_start: Duration::from_secs(2 * 60),
@@ -183,31 +187,40 @@ impl Default for ProviderAttemptLimits {
     }
 }
 
-/// The values an [`ExecutionBudgets`] is built from. [`Default`] holds the
-/// shipped defaults; [`ExecutionBudgets::new`] validates a value.
+/// The values an [`ExecutionBudgets`] is built from. Every field is a host
+/// decision with no default; [`ExecutionBudgetsConfig::recommended`] is the
+/// named preset a host may state, and [`ExecutionBudgets::new`] validates a
+/// value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ExecutionBudgetsConfig {
     /// The hard cap on one model call, over throttle, backoff and every
-    /// provider attempt: 10 min.
+    /// provider attempt.
     pub model_total: Duration,
-    /// One admission or checkpoint phase, all of its checks together: 60 s.
+    /// One admission or checkpoint phase, all of its checks together.
     pub control_phase: Duration,
     /// Spent once, after a stretch ends at its limit or on cancellation, to
-    /// collect evidence: 2 s.
+    /// collect evidence.
     pub stop_grace: Duration,
     pub provider: ProviderAttemptLimits,
-    /// Bound on a chain of agent frame switches: 16. The follow-on at this
+    /// Bound on a chain of agent frame switches. The follow-on at this
     /// depth stops with `AgentFrameSwitchLimit` before calling the model.
     pub agent_frame_switch_limit: NonZeroU32,
 }
 
-impl Default for ExecutionBudgetsConfig {
-    fn default() -> Self {
+impl ExecutionBudgetsConfig {
+    /// The named preset a host may choose: a 10 min model total, a 60 s
+    /// control phase, a 2 s stop grace,
+    /// [`ProviderAttemptLimits::recommended`] and 16 agent frame switches.
+    /// No measurement backs these values; they are lash's long-standing
+    /// shipped numbers. Execution budgets are a spend decision, so nothing
+    /// installs this preset for a host: it is passed explicitly.
+    #[must_use]
+    pub const fn recommended() -> Self {
         Self {
             model_total: Duration::from_secs(10 * 60),
             control_phase: Duration::from_secs(60),
             stop_grace: Duration::from_secs(2),
-            provider: ProviderAttemptLimits::default(),
+            provider: ProviderAttemptLimits::recommended(),
             agent_frame_switch_limit: NonZeroU32::MIN.saturating_add(15),
         }
     }
@@ -215,10 +228,18 @@ impl Default for ExecutionBudgetsConfig {
 
 /// The one validated source of every execution bound (spec v3 Part C).
 /// Shared: every holder of a runtime's budgets reads the same value.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecutionBudgets(std::sync::Arc<ExecutionBudgetsConfig>);
 
 impl ExecutionBudgets {
+    /// The validated [`ExecutionBudgetsConfig::recommended`] preset: the
+    /// named choice a host states when it has no numbers of its own. See
+    /// that preset for each value and its evidence.
+    #[must_use]
+    pub fn recommended() -> Self {
+        Self(std::sync::Arc::new(ExecutionBudgetsConfig::recommended()))
+    }
+
     /// Validate `config`.
     ///
     /// # Errors

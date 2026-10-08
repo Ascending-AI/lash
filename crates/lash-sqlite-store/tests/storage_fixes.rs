@@ -243,12 +243,12 @@ async fn process_record_is_a_root_without_registry_liveness() {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("unwired-process-owner"),
         relation: lash_core_execution::SessionRelation::default(),
-        config: lash_core_execution::SessionPolicy::new(
+        config: lash_core_execution::PersistedSessionConfig::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-        )
-        .into(),
+            lash_core_execution::SessionToolAccess::ambient(),
+        ),
         head: lash_core_execution::SessionCreationHead::Config,
     };
     store.admit_session(&request).await.expect("admit session");

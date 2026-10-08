@@ -329,6 +329,8 @@ fn standard_core(
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(model.provider(), served::metadata())
         .build(owner(build))
         .expect("the core builds")
@@ -352,6 +354,7 @@ async fn standard_runtime_keeps_recorded_history_across_params_renderer_and_reop
     let core = standard_core(&backend, &model, &renderer, &tool, "first-build");
     core.session(session_id(SESSION))
         .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
             served::spec(64)
                 .plugin(
                     lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
@@ -543,6 +546,8 @@ fn rlm_core(
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(model.provider(), served::metadata())
         .build(owner(build))
         .expect("the core builds")
@@ -571,6 +576,7 @@ async fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_
     );
     core.session(session_id(SESSION))
         .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
             served::spec(64)
                 .plugin(
                     lash::rlm::RLM_PROTOCOL_PLUGIN_ID,

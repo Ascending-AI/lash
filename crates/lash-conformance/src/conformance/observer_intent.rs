@@ -45,12 +45,12 @@ pub async fn fork_observer_transient_failure_retains_intent_until_publication(
                 source_session_id: SessionId::from("fork-observer-transient-source"),
                 source_node_id: Some("fork-observer-transient-node".into()),
             },
-            config: crate::SessionPolicy::new(
+            config: crate::PersistedSessionConfig::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
-            )
-            .into(),
+                crate::SessionToolAccess::ambient(),
+            ),
             head: crate::SessionCreationHead::Config,
         })
         .await

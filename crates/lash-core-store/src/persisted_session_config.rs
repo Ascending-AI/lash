@@ -106,18 +106,21 @@ impl PersistedSessionConfig {
     }
 
     /// Builds an empty persisted config carrying the required per-turn budget
-    /// and tool-call limit, plus the host's stall bound.
+    /// and tool-call limit, the host's stall bound and the session's tool
+    /// authority.
     ///
     /// Store implementors reading durable session heads populate the model
     /// fields from the row; the budget and the limit have no default by
     /// doctrine, so every construction names `TurnBudget::Bounded(n)` or
-    /// `Unbounded`, and a `MaxToolCalls`, explicitly. The other execution
+    /// `Unbounded`, a `MaxToolCalls`, and ambient or restricted tool
+    /// authority, explicitly. The other execution
     /// controls start at the values
     /// [`SessionPolicy::new`](crate::SessionPolicy::new) states.
     pub fn new(
         turn_budget: crate::TurnBudget,
         max_tool_calls: crate::MaxToolCalls,
         no_progress_budget: crate::NoProgressBudget,
+        tool_access: crate::SessionToolAccess,
     ) -> Self {
         let neutral = crate::SessionPolicy::new(turn_budget, max_tool_calls, no_progress_budget);
         Self {
@@ -128,23 +131,21 @@ impl PersistedSessionConfig {
             no_progress_budget: neutral.no_progress_budget,
             charge_safety: neutral.charge_safety,
             generation: crate::GenerationOptions::default(),
-            tool_access: crate::SessionToolAccess::default(),
+            tool_access,
             prompt_plan: crate::prompt_sections::PromptPlan::default(),
             plugin_config: crate::PluginConfig::default(),
             config_revision: 0,
             undelivered_change: None,
         }
     }
-}
 
-impl From<crate::SessionPolicy> for PersistedSessionConfig {
-    fn from(policy: crate::SessionPolicy) -> Self {
-        Self::from(&policy)
-    }
-}
-
-impl From<&crate::SessionPolicy> for PersistedSessionConfig {
-    fn from(policy: &crate::SessionPolicy) -> Self {
+    /// The config a session records from `policy` under `tool_access`. A
+    /// policy carries no tool authority, so its caller states it: the
+    /// creator's choice at creation, the recorded one anywhere else.
+    pub fn from_policy(
+        policy: &crate::SessionPolicy,
+        tool_access: crate::SessionToolAccess,
+    ) -> Self {
         Self {
             model: policy.model.clone(),
             attachment_acceptance: policy.attachment_acceptance.clone(),
@@ -153,7 +154,7 @@ impl From<&crate::SessionPolicy> for PersistedSessionConfig {
             no_progress_budget: policy.no_progress_budget,
             charge_safety: policy.charge_safety.clone(),
             generation: policy.generation.clone(),
-            tool_access: crate::SessionToolAccess::default(),
+            tool_access,
             prompt_plan: crate::prompt_sections::PromptPlan::default(),
             // A `SessionPolicy` carries no plugin configuration; its creator
             // records what the owners resolved.

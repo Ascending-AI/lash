@@ -212,7 +212,7 @@ impl ProviderHandle {
             charge_safety,
             &TelemetryMetrics::default(),
             None,
-            ModelCallBounds::default(),
+            ModelCallBounds::unnested(lash_sansio::ExecutionBudgets::recommended()),
         )
         .await
     }
@@ -797,10 +797,21 @@ fn provider_close_panicked(
 /// The bounds one model call runs under: the runtime's execution budgets
 /// and, for a call nested in another executable stretch, that stretch's
 /// limit, which clips the call's total (spec v3 L-C2).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModelCallBounds {
     pub budgets: lash_sansio::ExecutionBudgets,
     pub enclosing: Option<lash_sansio::ExecutionLimit>,
+}
+
+impl ModelCallBounds {
+    /// The bounds of a call no other stretch encloses: `budgets` alone.
+    #[must_use]
+    pub fn unnested(budgets: lash_sansio::ExecutionBudgets) -> Self {
+        Self {
+            budgets,
+            enclosing: None,
+        }
+    }
 }
 
 /// The typed model timeout a call settles with once its total expires.

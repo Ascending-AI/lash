@@ -288,6 +288,8 @@ async fn a_terminally_refused_command_commit_settles_with_its_cause_and_the_lane
         .serve_sessions(false)
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .serve_test_llm_profile(served::model(Arc::default()), served::metadata())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -298,7 +300,10 @@ async fn a_terminally_refused_command_commit_settles_with_its_cause_and_the_lane
     let id = lash::SessionId::try_from("command-refusal".to_owned()).unwrap();
     let durable = core
         .session(id.clone())
-        .create(lash::SessionCreation::root(served::spec(8)))
+        .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
+            served::spec(8),
+        ))
         .await
         .unwrap();
     let live = core.session(id.clone()).open().await.unwrap();

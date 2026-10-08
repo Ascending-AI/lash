@@ -754,13 +754,19 @@ fn delegation(
     rlm: bool,
 ) -> Arc<dyn lash_core::facade_support::PluginFactory> {
     let factory = match lifetimes {
-        Lifetimes::Starter => {
-            delegation::DelegationPluginFactory::new(served::spec(64), lash_core::lifetime::starter)
-        }
-        Lifetimes::Session => delegation::DelegationPluginFactory::new(served::spec(64), |cx| {
-            cx.session()
-                .map_or(lash_core::Lifetime::Detached, lash_core::Lifetime::Until)
-        }),
+        Lifetimes::Starter => delegation::DelegationPluginFactory::new(
+            lash::plugins::SessionToolAccess::ambient(),
+            served::spec(64),
+            lash_core::lifetime::starter,
+        ),
+        Lifetimes::Session => delegation::DelegationPluginFactory::new(
+            lash::plugins::SessionToolAccess::ambient(),
+            served::spec(64),
+            |cx| {
+                cx.session()
+                    .map_or(lash_core::Lifetime::Detached, lash_core::Lifetime::Until)
+            },
+        ),
     };
     Arc::new(if rlm {
         factory.with_rlm_children()

@@ -30,8 +30,10 @@ pub fn root_snapshot_config_from_state(
 pub fn execution_session_config_from_state(
     state: &crate::RuntimeSessionState,
 ) -> crate::PersistedSessionConfig {
-    let mut config = crate::PersistedSessionConfig::from(&state.policy);
-    config.tool_access = state.authority.tool_access.clone();
+    let mut config = crate::PersistedSessionConfig::from_policy(
+        &state.policy,
+        state.authority.tool_access.clone(),
+    );
     config.plugin_config = state.authority.plugin_config.clone();
     config.prompt_plan = state.authority.prompt_plan.clone();
     config.config_revision = state.config_revision;

@@ -452,6 +452,8 @@ async fn runtime_clamps_a_requested_cap_and_reports_the_reduced_wire_value() {
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(provider, model.clone())
         .build(crate::sim_process_owner())
         .expect("runtime core");
@@ -540,6 +542,8 @@ async fn protocol_owned_stop_is_absent_from_the_wire_and_reported_suppressed() {
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(provider, model.clone())
         .build(crate::sim_process_owner())
         .expect("RLM core");

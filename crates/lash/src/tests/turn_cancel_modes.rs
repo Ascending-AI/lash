@@ -232,7 +232,10 @@ async fn session_with(
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(crate::SessionId::parse(id).expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await?;
     Ok((core, session))
 }
@@ -945,7 +948,10 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     let session_id = crate::SessionId::parse(ID).expect("nonblank host identity");
     let session = core
         .session(session_id.clone())
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await?;
     let run = crate::TurnId::parse("turn-that-cannot-finish").expect("nonblank host identity");
     let handle = session
@@ -1026,7 +1032,10 @@ async fn an_accepted_cancel_survives_its_owners_loss_in_a_retry_backoff_without_
     let session_id = crate::SessionId::parse(ID).expect("nonblank host identity");
     let session = core
         .session(session_id.clone())
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await?;
     let run = crate::TurnId::parse("turn-in-backoff").expect("nonblank host identity");
     let handle = session

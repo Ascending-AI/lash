@@ -97,12 +97,12 @@ fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
         relation: SessionRelation::Root,
-        config: crate::SessionPolicy::new(
+        config: crate::PersistedSessionConfig::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-        )
-        .into(),
+            crate::SessionToolAccess::ambient(),
+        ),
         head: SessionCreationHead::Config,
     }
 }
@@ -163,12 +163,12 @@ async fn fork(
             source_session_id: source,
             head_revision,
             relation: SessionRelation::Root,
-            config: crate::SessionPolicy::new(
+            config: crate::PersistedSessionConfig::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
-            )
-            .into(),
+                crate::SessionToolAccess::ambient(),
+            ),
         })
         .await
         .expect("create lineage conformance fork");
@@ -497,12 +497,12 @@ pub async fn fork_lineage_no_carrier_law(handles: LineageConformanceHandles) {
             source_session_id: owner_id.clone(),
             head_revision: owner_revision,
             relation: SessionRelation::Root,
-            config: crate::SessionPolicy::new(
+            config: crate::PersistedSessionConfig::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
-            )
-            .into(),
+                crate::SessionToolAccess::ambient(),
+            ),
         })
         .await
         .expect_err("a deleted owner's pin holds nothing");

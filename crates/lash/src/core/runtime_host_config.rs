@@ -17,11 +17,21 @@ impl LashCoreBuilder {
             .tool_source_policy
             .take()
             .ok_or(EmbedError::MissingToolSourcePolicy)?;
+        let execution_budgets = self
+            .execution_budgets
+            .take()
+            .ok_or(EmbedError::MissingExecutionBudgets)?;
+        let delta_coalescing = self
+            .delta_coalescing
+            .take()
+            .ok_or(EmbedError::MissingDeltaCoalescing)?;
         let core = RuntimeHostConfig::new(
             self.backend.clone(),
             commit_budget,
             queued_work_batching,
             tool_source_policy,
+            execution_budgets,
+            delta_coalescing,
         );
         Ok(self.apply_core_overrides(core))
     }
@@ -62,12 +72,6 @@ impl LashCoreBuilder {
         }
         if let Some(context) = self.trace_context.take() {
             core.tracing = core.tracing.clone().with_base_context(context);
-        }
-        if let Some(budgets) = self.execution_budgets.take() {
-            core.control.execution_budgets = budgets;
-        }
-        if let Some(coalescing) = self.delta_coalescing.take() {
-            core.control.delta_coalescing = coalescing;
         }
         // The host's delivery bound is the one relay-policy source: the
         // recovery pass's relays and every immediate `deliver_now` derive

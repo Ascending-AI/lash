@@ -155,12 +155,12 @@ pub fn session_ingress_session_request() -> crate::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: session(),
         relation: crate::SessionRelation::Root,
-        config: crate::SessionPolicy::new(
+        config: crate::PersistedSessionConfig::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-        )
-        .into(),
+            crate::SessionToolAccess::ambient(),
+        ),
         head: crate::SessionCreationHead::Config,
     }
 }

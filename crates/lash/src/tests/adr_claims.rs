@@ -23,16 +23,21 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
     };
     let core = build()?;
     core.session(crate::SessionId::parse("materialize-run").expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await?;
     core.session(crate::SessionId::parse("materialize-child").expect("nonblank host identity"))
         .create(crate::SessionCreation::child_of(
+            crate::plugins::SessionToolAccess::ambient(),
             "materialize-run".into(),
             mock_session_spec(),
         ))
         .await?;
     core.session(crate::SessionId::parse("materialize-stated").expect("nonblank host identity"))
         .create(crate::SessionCreation {
+            tool_access: crate::plugins::SessionToolAccess::ambient(),
             parent: Some("materialize-run".into()),
             prompt_plan: None,
             spec: mock_session_spec().plugin_options(
@@ -81,6 +86,7 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
     let bad = cold
         .session(crate::SessionId::parse("materialize-refused").expect("nonblank host identity"))
         .create(crate::SessionCreation {
+            tool_access: crate::plugins::SessionToolAccess::ambient(),
             parent: Some("materialize-run".into()),
             prompt_plan: None,
             spec: mock_session_spec().plugin_options(
@@ -237,7 +243,10 @@ async fn resumed_session_observe_wait_cancel_shift_keep_original_owners() -> Res
     let id = "owner-operation-matrix";
     for core in [&source, &receiving] {
         core.session(crate::SessionId::parse(id).expect("nonblank host identity"))
-            .create(crate::SessionCreation::root(mock_session_spec()))
+            .create(crate::SessionCreation::root(
+                crate::plugins::SessionToolAccess::ambient(),
+                mock_session_spec(),
+            ))
             .await?;
     }
     let session = source

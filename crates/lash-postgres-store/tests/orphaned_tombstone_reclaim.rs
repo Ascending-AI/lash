@@ -72,7 +72,10 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash_core_execution::SessionRelation::Root,
-                config: policy.clone().into(),
+                config: lash_core_execution::PersistedSessionConfig::from_policy(
+                    &policy.clone(),
+                    lash_core_execution::SessionToolAccess::ambient(),
+                ),
                 head: lash_core_execution::SessionCreationHead::Config,
             })
             .await
@@ -127,7 +130,10 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
             source_session_id: SessionId::from("orphan-fork-parent"),
             head_revision: 1,
             relation: lash_core_execution::SessionRelation::Root,
-            config: policy.clone().into(),
+            config: lash_core_execution::PersistedSessionConfig::from_policy(
+                &policy.clone(),
+                lash_core_execution::SessionToolAccess::ambient(),
+            ),
         })
         .await
         .expect("fork at the parent's live tip");

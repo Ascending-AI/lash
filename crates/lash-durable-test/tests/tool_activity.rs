@@ -598,6 +598,8 @@ async fn a_durable_turn_streams_provider_deltas_before_its_committed_rows(tier: 
             .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+            .execution_budgets(lash::ExecutionBudgets::recommended())
+            .delta_coalescing(lash::DeltaCoalescing::recommended())
             .serve_test_llm_profile(
                 model,
                 lash_core::LlmProfileMetadata::builder(served::MODEL)
@@ -614,7 +616,10 @@ async fn a_durable_turn_streams_provider_deltas_before_its_committed_rows(tier: 
         let session_id = lash::SessionId::try_from("provider-activity".to_owned()).unwrap();
         let session = core
             .session(session_id.clone())
-            .create(lash::SessionCreation::root(served::spec(8)))
+            .create(lash::SessionCreation::root(
+                lash::plugins::SessionToolAccess::ambient(),
+                served::spec(8),
+            ))
             .await
             .expect("the session is created");
         let observed = core
@@ -932,6 +937,8 @@ async fn a_commit_on_one_node_reaches_a_subscriber_attached_through_another(tier
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(
             served::model(Arc::clone(&world.scripts)),
             served::metadata(),
@@ -948,7 +955,10 @@ async fn a_commit_on_one_node_reaches_a_subscriber_attached_through_another(tier
     let session_id = lash::SessionId::try_from(SESSION.to_owned()).expect("a session id");
     let session = attached
         .session(session_id.clone())
-        .create(lash::SessionCreation::root(served::spec(8)))
+        .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
+            served::spec(8),
+        ))
         .await
         .expect("the session is created");
     let observed = attached

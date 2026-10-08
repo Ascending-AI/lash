@@ -468,7 +468,7 @@ impl lash_lashlang_runtime::LashlangRunSettingsRecorder for RlmProcessSettingsRe
             tracing: self.plugin_host.trace_runtime().clone(),
             trace: None,
             owner: lash_core::RuntimeOwner::Process(lash_core::mint_process_id()),
-            tool_access: Default::default(),
+            tool_access: lash_core::SessionToolAccess::ambient(),
             plugin_config: plugin_config.clone(),
             materialization: lash_core::plugin::PluginSessionMaterialization::Creation,
             extensions: self.plugin_host.extensions().clone(),
@@ -796,6 +796,8 @@ mod process_settings_tests {
                     CommitBudget::bounded(8 * 1024 * 1024, 1024),
                     QueuedWorkBatchingConfig::new(1),
                     lash_core::ToolSourcePolicy::Tolerate,
+                    lash_core::ExecutionBudgets::recommended(),
+                    lash_core::runtime::DeltaCoalescing::recommended(),
                 ),
                 true,
             )

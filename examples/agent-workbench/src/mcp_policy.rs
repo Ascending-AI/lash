@@ -97,7 +97,7 @@ impl McpSamplingHandler for DemoSamplingHandler {
             lash::LlmProfileConfig::new(lash::RecordedLlmProfile::mint(
                 lash::LlmProfileKey::new("mcp-sampling"),
                 self.model.clone(),
-            )),
+            )), lash::ExecutionBudgets::recommended()
         )
         // The server's system prompt is this host-owned call's own
         // instruction text.

@@ -825,6 +825,8 @@ mod tests {
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
             crate::ToolSourcePolicy::Tolerate,
+            crate::ExecutionBudgets::recommended(),
+            crate::runtime::DeltaCoalescing::recommended(),
         ));
         let services = crate::RuntimeServices::new(
             plugins,
@@ -941,7 +943,10 @@ mod tests {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::fixture(session_id.to_string()),
             relation: crate::SessionRelation::Root,
-            config: policy.clone().into(),
+            config: crate::PersistedSessionConfig::from_policy(
+                &policy.clone(),
+                crate::SessionToolAccess::ambient(),
+            ),
             head: crate::SessionCreationHead::Config,
         };
         let backend = crate::testing::sqlite_memory_store_backend().await;
@@ -1020,7 +1025,10 @@ mod tests {
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::fixture(session_id.to_string()),
                 relation: crate::SessionRelation::Root,
-                config: policy.clone().into(),
+                config: crate::PersistedSessionConfig::from_policy(
+                    &policy.clone(),
+                    crate::SessionToolAccess::ambient(),
+                ),
                 head: crate::SessionCreationHead::Config,
             },
         )

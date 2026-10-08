@@ -357,6 +357,8 @@ fn build_core(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(latency_owner())
         .map_err(anyhow::Error::from)
 }
@@ -433,6 +435,7 @@ async fn run_lane(
         .core
         .session(session_id.clone())
         .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 latency_llm_profile_spec()?.wire_model,
                 lash::TurnBudget::Unbounded,
@@ -1082,12 +1085,12 @@ mod tests {
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash_core::SessionRelation::Root,
-                config: lash_core::SessionPolicy::new(
+                config: lash_core::PersistedSessionConfig::new(
                     lash_core::TurnBudget::Unbounded,
                     lash_core::MaxToolCalls::new(1024),
                     lash_core::NoProgressBudget::bounded(12),
-                )
-                .into(),
+                    lash_core::SessionToolAccess::ambient(),
+                ),
                 head: lash_core::SessionCreationHead::Config,
             })
             .await

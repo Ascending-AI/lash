@@ -752,7 +752,10 @@ impl SessionGraphScenario {
                 source_session_id,
                 head_revision: selected.revision(),
                 relation,
-                config: request.config.session_policy().into(),
+                config: crate::PersistedSessionConfig::from_policy(
+                    &request.config.session_policy(),
+                    crate::SessionToolAccess::ambient(),
+                ),
             })
             .await;
         let receipt = match result {

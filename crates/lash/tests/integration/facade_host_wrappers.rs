@@ -277,6 +277,8 @@ fn core(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "facade-host-wrappers-worker",
             "facade-host-wrappers-boot",
@@ -318,6 +320,7 @@ async fn a_facade_host_wraps_the_rlm_factory_and_its_stores(tier: Tier) {
     match core
         .session(lash::SessionId::parse("facade-host-wrappers").expect("nonblank host identity"))
         .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 "facade-host-wrappers",
                 lash::TurnBudget::Unbounded,
@@ -420,6 +423,8 @@ async fn eviction_law(backend: lash::Backend, tag: &str) -> LashCore {
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "replay-bounds",
             tag,
@@ -428,6 +433,7 @@ async fn eviction_law(backend: lash::Backend, tag: &str) -> LashCore {
     let id = format!("replay-bounds-{tag}");
     core.session(lash::SessionId::fixture(&id))
         .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 "live-replay-bounds",
                 lash::TurnBudget::Unbounded,
