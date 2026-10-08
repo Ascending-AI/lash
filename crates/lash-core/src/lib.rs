@@ -122,10 +122,7 @@ pub use lash_core_execution::tool_provider;
 pub(crate) use lash_core_execution::tool_provider;
 pub use lash_core_execution::tool_registry;
 pub(crate) use lash_core_execution::tool_result;
-#[cfg(feature = "testing")]
 pub use lash_core_execution::trace;
-#[cfg(not(feature = "testing"))]
-pub(crate) use lash_core_execution::trace;
 pub use lash_core_execution::triggers;
 
 mod protocol_copy;
