@@ -282,6 +282,8 @@ impl TraceEvent {
 
     /// - [`Self::LlmCallFailed`], [`Self::EffectEnvelopeDiff`], and
     ///   [`Self::StoreErrorObserved`] always;
+    /// - [`Self::ExecCodeFailed`] always and [`Self::ExecCodeCompleted`] when
+    ///   its executor reported a [`CellFailure`];
     /// - [`Self::DomainCompleted`] only with [`TraceDomainStatus::Failed`];
     /// - [`Self::JournaledEffectSettled`] only with
     ///   [`TraceJournaledEffectStatus::Failed`];
@@ -306,7 +308,9 @@ impl TraceEvent {
             Self::LlmCallFailed { .. }
             | Self::PromptCompositionFailed { .. }
             | Self::EffectEnvelopeDiff { .. }
-            | Self::StoreErrorObserved { .. } => true,
+            | Self::StoreErrorObserved { .. }
+            | Self::ExecCodeFailed { .. } => true,
+            Self::ExecCodeCompleted { error, .. } => error.is_some(),
             Self::ProgramStep { outcome, .. } => match outcome {
                 TraceProgramStepOutcome::Ok => false,
                 TraceProgramStepOutcome::Failure { .. } => true,
@@ -357,8 +361,6 @@ impl TraceEvent {
             | Self::RuntimeStreamEvent { .. }
             | Self::ToolCallStarted { .. }
             | Self::ExecCodeStarted { .. }
-            | Self::ExecCodeCompleted { .. }
-            | Self::ExecCodeFailed { .. }
             | Self::ObservationProjection { .. }
             | Self::JournaledEffectStarted { .. }
             | Self::DurableWaitParked { .. }

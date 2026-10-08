@@ -16,10 +16,13 @@ use lash_sansio::llm::types::{AttemptOutcome, LlmUsage};
 use crate::telemetry::{
     AttemptObservation, DurableTraceScope, EmissionSource, TraceAdmissionCandidate, TraceAnchor,
     TraceCandidateOutcome, TraceCarrier, TraceCause, TraceDomainProjector, TraceHostOperation,
-    TraceScopeFactory, TraceScopeId, TraceScopeKind, UntracedScopes, W3cSpanId, W3cTraceFlags,
-    W3cTraceId, W3cTraceState,
+    TraceScopeFactory, TraceScopeId, TraceScopeKind, TraceScopeOwner, TraceToolOwner,
+    UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
 };
-use crate::{TraceDomainOperation, TraceDomainStatus, TraceEvent, TraceRecord, TraceTurnOutcome};
+use crate::{
+    TraceContext, TraceDomainOperation, TraceDomainStatus, TraceEvent, TraceRecord,
+    TraceRetryAttemptDetail, TraceToolAttemptOutcome, TraceToolTerminal, TraceTurnOutcome,
+};
 
 /// Exact API namespace supported by this adapter.
 pub use opentelemetry as api;
@@ -296,12 +299,7 @@ impl OtelTelemetry {
                 A::EventType.value(record.event.kind().as_str()),
                 A::ScopeBoundary.value(i64::try_from(scope.scope.boundary).unwrap_or(i64::MAX)),
             ];
-            if let Some(session) = &record.context.session_id {
-                attrs.push(A::SessionId.value(session.to_string()));
-            }
-            if let Some(turn) = &record.context.turn_id {
-                attrs.push(A::TurnId.value(turn.to_string()));
-            }
+            correlation_attributes(&scope.scope, Some(&record.context), &mut attrs);
             projection.attributes(record, &mut attrs);
             let mut name = projection.name();
             if let Some(enrich) = &self.options.enrich {
@@ -373,6 +371,7 @@ impl TraceScopeFactory for OtelTelemetry {
             }
         }
         let mut attributes = vec![A::ScopeKind.value(scope.kind().as_str())];
+        correlation_attributes(scope, None, &mut attributes);
         if let TraceCause::Linked(links) = cause {
             attributes.push(A::LinksOmitted.value(i64::from(links.omitted())));
         }
@@ -422,15 +421,17 @@ impl TraceScopeFactory for OtelTelemetry {
             return;
         };
         let definition = admitted(kind).definition();
+        let mut attributes = vec![
+            A::ScopeKind.value(kind.as_str()),
+            A::AdmissionOutcome.value(TraceCandidateOutcome::Selected.as_str()),
+        ];
+        correlation_attributes(&scope.scope, None, &mut attributes);
         let mut span = self
             .tracer
             .span_builder(definition.name)
             .with_kind(definition.kind)
             .with_start_time(epoch_ms(scope.started_at_ms))
-            .with_attributes([
-                A::ScopeKind.value(kind.as_str()),
-                A::AdmissionOutcome.value(TraceCandidateOutcome::Selected.as_str()),
-            ])
+            .with_attributes(attributes)
             .start_with_context(
                 self.tracer.as_ref(),
                 &Context::new().with_remote_span_context(context),
@@ -603,6 +604,62 @@ fn epoch_ms(ms: u64) -> SystemTime {
     SystemTime::UNIX_EPOCH + Duration::from_millis(ms)
 }
 
+/// Correlation is exported independently of content. `TraceContext::run_id`
+/// is host metadata; only a scope's logical run owner supplies `lash.run.id`.
+fn correlation_attributes(
+    scope: &TraceScopeId,
+    context: Option<&TraceContext>,
+    out: &mut Vec<KeyValue>,
+) {
+    let (session, turn, run, process) = match &scope.owner {
+        TraceScopeOwner::Run { session_id, run } => (Some(session_id), None, Some(run), None),
+        TraceScopeOwner::Turn {
+            session_id,
+            turn_id,
+        } => (Some(session_id), Some(turn_id), None, None),
+        TraceScopeOwner::Operation { session_id, .. } => (Some(session_id), None, None, None),
+        TraceScopeOwner::Process { process_id } => (None, None, None, Some(process_id)),
+        TraceScopeOwner::Tool { owner, .. } => match owner {
+            TraceToolOwner::Turn {
+                session_id,
+                turn_id,
+            } => (Some(session_id), None, Some(turn_id), None),
+            TraceToolOwner::Operation { session_id, .. } => (Some(session_id), None, None, None),
+            TraceToolOwner::Process { process_id } => (None, None, None, Some(process_id)),
+        },
+        TraceScopeOwner::ToolIntent { owner, .. } => {
+            (owner.session_id(), None, None, owner.process_id())
+        }
+    };
+    if let Some(session) = context
+        .and_then(|context| context.session_id.as_ref())
+        .or(session)
+    {
+        out.push(A::SessionId.value(session.to_string()));
+        out.push(A::ConversationId.value(session.to_string()));
+    }
+    if let Some(turn) = context
+        .and_then(|context| context.turn_id.as_ref())
+        .or(turn)
+    {
+        out.push(A::TurnId.value(turn.to_string()));
+    }
+    if let Some(run) = run {
+        out.push(A::RunId.value(run.to_string()));
+    }
+    if let Some(process) = process {
+        out.push(A::ProcessId.value(process.to_string()));
+    }
+    if let Some(context) = context {
+        if let Some(id) = &context.llm_call_id {
+            out.push(A::LlmCallId.value(id.clone()));
+        }
+        if let Some(id) = &context.run_id {
+            out.push(A::HostRunId.value(id.clone()));
+        }
+    }
+}
+
 struct Projection<'a> {
     span: DomainSpan,
     operation: Option<&'static str>,
@@ -733,6 +790,9 @@ impl<'a> Projection<'a> {
                     usage_attributes(usage, out);
                 }
                 if let Some(error) = &attempt.error {
+                    if let Some(status) = error.http_status {
+                        out.push(A::HttpResponseStatusCode.value(i64::from(status)));
+                    }
                     out.push(
                         A::ErrorType.value(
                             error
@@ -768,11 +828,50 @@ impl<'a> Projection<'a> {
                     out.push(A::ErrorType.value("domain_failure"));
                 }
             }
-            TraceEvent::ToolCallCompleted { call_id, .. }
-            | TraceEvent::ToolReceipt { call_id, .. } => {
+            TraceEvent::ToolCallCompleted {
+                call_id,
+                output,
+                attempts,
+                ..
+            } => {
                 out.push(A::ToolCallId.value(call_id.to_string()));
                 if self.failed(record) {
-                    out.push(A::ErrorType.value("tool_failure"));
+                    // A controller failure after an attempt can replace the
+                    // terminal output; its class is authoritative over earlier attempts.
+                    let terminal_class = match &output.outcome {
+                        crate::TraceToolCallOutcome::Failure(value) => value
+                            .get("class")
+                            .and_then(|class| {
+                                serde_json::from_value::<lash_sansio::ToolFailureClass>(
+                                    class.clone(),
+                                )
+                                .ok()
+                            })
+                            .map(|class| crate::wire_tag(&class)),
+                        _ => None,
+                    };
+                    let class = terminal_class.or_else(|| {
+                        attempts
+                            .as_ref()
+                            .and_then(|attempts| attempts.last())
+                            .and_then(|attempt| match &attempt.detail {
+                                TraceRetryAttemptDetail::Tool {
+                                    outcome: TraceToolAttemptOutcome::Failed { class, .. },
+                                } => Some(crate::wire_tag(class)),
+                                _ => None,
+                            })
+                    });
+                    out.push(A::ErrorType.value(class.unwrap_or_else(|| "unknown".into())));
+                }
+            }
+            TraceEvent::ToolReceipt {
+                call_id, terminal, ..
+            } => {
+                out.push(A::ToolCallId.value(call_id.to_string()));
+                if let Some(terminal @ (TraceToolTerminal::Denied | TraceToolTerminal::Aborted)) =
+                    terminal
+                {
+                    out.push(A::ErrorType.value(crate::wire_tag(terminal)));
                 }
             }
             TraceEvent::TurnCompleted { outcome } => {
@@ -782,17 +881,39 @@ impl<'a> Projection<'a> {
                     TraceTurnOutcome::Cancelled { .. } => "cancelled",
                     TraceTurnOutcome::Failed { .. } => "failed",
                 }));
-                if self.failed(record) {
-                    out.push(A::ErrorType.value("turn_failure"));
+                if let TraceTurnOutcome::Failed { done_reason } = outcome {
+                    out.push(A::ErrorType.value(done_reason.wire_tag()));
                 }
             }
-            TraceEvent::DurableWaitResolved { wait_kind, .. } => {
+            TraceEvent::ExecCodeFailed { reason, .. } => {
+                out.push(A::ErrorType.value(crate::wire_tag(reason)));
+            }
+            TraceEvent::ExecCodeCompleted {
+                error: Some(error), ..
+            } => {
+                let reason = error
+                    .exec_failure
+                    .as_ref()
+                    .map(crate::wire_tag)
+                    .unwrap_or_else(|| crate::wire_tag(&error.kind));
+                out.push(A::ErrorType.value(reason));
+            }
+            TraceEvent::DurableWaitResolved {
+                wait_kind,
+                resolution,
+                ..
+            } => {
                 out.push(A::WaitKind.value(wait_kind.clone()));
                 if self.failed(record) {
-                    out.push(A::ErrorType.value("wait_failure"));
+                    out.push(A::ErrorType.value(resolution.wire_tag()));
                 }
             }
-            TraceEvent::DurableTimerResolved { .. } => out.push(A::WaitKind.value("timer")),
+            TraceEvent::DurableTimerResolved { status, .. } => {
+                out.push(A::WaitKind.value("timer"));
+                if status.is_failed() {
+                    out.push(A::ErrorType.value(status.wire_tag()));
+                }
+            }
             _ if self.failed(record) => out.push(A::ErrorType.value("domain_failure")),
             _ => {}
         }

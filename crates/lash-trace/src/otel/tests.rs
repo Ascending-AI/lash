@@ -920,3 +920,474 @@ fn host_send_is_a_short_producer_and_retained_acceptances_remain_attempts() {
     assert_eq!(spans[0].span_kind, opentelemetry::trace::SpanKind::Producer);
     assert!(UntracedScopes.begin_host_send(Some(&parent)).is_none());
 }
+
+/// A failed cell reports its own closed cause, independently of a turn's recovery.
+#[test]
+fn failed_cells_export_their_reason_without_failing_a_recovered_turn() {
+    let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
+    let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
+    let scope = admit(&adapter, TraceCause::Root);
+    let events = [
+        (
+            TraceEvent::ExecCodeFailed {
+                reason: crate::ExecCodeFailureReason::RuntimeStopped,
+                error: "private runtime detail".into(),
+            },
+            "runtime_stopped",
+        ),
+        (
+            TraceEvent::ExecCodeCompleted {
+                duration_ms: 10,
+                output: "private output".into(),
+                output_chars: 14,
+                observation_count: 0,
+                observation_projections: Vec::new(),
+                error: Some(crate::CellFailure::new(
+                    crate::CellFailureKind::Program,
+                    "bad program",
+                )),
+                terminal_finish: None,
+                tool_calls: Vec::new(),
+            },
+            "program",
+        ),
+        (
+            TraceEvent::ExecCodeCompleted {
+                duration_ms: 10,
+                output: String::new(),
+                output_chars: 0,
+                observation_count: 0,
+                observation_projections: Vec::new(),
+                error: Some(
+                    lash_sansio::ExecCodeFailure::new(
+                        crate::ExecCodeFailureReason::ExecutorUnavailable,
+                        "missing executor",
+                    )
+                    .into(),
+                ),
+                terminal_finish: None,
+                tool_calls: Vec::new(),
+            },
+            "executor_unavailable",
+        ),
+    ];
+    for (event, reason) in events {
+        let event = record(&scope, event, 8000);
+        adapter.project(&scope, None, &live(), &event);
+        adapter.project(
+            &scope,
+            None,
+            &EmissionSource::NewTransition,
+            &completed(&scope),
+        );
+        let spans = exporter.get_finished_spans().unwrap();
+        let cell = &spans[spans.len() - 2];
+        let turn = spans.last().unwrap();
+        assert_eq!(cell.name, "lash.exec_code");
+        assert!(
+            matches!(cell.status, Status::Error { .. }),
+            "cell must fail: {reason}"
+        );
+        assert!(
+            cell.attributes
+                .contains(&KeyValue::new("error.type", reason))
+        );
+        assert!(
+            event.event.is_failed(),
+            "the trace classifier must agree with export"
+        );
+        assert_eq!(turn.name, "invoke_agent");
+        assert!(!matches!(turn.status, Status::Error { .. }));
+        assert!(
+            !turn
+                .attributes
+                .iter()
+                .any(|a| a.key.as_str() == "error.type")
+        );
+    }
+}
+
+/// Known business identities remain joinable when payload and metadata export are off.
+#[test]
+fn correlation_ids_are_attributes_with_payload_export_off() {
+    let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
+    let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
+    let process_id = lash_sansio::ProcessId::fixture("process");
+    let process_value = process_id.to_string();
+    let owners = [
+        (
+            TraceScopeOwner::Run {
+                session_id: "conversation".into(),
+                run: "durable-run".into(),
+            },
+            Some("durable-run"),
+            None,
+        ),
+        (
+            TraceScopeOwner::Turn {
+                session_id: "conversation".into(),
+                turn_id: "physical-turn".into(),
+            },
+            None,
+            None,
+        ),
+        (
+            TraceScopeOwner::Operation {
+                session_id: "conversation".into(),
+                operation_id: "operation".into(),
+            },
+            None,
+            None,
+        ),
+        (
+            TraceScopeOwner::Process {
+                process_id: lash_sansio::ProcessId::fixture("process"),
+            },
+            None,
+            Some(process_value.as_str()),
+        ),
+        (
+            TraceScopeOwner::Tool {
+                owner: TraceToolOwner::Turn {
+                    session_id: "conversation".into(),
+                    turn_id: "durable-run".into(),
+                },
+                call_id: "tool".into(),
+            },
+            Some("durable-run"),
+            None,
+        ),
+        (
+            TraceScopeOwner::Tool {
+                owner: TraceToolOwner::Process {
+                    process_id: lash_sansio::ProcessId::fixture("process"),
+                },
+                call_id: "tool".into(),
+            },
+            None,
+            Some(process_value.as_str()),
+        ),
+        (
+            TraceScopeOwner::ToolIntent {
+                owner: lash_sansio::RuntimeOwner::Process(lash_sansio::ProcessId::fixture(
+                    "process",
+                )),
+                replay_key: "intent".into(),
+            },
+            None,
+            Some(process_value.as_str()),
+        ),
+        (
+            TraceScopeOwner::ToolIntent {
+                owner: lash_sansio::RuntimeOwner::Session("conversation".into()),
+                replay_key: "intent".into(),
+            },
+            None,
+            None,
+        ),
+    ];
+    for (owner, run, process) in owners {
+        let id = TraceScopeId::admission(owner);
+        let candidate = adapter.propose(&id, &TraceCause::Root);
+        let anchor = candidate.anchor();
+        candidate.settle(TraceCandidateOutcome::Selected);
+        let scope = DurableTraceScope {
+            scope: id,
+            cause: TraceCause::Root,
+            anchor,
+            started_at_ms: 1000,
+        };
+        let mut event = record(
+            &scope,
+            TraceEvent::LlmAttemptCompleted {
+                attempt: AttemptRecord {
+                    ordinal: 1,
+                    outcome: AttemptOutcome::Completed,
+                    protocol_position: ProtocolPosition::TerminalObserved,
+                    retry_budget_consumed: true,
+                    retry_decision: None,
+                    error: None,
+                    evidence: None,
+                    generation_disposition: None,
+                    usage: None,
+                },
+                observation: crate::TraceAttemptObservation {
+                    provider: None,
+                    request_model: "model".into(),
+                    started_at_ms: None,
+                    ended_at_ms: None,
+                },
+            },
+            9000,
+        );
+        event.context = TraceContext {
+            session_id: Some("conversation".into()),
+            llm_call_id: Some("model-call".into()),
+            run_id: Some("host-run".into()),
+            ..TraceContext::default()
+        };
+        adapter.project(&scope, None, &live(), &event);
+        let spans = exporter.get_finished_spans().unwrap();
+        let admission = &spans[spans.len() - 2];
+        let model = spans.last().unwrap();
+        for key_value in [
+            KeyValue::new("gen_ai.conversation.id", "conversation"),
+            KeyValue::new("lash.session.id", "conversation"),
+            KeyValue::new("lash.llm_call.id", "model-call"),
+            KeyValue::new("lash.context.run.id", "host-run"),
+        ] {
+            assert!(
+                model.attributes.contains(&key_value),
+                "missing {key_value:?}"
+            );
+        }
+        for span in [admission, model] {
+            for (key, expected) in [("lash.run.id", run), ("lash.process.id", process)] {
+                let values: Vec<_> = span
+                    .attributes
+                    .iter()
+                    .filter(|a| a.key.as_str() == key)
+                    .map(|a| a.value.to_string())
+                    .collect();
+                assert_eq!(
+                    values,
+                    expected.into_iter().map(str::to_owned).collect::<Vec<_>>()
+                );
+            }
+            assert!(
+                !span
+                    .attributes
+                    .iter()
+                    .any(|a| a.key.as_str().starts_with("lash.payload")
+                        || a.key.as_str() == "lash.context.metadata")
+            );
+        }
+        assert_eq!(model.name, "chat model");
+        // A scope still supplies conversation identity when the record has no context.
+        adapter.project(
+            &scope,
+            None,
+            &EmissionSource::NewTransition,
+            &completed(&scope),
+        );
+        let spans = exporter.get_finished_spans().unwrap();
+        let turn = spans.last().unwrap();
+        if process.is_none() {
+            assert!(
+                turn.attributes
+                    .contains(&KeyValue::new("gen_ai.conversation.id", "conversation"))
+            );
+        }
+    }
+}
+
+/// Export preserves the typed class at each operation boundary, without exporting detail.
+#[test]
+fn failure_attributes_preserve_typed_classes_and_model_http_status() {
+    let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
+    let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
+    let scope = admit(&adapter, TraceCause::Root);
+    let tool = |outcome, attempts| TraceEvent::ToolCallCompleted {
+        call_id: lash_sansio::ToolCallId::fixture("call"),
+        provider_call_id: None,
+        name: "tool".into(),
+        args: serde_json::Value::Null,
+        output: crate::TraceToolCallOutput {
+            outcome,
+            control: None,
+        },
+        duration_ms: 1,
+        issuing_node_id: None,
+        attempts: Some(attempts),
+    };
+    let attempts = vec![
+        crate::TraceRetryAttempt {
+            ordinal: 1,
+            delay_ms: None,
+            detail: crate::TraceRetryAttemptDetail::Tool {
+                outcome: crate::TraceToolAttemptOutcome::Failed {
+                    class: lash_sansio::ToolFailureClass::Io,
+                    code: "old".into(),
+                    message: "private detail".into(),
+                    source: lash_sansio::ToolFailureSource::Tool,
+                    suggested_delay_ms: None,
+                },
+            },
+        },
+        crate::TraceRetryAttempt {
+            ordinal: 2,
+            delay_ms: None,
+            detail: crate::TraceRetryAttemptDetail::Tool {
+                outcome: crate::TraceToolAttemptOutcome::Failed {
+                    class: lash_sansio::ToolFailureClass::PermissionDenied,
+                    code: "final".into(),
+                    message: "private detail".into(),
+                    source: lash_sansio::ToolFailureSource::Tool,
+                    suggested_delay_ms: None,
+                },
+            },
+        },
+    ];
+    let events = [
+        (
+            tool(
+                crate::TraceToolCallOutcome::Failure(serde_json::Value::Null),
+                attempts.clone(),
+            ),
+            Some("permission_denied"),
+        ),
+        (
+            tool(
+                crate::TraceToolCallOutcome::Failure(
+                    lash_sansio::ToolFailure::runtime(
+                        lash_sansio::ToolFailureClass::Internal,
+                        "tool_retry_sleep_failed",
+                        "private retry sleep failure",
+                    )
+                    .to_json_value(),
+                ),
+                attempts.clone(),
+            ),
+            Some("internal"),
+        ),
+        (
+            tool(
+                crate::TraceToolCallOutcome::Failure(
+                    lash_sansio::ToolFailure::io("host_io_failed", "private detail")
+                        .to_json_value(),
+                ),
+                Vec::new(),
+            ),
+            Some("io"),
+        ),
+        (
+            tool(
+                crate::TraceToolCallOutcome::Success(serde_json::Value::Null),
+                attempts,
+            ),
+            None,
+        ),
+        (
+            TraceEvent::TurnCompleted {
+                outcome: TraceTurnOutcome::Failed {
+                    done_reason: crate::TraceTurnFailureReason::ContextOverflow,
+                },
+            },
+            Some("context_overflow"),
+        ),
+        (
+            TraceEvent::DurableWaitResolved {
+                started_at_ms: 1000,
+                wait_kind: "event".into(),
+                resolution: crate::TraceDurableWaitResolution::Failed,
+            },
+            Some("failed"),
+        ),
+        (
+            TraceEvent::DurableWaitResolved {
+                started_at_ms: 1000,
+                wait_kind: "event".into(),
+                resolution: crate::TraceDurableWaitResolution::Error,
+            },
+            None,
+        ),
+        (
+            TraceEvent::DurableTimerResolved {
+                duration_ms: 10,
+                status: crate::TraceDurableTimerStatus::Failed,
+            },
+            Some("failed"),
+        ),
+        (
+            TraceEvent::ToolReceipt {
+                call_id: lash_sansio::ToolCallId::fixture("receipt"),
+                name: "tool".into(),
+                started_at_ms: 1000,
+                terminal: Some(crate::TraceToolTerminal::Denied),
+            },
+            Some("denied"),
+        ),
+        (
+            TraceEvent::ToolReceipt {
+                call_id: lash_sansio::ToolCallId::fixture("receipt"),
+                name: "tool".into(),
+                started_at_ms: 1000,
+                terminal: Some(crate::TraceToolTerminal::Cancelled),
+            },
+            None,
+        ),
+    ];
+    for (event, expected) in events {
+        adapter.project(
+            &scope,
+            None,
+            &EmissionSource::NewTransition,
+            &record(&scope, event, 9000),
+        );
+        let spans = exporter.get_finished_spans().unwrap();
+        let span = spans.last().unwrap();
+        assert_eq!(
+            matches!(span.status, Status::Error { .. }),
+            expected.is_some()
+        );
+        let classes: Vec<_> = span
+            .attributes
+            .iter()
+            .filter(|a| a.key.as_str() == "error.type")
+            .map(|a| a.value.to_string())
+            .collect();
+        assert_eq!(
+            classes,
+            expected.into_iter().map(str::to_owned).collect::<Vec<_>>()
+        );
+    }
+    for code in [None, Some(crate::TraceFailureCode::provider("rate_limit"))] {
+        let expected = code
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_else(|| "http".into());
+        let event = record(
+            &scope,
+            TraceEvent::LlmAttemptCompleted {
+                attempt: AttemptRecord {
+                    ordinal: 1,
+                    outcome: AttemptOutcome::Failed,
+                    protocol_position: ProtocolPosition::NoResponse,
+                    retry_budget_consumed: true,
+                    retry_decision: None,
+                    evidence: None,
+                    generation_disposition: None,
+                    error: Some(crate::TraceNormalizedError {
+                        class: crate::TraceProviderFailureKind::Http,
+                        code,
+                        http_status: Some(429),
+                        provider_request_id: None,
+                        retry_after: None,
+                    }),
+                    usage: None,
+                },
+                observation: crate::TraceAttemptObservation {
+                    provider: None,
+                    request_model: "model".into(),
+                    started_at_ms: None,
+                    ended_at_ms: None,
+                },
+            },
+            9000,
+        );
+        adapter.project(&scope, None, &live(), &event);
+        let spans = exporter.get_finished_spans().unwrap();
+        let model = spans.last().unwrap();
+        assert!(matches!(model.status, Status::Error { .. }));
+        assert!(
+            model
+                .attributes
+                .contains(&KeyValue::new("error.type", expected))
+        );
+        assert!(
+            model
+                .attributes
+                .contains(&KeyValue::new("http.response.status_code", 429_i64))
+        );
+    }
+}

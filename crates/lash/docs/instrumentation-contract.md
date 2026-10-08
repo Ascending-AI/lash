@@ -29,6 +29,12 @@ Scope `lash`, version `1.0`. GenAI snapshot `b31e9e8ea26ac1c086d3313d474e31d7c3f
 | `lash.links.omitted` | Integer |
 | `lash.record.id` | String |
 | `lash.event.type` | String |
+| `gen_ai.conversation.id` | String |
+| `lash.run.id` | String |
+| `lash.process.id` | String |
+| `lash.llm_call.id` | String |
+| `lash.context.run.id` | String |
+| `http.response.status_code` | Integer |
 | `lash.session.id` | String |
 | `lash.turn.id` | String |
 | `lash.attempt.invocation_id` | String |

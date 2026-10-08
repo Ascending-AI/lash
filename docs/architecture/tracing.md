@@ -16,6 +16,26 @@ An explicit payload option bounds exported bytes and events.
 The [logging and event practice](../agents/logging-and-events.md) defines diagnostic
 fields, failure ownership, levels and correlation with domain observations.
 
+The 1.0 export baseline includes conversation, durable run, process and model-call
+identities as span attributes, even with payload export off (FIG-5529).
+`gen_ai.conversation.id` and `lash.session.id` name the session. Scope ownership
+supplies `lash.run.id` and `lash.process.id`; record context supplies
+`lash.llm_call.id`. A physical turn's id does not imply its logical run's id.
+The free host metadata in `TraceContext::run_id` exports separately as
+`lash.context.run.id`. These identities do not enter default span names or
+metric dimensions.
+
+A failed code cell exports Error status and its closed execution reason, or
+its cell failure kind when the executor returned a cell failure. A recovered
+outer turn keeps its own successful status. Tool failures export the terminal
+outcome's typed class, using the last attempt's class when the terminal payload
+has no class. Turn failures export their stop reason, and failed waits and
+timers their resolution/status tag as `error.type`. Tool receipts export their
+closed denied or aborted terminal. Missing typed tool failure evidence exports
+`unknown`. Model failures retain their provider code or normalized class and,
+when present, `http.response.status_code`. Human-readable failure detail remains
+subject to the payload policy.
+
 ## Required durability contract
 
 Admission retains a typed cause, its selected SDK-created anchor and the
