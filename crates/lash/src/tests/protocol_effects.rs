@@ -80,7 +80,8 @@ impl ProtocolDriverPlugin for TestProtocolDriver {
     }
 }
 
-/// Starts one code cell, and records the failure it was handed and stops.
+/// Starts one code cell; records and reports the failure it was handed,
+/// and stops.
 struct TestDriver(Received);
 
 impl lash_sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol> for TestDriver {
@@ -126,22 +127,29 @@ impl lash_sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol> for TestDriv
         _driver_state: lash_core::ProtocolDriverState,
         result: std::result::Result<lash_core::ExecResponse, lash_core::ExecCodeFailure>,
     ) -> Vec<lash_core::DriverAction> {
+        let mut actions = Vec::new();
         if let Err(error) = result {
-            self.0
-                .lock_recover()
-                .push(serde_json::to_value(&error).expect("an exec failure encodes"));
+            let encoded = serde_json::to_value(&error).expect("an exec failure encodes");
+            // The failure as the driver received it, reported as the turn's
+            // error, so a host can read every field the driver was handed.
+            actions.push(lash_core::DriverAction::Emit(
+                lash_core::facade_support::SessionStreamEvent::Error {
+                    message: encoded.to_string(),
+                    envelope: None,
+                },
+            ));
+            self.0.lock_recover().push(encoded);
         }
-        vec![lash_core::DriverAction::Finish(TurnOutcome::Stopped(
+        actions.push(lash_core::DriverAction::Finish(TurnOutcome::Stopped(
             TurnStop::RuntimeError,
-        ))]
+        )));
+        actions
     }
 }
 
-/// A protocol that starts code in a session with no code executor stops
-/// the turn `RuntimeError`, its driver handed the typed
-/// `executor_unavailable` failure once.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn start_exec_without_code_executor_stops_as_runtime_error() -> Result<()> {
+/// The output of one turn of a session whose protocol starts code with no
+/// code executor, and the failures its driver was handed.
+async fn a_turn_without_a_code_executor() -> Result<(crate::TurnOutput, Vec<serde_json::Value>)> {
     let received = Received::default();
     let core = explicit_ephemeral_facets(
         LashCore::builder(sqlite_memory_store_backend().await)
@@ -154,6 +162,25 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() -> Result<()>
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let output = session.send(TurnInput::text("run code")).output().await?;
+    drop(session);
+    core.shutdown().await?;
+    let received = received.lock_recover().clone();
+    Ok((output, received))
+}
+
+fn executor_unavailable() -> serde_json::Value {
+    serde_json::json!({
+        "reason": "executor_unavailable",
+        "message": "code execution is not available in this session",
+    })
+}
+
+/// A protocol that starts code in a session with no code executor stops
+/// the turn `RuntimeError`, its driver handed the typed
+/// `executor_unavailable` failure once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn start_exec_without_code_executor_stops_as_runtime_error() -> Result<()> {
+    let (output, received) = a_turn_without_a_code_executor().await?;
     assert!(
         matches!(
             output.result.outcome,
@@ -163,14 +190,24 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() -> Result<()>
         output.result.outcome
     );
     assert_eq!(
-        *received.lock_recover(),
-        vec![serde_json::json!({
-            "reason": "executor_unavailable",
-            "message": "code execution is not available in this session",
-        })],
+        received,
+        vec![executor_unavailable()],
         "the driver is handed the typed failure once"
     );
-    drop(session);
-    core.shutdown().await?;
+    Ok(())
+}
+
+/// The failure the driver reported is the turn's error in its report.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "FIG-5334: a turn's report through send() carries no errors"]
+async fn the_driver_s_reported_exec_failure_is_the_turn_s_error() -> Result<()> {
+    let (output, _) = a_turn_without_a_code_executor().await?;
+    let reported = output
+        .result
+        .errors
+        .iter()
+        .find_map(|issue| serde_json::from_str::<serde_json::Value>(&issue.message).ok())
+        .unwrap_or_else(|| panic!("the driver reports the failure: {:?}", output.result.errors));
+    assert_eq!(reported, executor_unavailable());
     Ok(())
 }
