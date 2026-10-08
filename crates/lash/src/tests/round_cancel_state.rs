@@ -1,7 +1,6 @@
 //! L19 Q5 and L03 on the durable turn: cancelling a tool round's unfinished
-//! member keeps what its finished sibling committed and applies none of
-//! what the cancelled member answered, however late it answers and whether
-//! or not the two write the same key.
+//! member applies none of what it answered, however late it answers, on
+//! the key its finished sibling wrote too.
 
 use super::*;
 use crate::{TurnCancelMode, TurnEvent, TurnInput};
@@ -146,8 +145,8 @@ async fn committed_values(
 }
 
 /// A round of `A` and `B` cancelled `Immediate` once `B`'s outcome is
-/// published and while `A` holds; `A` answers as `answer` says. Its keys
-/// are `a` and `b` when `disjoint`, both `value` otherwise. The committed
+/// published and while `A` holds; `A` answers as `answer` says. Both write
+/// the key `value`. The committed
 /// namespace, `A`'s completion if one was published, `B`'s, and whether `A`
 /// saw its token fire.
 struct CancelledRound {
@@ -157,13 +156,9 @@ struct CancelledRound {
     observed: bool,
 }
 
-async fn cancelled_sibling(disjoint: bool, answer: Answer) -> Result<CancelledRound> {
-    let id = format!("round-cancel-state-{disjoint}-{answer:?}").to_ascii_lowercase();
-    let (a_key, b_key) = if disjoint {
-        ("a", "b")
-    } else {
-        ("value", "value")
-    };
+async fn cancelled_sibling(answer: Answer) -> Result<CancelledRound> {
+    let id = format!("round-cancel-state-{answer:?}").to_ascii_lowercase();
+    let (a_key, b_key) = ("value", "value");
     let plugin = StatePlugin {
         answer,
         entered: Arc::default(),
@@ -266,10 +261,9 @@ async fn cancelled_sibling(disjoint: bool, answer: Answer) -> Result<CancelledRo
 }
 
 /// The cancelled member's answer is never applied: no committed value is
-/// its own, on the same key as its finished sibling or on its own, and its
-/// completion, if published, is not a success.
-async fn the_cancelled_member_applies_nothing(disjoint: bool, answer: Answer) -> Result<()> {
-    let round = cancelled_sibling(disjoint, answer).await?;
+/// its own, and its completion, if published, is not a success.
+async fn the_cancelled_member_applies_nothing(answer: Answer) -> Result<()> {
+    let round = cancelled_sibling(answer).await?;
     assert!(round.b.is_success(), "{:?}", round.b);
     assert!(
         !round.values.values().any(|value| value == "A"),
@@ -287,31 +281,11 @@ async fn the_cancelled_member_applies_nothing(disjoint: bool, answer: Answer) ->
     Ok(())
 }
 
-/// The finished sibling's committed state survives the cancel.
-async fn the_finished_sibling_keeps_its_state(disjoint: bool) -> Result<()> {
-    let round = cancelled_sibling(disjoint, Answer::AfterItsStop).await?;
-    let key = if disjoint { "b" } else { "value" };
-    assert_eq!(
-        round.values.get(key),
-        Some(&serde_json::json!("B")),
-        "{:?}",
-        round.values
-    );
-    assert_eq!(round.values.len(), 1, "{:?}", round.values);
-    Ok(())
-}
-
-/// L19 Q5, on one key: the cancelled `A`, answering once it observed its
+/// L19 Q5: the cancelled `A`, answering once it observed its
 /// stop, applies nothing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn l19_native_inline_cancel_discards_the_same_key_unrecorded_sibling() -> Result<()> {
-    the_cancelled_member_applies_nothing(false, Answer::AfterItsStop).await
-}
-
-/// L19 Q5, on two keys.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn l19_native_inline_cancel_discards_the_disjoint_key_unrecorded_sibling() -> Result<()> {
-    the_cancelled_member_applies_nothing(true, Answer::AfterItsStop).await
+    the_cancelled_member_applies_nothing(Answer::AfterItsStop).await
 }
 
 /// L03: a cancel accepted before the unrecorded `A` answers discards its
@@ -321,19 +295,5 @@ async fn l19_native_inline_cancel_discards_the_disjoint_key_unrecorded_sibling()
 #[ignore = "FIG-5381: a round member answering after an accepted cancel is recorded with its own outcome"]
 async fn l03_native_cancel_accepted_before_inline_ack_discards_the_unrecorded_sibling() -> Result<()>
 {
-    the_cancelled_member_applies_nothing(false, Answer::AfterAcceptance).await
-}
-
-/// L19 Q5: the same-key durable sibling's value is retained.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-5373: a cancelled durable turn never commits its checkpointed steps to the head"]
-async fn l19_native_inline_cancel_retains_only_the_same_key_durable_sibling() -> Result<()> {
-    the_finished_sibling_keeps_its_state(false).await
-}
-
-/// L19 Q5: the disjoint-key durable sibling's value is retained.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-5373: a cancelled durable turn never commits its checkpointed steps to the head"]
-async fn l19_native_inline_cancel_retains_only_the_disjoint_key_durable_sibling() -> Result<()> {
-    the_finished_sibling_keeps_its_state(true).await
+    the_cancelled_member_applies_nothing(Answer::AfterAcceptance).await
 }

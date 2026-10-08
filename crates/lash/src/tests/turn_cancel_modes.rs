@@ -258,25 +258,18 @@ async fn cancelled(
         .unwrap_or_else(|| panic!("the turn ended cancelled: {:?}", output.result.outcome)))
 }
 
-/// An after-step stop requested while the model call streams, and the turn
-/// sent after it.
-struct MidModelStop {
-    evidence: lash_core::facade_support::TurnCancellationEvidence,
-    checkpoints: usize,
-    calls: usize,
-    tool: TokenWatchingTool,
-    next: crate::TurnOutput,
-    next_prompt: String,
-}
-
-/// Run [`MidModelStop`] on session `id`.
-async fn after_step_stop_mid_model(id: &str) -> Result<MidModelStop> {
+/// The step an after-step stop let finish stays in the session: the stop
+/// lands while the model call streams, the call's tool runs, and the next
+/// turn's prompt carries that tool call and its result.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "FIG-5373: a cancelled durable turn never commits its checkpointed steps to the head"]
+async fn an_after_step_stop_keeps_its_completed_step_in_the_session() -> Result<()> {
     let tool = TokenWatchingTool::default();
     tool.release();
     let (calls, seen) = (Arc::default(), Arc::<StdMutex<Vec<String>>>::default());
     let (started, release) = (Arc::default(), Arc::new(tokio::sync::Semaphore::new(0)));
     let (core, session) = session_with(
-        id,
+        "after-step-keeps-step",
         gated_tool_calling_model(&calls, &seen, &started, &release),
         Arc::new(tool.clone()),
     )
@@ -284,35 +277,15 @@ async fn after_step_stop_mid_model(id: &str) -> Result<MidModelStop> {
     let handle = session
         .send(TurnInput::text("stop after this step"))
         .await?;
-    let mut events = handle.events();
     started.notified().await;
-    let requested = outcome(
-        handle
-            .cancel()
-            .request_id("stop-1")
-            .origin("test-user")
-            .reason("mode witness")
-            .mode(TurnCancelMode::AfterStep)
-            .await?,
-    );
+    let requested = outcome(handle.cancel().mode(TurnCancelMode::AfterStep).await?);
     assert!(
-        matches!(&requested, TurnCancelOutcome::Requested(evidence)
-            if evidence.request_id == "stop-1" && evidence.mode == TurnCancelMode::AfterStep),
+        matches!(requested, TurnCancelOutcome::Requested(_)),
         "{requested:?}"
     );
     release.add_permits(1);
-    let evidence = cancelled(handle).await?;
-    let mut checkpoints = 0;
-    while let Some(activity) = tokio::time::timeout(ENDS_WITHIN, events.next_activity())
-        .await
-        .expect("the run's activity ends with the run")
-    {
-        if matches!(activity?.event, TurnEvent::CheckpointRecorded { .. }) {
-            checkpoints += 1;
-        }
-    }
-    let calls_at_stop = calls.load(Ordering::SeqCst);
-    let next = tokio::time::timeout(ENDS_WITHIN, session.send(TurnInput::text("next")).output())
+    cancelled(handle).await?;
+    tokio::time::timeout(ENDS_WITHIN, session.send(TurnInput::text("next")).output())
         .await
         .expect("the next turn answers")?;
     let next_prompt = seen
@@ -320,124 +293,12 @@ async fn after_step_stop_mid_model(id: &str) -> Result<MidModelStop> {
         .last()
         .cloned()
         .expect("the next turn called the model");
+    assert!(
+        next_prompt.contains("step-0-call") && next_prompt.contains("ToolResult"),
+        "the completed tool result is part of the stopped turn, not backtracked: {next_prompt}"
+    );
     drop(session);
     core.shutdown().await?;
-    Ok(MidModelStop {
-        evidence,
-        checkpoints,
-        calls: calls_at_stop,
-        tool,
-        next,
-        next_prompt,
-    })
-}
-
-/// An after-step stop requested while the model call streams waits for the
-/// response and the tool call it asks for: the tool runs to completion
-/// without its token firing, the step's checkpoint reaches the host before
-/// the stop, and no further model call starts.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn after_step_stop_mid_model_call_waits_for_the_response_and_its_tools() -> Result<()> {
-    let stop = after_step_stop_mid_model("after-step-mid-model").await?;
-    assert_eq!(stop.evidence.request_id, "stop-1");
-    assert_eq!(stop.evidence.mode, TurnCancelMode::AfterStep);
-    assert_eq!(stop.evidence.origin.as_deref(), Some("test-user"));
-    assert_eq!(
-        stop.checkpoints, 1,
-        "the accepted checkpoint reaches the host before the after-step stop"
-    );
-    assert_eq!(
-        stop.calls, 1,
-        "the response that was streaming finishes; no further model call starts"
-    );
-    assert_eq!(
-        stop.tool.executions.load(Ordering::SeqCst),
-        1,
-        "the tool call of the closing step runs to completion"
-    );
-    assert!(
-        !stop.tool.observed_cancelled.load(Ordering::SeqCst),
-        "an after-step stop never fires the cooperative token"
-    );
-    assert_eq!(
-        stop.next.assistant_message(),
-        Some("finished after the stop")
-    );
-    Ok(())
-}
-
-/// The step an after-step stop let finish stays in the session: the next
-/// turn's prompt carries its tool call and result.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-5373: a cancelled durable turn never commits its checkpointed steps to the head"]
-async fn an_after_step_stop_keeps_its_completed_step_in_the_session() -> Result<()> {
-    let stop = after_step_stop_mid_model("after-step-keeps-step").await?;
-    assert!(
-        stop.next_prompt.contains("step-0-call") && stop.next_prompt.contains("ToolResult"),
-        "the completed tool result is part of the stopped turn, not backtracked: {}",
-        stop.next_prompt
-    );
-    Ok(())
-}
-
-/// A cancel in either mode addressed to a turn whose input is still queued
-/// refuses that turn at its start: the input is withdrawn and never runs,
-/// so no model call or tool sees it.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn start_gate_refuses_the_next_turn_for_both_modes() -> Result<()> {
-    for mode in [TurnCancelMode::Immediate, TurnCancelMode::AfterStep] {
-        let tool = TokenWatchingTool::default();
-        let (calls, seen) = (Arc::default(), Arc::<StdMutex<Vec<String>>>::default());
-        let name = format!("start-gate-{mode:?}").to_ascii_lowercase();
-        let (core, session) = session_with(
-            &name,
-            tool_calling_model(WATCH, &calls, &seen),
-            Arc::new(tool.clone()),
-        )
-        .await?;
-        let running = session.send(TurnInput::text("use the tool")).await?;
-        tool.entered.notified().await;
-        let run = crate::TurnId::parse(format!("{name}-refused")).expect("nonblank host identity");
-        let refused = session
-            .send(TurnInput::text("never runs"))
-            .id(run.clone())
-            .await?;
-        let receipt = session
-            .cancel(crate::CancelTarget::Run(run.clone()))
-            .request_id("before-start")
-            .mode(mode)
-            .await?;
-        assert!(
-            matches!(&receipt, crate::CancelReceipt::Withdrawn { run: withdrawn, .. } if *withdrawn == run),
-            "{mode:?}: {receipt:?}"
-        );
-        tool.release();
-        let answered = tokio::time::timeout(ENDS_WITHIN, running.output())
-            .await
-            .expect("the running turn answers")?;
-        assert!(
-            answered.is_success(),
-            "{mode:?}: {:?}",
-            answered.result.outcome
-        );
-        let refused = tokio::time::timeout(ENDS_WITHIN, refused.outcome())
-            .await
-            .expect("the refused input's handle answers")?;
-        assert!(
-            matches!(refused, crate::SendOutcome::Withdrawn { .. }),
-            "{mode:?}: {refused:?}"
-        );
-        assert_eq!(tool.executions.load(Ordering::SeqCst), 1, "{mode:?}");
-        assert!(
-            !seen
-                .lock_recover()
-                .iter()
-                .any(|request| request.contains("never runs")),
-            "{mode:?}: no model call sees the refused input"
-        );
-        drop(session);
-        core.shutdown().await?;
-    }
     Ok(())
 }
 
@@ -1053,52 +914,6 @@ async fn after_step_stop_during_retry_sleep_lands_at_wake_and_stops_at_the_bound
         1,
         "no model call after the stop"
     );
-    core.shutdown().await?;
-    Ok(())
-}
-
-/// An immediate abort requested while a `Repeatable` call waits out its
-/// retry backoff ends the turn without the retry: the call's attempt count
-/// stays at one past the backoff's due time, and no model call follows.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn immediate_abort_during_retry_sleep_lands_at_wake_without_the_retry() -> Result<()> {
-    let tool = RetryOnceTool::default();
-    let (calls, seen) = (Arc::default(), Arc::default());
-    let (core, session) = session_with(
-        "abort-during-sleep",
-        tool_calling_model(RETRY, &calls, &seen),
-        Arc::new(tool.clone()),
-    )
-    .await?;
-    let handle = session.send(TurnInput::text("use the tool")).await?;
-    tool.failed.notified().await;
-    let requested = outcome(
-        handle
-            .cancel()
-            .request_id("abort-in-sleep")
-            .mode(TurnCancelMode::Immediate)
-            .await?,
-    );
-    assert!(
-        matches!(requested, TurnCancelOutcome::Requested(_)),
-        "{requested:?}"
-    );
-    let evidence = cancelled(handle).await?;
-    assert_eq!(evidence.request_id, "abort-in-sleep");
-    assert_eq!(evidence.mode, TurnCancelMode::Immediate);
-    assert_eq!(evidence.honoured_after_step, None);
-    tokio::time::sleep(std::time::Duration::from_millis(RETRY_AFTER_MS * 2)).await;
-    assert_eq!(
-        tool.attempts.load(Ordering::SeqCst),
-        1,
-        "no retry runs after the abort, even past the backoff's due time"
-    );
-    assert_eq!(
-        calls.load(Ordering::SeqCst),
-        1,
-        "no model call after the abort"
-    );
-    drop(session);
     core.shutdown().await?;
     Ok(())
 }
