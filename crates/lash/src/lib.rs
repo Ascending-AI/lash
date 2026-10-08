@@ -1197,6 +1197,7 @@ pub mod runtime {
     pub use lash_core::engine::{ObservationSink, ObservedEvent, ReplayKey, ShiftObservation};
     pub use lash_core::facade_support::TraceBoundaryReceipt;
     pub use lash_core::runtime::{AttemptStreamRecorder, DeclaredStartPhase, StartCancelDecision};
+    #[cfg(any(test, feature = "testing"))]
     pub use lash_core::{ObservationSource, work_with_observations};
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::engine::{EngineRefusal, RefusalClass};

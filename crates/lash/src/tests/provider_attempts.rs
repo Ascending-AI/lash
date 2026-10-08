@@ -605,9 +605,9 @@ async fn facade_courtesy_policy_controls_short_waits_and_call_cap() {
 mod facade_settings {
     use crate::http_transport::{HttpRequest, HttpResponse, HttpResponseBody, HttpTransport};
     use crate::provider::{
-        LlmRequest, LlmRequestScope, LlmTransportError, NoSlotDeliveries, Provider,
-        ProviderOptions, ProviderRateWindow, ProviderReliability, ProviderToken, TokenError,
-        TokenPolicy, TokenRequest, TokenRequestReason, TokenSource,
+        LiveRequestBody, LlmRequest, LlmRequestScope, LlmTransportError, NoSlotDeliveries,
+        Provider, ProviderOptions, ProviderRateWindow, ProviderReliability, ProviderToken,
+        ResponseContext, TokenError, TokenPolicy, TokenRequest, TokenRequestReason, TokenSource,
     };
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant, SystemTime};
@@ -694,12 +694,28 @@ mod facade_settings {
                         sse,
                         timeouts: timeouts.clone(),
                     }));
-            let result = provider.complete(request(), &NoSlotDeliveries).await;
+            let request = request();
+            // Lower before the timed send: this law checks transport ceilings,
+            // not whether the blocking pool can schedule preparation in 7 ms.
+            let template = Arc::new(provider.lower(&request).await.unwrap());
+            let body = LiveRequestBody::fill(template, Vec::new()).unwrap();
+            let result = provider
+                .send(&body, ResponseContext::of_request(&request))
+                .await;
             match expected {
-                "body" => assert!(matches!(
-                    result.unwrap_err().context.as_ref(),
-                    crate::provider::HttpFailureContext::ResponseBodyTooLarge { limit: 1, .. }
-                )),
+                "body" => {
+                    let error = result.unwrap_err();
+                    assert!(
+                        matches!(
+                            error.context.as_ref(),
+                            crate::provider::HttpFailureContext::ResponseBodyTooLarge {
+                                limit: 1,
+                                ..
+                            }
+                        ),
+                        "{error:?}"
+                    );
+                }
                 "event" => assert_eq!(
                     result.unwrap_err().code.unwrap().spelling(),
                     "sse_event_too_large"

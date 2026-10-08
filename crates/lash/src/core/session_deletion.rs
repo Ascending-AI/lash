@@ -66,6 +66,10 @@ impl LashCore {
         if matches!(lookup, SessionLookup::Deleted) {
             return Ok(Some(SessionDeleteCompletion::Deleted));
         }
+        // A close-begin transaction records the close and acknowledges its
+        // mail atomically. Read the mailbox first so an acknowledgement between
+        // reads cannot pair an old absent close with a new empty mailbox.
+        let undrained_mail = self.has_undrained_mail(session_id).await?;
         let close = lash_core::runtime::durable::session_close::session_close_state(
             &self.backend,
             session_id,
@@ -78,7 +82,7 @@ impl LashCore {
             Some(_) => None,
             // A close request is mail until the session actor drains it: while
             // the actor holds undrained mail, a close may still begin.
-            None if self.has_undrained_mail(session_id).await? => None,
+            None if undrained_mail => None,
             None => Some(match lookup {
                 SessionLookup::Absent => SessionDeleteCompletion::Absent,
                 SessionLookup::Live(_) | SessionLookup::Deleted => {
@@ -102,3 +106,6 @@ impl LashCore {
         Ok(snapshot.is_some_and(|snapshot| snapshot.pending_mail > 0))
     }
 }
+
+#[cfg(test)]
+mod tests;
