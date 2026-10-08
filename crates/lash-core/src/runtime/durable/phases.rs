@@ -168,9 +168,10 @@ pub async fn run_phases(
         match effect {
             Effect::LlmCall { id, request } => {
                 // `model.start`'s open is the call's one read: the turn's
-                // accepted cancel and the store's clock come with it.
+                // accepted cancel, a requested close and the store's clock
+                // come with it.
                 let mut tx = cx.begin().await?;
-                if tx.turn_cancel().is_some() {
+                if tx.turn_cancel().is_some() || turn_cancel::close_requested_in(&tx) {
                     return Ok(PhaseExit::CancelRequested);
                 }
                 if cx.draining() {
@@ -278,7 +279,6 @@ pub async fn run_phases(
                 }
                 let sent = turn_cancel::unless_cancelled(
                     cx,
-                    &session,
                     model_call::send(cx, drive.as_mut(), id, request, &body, &start),
                 )
                 .await?;
@@ -324,7 +324,7 @@ pub async fn run_phases(
                     drive.run_changes_committed(&written);
                 }
                 let cell = drive.exec_cell(cx, id, CodeCell { language, code });
-                match turn_cancel::unless_cancelled(cx, &session, cell).await? {
+                match turn_cancel::unless_cancelled(cx, cell).await? {
                     Some(ran) => {
                         if ran? == CellExit::Suspended {
                             return Ok(PhaseExit::Suspended { due: None });

@@ -79,6 +79,9 @@ impl LashCore {
             Some(close) if close.is_tombstone() => Some(SessionDeleteCompletion::Deleted),
             // The session actor is still closing itself.
             Some(_) => None,
+            // A close request is mail until the session actor drains it: while
+            // the actor holds undrained mail, a close may still begin.
+            None if self.has_undrained_mail(session_id).await? => None,
             None => Some(match lookup {
                 SessionLookup::Absent => SessionDeleteCompletion::Absent,
                 SessionLookup::Live(_) | SessionLookup::Deleted => {
@@ -86,5 +89,19 @@ impl LashCore {
                 }
             }),
         })
+    }
+
+    /// Whether `session_id`'s actor holds mail it has not drained.
+    async fn has_undrained_mail(&self, session_id: &SessionId) -> Result<bool> {
+        let Ok(actor) = lash_core::durable_port::ActorKey::session(session_id.as_str()) else {
+            return Ok(false);
+        };
+        let snapshot = self
+            .backend
+            .durable()
+            .actor(&actor)
+            .await
+            .map_err(EmbedError::from)?;
+        Ok(snapshot.is_some_and(|snapshot| snapshot.pending_mail > 0))
     }
 }

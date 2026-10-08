@@ -196,7 +196,7 @@ pub(super) async fn run(
             biased;
             end = &mut running => break end.map_err(round_error)?,
             () = cx.wait_for_mail(), if !cancel.is_cancelled() => {
-                if turn_cancel::immediate(cx, &session).await? {
+                if turn_cancel::immediate(cx).await? {
                     cancel.cancel();
                 }
             }

@@ -161,5 +161,7 @@ mod aggregate_oracle;
 mod plugin_build_refusal;
 mod plugin_reopen;
 mod response_phase_replay;
+mod session_control;
+mod standard_protocol_turns;
 mod tool_intent_ingress;
 mod turn_streaming;

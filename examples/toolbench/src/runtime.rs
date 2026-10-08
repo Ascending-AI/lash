@@ -526,6 +526,105 @@ fn session_options() -> lash::rlm::RlmCreateExtras {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    struct ShutdownWitness {
+        called: Arc<AtomicBool>,
+    }
+
+    #[lash::async_trait]
+    impl lash::plugins::PluginFactory for ShutdownWitness {
+        fn id(&self) -> &'static str {
+            "toolbench_timeout_shutdown_witness"
+        }
+
+        fn build(
+            &self,
+            _ctx: &lash::plugins::PluginSessionContext,
+        ) -> std::result::Result<Arc<dyn lash::plugins::SessionPlugin>, lash::plugins::PluginError>
+        {
+            Ok(Arc::new(ShutdownWitnessSession))
+        }
+
+        async fn shutdown(&self) -> std::result::Result<(), lash::plugins::PluginError> {
+            self.called.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    impl lash::plugins::PluginDefinition for ShutdownWitness {
+        fn declaration() -> lash::plugins::PluginDeclaration {
+            lash::plugins::PluginDeclaration::initial("toolbench_timeout_shutdown_witness")
+        }
+    }
+
+    struct ShutdownWitnessSession;
+
+    impl lash::plugins::SessionPlugin for ShutdownWitnessSession {
+        fn id(&self) -> &'static str {
+            "toolbench_timeout_shutdown_witness"
+        }
+
+        fn register(
+            &self,
+            _registrar: &mut lash::plugins::PluginRegistrar,
+        ) -> std::result::Result<(), lash::plugins::PluginError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn wall_limit_retains_core_and_awaits_installed_factory_shutdown() {
+        let shutdown_called = Arc::new(AtomicBool::new(false));
+        let witness = Arc::new(ShutdownWitness {
+            called: Arc::clone(&shutdown_called),
+        });
+        let local_requests = Arc::new(AtomicUsize::new(0));
+        let local_requests_for_handler = Arc::clone(&local_requests);
+        let upstream = axum::Router::new().fallback(move || {
+            let local_requests = Arc::clone(&local_requests_for_handler);
+            async move {
+                local_requests.fetch_add(1, Ordering::SeqCst);
+                std::future::pending::<()>().await;
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind local provider stub");
+        let recorder_origin = format!("http://{}", listener.local_addr().unwrap());
+        let upstream_task = tokio::spawn(async move {
+            axum::serve(listener, upstream).await.unwrap();
+        });
+        let task = crate::tasks::easy_pack()
+            .into_iter()
+            .next()
+            .expect("easy task");
+        let (_world, evidence) = super::run_task_with_shutdown_witness(
+            &task,
+            "test/toolbench-timeout",
+            "unused-no-network-key",
+            0,
+            crate::ChannelSelection::Standard,
+            crate::ReasoningEffort::None,
+            1,
+            0,
+            None,
+            Some(witness),
+            Some(recorder_origin),
+        )
+        .await;
+        upstream_task.abort();
+        let _ = upstream_task.await;
+
+        assert_eq!(evidence.completion_error.as_deref(), Some("wall_limit"));
+        assert!(!evidence.completed);
+        assert_eq!(evidence.rounds, 1);
+        assert_eq!(local_requests.load(Ordering::SeqCst), 1);
+        assert!(shutdown_called.load(Ordering::SeqCst));
+    }
+
     #[test]
     fn cleanup_failure_preserves_primary_failed_turn_evidence() {
         let mut completed = false;

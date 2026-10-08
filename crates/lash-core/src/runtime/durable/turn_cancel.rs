@@ -14,6 +14,12 @@
 //!   may have arrived (the wake hint, or the claim poll), where it honours an
 //!   `Immediate` request only.
 //!
+//! A requested session close (its close mail, not yet drained) is honoured
+//! at each of these points as an `Immediate` request is: the close cancels
+//! the open turn as its first step, so nothing the turn's in-memory work
+//! would still finish survives it, and a model call, round or cell that
+//! never answers cannot hold the close back (FIG-3871).
+//!
 //! Honouring it stops the turn's in-memory work and leaves the rest to the
 //! next activation pass, which finds the request on the row and
 //! [`finalize`]s the turn: its `Cancelled` terminal in one `turn.cancel`
@@ -27,53 +33,48 @@ use lash_durable::CommitLabel;
 use lash_durable::domain::{DomainWrite, TurnWrite};
 
 use super::session::{TurnCancelRequest, TurnError, TurnRow, cancel_evidence, cancelled_cause};
-use crate::{ActorContext, SessionId, TurnCancelMode};
+use super::session_close::SESSION_CLOSE_MAIL;
+use crate::{ActorContext, TurnCancelMode};
 
-/// The cancel request the session's unfinished turn accepted, as of now.
+/// Whether the session's unfinished turn must stop now, as of a fenced
+/// read: it accepted an `Immediate` cancel request, or the session's close
+/// was requested ([`immediate_in`]).
 ///
 /// # Errors
 ///
-/// [`TurnError::Durable`] when the row cannot be read.
-pub(super) async fn requested(
-    cx: &ActorContext,
-    session: &SessionId,
-) -> Result<Option<TurnCancelRequest>, TurnError> {
-    Ok(cx
-        .durable_reads()?
-        .turn(session)
-        .await?
-        .and_then(|row| row.cancel))
+/// [`TurnError::Durable`] when the actor cannot be read, ownership lost
+/// among them.
+pub(super) async fn immediate(cx: &ActorContext) -> Result<bool, TurnError> {
+    Ok(immediate_in(&cx.begin().await?))
 }
 
-/// Whether the session's unfinished turn accepted an `Immediate` cancel
-/// request, as of now.
-///
-/// # Errors
-///
-/// [`TurnError::Durable`] when the row cannot be read.
-pub(super) async fn immediate(cx: &ActorContext, session: &SessionId) -> Result<bool, TurnError> {
-    Ok(requested(cx, session)
-        .await?
-        .is_some_and(|request| request.mode == TurnCancelMode::Immediate))
-}
-
-/// Whether the cancel request `tx`'s open read on the turn is `Immediate`:
-/// the boundary check a phase commit's own open answers, with no read of
-/// its own.
+/// Whether `tx`'s open read says the turn stops at once: its cancel request
+/// is `Immediate`, or the session holds an undrained close request. The
+/// boundary check a phase commit's own open answers, with no read of its
+/// own.
 pub(super) fn immediate_in(tx: &lash_durable::ActorTx) -> bool {
     tx.turn_cancel()
         .is_some_and(|request| request.mode == TurnCancelMode::Immediate)
+        || close_requested_in(tx)
 }
 
-/// Run `work` until it finishes or the turn accepts an `Immediate` cancel
-/// request: `None` when the request won, and `work` was dropped.
+/// Whether the session holds a close request its actor has not drained, as
+/// of `tx`'s open read.
+pub(super) fn close_requested_in(tx: &lash_durable::ActorTx) -> bool {
+    tx.mail()
+        .iter()
+        .any(|mail| mail.kind.as_str() == SESSION_CLOSE_MAIL)
+}
+
+/// Run `work` until it finishes, or the turn accepts an `Immediate` cancel
+/// request or the session's close is requested: `None` when the stop won,
+/// and `work` was dropped.
 ///
 /// # Errors
 ///
-/// [`TurnError::Durable`] when the turn row cannot be read.
+/// [`TurnError::Durable`] when the actor cannot be read.
 pub(super) async fn unless_cancelled<F: Future>(
     cx: &ActorContext,
-    session: &SessionId,
     work: F,
 ) -> Result<Option<F::Output>, TurnError> {
     tokio::pin!(work);
@@ -82,7 +83,7 @@ pub(super) async fn unless_cancelled<F: Future>(
             biased;
             output = &mut work => return Ok(Some(output)),
             () = cx.wait_for_mail() => {
-                if immediate(cx, session).await? {
+                if immediate(cx).await? {
                     return Ok(None);
                 }
             }
