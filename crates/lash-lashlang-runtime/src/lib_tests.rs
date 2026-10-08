@@ -288,14 +288,6 @@ async fn process_trace_map_is_obtainable_without_an_execution_started_event() {
     assert_eq!(snapshot, direct);
     assert!(!snapshot.nodes.is_empty());
 
-    let mut missing_process = input.clone();
-    missing_process.process_name = "missing".to_string();
-    assert!(matches!(
-        trace_lashlang_process_map_snapshot(&lash_vm_client::service::Service::default(),&store, &missing_process).await,
-        Err(TraceLanguageExecutionMapError::ProcessMissing { process_name, .. })
-            if process_name == "missing"
-    ));
-
     let missing_hash = lashlang::ContentHash::new("missing-trace-map-artifact");
     let mut missing_artifact = input;
     missing_artifact.module_ref = lashlang::ModuleRef::new(&missing_hash);
@@ -307,6 +299,82 @@ async fn process_trace_map_is_obtainable_without_an_execution_started_event() {
         )
         .await,
         Err(TraceLanguageExecutionMapError::ArtifactMissing(_))
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn process_trace_map_recovery_uses_the_persisted_process_ref() {
+    let environment = LashlangHostEnvironment::new(lashlang::LashlangHostCatalog::new());
+    let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
+        source: "process worker() -> bool { finish true } process other() -> bool { finish false }",
+        program: b::module(
+            vec![
+                b::process_returning(
+                    "worker",
+                    Vec::new(),
+                    lashlang::TypeExpr::Bool,
+                    b::finish(b::bool_lit(true)),
+                ),
+                b::process_returning(
+                    "other",
+                    Vec::new(),
+                    lashlang::TypeExpr::Bool,
+                    b::finish(b::bool_lit(false)),
+                ),
+            ],
+            Vec::new(),
+        ),
+        environment: &environment,
+    })
+    .expect("process module compiles");
+    let store = memory_artifact_store().await;
+    store
+        .publish_module_artifact(&host_claim(), &output.artifact)
+        .await
+        .expect("artifact publishes");
+    let workers = lash_vm_client::service::Service::default();
+    let input = LashlangProcessInput {
+        module_ref: output.module_ref,
+        process_ref: output.artifact.process_ref("worker").unwrap().clone(),
+        host_requirements_ref: output.host_requirements_ref,
+        process_name: "worker".to_string(),
+        args: serde_json::Map::new(),
+    };
+    let before = trace_lashlang_process_map_snapshot(&workers, &store, &input)
+        .await
+        .expect("map before serialization");
+    assert!(!before.nodes.is_empty());
+    let encoded = serde_json::to_value(&input).expect("process input serializes");
+    assert!(encoded.get("process_name").is_none());
+    let decoded: LashlangProcessInput =
+        serde_json::from_value(encoded).expect("stored process input decodes");
+    assert!(decoded.process_name.is_empty());
+    let recovered = trace_lashlang_process_map_snapshot(&workers, &store, &decoded)
+        .await
+        .expect("map recovers from the persisted process ref");
+    assert_eq!(recovered, before);
+
+    let other = trace_lashlang_process_map(
+        &lashlang::workflow_graph_from_artifact(&output.artifact, &lashlang::NoStatementText),
+        "other",
+    )
+    .expect("other export has a map");
+    assert_ne!(other, before, "the exports must have distinguishable maps");
+    let mut mismatched = input;
+    mismatched.process_name = "other".to_string();
+    assert_eq!(
+        trace_lashlang_process_map_snapshot(&workers, &store, &mismatched)
+            .await
+            .expect("the convenience name cannot select another export"),
+        before
+    );
+    mismatched.process_ref =
+        lashlang::ProcessRef::new(lashlang::ContentHash::new("missing-process"), 0);
+    assert!(matches!(
+        trace_lashlang_process_map_snapshot(&workers, &store, &mismatched).await,
+        Err(TraceLanguageExecutionMapError::ProcessRefMissing { module_ref, process_ref })
+            if module_ref == mismatched.module_ref.to_string()
+                && process_ref == mismatched.process_ref
     ));
 }
 

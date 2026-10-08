@@ -12,6 +12,11 @@ pub enum TraceLanguageExecutionMapError {
     ArtifactStore(#[from] lash_core::ArtifactStoreError),
     #[error("Lashlang module artifact `{0}` is unavailable")]
     ArtifactMissing(String),
+    #[error("process reference `{process_ref:?}` is absent from Lashlang module `{module_ref}`")]
+    ProcessRefMissing {
+        module_ref: String,
+        process_ref: lashlang::ProcessRef,
+    },
     #[error("process `{process_name}` is absent from Lashlang module `{module_ref}`")]
     ProcessMissing {
         module_ref: String,
@@ -23,6 +28,8 @@ pub enum TraceLanguageExecutionMapError {
 ///
 /// This is independent of trace delivery: a host can call it after attaching
 /// to a resumed process whose initial `ExecutionStarted` event is unavailable.
+/// The persisted process reference selects the export; the input's convenience
+/// name is not authoritative.
 pub async fn trace_lashlang_process_map_snapshot(
     workers: &lash_vm_client::service::Service,
     store: &lashlang::LashlangArtifacts,
@@ -34,10 +41,16 @@ pub async fn trace_lashlang_process_map_snapshot(
         .ok_or_else(|| {
             TraceLanguageExecutionMapError::ArtifactMissing(input.module_ref.to_string())
         })?;
-    trace_lashlang_process_map(&artifact.graph, &input.process_name).ok_or_else(|| {
+    let process_name = artifact
+        .process_name_for_ref(&input.process_ref)
+        .ok_or_else(|| TraceLanguageExecutionMapError::ProcessRefMissing {
+            module_ref: input.module_ref.to_string(),
+            process_ref: input.process_ref.clone(),
+        })?;
+    trace_lashlang_process_map(&artifact.graph, process_name).ok_or_else(|| {
         TraceLanguageExecutionMapError::ProcessMissing {
             module_ref: input.module_ref.to_string(),
-            process_name: input.process_name.clone(),
+            process_name: process_name.to_owned(),
         }
     })
 }
