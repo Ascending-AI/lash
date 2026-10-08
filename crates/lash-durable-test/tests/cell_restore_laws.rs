@@ -1089,12 +1089,20 @@ async fn deferred_grant_across_a_crash(dialect: Dialect, postgres_url: Option<St
     );
 }
 
-/// Await process: the cell's `processes.await` parks on its completion
-/// wait, the session releases as `waiting` while the process sleeps, and
-/// the cell resumes with the process's outcome once it ends.
-async fn await_process(dialect: Dialect, postgres_url: Option<String>) {
-    let turn = CellTurn::new(Cell::AwaitProcess, dialect, postgres_url);
-    let (clock, database, nodes) = simulated(&turn).await;
+/// Run `turn`, a cell awaiting a host process that sleeps [`PROCESS_MS`],
+/// until its `processes.await` parks on its completion wait and the session
+/// releases as `waiting`: the nodes, the process, and whether it released
+/// before the process ended.
+async fn parked_on_a_process(
+    turn: &CellTurn,
+) -> (
+    Arc<SimClock>,
+    Arc<dyn DurableStore>,
+    SimNodes,
+    ProcessId,
+    bool,
+) {
+    let (clock, database, nodes) = simulated(turn).await;
     let until = SimClock::timestamp_ms_at(0) + PROCESS_MS;
     let process = turn
         .backend()
@@ -1118,7 +1126,6 @@ async fn await_process(dialect: Dialect, postgres_url: Option<String>) {
     *turn.world.process.lock_recover() = Some(process.clone());
     turn.send().await.expect("the turn is sent");
     nodes.start("a");
-    let process_actor = ActorKey::process(process.as_str()).expect("a process actor key");
     // The session releases as `waiting` while the process still sleeps.
     let mut released = false;
     while clock.logical_ms() < PROCESS_MS {
@@ -1138,6 +1145,16 @@ async fn await_process(dialect: Dialect, postgres_url: Option<String>) {
             clock.advance_by(1_000).await;
         }
     }
+    (clock, database, nodes, process, released)
+}
+
+/// Await process: the cell's `processes.await` parks on its completion
+/// wait, the session releases as `waiting` while the process sleeps, and
+/// the cell resumes with the process's outcome once it ends.
+async fn await_process(dialect: Dialect, postgres_url: Option<String>) {
+    let turn = CellTurn::new(Cell::AwaitProcess, dialect, postgres_url);
+    let (clock, database, nodes, process, released) = parked_on_a_process(&turn).await;
+    let process_actor = ActorKey::process(process.as_str()).expect("a process actor key");
     let mut violations = Vec::new();
     if !released {
         violations.push(format!(
@@ -1177,6 +1194,94 @@ async fn await_process(dialect: Dialect, postgres_url: Option<String>) {
     assert!(
         violations.is_empty(),
         "await process on {dialect:?}:\n  {}\n{}",
+        violations.join("\n  "),
+        nodes.script().rendered_trace()
+    );
+}
+
+/// After-step during a process await: an `AfterStep` request committed
+/// while the cell's `processes.await` is parked never cancels the awaited
+/// process or cuts its wait. The process ends on its own terms, the cell
+/// resumes with its outcome and the step closes, and the turn stops at that
+/// boundary: it ends no sooner than the process, with no model call after
+/// the step.
+async fn after_step_during_a_process_await(dialect: Dialect, postgres_url: Option<String>) {
+    let turn = CellTurn::new(Cell::AwaitProcess, dialect, postgres_url);
+    let (clock, database, nodes, process, released) = parked_on_a_process(&turn).await;
+    assert!(
+        released,
+        "the session never released on its parked cell:\n{}",
+        nodes.script().rendered_trace()
+    );
+    let run = database
+        .turn(&session())
+        .await
+        .expect("the turn reads")
+        .expect("the parked turn is open")
+        .run;
+    let answer = lash_core::runtime::durable::session::request_turn_cancel(
+        &turn.backend(),
+        lash_durable::domain::TurnCancelRequest {
+            session: session(),
+            run,
+            request_id: "stop-in-process".to_owned(),
+            origin: None,
+            reason: None,
+            undelivered: lash_core::TurnCancelUndeliveredInputPolicy::Defer,
+            mode: lash_core::TurnCancelMode::AfterStep,
+        },
+    )
+    .await
+    .expect("the request commits");
+    assert_eq!(answer, lash_durable::domain::TurnCancelAnswer::Requested);
+    let horizon = PROCESS_MS * 2;
+    let mut violations = Vec::new();
+    while !turn.done(&nodes).await {
+        if clock.logical_ms() < PROCESS_MS
+            && !matches!(database.turn(&session()).await, Ok(Some(_)))
+        {
+            violations.push(format!(
+                "the after-step stop ended the turn at {} ms, before the process's end",
+                clock.logical_ms()
+            ));
+            break;
+        }
+        if clock.logical_ms() >= horizon {
+            violations.push(format!(
+                "the turn is not done {} ms after the process's end",
+                clock.logical_ms() - PROCESS_MS
+            ));
+            break;
+        }
+        if nodes.step().await.is_none() {
+            clock.advance_by(1_000).await;
+        }
+    }
+    nodes.quiesce().await;
+    let record = turn
+        .backend()
+        .process_registry()
+        .get_process(&process)
+        .await
+        .expect("the process reads")
+        .expect("the process is retained");
+    let terminal = format!("{:?}", record.terminal());
+    if !terminal.contains("slept") || terminal.contains("Cancel") {
+        violations.push(format!(
+            "the awaited process did not end on its own terms: {terminal}"
+        ));
+    }
+    let requests = turn.requests.lock_recover().len();
+    if requests != 1 {
+        violations.push(format!(
+            "the model was called {requests} times; an after-step stop calls it no more after \
+             the step"
+        ));
+    }
+    violations.extend(turn_ended(&nodes).await);
+    assert!(
+        violations.is_empty(),
+        "after-step during a process await on {dialect:?}:\n  {}\n{}",
         violations.join("\n  "),
         nodes.script().rendered_trace()
     );
@@ -1317,4 +1422,12 @@ async fn a_restored_cell_keeps_its_deferred_grants_and_resolves_nothing_twice_on
         return;
     };
     deferred_grant_across_a_crash(Dialect::Postgres, Some(url)).await;
+}
+
+/// An after-step stop during a cell's `processes.await` lets the process
+/// finish and stops the turn at the step's boundary, on SQLite in memory.
+#[tokio::test]
+#[ignore = "FIG-5377: a pass finalizes an after-step request on a parked turn before its wait ends"]
+async fn an_after_step_stop_during_a_process_await_lets_the_process_finish_on_sqlite_memory() {
+    after_step_during_a_process_await(Dialect::SqliteMemory, None).await;
 }
