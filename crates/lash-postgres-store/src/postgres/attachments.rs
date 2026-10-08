@@ -247,11 +247,7 @@ pub(crate) async fn lock_attachment_fence_tx(
 /// so a probe that acquires it has proven the pass dead.
 pub(crate) const ATTACHMENT_SWEEP_LIVENESS_LOCK_NAMESPACE: i32 = 715_424;
 
-/// How many generations a pass mints before giving up on a liveness key no
-/// other live pass shares. Keys are hashed, so a collision is possible and
-/// astronomically rare; minting again sidesteps it.
-const ATTACHMENT_SWEEP_MINT_ATTEMPTS: u32 = 3;
-
+/// The catalog and generation name the sweep liveness key.
 fn sweep_liveness_key(catalog_id: &str, generation: i64) -> String {
     format!("{catalog_id}:{generation}")
 }
@@ -286,7 +282,8 @@ pub(crate) async fn begin_attachment_sweep(
         .await
         .map_err(store_sqlx_error)?
         .detach();
-    for _ in 0..ATTACHMENT_SWEEP_MINT_ATTEMPTS {
+    let attempts = pools.maintenance.sweep_mint_attempts;
+    for _ in 0..attempts {
         let mut tx = crate::begin_guarded(&mut connection, fence).await?;
         let generation: i64 =
             sqlx::query_scalar(attachment_sql().sweep_clock.mint_generation.sql())
@@ -321,7 +318,7 @@ pub(crate) async fn begin_attachment_sweep(
         }
     }
     Err(StoreError::Backend(format!(
-        "no attachment sweep generation with a free liveness key after {ATTACHMENT_SWEEP_MINT_ATTEMPTS} mints"
+        "no attachment sweep generation with a free liveness key after {attempts} mints"
     )))
 }
 

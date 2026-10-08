@@ -131,6 +131,8 @@ mod tests {
             .expect("create snapshots");
         let actor = ActorKey::session("session").expect("actor");
         let commit = Committing {
+            checkpoint_ref_chunk: crate::host::MaintenancePolicy::default().checkpoint_ref_chunk
+                as usize,
             actor: &actor,
             epoch: Epoch(1),
             now: DurableInstant(1),

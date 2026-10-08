@@ -356,11 +356,11 @@ fn endpoints() -> Result<lash::postgres::PostgresEndpoints, CliError> {
 }
 
 /// The host configuration in `LASH_POSTGRES_CONFIG` (its JSON form), or the
-/// default one: the same document a deployment's workers run under, so the
+/// documented standard production preset: the same document a deployment's workers run under, so the
 /// operator's pools are sized and named by it.
 fn host_config() -> Result<lash::postgres::PostgresHostConfig, CliError> {
     let Ok(json) = std::env::var("LASH_POSTGRES_CONFIG") else {
-        return Ok(lash::postgres::PostgresHostConfig::default());
+        return Ok(lash::postgres::PostgresHostConfig::standard());
     };
     let config: lash::postgres::PostgresHostConfig = serde_json::from_str(&json)
         .map_err(|error| CliError::new(Exit::Refused, format!("LASH_POSTGRES_CONFIG: {error}")))?;

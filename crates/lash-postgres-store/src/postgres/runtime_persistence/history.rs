@@ -302,7 +302,13 @@ impl SessionHistoryStore for PostgresStore {
         };
         let checkpoint = match checkpoint_ref.as_ref() {
             Some(reference) => {
-                let checkpoint = get_checkpoint_tx(&mut tx, reference, self.fence.fleet()).await?;
+                let checkpoint = get_checkpoint_tx(
+                    &mut tx,
+                    reference,
+                    self.fence.fleet(),
+                    self.pools.maintenance.checkpoint_ref_chunk as usize,
+                )
+                .await?;
                 if checkpoint.is_none() {
                     // An admitted base may have been collected since; the
                     // current head's own manifest never is, so its absence is

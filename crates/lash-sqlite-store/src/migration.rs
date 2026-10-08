@@ -141,10 +141,26 @@ pub struct SqliteMigrationBackup {
 
 impl Default for SqliteMigrationBackup {
     fn default() -> Self {
+        Self::standard()
+    }
+}
+
+impl SqliteMigrationBackup {
+    /// Standard production: backups beside the store, keeping two complete
+    /// backups. No workload measurement establishes two as universal.
+    pub fn standard() -> Self {
         Self {
             location: SqliteBackupLocation::BesideStore,
             retain: NonZeroUsize::new(2).unwrap_or(NonZeroUsize::MIN),
         }
+    }
+}
+
+impl SqliteMigrationBackup {
+    /// Development keeps the same two beside-store backups as standard;
+    /// local development does not justify weaker migration recovery.
+    pub fn development() -> Self {
+        Self::standard()
     }
 }
 
@@ -361,13 +377,15 @@ impl Backup {
 pub(crate) async fn migrate_on_open(
     location: &SqliteLocation,
     backup: &SqliteMigrationBackup,
-    busy_timeout: Duration,
+    policy: crate::SqliteConnectionPolicy,
     clock: &dyn Clock,
     probe: Probe,
 ) -> Result<(), StoreError> {
-    SqliteConnection::check_release_before_open(
+    policy.operational.validate().map_err(crate::sqlite_error)?;
+    SqliteConnection::check_release_configured(
         &location.target(),
         crate::release_stamp::BUILD_RELEASE,
+        policy.operational,
     )
     .await
     .map_err(crate::sqlite_async_error)?;
@@ -386,7 +404,8 @@ pub(crate) async fn migrate_on_open(
         path,
         backups,
         retain: backup.retain.get(),
-        busy_timeout,
+        busy_timeout: policy.busy_timeout,
+        operational: policy.operational,
         clock,
         probe,
     }
@@ -402,6 +421,7 @@ struct Migration<'a> {
     backups: PathBuf,
     retain: usize,
     busy_timeout: Duration,
+    operational: crate::SqliteOperationalSettings,
     clock: &'a dyn Clock,
     probe: Probe,
 }
@@ -432,9 +452,13 @@ impl Migration<'_> {
         {
             return Ok(());
         }
-        let _migrator = crate::store_ownership::exclusive(self.location, self.busy_timeout)
-            .await
-            .map_err(Stop::Failed)?;
+        let _migrator = crate::store_ownership::exclusive(
+            self.location,
+            self.busy_timeout,
+            self.operational.migration_poll,
+        )
+        .await
+        .map_err(Stop::Failed)?;
         // Decided again under the lock: another process's migration may have
         // finished while this one waited for it.
         self.run_exclusive(identity).await
@@ -473,7 +497,12 @@ impl Migration<'_> {
 
     /// The database's stamp, read-only.
     async fn stamp(&self) -> Result<Option<CompatStamp>, Stop> {
-        Ok(SqliteConnection::migration_stamp(&self.location.target(), self.busy_timeout).await?)
+        Ok(SqliteConnection::migration_stamp(
+            &self.location.target(),
+            self.busy_timeout,
+            self.operational,
+        )
+        .await?)
     }
 
     /// Migrate when the database is older than this build writes and stamped
@@ -656,7 +685,7 @@ impl Migration<'_> {
                     location: self.path.to_path_buf(),
                 }));
             }
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            tokio::time::sleep(self.operational.migration_poll).await;
         }
     }
 

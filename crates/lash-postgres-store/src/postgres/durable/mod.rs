@@ -79,6 +79,7 @@ pub use node_wakes::PostgresNodeWakes;
 
 /// The owner commit a domain write is applied in: after its fence.
 pub(crate) struct Committing<'a> {
+    pub(crate) checkpoint_ref_chunk: usize,
     /// The actor whose fence matched.
     pub(crate) actor: &'a ActorKey,
     /// The epoch it matched at; domain rows record it as `written_epoch`.
@@ -702,12 +703,14 @@ async fn apply_owner(
     fence: Option<i64>,
     now: DurableInstant,
     fleet: lash_core_execution::FleetFormat,
+    checkpoint_ref_chunk: usize,
 ) -> Result<ActorCommit, DurableError> {
     let actor = write.actor().as_str();
     let Some(revision) = fence else {
         return Err(fenced(tx, write.actor(), write.epoch()).await?);
     };
     let committing = Committing {
+        checkpoint_ref_chunk,
         actor: write.actor(),
         epoch: write.epoch(),
         now,

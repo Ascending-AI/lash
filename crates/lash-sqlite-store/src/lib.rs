@@ -91,6 +91,8 @@ mod attachments;
 mod blobs;
 mod codec;
 mod conn;
+mod operational;
+pub use operational::SqliteOperationalSettings;
 mod connection_sql;
 mod durable;
 mod retention;
@@ -573,3 +575,14 @@ mod turn_feed_tests;
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
+
+impl StoreOptions {
+    /// Explicit development: LowLatency blobs (no compression) and the
+    /// smaller connection preset. Blob compression spends CPU, not correctness.
+    pub fn development(synchronous: SqliteSynchronous) -> Self {
+        Self {
+            blob_profile: BuiltinBlobProfile::LowLatency,
+            connection_policy: SqliteConnectionPolicy::development(synchronous),
+        }
+    }
+}

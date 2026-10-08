@@ -6,11 +6,11 @@
 //!   after the commits that woke its actors and never inside one: a row for
 //!   each node picked to claim a readied unowned actor, with no actors, and a
 //!   row for each owner node with the keys of its actors that took mail. The
-//!   same transaction deletes the rows older than [`RETENTION`]: a hint that
+//!   same transaction deletes the rows older than the configured wake retention: a hint that
 //!   old is worth nothing, since the polls have found its work.
 //! - **Listener.** Each node's listener runs on a thread of its own with a
 //!   read-only connection of its own, and asks it for `PRAGMA data_version`
-//!   every [`POLL`]. The version moves exactly when another connection
+//!   every the configured wake poll. The version moves exactly when another connection
 //!   commits, so a quiet database costs one pragma and one file check per
 //!   poll. When it moves, the listener reads the wake rows past its cursor
 //!   and forwards its own node's. A publish in this process also rings this
@@ -74,21 +74,6 @@ const TAIL: &str = "SELECT COALESCE(MAX(seq), 0) FROM node_wakes";
 /// Node `?2`'s hints past cursor `?1`, in publish order.
 const PAST: &str =
     "SELECT seq, actors FROM node_wakes WHERE seq > ?1 AND node_id = ?2 ORDER BY seq";
-
-/// How often a listener asks whether another connection committed.
-pub(crate) const POLL: Duration = Duration::from_millis(25);
-
-/// How long a hint is kept for its listener.
-const RETENTION: Duration = Duration::from_secs(10);
-
-/// How long a listener waits for its boot's lock to come free: an earlier
-/// session of the same boot ending, or a probe letting it go.
-const HOLD_WITHIN: Duration = Duration::from_secs(5);
-
-/// How long a listener whose session failed waits before it opens another,
-/// first and at most.
-const REOPEN_FIRST: Duration = Duration::from_millis(25);
-const REOPEN_MOST: Duration = Duration::from_secs(1);
 
 /// The rings of this process's listeners, one per database, so a publish
 /// here wakes them without a poll. Entries are weak: a database nobody
@@ -190,9 +175,9 @@ impl SqliteNodeWakes {
     pub(crate) fn new(store: SqliteDurableStore, path: &std::path::Path) -> Self {
         let target = DatabaseTarget::File(path.to_path_buf());
         Self {
-            store,
-            locks: LivenessLocks::beside(path),
+            locks: LivenessLocks::beside(path, store.conn.operational.liveness_lock_attempts),
             ring: ring(&target),
+            store,
             target,
         }
     }
@@ -215,6 +200,7 @@ struct Opener {
     locks: LivenessLocks,
     lock: String,
     node: String,
+    policy: crate::SqliteOperationalSettings,
 }
 
 fn unavailable(message: String) -> DurableError {
@@ -225,23 +211,23 @@ fn unavailable(message: String) -> DurableError {
 }
 
 impl Opener {
-    /// Take the boot's lock, waiting up to [`HOLD_WITHIN`] for it to come
+    /// Take the boot's lock, waiting up to the configured lock budget for it to come
     /// free, then open the connection and read its version and cursor, in
     /// that order: a commit after the version read moves the version again,
     /// so the first poll reads past a cursor that may already include it.
     /// Gives up when `stop` is set.
     fn open(&self, stop: &AtomicBool) -> Result<Session, DurableError> {
-        let deadline = Instant::now() + HOLD_WITHIN;
+        let deadline = Instant::now() + self.policy.wake_lock_timeout;
         let lock = loop {
             match self.locks.try_hold(&self.lock) {
                 Ok(Some(lock)) => break lock,
                 Ok(None) if Instant::now() < deadline && !stop.load(Ordering::Acquire) => {
-                    std::thread::sleep(Duration::from_millis(10));
+                    std::thread::sleep(self.policy.lock_poll);
                 }
                 Ok(None) => {
                     return Err(unavailable(format!(
-                        "the liveness lock `{}` stayed held for {HOLD_WITHIN:?}",
-                        self.lock
+                        "the liveness lock `{}` stayed held for {:?}",
+                        self.lock, self.policy.wake_lock_timeout
                     )));
                 }
                 Err(error) => return Err(lock_failure(&error)),
@@ -254,8 +240,9 @@ impl Opener {
                 | rusqlite::OpenFlags::SQLITE_OPEN_URI,
         )
         .and_then(|connection| {
-            connection.busy_timeout(crate::connection_sql::READ_ONLY_BUSY_TIMEOUT)?;
-            connection.execute_batch(crate::connection_sql::READ_ONLY_PRAGMAS)?;
+            connection.busy_timeout(self.policy.readonly_busy_timeout)?;
+            connection.pragma_update(None, "cache_size", self.policy.readonly_cache_size)?;
+            connection.set_prepared_statement_cache_capacity(self.policy.statement_cache_capacity);
             Ok(connection)
         })
         .map_err(store_failure)?;
@@ -395,7 +382,7 @@ fn listen_on(
     }
     let mut seen = ring.rung();
     'serve: loop {
-        seen = ring.wait(seen, POLL, stop);
+        seen = ring.wait(seen, opener.policy.wake_poll, stop);
         if stop.load(Ordering::Acquire) {
             break 'serve;
         }
@@ -411,7 +398,7 @@ fn listen_on(
         // open another, so the lock and the cursor are taken anew.
         lost.fetch_add(1, Ordering::AcqRel);
         drop(session);
-        let mut wait = REOPEN_FIRST;
+        let mut wait = opener.policy.wake_reopen_initial;
         session = loop {
             if stop.load(Ordering::Acquire) {
                 return;
@@ -420,7 +407,7 @@ fn listen_on(
                 Ok(reopened) => break reopened,
                 Err(_) => {
                     ring.pause(wait, stop);
-                    wait = (wait * 2).min(REOPEN_MOST);
+                    wait = wait.saturating_mul(2).min(opener.policy.wake_reopen_max);
                 }
             }
         };
@@ -469,9 +456,10 @@ impl NodeWakes for SqliteNodeWakes {
             return Ok(());
         }
         let now = self.store.instant()?;
-        let oldest = now
-            .0
-            .saturating_sub(i64::try_from(RETENTION.as_millis()).unwrap_or(i64::MAX));
+        let oldest = now.0.saturating_sub(
+            i64::try_from(self.store.conn.operational.wake_retention.as_millis())
+                .unwrap_or(i64::MAX),
+        );
         self.store
             .conn
             .write(move |tx| {
@@ -493,6 +481,7 @@ impl NodeWakes for SqliteNodeWakes {
             locks: self.locks.clone(),
             lock: boot_lock(&lease.owner.boot),
             node: lease.owner.node.as_str().to_owned(),
+            policy: self.store.conn.operational,
         };
         let (send, wakes) = mpsc::unbounded_channel();
         let (opened, open) = oneshot::channel();

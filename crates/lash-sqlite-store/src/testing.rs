@@ -86,7 +86,7 @@ pub fn read_rows_for_testing(
     )
     .map_err(|error| format!("open the database read-only: {error}"))?;
     connection
-        .busy_timeout(crate::connection_sql::READ_ONLY_BUSY_TIMEOUT)
+        .busy_timeout(crate::SqliteOperationalSettings::standard().readonly_busy_timeout)
         .map_err(|error| format!("set the busy timeout: {error}"))?;
     let mut statement = connection
         .prepare(sql)
@@ -158,7 +158,7 @@ pub fn read_stored_cells_for_testing(
     )
     .map_err(|error| format!("open the database read-only: {error}"))?;
     connection
-        .busy_timeout(crate::connection_sql::READ_ONLY_BUSY_TIMEOUT)
+        .busy_timeout(crate::SqliteOperationalSettings::standard().readonly_busy_timeout)
         .map_err(|error| format!("set the busy timeout: {error}"))?;
     let mut cells = Vec::new();
     let tables = {
@@ -440,4 +440,24 @@ pub(crate) struct ConnectionHooks {
     /// Run every call to its answer before its caller goes on
     /// ([`crate::SqliteStoreSetOptions::inline_calls`]).
     pub(crate) inline_calls: bool,
+}
+
+impl crate::SqliteStoreSet {
+    /// Actual busy timeout and page cache of a catalog reader, for configuration laws.
+    pub async fn reader_settings_for_testing(&self) -> rusqlite::Result<(i64, i64)> {
+        self.process_env_store().reader_settings_for_testing().await
+    }
+}
+
+impl crate::SqliteStore {
+    async fn reader_settings_for_testing(&self) -> rusqlite::Result<(i64, i64)> {
+        self.readers[0]
+            .call(|connection| {
+                Ok((
+                    connection.query_row("PRAGMA busy_timeout", [], |row| row.get(0))?,
+                    connection.query_row("PRAGMA cache_size", [], |row| row.get(0))?,
+                ))
+            })
+            .await
+    }
 }

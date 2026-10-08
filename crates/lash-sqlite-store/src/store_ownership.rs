@@ -21,6 +21,7 @@ pub(crate) fn lock_path(path: &std::path::Path) -> std::path::PathBuf {
 pub(crate) async fn exclusive(
     location: &SqliteLocation,
     busy_timeout: Duration,
+    poll: Duration,
 ) -> Result<Option<File>, StoreError> {
     let SqliteLocation::File { path: database } = location else {
         return Ok(None);
@@ -32,7 +33,7 @@ pub(crate) async fn exclusive(
         match file.try_lock() {
             Ok(()) => return Ok(Some(file)),
             Err(std::fs::TryLockError::WouldBlock) if Instant::now() < deadline => {
-                tokio::time::sleep(Duration::from_millis(10)).await;
+                tokio::time::sleep(poll).await;
             }
             Err(std::fs::TryLockError::WouldBlock) => {
                 return Err(failure(format!(

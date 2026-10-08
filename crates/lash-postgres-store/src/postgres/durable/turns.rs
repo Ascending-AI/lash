@@ -235,10 +235,16 @@ pub(super) async fn apply_session_commit(
             .map_err(|error| refused(&error))?;
     let now = integer::<u64>(commit.now.0)?;
     let writer = head_writer(commit.actor, &write.session);
-    crate::runtime_persistence::apply_runtime_commit_tx(tx, &planner, writer, now)
-        .await
-        .map(drop)
-        .map_err(|error| refused(&error))
+    crate::runtime_persistence::apply_runtime_commit_tx(
+        tx,
+        &planner,
+        writer,
+        now,
+        commit.checkpoint_ref_chunk,
+    )
+    .await
+    .map(drop)
+    .map_err(|error| refused(&error))
 }
 
 /// Who writes a session head commit fenced by `actor`: the session's own

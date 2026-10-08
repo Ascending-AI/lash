@@ -727,7 +727,9 @@ async fn assert_release_admission(writing: &str, build: &str, counter: u32, refu
     drop(connection);
     let before = std::fs::read(&path).expect("original bytes");
     let target = crate::location::DatabaseTarget::File(path.clone());
-    let row = super::verify_schema_target(&target, build).await;
+    let row =
+        super::verify_schema_target(&target, build, crate::SqliteOperationalSettings::standard())
+            .await;
     let early = crate::conn::SqliteConnection::check_release_before_open(&target, build).await;
     let mut connection = rusqlite::Connection::open(&path).expect("open for admission");
     let tx = connection.transaction().expect("open transaction");

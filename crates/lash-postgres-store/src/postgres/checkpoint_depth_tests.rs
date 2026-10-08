@@ -104,6 +104,7 @@ async fn checkpoint_component_statement_count_is_depth_invariant_when_configured
             &mut tx,
             &checkpoint_with_changed_components(depth),
             lash_core_execution::FleetFormat::current(),
+            crate::host::MaintenancePolicy::default().checkpoint_ref_chunk as usize,
         )
         .await
         .expect("seed checkpoint component bodies");
@@ -115,6 +116,7 @@ async fn checkpoint_component_statement_count_is_depth_invariant_when_configured
                 &mut tx,
                 &unchanged,
                 lash_core_execution::FleetFormat::current(),
+                crate::host::MaintenancePolicy::default().checkpoint_ref_chunk as usize,
             ))
             .await;
         let commit_elapsed = commit_started.elapsed();
@@ -126,6 +128,7 @@ async fn checkpoint_component_statement_count_is_depth_invariant_when_configured
                 &mut tx,
                 &checkpoint_ref,
                 lash_core_execution::FleetFormat::current(),
+                crate::host::MaintenancePolicy::default().checkpoint_ref_chunk as usize,
             ))
             .await;
         let load_elapsed = load_started.elapsed();

@@ -15,8 +15,6 @@
 //! rewrite, and the connection policy's pragmas are built per connection from
 //! values SQLite will not accept as parameters at all.
 
-use std::time::Duration;
-
 use crate::conn::SqliteConnectionPolicy;
 
 /// PRAGMAs applied on the connection thread immediately after open.
@@ -42,13 +40,6 @@ pub(crate) fn open_pragmas(policy: SqliteConnectionPolicy) -> String {
         policy.cache_size,
     )
 }
-
-/// The busy timeout a read-only probe connection waits with.
-pub(crate) const READ_ONLY_BUSY_TIMEOUT: Duration = Duration::from_secs(1);
-
-/// The page cache a read-only probe connection runs with: 500 KiB, small
-/// enough that opening one to answer a question costs nothing to hold.
-pub(crate) const READ_ONLY_PRAGMAS: &str = "PRAGMA cache_size = -500;";
 
 /// Whether the database carries the release-stamp table at all.
 ///

@@ -62,6 +62,7 @@ impl PostgresDurableStore {
                         fence,
                         now,
                         self.fence.fleet(),
+                        self.pools.maintenance.checkpoint_ref_chunk as usize,
                     ))
                     .await;
                     self.settle(label, guarded, outcome, deadline).await

@@ -246,6 +246,7 @@ fn window(
     selector: WindowSelector,
     fleet: lash_core_execution::FleetFormat,
     decoded: &AtomicU64,
+    chunk_size: usize,
 ) -> Result<Option<SessionWindowRead>, StoreError> {
     live(conn, session)?;
     let Some(meta) = try_load_session_head_meta_from_conn(conn, session, fleet)? else {
@@ -267,7 +268,7 @@ fn window(
     };
     let checkpoint = match checkpoint_ref.as_ref() {
         Some(reference) => {
-            let value = SqliteStore::get_checkpoint_conn(conn, reference, fleet)?;
+            let value = SqliteStore::get_checkpoint_conn(conn, reference, fleet, chunk_size)?;
             if value.is_none() {
                 // An admitted base may have been collected since; the current
                 // head's own manifest never is, so its absence is corruption.
@@ -412,8 +413,13 @@ impl SessionHistoryStore for SqliteStore {
         let session = session_id.clone();
         let fleet = self.conn.fleet();
         let decoded = Arc::clone(&self.decoded_graph_node_bodies);
+        let chunk_size = self.conn.operational.checkpoint_ref_chunk.get();
         self.read_connection()
-            .read(move |conn| Ok(window(conn, &session, selector, fleet, &decoded)))
+            .read(move |conn| {
+                Ok(window(
+                    conn, &session, selector, fleet, &decoded, chunk_size,
+                ))
+            })
             .await
             .map_err(sqlite_error)?
     }

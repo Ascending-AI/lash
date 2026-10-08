@@ -59,13 +59,18 @@ pub async fn verify_schema_at(path: &Path) -> StoreSchemaDatabase {
     verify_schema_target(
         &DatabaseTarget::File(path.to_path_buf()),
         crate::release_stamp::BUILD_RELEASE,
+        crate::SqliteOperationalSettings::standard(),
     )
     .await
 }
 
 /// The store's report row, read through its location-derived target.
-async fn verify_schema_target(target: &DatabaseTarget, build_release: &str) -> StoreSchemaDatabase {
-    let (verdict, min_reader) = read_compat_verdict(target, build_release).await;
+async fn verify_schema_target(
+    target: &DatabaseTarget,
+    build_release: &str,
+    operational: crate::SqliteOperationalSettings,
+) -> StoreSchemaDatabase {
+    let (verdict, min_reader) = read_compat_verdict(target, build_release, operational).await;
     StoreSchemaDatabase {
         name: crate::schema::DATABASE_NAME.to_string(),
         location: target.to_string(),
@@ -79,13 +84,14 @@ async fn verify_schema_target(target: &DatabaseTarget, build_release: &str) -> S
 async fn read_compat_verdict(
     target: &DatabaseTarget,
     build_release: &str,
+    operational: crate::SqliteOperationalSettings,
 ) -> (StoreSchemaVerdict, Option<i64>) {
     if !target.exists() {
         return (StoreSchemaVerdict::Absent, None);
     }
     // A failed read-only open is an undecided database, never a reason to reach for a
     // connection that can write.
-    let conn = match SqliteConnection::open_readonly(target).await {
+    let conn = match SqliteConnection::open_readonly_configured(target, operational).await {
         Ok(conn) => conn,
         Err(error) => {
             return (
@@ -205,11 +211,14 @@ async fn read_compat_verdict(
 /// it. A database that exists but cannot be read is
 /// [`StoreReleaseState::Unreadable`] instead — an undecided stamp is not an
 /// absent one.
-async fn read_release_state(target: &DatabaseTarget) -> StoreReleaseState {
+async fn read_release_state(
+    target: &DatabaseTarget,
+    operational: crate::SqliteOperationalSettings,
+) -> StoreReleaseState {
     if !target.exists() {
         return StoreReleaseState::Unstamped;
     }
-    let conn = match SqliteConnection::open_readonly(target).await {
+    let conn = match SqliteConnection::open_readonly_configured(target, operational).await {
         Ok(conn) => conn,
         Err(err) => {
             return StoreReleaseState::Unreadable {
@@ -237,11 +246,14 @@ async fn read_release_state(target: &DatabaseTarget) -> StoreReleaseState {
 /// row is [`FleetFormatState::Unrecorded`] — the deployment records no fleet
 /// format — and a database that exists but cannot be read is
 /// [`FleetFormatState::Unreadable`], never silently absent.
-async fn read_fleet_format_state(target: &DatabaseTarget) -> FleetFormatState {
+async fn read_fleet_format_state(
+    target: &DatabaseTarget,
+    operational: crate::SqliteOperationalSettings,
+) -> FleetFormatState {
     if !target.exists() {
         return FleetFormatState::Unrecorded;
     }
-    let conn = match SqliteConnection::open_readonly(target).await {
+    let conn = match SqliteConnection::open_readonly_configured(target, operational).await {
         Ok(conn) => conn,
         Err(err) => {
             return FleetFormatState::Unreadable {
@@ -272,9 +284,18 @@ async fn read_fleet_format_state(target: &DatabaseTarget) -> FleetFormatState {
 #[derive(Clone, Debug)]
 pub struct SqliteStorePreflight {
     location: SqliteLocation,
+    operational: crate::SqliteOperationalSettings,
 }
 
 impl SqliteStorePreflight {
+    /// Override the standard operational preset for every read-only probe.
+    /// Invalid pacing is reported as unreadable/not scanned when the probe runs.
+    #[must_use]
+    pub fn operational(mut self, settings: crate::SqliteOperationalSettings) -> Self {
+        self.operational = settings;
+        self
+    }
+
     /// The store at `location`, the same value `SqliteStoreSet` keeps.
     ///
     /// A file path is canonicalized the way the open path canonicalizes it,
@@ -286,7 +307,10 @@ impl SqliteStorePreflight {
             },
             memory => memory,
         };
-        Self { location }
+        Self {
+            location,
+            operational: crate::SqliteOperationalSettings::standard(),
+        }
     }
 
     /// The file store in the database file at `path`: the same path
@@ -309,9 +333,14 @@ impl StorePreflight for SqliteStorePreflight {
 
     async fn schema_status(&self) -> Result<StoreSchemaStatus, StoreError> {
         let target = self.location.target();
-        let release = read_release_state(&target).await;
-        let fleet_format = read_fleet_format_state(&target).await;
-        let row = verify_schema_target(&target, crate::release_stamp::BUILD_RELEASE).await;
+        let release = read_release_state(&target, self.operational).await;
+        let fleet_format = read_fleet_format_state(&target, self.operational).await;
+        let row = verify_schema_target(
+            &target,
+            crate::release_stamp::BUILD_RELEASE,
+            self.operational,
+        )
+        .await;
         Ok(StoreSchemaStatus {
             databases: vec![row],
             release,

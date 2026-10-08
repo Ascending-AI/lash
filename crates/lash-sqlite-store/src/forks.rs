@@ -223,7 +223,7 @@ pub(super) async fn fork_at_in_catalog(
                     });
                 }
                 let mut checkpoint = SqliteStore::get_checkpoint_conn(
-                    tx, &BlobRef(retained_ref.clone()), fleet_format,
+                    tx, &BlobRef(retained_ref.clone()), fleet_format, tx.operational.checkpoint_ref_chunk.get(),
                 )?.ok_or(lash_core_execution::StoreError::CheckpointRootMissing {
                     blob_ref: BlobRef(retained_ref),
                 })?;

@@ -39,11 +39,30 @@ let backend = lash::durable::DurableBackendBuilder::postgres(&host, attachments)
   `PostgresStorePreflight::connect_lazy(endpoints, config)` is the read-only
   probe.
 - `lashctl` reads the same document from `LASH_POSTGRES_CONFIG` (JSON; the
-  defaults when unset) and the endpoint from `LASH_POSTGRES_DATABASE_URL`.
+  standard production preset when unset) and the endpoint from `LASH_POSTGRES_DATABASE_URL`.
 
 Validation runs before any I/O and refuses the first broken rule with
 `PostgresHostConfigError { field, reason }`, `field` being the serialized
 path (`roles.work.max_connections`).
+
+## Named presets
+
+`PostgresHostConfig::standard()` is the production preset and `Default`.
+JSON section omission and an unset `LASH_POSTGRES_CONFIG` resolve to it.
+All operational fields remain optional and configurable. Live replay stays
+absent unless selected; enabling it states the host's retention policy.
+
+`PostgresHostConfig::development()` is explicit: work/critical pools 4/1,
+store admission 4, preflight/migration pools 1 each, checkpoint chunks 256
+and event-release pages 32. Its node uses `DurableSettings::development()`:
+claim batch 2, active actors 8, group members 8, cascade batch 32. Every
+other value below is standard, including compatibility enforcement and TLS
+inheritance. No universal workload measurement backs the reduced capacities.
+
+Standard pool recycling follows SQLx 0.8.6. FIG-5167 measured wake behavior
+with the standard leases. Exact role capacities, deadlines, retry counts,
+reconnect delays and working chunks have no universal workload measurement;
+measure and override them for the deployment. None is a refusal ceiling.
 
 ## Endpoints and credentials
 
@@ -209,6 +228,8 @@ Absent by default: no replay pool or listener opens.
 | `max_schema_sessions` | 1 schema verification session at once |
 | `sweep_liveness_probe_timeout_ms` | 500 |
 | `process_event_release_page_rows` | 256 |
+| `checkpoint_ref_chunk` | 16384 refs/bodies per query |
+| `sweep_mint_attempts` | 3 generation collision retries |
 
 ### `schema_check` and `deployment`
 
@@ -218,7 +239,8 @@ least 2), `other_clients`, `admin_headroom`, `other_host_connections` and
 `operator_connections`. With it the connect reads the server's capacity on
 its first connection and refuses a budget that does not fit
 (`PostgresHostError::Budget`) before any other pool opens. Without it the
-check is skipped: that is for development only.
+check is skipped. Both named presets leave deployment optional; set it to
+validate a measured deployment capacity before serving.
 
 ## Sizing
 

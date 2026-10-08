@@ -3,9 +3,6 @@
 use super::*;
 use lash_sansio::ProcessId;
 
-/// Rows one release round reads and rewrites.
-const RELEASE_PAGE_ROWS: i64 = 256;
-
 impl SqliteProcessRegistry {
     /// The highest sequence `process_id` released, `0` when it released none.
     pub(crate) fn released_through_conn(
@@ -46,7 +43,7 @@ impl SqliteProcessRegistry {
     /// `through`, clamped to the last event, into their released form, and
     /// raise the horizon, in the caller's transaction.
     fn release_process_events_conn(
-        conn: &Connection,
+        conn: &crate::conn::FencedTx<'_>,
         process_id: &ProcessId,
         through: u64,
     ) -> Result<lash_core_execution::ProcessEventRelease, lash_core_execution::PluginError> {
@@ -72,7 +69,8 @@ impl SqliteProcessRegistry {
                         process_id.as_str(),
                         crate::clamp_sequence_bound(after),
                         target_bound,
-                        RELEASE_PAGE_ROWS
+                        i64::try_from(conn.operational.process_event_release_page.get())
+                            .unwrap_or(i64::MAX)
                     ],
                     |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
                 )

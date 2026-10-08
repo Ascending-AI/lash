@@ -434,6 +434,14 @@ impl PostgresHostConfig {
                 maintenance.max_schema_sessions,
             ),
             (
+                "maintenance.checkpoint_ref_chunk",
+                maintenance.checkpoint_ref_chunk,
+            ),
+            (
+                "maintenance.sweep_mint_attempts",
+                maintenance.sweep_mint_attempts,
+            ),
+            (
                 "maintenance.process_event_release_page_rows",
                 maintenance.process_event_release_page_rows,
             ),

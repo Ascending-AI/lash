@@ -80,12 +80,6 @@ pub(crate) enum TxOutcome<T> {
 /// 15-second window so cross-process writers wait rather than fail fast.
 pub(crate) const BUSY_TIMEOUT_MS: u32 = 15_000;
 
-/// Prepared statements each connection keeps cached (FIG-3975). rusqlite's
-/// default cache of 16 evicts constantly under this store's statement mix,
-/// so nearly every `execute`/`query_row` re-parsed its SQL; the catalog's
-/// distinct statements fit comfortably inside 256.
-const PREPARED_STATEMENT_CACHE_CAPACITY: usize = 256;
-
 /// The process-wide write gates, one per database identity
 /// ([`DatabaseTarget::canonical_name`], so differently-spelled paths and
 /// `memdb` names of the same database share one gate). Entries are weak so
@@ -107,6 +101,7 @@ struct CheckpointState {
     read_gate: Arc<RwLock<()>>,
     threshold_pages: AtomicU64,
     commits: AtomicU64,
+    timing: Mutex<(Duration, Duration)>,
 }
 
 fn checkpoint_state(
@@ -114,6 +109,7 @@ fn checkpoint_state(
     write_gate: &Arc<Mutex<()>>,
     read_gate: &Arc<RwLock<()>>,
     threshold_pages: u32,
+    policy: crate::SqliteOperationalSettings,
 ) -> Option<Arc<CheckpointState>> {
     let path = target.file_path()?;
     if threshold_pages == 0 {
@@ -127,6 +123,13 @@ fn checkpoint_state(
         state
             .threshold_pages
             .fetch_min(u64::from(threshold_pages), Ordering::Relaxed);
+        let mut timing = state
+            .timing
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        timing.0 = timing.0.min(policy.checkpoint_interval);
+        timing.1 = timing.1.min(policy.checkpoint_busy_timeout);
+        drop(timing);
         return Some(state);
     }
     let state = Arc::new(CheckpointState {
@@ -135,6 +138,7 @@ fn checkpoint_state(
         read_gate: Arc::clone(read_gate),
         threshold_pages: AtomicU64::new(u64::from(threshold_pages)),
         commits: AtomicU64::new(0),
+        timing: Mutex::new((policy.checkpoint_interval, policy.checkpoint_busy_timeout)),
     });
     let weak = Arc::downgrade(&state);
     match std::thread::Builder::new()
@@ -156,7 +160,16 @@ fn checkpoint_loop(state: Weak<CheckpointState>) {
     let mut seen_commits = 0;
     let mut retry = false;
     loop {
-        std::thread::sleep(Duration::from_millis(100));
+        let Some(active) = state.upgrade() else {
+            return;
+        };
+        let interval = active
+            .timing
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .0;
+        drop(active);
+        std::thread::sleep(interval);
         let Some(state) = state.upgrade() else {
             return;
         };
@@ -189,7 +202,13 @@ fn checkpoint_if_needed(state: &CheckpointState) -> rusqlite::Result<bool> {
         &state.path,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
-    connection.busy_timeout(Duration::from_millis(20))?;
+    connection.busy_timeout(
+        state
+            .timing
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .1,
+    )?;
     let pages: i64 =
         connection.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |row| row.get(1))?;
     if pages < state.threshold_pages.load(Ordering::Relaxed) as i64 {
@@ -310,16 +329,43 @@ pub struct SqliteConnectionPolicy {
     /// values count KiB and positive values count pages, so change it to match
     /// the deployment's memory budget and page size.
     pub cache_size: i32,
+    /// Coordination, readonly readers and working batches.
+    pub operational: crate::SqliteOperationalSettings,
 }
 
 impl Default for SqliteConnectionPolicy {
     fn default() -> Self {
+        Self::standard(SqliteSynchronous::Normal)
+    }
+}
+
+impl SqliteConnectionPolicy {
+    /// Standard production: four readers, 15 s busy timeout, 1000-page WAL
+    /// checkpoint and -2000 KiB cache, plus standard operational settings.
+    /// WAL/cache follow SQLite conventions; no universal workload measurement
+    /// backs the reader count or busy budget. The host states durability.
+    pub fn standard(synchronous: SqliteSynchronous) -> Self {
         Self {
             read_connections: std::num::NonZeroUsize::new(4).unwrap_or(std::num::NonZeroUsize::MIN),
             busy_timeout: Duration::from_millis(BUSY_TIMEOUT_MS as u64),
-            synchronous: SqliteSynchronous::Normal,
+            synchronous,
             wal_autocheckpoint_pages: 1_000,
             cache_size: -2_000,
+            operational: crate::SqliteOperationalSettings::standard(),
+        }
+    }
+}
+
+impl SqliteConnectionPolicy {
+    /// Development uses one reader, a 2 s busy budget and the smaller
+    /// operational development capacities; WAL and cache remain standard.
+    /// These capacity reductions are unmeasured. The host states durability.
+    pub fn development(synchronous: SqliteSynchronous) -> Self {
+        Self {
+            read_connections: std::num::NonZeroUsize::MIN,
+            busy_timeout: Duration::from_secs(2),
+            operational: crate::SqliteOperationalSettings::development(),
+            ..Self::standard(synchronous)
         }
     }
 }
@@ -358,15 +404,19 @@ fn install_perf_statement_witness(connection: &Connection) {
 /// on that conversion and all but one get `SQLITE_BUSY`/"database is locked".
 /// We therefore retry the conversion ourselves with a short backoff until the
 /// busy-timeout budget is exhausted.
-fn set_wal_journal_mode(c: &Connection, busy_timeout: Duration) -> rusqlite::Result<()> {
+fn set_wal_journal_mode(
+    c: &Connection,
+    busy_timeout: Duration,
+    policy: crate::SqliteOperationalSettings,
+) -> rusqlite::Result<()> {
     let deadline = std::time::Instant::now() + busy_timeout;
-    let mut backoff = std::time::Duration::from_millis(1);
+    let mut backoff = policy.wal_retry_initial;
     loop {
         match c.pragma_update(None, "journal_mode", "WAL") {
             Ok(()) => return Ok(()),
             Err(err) if is_busy(&err) && std::time::Instant::now() < deadline => {
                 std::thread::sleep(backoff);
-                backoff = (backoff * 2).min(std::time::Duration::from_millis(50));
+                backoff = backoff.saturating_mul(2).min(policy.wal_retry_max);
             }
             Err(err) => return Err(err),
         }
@@ -456,6 +506,7 @@ impl WriterFence {
 /// encoded under [`fleet`](Self::fleet), so nothing it writes straddles a
 /// finalize.
 pub(crate) struct FencedTx<'c> {
+    pub(crate) operational: crate::SqliteOperationalSettings,
     tx: Transaction<'c>,
     fleet: FleetFormat,
     /// The build's writable range for `F`: the fleet is finalized at this
@@ -503,6 +554,7 @@ impl<'c> std::ops::Deref for FencedTx<'c> {
 /// it to every module.
 #[derive(Clone)]
 pub(crate) struct SqliteConnection {
+    pub(crate) operational: crate::SqliteOperationalSettings,
     inner: AsyncConnection,
     /// The gate every in-process writer to this connection's database queues
     /// on (FIG-3975), shared by all connections that open it.
@@ -576,7 +628,13 @@ impl SqliteConnection {
         policy: SqliteConnectionPolicy,
         #[cfg(feature = "testing")] hooks: crate::testing::ConnectionHooks,
     ) -> tokio_rusqlite::Result<Self> {
-        Self::check_release_before_open(target, crate::release_stamp::BUILD_RELEASE).await?;
+        policy.operational.validate()?;
+        Self::check_release_configured(
+            target,
+            crate::release_stamp::BUILD_RELEASE,
+            policy.operational,
+        )
+        .await?;
         let gate = write_gate(target);
         let reads = read_gate(target);
         let path = target.open_name();
@@ -587,18 +645,27 @@ impl SqliteConnection {
                 // Install the busy handler through the rusqlite API *before* the
                 // WAL conversion so ordinary write contention waits on it.
                 c.busy_timeout(policy.busy_timeout)?;
-                c.set_prepared_statement_cache_capacity(PREPARED_STATEMENT_CACHE_CAPACITY);
+                c.set_prepared_statement_cache_capacity(
+                    policy.operational.statement_cache_capacity,
+                );
                 // The WAL switch is not covered by the busy handler, so it gets
                 // its own bounded retry loop (see `set_wal_journal_mode`).
-                set_wal_journal_mode(c, policy.busy_timeout)?;
+                set_wal_journal_mode(c, policy.busy_timeout, policy.operational)?;
                 c.execute_batch(&pragmas)?;
                 install_perf_statement_witness(c);
                 Ok(())
             })
             .await?;
         Ok(Self {
+            operational: policy.operational,
             inner,
-            checkpoint: checkpoint_state(target, &gate, &reads, policy.wal_autocheckpoint_pages),
+            checkpoint: checkpoint_state(
+                target,
+                &gate,
+                &reads,
+                policy.wal_autocheckpoint_pages,
+                policy.operational,
+            ),
             write_gate: gate,
             read_gate: reads,
             fence: WriterFence::new(),
@@ -609,8 +676,17 @@ impl SqliteConnection {
         })
     }
 
-    /// Used by the export/resume call sites that must never mutate the source database.
+    #[cfg(test)]
     pub(crate) async fn open_readonly(target: &DatabaseTarget) -> tokio_rusqlite::Result<Self> {
+        Self::open_readonly_configured(target, crate::SqliteOperationalSettings::standard()).await
+    }
+
+    pub(crate) async fn open_readonly_configured(
+        target: &DatabaseTarget,
+        operational: crate::SqliteOperationalSettings,
+    ) -> tokio_rusqlite::Result<Self> {
+        operational.validate()?;
+
         let uri = target.read_only_uri();
         let inner = AsyncConnection::start(move || {
             Connection::open_with_flags(
@@ -623,14 +699,15 @@ impl SqliteConnection {
         .await?;
         inner
             .call(move |c| {
-                c.busy_timeout(crate::connection_sql::READ_ONLY_BUSY_TIMEOUT)?;
-                c.set_prepared_statement_cache_capacity(PREPARED_STATEMENT_CACHE_CAPACITY);
-                c.execute_batch(crate::connection_sql::READ_ONLY_PRAGMAS)?;
+                c.busy_timeout(operational.readonly_busy_timeout)?;
+                c.set_prepared_statement_cache_capacity(operational.statement_cache_capacity);
+                c.pragma_update(None, "cache_size", operational.readonly_cache_size)?;
                 install_perf_statement_witness(c);
                 Ok(())
             })
             .await?;
         Ok(Self {
+            operational,
             inner,
             write_gate: write_gate(target),
             read_gate: read_gate(target),
@@ -645,15 +722,29 @@ impl SqliteConnection {
 
     /// Refuse pre-release file stores before journal setup, recovery or backup
     /// can change their bytes. The installer checks again in its transaction.
+    #[cfg(test)]
     pub(crate) async fn check_release_before_open(
         target: &DatabaseTarget,
         build_release: &str,
+    ) -> tokio_rusqlite::Result<()> {
+        Self::check_release_configured(
+            target,
+            build_release,
+            crate::SqliteOperationalSettings::standard(),
+        )
+        .await
+    }
+
+    pub(crate) async fn check_release_configured(
+        target: &DatabaseTarget,
+        build_release: &str,
+        policy: crate::SqliteOperationalSettings,
     ) -> tokio_rusqlite::Result<()> {
         // A named SQLite memory database belongs to this process's build.
         if !matches!(target, DatabaseTarget::File(_)) || !target.exists() {
             return Ok(());
         }
-        let connection = Self::open_readonly(target).await?;
+        let connection = Self::open_readonly_configured(target, policy).await?;
         let build_release = build_release.to_owned();
         let result = connection.call(move |c| {
             let writing_release = crate::release_stamp::read_release(c);
@@ -676,8 +767,13 @@ impl SqliteConnection {
     pub(crate) async fn migration_stamp(
         target: &DatabaseTarget,
         busy_timeout: Duration,
+        operational: crate::SqliteOperationalSettings,
     ) -> rusqlite::Result<Option<lash_core_execution::compat::CompatStamp>> {
-        let connection = flatten(Self::open_readonly(target).await.map(Ok))?;
+        let connection = flatten(
+            Self::open_readonly_configured(target, operational)
+                .await
+                .map(Ok),
+        )?;
         let result = connection
             .call(move |c| {
                 c.busy_timeout(busy_timeout)?;
@@ -883,6 +979,7 @@ impl SqliteConnection {
         let read_gate = Arc::clone(&self.read_gate);
         let checkpoint = self.checkpoint.clone();
         let fence = Arc::clone(&self.fence);
+        let operational = self.operational;
         #[cfg(feature = "testing")]
         let pauses = self.pauses.clone();
         flatten(
@@ -907,6 +1004,7 @@ impl SqliteConnection {
                         pauses.reach_after_fence();
                     }
                     let tx = FencedTx {
+                        operational,
                         tx,
                         fleet,
                         writable: fence.writable(),

@@ -58,6 +58,23 @@ pub struct SqliteStoreSetOptions {
 }
 
 impl SqliteStoreSetOptions {
+    /// Development uses uncompressed blobs and smaller reader/working
+    /// capacities, with standard migration backups. The host states durability.
+    pub fn development(synchronous: crate::SqliteSynchronous) -> Self {
+        Self {
+            store: StoreOptions::development(synchronous),
+            migration_backup: crate::SqliteMigrationBackup::development(),
+            observer: lash_core_execution::facade_support::StoreObserver::default(),
+            process_id_mint: lash_core_execution::ProcessIdMint::default(),
+            #[cfg(feature = "testing")]
+            pauses: None,
+            #[cfg(feature = "testing")]
+            inline_calls: false,
+            #[cfg(feature = "testing")]
+            migration_hook: None,
+        }
+    }
+
     /// The options [`SqliteStoreSet::memory`] uses: uncompressed blobs,
     /// since an in-memory catalog spends CPU, not disk, on compression.
     pub fn memory() -> Self {
@@ -199,7 +216,7 @@ impl SqliteStoreSet {
         crate::migration::migrate_on_open(
             &location,
             &options.migration_backup,
-            options.store.connection_policy.busy_timeout,
+            options.store.connection_policy,
             clock.as_ref(),
             probe,
         )

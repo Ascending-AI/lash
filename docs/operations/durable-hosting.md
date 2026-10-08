@@ -81,7 +81,7 @@ let stores: Arc<dyn lash::StoreSet> = Arc::new(lash::postgres::PostgresStoreSet:
     attachment_store,
 ));
 let backend = DurableBackendBuilder::new(stores)
-    .config(DurableSettings::default())
+    .config(DurableSettings::standard())
     .process_engine(Arc::new(CiEngine))
     .projection_provider(Arc::new(TicketProvider::new(client)))
     .build()?;
@@ -717,6 +717,33 @@ naming it plus a provider that reads it.
 ## 8. Operations
 
 ### DurableConfig
+
+`DurableSettings::standard()` is the production preset and the builder's
+omission default. `DurableSettings::development()` reduces claims to 2,
+active actors to 8, group members to 8 and cascade batches to 32, keeping
+all other standard values. Both are plain data, and every field remains
+configurable. FIG-5167 measured wake behavior under the standard leases;
+the other numerical capacities and timing choices lack workload measurements.
+
+For SQLite, `SqliteConnectionPolicy::standard(synchronous)` selects the
+production connection preset, and `::development(synchronous)` selects one
+reader and a 2 s busy budget. The host states filesystem synchronization.
+`StoreOptions::development(synchronous)` uses uncompressed blobs;
+`SqliteStoreSetOptions::development(synchronous)` also keeps the standard
+migration backup (two complete backups beside the store). Backup location
+and count remain configurable.
+
+The connection policy's `operational` field exposes readonly busy/cache,
+statement cache, checkpoint pacing/busy, WAL retry, wake poll/retention/reopen,
+lock attempts and polling, migration polling, checkpoint/graph chunks and
+event-release paging. `SqliteOperationalSettings::standard()` documents every
+value and its evidence; `::development()` reduces working capacities.
+FIG-3975 found a 16-statement cache evicted the store's statement mix, leading
+to 256 in standard. The timing and reduced development values are unmeasured.
+Handles on one file share a checkpoint worker and resolve its timing and
+threshold to the smallest values requested during that worker's lifetime, rather than a
+first-opener policy.
+Reopened handles retain their selected options.
 
 `DurableSettings` is plain data. The builder validates it into a
 `lash::durable::DurableConfig`, and `DurableConfigError` names the first broken

@@ -35,14 +35,11 @@ const DIR_SUFFIX: &str = "-liveness";
 /// The extension of every lock file.
 const EXTENSION: &str = "lock";
 
-/// How many times a holder takes its lock again after finding its path
-/// deleted under it before it reports the lock as held elsewhere.
-const HOLD_ATTEMPTS: usize = 8;
-
 /// The liveness locks of one file database.
 #[derive(Clone, Debug)]
 pub(crate) struct LivenessLocks {
     dir: PathBuf,
+    attempts: std::num::NonZeroUsize,
 }
 
 /// What a probe saw.
@@ -71,11 +68,12 @@ pub(crate) struct ProbeGuard {
 
 impl LivenessLocks {
     /// The liveness locks of the database at `database`.
-    pub(crate) fn beside(database: &Path) -> Self {
+    pub(crate) fn beside(database: &Path, attempts: std::num::NonZeroUsize) -> Self {
         let mut dir = database.as_os_str().to_owned();
         dir.push(DIR_SUFFIX);
         Self {
             dir: PathBuf::from(dir),
+            attempts,
         }
     }
 
@@ -90,7 +88,7 @@ impl LivenessLocks {
     )]
     pub(crate) fn try_hold(&self, name: &str) -> io::Result<Option<HeldLock>> {
         let path = self.path(name);
-        for _ in 0..HOLD_ATTEMPTS {
+        for _ in 0..self.attempts.get() {
             std::fs::create_dir_all(&self.dir)?;
             let file = OpenOptions::new()
                 .create(true)

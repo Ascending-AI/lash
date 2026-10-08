@@ -224,6 +224,7 @@ async fn store_options_apply_connection_policy_on_connection_thread() {
                 synchronous: SqliteSynchronous::Full,
                 wal_autocheckpoint_pages: 17,
                 cache_size: -4096,
+                ..SqliteConnectionPolicy::default()
             },
         },
     )

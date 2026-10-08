@@ -254,9 +254,10 @@ fn encode_msgpack<T: serde::Serialize>(
 async fn put_checkpoint_blobs_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     blobs: &std::collections::BTreeMap<String, std::sync::Arc<[u8]>>,
+    chunk_size: usize,
 ) -> Result<(), StoreError> {
     let blobs = blobs.iter().collect::<Vec<_>>();
-    for chunk in blobs.chunks(CHECKPOINT_COMPONENT_REF_CHUNK_SIZE) {
+    for chunk in blobs.chunks(chunk_size) {
         let hashes = chunk
             .iter()
             .map(|(hash, _)| hash.as_str())
@@ -286,11 +287,6 @@ async fn get_blob_tx(
         .map_err(store_sqlx_error)
 }
 
-// One array bind avoids PostgreSQL's scalar-parameter ceiling. A 16,384-ref
-// chunk is four times the largest required depth while bounding each encoded
-// request to roughly one MiB of SHA-256 text plus array framing.
-const CHECKPOINT_COMPONENT_REF_CHUNK_SIZE: usize = 16_384;
-
 pub(crate) async fn lock_checkpoint_blob_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     blob_ref: &str,
@@ -317,6 +313,7 @@ pub(crate) async fn lock_checkpoint_blob_tx(
 async fn lock_checkpoint_blobs_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     acquisition_order: &[(String, Option<String>)],
+    chunk_size: usize,
 ) -> Result<(), StoreError> {
     let blob_refs = acquisition_order
         .iter()
@@ -325,7 +322,7 @@ async fn lock_checkpoint_blobs_tx(
         .into_iter()
         .collect::<Vec<_>>();
     let mut locked = std::collections::HashSet::with_capacity(blob_refs.len());
-    for chunk in blob_refs.chunks(CHECKPOINT_COMPONENT_REF_CHUNK_SIZE) {
+    for chunk in blob_refs.chunks(chunk_size) {
         locked.extend(
             sqlx::query_scalar::<_, String>(
                 crate::blobs::blob_sql().postgres.lock_existing_hashes.sql(),
@@ -355,6 +352,7 @@ async fn lock_checkpoint_blobs_tx(
 async fn checkpoint_component_bodies_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     manifest: &SessionCheckpoint,
+    chunk_size: usize,
 ) -> Result<std::collections::HashMap<String, std::sync::Arc<[u8]>>, StoreError> {
     let blob_refs = manifest
         .components
@@ -363,7 +361,7 @@ async fn checkpoint_component_bodies_tx(
         .collect::<std::collections::BTreeSet<_>>();
     let mut bodies = std::collections::HashMap::with_capacity(blob_refs.len());
     let blob_refs = blob_refs.iter().map(String::as_str).collect::<Vec<_>>();
-    for chunk in blob_refs.chunks(CHECKPOINT_COMPONENT_REF_CHUNK_SIZE) {
+    for chunk in blob_refs.chunks(chunk_size) {
         let rows = sqlx::query(
             crate::blobs::blob_sql()
                 .postgres
@@ -392,6 +390,7 @@ pub(crate) async fn put_checkpoint_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     checkpoint: &HydratedSessionCheckpoint,
     fleet_format: lash_core_execution::FleetFormat,
+    chunk_size: usize,
 ) -> Result<(BlobRef, SessionCheckpoint), StoreError> {
     let manifest = checkpoint.manifest(fleet_format)?;
     let bytes = encode_msgpack(&manifest, "checkpoint root")?;
@@ -443,8 +442,8 @@ pub(crate) async fn put_checkpoint_tx(
             .entry(stored_ref.0)
             .or_insert_with(|| std::sync::Arc::clone(body));
     }
-    put_checkpoint_blobs_tx(tx, &supplied_blobs).await?;
-    lock_checkpoint_blobs_tx(tx, &acquisition_order).await?;
+    put_checkpoint_blobs_tx(tx, &supplied_blobs, chunk_size).await?;
+    lock_checkpoint_blobs_tx(tx, &acquisition_order, chunk_size).await?;
     let component_refs = manifest
         .components
         .values()
@@ -465,6 +464,7 @@ pub(crate) async fn get_checkpoint_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     blob_ref: &BlobRef,
     fleet: lash_core_execution::FleetFormat,
+    chunk_size: usize,
 ) -> Result<Option<HydratedSessionCheckpoint>, StoreError> {
     let bytes = get_blob_tx(tx, blob_ref).await?;
     let Some(bytes) = bytes else {
@@ -480,7 +480,7 @@ pub(crate) async fn get_checkpoint_tx(
             fleet,
         )?;
     manifest.validate_component_encoding_versions_for_fleet(fleet)?;
-    let bodies = checkpoint_component_bodies_tx(tx, &manifest).await?;
+    let bodies = checkpoint_component_bodies_tx(tx, &manifest, chunk_size).await?;
     let mut components = std::collections::BTreeMap::new();
     for (key, descriptor) in &manifest.components {
         let body = bodies.get(descriptor.blob_ref.as_str()).ok_or_else(|| {

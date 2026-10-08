@@ -479,10 +479,12 @@ impl SqliteStore {
 
     /// The liveness locks beside a file database; none for a memory one.
     fn sweep_locks(&self) -> Option<crate::liveness_locks::LivenessLocks> {
-        self.location
-            .target()
-            .file_path()
-            .map(crate::liveness_locks::LivenessLocks::beside)
+        self.location.target().file_path().map(|path| {
+            crate::liveness_locks::LivenessLocks::beside(
+                path,
+                self.conn.operational.liveness_lock_attempts,
+            )
+        })
     }
 
     /// `Condemned -> Deleting` under `generation`: the CAS that authorizes the

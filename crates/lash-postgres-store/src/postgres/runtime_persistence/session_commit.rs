@@ -347,6 +347,7 @@ impl PostgresStore {
             planner,
             lash_core_execution::store::HeadWriter::Store,
             now,
+            self.pools.maintenance.checkpoint_ref_chunk as usize,
         )
         .await?;
         tx.commit().await.map_err(store_sqlx_error)?;
@@ -364,6 +365,7 @@ pub(crate) async fn apply_runtime_commit_tx(
     planner: &lash_core_execution::store::RuntimeCommitPlanner,
     writer: lash_core_execution::store::HeadWriter,
     now: u64,
+    chunk_size: usize,
 ) -> Result<RuntimeCommitReceipt, StoreError> {
     let commit = planner.commit();
     let fleet = tx.fleet();
@@ -457,7 +459,8 @@ pub(crate) async fn apply_runtime_commit_tx(
     };
     // Publication owns the complete sorted blob-row set before this fresh
     // commit locks or writes any checkpoint owner edge, graph row, or head.
-    let (checkpoint_ref, manifest) = put_checkpoint_tx(&mut *tx, &commit.checkpoint, fleet).await?;
+    let (checkpoint_ref, manifest) =
+        put_checkpoint_tx(&mut *tx, &commit.checkpoint, fleet, chunk_size).await?;
     let actual_revision = existing.as_ref().map_or(0, |meta| meta.head_revision);
     let locked_revision =
         sqlx::query_scalar::<_, i64>(session_sql().head_postgres.select_revision_for_update.sql())

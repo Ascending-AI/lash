@@ -45,6 +45,16 @@ pub struct LeaseSettings {
 
 impl Default for LeaseSettings {
     fn default() -> Self {
+        Self::standard()
+    }
+}
+
+impl LeaseSettings {
+    /// Standard production: TTL 15 s, heartbeat 3 s, self-stop 10 s,
+    /// reap 2 s, claim poll 250 ms / backoff 25 ms, startup and shutdown 2 s.
+    /// FIG-5167 measured wakes under these timings; it did not establish
+    /// universal numerical choices. Startup/shutdown have no workload evidence.
+    pub fn standard() -> Self {
         Self {
             ttl: Duration::from_secs(15),
             heartbeat_every: Duration::from_secs(3),
@@ -111,6 +121,13 @@ pub struct LeaseConfig {
 }
 
 impl LeaseSettings {
+    /// Development uses the standard lease timings: TTL 15 s, heartbeat 3 s,
+    /// self-stop 10 s, reap 2 s, poll 250 ms, backoff 25 ms, startup/shutdown
+    /// 2 s. FIG-5167 measured wake behavior, not universal timing suitability.
+    pub fn development() -> Self {
+        Self::standard()
+    }
+
     /// Validate these timings.
     ///
     /// # Errors

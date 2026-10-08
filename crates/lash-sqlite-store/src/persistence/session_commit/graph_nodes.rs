@@ -10,7 +10,7 @@ use super::*;
 /// The id list is bound as a single JSON array, the same idiom the checkpoint
 /// ref batches use, so the scalar-parameter ceiling is never in play.
 pub(super) fn occupied_node_ids_conn(
-    tx: &rusqlite::Connection,
+    tx: &crate::conn::FencedTx<'_>,
     nodes: &[lash_core_execution::SessionNodeRecord],
 ) -> Result<std::collections::HashSet<lash_core_execution::NodeId>, StoreError> {
     let mut occupied = std::collections::HashSet::new();
@@ -21,7 +21,7 @@ pub(super) fn occupied_node_ids_conn(
         .iter()
         .map(|node| node.node_id.as_str())
         .collect::<Vec<_>>();
-    for chunk in node_ids.chunks(OCCUPIED_NODE_ID_CHUNK_SIZE) {
+    for chunk in node_ids.chunks(tx.operational.occupied_node_chunk.get()) {
         let encoded = serde_json::to_string(chunk).map_err(|error| {
             StoreError::Backend(format!("failed to encode commit node id batch: {error}"))
         })?;
@@ -38,10 +38,6 @@ pub(super) fn occupied_node_ids_conn(
     Ok(occupied)
 }
 
-/// One JSON-array bind per commit keeps the encoded id list around a MiB while
-/// staying far above any realistic per-commit node count.
-const OCCUPIED_NODE_ID_CHUNK_SIZE: usize = 16_384;
-
 /// Asked as one multi-row `INSERT` rather than one statement per node: the rows
 /// are already known in full before any of them is written, and they all land or
 /// none of them do regardless, so a statement per node bought no atomicity — it
@@ -54,14 +50,14 @@ const OCCUPIED_NODE_ID_CHUNK_SIZE: usize = 16_384;
 /// the loop used to raise. That replay runs only on the failing path, where a
 /// commit is being refused anyway.
 pub(super) fn insert_graph_nodes_conn(
-    tx: &rusqlite::Connection,
+    tx: &crate::conn::FencedTx<'_>,
     session_id: &SessionId,
     nodes: &[lash_core_execution::SessionNodeRecord],
     plan: &lash_core_execution::store::RuntimeCommitPlan<'_>,
 ) -> Result<(), StoreError> {
-    for (nodes, facts) in nodes.chunks(GRAPH_NODE_INSERT_CHUNK_SIZE).zip(
+    for (nodes, facts) in nodes.chunks(tx.operational.graph_insert_chunk.get()).zip(
         plan.planned_node_facts()
-            .chunks(GRAPH_NODE_INSERT_CHUNK_SIZE),
+            .chunks(tx.operational.graph_insert_chunk.get()),
     ) {
         let mut rows = Vec::with_capacity(nodes.len());
         for (node, facts) in nodes.iter().zip(facts) {
@@ -99,18 +95,12 @@ pub(super) fn insert_graph_nodes_conn(
     Ok(())
 }
 
-/// The batch rides as one JSON array bound to a single parameter, so SQLite's
-/// 32,766-parameter ceiling is not in play at all; the chunk bounds the encoded
-/// array's size instead, and sits far above any per-commit node count, so the
-/// chunking never runs in practice.
-const GRAPH_NODE_INSERT_CHUNK_SIZE: usize = 512;
-
 /// Replay a failed node batch row by row so the refusal names the offending row.
 ///
 /// Reached only after the batch has already failed and the transaction is headed
 /// for a rollback, so the extra statements cost nothing a successful commit pays.
 fn insert_graph_nodes_one_at_a_time(
-    tx: &rusqlite::Connection,
+    tx: &crate::conn::FencedTx<'_>,
     session_id: &SessionId,
     nodes: &[lash_core_execution::SessionNodeRecord],
     facts: &[lash_core_execution::store::PlannedNodeFacts],

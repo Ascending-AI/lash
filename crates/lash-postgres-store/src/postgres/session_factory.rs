@@ -492,6 +492,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                 &mut tx,
                 &BlobRef(retained_ref.clone()),
                 self.fence.fleet(),
+                self.pools.maintenance.checkpoint_ref_chunk as usize,
             )
             .await?
             .ok_or(StoreError::CheckpointRootMissing {
@@ -519,11 +520,16 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             )?;
             if inherited_admission || source_frame_ended || forked_state {
                 checkpoint_ref = Some(
-                    crate::support::put_checkpoint_tx(&mut tx, &checkpoint, self.fence.fleet())
-                        .await?
-                        .0
-                        .as_str()
-                        .to_owned(),
+                    crate::support::put_checkpoint_tx(
+                        &mut tx,
+                        &checkpoint,
+                        self.fence.fleet(),
+                        self.pools.maintenance.checkpoint_ref_chunk as usize,
+                    )
+                    .await?
+                    .0
+                    .as_str()
+                    .to_owned(),
                 );
             }
         }

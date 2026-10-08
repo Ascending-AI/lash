@@ -501,7 +501,7 @@ async fn a_wake_crosses_processes_and_a_killed_process_is_reaped_by_its_lock() {
                 assert!(snapshot.epoch > claimed.epoch, "takeover fences the child");
                 break;
             }
-            tokio::time::sleep(POLL).await;
+            tokio::time::sleep(crate::SqliteOperationalSettings::standard().wake_poll).await;
         }
     })
     .await

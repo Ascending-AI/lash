@@ -111,11 +111,6 @@ fn blob_content_hash(content: &[u8]) -> String {
 }
 
 impl SqliteStore {
-    // One JSON-array bind avoids SQLite's scalar-parameter ceiling. A
-    // 16,384-ref chunk is four times the largest required depth while bounding
-    // each encoded request to roughly one MiB of SHA-256 text plus JSON framing.
-    const CHECKPOINT_COMPONENT_REF_CHUNK_SIZE: usize = 16_384;
-
     /// Decode a checkpoint from a fresh durable connection without calling
     /// the session history read path.
     #[cfg(any(test, feature = "testing"))]
@@ -125,7 +120,14 @@ impl SqliteStore {
     ) -> Result<Option<HydratedSessionCheckpoint>, StoreError> {
         let connection = Connection::open(path).map_err(sqlite_error)?;
         let fleet = crate::compat::recorded_or_current(&connection).map_err(sqlite_error)?;
-        Self::get_checkpoint_conn(&connection, blob_ref, fleet)
+        Self::get_checkpoint_conn(
+            &connection,
+            blob_ref,
+            fleet,
+            crate::SqliteOperationalSettings::standard()
+                .checkpoint_ref_chunk
+                .get(),
+        )
     }
 
     pub(crate) fn insert_artifact_blob_conn(
@@ -207,12 +209,16 @@ impl SqliteStore {
     /// collector can observe the git-loose-object race where a leaf exists
     /// without its root, or a root becomes visible before all leaves exist.
     pub(crate) fn put_checkpoint_conn(
-        conn: &Connection,
+        conn: &crate::conn::FencedTx<'_>,
         checkpoint: &HydratedSessionCheckpoint,
         profile: BuiltinBlobProfile,
         fleet_format: lash_core_execution::FleetFormat,
     ) -> Result<StoredSessionCheckpoint, StoreError> {
-        Self::validate_checkpoint_component_refs_conn(conn, checkpoint)?;
+        Self::validate_checkpoint_component_refs_conn(
+            conn,
+            checkpoint,
+            conn.operational.checkpoint_ref_chunk.get(),
+        )?;
         let manifest = checkpoint.manifest(fleet_format)?;
         for (key, descriptor) in &manifest.components {
             let component =
@@ -286,6 +292,7 @@ impl SqliteStore {
     pub(crate) fn validate_checkpoint_component_refs_conn(
         conn: &Connection,
         checkpoint: &HydratedSessionCheckpoint,
+        chunk_size: usize,
     ) -> Result<(), StoreError> {
         let mut referenced = std::collections::BTreeSet::new();
         for (key, component) in &checkpoint.components {
@@ -298,7 +305,8 @@ impl SqliteStore {
             };
             referenced.insert(blob_ref.as_str().to_string());
         }
-        let existing = Self::existing_checkpoint_component_refs_conn(conn, &referenced)?;
+        let existing =
+            Self::existing_checkpoint_component_refs_conn(conn, &referenced, chunk_size)?;
         for (key, component) in &checkpoint.components {
             let Some(blob_ref) = component.blob_ref().filter(|_| component.body().is_none()) else {
                 continue;
@@ -316,10 +324,11 @@ impl SqliteStore {
     fn existing_checkpoint_component_refs_conn(
         conn: &Connection,
         blob_refs: &std::collections::BTreeSet<String>,
+        chunk_size: usize,
     ) -> Result<std::collections::HashSet<String>, StoreError> {
         let mut existing = std::collections::HashSet::with_capacity(blob_refs.len());
         let blob_refs = blob_refs.iter().map(String::as_str).collect::<Vec<_>>();
-        for chunk in blob_refs.chunks(Self::CHECKPOINT_COMPONENT_REF_CHUNK_SIZE) {
+        for chunk in blob_refs.chunks(chunk_size) {
             let encoded = serde_json::to_string(chunk).map_err(|error| {
                 StoreError::Backend(format!("failed to encode checkpoint ref batch: {error}"))
             })?;
@@ -337,6 +346,7 @@ impl SqliteStore {
     fn checkpoint_component_bodies_conn(
         conn: &Connection,
         checkpoint: &SessionCheckpoint,
+        chunk_size: usize,
     ) -> Result<std::collections::HashMap<String, std::sync::Arc<[u8]>>, StoreError> {
         let blob_refs = checkpoint
             .components
@@ -345,7 +355,7 @@ impl SqliteStore {
             .collect::<std::collections::BTreeSet<_>>();
         let mut bodies = std::collections::HashMap::with_capacity(blob_refs.len());
         let blob_refs = blob_refs.iter().map(String::as_str).collect::<Vec<_>>();
-        for chunk in blob_refs.chunks(Self::CHECKPOINT_COMPONENT_REF_CHUNK_SIZE) {
+        for chunk in blob_refs.chunks(chunk_size) {
             let encoded = serde_json::to_string(chunk).map_err(|error| {
                 StoreError::Backend(format!("failed to encode checkpoint ref batch: {error}"))
             })?;
@@ -387,13 +397,14 @@ impl SqliteStore {
         conn: &Connection,
         blob_ref: &BlobRef,
         fleet: lash_core_execution::FleetFormat,
+        chunk_size: usize,
     ) -> Result<Option<HydratedSessionCheckpoint>, StoreError> {
         let Some(bytes) = Self::get_blob_conn(conn, blob_ref)? else {
             return Ok(None);
         };
         let record = decode_checkpoint_for_fleet(&bytes, fleet)?;
         record.validate_component_encoding_versions_for_fleet(fleet)?;
-        let bodies = Self::checkpoint_component_bodies_conn(conn, &record)?;
+        let bodies = Self::checkpoint_component_bodies_conn(conn, &record, chunk_size)?;
         let mut components = std::collections::BTreeMap::new();
         for (key, descriptor) in &record.components {
             let body = bodies.get(descriptor.blob_ref.as_str()).ok_or_else(|| {
@@ -465,10 +476,12 @@ impl SqliteStore {
         blob_ref: &BlobRef,
     ) -> Result<Option<HydratedSessionCheckpoint>, StoreError> {
         let blob_ref = blob_ref.clone();
+        let chunk_size = self.conn.operational.checkpoint_ref_chunk.get();
         let fleet = self.conn.fleet();
         self.conn
             .call(move |conn| {
-                Self::get_checkpoint_conn(conn, &blob_ref, fleet).map_err(sqlite_conversion_error)
+                Self::get_checkpoint_conn(conn, &blob_ref, fleet, chunk_size)
+                    .map_err(sqlite_conversion_error)
             })
             .await
             .map_err(sqlite_error)

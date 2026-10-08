@@ -191,7 +191,11 @@ impl SqliteStore {
         crate::schema::ensure_versioned_schema_with_writable(&conn, writable).await?;
         let mut readers = Vec::with_capacity(options.connection_policy.read_connections.get());
         for _ in 0..options.connection_policy.read_connections.get() {
-            let reader = SqliteConnection::open_readonly(core.target()).await?;
+            let reader = SqliteConnection::open_readonly_configured(
+                core.target(),
+                options.connection_policy.operational,
+            )
+            .await?;
             #[cfg(feature = "testing")]
             let reader = reader.with_inline_calls(inline_calls);
             readers.push(reader);

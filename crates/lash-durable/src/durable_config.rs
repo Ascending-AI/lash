@@ -67,6 +67,17 @@ pub struct DurableSettings {
 
 impl Default for DurableSettings {
     fn default() -> Self {
+        Self::standard()
+    }
+}
+
+impl DurableSettings {
+    /// Standard production: standard leases, claims of 16 / 256 active,
+    /// idle eviction 60 s, activation loop budget 8, groups of 64 / 5 ms,
+    /// snapshot every 1,000,000 fuel, cascades of 256, after-commit wakes.
+    /// Lease timing evidence is documented by `LeaseSettings::standard`;
+    /// no workload measurement establishes the other numerical values.
+    pub fn standard() -> Self {
         Self {
             lease: LeaseSettings::default(),
             claim_batch: 16,
@@ -143,6 +154,23 @@ impl Default for DurableConfig {
 }
 
 impl DurableSettings {
+    /// Development: 2 actors per claim, 8 active actors, groups of 8, and
+    /// cascades of 32. All other values are standard. These smaller working
+    /// capacities are unmeasured conveniences for a local host.
+    pub fn development() -> Self {
+        Self {
+            lease: LeaseSettings::development(),
+            claim_batch: 2,
+            max_active: 8,
+            group_commit: GroupCommit {
+                max_members: 8,
+                ..Self::standard().group_commit
+            },
+            cascade_batch: 32,
+            ..Self::standard()
+        }
+    }
+
     /// Validate these parameters.
     ///
     /// # Errors

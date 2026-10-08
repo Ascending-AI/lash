@@ -26,7 +26,7 @@ use crate::SchemaCheck;
 
 /// Every lash PostgreSQL connection role's sizes, guards, retries and
 /// names, and the durable node settings, validated together.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct PostgresHostConfig {
     /// Transport policy every role shares.
@@ -50,8 +50,57 @@ pub struct PostgresHostConfig {
     /// What open does when the live schema drifts.
     pub schema_check: SchemaCheck,
     /// The deployment's connection budget. `None` skips the server
-    /// capacity check, for development only: a production host declares it.
+    /// capacity check. Both presets leave this optional; a host can declare it.
     pub deployment: Option<DeploymentBudget>,
+}
+
+impl Default for PostgresHostConfig {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+
+impl PostgresHostConfig {
+    /// Standard production preset: the role sizes, acquire/SQL deadlines,
+    /// retry and maintenance values documented in `docs/operations/postgres.md`.
+    /// Pool recycling matches SQLx 0.8.6; exact sizes, deadlines and retries
+    /// have no universal workload measurement. TLS inherits endpoints,
+    /// schema checks enforce compatibility, live replay is off, and no
+    /// deployment capacity claim is invented (`deployment = None`). Set a
+    /// deployment budget to check capacity against the server before serving.
+    pub fn standard() -> Self {
+        Self {
+            connection: ConnectionPolicy::default(),
+            roles: RolePolicies::default(),
+            node: DurableSettings::standard(),
+            guards: GuardPolicies::default(),
+            retry: RetryPolicies::default(),
+            signals: SignalPolicy::default(),
+            live_replay: None,
+            maintenance: MaintenancePolicy::default(),
+            schema_check: SchemaCheck::default(),
+            deployment: None,
+        }
+    }
+
+    /// Explicit local-development preset: work pool 4, scheduler 1, critical
+    /// 1, four store operations, and one preflight/migration connection each.
+    /// Checkpoint chunks are 256 and event-release pages 32.
+    /// Uses `DurableSettings::development`; other standard values apply,
+    /// including schema enforcement. No measurement backs these smaller
+    /// capacities. It makes no deployment capacity claim.
+    pub fn development() -> Self {
+        let mut config = Self::standard();
+        config.roles.work.max_connections = 4;
+        config.roles.critical.max_connections = 1;
+        config.roles.max_store_operations = 4;
+        config.maintenance.preflight_pool.max_connections = 1;
+        config.maintenance.migration_pool.max_connections = 1;
+        config.node = DurableSettings::development();
+        config.maintenance.checkpoint_ref_chunk = 256;
+        config.maintenance.process_event_release_page_rows = 32;
+        config
+    }
 }
 
 /// Transport policy shared by every role.
@@ -589,6 +638,11 @@ pub struct MaintenancePolicy {
     pub sweep_liveness_probe_timeout: Duration,
     /// Rows one process-event release page reads. Default 256.
     pub process_event_release_page_rows: u32,
+    /// Checkpoint refs/bodies in one query; standard 16,384 (around 1 MiB
+    /// of hash text). No workload measurement establishes this chunk size.
+    pub checkpoint_ref_chunk: u32,
+    /// Sweep-generation collision retries; standard 3, unmeasured.
+    pub sweep_mint_attempts: u32,
 }
 
 impl Default for MaintenancePolicy {
@@ -604,6 +658,8 @@ impl Default for MaintenancePolicy {
             max_schema_sessions: 1,
             sweep_liveness_probe_timeout: Duration::from_millis(500),
             process_event_release_page_rows: 256,
+            checkpoint_ref_chunk: 16_384,
+            sweep_mint_attempts: 3,
         }
     }
 }

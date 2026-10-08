@@ -40,7 +40,7 @@ impl DurableBackendBuilder {
     pub fn new(stores: Arc<dyn StoreSet>) -> Self {
         Self {
             stores,
-            settings: DurableSettings::default(),
+            settings: DurableSettings::standard(),
             host_settings: false,
             overridden: false,
             engines: Vec::new(),
@@ -135,4 +135,101 @@ fn projection_catalog(
         catalog.register(provider).map_err(|_| duplicate())?;
     }
     Ok(Arc::new(catalog))
+}
+
+#[cfg(all(test, feature = "sqlite"))]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// D-DEFAULTS2: the facade's non-default SQLite coordination reaches its reader.
+    #[tokio::test]
+    async fn sqlite_operational_policy_reaches_catalog_readers() {
+        let mut options = crate::sqlite::SqliteStoreSetOptions::memory();
+        options
+            .store
+            .connection_policy
+            .operational
+            .readonly_busy_timeout = Duration::from_millis(37);
+        options
+            .store
+            .connection_policy
+            .operational
+            .readonly_cache_size = -123;
+        let stores = crate::sqlite::SqliteStoreSet::memory_with_options_and_clock(
+            options,
+            Arc::new(crate::testing::TestClock::new(1_000)),
+        )
+        .await
+        .expect("configured SQLite store set");
+        assert_eq!(
+            stores
+                .reader_settings_for_testing()
+                .await
+                .expect("reader pragmas"),
+            (37, -123)
+        );
+    }
+
+    /// D-DEFAULTS2: operational settings cross the facade builder unchanged.
+    #[tokio::test]
+    async fn durable_preset_overrides_reach_the_backend() {
+        let stores = Arc::new(
+            crate::sqlite::SqliteStoreSet::memory()
+                .await
+                .expect("SQLite"),
+        );
+        let mut settings = DurableSettings::development();
+        settings.claim_batch = 3;
+        settings.max_active = 11;
+        settings.group_commit.max_members = 7;
+        settings.group_commit.window = Duration::from_millis(9);
+        settings.cascade_batch = 19;
+        settings.lease.claim_poll = Duration::from_millis(79);
+        settings.notifier = Notifier::PollOnly;
+        let backend = DurableBackendBuilder::new(stores)
+            .config(settings)
+            .build()
+            .expect("backend");
+        assert_eq!(backend.config().settings(), settings);
+        assert_eq!(backend.config().lease().settings(), settings.lease);
+    }
+
+    /// D-DEFAULTS2: the facade's PostgreSQL policy sizes the actual lazy pool
+    /// and carries deadlines to the SQL prelude without connecting a server.
+    #[cfg(feature = "postgres")]
+    #[tokio::test]
+    async fn postgres_operational_policy_reaches_pool_and_transaction() {
+        use crate::postgres::*;
+        let mut config = PostgresHostConfig::development();
+        config.roles.work.max_connections = 6;
+        config.roles.work.acquire_timeout = Duration::from_millis(73);
+        config.guards.durable.lock = ServerTimeout::Limit(Duration::from_millis(67));
+        config.validate().expect("host policy");
+        let factory = PostgresConnectionFactory::new(
+            PostgresEndpoints::from_url("postgres://localhost/lash").expect("endpoint"),
+            config.connection.clone(),
+        );
+        let pool = factory.pool(
+            ConnectionRole::Work,
+            &config.roles.work,
+            Some(&config.guards.ordinary),
+        );
+        assert_eq!(pool.options().get_max_connections(), 6);
+        assert_eq!(
+            pool.options().get_acquire_timeout(),
+            Duration::from_millis(73)
+        );
+        let prelude = TransactionPrelude::new(&config.guards.durable);
+        assert!(
+            prelude.statement().contains("lock_timeout = 67"),
+            "{}",
+            prelude.statement()
+        );
+        assert_eq!(prelude.deadline(), config.guards.durable.operation_deadline);
+        let omitted: PostgresHostConfig =
+            serde_json::from_str("{}").expect("omitted optional settings");
+        assert_eq!(omitted, PostgresHostConfig::standard());
+        PostgresHostConfig::standard().validate().expect("standard");
+    }
 }
