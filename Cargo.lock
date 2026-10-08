@@ -2929,7 +2929,9 @@ dependencies = [
  "lash-runtime",
  "serde",
  "serde_json",
+ "sqlx",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

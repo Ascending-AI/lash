@@ -34,6 +34,8 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [dev-dependencies]
 lash-postgres-store = { workspace = true, features = ["testing"] }
+sqlx = { workspace = true, features = ["postgres", "runtime-tokio-rustls"] }
+uuid = { workspace = true, features = ["v4"] }
 
 [[bin]]
 name = "lashctl"

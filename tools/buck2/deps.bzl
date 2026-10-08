@@ -1126,7 +1126,9 @@ PACKAGE_DEPS = {
     "lashctl": {
         "build": {},
         "dev": {
-            "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store"
+            "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
+            "sqlx": "//third-party/rust:p0333",
+            "uuid": "//third-party/rust:p0409"
         },
         "normal": {
             "lash": "//crates/lash:lash",

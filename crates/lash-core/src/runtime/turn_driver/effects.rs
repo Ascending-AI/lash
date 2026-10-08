@@ -531,7 +531,12 @@ impl RuntimeTurnDriver<'_> {
             })
             .await
             .map_err(|err| err.into_turn_failure(RuntimeErrorCode::PluginCheckpoint))?;
-        emit_session_events(event_tx, applied.events);
+        // Observed as the turn's own activity, as its checkpoint record is:
+        // a raw stream event reaches no turn report.
+        for event in applied.events {
+            self.turn_observations
+                .observe(event_tx, crate::engine::ObservedEvent::Session(event));
+        }
 
         Ok((
             crate::CheckpointDelivery {

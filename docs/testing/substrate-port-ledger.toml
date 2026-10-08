@@ -4,7 +4,7 @@
 # 1648 rows over 873 files, 4021 laws.
 # By class: mechanical 184, semantic 128, delete 871, replace 465.
 # By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 87, L9c 352, L9d 89, L9e 134, L9f 125, L9g 98, L9h 106, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
-# By status: todo 363, ported 105, deleted 1180.
+# By status: todo 360, ported 105, deleted 1183.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -185,10 +185,6 @@
 #   remote reset and transcript projection agree
 # - L9c: crates/lash/tests/facade_host_wrappers.rs
 #   a facade host wraps the rlm factory and its stores on sqlite memory; and 2 more law(s) of the file, by test name
-# - L9c: crates/lashctl/tests/operator_json_contract.rs::operator_json_contract_postgres
-#   operator json contract postgres
-# - L9c: crates/lashctl/tests/operator_json_contract.rs::recovery_json_uses_sqlite_and_keeps_typed_refusals
-#   recovery json uses sqlite and keeps typed refusals
 # - L9c: runbooks/session-binding/runbook.md
 #   a session-binding runbook selects the session binding, catalog acquisition, deletion and fork laws once they run on the durable harness
 # - L9c: runbooks/workbench-session-config/runbook.md
@@ -3515,9 +3511,9 @@ lane = "L9e"
 laws = [
   "scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_seed",
 ]
-disposition = "port"
-status = "todo"
-note = "blocked: fig-5172-prod (L3, FIG-5172): no production TurnServices runs a facade turn (the only impls are lash-durable-test's and lash-postgres-workers'), so a facade session opens on SQLite memory but its send never completes: a probe that builds a standard core over sqlite_memory_store_backend, opens a session and sends one text input times out after 20 s with the provider never called (L3s's session mail, FIG-5196, has landed); the law is not written yet"
+disposition = "replaced-by:crates/lash-durable-test/tests/context_budget_warning.rs::a_budget_warning_reaches_the_model_and_continue_as_carries_only_the_seed"
+status = "deleted"
+note = "the scripted driver went with Restate (FIG-5190, 5ad9641f9e); FIG-5309 re-wrote the law through a host's send() of an RLM turn on the core's node. It exposed two bugs: a durable turn never committed its last prompt usage (FIG-5208, bbffe67d98, deleted the legacy loop's write), so no turn ever warned; and a checkpoint's plugin events were published raw, never projected into the turn's activities. FIG-5309 commits the usage at the turn's finish and observes checkpoint events as turn activity"
 
 [[row]]
 path = "crates/lash-protocol-rlm/tests/protocol_drivers/render_cache_law.rs"
@@ -16425,10 +16421,10 @@ lane = "L9c"
 laws = [
   "operator_json_contract_postgres",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lashctl/tests/operator_json_contract.rs::operator_json_contract_postgres"
+status = "deleted"
 owed = "operator json contract postgres"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5309 re-wrote the law over a scratch PostgreSQL schema: the migrate plan and run, the empty backfill and contract phases, a ready preflight with the provisioned stamp and recorded fleet epoch, an expanded stamp still admitted and a raised reader floor refused typed, each as the versioned JSON envelope; the drain and park verbs went with Restate and its relays (FIG-5190, FIG-5191), and it needs no facade session. It is #[ignore]d outside a service gate and ran once under `with-service.sh pg`"
 
 [[row]]
 path = "crates/lashctl/tests/operator_json_contract.rs"
@@ -16440,10 +16436,10 @@ lane = "L9c"
 laws = [
   "recovery_json_uses_sqlite_and_keeps_typed_refusals",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lashctl/tests/operator_json_contract.rs::recovery_json_uses_sqlite_and_keeps_typed_refusals"
+status = "deleted"
 owed = "recovery json uses sqlite and keeps typed refusals"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "FIG-5309 re-wrote the law over a SQLite file: the stalled list pages artifact-cleanup obligations seeded through the store's ports and resumes after its last row, a re-armed one leaves the list, re-arming one not stalled answers false, deployment-status reports its admission, and an unnamed obligation kind is a usage refusal, each as the versioned JSON envelope; the run-relay obligations it read went with Restate (FIG-5190, FIG-5191)"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/approvals.rs"

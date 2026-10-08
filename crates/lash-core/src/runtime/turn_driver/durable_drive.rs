@@ -434,6 +434,12 @@ impl TurnDrive for RuntimeDrive {
             None => None,
         };
         let failure_evidence = driver.failure_evidence.clone();
+        // The turn's last completed prompt commits with it: the next turn's
+        // context budget reads it, while this turn's own checkpoints read
+        // the one before.
+        if let Some(prompt) = driver.latest_prompt_usage.clone() {
+            driver.turn_pipeline.state_mut().last_prompt_usage = Some(prompt);
+        }
         let mut commit = driver
             .turn_pipeline
             .durable_commit(
