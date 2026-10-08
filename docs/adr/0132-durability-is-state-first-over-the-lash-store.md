@@ -140,6 +140,17 @@ effect the checkpoint names.
   commit, so hooks are repeat-safe. An at-most-once external mutation is an
   admitted `Once` execution, not a hook.
 
+`TurnFinalized` lifecycle observers are advisory post-commit delivery. The
+owner delivers them after the turn's commit is acknowledged and its live
+commit observation is published or publication fails. The engine awaits
+observers in registration order and reports their failures; those failures
+cannot veto or change the committed outcome. A caller answers from the
+stored terminal independently of this delivery, so its answer may precede
+the observers. Delivery is not durable: an owner lost after commit may
+never deliver the event. A consumer or law that needs an observation waits
+for an explicit receipt from its observer, not for caller completion or an
+elapsed time.
+
 ### 5. Tool calls are phase rows
 
 The `RunLedger` records persist as rows keyed by `(owner, run, ordinal)`, and

@@ -210,6 +210,10 @@ pub struct SessionConfigChangedContext {
 
 #[derive(Clone)]
 pub enum PluginLifecycleEvent {
+    /// Advisory delivery after the turn's commit is acknowledged. The caller
+    /// may receive the committed outcome before observers run; observer
+    /// failures are reported and cannot change that outcome. Delivery is
+    /// not durable: an owner lost after commit may never deliver the event.
     TurnFinalized(Arc<AssembledTurn>),
     SessionRestored(SessionReadView),
     /// A config transaction changed the session's policy. Observers see it
