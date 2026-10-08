@@ -18,15 +18,18 @@
 //!   execution state from the seed. A later failure of the turn leaves the
 //!   frame in place.
 //!
-//! The commit is an idempotent fenced store write under an operation named by
-//! the turn and the hook (ADR 0105 §9), and the frame key is core's, derived
-//! from the session, the frame current at open, the turn and the hook. A hook
-//! is named by the plugin that registered it and its own id, so two plugins
-//! whose hooks share an id never share a record or frame namespace. A
-//! redriven turn replays the head its run was admitted on (ADR 0105 §2), so
-//! it decides again over the same base, reads the summarizer completion back
-//! from its journal, and meets the frame commit's receipt: it never opens a
-//! second frame or bills a second summary.
+//! The commit is the session's own head commit, `pressure.frame`, on the
+//! turn's session actor transaction (FIG-5355): the actor's epoch fences it,
+//! so a zombie owner opens nothing, and the bound run that owns the head
+//! never refuses it. It is written under an operation named by the turn and
+//! the hook (ADR 0105 §9), whose receipt makes it idempotent, and the frame
+//! key is core's, derived from the session, the frame current at open, the
+//! turn and the hook. A hook is named by the plugin that registered it and
+//! its own id, so two plugins whose hooks share an id never share a record
+//! or frame namespace. A turn redriven after the commit prepares over the
+//! head it moved, where the decision that opened the frame no longer holds;
+//! one redriven before it decides again over the same base and resends the
+//! summarizer's admitted body (ADR 0133 §8): it never opens a second frame.
 
 use super::*;
 use crate::ActorContext;
@@ -249,7 +252,7 @@ impl LashRuntime {
         };
         let frame_node_id = opened.result.frame_node_id.clone();
         if let Err(error) = self
-            .persist_context_pressure_frame(write, opened, committing.execution_scope())
+            .persist_context_pressure_frame(write, opened, committing)
             .await
         {
             // Nothing of the frame is durable: drop it from resident state,
@@ -315,7 +318,7 @@ impl LashRuntime {
         &mut self,
         write: &ContextPressureWrite<'_>,
         opened: crate::runtime::frame_open::OpenedFrame,
-        committing: &crate::ExecutionScope,
+        committing: &ActorContext,
     ) -> Result<(), RuntimeError> {
         // A storeless runtime keeps the frame resident, as it keeps
         // everything else.
@@ -335,7 +338,7 @@ impl LashRuntime {
             &self.state,
             opened.ended,
             opened.carries,
-            committing,
+            committing.execution_scope(),
             &persisted_node_ids,
         )
         .map_err(super::runtime_error_from_store_commit)?;
@@ -345,10 +348,27 @@ impl LashRuntime {
         )
         .await
         .map_err(super::runtime_error_from_store_commit)?;
+        crate::runtime::durable::head_commit::commit(
+            committing,
+            commit.clone(),
+            lash_durable::CommitLabel::PRESSURE_FRAME,
+            self.host.core.tracing.metrics(),
+        )
+        .await
+        .map_err(crate::runtime::durable::head_commit::HeadCommitError::into_runtime_error)?;
+        // The resident session adopts the landed commit's receipt, which
+        // its idempotent replay reads back and writes nothing for.
         let result = store
-            .commit_runtime_state_verified(commit, self.host.core.tracing.metrics())
+            .store()
+            .commit_runtime_state(commit)
             .await
             .map_err(super::runtime_error_from_store_commit)?;
+        if !result.receipt_replayed {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::StoreCommitFailed,
+                "the pressure frame's receipt read committed it anew",
+            ));
+        }
         self.state.apply_persisted_commit_result(result);
         self.state.mark_node_ids_persisted(persisted_node_ids);
         Ok(())

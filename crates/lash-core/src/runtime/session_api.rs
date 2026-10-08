@@ -1156,9 +1156,10 @@ impl LashRuntime {
             )
             .map_err(super::runtime_error_from_store_commit)?;
         commit.applied_commands = Some(completion);
-        let committed = super::durable::session_command::commit(
+        let committed = super::durable::head_commit::commit(
             owner,
             commit,
+            lash_durable::CommitLabel::SESSION_COMMAND,
             self.host.core.tracing.metrics(),
         )
         .await;
@@ -1169,7 +1170,7 @@ impl LashRuntime {
             Ok(()) => {}
             // A host withdrew a command since the lane was read: the commit
             // applied nothing, and the lane is read again (FIG-3927 §2.7).
-            Err(super::durable::session_command::CommandCommitError::Store(
+            Err(super::durable::head_commit::HeadCommitError::Store(
                 crate::StoreError::SessionCommandWithdrawn { .. },
             )) => return Ok(false),
             Err(error) => return Err(error.into_runtime_error()),

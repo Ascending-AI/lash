@@ -1,10 +1,13 @@
 //! Who owns a session's head when a head write arrives from outside a run
 //! (FIG-4202, ADR 0105).
 //!
-//! The bound turn owns the session head. A head commit that names the run
-//! it commits under is a run's own: the session actor's epoch fences it.
-//! So is the command lane's commit that applies the open commands it
-//! settles, the owner it would otherwise wait on
+//! The bound turn owns the session head. A head commit the session actor
+//! writes on its own fenced transaction is the session's own: its epoch
+//! fences it, so a turn's commit and a context-pressure frame its turn
+//! opens (FIG-5355) pass whatever they name ([`HeadWriter::SessionActor`]).
+//! So does a store commit that names the run it commits under, or the
+//! command lane's commit that applies the open commands it settles, the
+//! owner it would otherwise wait on
 //! ([`RuntimeCommit::is_sessions_own_head_write`]). Any other commit is a
 //! writer outside every run (a host-scoped service's write): the store
 //! refuses it, in the commit's own transaction, while a run owns the head
@@ -22,11 +25,10 @@
 //! A session's first commit publishes over the created head, which is no
 //! head to own (FIG-4099), so creation is never refused.
 //!
-//! [`RuntimeCommit::is_sessions_own_head_write`]: super::RuntimeCommit::is_sessions_own_head_write
 
 use crate::{SessionId, TurnId};
 
-use super::StoreError;
+use super::{RuntimeCommit, StoreError};
 
 /// What owns a session's head, refusing a head write outside every run.
 #[derive(
@@ -61,12 +63,27 @@ pub struct HeadOwnershipFacts {
     pub open_command: Option<u64>,
 }
 
-/// Whether a commit onto a head that exists (`head_exists`) must be checked
-/// against the head's owners: exactly a write that is not the session's own
-/// (`sessions_own`) onto an existing head.
+/// Who writes a head commit, as the transaction applying it proves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HeadWriter {
+    /// The session store's own commit, outside every actor's fence.
+    Store,
+    /// The session's own actor, on its fenced owner transaction.
+    SessionActor,
+}
+
+/// Whether `commit`, written by `writer` onto a head that exists
+/// (`head_exists`), must be checked against the head's owners: exactly a
+/// write that is not the session's own onto an existing head. The session
+/// actor's writes are its own; a store commit is when it names its run or
+/// the commands it applies ([`RuntimeCommit::is_sessions_own_head_write`]).
 #[must_use]
-pub fn head_write_needs_ownership(sessions_own: bool, head_exists: bool) -> bool {
-    !sessions_own && head_exists
+pub fn head_write_needs_ownership(
+    commit: &RuntimeCommit,
+    writer: HeadWriter,
+    head_exists: bool,
+) -> bool {
+    writer == HeadWriter::Store && !commit.is_sessions_own_head_write() && head_exists
 }
 
 /// Refuse a head write outside every run while `facts` name an owner of

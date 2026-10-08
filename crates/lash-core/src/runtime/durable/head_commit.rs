@@ -1,11 +1,14 @@
-//! A session command's commit (ADR 0132 §3, §14; FIG-5230).
+//! The session actor's head commits outside `turn.commit` (ADR 0132 §3,
+//! §14): a session command's (FIG-5230) and a context-pressure frame's
+//! open (FIG-5355).
 //!
-//! The command lane's handler builds the head commit that applies a command
-//! and settles its rows. [`commit`] writes it as the session's own head
-//! commit ([`DomainWrite::SessionCommit`], the shape `turn.commit` writes) on
-//! the session actor's fenced transaction, under `session.command`: an owner
-//! whose epoch is stale commits nothing, and the crash matrix cuts the
-//! commit like every other owner commit.
+//! The caller builds the head commit. [`commit`] writes it as the session's
+//! own head commit ([`DomainWrite::SessionCommit`], the shape `turn.commit`
+//! writes) on the session actor's fenced transaction, under the caller's
+//! label (`session.command`, `pressure.frame`): an owner whose epoch is
+//! stale commits nothing, the store takes it as the session's own head
+//! write whatever run owns the head, and the crash matrix cuts the commit
+//! like every other owner commit.
 
 use lash_durable::domain::{DomainRefusal, SessionCommitWrite};
 use lash_durable::{CommitLabel, DomainWrite, DurableError};
@@ -13,9 +16,9 @@ use lash_durable::{CommitLabel, DomainWrite, DurableError};
 use crate::store::RuntimeCommit;
 use crate::{ActorContext, RuntimeError, RuntimeErrorCode, StoreError};
 
-/// Why a session command's commit is not known to have landed.
+/// Why a head commit is not known to have landed.
 #[derive(Debug)]
-pub(crate) enum CommandCommitError {
+pub(crate) enum HeadCommitError {
     /// The session store refused it, with its own typed refusal; nothing was
     /// written.
     Store(StoreError),
@@ -27,63 +30,61 @@ pub(crate) enum CommandCommitError {
     Owner(DurableError),
 }
 
-impl CommandCommitError {
+impl HeadCommitError {
     pub(crate) fn into_runtime_error(self) -> RuntimeError {
         match self {
             Self::Store(error) => crate::runtime::runtime_error_from_store_commit(error),
             Self::Refused(error) => error,
             Self::Owner(error) => RuntimeError::new(
                 RuntimeErrorCode::StoreCommitFailed,
-                format!("the session command's commit: {error}"),
+                format!("the session's head commit: {error}"),
             ),
         }
     }
 }
 
-/// Commit `commit`, a session command's head commit, on `owner`'s fenced
-/// transaction under `session.command`, after admitting it against its
-/// commit budget.
+/// Commit `commit`, a head commit of the session actor `owner`, on its
+/// fenced transaction under `label`, after admitting it against its commit
+/// budget.
 ///
 /// # Errors
 ///
-/// [`CommandCommitError::Store`] with the store's refusal (a withdrawn
+/// [`HeadCommitError::Store`] with the store's refusal (a withdrawn
 /// command, a moved head, a stale append's ancestor, the budget);
-/// [`CommandCommitError::Refused`] when the store refused it for another
-/// of its rules;
-/// [`CommandCommitError::Owner`] when the transaction failed.
+/// [`HeadCommitError::Refused`] when the store refused it for another of
+/// its rules;
+/// [`HeadCommitError::Owner`] when the transaction failed.
 pub(crate) async fn commit(
     owner: &ActorContext,
     commit: RuntimeCommit,
+    label: CommitLabel,
     metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
-) -> Result<(), CommandCommitError> {
-    crate::store::admit_runtime_commit_budget(&commit, metrics)
-        .map_err(CommandCommitError::Store)?;
+) -> Result<(), HeadCommitError> {
+    crate::store::admit_runtime_commit_budget(&commit, metrics).map_err(HeadCommitError::Store)?;
     let write = SessionCommitWrite {
         session: commit.session_id.clone(),
         expected_head: commit.expected_head_revision,
         commit_json: crate::store::encode_session_commit(&commit)
-            .map_err(CommandCommitError::Store)?,
+            .map_err(HeadCommitError::Store)?,
     };
-    let mut tx = owner.begin().await.map_err(CommandCommitError::Owner)?;
+    let mut tx = owner.begin().await.map_err(HeadCommitError::Owner)?;
     tx.write(DomainWrite::SessionCommit(write));
-    let committed = owner.commit(tx, CommitLabel::SESSION_COMMAND).await;
+    let committed = owner.commit(tx, label).await;
     if let Err(DurableError::Domain(refusal)) = &committed
         && let Some(error) = refusal.session_commit_refusal()
     {
-        return Err(CommandCommitError::Refused(error));
+        return Err(HeadCommitError::Refused(error));
     }
     match committed {
         Ok(_) => Ok(()),
         Err(DurableError::Domain(DomainRefusal::HeadMoved {
             expected, found, ..
-        })) => Err(CommandCommitError::Store(
-            StoreError::HeadRevisionConflict {
-                expected,
-                actual: found.unwrap_or_default(),
-            },
-        )),
+        })) => Err(HeadCommitError::Store(StoreError::HeadRevisionConflict {
+            expected,
+            actual: found.unwrap_or_default(),
+        })),
         Err(DurableError::Domain(DomainRefusal::SessionCommandWithdrawn { session, batch })) => {
-            Err(CommandCommitError::Store(
+            Err(HeadCommitError::Store(
                 StoreError::SessionCommandWithdrawn {
                     session_id: session,
                     batch_id: batch,
@@ -91,10 +92,10 @@ pub(crate) async fn commit(
             ))
         }
         Err(DurableError::Domain(DomainRefusal::AppendAncestorNotActive { required, .. })) => Err(
-            CommandCommitError::Store(StoreError::AppendAncestorNotActive {
+            HeadCommitError::Store(StoreError::AppendAncestorNotActive {
                 required_node_id: required,
             }),
         ),
-        Err(error) => Err(CommandCommitError::Owner(error)),
+        Err(error) => Err(HeadCommitError::Owner(error)),
     }
 }

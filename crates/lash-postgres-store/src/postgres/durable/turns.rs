@@ -7,7 +7,7 @@
 
 use std::sync::LazyLock;
 
-use lash_core_execution::store::{RunAdmissionRecord, RunTerminalCause};
+use lash_core_execution::store::{HeadWriter, RunAdmissionRecord, RunTerminalCause};
 use lash_core_execution::store_backend_support::turn_cancel::{
     turn_cancel_mode_from_wire, turn_cancel_mode_wire, turn_cancel_undelivered_from_wire,
     turn_cancel_undelivered_wire,
@@ -220,7 +220,8 @@ pub(super) async fn apply_session_commit(
         lash_core_execution::store::RuntimeCommitPlanner::prepare(runtime_commit, tx.fleet())
             .map_err(|error| refused(&error))?;
     let now = integer::<u64>(commit.now.0)?;
-    match crate::runtime_persistence::apply_runtime_commit_tx(tx, &planner, now).await {
+    let writer = head_writer(commit.actor, &write.session);
+    match crate::runtime_persistence::apply_runtime_commit_tx(tx, &planner, writer, now).await {
         Ok(_) => Ok(()),
         Err(StoreError::HeadRevisionConflict { expected, actual }) => {
             Err(DurableError::Domain(DomainRefusal::HeadMoved {
@@ -243,6 +244,17 @@ pub(super) async fn apply_session_commit(
         )),
         Err(error @ StoreError::Contended) => Err(super::store_failure(error)),
         Err(error) => Err(refused(&error)),
+    }
+}
+
+/// Who writes a session head commit fenced by `actor`: the session's own
+/// actor, whose epoch fences every head write it makes (FIG-5355), or any
+/// other owner, which the head's ownership gate checks as a store writer.
+fn head_writer(actor: &ActorKey, session: &SessionId) -> HeadWriter {
+    if ActorKey::session(session.as_str()).is_ok_and(|own| &own == actor) {
+        HeadWriter::SessionActor
+    } else {
+        HeadWriter::Store
     }
 }
 

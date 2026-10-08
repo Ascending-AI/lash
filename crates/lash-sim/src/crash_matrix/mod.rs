@@ -6,7 +6,8 @@
 //! round's store-local effects, a turn cancel, a code cell, a code cell
 //! killed inside its body, a process with its waits and cascade, a
 //! process's mail, a session close, a session's commands, a trigger
-//! occurrence, a node's drain by release and a turn's prompt sections. Each runs
+//! occurrence, a node's drain by release, a turn's prompt sections, a
+//! session's compaction and a context-pressure frame. Each runs
 //! as a [`deployment::Deployment`]: the production session and process
 //! activations behind one dispatch on simulated nodes `a` and `b` over one
 //! SQLite memory database, the host acting from outside through its own
@@ -94,11 +95,15 @@ pub enum Case {
     /// summary call is admitted under `completion.start` with its exact
     /// body, and a resend sends that body.
     Compaction,
+    /// A session whose first turn overflows: preparing its second turn
+    /// summarizes the history and opens the recovery frame under
+    /// `pressure.frame`, and the turn runs in it.
+    Pressure,
 }
 
 impl Case {
     /// Every case, in registry order.
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::Turn,
         Self::Round,
         Self::Effects,
@@ -113,6 +118,7 @@ impl Case {
         Self::Drain,
         Self::Prompt,
         Self::Compaction,
+        Self::Pressure,
     ];
 
     /// The case's name.
@@ -133,6 +139,7 @@ impl Case {
             Self::Drain => "drain",
             Self::Prompt => "prompt",
             Self::Compaction => "compaction",
+            Self::Pressure => "pressure",
         }
     }
 
@@ -161,6 +168,7 @@ impl Case {
             Self::Drain => Box::<cases::drain::DrainCase>::default(),
             Self::Prompt => Box::new(cases::prompt::PromptCase::tagged(tag)),
             Self::Compaction => Box::new(cases::compaction::CompactionCase::tagged(tag)),
+            Self::Pressure => Box::new(cases::pressure::PressureCase::tagged(tag)),
         }
     }
 }

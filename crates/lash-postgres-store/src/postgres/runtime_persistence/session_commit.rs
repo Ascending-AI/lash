@@ -342,7 +342,13 @@ impl PostgresStore {
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
-        let result = apply_runtime_commit_tx(&mut tx, planner, now).await?;
+        let result = apply_runtime_commit_tx(
+            &mut tx,
+            planner,
+            lash_core_execution::store::HeadWriter::Store,
+            now,
+        )
+        .await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(Ok(result))
     }
@@ -351,11 +357,12 @@ impl PostgresStore {
 /// Apply `planner`'s runtime commit inside the open guarded transaction
 /// `tx`: the receipt replay, the head compare-and-set and every write of the
 /// commit, or a typed refusal. The caller commits `tx`; the runtime store's
-/// own commit and a turn's `turn.commit` (in the durable owner's fenced
-/// transaction) both apply a commit here.
+/// own commit and the session actor's head commits (in its fenced owner
+/// transaction) both apply a commit here, `writer` naming which.
 pub(crate) async fn apply_runtime_commit_tx(
     tx: &mut GuardedTx<'_>,
     planner: &lash_core_execution::store::RuntimeCommitPlanner,
+    writer: lash_core_execution::store::HeadWriter,
     now: u64,
 ) -> Result<RuntimeCommitReceipt, StoreError> {
     let commit = planner.commit();
@@ -440,7 +447,8 @@ pub(crate) async fn apply_runtime_commit_tx(
     // replayed receipt above answered its first outcome already; the plan's
     // own refusals (a moved head) answer before the ownership's.
     let head_ownership = if lash_core_execution::store::head_write_needs_ownership(
-        commit.is_sessions_own_head_write(),
+        commit,
+        writer,
         existing.as_ref().is_some_and(|head| !head.is_created()),
     ) {
         Some(crate::session_runs::head_ownership_facts_conn(&mut *tx, &commit.session_id).await?)

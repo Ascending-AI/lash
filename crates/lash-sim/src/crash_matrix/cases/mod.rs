@@ -14,6 +14,7 @@ pub mod command;
 pub mod compaction;
 pub mod drain;
 pub mod effects;
+pub mod pressure;
 pub mod process;
 pub mod prompt;
 pub mod round;

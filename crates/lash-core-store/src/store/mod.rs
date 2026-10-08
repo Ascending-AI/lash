@@ -128,7 +128,8 @@ pub use fleet_format::{
 };
 pub use fork_plan::{ForkLineageAncestor, ForkNodeFacts, ForkPlan};
 pub use head_ownership::{
-    HeadOwnershipFacts, SessionHeadOwner, head_write_needs_ownership, require_unowned_head,
+    HeadOwnershipFacts, HeadWriter, SessionHeadOwner, head_write_needs_ownership,
+    require_unowned_head,
 };
 pub use history::{
     CommittedTurnCursor, CommittedTurnNodes, CommittedTurnNodesPage, CommittedTurnReceipt,

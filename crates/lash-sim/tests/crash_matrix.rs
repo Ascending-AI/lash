@@ -63,6 +63,7 @@ crash_matrix! {
     a_drained_node_cut_at_every_label_releases_its_actors_to_the_next_once => Drain;
     a_turn_s_prompt_sections_cut_at_every_label_commit_with_each_call_s_admission => Prompt;
     a_compaction_s_summary_cut_at_every_label_sends_its_admitted_body => Compaction;
+    a_pressure_frame_cut_at_every_label_opens_once_and_its_turn_runs_in_it => Pressure;
 }
 
 /// A stale-epoch cut at `cell.snapshot+admit` runs no body on the old owner:
@@ -255,4 +256,5 @@ crash_matrix_on_postgres! {
     the_crash_matrix_holds_on_postgres_for_a_drained_node => Drain;
     the_crash_matrix_holds_on_postgres_for_a_prompt_composition => Prompt;
     the_crash_matrix_holds_on_postgres_for_a_compaction_s_summary => Compaction;
+    the_crash_matrix_holds_on_postgres_for_a_pressure_frame => Pressure;
 }

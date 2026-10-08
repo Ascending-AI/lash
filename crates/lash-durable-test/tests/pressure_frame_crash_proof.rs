@@ -7,15 +7,17 @@
 //! callback records a pending recovery with the turn's commit. Preparing the
 //! second turn runs the plugin's context-pressure hook: it summarizes the
 //! history in one direct completion and opens a recovery frame seeded with
-//! the summary, which commits on its own before the turn runs in it. The
-//! nodes are simulated (A and B) over the production durable store.
+//! the summary, which commits as the session actor's own `pressure.frame`
+//! before the turn runs in it (FIG-5355). The nodes are simulated (A and B)
+//! over the production durable store.
 //!
 //! The matrix cuts the uncut run at every labelled write, under
 //! fail-before, ack-hidden, zombie, abort and commit-then-abort, recovers on
 //! the other node, and checks:
 //!
-//! - the pressure frame opened once: the session's whole ancestry holds two
-//!   frames, and the recovery frame holds one summary seed;
+//! - the pressure frame opened once: one `pressure.frame` commit landed, the
+//!   session's whole ancestry holds two frames, and the recovery frame holds
+//!   one summary seed;
 //! - the second turn ran on the recovery frame and answered there: no model
 //!   call of it saw the first frame's input;
 //! - two turns were admitted and two committed, nothing is open, bound or
@@ -28,6 +30,23 @@
 //! checks the turn commits that call's usage however its owners resumed it:
 //! a pass that resumes it after its committed `model.done` makes no model
 //! call of its own.
+//!
+//! The RLM legs (FIG-5355) run the protocol with a live interpreter.
+//!
+//! - **Globals:** the first turn's cell sets a session global, and its model
+//!   call reports a prompt usage over the compaction threshold, so preparing
+//!   the second turn opens a compaction frame, the plugin's other decision.
+//!   The second turn runs in it, and its cell finds the global gone: the
+//!   live interpreter restarted from the frame's seed. With no pressure the
+//!   same cell finds the global kept, so the law is about the frame.
+//! - **Pressure then `continue_as`:** the first turn's model call also
+//!   reports a usage over the threshold, so the second turn runs in a
+//!   compaction frame. Its cell switches frames with `control.continue_as`,
+//!   again over the threshold, and the follow-on runs the task in the third
+//!   frame. Cut at every label, the session commits both frames,
+//!   in order, each once: the summary seeds the second frame, one
+//!   `pressure.frame` commit landed, and the follow-on never compacts again
+//!   on the switching turn's usage.
 
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
@@ -44,7 +63,6 @@ mod matrix;
 
 use matrix::MatrixTestExt as _;
 
-use std::collections::BTreeSet;
 use std::num::{NonZeroU32, NonZeroU64};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -80,6 +98,12 @@ const SUMMARY: &str = "the user asked to read the repository";
 const FINAL: &str = "a brief answer";
 /// What marks the compaction summarizer's request.
 const SUMMARIZER: &str = "Provide a detailed summary of the conversation above";
+/// A prompt usage over the 200 000-token window's compaction threshold.
+const OVER_THRESHOLD: i64 = 190_000;
+/// The session global the RLM globals leg sets.
+const GLOBAL: &str = "pressureLawGlobal";
+/// The task the RLM `continue_as` leg switches frames to.
+const TASK: &str = "finish the briefing in a fresh frame";
 
 fn session() -> SessionId {
     SessionId::try_from(SESSION.to_owned()).unwrap()
@@ -110,10 +134,74 @@ fn text(request: &LlmRequest, text: &str) -> LlmResponse {
     }
 }
 
-/// The scripted model: the summarizer's request gets the summary, a request
-/// holding the second input its answer, and any other request overflows.
-/// Every turn request it saw is rendered into `seen`.
-fn model(seen: Arc<Mutex<Vec<String>>>) -> ProviderHandle {
+/// What a scenario's session runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Script {
+    /// The standard protocol: the first turn overflows, and the recovered
+    /// turn answers in prose.
+    Overflow,
+    /// RLM: the first turn's cell sets [`GLOBAL`], over the compaction
+    /// threshold when `pressure`, and the second turn's cell finishes with
+    /// the global's type.
+    Globals { pressure: bool },
+    /// RLM: the first turn finishes over the compaction threshold, the
+    /// compacted turn's cell calls `control.continue_as` with [`TASK`], also
+    /// over it, and the follow-on finishes.
+    ContinueAs,
+}
+
+impl Script {
+    fn rlm(self) -> bool {
+        self != Self::Overflow
+    }
+
+    /// The scenario's answer to the turn request `rendered`.
+    fn answer(self, request: &LlmRequest, rendered: &str) -> LlmResponse {
+        let over = |mut response: LlmResponse| {
+            response.usage.input_tokens = OVER_THRESHOLD;
+            response
+        };
+        match self {
+            Self::Overflow if rendered.contains(NEXT) => text(request, FINAL),
+            Self::Globals { .. } if rendered.contains(NEXT) => text(
+                request,
+                &cell(&format!("finish(typeof globalThis.{GLOBAL});")),
+            ),
+            Self::Globals { pressure } => {
+                let set = text(
+                    request,
+                    &cell(&format!(
+                        "globalThis.{GLOBAL} = \"kept\";\nfinish(\"set\");"
+                    )),
+                );
+                if pressure { over(set) } else { set }
+            }
+            Self::ContinueAs if rendered.contains(TASK) && !rendered.contains(NEXT) => {
+                text(request, &cell("finish(\"done\");"))
+            }
+            Self::ContinueAs if rendered.contains(NEXT) => over(text(
+                request,
+                &cell(&format!("await control.continue_as({{ task: {TASK:?} }});")),
+            )),
+            Self::ContinueAs => over(text(request, &cell("finish(\"set\");"))),
+            Self::Overflow => LlmResponse {
+                terminal_reason: LlmTerminalReason::ContextOverflow,
+                terminal_diagnostic: Some("context window exceeded".to_owned()),
+                ..LlmResponse::default()
+            },
+        }
+    }
+}
+
+/// An RLM cell of `code`.
+fn cell(code: &str) -> String {
+    format!("<typescript>\n{code}\n</typescript>")
+}
+
+/// The scripted model: the summarizer's request gets the summary, and every
+/// turn request `script`'s answer. Every turn request it saw is rendered
+/// into `seen`.
+fn model(script: Script, seen: Arc<Mutex<Vec<String>>>) -> ProviderHandle {
     lash_core::testing::TestProvider::builder()
         .kind("pressure-frame-scripted")
         .requires_streaming(true)
@@ -125,14 +213,7 @@ fn model(seen: Arc<Mutex<Vec<String>>>) -> ProviderHandle {
                     return Ok(text(&request, SUMMARY));
                 }
                 seen.lock_recover().push(rendered.clone());
-                if rendered.contains(NEXT) {
-                    return Ok(text(&request, FINAL));
-                }
-                Ok(LlmResponse {
-                    terminal_reason: LlmTerminalReason::ContextOverflow,
-                    terminal_diagnostic: Some("context window exceeded".to_owned()),
-                    ..LlmResponse::default()
-                })
+                Ok(script.answer(&request, &rendered))
             }
         })
         .build()
@@ -146,25 +227,31 @@ fn metadata() -> lash_core::LlmProfileMetadata {
         .expect("the model's metadata")
 }
 
-/// The scenario on one dialect, fresh for every matrix cell.
+/// The scenario of one script on one dialect, fresh for every matrix cell.
 struct PressureFrame {
+    script: Script,
     dialect: Dialect,
     postgres_url: Option<String>,
     seen: Arc<Mutex<Vec<String>>>,
     tripwire: Arc<Tripwire>,
     backend: Mutex<Option<Backend>>,
+    /// The virtual clock the database was built on, which an RLM core's VM
+    /// worker calls hold.
+    clock: Mutex<Option<Arc<SimClock>>>,
     core: Mutex<Option<lash::LashCore>>,
     keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
 }
 
 impl PressureFrame {
-    fn new(dialect: Dialect, postgres_url: Option<String>) -> Self {
+    fn of(script: Script, dialect: Dialect, postgres_url: Option<String>) -> Self {
         Self {
+            script,
             dialect,
             postgres_url,
             seen: Arc::default(),
             tripwire: Arc::default(),
             backend: Mutex::default(),
+            clock: Mutex::default(),
             core: Mutex::default(),
             keep: Mutex::default(),
         }
@@ -184,11 +271,35 @@ impl PressureFrame {
         self.core
             .lock_recover()
             .get_or_insert_with(|| {
-                lash::LashCore::standard_builder(backend)
+                let builder = if self.script.rlm() {
+                    let clock = self
+                        .clock
+                        .lock_recover()
+                        .clone()
+                        .expect("the database is built first");
+                    lash::LashCore::rlm_builder(
+                        backend.clone(),
+                        lash::rlm::RlmProtocolPluginFactory::new(
+                            lash::rlm::RlmProtocolPluginConfig::builder()
+                                .channel(lash::rlm::RlmChannel::Cell)
+                                .instruction_limit(lash::rlm::InstructionBound::instructions(
+                                    1_000_000,
+                                ))
+                                .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+                                .build(),
+                            Arc::new(lash::rlm::TypescriptDialect),
+                            &backend,
+                        )
+                        .with_worker_service(sim::workers(&clock)),
+                    )
+                } else {
+                    lash::LashCore::standard_builder(backend)
+                };
+                builder
                     .serve_sessions(false)
                     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-                    .serve_test_llm_profile(model(Arc::clone(&self.seen)), metadata())
+                    .serve_test_llm_profile(model(self.script, Arc::clone(&self.seen)), metadata())
                     .plugin(Arc::new(
                         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
                     ))
@@ -225,9 +336,9 @@ impl PressureFrame {
         Ok(())
     }
 
-    /// The frame of every node in the session's ancestry, and the recovery
-    /// frame's summary seeds.
-    async fn frames(&self) -> Result<(BTreeSet<String>, usize), String> {
+    /// The frames of the session's ancestry, root first, and the frame of
+    /// each summary seed in it.
+    async fn frames(&self) -> Result<(Vec<String>, Vec<String>), String> {
         let store = self.backend().session_store_factory();
         let page = store
             .load_ancestors(
@@ -243,25 +354,48 @@ impl PressureFrame {
         if page.next.is_some() {
             return Err("the session's ancestry did not fit one page".to_owned());
         }
-        let frames = page
-            .nodes
-            .iter()
-            .map(|node| node.frame_node_id.as_str().to_owned())
-            .collect();
-        let summaries = page
-            .nodes
+        let mut nodes = page.nodes;
+        nodes.sort_by_key(|node| node.generation);
+        let mut frames = Vec::new();
+        for node in &nodes {
+            let frame = node.frame_node_id.as_str().to_owned();
+            if !frames.contains(&frame) {
+                frames.push(frame);
+            }
+        }
+        let summaries = nodes
             .iter()
             .filter(|node| {
                 serde_json::to_string(&node.record).is_ok_and(|body| body.contains(SUMMARY))
             })
-            .count();
+            .map(|node| node.frame_node_id.as_str().to_owned())
+            .collect();
         Ok((frames, summaries))
+    }
+
+    /// The session's turns ended, and nothing is left open, bound or
+    /// mailed.
+    async fn settled(&self, database: &Arc<dyn DurableStore>) -> Vec<String> {
+        let mut violations = Vec::new();
+        match database.turn(&session()).await {
+            Ok(None) => {}
+            other => violations.push(format!("a turn did not end: {other:?}")),
+        }
+        match database.session_mailbox(&session()).await {
+            Ok(mailbox)
+                if mailbox.bound_run.is_none()
+                    && mailbox.inputs.is_empty()
+                    && mailbox.batches.is_empty() => {}
+            other => violations.push(format!("the session's mail did not settle: {other:?}")),
+        }
+        violations
     }
 }
 
 #[async_trait::async_trait]
 impl Scenario for PressureFrame {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
+        *self.clock.lock_recover() = Some(Arc::clone(&clock));
         let (stores, database): (Arc<dyn StoreSet>, Arc<dyn DurableStore>) = dialect::open(
             self.dialect,
             self.postgres_url.as_deref(),
@@ -319,7 +453,6 @@ impl Scenario for PressureFrame {
     }
 
     async fn check(&self, nodes: &SimNodes, cut: Option<&Cut>) -> Vec<String> {
-        let mut violations = Vec::new();
         let database = nodes.database();
         let trace = nodes.script().trace();
         let seen = std::mem::take(&mut *self.seen.lock_recover());
@@ -329,8 +462,45 @@ impl Scenario for PressureFrame {
                 .filter(|write| write.point.label == label && write.committed())
                 .count()
         };
+        let mut violations = match self.script {
+            Script::Overflow => self.recovered(database, &seen).await,
+            Script::Globals { pressure } => self.globals(database, pressure).await,
+            Script::ContinueAs => self.continued(database, &seen).await,
+        };
 
-        // The first turn ended; the second answered in prose.
+        // Every turn was admitted and committed once, and the pressure
+        // frame, when one opens, landed in one owner commit.
+        let (turns, frames) = match self.script {
+            Script::Overflow | Script::Globals { pressure: true } => (2, 1),
+            Script::Globals { pressure: false } => (2, 0),
+            Script::ContinueAs => (3, 1),
+        };
+        let admitted = committed(CommitLabel::TURN_ADMIT);
+        let commits = committed(CommitLabel::TURN_COMMIT);
+        if admitted != turns || commits != turns {
+            violations.push(format!(
+                "{admitted} turns were admitted and {commits} committed, not {turns}"
+            ));
+        }
+        let opened = committed(CommitLabel::PRESSURE_FRAME);
+        if opened != frames {
+            violations.push(format!(
+                "{opened} pressure.frame commits landed, not {frames}"
+            ));
+        }
+        violations.extend(self.settled(database).await);
+        if let Some(cut) = cut {
+            violations.extend(zombie_laws(cut, &trace));
+        }
+        violations
+    }
+}
+
+impl PressureFrame {
+    /// The overflow script's laws: the first turn ended, and the second ran
+    /// on the recovery frame, seeded with one summary, and answered there.
+    async fn recovered(&self, database: &Arc<dyn DurableStore>, seen: &[String]) -> Vec<String> {
+        let mut violations = Vec::new();
         match database.turn_end(&session(), &turn(FIRST_RUN)).await {
             Ok(Some(_)) => {}
             other => violations.push(format!("the overflowing turn did not end: {other:?}")),
@@ -349,23 +519,12 @@ impl Scenario for PressureFrame {
                 "the recovered turn did not answer in prose: {other:?}"
             )),
         }
-        let admitted = committed(CommitLabel::TURN_ADMIT);
-        let commits = committed(CommitLabel::TURN_COMMIT);
-        if admitted != 2 || commits != 2 {
-            violations.push(format!(
-                "{admitted} turns were admitted and {commits} committed, not two"
-            ));
-        }
-
-        // The pressure frame opened once, seeded with one summary.
         match self.frames().await {
-            Ok((frames, 1)) if frames.len() == 2 => {}
+            Ok((frames, summaries)) if frames.len() == 2 && summaries.len() == 1 => {}
             other => violations.push(format!(
                 "the ancestry does not hold two frames and one summary: {other:?}"
             )),
         }
-
-        // The second turn ran on the recovery frame.
         let recovered: Vec<&String> = seen.iter().filter(|seen| seen.contains(NEXT)).collect();
         if recovered.is_empty() {
             violations.push("the model never saw the second input".to_owned());
@@ -378,22 +537,78 @@ impl Scenario for PressureFrame {
         if !recovered.iter().all(|request| request.contains(SUMMARY)) {
             violations.push("the second turn ran without the recovery frame's seed".to_owned());
         }
+        violations
+    }
 
-        // Nothing is left open, bound or mailed.
-        match database.turn(&session()).await {
-            Ok(None) => {}
-            other => violations.push(format!("a turn did not end: {other:?}")),
+    /// The globals script's laws: the second turn's cell found the global
+    /// gone behind a compaction frame, and kept with none.
+    async fn globals(&self, database: &Arc<dyn DurableStore>, pressure: bool) -> Vec<String> {
+        let mut violations = Vec::new();
+        let expected = if pressure { "undefined" } else { "string" };
+        match database.turn_end(&session(), &turn(SECOND_RUN)).await {
+            Ok(Some(end))
+                if matches!(
+                    &end.cause,
+                    RunTerminalCause::Committed {
+                        outcome: RunCommittedOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue {
+                            value,
+                        }),
+                        ..
+                    } if value.as_str() == Some(expected)
+                ) => {}
+            other => violations.push(format!(
+                "the second turn's cell did not find the global's type {expected}: {other:?}"
+            )),
         }
-        match database.session_mailbox(&session()).await {
-            Ok(mailbox)
-                if mailbox.bound_run.is_none()
-                    && mailbox.inputs.is_empty()
-                    && mailbox.batches.is_empty() => {}
-            other => violations.push(format!("the session's mail did not settle: {other:?}")),
+        let frames = usize::from(pressure) + 1;
+        match self.frames().await {
+            Ok((ancestry, summaries))
+                if ancestry.len() == frames && summaries.len() == frames - 1 => {}
+            other => violations.push(format!(
+                "the ancestry does not hold {frames} frames and {} summaries: {other:?}",
+                frames - 1
+            )),
         }
+        violations
+    }
 
-        if let Some(cut) = cut {
-            violations.extend(zombie_laws(cut, &trace));
+    /// The `continue_as` script's laws: the summary seeds the second frame,
+    /// the switch opens the third after it, and the follow-on ran the task
+    /// there.
+    async fn continued(&self, database: &Arc<dyn DurableStore>, seen: &[String]) -> Vec<String> {
+        let mut violations = Vec::new();
+        match database.turn_end(&session(), &turn(SECOND_RUN)).await {
+            Ok(Some(end))
+                if matches!(
+                    &end.cause,
+                    RunTerminalCause::Committed {
+                        outcome: RunCommittedOutcome::AgentFrameSwitch { task, .. },
+                        ..
+                    } if task == TASK
+                ) => {}
+            other => violations.push(format!(
+                "the compacted turn did not switch frames to the task: {other:?}"
+            )),
+        }
+        match self.frames().await {
+            Ok((frames, summaries)) if frames.len() == 3 && summaries == [frames[1].clone()] => {}
+            other => violations.push(format!(
+                "the ancestry does not hold three frames with the summary seeding the second: \
+                 {other:?}"
+            )),
+        }
+        let follow_on: Vec<&String> = seen
+            .iter()
+            .filter(|seen| seen.contains(TASK) && !seen.contains(NEXT))
+            .collect();
+        if follow_on.is_empty() {
+            violations.push("the follow-on never ran the task".to_owned());
+        }
+        if let Some(request) = follow_on
+            .iter()
+            .find(|request| request.contains(ASK) || request.contains(SUMMARY))
+        {
+            violations.push(format!("the follow-on ran on an earlier frame: {request}"));
         }
         violations
     }
@@ -423,58 +638,39 @@ fn zombie_laws(cut: &Cut, trace: &[lash_durable_test::Write]) -> Vec<String> {
     violations
 }
 
-/// The owner commits the uncut run makes, in this order among others: the
-/// overflowing turn admits, calls the model and commits; the recovered turn
-/// admits, summarizes in a direct completion, calls the model on the
-/// recovery frame and commits.
-fn ordered_labels() -> Vec<CommitLabel> {
-    vec![
+/// The owner commits `script`'s uncut run makes, in this order among
+/// others. The overflow script: the overflowing turn admits, calls the model
+/// and commits; the recovered turn admits, summarizes in a direct
+/// completion, opens the recovery frame, calls the model on it and commits.
+/// The RLM scripts' second turn does the same, and the `continue_as`
+/// script's follow-on admits, calls the model and commits after it.
+fn ordered_labels(script: Script) -> Vec<CommitLabel> {
+    let mut labels = vec![
         CommitLabel::TURN_ADMIT,
         CommitLabel::MODEL_START,
         CommitLabel::TURN_COMMIT,
         CommitLabel::TURN_ADMIT,
-        CommitLabel::COMPLETION_START,
-        CommitLabel::MODEL_START,
-        CommitLabel::TURN_COMMIT,
-    ]
-}
-
-async fn prove(dialect: Dialect, postgres_url: Option<String>) {
-    let report = Matrix::new()
-        .faults(&[
-            Fault::FailBefore,
-            Fault::AckHidden,
-            Fault::Zombie,
-            Fault::Abort,
-            Fault::CommitThenAbort,
-        ])
-        .horizon(Duration::from_secs(600))
-        .run_test(|| PressureFrame::new(dialect, postgres_url.clone()))
-        .await;
-    let labels: Vec<&str> = report.labels().iter().map(|label| label.as_str()).collect();
-    eprintln!(
-        "pressure frame {dialect:?}: {} cells over {} labels ({})",
-        report.cells.len(),
-        labels.len(),
-        labels.join(", ")
-    );
-    report.assert_held();
-    for label in ordered_labels() {
-        assert!(
-            report.labels().contains(&label),
-            "the matrix never cut {label}"
-        );
+    ];
+    if script != (Script::Globals { pressure: false }) {
+        labels.extend([CommitLabel::COMPLETION_START, CommitLabel::PRESSURE_FRAME]);
     }
+    labels.extend([CommitLabel::MODEL_START, CommitLabel::TURN_COMMIT]);
+    if script == Script::ContinueAs {
+        labels.extend([
+            CommitLabel::TURN_ADMIT,
+            CommitLabel::MODEL_START,
+            CommitLabel::TURN_COMMIT,
+        ]);
+    }
+    labels
 }
 
-/// The uncut run: the overflowing turn commits its pending recovery, and
-/// the next turn's preparation opens the recovery frame it runs in.
-#[tokio::test]
-#[ignore = "FIG-5355: a context-pressure frame's commit is refused while its run owns the head"]
-async fn a_pressure_frame_opens_before_the_turn_that_runs_in_it() {
+/// `script`'s uncut run on SQLite in memory holds its laws and makes every
+/// expected owner commit, in order.
+async fn uncut(script: Script) {
     let report = Matrix::new()
         .faults(&[])
-        .run_test(|| PressureFrame::new(Dialect::SqliteMemory, None))
+        .run_test(|| PressureFrame::of(script, Dialect::SqliteMemory, None))
         .await;
     report.assert_held();
     let labels: Vec<CommitLabel> = report
@@ -483,7 +679,7 @@ async fn a_pressure_frame_opens_before_the_turn_that_runs_in_it() {
         .filter(|write| write.kind == WriteKind::Actor && write.committed())
         .map(|write| write.point.label)
         .collect();
-    let mut expected = ordered_labels().into_iter().peekable();
+    let mut expected = ordered_labels(script).into_iter().peekable();
     for label in labels {
         if expected.peek() == Some(&label) {
             expected.next();
@@ -496,30 +692,100 @@ async fn a_pressure_frame_opens_before_the_turn_that_runs_in_it() {
     );
 }
 
+/// `script` cut at every label of its uncut run on `dialect`.
+async fn prove(script: Script, dialect: Dialect, postgres_url: Option<String>) {
+    let report = Matrix::new()
+        .faults(&[
+            Fault::FailBefore,
+            Fault::AckHidden,
+            Fault::Zombie,
+            Fault::Abort,
+            Fault::CommitThenAbort,
+        ])
+        .horizon(Duration::from_secs(600))
+        .run_test(|| PressureFrame::of(script, dialect, postgres_url.clone()))
+        .await;
+    let labels: Vec<&str> = report.labels().iter().map(|label| label.as_str()).collect();
+    eprintln!(
+        "pressure frame {script:?} {dialect:?}: {} cells over {} labels ({})",
+        report.cells.len(),
+        labels.len(),
+        labels.join(", ")
+    );
+    report.assert_held();
+    for label in ordered_labels(script) {
+        assert!(
+            report.labels().contains(&label),
+            "the matrix never cut {label}"
+        );
+    }
+}
+
+/// The uncut run: the overflowing turn commits its pending recovery, and
+/// the next turn's preparation opens the recovery frame it runs in.
+#[tokio::test]
+async fn a_pressure_frame_opens_before_the_turn_that_runs_in_it() {
+    uncut(Script::Overflow).await;
+}
+
 /// On SQLite in memory: a pressure frame killed at every label opens once,
 /// and the turn runs in it.
 #[tokio::test]
-#[ignore = "FIG-5355: a context-pressure frame's commit is refused while its run owns the head"]
 async fn a_pressure_frame_killed_at_every_label_opens_once_on_sqlite_memory() {
-    prove(Dialect::SqliteMemory, None).await;
+    prove(Script::Overflow, Dialect::SqliteMemory, None).await;
 }
 
 /// On a SQLite file.
 #[tokio::test]
-#[ignore = "FIG-5355: a context-pressure frame's commit is refused while its run owns the head"]
 async fn a_pressure_frame_killed_at_every_label_opens_once_on_sqlite_file() {
-    prove(Dialect::SqliteFile, None).await;
+    prove(Script::Overflow, Dialect::SqliteFile, None).await;
 }
 
 /// On PostgreSQL.
 #[tokio::test]
-#[ignore = "FIG-5355: a context-pressure frame's commit is refused while its run owns the head"]
 async fn a_pressure_frame_killed_at_every_label_opens_once_on_postgres() {
     let Some(url) = dialect::postgres_url() else {
         eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
         return;
     };
-    prove(Dialect::Postgres, Some(url)).await;
+    prove(Script::Overflow, Dialect::Postgres, Some(url)).await;
+}
+
+/// An RLM session's live execution state restarts from a pressure frame's
+/// seed: the global the first turn's cell set is gone from the interpreter
+/// the compacted turn's cell runs in, and kept when no frame opens.
+#[tokio::test]
+async fn an_rlm_pressure_frame_restarts_the_session_s_globals_from_its_seed() {
+    uncut(Script::Globals { pressure: false }).await;
+    uncut(Script::Globals { pressure: true }).await;
+}
+
+/// On SQLite in memory: an RLM pressure frame followed by a `continue_as`
+/// in the next turn, killed at every label, commits both frames in order,
+/// each once.
+#[tokio::test]
+async fn an_rlm_pressure_frame_then_continue_as_killed_at_every_label_commits_both_frames_once_on_sqlite_memory()
+ {
+    uncut(Script::ContinueAs).await;
+    prove(Script::ContinueAs, Dialect::SqliteMemory, None).await;
+}
+
+/// On a SQLite file.
+#[tokio::test]
+async fn an_rlm_pressure_frame_then_continue_as_killed_at_every_label_commits_both_frames_once_on_sqlite_file()
+ {
+    prove(Script::ContinueAs, Dialect::SqliteFile, None).await;
+}
+
+/// On PostgreSQL.
+#[tokio::test]
+async fn an_rlm_pressure_frame_then_continue_as_killed_at_every_label_commits_both_frames_once_on_postgres()
+ {
+    let Some(url) = dialect::postgres_url() else {
+        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
+        return;
+    };
+    prove(Script::ContinueAs, Dialect::Postgres, Some(url)).await;
 }
 
 const USAGE_SESSION: &str = "prompt-usage-session";

@@ -7,7 +7,7 @@
 
 use std::sync::LazyLock;
 
-use lash_core_execution::store::{RunAdmissionRecord, RunTerminalCause};
+use lash_core_execution::store::{HeadWriter, RunAdmissionRecord, RunTerminalCause};
 use lash_core_execution::store_backend_support::turn_cancel::{
     turn_cancel_mode_from_wire, turn_cancel_mode_wire, turn_cancel_undelivered_from_wire,
     turn_cancel_undelivered_wire,
@@ -283,6 +283,7 @@ pub(super) fn apply_session_commit(
     match crate::persistence::session_commit::apply_runtime_commit_conn(
         tx,
         &planner,
+        head_writer(commit.actor, &write.session),
         commit.blob_profile,
         now,
     ) {
@@ -311,6 +312,17 @@ pub(super) fn apply_session_commit(
             message: "the session head commit contended".to_owned(),
         }))),
         Err(error) => refused(&error),
+    }
+}
+
+/// Who writes a session head commit fenced by `actor`: the session's own
+/// actor, whose epoch fences every head write it makes (FIG-5355), or any
+/// other owner, which the head's ownership gate checks as a store writer.
+fn head_writer(actor: &ActorKey, session: &SessionId) -> HeadWriter {
+    if ActorKey::session(session.as_str()).is_ok_and(|own| &own == actor) {
+        HeadWriter::SessionActor
+    } else {
+        HeadWriter::Store
     }
 }
 

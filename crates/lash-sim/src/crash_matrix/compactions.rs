@@ -3,8 +3,12 @@
 //! the standard protocol and the standard compaction plugin. The host
 //! appends a conversation to it, and its `CompactContext` command then
 //! summarizes it under the command's run: an owned call admitted under
-//! `completion.start` (ADR 0133 §8, FIG-5259). Only the model is the
-//! simulator's.
+//! `completion.start` (ADR 0133 §8, FIG-5259). A [`TurnScript::Pressure`]
+//! session runs on the same core: the host sends it two inputs, the model
+//! overflows on the first turn, and the plugin's context-pressure hook
+//! summarizes the history the same way while it prepares the second, which
+//! then runs in the recovery frame the summary seeds (FIG-5355). Only the
+//! model is the simulator's.
 //!
 //! The model's builder lowers every request to a body of its own
 //! generation, so a summary body lowered twice is told apart from one
@@ -13,10 +17,12 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
+use lash_core::LlmTerminalReason;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{LlmContentBlock, LlmOutputPart, LlmRequest, LlmResponse};
-use lash_sansio::SessionId;
+use lash_sansio::{SessionId, TurnId};
 
+use super::services::TurnScript;
 use super::world::World;
 
 /// The model every compaction session names.
@@ -27,6 +33,16 @@ pub const LOWERED: &str = "compaction.lowered";
 pub const SENT: &str = "compaction.sent";
 /// The summary the model answers.
 pub const SUMMARY: &str = "the turn was answered";
+/// A pressure session's first input, whose turn overflows.
+pub const ASK: &str = "read the whole repository";
+/// A pressure session's second input, which its recovered turn answers.
+pub const NEXT: &str = "now answer briefly";
+/// What a pressure session's recovered turn answers.
+pub const FINAL: &str = "a brief answer";
+/// What a pressure session's recovered request notes:
+/// `{RECOVERED} {session} :: summary={bool} ask={bool}`, whether it carried
+/// the summary and the first input.
+pub const RECOVERED: &str = "pressure.recovered";
 
 /// The run's core for its compaction sessions, built once over `world`'s
 /// backend.
@@ -60,6 +76,37 @@ pub fn compaction_core(world: &Arc<World>) -> Result<lash::LashCore, String> {
 ///
 /// The facade refused.
 pub async fn create(core: &lash::LashCore, session: &SessionId) -> Result<(), String> {
+    created(core, session).await.map(drop)
+}
+
+/// Create the pressure session `session` through `core` and send it its
+/// inputs: [`ASK`] as `first`, then [`NEXT`] as `second`.
+///
+/// # Errors
+///
+/// The facade refused.
+pub async fn send_pressure(
+    core: &lash::LashCore,
+    session: &SessionId,
+    first: &TurnId,
+    second: &TurnId,
+) -> Result<(), String> {
+    let handle = created(core, session).await?;
+    for (input, run) in [(ASK, first), (NEXT, second)] {
+        handle
+            .send(lash::TurnInput::text(input))
+            .id(run.clone())
+            .await
+            .map(drop)
+            .map_err(|error| format!("send {input}: {error}"))?;
+    }
+    Ok(())
+}
+
+async fn created(
+    core: &lash::LashCore,
+    session: &SessionId,
+) -> Result<lash::DurableSession, String> {
     core.session(session.clone())
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             MODEL,
@@ -67,7 +114,6 @@ pub async fn create(core: &lash::LashCore, session: &SessionId) -> Result<(), St
             lash::MaxToolCalls::new(8),
         )))
         .await
-        .map(drop)
         .map_err(|error| format!("create the compaction session: {error}"))
 }
 
@@ -120,13 +166,37 @@ fn model(world: Weak<World>) -> ProviderHandle {
                         request.scope.session_id, body.body
                     ));
                 }
-                Ok(LlmResponse {
+                let answer = |text: &str| LlmResponse {
                     parts: vec![LlmOutputPart::Text {
-                        text: SUMMARY.to_owned(),
+                        text: text.to_owned(),
                         response_meta: None,
                     }],
                     ..LlmResponse::default()
-                })
+                };
+                if summary
+                    || TurnScript::of(&request.scope.session_id) != Some(TurnScript::Pressure)
+                {
+                    return Ok(answer(SUMMARY));
+                }
+                // A pressure session's turn: the second input's is answered,
+                // the first's overflows.
+                let rendered = serde_json::to_string(&request.messages).unwrap_or_default();
+                if !rendered.contains(NEXT) {
+                    return Ok(LlmResponse {
+                        terminal_reason: LlmTerminalReason::ContextOverflow,
+                        terminal_diagnostic: Some("context window exceeded".to_owned()),
+                        ..LlmResponse::default()
+                    });
+                }
+                if let Some(world) = world.upgrade() {
+                    world.note(format!(
+                        "{RECOVERED} {} :: summary={} ask={}",
+                        request.scope.session_id,
+                        rendered.contains(SUMMARY),
+                        rendered.contains(ASK)
+                    ));
+                }
+                Ok(answer(FINAL))
             }
         })
         .build()

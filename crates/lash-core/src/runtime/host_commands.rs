@@ -35,7 +35,7 @@
 
 use super::*;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
-use crate::runtime::durable::session_command::CommandCommitError;
+use crate::runtime::durable::head_commit::HeadCommitError;
 use crate::runtime::turn_boundary::SeedCarries;
 
 mod task_cancel;
@@ -669,9 +669,10 @@ impl LashRuntime {
             self.turn_phase_probe.clone(),
             SESSION_COMMAND_STAGED_PHASE,
         ));
-        let committed = super::durable::session_command::commit(
+        let committed = super::durable::head_commit::commit(
             owner,
             commit,
+            lash_durable::CommitLabel::SESSION_COMMAND,
             self.host.core.tracing.metrics(),
         )
         .await;
@@ -685,7 +686,7 @@ impl LashRuntime {
                 ));
                 Ok(Ok(CommandCommit::Landed))
             }
-            Err(CommandCommitError::Store(error)) => match error {
+            Err(HeadCommitError::Store(error)) => match error {
                 crate::StoreError::SessionCommandWithdrawn { .. } => {
                     Ok(Ok(CommandCommit::Withdrawn))
                 }

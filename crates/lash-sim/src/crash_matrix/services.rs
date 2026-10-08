@@ -71,11 +71,14 @@ pub enum TurnScript {
     /// A turn behind the facade that the host's compaction command then
     /// summarizes ([`super::compactions`]).
     Compaction,
+    /// Two turns behind the facade: the first overflows, and the second's
+    /// preparation opens a recovery frame ([`super::compactions`]).
+    Pressure,
 }
 
 impl TurnScript {
     /// Every script.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Plain,
         Self::Round,
         Self::Hang,
@@ -84,6 +87,7 @@ impl TurnScript {
         Self::Effects,
         Self::Prompt,
         Self::Compaction,
+        Self::Pressure,
     ];
 
     /// The script's name, the prefix of its sessions' ids.
@@ -98,6 +102,7 @@ impl TurnScript {
             Self::Effects => "effects",
             Self::Prompt => "prompt",
             Self::Compaction => "compaction",
+            Self::Pressure => "pressure",
         }
     }
 
@@ -491,9 +496,11 @@ impl SimServices {
             Some(TurnScript::Prompt) => Ok(Some(super::cells::services(
                 &super::prompts::prompt_core(&self.world).map_err(TurnError::Exec)?,
             ))),
-            Some(TurnScript::Compaction) => Ok(Some(super::cells::services(
-                &super::compactions::compaction_core(&self.world).map_err(TurnError::Exec)?,
-            ))),
+            Some(TurnScript::Compaction | TurnScript::Pressure) => {
+                Ok(Some(super::cells::services(
+                    &super::compactions::compaction_core(&self.world).map_err(TurnError::Exec)?,
+                )))
+            }
             _ => Ok(None),
         }
     }
@@ -639,7 +646,8 @@ impl TurnDrive for SimDrive {
             | TurnScript::Cell
             | TurnScript::CellKilled
             | TurnScript::Prompt
-            | TurnScript::Compaction => &[],
+            | TurnScript::Compaction
+            | TurnScript::Pressure => &[],
             TurnScript::Round => &[Tool::WriteSlow, Tool::Flaky, Tool::WriteNow],
             TurnScript::Hang => &[Tool::Hang],
             TurnScript::Effects => &[Tool::Spawn, Tool::Poke],

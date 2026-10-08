@@ -307,7 +307,13 @@ impl SqliteStore {
                         planner,
                     ))));
                 }
-                let outcome = apply_runtime_commit_conn(tx, &planner, blob_profile, now);
+                let outcome = apply_runtime_commit_conn(
+                    tx,
+                    &planner,
+                    lash_core_execution::store::HeadWriter::Store,
+                    blob_profile,
+                    now,
+                );
                 // Roll back on a `StoreError` so a failure after the first
                 // write (e.g. a head-revision conflict surfaced mid-commit, or a
                 // backend write error) does not leave the partial transaction
@@ -325,11 +331,13 @@ impl SqliteStore {
 /// Apply `planner`'s runtime commit inside the open write transaction `tx`:
 /// the receipt replay, the head compare-and-set and every write of the
 /// commit, or a typed refusal with the transaction left for the caller to
-/// roll back. The runtime store's own commit and a turn's `turn.commit`
-/// (in the durable owner's fenced transaction) both apply a commit here.
+/// roll back. The runtime store's own commit and the session actor's head
+/// commits (in its fenced owner transaction) both apply a commit here,
+/// `writer` naming which.
 pub(crate) fn apply_runtime_commit_conn(
     tx: &crate::conn::FencedTx<'_>,
     planner: &lash_core_execution::store::RuntimeCommitPlanner,
+    writer: lash_core_execution::store::HeadWriter,
     blob_profile: crate::BuiltinBlobProfile,
     now: u64,
 ) -> Result<RuntimeCommitReceipt, StoreError> {
@@ -522,7 +530,8 @@ pub(crate) fn apply_runtime_commit_conn(
     // first outcome already, and the plan's own refusals (a
     // moved head) answer first.
     if lash_core_execution::store::head_write_needs_ownership(
-        commit.is_sessions_own_head_write(),
+        commit,
+        writer,
         existing.as_ref().is_some_and(|head| !head.is_created()),
     ) {
         let facts = crate::session_runs::head_ownership_facts_conn(tx, &commit.session_id)?;

@@ -331,9 +331,10 @@ impl LashRuntime {
                     },
                 );
             }
-            let committed = super::durable::session_command::commit(
+            let committed = super::durable::head_commit::commit(
                 owner,
                 commit,
+                lash_durable::CommitLabel::SESSION_COMMAND,
                 self.host.core.tracing.metrics(),
             )
             .await;
@@ -355,7 +356,7 @@ impl LashRuntime {
                     ));
                     return Ok(true);
                 }
-                Err(super::durable::session_command::CommandCommitError::Store(error)) => error,
+                Err(super::durable::head_commit::HeadCommitError::Store(error)) => error,
                 Err(error) => return Err(error.into_runtime_error()),
             };
             match error {

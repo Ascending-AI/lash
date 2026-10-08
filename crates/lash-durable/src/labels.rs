@@ -36,6 +36,11 @@ impl CommitLabel {
     /// execution that owns it, before its first byte: its prompt snapshot,
     /// exact provider body and deadline (ADR 0133 §8).
     pub const COMPLETION_START: Self = Self::new("completion.start");
+    /// `pressure.frame`: A context-pressure frame opened in the turn that
+    /// runs in it, before its model call: the records it leaves, the frame,
+    /// its seed and the execution-state reset, as the session's own head
+    /// commit (FIG-5355).
+    pub const PRESSURE_FRAME: Self = Self::new("pressure.frame");
     /// `turn.commit`: The turn's commit: head compare-and-set, terminal, phase-row pruning (C7);
     /// for a turn whose preparation was refused, its `Refused` terminal alone.
     pub const TURN_COMMIT: Self = Self::new("turn.commit");
@@ -153,7 +158,7 @@ impl CommitLabel {
     }
 
     /// Every label in the catalog, L1's lease labels first.
-    pub const ALL: [Self; 46] = [
+    pub const ALL: [Self; 47] = [
         Self::CLAIM,
         Self::HEARTBEAT,
         Self::REAP,
@@ -167,6 +172,7 @@ impl CommitLabel {
         Self::MODEL_DONE,
         Self::ROUND_PRESENT_MODEL_START,
         Self::COMPLETION_START,
+        Self::PRESSURE_FRAME,
         Self::TURN_COMMIT,
         Self::TURN_CANCEL,
         Self::SESSION_RELEASE,

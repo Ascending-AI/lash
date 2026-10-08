@@ -11,8 +11,9 @@
 //!   and applied under the epoch on every claim (L3s).
 //! - [`session_close`]: the session's closing state, one fenced step at a
 //!   time (L6b).
-//! - `session_command`: a session command's head commit, on the session's
-//!   fenced transaction under `session.command` (FIG-5230).
+//! - `head_commit`: the session's head commits outside `turn.commit`, a
+//!   session command's (`session.command`, FIG-5230) and a context-pressure
+//!   frame's open (`pressure.frame`, FIG-5355), on its fenced transaction.
 //! - [`schedules`]: the ticks of the scheduled trigger sources a session
 //!   subscribes to, fired at the session's due time (FIG-5348).
 //! - [`turn_scope`]: a turn's scope ending with its commit or cancel, the
@@ -20,6 +21,7 @@
 
 pub(in crate::runtime) mod commit_publication;
 pub mod head;
+pub(crate) mod head_commit;
 mod model_call;
 pub mod node;
 pub mod phases;
@@ -27,7 +29,6 @@ pub mod schedules;
 pub mod services;
 pub mod session;
 pub mod session_close;
-pub(crate) mod session_command;
 pub mod session_mail;
 mod tool_round;
 mod turn_cancel;

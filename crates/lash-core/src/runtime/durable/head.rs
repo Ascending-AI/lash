@@ -151,7 +151,10 @@ impl SessionHead {
 /// revision. Only the owner moves the head through its own `turn.commit`,
 /// after which the head is evicted; a pass that fails for any reason, a
 /// failed fence or a refused compare-and-set among them, evicts it too, and
-/// the next pass reloads it from rows. It is never patched.
+/// the next pass reloads it from rows. It is never patched. A context-pressure
+/// frame the turn's preparation opens (`pressure.frame`) moves the head
+/// inside the turn: the runtime's turn commits over the head it left, and a
+/// restore whose checkpoint pins that head reads its window at the pin.
 #[derive(Default)]
 pub struct HeadCache {
     held: Option<CachedHead>,
