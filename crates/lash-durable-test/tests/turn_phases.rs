@@ -8,7 +8,7 @@
 //! recovers on the other node, and checks:
 //!
 //! - **Model re-send:** every attempt of one model call carries the same
-//!   request bytes, attempts count up from where the pin left them, and an
+//!   request, attempts count up from where the pin left them, and an
 //!   attempt after the first restarts the session's live stream (retracts
 //!   what the earlier attempts streamed) first. A
 //!   crash after `model.start` commits re-sends the call as attempt 2.
@@ -54,6 +54,18 @@
 //!   acknowledgement sends the admitted composition. A cut at `model.start`
 //!   whose commit landed composes the call once; one whose commit did not
 //!   land composes it again.
+//! - **WIRE-SLOTS (ADR 0133 §6, ADR 0135 §6, FIG-5445):** every attempt goes
+//!   through the runtime's own attempt loop and sends the request template
+//!   its admission stored: a call with no slot sends exactly the admitted
+//!   bytes, and a call with an attachment slot sends the admitted literals
+//!   with the slot filled by the pinned codec from a delivery made for that
+//!   attempt alone, so a resend after a crash on an owner whose builder
+//!   would lower other bytes sends the admitted literals with a fresh
+//!   delivery, and nothing else delivers.
+//! - **Admitted-slot hold (ADR 0135 §7, FIG-5445):** an attachment only an
+//!   admitted call names is held by the turn's execution: its upload ended
+//!   and a sweep ran before every attempt, every attempt still delivers it,
+//!   and once the turn settles it is held by nothing and reclaimed.
 
 // Test code.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
@@ -70,6 +82,8 @@ mod matrix;
 
 #[path = "turn_phases/parks.rs"]
 mod parks;
+#[path = "turn_phases/slots.rs"]
+mod slots;
 
 use matrix::MatrixTestExt as _;
 
@@ -109,7 +123,7 @@ use lash_durable::{
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
-use lash_sansio::llm::types::{ProviderRequestBody, ProviderRouteIdentity};
+use lash_sansio::llm::types::{ProviderRouteIdentity, RecordedRequestTemplate};
 use lash_sansio::sansio::ExecutionEnvironmentSync;
 use lash_sansio::sync::MutexExt as _;
 use lash_sansio::{
@@ -170,6 +184,13 @@ enum Mode {
     /// frame's one node id, so the session store refuses the commit with a
     /// node id collision on every pass (FIG-5352).
     CollidingCommit,
+    /// As [`Mode::Plain`], with an image only the model calls name: every
+    /// call's template carries one attachment slot, delivered as a fresh
+    /// signed URL on every attempt (WIRE-SLOTS).
+    Slots,
+    /// As [`Mode::Slots`], with the image's upload ended and the store swept
+    /// before every attempt: only the turn's execution holds it.
+    SlotHold,
     /// The turn's head commit publishes a plugin's config at a writer
     /// format past the range the fleet record permits, as a build of a
     /// rolling deploy does before `lashctl finalize`: the store refuses it
@@ -278,11 +299,16 @@ struct Call {
     /// The call the turn's row pinned when the attempt was sent, and
     /// whether its stored checkpoint carries the attempt's composition.
     admitted: Option<(u32, bool)>,
-    /// The exact body the attempt sent.
-    sent: Arc<str>,
-    /// The body the pinned call's admission stored, read back as the
+    /// The exact wire bytes the attempt sent, as the provider received
+    /// them from the runtime's attempt loop.
+    sent: String,
+    /// The template the attempt loop filled, as the provider saw it.
+    sent_template: Option<RecordedRequestTemplate>,
+    /// The URL of every delivery made for this attempt, in slot order.
+    delivered: Vec<String>,
+    /// The template the pinned call's admission stored, read back as the
     /// attempt is sent.
-    stored: Option<Arc<str>>,
+    stored: Option<Arc<RecordedRequestTemplate>>,
     /// Whether the turn's cancel had been requested when it started.
     after_cancel: bool,
 }
@@ -340,6 +366,10 @@ struct Seen {
     admission_cancel: Option<Result<TurnCancelAnswer, String>>,
     /// Whether a send lost its call's stored admission.
     material_lost: bool,
+    /// Every delivery the slot store made, by URL, across every node.
+    deliveries: Vec<String>,
+    /// Every delivery the slot store could not make, and why.
+    delivery_failures: Vec<String>,
     /// What the turns told the host: every effect the drive does not
     /// answer, and every finished turn's outcome.
     told: Vec<String>,
@@ -350,6 +380,8 @@ struct L3Services {
     mode: Mode,
     seen: Arc<Mutex<Seen>>,
     backend: Arc<Mutex<Option<Backend>>>,
+    /// The image the slot modes' calls name, once the scenario put it.
+    image: Arc<Mutex<Option<slots::Image>>>,
 }
 
 /// The route the scenario's provider serves.
@@ -413,6 +445,8 @@ impl TurnServices for L3Services {
             | Mode::QueuedCancel
             | Mode::CancelAtAdmission
             | Mode::MaterialLost
+            | Mode::Slots
+            | Mode::SlotHold
             | Mode::CollidingCommit
             | Mode::OutsideWriterRange => ExecutionBudgets::default(),
         }
@@ -551,17 +585,16 @@ impl TurnDrive for L3Drive {
             seen.lowerings
         };
         let lowered = serde_json::to_string(&request).expect("a request encodes");
+        let literal = format!("{{\"builder\":{generation},\"request\":{lowered}");
+        let image = self.services.image.lock_recover().clone();
+        let template = match image {
+            Some(image) => slots::template(&literal, &image),
+            None => RecordedRequestTemplate::literal(route(), true, None, format!("{literal}}}")),
+        };
         Ok(PreparedCall::Admit(Box::new(ComposedCall {
             request: Arc::new(request),
             prompt: None,
-            body: ProviderRequestBody {
-                route: route(),
-                stream: true,
-                generation: None,
-                body: Arc::from(format!(
-                    "{{\"builder\":{generation},\"request\":{lowered}}}"
-                )),
-            },
+            template,
         })))
     }
 
@@ -570,7 +603,7 @@ impl TurnDrive for L3Drive {
         cx: &ActorContext,
         id: EffectId,
         request: Arc<LlmRequest>,
-        body: &ProviderRequestBody,
+        template: &Arc<RecordedRequestTemplate>,
         attempt: ModelCallAttempt,
     ) -> Result<(), TurnError> {
         let ModelCallAttempt {
@@ -606,7 +639,7 @@ impl TurnDrive for L3Drive {
                 lash_core::plugin::prompt::load_admitted_call(cx.durable_reads()?, &key)
                     .await
                     .map_err(|error| TurnError::Exec(error.to_string()))?
-                    .map(|admitted| admitted.body.body)
+                    .map(|admitted| admitted.template)
             }
             None => None,
         };
@@ -628,6 +661,9 @@ impl TurnDrive for L3Drive {
             .await;
             self.services.seen.lock_recover().moved = Some((from, to));
         }
+        // The attempt goes through the runtime's own attempt loop, which
+        // fills the template's slots and hands the provider the wire.
+        let sent = slots::send(&self.services, &request, template).await?;
         let first_streaming_call = {
             let mut seen = self.services.seen.lock_recover();
             let after_cancel = seen.cancel_requested;
@@ -638,7 +674,9 @@ impl TurnDrive for L3Drive {
                 request: rendered,
                 composed,
                 admitted,
-                sent: Arc::clone(&body.body),
+                sent: sent.wire,
+                sent_template: sent.template,
+                delivered: sent.delivered,
                 stored,
                 after_cancel,
             });
@@ -915,6 +953,8 @@ struct L3 {
     seen: Arc<Mutex<Seen>>,
     tripwire: Arc<Tripwire>,
     backend: Arc<Mutex<Option<Backend>>>,
+    image: Arc<Mutex<Option<slots::Image>>>,
+    clock: Mutex<Option<Arc<SimClock>>>,
     keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
 }
 
@@ -927,6 +967,8 @@ impl L3 {
             seen: Arc::default(),
             tripwire: Arc::default(),
             backend: Arc::default(),
+            image: Arc::default(),
+            clock: Mutex::default(),
             keep: Mutex::default(),
         }
     }
@@ -935,6 +977,7 @@ impl L3 {
 #[async_trait::async_trait]
 impl Scenario for L3 {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
+        *self.clock.lock_recover() = Some(Arc::clone(&clock));
         let (stores, database) = dialect::open(
             self.dialect,
             self.postgres_url.as_deref(),
@@ -972,6 +1015,7 @@ impl Scenario for L3 {
                 mode: self.mode,
                 seen: Arc::clone(&self.seen),
                 backend: Arc::clone(&self.backend),
+                image: Arc::clone(&self.image),
             }),
             Arc::clone(&self.tripwire) as _,
         ))
@@ -984,6 +1028,9 @@ impl Scenario for L3 {
             .clone()
             .expect("the database is built first");
         let input = seed::send_turn(&backend, &session(), &run(), "think twice").await?;
+        if matches!(self.mode, Mode::Slots | Mode::SlotHold) {
+            *self.image.lock_recover() = Some(slots::put_image(&backend).await?);
+        }
         match self.mode {
             Mode::QueuedCancel => {
                 let queued =
@@ -1101,7 +1148,11 @@ impl Scenario for L3 {
         }
 
         match self.mode {
-            Mode::Plain | Mode::ShortDeadline | Mode::HeadMovesUnderTheTurn => {
+            Mode::Plain
+            | Mode::ShortDeadline
+            | Mode::HeadMovesUnderTheTurn
+            | Mode::Slots
+            | Mode::SlotHold => {
                 // Atomic turn progress: one head advance, with its terminal.
                 let commits = committed(CommitLabel::TURN_COMMIT);
                 if commits != 1 {
@@ -1164,6 +1215,15 @@ impl Scenario for L3 {
         if self.mode == Mode::HeadMovesUnderTheTurn {
             let backend = self.backend.lock_recover().clone().expect("the backend");
             violations.extend(head_moved_laws(&backend, &trace, &seen).await);
+        }
+        let image = self.image.lock_recover().clone();
+        if let Some(image) = image {
+            violations.extend(slots::delivery_laws(&seen, &image));
+            if self.mode == Mode::SlotHold {
+                let backend = self.backend.lock_recover().clone().expect("the backend");
+                let clock = self.clock.lock_recover().clone().expect("the clock");
+                violations.extend(slots::hold_laws(&backend, &clock, &seen, &image).await);
+            }
         }
 
         if let Some(cut) = cut {
@@ -1384,18 +1444,44 @@ async fn withdraw_or_cancel_laws(
 /// - FENCE and CUT-ACK: every attempt the model receives is of an admitted
 ///   call: the turn's row, read as the attempt is sent, pins that call and
 ///   stores the composition the attempt carries.
-/// - WIRE (FIG-5259): every attempt sends the exact body the call's
-///   admission stored, so a resend on a second owner, whose renderer and
-///   provider builder would produce other bytes, sends the admitted bytes.
+/// - WIRE-SLOTS (FIG-5259, FIG-5445): every attempt sends the template the
+///   call's admission stored, so a resend on a second owner, whose renderer
+///   and provider builder would produce other bytes, sends the admitted
+///   literals and slots; a call with no slot sends exactly its admitted
+///   bytes, and a slot is filled by one value its codec made from that
+///   attempt's own delivery ([`slots::fill_laws`]). Two attempts of one call
+///   differ only inside their slots.
 fn admission_laws(seen: &Seen) -> Vec<String> {
     let mut violations = Vec::new();
     for call in &seen.calls {
         let ordinal = if call.second { 2 } else { 1 };
-        if call.stored.as_deref() != Some(&*call.sent) {
-            violations.push(format!(
-                "WIRE: attempt {} of call {ordinal} sent {} while its admission stored {:?}",
-                call.attempt, call.sent, call.stored
-            ));
+        match &call.stored {
+            None => violations.push(format!(
+                "WIRE-SLOTS: attempt {} of call {ordinal} was sent with no stored admission",
+                call.attempt
+            )),
+            Some(stored) => {
+                if call.sent_template.as_ref() != Some(&**stored) {
+                    violations.push(format!(
+                        "WIRE-SLOTS: attempt {} of call {ordinal} sent template {:?} while its \
+                         admission stored {}",
+                        call.attempt,
+                        call.sent_template
+                            .as_ref()
+                            .map(RecordedRequestTemplate::redacted),
+                        stored.redacted()
+                    ));
+                }
+                if stored.slots().next().is_none() && call.sent != stored.redacted() {
+                    violations.push(format!(
+                        "WIRE: attempt {} of call {ordinal} sent {} while its admission stored {}",
+                        call.attempt,
+                        call.sent,
+                        stored.redacted()
+                    ));
+                }
+                violations.extend(slots::fill_laws(ordinal, call, stored));
+            }
         }
         match call.composed {
             Some(composed) if composed.call == ordinal => {}
@@ -1428,16 +1514,16 @@ fn admission_laws(seen: &Seen) -> Vec<String> {
                 seen.calls
             ));
         }
-        let mut bodies = seen
+        let mut templates = seen
             .calls
             .iter()
             .filter(|call| u32::from(call.second) + 1 == ordinal)
-            .map(|call| &call.sent);
-        if let Some(first) = bodies.next()
-            && bodies.any(|other| other != first)
+            .map(|call| &call.sent_template);
+        if let Some(first) = templates.next()
+            && templates.any(|other| other != first)
         {
             violations.push(format!(
-                "WIRE: call {ordinal} was sent with two bodies: {:?}",
+                "WIRE-SLOTS: call {ordinal} was sent with two templates: {:?}",
                 seen.calls
             ));
         }
@@ -1485,7 +1571,9 @@ fn compositions_of(seen: &Seen, call: u32) -> usize {
 /// how often a call cut at its `model.start` composed (FIG-5255).
 fn cut_laws(mode: Mode, cut: &Cut, seen: &Seen) -> Vec<String> {
     let mut violations = Vec::new();
-    if mode == Mode::Plain && cut.point.label == CommitLabel::MODEL_START {
+    if matches!(mode, Mode::Plain | Mode::Slots | Mode::SlotHold)
+        && cut.point.label == CommitLabel::MODEL_START
+    {
         // Uncut up to its cut, a plain turn's nth `model.start` admits its
         // nth call. A crash after admission resends the admitted call and
         // composes nothing; one before it composes the call again.
@@ -1518,7 +1606,7 @@ fn cut_laws(mode: Mode, cut: &Cut, seen: &Seen) -> Vec<String> {
         .max()
         .unwrap_or(0);
     match mode {
-        Mode::Plain => {
+        Mode::Plain | Mode::Slots | Mode::SlotHold => {
             if max_attempt != 2 {
                 violations.push(format!(
                     "re-send: a call pinned by a killed node was not re-sent as attempt 2: {:?}",
@@ -1838,6 +1926,36 @@ async fn a_call_whose_admitted_body_is_lost_settles_unsent() {
     prove_on(
         matrix().labels(SHORT_DEADLINE),
         Mode::MaterialLost,
+        SHORT_DEADLINE,
+        Dialect::SqliteMemory,
+    )
+    .await;
+}
+
+/// WIRE-SLOTS (FIG-5445): a call whose template carries an attachment slot,
+/// cut at its `model.start` under every fault and resent on the other node,
+/// whose builder would lower other bytes, sends the admitted literals and
+/// slot with a fresh delivery in the slot; nothing else is ever delivered.
+#[tokio::test]
+async fn an_attachment_call_resends_its_template_with_fresh_deliveries() {
+    prove_on(
+        matrix().labels(SHORT_DEADLINE),
+        Mode::Slots,
+        SHORT_DEADLINE,
+        Dialect::SqliteMemory,
+    )
+    .await;
+}
+
+/// PUT/REFERRER, the admitted slot (FIG-5445): an attachment only an
+/// admitted call names stays deliverable across a takeover, its upload
+/// ended and the store swept before every attempt, and is reclaimed once
+/// the turn that owned the call settled.
+#[tokio::test]
+async fn an_admitted_calls_attachment_outlives_takeover_until_its_owner_settles() {
+    prove_on(
+        matrix().labels(SHORT_DEADLINE),
+        Mode::SlotHold,
         SHORT_DEADLINE,
         Dialect::SqliteMemory,
     )

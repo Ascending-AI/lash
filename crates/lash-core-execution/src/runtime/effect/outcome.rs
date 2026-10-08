@@ -258,7 +258,6 @@ mod tests {
             )
             .with_reasoning(crate::ReasoningSelection::ProviderDefault),
             messages: Vec::new(),
-            resolved_stored: Default::default(),
             tools: Arc::new(Vec::new()),
             tool_choice: crate::llm::types::LlmToolChoice::Auto,
             attachment_acceptance: Default::default(),

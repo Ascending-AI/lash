@@ -11,9 +11,10 @@
 //! text stands in. A late render's result is dropped.
 //!
 //! A call's admission ([`admission_record`]) records its [`ComposedPrompt`]
-//! and its exact provider body as one root whose texts and body chunks are
+//! and its request template as one root whose texts and literal chunks are
 //! stored by content address, so a section that did not change between
-//! calls, or a body prefix two calls share, is stored once.
+//! calls, or a literal prefix two calls share, is stored once. The template's
+//! attachment slots record refs, never a delivered value (ADR 0135 §6).
 //! [`load_admitted_call`] reads an admitted call back, every text verified
 //! against its address, without calling any renderer, wrapper or provider
 //! builder.
@@ -26,7 +27,7 @@ use std::sync::{Arc, Barrier, Mutex, OnceLock};
 
 use lash_durable::domain::{PromptCallKey, PromptText, PromptWrite};
 use lash_durable::{DomainWrite, DurableError, DurableInstant, DurableReads};
-use lash_sansio::llm::types::ProviderRequestBody;
+use lash_sansio::llm::types::RecordedRequestTemplate;
 use lash_sansio::sync::MutexExt;
 
 use super::{
@@ -34,7 +35,7 @@ use super::{
     PromptSnapshot, PromptSnapshotVersion, PromptTextRef, RecordedSectionText,
     ResolvedPromptComposition,
 };
-use crate::prompt_sections::{AdmittedModelCall, ProviderBodyError, RecordedProviderBody};
+use crate::prompt_sections::{AdmittedModelCall, ChunkedRequestTemplate, ProviderBodyError};
 use crate::store::BlobRef;
 
 /// What separates two sections' text within one placement.
@@ -180,9 +181,9 @@ pub struct ComposedPrompt {
 
 /// The owner-commit write that admits `call` (ADR 0133 §6): one root holding
 /// its record, an [`AdmittedModelCall`] of `prompt`'s snapshot (none when the
-/// session registers no sections), the exact `body` and, for a call no turn
-/// row pins, its `deadline`, over every section text and body chunk stored
-/// by content. It belongs in the commit that admits the call, once per new
+/// session registers no sections), the request `template` and, for a call no
+/// turn row pins, its `deadline`, over every section text and literal chunk
+/// stored by content. It belongs in the commit that admits the call, once per new
 /// call: a second record of one call is refused.
 ///
 /// # Errors
@@ -191,10 +192,10 @@ pub struct ComposedPrompt {
 pub fn admission_record(
     call: PromptCallKey,
     prompt: Option<&ComposedPrompt>,
-    body: &ProviderRequestBody,
+    template: &RecordedRequestTemplate,
     deadline: Option<DurableInstant>,
 ) -> Result<DomainWrite, serde_json::Error> {
-    let (recorded_body, chunks) = RecordedProviderBody::chunk(body);
+    let (recorded_body, chunks) = ChunkedRequestTemplate::chunk(template);
     let mut texts: BTreeMap<BlobRef, String> = chunks.into_iter().collect();
     if let Some(prompt) = prompt {
         texts.extend(
@@ -366,8 +367,8 @@ pub enum AdmittedCallLoadError {
     /// A stored text does not match its content address.
     #[error("prompt text {hash} does not match its address")]
     TextMismatch { hash: String },
-    /// The exact body cannot be assembled from its stored chunks.
-    #[error("admitted provider body: {0}")]
+    /// The template cannot be assembled from its stored chunks.
+    #[error("admitted request template: {0}")]
     Body(#[from] ProviderBodyError),
 }
 
@@ -388,26 +389,26 @@ impl LoadedPromptSnapshot {
     }
 }
 
-/// An admitted call, read back: its prompt snapshot, the exact body every
-/// send of it sends, and an owned call's pinned deadline.
+/// An admitted call, read back: its prompt snapshot, the request template
+/// every send of it fills and sends, and an owned call's pinned deadline.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LoadedAdmittedCall {
     /// `None` when the session registered no sections.
     pub prompt: Option<LoadedPromptSnapshot>,
-    pub body: ProviderRequestBody,
+    pub template: Arc<RecordedRequestTemplate>,
     pub deadline: Option<DurableInstant>,
 }
 
 /// Read `call`'s admission back from `reads`: its record, every section text
-/// and body chunk it references, each verified against its content address,
-/// and the body assembled byte for byte. No renderer, wrapper or provider
+/// and literal chunk it references, each verified against its content
+/// address, and the template assembled byte for byte. No renderer, wrapper or provider
 /// builder runs. `None` when the call has no retained root.
 ///
 /// # Errors
 ///
 /// [`AdmittedCallLoadError`] when the store fails, the record does not
-/// decode, a text is missing or does not match its address, or the body
-/// does not assemble to its recorded length.
+/// decode, a text is missing or does not match its address, or the
+/// template does not assemble as recorded.
 pub async fn load_admitted_call(
     reads: &dyn DurableReads,
     call: &PromptCallKey,
@@ -423,9 +424,11 @@ pub async fn load_admitted_call(
         }
         texts.insert(BlobRef(stored.hash), stored.text);
     }
-    let body = admitted
-        .body
-        .assemble(|blob| texts.get(blob).map(String::as_str))?;
+    let template = Arc::new(
+        admitted
+            .body
+            .assemble(|blob| texts.get(blob).map(String::as_str))?,
+    );
     let prompt = match admitted.prompt {
         Some(snapshot) => {
             let referenced = snapshot.sections.iter().flat_map(|section| {
@@ -433,7 +436,7 @@ pub async fn load_admitted_call(
                     .chain(section.wraps.iter().map(|wrap| &wrap.output))
                     .chain(std::iter::once(&section.value))
             });
-            // The snapshot's own texts: the body's chunks share the root.
+            // The snapshot's own texts: the template's chunks share the root.
             let mut prompt_texts = BTreeMap::new();
             for recorded in referenced {
                 if let RecordedSectionText::Text { text } = recorded {
@@ -454,7 +457,7 @@ pub async fn load_admitted_call(
     };
     Ok(Some(LoadedAdmittedCall {
         prompt,
-        body,
+        template,
         deadline: admitted.deadline_ms.map(DurableInstant),
     }))
 }

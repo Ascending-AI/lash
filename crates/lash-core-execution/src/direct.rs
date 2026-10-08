@@ -1,12 +1,15 @@
+use crate::AttachmentRef;
 use crate::SchemaContract;
 use crate::llm::transport::LlmTransportError;
 use crate::llm::types::{
-    AttachmentSource, LlmContentBlock, LlmEventSender, LlmJsonSchema, LlmMessage, LlmOutputSpec,
-    LlmRequest, LlmRequestScope, LlmResponse, LlmRole, LlmStreamEvent, LlmToolChoice,
+    LlmContentBlock, LlmEventSender, LlmJsonSchema, LlmMessage, LlmOutputSpec, LlmRequest,
+    LlmRequestScope, LlmResponse, LlmRole, LlmStreamEvent, LlmToolChoice,
 };
 #[cfg(test)]
 use crate::provider::LlmProfileCapability;
-use crate::provider::{LlmProfileEffortValidationCategory, ProviderHandle};
+use crate::provider::{
+    LlmProfileEffortValidationCategory, NoSlotDeliveries, ProviderHandle, SlotDeliveries,
+};
 use lash_trace::{TraceContext, TraceSink};
 use std::sync::Arc;
 
@@ -21,7 +24,7 @@ pub enum DirectRole {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DirectPart {
     Text(String),
-    Attachment(Box<AttachmentSource>),
+    Attachment(Box<AttachmentRef>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -85,16 +88,15 @@ pub struct DirectRequest {
 }
 
 impl DirectRequest {
-    /// Attachment sources in message order, derived from their owning blocks.
-    pub fn attachments(&self) -> Vec<&AttachmentSource> {
+    /// Attachment refs in message order, derived from their owning blocks.
+    pub fn attachments(&self) -> impl Iterator<Item = &AttachmentRef> {
         self.messages
             .iter()
             .flat_map(|message| message.parts.iter())
             .filter_map(|part| match part {
-                DirectPart::Attachment(source) => Some(source.as_ref()),
-                _ => None,
+                DirectPart::Attachment(reference) => Some(reference.as_ref()),
+                DirectPart::Text(_) => None,
             })
-            .collect()
     }
 
     pub fn text(prompt: impl Into<String>) -> Self {
@@ -202,6 +204,9 @@ pub struct DirectLlmClient {
     trace_sink: Option<Arc<dyn TraceSink>>,
     trace_context: TraceContext,
     clock: Arc<dyn crate::Clock>,
+    /// What delivers a request's attachment slots on each attempt. A client
+    /// with none refuses an attachment-bearing request unsent.
+    deliveries: Arc<dyn SlotDeliveries>,
 }
 
 impl DirectLlmClient {
@@ -213,7 +218,15 @@ impl DirectLlmClient {
             trace_sink: None,
             trace_context: TraceContext::default(),
             clock: Arc::new(crate::SystemClock),
+            deliveries: Arc::new(NoSlotDeliveries),
         }
+    }
+
+    /// Deliver every request's attachment slots through `deliveries`, such
+    /// as the host's attachment store, on each attempt.
+    pub fn with_attachment_deliveries(mut self, deliveries: Arc<dyn SlotDeliveries>) -> Self {
+        self.deliveries = deliveries;
+        self
     }
 
     /// Send `instructions` as every request's initial instructions.
@@ -280,14 +293,15 @@ impl DirectLlmClient {
                 .provider_attempts(sideband, TraceContext::default().for_llm_call(id.clone())),
             None => sideband,
         };
-        let body = match self.provider.lower(&llm_request).await {
-            Ok(body) => body,
+        let template = match self.provider.lower(&llm_request).await {
+            Ok(template) => Arc::new(template),
             Err(error) => return Err(DirectLlmError::from(Box::new(error))),
         };
         match lash_core_llm::core_internal::complete_prepared(
             &mut self.provider,
             llm_request,
-            &body,
+            &template,
+            self.deliveries.as_ref(),
             sideband,
             crate::ChargeSafetyPolicy::default(),
             &Default::default(),
@@ -412,8 +426,8 @@ pub fn build_llm_request(
                         });
                     }
                 }
-                DirectPart::Attachment(source) => {
-                    blocks.push(LlmContentBlock::Attachment { source });
+                DirectPart::Attachment(reference) => {
+                    blocks.push(LlmContentBlock::Attachment { reference });
                 }
             }
         }
@@ -457,7 +471,6 @@ pub fn build_llm_request(
         instructions: None,
         model,
         messages: llm_messages,
-        resolved_stored: Default::default(),
         tools: Vec::new().into(),
         tool_choice: LlmToolChoice::None,
         attachment_acceptance,

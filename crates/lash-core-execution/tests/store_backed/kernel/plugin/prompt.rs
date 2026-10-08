@@ -128,18 +128,43 @@ fn call_key(call: u32) -> PromptCallKey {
     }
 }
 
-/// The exact body call `call` admits with its prompt.
-fn body(call: u32) -> lash_sansio::llm::types::ProviderRequestBody {
-    lash_sansio::llm::types::ProviderRequestBody {
-        route: lash_sansio::llm::types::ProviderRouteIdentity {
-            provider: "test".into(),
-            endpoint: "https://provider.test/v1".into(),
-            model: "model".into(),
-        },
-        stream: true,
-        generation: None,
-        body: Arc::from(format!("{{\"call\":{call}}}")),
+/// The request template call `call` admits with its prompt: the first a
+/// lone literal, the second an image slot between two literals.
+fn template(call: u32) -> lash_sansio::llm::types::RecordedRequestTemplate {
+    use lash_sansio::llm::attachment_delivery::{AttachmentPosition, ProviderAccepts};
+    use lash_sansio::llm::types::{AttachmentSlot, RecordedRequestTemplate, SlotCodec};
+    let route = lash_sansio::llm::types::ProviderRouteIdentity {
+        provider: "test".into(),
+        endpoint: "https://provider.test/v1".into(),
+        model: "model".into(),
+    };
+    if call == 1 {
+        return RecordedRequestTemplate::literal(route, true, None, format!("{{\"call\":{call}}}"));
     }
+    let mut builder = RecordedRequestTemplate::builder(route, true, None);
+    builder
+        .literal(format!("{{\"call\":{call},\"image\":"))
+        .attachment(AttachmentSlot {
+            reference: lash_sansio::AttachmentRef {
+                id: lash_sansio::AttachmentId::parse("ab".repeat(32)).expect("a digest id"),
+                media_type: lash_sansio::MediaType::parse("image/png").expect("a media type"),
+                byte_len: 4,
+                type_metadata: None,
+                label: Some("shot".to_owned()),
+            },
+            position: AttachmentPosition::Message,
+            accepts: ProviderAccepts {
+                bytes: true,
+                url: true,
+                provider_file: None,
+            },
+            codec: SlotCodec {
+                name: "lash.canonical".into(),
+                revision: 1,
+            },
+        })
+        .literal("}");
+    builder.finish().expect("a valid template")
 }
 
 #[tokio::test]
@@ -188,7 +213,7 @@ async fn an_admitted_calls_snapshot_reads_back_byte_for_byte_without_any_rendere
         .expect("begin the admission");
     for (call, prompt) in (1..).zip(&composed) {
         tx.write(
-            admission_record(call_key(call), Some(prompt), &body(call), None)
+            admission_record(call_key(call), Some(prompt), &template(call), None)
                 .expect("the admission encodes"),
         );
     }
@@ -204,9 +229,9 @@ async fn an_admitted_calls_snapshot_reads_back_byte_for_byte_without_any_rendere
             .expect("the admission loads")
             .expect("the call is admitted");
         assert_eq!(
-            admitted.body,
-            body(call),
-            "the body reads back byte for byte"
+            *admitted.template,
+            template(call),
+            "the template, its literals and slots, reads back byte for byte"
         );
         let loaded = admitted.prompt.expect("the admitted call has a snapshot");
         assert_eq!(loaded.snapshot, prompt.snapshot);

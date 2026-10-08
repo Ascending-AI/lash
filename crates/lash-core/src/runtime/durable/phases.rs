@@ -4,13 +4,14 @@
 //! The runner polls the turn's machine through its [`TurnDrive`] and commits
 //! at the catalog's labels: `model.start` admits a model call before its
 //! first byte (ADR 0133 §6): a new call takes the next ordinal of the turn's
-//! calls, composes its prompt into its request and is lowered to its exact
-//! provider body, and its admission commits its pin, the checkpoint that
+//! calls, composes its prompt into its request and is lowered to its request
+//! template, every attachment its slots name is held under the turn's
+//! execution, and its admission commits its pin, the checkpoint that
 //! re-delivers it, the plugin namespaces the turn's run changed since its
 //! last commit (the pending checkpoint-callback decisions among them; an
 //! unchanged namespace is never written) and its admission record
-//! (snapshot and body); a
-//! resend is the same call, prepares nothing and sends the stored body. `model.done` commits the
+//! (snapshot and template); a resend is the same call, prepares nothing and
+//! sends the stored template with its slots filled afresh. `model.done` commits the
 //! phase that re-delivers a round or a cell
 //! before it starts, and `turn.commit` publishes the next revision of the
 //! head the owner cached with the turn's terminal in one fenced
@@ -48,7 +49,7 @@ use super::turn_scope::end_turn_scope;
 use super::{model_call, turn_cancel};
 use crate::plugin::prompt::{admission_record, load_admitted_call};
 use crate::{ActorContext, Effect, HostTurnProtocol, SessionStreamEvent, TurnMachine};
-use lash_sansio::llm::types::ProviderRequestBody;
+use lash_sansio::llm::types::RecordedRequestTemplate;
 use lash_sansio::{SavedTurn, SessionId, TurnId};
 use std::sync::Arc;
 
@@ -203,13 +204,13 @@ pub async fn run_phases(
                 let current = iteration(drive.machine());
                 // `model` is spent: only the call the restored machine
                 // re-delivers is the pinned one; every other call is new.
-                let (pinned, request, body, admission) = match model.take() {
+                let (pinned, request, template, admission) = match model.take() {
                     Some((redelivered, pin)) if redelivered == id => {
-                        // A resend sends the body its admission stored, read
-                        // back byte for byte; nothing prepares it again.
+                        // A resend sends the template its admission stored,
+                        // read back byte for byte; nothing prepares it again.
                         let key = call_key(&session, &run, pin.call);
-                        match admitted_body(cx, &key).await? {
-                            Ok(body) => (Some(pin), request, body, None),
+                        match admitted_template(cx, &key).await? {
+                            Ok(template) => (Some(pin), request, template, None),
                             Err(unavailable) => {
                                 settle_unsent(drive.as_mut(), id, unavailable);
                                 continue;
@@ -218,17 +219,35 @@ pub async fn run_phases(
                     }
                     _ => {
                         // A new call is prepared over the turn's committed
-                        // state: composed, decided and lowered to its exact
-                        // body. The machine waits on the request that
-                        // carries it, so the checkpoint names it.
+                        // state: composed, decided and lowered to its
+                        // request template, whose attachments are held
+                        // under the turn's execution before it is admitted.
+                        // The machine waits on the request that carries it,
+                        // so the checkpoint names it.
                         let call = calls.saturating_add(1);
                         match drive.prepare_call(cx, id, call, request).await? {
                             PreparedCall::Admit(composed) => {
                                 let ComposedCall {
                                     request,
                                     prompt,
-                                    body,
+                                    template,
                                 } = *composed;
+                                // The turn's execution holds them, as it holds
+                                // the turn's own puts.
+                                let turn_cx = cx.scoped(crate::AdmittedScope::turn(
+                                    session.clone(),
+                                    run.clone(),
+                                ))?;
+                                if let Err(refused) =
+                                    crate::runtime::owned_call::hold_slots(&turn_cx, &template)
+                                        .await
+                                        .map_err(|error| {
+                                            TurnError::Runtime(error.into_runtime_error())
+                                        })?
+                                {
+                                    settle_unsent(drive.as_mut(), id, refused);
+                                    continue;
+                                }
                                 if !drive.machine().admit_request(id, Arc::clone(&request)) {
                                     return Err(TurnError::Exec(format!(
                                         "the turn machine does not wait on model call {id:?}"
@@ -237,7 +256,7 @@ pub async fn run_phases(
                                 let record = admission_record(
                                     call_key(&session, &run, call),
                                     prompt.as_ref(),
-                                    &body,
+                                    &template,
                                     None,
                                 )
                                 .map_err(|error| {
@@ -245,7 +264,7 @@ pub async fn run_phases(
                                         "the model call's admission does not encode: {error}"
                                     ))
                                 })?;
-                                (None, request, body, Some(record))
+                                (None, request, Arc::new(template), Some(record))
                             }
                             PreparedCall::Unsent(refused) => {
                                 settle_unsent(drive.as_mut(), id, refused);
@@ -273,8 +292,8 @@ pub async fn run_phases(
                     // the checkpoint that re-delivers its request, the
                     // plugin state the turn published, the pending
                     // checkpoint-callback decisions among it, and its
-                    // admission record (its prompt snapshot and exact
-                    // body), in one transaction. A resend commits its next
+                    // admission record (its prompt snapshot and request
+                    // template), in one transaction. A resend commits its next
                     // attempt and records nothing.
                     let label = tool_round::model_start_label(&carry);
                     if let Some(present) = carry.take() {
@@ -302,7 +321,7 @@ pub async fn run_phases(
                         calls = pin.call;
                     }
                 }
-                if !model_call::send(cx, drive.as_mut(), id, request, &body, &start).await? {
+                if !model_call::send(cx, drive.as_mut(), id, request, &template, &start).await? {
                     return Ok(PhaseExit::CancelRequested);
                 }
             }
@@ -543,18 +562,18 @@ fn call_key(session: &crate::SessionId, run: &crate::TurnId, call: u32) -> Promp
     }
 }
 
-/// The exact body admitted call `key` sends, read back as `model.start`
-/// stored it. The inner `Err` is the settlement of a call whose body is
-/// gone or does not assemble: it is never sent, and nothing rebuilds it
-/// (`AdmittedRequestUnavailable`).
+/// The request template admitted call `key` sends, read back as
+/// `model.start` stored it. The inner `Err` is the settlement of a call whose
+/// template is gone or does not assemble: it is never sent, and nothing
+/// rebuilds it (`AdmittedRequestUnavailable`).
 ///
 /// # Errors
 ///
 /// [`TurnError::Durable`] when the store cannot be read.
-async fn admitted_body(
+async fn admitted_template(
     cx: &ActorContext,
     key: &PromptCallKey,
-) -> Result<Result<ProviderRequestBody, crate::LlmCallError>, TurnError> {
+) -> Result<Result<Arc<RecordedRequestTemplate>, crate::LlmCallError>, TurnError> {
     let unavailable = |message: String| crate::LlmCallError {
         message,
         retryable: false,
@@ -568,14 +587,14 @@ async fn admitted_body(
         partial_response: None,
     };
     match load_admitted_call(cx.durable_reads()?, key).await {
-        Ok(Some(admitted)) => Ok(Ok(admitted.body)),
+        Ok(Some(admitted)) => Ok(Ok(admitted.template)),
         Ok(None) => Ok(Err(unavailable(format!(
-            "{} has no admitted body to send",
+            "{} has no admitted request template to send",
             key.call
         )))),
         Err(crate::plugin::prompt::AdmittedCallLoadError::Store(error)) => Err(error.into()),
         Err(error) => Ok(Err(unavailable(format!(
-            "{}'s admitted body cannot be sent: {error}",
+            "{}'s admitted request template cannot be sent: {error}",
             key.call
         )))),
     }

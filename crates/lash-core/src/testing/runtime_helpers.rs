@@ -227,6 +227,40 @@ fn mock_provider_with_kind(kind: &'static str, calls: Vec<MockCall>) -> TestProv
         .build()
 }
 
+/// Send `template`, an admitted call's request template lowered for
+/// `request`, on `handle` as the runtime sends an admitted call: every
+/// attempt fills its slots through `deliveries`, under the default budgets
+/// and charge safety. A test that stands in for the runtime's model call
+/// uses it to exercise the real attempt loop (WIRE-SLOTS).
+///
+/// # Errors
+///
+/// The call's settled failure, with its sealed attempts.
+#[allow(
+    clippy::result_large_err,
+    reason = "ProviderCompletionError carries the sealed call record, as the handle's own sends do"
+)]
+pub async fn send_admitted(
+    handle: &mut crate::ProviderHandle,
+    mut request: LlmRequest,
+    template: &Arc<lash_sansio::llm::types::RecordedRequestTemplate>,
+    deliveries: &dyn crate::provider::SlotDeliveries,
+) -> Result<crate::provider::ProviderCompletion, crate::provider::ProviderCompletionError> {
+    let sideband = crate::provider::prepare_completion(handle, &mut request);
+    crate::provider::complete_prepared(
+        handle,
+        request,
+        template,
+        deliveries,
+        sideband,
+        crate::ChargeSafetyPolicy::default(),
+        &lash_trace::telemetry::metrics::TelemetryMetrics::default(),
+        None,
+        crate::provider::ModelCallBounds::default(),
+    )
+    .await
+}
+
 /// Serve the runtime session's recorded model with `provider`: the host's
 /// models become a one-model registry holding exactly that binding. A
 /// session with no model records the standard test model first.

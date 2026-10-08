@@ -78,10 +78,11 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// may emit once a step body of this attempt has really run, or, on the
     /// copy a recorded step's body runs on, that body's live step.
     pub(super) trace: crate::trace::TraceStanding,
-    /// The exact provider body of the admitted call the next model-call
-    /// effect sends (ADR 0133 §6): handed to that effect's body, never
-    /// rebuilt there.
-    pub(super) admitted_body: Option<lash_sansio::llm::types::ProviderRequestBody>,
+    /// The request template of the admitted call the next model-call effect
+    /// sends (ADR 0133 §6): handed to that effect's body, which fills its
+    /// slots afresh and never rebuilds it.
+    pub(super) admitted_body:
+        Option<std::sync::Arc<lash_sansio::llm::types::RecordedRequestTemplate>>,
     /// The attempt of the admitted call the next model-call effect sends, its
     /// pin's: a re-sent attempt streams under an observation key of its own
     /// (`abandoned_stream::model_stream_key`).

@@ -11,8 +11,8 @@
 //! placements and wrapper chains one model call composed under. A
 //! [`PromptSnapshot`] records every section's base text, each wrapper's
 //! output and the final text, as content-addressed references. An
-//! [`AdmittedModelCall`] records a call's snapshot with its exact provider
-//! body (FIG-5259). The records are version 1. None is ever read back to
+//! [`AdmittedModelCall`] records a call's snapshot with its request template
+//! (FIG-5259, FIG-5445). The records are version 1. None is ever read back to
 //! recompose a request.
 
 use std::num::NonZeroU32;
@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::store::BlobRef;
 use crate::store::plugin_writers::PluginRevision;
+use lash_sansio::llm::types::AttachmentSlot;
 
 /// The longest local section or wrapper key, in bytes.
 pub const PROMPT_KEY_MAX_BYTES: usize = 64;
@@ -496,109 +497,163 @@ pub struct PromptSnapshot {
     pub sections: Vec<RenderedPromptSection>,
 }
 
-/// The most bytes one stored chunk of a provider body holds. A chunk ends at
-/// a UTF-8 character boundary at or below it, so equal leading bytes of two
-/// bodies store equal leading chunks.
+/// The most bytes one stored chunk of a request template's literal holds. A
+/// chunk ends at a UTF-8 character boundary at or below it, so equal leading
+/// bytes of two literals store equal leading chunks.
 pub const PROVIDER_BODY_CHUNK_BYTES: usize = 32 * 1024;
 
-/// The exact provider body an admitted call sends, as its record stores it
-/// (ADR 0133 §6): the route that lowered it, whether it streams, the
-/// generation receipt its provider built, and its bytes as content-addressed
-/// chunks in order. A body that shares a prefix with an earlier call's
-/// shares that prefix's chunks.
+/// The request template an admitted call sends, as its record stores it
+/// (ADR 0133 §6, ADR 0135 §6): the route that lowered it, whether it
+/// streams, the generation receipt its provider built, and its segments in
+/// wire order. A literal is stored as content-addressed chunks of its own,
+/// so a template that shares a literal prefix with an earlier call's shares
+/// that prefix's chunks. A slot is recorded inline: its ref, position,
+/// acceptance and codec, never a delivered value.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct RecordedProviderBody {
+pub struct ChunkedRequestTemplate {
     pub route: lash_sansio::llm::types::ProviderRouteIdentity,
     pub stream: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation: Option<lash_sansio::llm::types::GenerationReceipt>,
-    /// The body's length in bytes.
-    pub bytes: u64,
-    /// Every chunk, in order.
-    pub chunks: Vec<PromptTextRef>,
+    /// Every segment, in wire order.
+    pub segments: Vec<ChunkedSegment>,
 }
 
-/// Why a recorded body could not be assembled as admitted.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+/// One stored segment of a [`ChunkedRequestTemplate`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "segment", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ChunkedSegment {
+    /// Literal JSON text: its length in bytes and every chunk, in order.
+    Literal {
+        bytes: u64,
+        chunks: Vec<PromptTextRef>,
+    },
+    /// One attachment slot, filled per attempt.
+    Attachment {
+        slot: lash_sansio::llm::types::AttachmentSlot,
+    },
+}
+
+/// Why a recorded template could not be assembled as admitted.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ProviderBodyError {
     /// A chunk the record names is not among the texts read back.
-    #[error("provider body chunk {hash} is missing")]
+    #[error("request template chunk {hash} is missing")]
     MissingChunk { hash: String },
-    /// The assembled bytes are not the recorded length.
-    #[error("the assembled provider body holds {assembled} bytes, not the recorded {recorded}")]
+    /// An assembled literal is not its recorded length.
+    #[error(
+        "an assembled request template literal holds {assembled} bytes, not the recorded {recorded}"
+    )]
     Length { assembled: u64, recorded: u64 },
+    /// The assembled segments are not a valid template.
+    #[error("the assembled request template is invalid: {0}")]
+    Template(#[from] lash_sansio::llm::types::TemplateError),
 }
 
-impl RecordedProviderBody {
-    /// Record `body` as chunks: the record and each chunk's text by its
-    /// content address.
+impl ChunkedRequestTemplate {
+    /// Record `template` as chunks: the record and each literal chunk's text
+    /// by its content address.
     pub fn chunk(
-        body: &lash_sansio::llm::types::ProviderRequestBody,
+        template: &lash_sansio::llm::types::RecordedRequestTemplate,
     ) -> (Self, Vec<(BlobRef, String)>) {
-        let mut rest = &*body.body;
-        let mut chunks = Vec::new();
+        use lash_sansio::llm::types::RequestSegment;
         let mut texts = Vec::new();
-        while !rest.is_empty() {
-            let mut end = rest.len().min(PROVIDER_BODY_CHUNK_BYTES);
-            while !rest.is_char_boundary(end) {
-                end -= 1;
-            }
-            let (chunk, tail) = rest.split_at(end);
-            let reference = PromptTextRef::of(chunk);
-            texts.push((reference.blob.clone(), chunk.to_owned()));
-            chunks.push(reference);
-            rest = tail;
-        }
+        let segments = template
+            .segments
+            .iter()
+            .map(|segment| match segment {
+                RequestSegment::Literal { text } => {
+                    let mut rest = &**text;
+                    let mut chunks = Vec::new();
+                    while !rest.is_empty() {
+                        let mut end = rest.len().min(PROVIDER_BODY_CHUNK_BYTES);
+                        while !rest.is_char_boundary(end) {
+                            end -= 1;
+                        }
+                        let (chunk, tail) = rest.split_at(end);
+                        let reference = PromptTextRef::of(chunk);
+                        texts.push((reference.blob.clone(), chunk.to_owned()));
+                        chunks.push(reference);
+                        rest = tail;
+                    }
+                    ChunkedSegment::Literal {
+                        bytes: u64::try_from(text.len()).unwrap_or(u64::MAX),
+                        chunks,
+                    }
+                }
+                RequestSegment::Attachment { slot } => ChunkedSegment::Attachment {
+                    slot: AttachmentSlot::clone(slot),
+                },
+            })
+            .collect();
         (
             Self {
-                route: body.route.clone(),
-                stream: body.stream,
-                generation: body.generation,
-                bytes: u64::try_from(body.body.len()).unwrap_or(u64::MAX),
-                chunks,
+                route: template.route.clone(),
+                stream: template.stream,
+                generation: template.generation,
+                segments,
             },
             texts,
         )
     }
 
-    /// The body these chunks hold, each read from `text` by its address.
+    /// The template these segments hold, each literal chunk read from
+    /// `text` by its address, validated as a template.
     ///
     /// # Errors
     ///
-    /// [`ProviderBodyError`] when a chunk is missing or the bytes are not the
-    /// recorded length; the caller verified every text against its address.
+    /// [`ProviderBodyError`] when a chunk is missing, a literal is not its
+    /// recorded length, or the segments are not a valid template; the caller
+    /// verified every text against its address.
     pub fn assemble<'a>(
         &self,
         text: impl Fn(&BlobRef) -> Option<&'a str>,
-    ) -> Result<lash_sansio::llm::types::ProviderRequestBody, ProviderBodyError> {
-        let mut body = String::new();
-        for chunk in &self.chunks {
-            let stored = text(&chunk.blob).ok_or_else(|| ProviderBodyError::MissingChunk {
-                hash: chunk.blob.as_str().to_owned(),
-            })?;
-            body.push_str(stored);
-        }
-        let assembled = u64::try_from(body.len()).unwrap_or(u64::MAX);
-        if assembled != self.bytes {
-            return Err(ProviderBodyError::Length {
-                assembled,
-                recorded: self.bytes,
+    ) -> Result<lash_sansio::llm::types::RecordedRequestTemplate, ProviderBodyError> {
+        use lash_sansio::llm::types::RequestSegment;
+        let mut segments = Vec::with_capacity(self.segments.len());
+        for segment in &self.segments {
+            segments.push(match segment {
+                ChunkedSegment::Literal { bytes, chunks } => {
+                    let mut literal = String::new();
+                    for chunk in chunks {
+                        let stored =
+                            text(&chunk.blob).ok_or_else(|| ProviderBodyError::MissingChunk {
+                                hash: chunk.blob.as_str().to_owned(),
+                            })?;
+                        literal.push_str(stored);
+                    }
+                    let assembled = u64::try_from(literal.len()).unwrap_or(u64::MAX);
+                    if assembled != *bytes {
+                        return Err(ProviderBodyError::Length {
+                            assembled,
+                            recorded: *bytes,
+                        });
+                    }
+                    RequestSegment::Literal {
+                        text: literal.into(),
+                    }
+                }
+                ChunkedSegment::Attachment { slot } => RequestSegment::Attachment {
+                    slot: Box::new(slot.clone()),
+                },
             });
         }
-        Ok(lash_sansio::llm::types::ProviderRequestBody {
+        let template = lash_sansio::llm::types::RecordedRequestTemplate {
             route: self.route.clone(),
             stream: self.stream,
             generation: self.generation,
-            body: body.into(),
-        })
+            segments,
+        };
+        template.validate()?;
+        Ok(template)
     }
 }
 
 /// What one admitted model call commits (ADR 0133 §6), version 1: its
-/// prompt snapshot, its exact provider body and, for a call no turn row
-/// pins, its deadline. A resend reads it back and sends the body; nothing
-/// recomposes or lowers the call again.
+/// prompt snapshot, its request template and, for a call no turn row pins,
+/// its deadline. A resend reads it back and sends the template with its
+/// slots filled afresh; nothing recomposes or lowers the call again.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdmittedModelCall {
@@ -606,7 +661,7 @@ pub struct AdmittedModelCall {
     /// The call's prompt; `None` when the session registers no sections.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<PromptSnapshot>,
-    pub body: RecordedProviderBody,
+    pub body: ChunkedRequestTemplate,
     /// The model-total deadline, in milliseconds on the store's clock, that
     /// every send of a compaction's or direct call keeps. A turn's call pins
     /// its deadline in the turn row instead.

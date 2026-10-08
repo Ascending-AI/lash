@@ -107,12 +107,23 @@ pub struct ProcessDefinitionLocalExecution {
     pub(crate) claim: crate::ReferrerClaim,
 }
 
-/// An admitted direct call, ready to send: its exact body and the live limit
+/// An admitted direct call, ready to send: its request template, the store
+/// that delivers its attachment slots on every attempt, and the live limit
 /// its pinned deadline leaves.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct AdmittedDirectSend {
-    pub body: crate::ProviderRequestBody,
+    pub template: Arc<lash_sansio::llm::types::RecordedRequestTemplate>,
+    pub deliveries: Arc<dyn crate::provider::SlotDeliveries>,
     pub limit: crate::ExecutionLimit,
+}
+
+impl std::fmt::Debug for AdmittedDirectSend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AdmittedDirectSend")
+            .field("template", &self.template.redacted())
+            .field("limit", &self.limit)
+            .finish_non_exhaustive()
+    }
 }
 
 pub(super) struct LocalDirectEffectRunner {
@@ -122,9 +133,11 @@ pub(super) struct LocalDirectEffectRunner {
     /// The runtime's execution budgets and the enclosing limit the call is
     /// clipped to: the deadline its admission pinned.
     bounds: lash_core_llm::core_internal::ModelCallBounds,
-    /// The call's exact provider body, as its admission stored it: every
-    /// attempt sends it, and nothing lowers the call again.
-    body: crate::ProviderRequestBody,
+    /// The call's request template, as its admission stored it: every
+    /// attempt fills its slots from `deliveries` and sends it, and nothing
+    /// lowers the call again.
+    template: Arc<lash_sansio::llm::types::RecordedRequestTemplate>,
+    deliveries: Arc<dyn crate::provider::SlotDeliveries>,
     /// Who the call spends for (ADR 0127).
     owner: crate::RuntimeOwner,
     /// The request is the body's own work, so its records are made inside
@@ -661,8 +674,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         Self::language_runtime_value_with(run)
     }
 
-    /// The body of an admitted direct call: it sends `admitted`'s exact body
-    /// within the limit its pinned deadline leaves.
+    /// The body of an admitted direct call: it sends `admitted`'s template,
+    /// its slots filled afresh, within the limit its pinned deadline leaves.
     pub fn direct(
         binding: crate::LlmProfileBinding,
         charge_safety: crate::ChargeSafetyPolicy,
@@ -681,7 +694,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                         budgets,
                         enclosing: Some(admitted.limit),
                     },
-                    body: admitted.body,
+                    template: admitted.template,
+                    deliveries: admitted.deliveries,
                     owner,
                     tracing,
                     live: None,

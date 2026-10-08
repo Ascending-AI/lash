@@ -211,12 +211,6 @@ pub enum TurnFailureCode {
     ProviderRouteAboveBudget,
     /// The request used an attachment capability the provider does not offer.
     UnsupportedAttachmentCapability,
-    /// A message attachment could not be encoded for the request.
-    AttachmentSourceNotEncodable,
-    /// A stored attachment could not be resolved for the request.
-    StoredAttachmentNotResolved,
-    /// A provider-file attachment requires an explicit media type.
-    ProviderFileMediaTypeRequired,
     /// The model does not support the requested reasoning-retention mode.
     UnsupportedReasoningRetention,
     /// The route's wire cannot carry the resolved reasoning intent, or the
@@ -251,10 +245,11 @@ pub enum TurnFailureCode {
     /// resolve. The call was never sent; its message names the attributed
     /// site.
     PromptCompositionFailed,
-    /// An admitted model call's exact request body cannot be sent as
+    /// An admitted model call's request template cannot be sent as
     /// admitted (ADR 0133 §6): a stored chunk of it is missing or does not
-    /// match its address, or the route serving the call is not the route
-    /// that lowered it. The call was never sent; nothing rebuilds the body.
+    /// match its address, the route serving the call is not the route that
+    /// lowered it, or the serving provider does not implement a slot's
+    /// pinned codec. The call was never sent; nothing rebuilds the template.
     AdmittedRequestUnavailable,
     /// A driver task join failed.
     TaskJoinFailed,
@@ -355,9 +350,6 @@ impl TurnFailureCode {
             Self::InvalidProviderEndpoint => "invalid_provider_endpoint",
             Self::ProviderRouteAboveBudget => "provider_route_above_budget",
             Self::UnsupportedAttachmentCapability => "unsupported_attachment_capability",
-            Self::AttachmentSourceNotEncodable => "attachment_source_not_encodable",
-            Self::StoredAttachmentNotResolved => "stored_attachment_not_resolved",
-            Self::ProviderFileMediaTypeRequired => "provider_file_media_type_required",
             Self::UnsupportedReasoningRetention => "unsupported_reasoning_retention",
             Self::ReasoningEncodingUnrepresentable => "reasoning_encoding_unrepresentable",
             Self::UnsupportedGenerationOption => "unsupported_generation_option",
@@ -462,9 +454,6 @@ impl TurnFailureCode {
             "invalid_provider_endpoint" => Self::InvalidProviderEndpoint,
             "provider_route_above_budget" => Self::ProviderRouteAboveBudget,
             "unsupported_attachment_capability" => Self::UnsupportedAttachmentCapability,
-            "attachment_source_not_encodable" => Self::AttachmentSourceNotEncodable,
-            "stored_attachment_not_resolved" => Self::StoredAttachmentNotResolved,
-            "provider_file_media_type_required" => Self::ProviderFileMediaTypeRequired,
             "unsupported_reasoning_retention" => Self::UnsupportedReasoningRetention,
             "reasoning_encoding_unrepresentable" => Self::ReasoningEncodingUnrepresentable,
             "unsupported_generation_option" => Self::UnsupportedGenerationOption,
@@ -549,9 +538,6 @@ impl TurnFailureCode {
         Self::InvalidProviderEndpoint,
         Self::ProviderRouteAboveBudget,
         Self::UnsupportedAttachmentCapability,
-        Self::AttachmentSourceNotEncodable,
-        Self::StoredAttachmentNotResolved,
-        Self::ProviderFileMediaTypeRequired,
         Self::UnsupportedReasoningRetention,
         Self::ReasoningEncodingUnrepresentable,
         Self::UnsupportedGenerationOption,

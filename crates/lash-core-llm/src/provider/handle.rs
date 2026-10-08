@@ -1,7 +1,10 @@
 use super::support::*;
 use futures_util::FutureExt as _;
+use lash_sansio::llm::attachment_delivery::{Delivery, DeliveryContext};
 use lash_trace::EmissionPermit;
 use lash_trace::telemetry::metrics::TelemetryMetrics;
+
+use super::slot_delivery::{AttachmentDeliveryError, SlotDeliveries};
 
 fn replay_origin_conflict_error(conflict: ProviderReplayOriginConflict) -> LlmTransportError {
     LlmTransportError::new(conflict.to_string())
@@ -176,8 +179,9 @@ impl ProviderHandle {
     pub async fn complete(
         &mut self,
         request: LlmRequest,
+        deliveries: &dyn SlotDeliveries,
     ) -> Result<ProviderCompletion, ProviderCompletionError> {
-        self.complete_with_charge_safety(request, crate::ChargeSafetyPolicy::default())
+        self.complete_with_charge_safety(request, crate::ChargeSafetyPolicy::default(), deliveries)
             .await
     }
 
@@ -193,15 +197,17 @@ impl ProviderHandle {
         &mut self,
         mut request: LlmRequest,
         charge_safety: crate::ChargeSafetyPolicy,
+        deliveries: &dyn SlotDeliveries,
     ) -> Result<ProviderCompletion, ProviderCompletionError> {
         let sideband = self.prepare_completion(&mut request);
-        let body = match self.lower(&request).await {
-            Ok(body) => body,
+        let template = match self.lower(&request).await {
+            Ok(template) => Arc::new(template),
             Err(error) => return Err(unsent(&request, &sideband, error)),
         };
         self.complete_prepared(
             request,
-            &body,
+            &template,
+            deliveries,
             sideband,
             charge_safety,
             &TelemetryMetrics::default(),
@@ -212,19 +218,21 @@ impl ProviderHandle {
     }
 
     /// Lower `request`, as [`Self::prepare_completion`] left it, to the
-    /// exact body its route sends (ADR 0133 §6). A durable call lowers once,
-    /// before its admission, and every attempt and resend sends the body.
-    /// A provider that panics while lowering is contained as a typed,
-    /// non-retryable failure; a body lowered for another route is refused.
+    /// request template its route sends (ADR 0133 §6, ADR 0135 §6): its
+    /// exact literal JSON with one slot per attachment. A durable call
+    /// lowers once, before its admission, and every attempt and resend
+    /// fills and sends the template. A provider that panics while lowering
+    /// is contained as a typed, non-retryable failure; a template that is
+    /// not valid, or one lowered for another route, is refused.
     ///
     /// # Errors
     ///
     /// The provider's classified refusal, an invalid endpoint, a contained
-    /// panic, or a body for another route.
+    /// panic, an invalid template, or a template for another route.
     pub async fn lower(
         &mut self,
         request: &LlmRequest,
-    ) -> Result<ProviderRequestBody, LlmTransportError> {
+    ) -> Result<RecordedRequestTemplate, LlmTransportError> {
         let route = self.route_identity(request.model.wire_model());
         route.validate_endpoint().map_err(|error| {
             LlmTransportError::new(error.to_string())
@@ -236,7 +244,7 @@ impl ProviderHandle {
             std::panic::AssertUnwindSafe(async { self.components.provider.lower(request).await })
                 .catch_unwind()
                 .await;
-        let body = match lowered {
+        let template = match lowered {
             Ok(lowered) => {
                 lowered.map_err(|failure| self.components.failure_classifier.classify(failure))?
             }
@@ -251,8 +259,13 @@ impl ProviderHandle {
                 );
             }
         };
-        check_body_route(&body, &route)?;
-        Ok(body)
+        template.validate().map_err(|error| {
+            LlmTransportError::new(format!("the lowered request template is invalid: {error}"))
+                .with_kind(ProviderFailureKind::Validation)
+                .with_retry_verdict(TransportRetryVerdict::Forbidden)
+        })?;
+        check_body_route(&template, &route)?;
+        Ok(template)
     }
 
     pub(crate) fn prepare_completion(
@@ -300,12 +313,13 @@ impl ProviderHandle {
     )]
     #[allow(
         clippy::too_many_arguments,
-        reason = "the admitted send: its body and sideband with the call's policy and bounds"
+        reason = "the admitted send: its template, deliveries and sideband with the call's policy and bounds"
     )]
     pub(crate) async fn complete_prepared(
         &mut self,
         mut request: LlmRequest,
-        body: &ProviderRequestBody,
+        template: &Arc<RecordedRequestTemplate>,
+        deliveries: &dyn SlotDeliveries,
         sideband: ProviderCompletionSideband,
         charge_safety: crate::ChargeSafetyPolicy,
         metrics: &TelemetryMetrics,
@@ -320,13 +334,13 @@ impl ProviderHandle {
                 .with_retry_verdict(TransportRetryVerdict::Forbidden);
             return Err(unsent(&request, &sideband, error));
         }
-        // The body is sent as it was lowered, and only by its own route.
-        if let Err(error) = check_body_route(body, &serving_route) {
+        // The template is sent as it was lowered, and only by its own route.
+        if let Err(error) = check_body_route(template, &serving_route) {
             return Err(unsent(&request, &sideband, error));
         }
-        // The body decides whether the response streams: a streamed body is
-        // read through a sender even when the caller asked for none.
-        match (body.stream, request.stream_events.is_some()) {
+        // The template decides whether the response streams: a streamed
+        // body is read through a sender even when the caller asked for none.
+        match (template.stream, request.stream_events.is_some()) {
             (true, false) => {
                 request.stream_events = Some(crate::llm::types::LlmEventSender::new(|_| {}));
             }
@@ -360,6 +374,9 @@ impl ProviderHandle {
             .budgets
             .model_call_limit(clock.timestamp_ms(), bounds.enclosing.as_ref());
         let deadline = clock.now() + limit.remaining(clock.timestamp_ms());
+        // A delivered URL or file id must outlive every attempt the total
+        // allows, with a minute for the provider to fetch it (ADR 0135 §4).
+        let valid_through_ms = limit.expires_at.saturating_add(DELIVERY_FETCH_HORIZON_MS);
         let remaining = |clock: &dyn crate::Clock| deadline.saturating_duration_since(clock.now());
         let mut budget = RetryBudget::default();
         loop {
@@ -404,11 +421,22 @@ impl ProviderHandle {
             let attempt = {
                 // The call is built inside the caught future: a provider
                 // that panics while constructing its future is contained.
-                // Each attempt's copy names its ordinal in its scope.
+                // Each attempt's copy names its ordinal in its scope. Its
+                // slots are delivered and encoded afresh inside the same
+                // envelope, under the call's deadline and cancellation.
                 let attempt = std::panic::AssertUnwindSafe(async {
                     let mut attempt_request = request.clone();
                     attempt_request.scope.attempt = Some(attempt_ordinal);
-                    self.components.provider.send(attempt_request, body).await
+                    let provider = &mut self.components.provider;
+                    match fill_slots(provider.as_ref(), template, deliveries, valid_through_ms)
+                        .await
+                    {
+                        Ok((live, delivered)) => AttemptSend::Sent {
+                            result: provider.send(attempt_request, &live).await,
+                            delivered,
+                        },
+                        Err(error) => AttemptSend::Unsent(error),
+                    }
                 })
                 .catch_unwind();
                 let expiry = clock.sleep_until(deadline);
@@ -432,8 +460,9 @@ impl ProviderHandle {
                     Some(ProtocolPosition::NoResponse),
                 ));
             };
-            let (mut result, panic_payload) = match attempt {
-                Ok(result) => (result, None),
+            let (mut result, delivered, unsent_attempt, panic_payload) = match attempt {
+                Ok(AttemptSend::Sent { result, delivered }) => (result, delivered, false, None),
+                Ok(AttemptSend::Unsent(error)) => (Err(error), Vec::new(), true, None),
                 Err(payload) => {
                     let message = crate::panic_containment::payload_message(payload.as_ref());
                     (
@@ -441,17 +470,34 @@ impl ProviderHandle {
                             .with_kind(ProviderFailureKind::Unknown)
                             .with_lash_code(TurnFailureCode::ProviderPanicked)
                             .with_retry_verdict(TransportRetryVerdict::NotRetryable)),
+                        Vec::new(),
+                        false,
                         Some(payload),
                     )
                 }
             };
             // Classify provider-owned failures before applying Lash's replay
             // contract. A classifier must never reinterpret the synthetic,
-            // non-retryable origin-conflict result from the fence below.
-            if panic_payload.is_none() {
+            // non-retryable origin-conflict result from the fence below, nor
+            // a delivery failure, which is Lash's own and reached no provider.
+            if panic_payload.is_none() && !unsent_attempt {
                 result =
                     result.map_err(|failure| self.components.failure_classifier.classify(failure));
             }
+            // A provider that definitely rejected delivered slots (an expired
+            // file id, an unfetchable URL) refused before generating: the
+            // rejected deliveries are forgotten and the attempt may be made
+            // again with fresh ones. Authentication is never a rejection.
+            if let Err(failure) = &mut result
+                && !failure.rejected_slots().is_empty()
+            {
+                invalidate_rejected(template, deliveries, &delivered, failure.rejected_slots())
+                    .await;
+                if failure.kind != ProviderFailureKind::Auth {
+                    failure.retry_verdict = TransportRetryVerdict::RetryableTransient;
+                }
+            }
+            drop(delivered);
             let (result, original_failure) = match result {
                 Ok(mut response) => match sideband.fence_response(&mut response) {
                     Ok(()) => (Ok(response), None),
@@ -532,7 +578,7 @@ impl ProviderHandle {
                     let retry_guarantee = self
                         .components
                         .provider
-                        .generation_retry_guarantee(&request, body);
+                        .generation_retry_guarantee(&request, template);
                     let (verdict, charge_safety_decision) = retry_verdict(
                         &failure,
                         protocol_position,
@@ -1063,7 +1109,9 @@ pub(super) fn automatic_retry_class(
 
     match position {
         ProtocolPosition::NoResponse => Some(RetryClass::NoResponse),
-        ProtocolPosition::ResponseObserved if retryable_http_rejection(failure) => {
+        ProtocolPosition::ResponseObserved
+            if retryable_http_rejection(failure) || rejected_delivery(failure) =>
+        {
             Some(RetryClass::RejectedHttpResponse)
         }
         ProtocolPosition::ResponseObserved if empty_stream_partial(failure) => {
@@ -1073,6 +1121,12 @@ pub(super) fn automatic_retry_class(
         | ProtocolPosition::OutputStarted
         | ProtocolPosition::TerminalObserved => None,
     }
+}
+
+/// A provider's refusal of delivered slots, before any output: retrying
+/// with fresh deliveries cannot buy a second generation.
+fn rejected_delivery(failure: &LlmTransportError) -> bool {
+    failure.partial_response.is_none() && !failure.rejected_slots().is_empty()
 }
 
 fn retryable_http_rejection(failure: &LlmTransportError) -> bool {
@@ -1331,7 +1385,7 @@ impl Provider for UnconfiguredProvider {
     async fn send(
         &mut self,
         _request: LlmRequest,
-        _body: &ProviderRequestBody,
+        _body: &LiveRequestBody,
     ) -> Result<LlmResponse, LlmTransportError> {
         Err(LlmTransportError::new(
             "no provider configured: host must set SessionPolicy.provider before running a turn",
@@ -1353,8 +1407,9 @@ pub fn prepare_completion(
     handle.prepare_completion(request)
 }
 
-/// Sends `body`, the exact body lowered for a request [`prepare_completion`]
-/// prepared, under its sideband: every attempt sends those bytes.
+/// Sends `template`, the request template lowered for a request
+/// [`prepare_completion`] prepared, under its sideband: every attempt sends
+/// its literals with its slots filled afresh through `deliveries`.
 #[allow(
     clippy::result_large_err,
     reason = "ProviderCompletionError carries the sealed call record for observability; boxing it would push the cost onto every caller"
@@ -1366,7 +1421,8 @@ pub fn prepare_completion(
 pub async fn complete_prepared(
     handle: &mut ProviderHandle,
     request: LlmRequest,
-    body: &ProviderRequestBody,
+    template: &Arc<RecordedRequestTemplate>,
+    deliveries: &dyn SlotDeliveries,
     sideband: ProviderCompletionSideband,
     charge_safety: crate::ChargeSafetyPolicy,
     metrics: &TelemetryMetrics,
@@ -1376,7 +1432,8 @@ pub async fn complete_prepared(
     handle
         .complete_prepared(
             request,
-            body,
+            template,
+            deliveries,
             sideband,
             charge_safety,
             metrics,
@@ -1386,20 +1443,20 @@ pub async fn complete_prepared(
         .await
 }
 
-/// Refuse `body` unless `route` lowered it: an admitted body is sent only
-/// by the route that lowered it, never rebuilt for another.
+/// Refuse `template` unless `route` lowered it: an admitted template is
+/// sent only by the route that lowered it, never rebuilt for another.
 fn check_body_route(
-    body: &ProviderRequestBody,
+    template: &RecordedRequestTemplate,
     route: &ProviderRouteIdentity,
 ) -> Result<(), LlmTransportError> {
-    if body.route == *route {
+    if template.route == *route {
         return Ok(());
     }
     Err(LlmTransportError::new(format!(
-        "the request body was lowered for route {}:{}:{}, not the serving route {}:{}:{}",
-        body.route.provider,
-        body.route.endpoint,
-        body.route.model,
+        "the request template was lowered for route {}:{}:{}, not the serving route {}:{}:{}",
+        template.route.provider,
+        template.route.endpoint,
+        template.route.model,
         route.provider,
         route.endpoint,
         route.model
@@ -1407,6 +1464,106 @@ fn check_body_route(
     .with_kind(ProviderFailureKind::Validation)
     .with_lash_code(TurnFailureCode::AdmittedRequestUnavailable)
     .with_retry_verdict(TransportRetryVerdict::Forbidden))
+}
+
+/// How long past a call's total a delivered URL or provider file must stay
+/// valid: the provider may fetch it after the last byte of the request.
+const DELIVERY_FETCH_HORIZON_MS: u64 = 60_000;
+
+/// What one attempt did: sent its filled template, keeping the deliveries
+/// until the provider answered, or failed to fill it and sent nothing.
+enum AttemptSend {
+    Sent {
+        result: Result<LlmResponse, LlmTransportError>,
+        delivered: Vec<Arc<Delivery>>,
+    },
+    Unsent(LlmTransportError),
+}
+
+/// Fill `template`'s slots for one attempt: deliver every slot through
+/// `deliveries` (none for a template with no slot), check each delivery is a
+/// form its slot's acceptance allows, encode each through the slot's pinned
+/// codec, and fill the literals. The deliveries are returned with the live
+/// body so a rejected one can be forgotten; neither is ever recorded.
+async fn fill_slots(
+    provider: &dyn Provider,
+    template: &Arc<RecordedRequestTemplate>,
+    deliveries: &dyn SlotDeliveries,
+    valid_through_ms: u64,
+) -> Result<(LiveRequestBody, Vec<Arc<Delivery>>), LlmTransportError> {
+    let slots: Vec<&AttachmentSlot> = template.slots().collect();
+    let live_file_scope = provider.attachment_file_scope();
+    let delivered = if slots.is_empty() {
+        Vec::new()
+    } else {
+        let ctx = DeliveryContext {
+            valid_through_ms,
+            live_file_scope: live_file_scope.clone(),
+        };
+        deliveries
+            .deliver(&slots, &ctx)
+            .await
+            .map_err(AttachmentDeliveryError::into_transport_error)?
+    };
+    if delivered.len() != slots.len() {
+        return Err(AttachmentDeliveryError::Unavailable {
+            retryable: false,
+            message: format!(
+                "the attachment store answered {} deliveries for {} slots",
+                delivered.len(),
+                slots.len()
+            ),
+        }
+        .into_transport_error());
+    }
+    let mut values = Vec::with_capacity(slots.len());
+    for (slot, delivery) in slots.iter().zip(&delivered) {
+        if !slot
+            .accepts
+            .narrowed_to_live_scope(live_file_scope.as_ref())
+            .allows(delivery)
+        {
+            return Err(AttachmentDeliveryError::Refused {
+                id: slot.reference.id.clone(),
+            }
+            .into_transport_error());
+        }
+        values.push(provider.encode_slot(slot, delivery)?);
+    }
+    let live = LiveRequestBody::fill(Arc::clone(template), values).map_err(|error| {
+        LlmTransportError::new(format!(
+            "the admitted request template cannot be filled: {error}"
+        ))
+        .with_kind(ProviderFailureKind::Validation)
+        .with_lash_code(TurnFailureCode::AdmittedRequestUnavailable)
+        .with_retry_verdict(TransportRetryVerdict::Forbidden)
+    })?;
+    Ok((live, delivered))
+}
+
+/// Forget each delivery the provider rejected, by slot index. A failure to
+/// forget is logged by ref only and does not change the attempt's outcome:
+/// the next attempt's delivery is checked again either way.
+async fn invalidate_rejected(
+    template: &RecordedRequestTemplate,
+    deliveries: &dyn SlotDeliveries,
+    delivered: &[Arc<Delivery>],
+    rejected: &[usize],
+) {
+    let slots: Vec<&AttachmentSlot> = template.slots().collect();
+    for &index in rejected {
+        let (Some(slot), Some(delivery)) = (slots.get(index), delivered.get(index)) else {
+            continue;
+        };
+        if let Err(error) = deliveries.invalidate(&slot.reference, delivery).await {
+            tracing::warn!(
+                target: "lash_core::provider::reliability",
+                attachment_id = %slot.reference.id,
+                error = %error,
+                "a rejected attachment delivery could not be forgotten"
+            );
+        }
+    }
 }
 
 /// The failure of a call refused before its first attempt: nothing was sent.

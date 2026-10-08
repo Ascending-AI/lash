@@ -634,15 +634,15 @@ impl lash_core::ToolProvider for AttachmentResultTool {
             .await
             .expect("store tool attachment");
         lash_core::ToolOutcome::from_output(lash_core::ToolCallOutput::success_tool_value(
-            lash_core::ToolValue::Attachment(lash_core::AttachmentSource::stored(attachment_ref)),
+            lash_core::ToolValue::Attachment(attachment_ref),
         ))
         .into()
     }
 }
 
 /// Every call the attachment model answered: the request it was asked and
-/// the body its provider lowered from the request with its stored
-/// attachments resolved.
+/// the wire its provider was handed, its attachment slots filled from the
+/// session's store for that attempt.
 #[derive(Default)]
 struct Asked {
     calls: Mutex<Vec<(LlmRequest, serde_json::Value)>>,
@@ -668,68 +668,75 @@ impl Asked {
 
 /// Calls `attachment_result` first, then answers each request; a request
 /// carrying an attachment no acceptor takes is refused as a provider would.
-/// Its lowered body names each attachment's bytes as the resolved request
-/// holds them, as a provider's wire body embeds them.
+/// It lowers canonically, so its wire holds each attachment where the
+/// request names it, filled by the canonical codec from the delivery the
+/// session's store made for the attempt.
 fn attachment_model(asked: Arc<Asked>) -> lash_core::facade_support::ProviderHandle {
     let calls = Arc::new(AtomicUsize::new(0));
     lash_core::testing::TestProvider::builder()
         .kind("mock")
         .requires_streaming(true)
-        .lower(|request: &LlmRequest| {
-            let attachments = request
-                .attachments()
-                .into_iter()
-                .map(|source| {
-                    request
-                        .attachment_bytes(source)
-                        .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
-                })
-                .collect::<Vec<_>>();
-            serde_json::json!({ "attachments": attachments }).to_string()
-        })
-        .send(
-            move |request: LlmRequest, body: lash_core::ProviderRequestBody| {
-                let asked = Arc::clone(&asked);
-                let calls = Arc::clone(&calls);
-                async move {
-                    let index = calls.fetch_add(1, Ordering::SeqCst);
-                    let lowered =
-                        serde_json::from_str(&body.body).unwrap_or(serde_json::Value::Null);
-                    asked.calls.lock_recover().push((request.clone(), lowered));
-                    if index == 0 {
-                        return Ok(LlmResponse {
-                            parts: vec![tool_call(
-                                "attachment-result-call",
-                                "attachment_result",
-                                serde_json::json!({}),
-                            )],
-                            ..LlmResponse::default()
-                        });
-                    }
-                    if let Some(source) = request.attachments().iter().find(|source| {
-                        lash_core::llm::transport::known_attachment_acceptors(
-                            &request.attachment_acceptance,
-                            source,
-                        )
-                        .is_empty()
-                    }) {
-                        return Err(
-                            lash_core::llm::transport::unsupported_attachment_capability(
-                                "OpenAI Chat Completions",
-                                source,
-                                &[],
-                            ),
-                        );
-                    }
-                    Ok(LlmResponse {
-                        parts: vec![text(&format!("completed provider call {index}"))],
+        .send(move |request: LlmRequest, wire: String| {
+            let asked = Arc::clone(&asked);
+            let calls = Arc::clone(&calls);
+            async move {
+                let index = calls.fetch_add(1, Ordering::SeqCst);
+                let lowered = serde_json::from_str(&wire).unwrap_or(serde_json::Value::Null);
+                asked.calls.lock_recover().push((request.clone(), lowered));
+                if index == 0 {
+                    return Ok(LlmResponse {
+                        parts: vec![tool_call(
+                            "attachment-result-call",
+                            "attachment_result",
+                            serde_json::json!({}),
+                        )],
                         ..LlmResponse::default()
-                    })
+                    });
                 }
-            },
-        )
+                let position =
+                    lash_sansio::llm::attachment_delivery::AttachmentPosition::ToolResult;
+                if let Some(reference) = request.attachments().find(|reference| {
+                    lash_core::llm::transport::known_attachment_acceptors(
+                        &request.attachment_acceptance,
+                        reference,
+                        position,
+                    )
+                    .is_empty()
+                }) {
+                    return Err(
+                        lash_core::llm::transport::unsupported_attachment_capability(
+                            "OpenAI Chat Completions",
+                            reference,
+                            position,
+                            &[],
+                        ),
+                    );
+                }
+                Ok(LlmResponse {
+                    parts: vec![text(&format!("completed provider call {index}"))],
+                    ..LlmResponse::default()
+                })
+            }
+        })
         .build()
         .into_handle()
+}
+
+/// Every value the canonical slot codec filled into `wire`, in order.
+fn slot_values(wire: &serde_json::Value) -> Vec<serde_json::Value> {
+    match wire {
+        serde_json::Value::Object(object)
+            if object.len() == 1
+                && ["bytes_base64", "url", "provider_file"]
+                    .iter()
+                    .any(|form| object.contains_key(*form)) =>
+        {
+            vec![wire.clone()]
+        }
+        serde_json::Value::Object(object) => object.values().flat_map(slot_values).collect(),
+        serde_json::Value::Array(values) => values.iter().flat_map(slot_values).collect(),
+        _ => Vec::new(),
+    }
 }
 
 fn request_text(request: &LlmRequest) -> String {
@@ -748,9 +755,30 @@ fn request_text(request: &LlmRequest) -> String {
         .join("\n")
 }
 
-/// The session spec of the attachment laws: the test acceptance table.
+/// The session spec of the attachment laws: the host catalogue takes PNG
+/// images from the scenario's provider, as bytes, in tool results and
+/// messages, and no other media.
 fn attachment_spec() -> lash::SessionSpec {
-    served::spec(8).attachment_acceptance(lash_core::attachments::attachment_test_acceptance())
+    use lash_sansio::llm::attachment_delivery::{AttachmentPosition, DeliveryForms};
+    use lash_sansio::llm::capability::{
+        AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
+    };
+    served::spec(8).attachment_acceptance(Arc::new(AttachmentCapabilitySnapshot {
+        revision: "standard-turn-outcomes".to_owned(),
+        acceptors: vec![AttachmentAcceptor {
+            provider: "mock".to_owned(),
+            rules: vec![AttachmentAcceptanceRule {
+                positions: vec![AttachmentPosition::Message, AttachmentPosition::ToolResult],
+                media_types: vec!["image/png".to_owned()],
+                media_families: Vec::new(),
+                forms: DeliveryForms {
+                    bytes: true,
+                    url: false,
+                    provider_file: false,
+                },
+            }],
+        }],
+    }))
 }
 
 /// A committed tool attachment no provider accepts degrades instead of
@@ -802,7 +830,7 @@ async fn unsupported_committed_tool_attachment_degrades_and_session_remains_cont
     assert_eq!(requests.len(), 3);
     for request in &requests[1..] {
         assert!(
-            request.attachments().is_empty(),
+            request.attachments().next().is_none(),
             "an unmaterializable attachment is omitted from provider requests"
         );
         let notice = request_text(request)
@@ -815,14 +843,16 @@ async fn unsupported_committed_tool_attachment_degrades_and_session_remains_cont
             .unwrap_or_else(|| panic!("a typed notice in {}", request_text(request)));
         assert_eq!(notice["label"], "workspace_badge.bin");
         assert_eq!(notice["media_type"], "application/octet-stream");
-        assert_eq!(notice["source"], "stored");
-        assert_eq!(notice["reason"], "no_provider_accepts_mime_and_source");
+        assert_eq!(notice["position"], "tool_result");
+        assert_eq!(notice["reason"], "no_provider_accepts_mime_and_position");
     }
     world.shutdown().await;
 }
 
-/// A tool attachment the provider accepts reaches the next request as the
-/// stored bytes, with no degradation note.
+/// A tool attachment the provider accepts reaches the next request as a
+/// ref, and the provider's wire as the stored bytes the session's store
+/// delivered for that attempt into the call's slot, with no degradation
+/// note (WIRE-SLOTS through the runtime's attempt loop).
 async fn accepted_tool_attachment_round_trips_without_degradation(tier: Tier) {
     const IMAGE_BYTES: &[u8] = b"accepted-image-bytes";
     let asked = Arc::new(Asked::default());
@@ -853,15 +883,17 @@ async fn accepted_tool_attachment_round_trips_without_degradation(tier: Tier) {
     let requests = asked.requests();
     assert_eq!(requests.len(), 2);
     let replay = &requests[1];
-    assert_eq!(replay.attachments().len(), 1);
-    let source = &replay.attachments()[0];
-    let attachment_ref = source.stored_ref().expect("a stored accepted attachment");
+    let attachments = replay.attachments().collect::<Vec<_>>();
+    assert_eq!(attachments.len(), 1);
+    let attachment_ref = attachments[0];
     assert_eq!(attachment_ref.media_type.as_str(), "image/png");
     assert_eq!(attachment_ref.label.as_deref(), Some("accepted.png"));
+    // base64 of `IMAGE_BYTES`, the canonical codec's bytes form.
+    let delivered = serde_json::json!({ "bytes_base64": "YWNjZXB0ZWQtaW1hZ2UtYnl0ZXM=" });
     assert_eq!(
-        asked.bodies()[1],
-        serde_json::json!({ "attachments": [String::from_utf8_lossy(IMAGE_BYTES)] }),
-        "the provider lowers the call with the attachment's stored bytes"
+        slot_values(&asked.bodies()[1]),
+        [delivered],
+        "the provider's wire carries the attachment's stored bytes in its one slot"
     );
     assert!(!request_text(replay).contains("attachment_unavailable"));
     world.shutdown().await;
@@ -911,9 +943,7 @@ impl lash_core::ToolProvider for ArrayAttachmentTool {
         lash_core::ToolOutcome::from_output(lash_core::ToolCallOutput::success_tool_value(
             lash_core::ToolValue::Array(vec![
                 lash_core::ToolValue::String("before".to_owned()),
-                lash_core::ToolValue::Attachment(lash_core::AttachmentSource::stored(
-                    attachment_ref,
-                )),
+                lash_core::ToolValue::Attachment(attachment_ref),
                 lash_core::ToolValue::String("after".to_owned()),
             ]),
         ))
@@ -1054,7 +1084,6 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing(tier
     let images = blocks
         .iter()
         .filter_map(|block| block.attachment())
-        .filter_map(|source| source.stored_ref())
         .map(|attachment| attachment.label.clone())
         .collect::<Vec<_>>();
     assert_eq!(

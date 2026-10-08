@@ -91,7 +91,7 @@ use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
-use lash_sansio::llm::types::{ProviderRequestBody, ProviderRouteIdentity};
+use lash_sansio::llm::types::{ProviderRouteIdentity, RecordedRequestTemplate};
 use lash_sansio::sansio::ExecutionEnvironmentSync;
 use lash_sansio::sync::MutexExt as _;
 use lash_sansio::{
@@ -617,12 +617,12 @@ impl TurnDrive for L4Drive {
             endpoint: "https://round.test/v1".into(),
             model: "scripted".into(),
         };
-        let body = ProviderRequestBody::of_request(route, &request)
+        let template = RecordedRequestTemplate::of_request(route, &request)
             .map_err(|error| TurnError::Exec(error.to_string()))?;
         Ok(PreparedCall::Admit(Box::new(ComposedCall {
             request,
             prompt: None,
-            body,
+            template,
         })))
     }
 
@@ -631,7 +631,7 @@ impl TurnDrive for L4Drive {
         _cx: &ActorContext,
         id: EffectId,
         request: Arc<LlmRequest>,
-        _body: &ProviderRequestBody,
+        _template: &Arc<RecordedRequestTemplate>,
         _attempt: ModelCallAttempt,
     ) -> Result<(), TurnError> {
         let rendered = serde_json::to_string(&*request).expect("a request encodes");

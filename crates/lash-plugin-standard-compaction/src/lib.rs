@@ -192,7 +192,7 @@ pub(crate) fn find_compaction_cut_point(messages: &[Message], prefix_len: usize)
         for part in messages[idx].parts.iter() {
             accumulated += approx_token_count(&part.content());
             // approximate binary attachment token cost
-            accumulated += 1200 * part.attachment_sources().count();
+            accumulated += 1200 * part.attachments().count();
         }
         if accumulated >= COMPACTION_KEEP_RECENT_TOKENS && messages[idx].role == MessageRole::User {
             return idx;
@@ -538,7 +538,6 @@ async fn summarize_compaction_prefix(
         instructions: None,
         model: model.clone(),
         messages: rendered.messages,
-        resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: lash_sansio::llm::types::LlmToolChoice::None,
         attachment_acceptance: Arc::clone(&snapshot.policy.attachment_acceptance),

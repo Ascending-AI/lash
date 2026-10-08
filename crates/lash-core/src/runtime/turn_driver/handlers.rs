@@ -84,19 +84,19 @@ impl RuntimeTurnDriver<'_> {
         }
     }
 
-    /// Send attempt of the admitted call `id`: `body` is its exact provider
-    /// body, which every attempt and resend sends.
+    /// Send attempt of the admitted call `id`: `template` is its request
+    /// template, which every attempt and resend fills and sends.
     pub(super) async fn handle_llm_call_effect(
         &mut self,
         machine: &mut TurnMachine,
         id: crate::sansio::EffectId,
         request: Arc<LlmRequest>,
-        body: &lash_sansio::llm::types::ProviderRequestBody,
+        template: &std::sync::Arc<lash_sansio::llm::types::RecordedRequestTemplate>,
         attempt: u32,
         event_tx: &TurnObserver,
     ) -> Result<(), RuntimeError> {
         self.trace_before_llm_call(machine, &request);
-        self.admitted_body = Some(body.clone());
+        self.admitted_body = Some(std::sync::Arc::clone(template));
         self.model_attempt = attempt;
         let crate::runtime::RuntimeLlmCallOutcome {
             result,

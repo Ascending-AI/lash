@@ -81,7 +81,7 @@ impl Provider for StallingProvider {
     async fn send(
         &mut self,
         _request: LlmRequest,
-        _body: &ProviderRequestBody,
+        _body: &LiveRequestBody,
     ) -> Result<LlmResponse, LlmTransportError> {
         self.attempts.fetch_add(1, Ordering::SeqCst);
         tokio::time::sleep(self.stall).await;
@@ -140,11 +140,12 @@ async fn complete_under(
         ProviderHandle::new(ProviderComponents::new(Box::new(provider))).with_clock(clock.clone());
     let mut request = empty_request();
     let sideband = handle.prepare_completion(&mut request);
-    let body = handle.lower(&request).await.expect("the request lowers");
+    let template = Arc::new(handle.lower(&request).await.expect("the request lowers"));
     let error = handle
         .complete_prepared(
             request,
-            &body,
+            &template,
+            &NoSlotDeliveries,
             sideband,
             crate::ChargeSafetyPolicy::default(),
             &lash_trace::telemetry::metrics::TelemetryMetrics::default(),

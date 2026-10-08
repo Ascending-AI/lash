@@ -309,7 +309,7 @@ impl TurnDrive for RuntimeDrive {
         _cx: &ActorContext,
         id: crate::EffectId,
         request: Arc<LlmRequest>,
-        body: &lash_sansio::llm::types::ProviderRequestBody,
+        template: &Arc<lash_sansio::llm::types::RecordedRequestTemplate>,
         attempt: ModelCallAttempt,
     ) -> Result<(), TurnError> {
         let ModelCallAttempt {
@@ -325,7 +325,7 @@ impl TurnDrive for RuntimeDrive {
             &mut self.machine,
             id,
             request,
-            body,
+            template,
             attempt,
             &self.observer,
         ));

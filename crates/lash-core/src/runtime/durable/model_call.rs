@@ -6,7 +6,8 @@
 //! `model_total` deadline, clipped to what remains of the turn's deadline.
 //!
 //! - **Re-send.** A turn restored in its `Model` phase re-delivers the same
-//!   call, and sends the exact body its admission stored. It is sent again
+//!   call, and sends the request template its admission stored, its
+//!   attachment slots filled afresh (WIRE-SLOTS). It is sent again
 //!   as the next attempt only when its request has the pinned reference: the checkpoint the pin committed with re-yields it, and
 //!   anything else is a broken pin, never a new call. The reference is the
 //!   request as the checkpoint names it (FIG-5207), so pinning and checking
@@ -22,6 +23,10 @@
 //!   new. The pin holds where the live replay stood before the first
 //!   attempt streamed: the retraction is read back from there, or the
 //!   stream restarts with a gap (FIG-5399).
+//! - **Slots are held through the call.** Before a call is admitted, every
+//!   attachment its template's slots name is acquired under the call's
+//!   owner (`owned_call::hold_slots`), so a ref only the call names survives a
+//!   takeover and is reclaimable once that owner settles (ADR 0135 §7).
 
 use std::time::Duration;
 
@@ -175,7 +180,7 @@ pub(super) async fn send(
     drive: &mut dyn TurnDrive,
     id: EffectId,
     request: std::sync::Arc<LlmRequest>,
-    body: &lash_sansio::llm::types::ProviderRequestBody,
+    template: &std::sync::Arc<lash_sansio::llm::types::RecordedRequestTemplate>,
     start: &ModelStart,
 ) -> Result<bool, TurnError> {
     let (pin, limit, resent) = match start {
@@ -197,7 +202,7 @@ pub(super) async fn send(
             cx,
             id,
             request,
-            body,
+            template,
             super::session::ModelCallAttempt {
                 ordinal: pin.attempt,
                 limit,

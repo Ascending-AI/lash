@@ -40,7 +40,7 @@ use lash_durable::{
     ActorTx, CommitLabel, DomainWrite, DurableError, DurableInstant, DurableProbe, MailTx, Release,
 };
 use lash_sansio::SavedTurn;
-use lash_sansio::llm::types::ProviderRequestBody;
+use lash_sansio::llm::types::RecordedRequestTemplate;
 use tokio_util::sync::CancellationToken;
 
 use super::head::{HeadCache, SessionHead};
@@ -211,8 +211,9 @@ pub trait TurnDrive: Send {
     ///
     /// [`TurnError`] when the call aborts the turn rather than answering it.
     ///
-    /// `body` is the call's exact provider body as `model.start` admitted
-    /// it: every attempt, and a resend on any owner, sends those bytes.
+    /// `template` is the call's request template as `model.start` admitted
+    /// it: every attempt, and a resend on any owner, sends its literals with
+    /// its attachment slots filled afresh (WIRE-SLOTS).
     /// When `attempt.cancel` fires, settle the call with its already-sealed attempts
     /// before returning. Its cancellation does not authorize another send.
     async fn model_call(
@@ -220,15 +221,14 @@ pub trait TurnDrive: Send {
         cx: &ActorContext,
         id: EffectId,
         request: Arc<LlmRequest>,
-        body: &ProviderRequestBody,
+        template: &Arc<RecordedRequestTemplate>,
         attempt: ModelCallAttempt,
     ) -> Result<(), TurnError>;
 
     /// Prepare model call `call`, new to the turn, whose request the machine
     /// built as `request` and waits on as `id`, for its admission (ADR 0133 §6): compose its
     /// prompt sections and lower them into it, take the protocol's
-    /// before-call decision, normalize its attachments, and lower it to the
-    /// exact provider body. It reads the turn's last commit and what the
+    /// before-call decision, and lower it to its request template. It reads the turn's last commit and what the
     /// turn published since, all of which `model.start` commits with the
     /// call. A resend of an admitted call never prepares; a crash before
     /// admission prepares the call again, so what it runs must be
@@ -891,14 +891,14 @@ pub enum PreparedCall {
 }
 
 /// A new model call, ready to admit: the request, its composed prompt and
-/// its exact provider body, all of which `model.start` commits.
+/// its request template, all of which `model.start` commits.
 pub struct ComposedCall {
     /// The request the machine waits on, with the call's sections in it.
     pub request: Arc<LlmRequest>,
     /// The call's composition; `None` when the session has no sections.
     pub prompt: Option<crate::plugin::prompt::ComposedPrompt>,
-    /// The exact body every send of the call sends.
-    pub body: ProviderRequestBody,
+    /// The template every send of the call fills and sends.
+    pub template: RecordedRequestTemplate,
 }
 
 /// What a phase row's checkpoint holds: the machine's saved turn, the

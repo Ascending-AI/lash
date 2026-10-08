@@ -3,15 +3,18 @@
 //!
 //! A new call composes the sections of its purpose over an empty tool offer
 //! and lowers them into its request, the provider of its route lowers the
-//! request to its exact body, and `completion.start` commits the call's
-//! record (its prompt snapshot, body and model-total deadline) under the
-//! owner's fence before the first byte is sent. The call's identity is its
-//! owner's execution scope and its stable key there, with no turn required.
+//! request to its request template, every attachment the template's slots
+//! name is held under the owner (ADR 0135 §7), and `completion.start`
+//! commits the call's record (its prompt snapshot, template and model-total
+//! deadline) under the owner's fence before the first byte is sent. The
+//! call's identity is its owner's execution scope and its stable key there,
+//! with no turn required.
 //!
 //! A redrive of the owner makes the same call again: it finds the record,
-//! sends the stored body under the pinned deadline, and composes, lowers and
-//! records nothing. A record whose body cannot be read back as admitted, or
-//! a deadline that has passed, settles the call unsent. The call's response
+//! sends the stored template under the pinned deadline, its slots filled
+//! afresh, and composes, lowers and records nothing. A record whose template
+//! cannot be read back as admitted, or a deadline that has passed, settles
+//! the call unsent. The call's response
 //! is durable only through its owner's own commit, as a turn's is through
 //! `model.done`.
 
@@ -29,8 +32,8 @@ use crate::{
     ActorContext, ExecutionBudgets, ExecutionLimit, FailureCode, LlmCallError, LlmRequest,
     PluginError, TurnFailureCode,
 };
+use lash_core_execution::AdmittedDirectSend;
 use lash_core_execution::core_internal::{compose_prompt, prompt_cut};
-use lash_core_execution::{AdmittedDirectSend, ProviderRequestBody};
 
 /// What an owned call composes its prompt from: the owner's recorded plan,
 /// config and plugins, and its committed session view when a session owns
@@ -54,16 +57,18 @@ pub(in crate::runtime) struct OwnedCall<'a> {
     /// The caller's request, before its prompt is composed into it.
     pub(in crate::runtime) request: LlmRequest,
     pub(in crate::runtime) binding: crate::LlmProfileBinding,
+    /// The session's attachment store: every attempt delivers the
+    /// template's slots from it.
     pub(in crate::runtime) attachment_store: Arc<crate::RuntimeAttachmentStore>,
     pub(in crate::runtime) budgets: ExecutionBudgets,
 }
 
 /// How an owned call goes on.
 pub(in crate::runtime) enum OwnedAdmission {
-    /// Send the admitted body.
+    /// Send the admitted template.
     Send {
-        /// The request that reads the response: the one the body was lowered
-        /// from, or on a resend the caller's own, with no prompt composed.
+        /// The request that reads the response: the one the template was
+        /// lowered from, or on a resend the caller's own, with no prompt composed.
         request: Box<LlmRequest>,
         admitted: AdmittedDirectSend,
     },
@@ -101,7 +106,7 @@ impl OwnedCall<'_> {
         let per_request = self.budgets.provider().per_request();
         match load_admitted_call(reads, &self.key).await {
             Ok(Some(admitted)) => {
-                // A resend: the stored body under the pinned deadline.
+                // A resend: the stored template under the pinned deadline.
                 let Some(deadline) = admitted.deadline else {
                     return Ok(OwnedAdmission::Unsent(unavailable(format!(
                         "{} was admitted with no deadline",
@@ -115,7 +120,8 @@ impl OwnedCall<'_> {
                 Ok(OwnedAdmission::Send {
                     request: Box::new(self.request),
                     admitted: AdmittedDirectSend {
-                        body: admitted.body,
+                        template: admitted.template,
+                        deliveries: self.attachment_store,
                         limit: ExecutionLimit::starting_at(
                             now_ms,
                             std::time::Duration::from_millis(deadline_ms - now_ms),
@@ -127,7 +133,7 @@ impl OwnedCall<'_> {
             Ok(None) => self.admit_new(now_ms).await,
             Err(AdmittedCallLoadError::Store(error)) => Err(live(error)),
             Err(error) => Ok(OwnedAdmission::Unsent(unavailable(format!(
-                "{}'s admitted body cannot be sent: {error}",
+                "{}'s admitted request template cannot be sent: {error}",
                 self.key.call
             )))),
         }
@@ -170,37 +176,32 @@ impl OwnedCall<'_> {
         let mut provider = binding
             .bind_for_unjournaled_call()
             .map_err(PluginError::RuntimeEffectController)?;
-        let mut resolved = match crate::attachments::resolve_llm_request_attachments(
-            request.clone(),
-            attachment_store.as_ref(),
-        )
-        .await
-        {
-            Ok(resolved) => resolved,
-            Err(err) => {
-                return Ok(OwnedAdmission::Unsent(refused(
-                    TurnFailureCode::AttachmentResolutionFailed,
-                    err.to_string(),
-                )));
-            }
-        };
-        resolved.drop_foreign_replay(&provider.route_identity(resolved.model.wire_model()));
-        resolved.stream_events = crate::session_model::transport_stream_events(&provider, None);
-        let body: ProviderRequestBody = match provider.lower(&resolved).await {
-            Ok(body) => body,
+        let mut lowered = request.clone();
+        lowered.drop_foreign_replay(&provider.route_identity(lowered.model.wire_model()));
+        lowered.stream_events = crate::session_model::transport_stream_events(&provider, None);
+        let template = match provider.lower(&lowered).await {
+            Ok(template) => template,
             Err(error) => {
                 return Ok(OwnedAdmission::Unsent(
                     crate::runtime::effect::llm_call_error_from_transport(error),
                 ));
             }
         };
+        // Every attachment a slot names is held under the owner before the
+        // call is admitted: a ref only this call names survives a takeover
+        // and is released when the owner settles.
+        if let Err(refused) = hold_slots(cx, &template)
+            .await
+            .map_err(PluginError::RuntimeEffectController)?
+        {
+            return Ok(OwnedAdmission::Unsent(refused));
+        }
         let limit = budgets.model_call_limit(now_ms, None);
         let deadline =
             lash_durable::DurableInstant(i64::try_from(limit.expires_at).unwrap_or(i64::MAX));
-        let record =
-            admission_record(key, composed.as_ref(), &body, Some(deadline)).map_err(|error| {
-                PluginError::Session(format!("the call's admission does not encode: {error}"))
-            })?;
+        let record = admission_record(key, composed.as_ref(), &template, Some(deadline)).map_err(
+            |error| PluginError::Session(format!("the call's admission does not encode: {error}")),
+        )?;
         let mut tx = cx.begin().await.map_err(live)?;
         tx.write(record);
         cx.commit(tx, CommitLabel::COMPLETION_START)
@@ -208,9 +209,79 @@ impl OwnedCall<'_> {
             .map_err(live)?;
         Ok(OwnedAdmission::Send {
             request: Box::new(request),
-            admitted: AdmittedDirectSend { body, limit },
+            admitted: AdmittedDirectSend {
+                template: Arc::new(template),
+                deliveries: attachment_store,
+                limit,
+            },
         })
     }
+}
+
+/// Acquire every attachment `template`'s slots name under the holder of the
+/// call's owner, `cx`'s execution: its journal, or a process's record
+/// (ADR 0135 §7, ADR 0124 §4). It runs before the admission commits, and a
+/// crash between the two leaves only a hold its owner's end releases. The
+/// inner `Err` settles the call unsent: a ref whose content the store holds
+/// no evidence for, or a permanent refusal (`AttachmentResolutionFailed`).
+///
+/// # Errors
+///
+/// A live fault of the owner: a transient store fault, or an owner whose
+/// referrer already ended. It admitted nothing, so the owner's redrive
+/// prepares the call again.
+pub(in crate::runtime) async fn hold_slots(
+    cx: &ActorContext,
+    template: &lash_sansio::llm::types::RecordedRequestTemplate,
+) -> Result<Result<(), LlmCallError>, crate::RuntimeEffectControllerError> {
+    use lash_core_execution::runtime::attachment_delivery::{
+        DeliveryAcquisition, acquire_under, receiving_claim,
+    };
+    let mut ids: Vec<crate::AttachmentId> = template
+        .slots()
+        .map(|slot| slot.reference.id.clone())
+        .collect();
+    if ids.is_empty() {
+        return Ok(Ok(()));
+    }
+    ids.sort();
+    ids.dedup();
+    let live = |error: crate::PluginError| match error {
+        crate::PluginError::RuntimeEffectController(error) => error,
+        other => crate::RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::RuntimeEffectAttachmentStore,
+            other.to_string(),
+        ),
+    };
+    let claim = receiving_claim(cx.execution_scope()).map_err(live)?;
+    let referrers = cx.backend().attachment_referrers();
+    match acquire_under(referrers.as_ref(), &claim, &ids)
+        .await
+        .map_err(live)?
+    {
+        DeliveryAcquisition::Held => Ok(Ok(())),
+        DeliveryAcquisition::SourceGone { digest } => Ok(Err(unresolved(format!(
+            "attachment `{digest}` the call names is not held by any owner"
+        )))),
+        DeliveryAcquisition::Refused { refusal } => Ok(Err(unresolved(format!(
+            "the call's attachments cannot be held: {}",
+            refusal.message
+        )))),
+        DeliveryAcquisition::ReceiverEnded { referrer } => {
+            Err(crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectAttachmentStore,
+                format!(
+                    "the call's owner `{}` ended before its attachments were held",
+                    referrer.canonical_id()
+                ),
+            ))
+        }
+    }
+}
+
+/// The settlement of a call whose attachments cannot be held.
+fn unresolved(message: String) -> LlmCallError {
+    refused(TurnFailureCode::AttachmentResolutionFailed, message)
 }
 
 /// Compose `purpose`'s sections for the call over an empty tool offer.

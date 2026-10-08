@@ -138,7 +138,8 @@ impl LocalDirectEffectRunner {
         match lash_core_llm::core_internal::complete_prepared(
             &mut provider,
             request,
-            &self.body,
+            &self.template,
+            self.deliveries.as_ref(),
             sideband,
             self.charge_safety.clone(),
             self.tracing.metrics(),
