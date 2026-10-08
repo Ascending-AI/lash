@@ -514,6 +514,46 @@ fn a_signal_append_selects_its_declared_wait_or_its_position() {
     );
 }
 
+/// A signal is admitted only under a name its process declares and with a
+/// payload that name's schema accepts: an undeclared name and a mistyped
+/// payload are refused before anything is appended.
+#[test]
+fn a_signal_is_admitted_only_under_a_declared_name_with_a_payload_its_schema_accepts() {
+    let registration = fixture_registration("signal-validation").with_extra_event_types([
+        crate::ProcessEventType {
+            name: "signal.ready".to_string(),
+            payload_schema: crate::JsonSchema::admit(serde_json::json!({ "type": "string" }))
+                .expect("a string schema"),
+            semantics: crate::ProcessEventSemanticsSpec::default(),
+        },
+    ]);
+    let record =
+        ProcessRecord::from_registration(registration, crate::process_id_for_test("record"));
+    let signal = |name: &str, payload: serde_json::Value| {
+        crate::runtime::admit_process_signal_append(
+            &record,
+            &crate::ProcessSignal::new(
+                crate::ProcessSignalIdentity::new(record.id.clone(), name, "signal-validation")
+                    .expect("valid signal identity"),
+                payload,
+            )
+            .append_request(),
+        )
+    };
+    signal("ready", serde_json::json!("go")).expect("a declared name with its payload");
+    assert!(
+        signal("unknown", serde_json::json!("go")).is_err(),
+        "an undeclared signal name is refused"
+    );
+    assert!(
+        matches!(
+            signal("ready", serde_json::json!(7)),
+            Err(crate::PluginError::ValueMismatch { .. })
+        ),
+        "a payload its declaration's schema refuses is refused"
+    );
+}
+
 #[test]
 fn every_registration_refusal_rule_has_a_fixture_that_trips_exactly_it() {
     use crate::runtime::{
