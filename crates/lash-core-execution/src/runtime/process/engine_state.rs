@@ -108,6 +108,19 @@ pub enum StepRequest {
         /// The body's input.
         input: serde_json::Value,
     },
+    /// An operation on the lash store that no catalog tool answers (a
+    /// lashlang process's trigger command), run through the
+    /// [`EngineHostSteps`] its engine's registration declares, admitted
+    /// `Once`. A registration that declares none, or not this operation, is
+    /// refused before admission ([`EngineStepRefusal`]).
+    Host {
+        /// The step's name.
+        step: StepName,
+        /// The host operation it performs.
+        operation: String,
+        /// The operation's input.
+        input: serde_json::Value,
+    },
 }
 
 impl StepRequest {
@@ -115,7 +128,7 @@ impl StepRequest {
     #[must_use]
     pub fn step(&self) -> &StepName {
         match self {
-            Self::Tool { step, .. } | Self::Engine { step, .. } => step,
+            Self::Tool { step, .. } | Self::Engine { step, .. } | Self::Host { step, .. } => step,
         }
     }
 
@@ -123,19 +136,24 @@ impl StepRequest {
     #[must_use]
     pub fn input(&self) -> &serde_json::Value {
         match self {
-            Self::Tool { input, .. } | Self::Engine { input, .. } => input,
+            Self::Tool { input, .. } | Self::Engine { input, .. } | Self::Host { input, .. } => {
+                input
+            }
         }
     }
 
     /// The tool its admission records for a process of engine `engine`:
-    /// the catalog tool, or for an engine step `<engine>/<kind>`, which
-    /// only identifies the record. An engine step is dispatched by its
-    /// variant, never by this name.
+    /// the catalog tool, or for an engine step `<engine>/<kind>` and for a
+    /// host step `<engine>/<operation>`, which only identify the record. An
+    /// engine or host step is dispatched by its variant, never by this name.
     #[must_use]
     pub fn admitted_tool(&self, engine: &str) -> lash_sansio::ToolId {
         match self {
             Self::Tool { tool, .. } => tool.clone(),
             Self::Engine { kind, .. } => lash_sansio::ToolId::new(format!("{engine}/{}", kind.0)),
+            Self::Host { operation, .. } => {
+                lash_sansio::ToolId::new(format!("{engine}/{operation}"))
+            }
         }
     }
 }
@@ -198,6 +216,39 @@ pub trait EngineSteps: Send + Sync {
     ) -> SettledOutput;
 }
 
+/// What a host step's body is handed: the step's lash-minted call identity,
+/// which keys its store effect, and its operation and input.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HostStepRun {
+    /// The step's call identity.
+    pub call: crate::ToolCallId,
+    /// The host operation it performs.
+    pub operation: String,
+    /// The operation's input.
+    pub input: serde_json::Value,
+}
+
+/// An engine's host steps, declared at registration
+/// ([`ProcessEngineRegistration::with_host_steps`](super::ProcessEngineRegistration::with_host_steps)):
+/// operations on the lash store its processes issue that no catalog tool
+/// answers. Each is admitted `Once` and runs once over its process's step
+/// execution context, which acts as the process's recorded originator. Its
+/// store write is its store-local effect (ADR 0132 §5): a crash before its
+/// outcome commits records `Interrupted`, never a second write.
+#[async_trait::async_trait]
+pub trait EngineHostSteps: Send + Sync {
+    /// Whether `operation` is one of this engine's host steps.
+    fn serves(&self, operation: &str) -> bool;
+
+    /// Run one host step to its answer over `context`, the process's step
+    /// execution context.
+    async fn run(
+        &self,
+        context: crate::RuntimeExecutionContext<'static>,
+        run: HostStepRun,
+    ) -> crate::ToolCallOutput;
+}
+
 /// Why an engine step was refused before admission.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum EngineStepRefusal {
@@ -220,6 +271,15 @@ pub enum EngineStepRefusal {
         engine: String,
         /// The step kind asked for.
         kind: EngineStepKind,
+    },
+    /// The engine's registration declares no host step for this
+    /// operation.
+    #[error("process engine `{engine}` declares no host step `{operation}`")]
+    UndeclaredHostStep {
+        /// The engine kind.
+        engine: String,
+        /// The host operation asked for.
+        operation: String,
     },
 }
 

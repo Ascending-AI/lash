@@ -566,9 +566,9 @@ impl QuietPointHost {
             .saturating_add(i64::try_from(duration_ms).unwrap_or(i64::MAX))
     }
 
-    /// One resource operation as a leaf: a catalog tool to run as a step,
-    /// or settled in place when it needs none (a language runtime value) or
-    /// is refused before dispatch.
+    /// One resource operation as a leaf: a catalog tool or a trigger command
+    /// to run as a step, or settled in place when it needs none (a language
+    /// runtime value) or is refused before dispatch.
     fn leaf(
         &self,
         operation: lashlang::ResourceOperation,
@@ -601,18 +601,20 @@ impl QuietPointHost {
         };
         let host_operation =
             crate::resolve_lashlang_module_operation(&self.environment, receiver, &operation)?;
+        // A trigger command is a host step, whose trigger write is its
+        // store-local effect; every other host operation is a catalog tool.
+        if lashlang::TriggerHostOperation::from_host_operation(&host_operation).is_some() {
+            return Ok(IssuedLeaf::Host {
+                operation: host_operation,
+                input: resource_payload(&args)?,
+            });
+        }
         let tool = lash_core::ToolId::from(host_operation.as_str());
-        // A trigger operation is a tool step whose outcome commits its
-        // trigger as a store-local effect; every other host operation is a
-        // catalog tool.
-        let is_trigger =
-            lashlang::TriggerHostOperation::from_host_operation(&host_operation).is_some();
-        if !is_trigger
-            && !self
-                .catalog
-                .tools
-                .iter()
-                .any(|entry| entry.manifest.id == tool)
+        if !self
+            .catalog
+            .tools
+            .iter()
+            .any(|entry| entry.manifest.id == tool)
         {
             return Err(LashlangHostError::ResolvedOperationUnavailable {
                 operation,

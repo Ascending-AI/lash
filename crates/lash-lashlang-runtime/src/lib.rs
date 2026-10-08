@@ -1447,14 +1447,15 @@ pub fn lashlang_process_engine_registration(
         lash_core::ProcessEngineAdmission::new(LASHLANG_ENGINE_KIND, admit_lashlang_process),
     )
     .expect("lashlang engine and admission share a fixed kind")
-    .with_engine_steps(Arc::new(LashlangEngineSteps::new(engine)))
+    .with_engine_steps(Arc::new(LashlangEngineSteps::new(Arc::clone(&engine))))
+    .with_host_steps(Arc::new(LashlangHostSteps::new(engine)))
 }
 
 mod bridge;
 #[cfg(test)]
 mod catalog_tests;
 pub mod engine;
-pub use engine::LashlangEngineSteps;
+pub use engine::{LashlangEngineSteps, LashlangHostSteps};
 mod catalogue_preview;
 mod deferred;
 mod deferred_triggers;

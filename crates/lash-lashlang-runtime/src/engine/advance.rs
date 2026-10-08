@@ -325,6 +325,18 @@ fn park(
                                 outcome: None,
                             })
                         }
+                        IssuedLeaf::Host { operation, input } => {
+                            steps.push(StepRequest::Host {
+                                step: step.clone(),
+                                operation,
+                                input,
+                            });
+                            Ok(Leaf::Step {
+                                step,
+                                timer: false,
+                                outcome: None,
+                            })
+                        }
                         IssuedLeaf::Timer { until_ms } => {
                             steps.push(StepRequest::Engine {
                                 step: step.clone(),

@@ -64,8 +64,9 @@ pub use engine::{
     ProcessEngineRegistry, ProcessInfraError, ProcessRunOutcome, WeakProcessEngineRegistry,
 };
 pub use engine_state::{
-    EngineAction, EngineEvent, EngineState, EngineStateFormat, EngineStepKind, EngineStepRefusal,
-    EngineStepRun, EngineSteps, HostWaitKind, KeyName, StepName, StepRequest,
+    EngineAction, EngineEvent, EngineHostSteps, EngineState, EngineStateFormat, EngineStepKind,
+    EngineStepRefusal, EngineStepRun, EngineSteps, HostStepRun, HostWaitKind, KeyName, StepName,
+    StepRequest,
 };
 pub use events::{
     AbandonEvidence, AbandonWriter, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessAwaitOutput,

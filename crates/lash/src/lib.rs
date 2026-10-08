@@ -1025,9 +1025,9 @@ pub mod plugins {
     /// keeps, the events lash delivers to `advance`, and the action it
     /// answers with.
     pub use lash_core::{
-        EngineAction, EngineEvent, EngineState, EngineStateFormat, EngineStepKind,
-        EngineStepRefusal, EngineStepRun, EngineSteps, HostWaitKind, KeyName, Material,
-        NamesMaterial, SettledOutput, SettledOutputRefusal, StepName, StepRequest,
+        EngineAction, EngineEvent, EngineHostSteps, EngineState, EngineStateFormat, EngineStepKind,
+        EngineStepRefusal, EngineStepRun, EngineSteps, HostStepRun, HostWaitKind, KeyName,
+        Material, NamesMaterial, SettledOutput, SettledOutputRefusal, StepName, StepRequest,
     };
     /// Executable identity and terminal rendering returned by protocol integrators.
     pub use lash_core::{ExecutableGeneration, RecordedRender};

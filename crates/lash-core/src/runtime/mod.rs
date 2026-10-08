@@ -266,11 +266,11 @@ pub use process::reconcile_pruned_trigger_deliveries_interleaved;
 pub use process::registry_transitions;
 pub use process::{
     AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry, DeclaredProcessIdentity,
-    DefinitionAcquisition, EngineAction, EngineEvent, EngineState, EngineStateFormat,
-    EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps, HandleId, HostWaitKind,
-    InvalidProcessDefinitionId, InvalidStartKey, KeyName, Lifetime, LifetimeDecision,
-    LifetimePolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NonTerminalProcessPage, ObservedProcess,
-    ObservedProcessEvent, ObservedProcessEventLite, ObservedProcessEventPage,
+    DefinitionAcquisition, EngineAction, EngineEvent, EngineHostSteps, EngineState,
+    EngineStateFormat, EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps, HandleId,
+    HostStepRun, HostWaitKind, InvalidProcessDefinitionId, InvalidStartKey, KeyName, Lifetime,
+    LifetimeDecision, LifetimePolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NonTerminalProcessPage,
+    ObservedProcess, ObservedProcessEvent, ObservedProcessEventLite, ObservedProcessEventPage,
     ObservedProcessEventReadOutcome, ObservedWorkItem, ObservedWorkItemState,
     PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
     PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION,

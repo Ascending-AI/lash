@@ -396,7 +396,7 @@ fn step_entries(call: &ToolCallId) -> u32 {
 fn step_tool(step: &StepRequest) -> &str {
     match step {
         StepRequest::Tool { tool, .. } => tool.as_str(),
-        StepRequest::Engine { .. } => "",
+        StepRequest::Engine { .. } | StepRequest::Host { .. } => "",
     }
 }
 

@@ -3298,7 +3298,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5309 re-wrote the law at the trigger command handler a process body's trigger operation runs through (execute_trigger_operation): in a host-originated process context, a list and the delete of a live session subscription are refused naming bare host authority, and the store is unchanged. The end-to-end route from a lashlang process body is broken (FIG-5313)"
+note = "FIG-5309 re-wrote the law at the trigger command handler a process body's trigger operation runs through (execute_trigger_operation): in a host-originated process context, a list and the delete of a live session subscription are refused naming bare host authority, and the store is unchanged. FIG-5313 routed a lashlang process body's trigger operation to it as a host step of the process, acting as the process's recorded originator"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
@@ -3312,7 +3312,7 @@ laws = [
 ]
 disposition = "replaced-by:crates/lash-durable-test/tests/process_tool_calls.rs::process_body_uses_trigger_command_handler"
 status = "deleted"
-note = "FIG-5309 re-wrote the law through a host's send() on the core's served node: an RLM cell starts a process whose body lists triggers. It exposed a bug: the worker refuses a process body's trigger operation as a tool its catalog does not hold. The law is #[ignore]d (sqlite_memory_triggers) against FIG-5313"
+note = "FIG-5309 re-wrote the law through a host's send() on the core's served node: an RLM cell starts a process whose body lists triggers. It exposed a bug: the worker refused a process body's trigger operation as a tool its catalog does not hold. FIG-5313 runs it as a host step the lashlang engine declares, and the law runs on every tier"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
@@ -3326,7 +3326,7 @@ laws = [
 ]
 disposition = "replaced-by:crates/lash-durable-test/tests/process_tool_calls.rs::process_local_helper_reaches_trigger_command_handler"
 status = "deleted"
-note = "FIG-5309 re-wrote the law through a host's send() on the core's served node: an RLM cell starts a process whose body lists triggers. It exposed a bug: the worker refuses a process body's trigger operation as a tool its catalog does not hold. The law is #[ignore]d (sqlite_memory_triggers) against FIG-5313"
+note = "FIG-5309 re-wrote the law through a host's send() on the core's served node: an RLM cell starts a process whose body lists triggers. It exposed a bug: the worker refused a process body's trigger operation as a tool its catalog does not hold. FIG-5313 runs it as a host step the lashlang engine declares, and the law runs on every tier"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"

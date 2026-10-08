@@ -248,6 +248,12 @@ pub(crate) enum IssuedLeaf {
         tool: lash_core::ToolId,
         input: serde_json::Value,
     },
+    /// A host operation no catalog tool answers (a trigger command), with
+    /// its input: run as a host step.
+    Host {
+        operation: String,
+        input: serde_json::Value,
+    },
     /// A timer that settles at `until_ms`.
     Timer { until_ms: i64 },
     /// Settled at issue: refused before dispatch, or a runtime value.

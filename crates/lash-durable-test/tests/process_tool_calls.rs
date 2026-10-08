@@ -483,24 +483,6 @@ tiered_laws!(
     tool_call_limit_counts_what_a_process_holds,
     process_tool_call_limit_admits_the_limit_and_refuses_the_group_past_it,
     process_tool_call_limit_staged_calls,
+    process_body_uses_trigger_command_handler,
+    process_local_helper_reaches_trigger_command_handler,
 );
-
-/// A process body's trigger commands, on SQLite memory until FIG-5313 lands:
-/// the worker refuses a trigger operation as a tool its catalog does not
-/// hold, so both laws fail today.
-mod sqlite_memory_triggers {
-    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-    #[ignore = "FIG-5313: a process body's trigger command is refused as an uncatalogued tool step"]
-    async fn process_body_uses_trigger_command_handler() {
-        super::process_body_uses_trigger_command_handler(super::served::Tier::SqliteMemory).await;
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-    #[ignore = "FIG-5313: a process body's trigger command is refused as an uncatalogued tool step"]
-    async fn process_local_helper_reaches_trigger_command_handler() {
-        super::process_local_helper_reaches_trigger_command_handler(
-            super::served::Tier::SqliteMemory,
-        )
-        .await;
-    }
-}

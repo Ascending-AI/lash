@@ -279,6 +279,7 @@ pub struct ProcessEngineRegistration {
     engine: Arc<dyn ProcessEngine>,
     admission: ProcessEngineAdmission,
     engine_steps: Option<Arc<dyn super::engine_state::EngineSteps>>,
+    host_steps: Option<Arc<dyn super::engine_state::EngineHostSteps>>,
 }
 
 impl ProcessEngineRegistration {
@@ -297,6 +298,7 @@ impl ProcessEngineRegistration {
             engine,
             admission,
             engine_steps: None,
+            host_steps: None,
         })
     }
 
@@ -307,6 +309,7 @@ impl ProcessEngineRegistration {
             engine,
             admission,
             engine_steps: None,
+            host_steps: None,
         }
     }
 
@@ -318,6 +321,15 @@ impl ProcessEngineRegistration {
         self.engine_steps = Some(steps);
         self
     }
+
+    /// Declare the engine's host steps: what runs a
+    /// [`StepRequest::Host`](super::StepRequest::Host) its `advance` asks
+    /// for.
+    #[must_use]
+    pub fn with_host_steps(mut self, steps: Arc<dyn super::engine_state::EngineHostSteps>) -> Self {
+        self.host_steps = Some(steps);
+        self
+    }
 }
 
 #[derive(Clone, Default)]
@@ -325,6 +337,7 @@ pub struct ProcessEngineRegistry {
     engines: Arc<BTreeMap<String, Arc<dyn ProcessEngine>>>,
     admissions: Arc<BTreeMap<String, ProcessEngineAdmission>>,
     engine_steps: Arc<BTreeMap<String, Arc<dyn super::engine_state::EngineSteps>>>,
+    host_steps: Arc<BTreeMap<String, Arc<dyn super::engine_state::EngineHostSteps>>>,
     artifact_ports: Option<Arc<super::ArtifactReferrerPorts>>,
 }
 
@@ -334,6 +347,7 @@ pub struct WeakProcessEngineRegistry {
     engines: std::sync::Weak<BTreeMap<String, Arc<dyn ProcessEngine>>>,
     admissions: std::sync::Weak<BTreeMap<String, ProcessEngineAdmission>>,
     engine_steps: std::sync::Weak<BTreeMap<String, Arc<dyn super::engine_state::EngineSteps>>>,
+    host_steps: std::sync::Weak<BTreeMap<String, Arc<dyn super::engine_state::EngineHostSteps>>>,
     artifact_ports: Option<Arc<super::ArtifactReferrerPorts>>,
 }
 
@@ -345,6 +359,7 @@ impl WeakProcessEngineRegistry {
             engines: self.engines.upgrade()?,
             admissions: self.admissions.upgrade()?,
             engine_steps: self.engine_steps.upgrade()?,
+            host_steps: self.host_steps.upgrade()?,
             artifact_ports: self.artifact_ports.clone(),
         })
     }
@@ -362,6 +377,7 @@ impl ProcessEngineRegistry {
             engines: Arc::downgrade(&self.engines),
             admissions: Arc::downgrade(&self.admissions),
             engine_steps: Arc::downgrade(&self.engine_steps),
+            host_steps: Arc::downgrade(&self.host_steps),
             artifact_ports: self.artifact_ports.clone(),
         }
     }
@@ -380,14 +396,20 @@ impl ProcessEngineRegistry {
         let mut engines = (*self.engines).clone();
         let mut admissions = (*self.admissions).clone();
         let mut engine_steps = (*self.engine_steps).clone();
+        let mut host_steps = (*self.host_steps).clone();
         let ProcessEngineRegistration {
             engine,
             admission,
             engine_steps: steps,
+            host_steps: hosted,
         } = registration;
         match steps {
             Some(steps) => engine_steps.insert(engine.kind().to_string(), steps),
             None => engine_steps.remove(engine.kind()),
+        };
+        match hosted {
+            Some(hosted) => host_steps.insert(engine.kind().to_string(), hosted),
+            None => host_steps.remove(engine.kind()),
         };
         engines.insert(engine.kind().to_string(), engine);
         admissions.insert(admission.kind().to_string(), admission);
@@ -395,6 +417,7 @@ impl ProcessEngineRegistry {
             engines: Arc::new(engines),
             admissions: Arc::new(admissions),
             engine_steps: Arc::new(engine_steps),
+            host_steps: Arc::new(host_steps),
             artifact_ports: self.artifact_ports,
         }
     }
@@ -433,6 +456,37 @@ impl ProcessEngineRegistry {
             });
         }
         Ok(Arc::clone(steps))
+    }
+
+    /// The body that runs host operation `operation` for processes of
+    /// engine `engine`: the typed refusal, before admission, of a
+    /// [`StepRequest::Host`](super::StepRequest::Host) no registration
+    /// declares.
+    ///
+    /// # Errors
+    ///
+    /// [`EngineStepRefusal`](super::engine_state::EngineStepRefusal) when
+    /// the engine is unknown or declares no host step for `operation`.
+    pub fn host_steps(
+        &self,
+        engine: &str,
+        operation: &str,
+    ) -> Result<Arc<dyn super::engine_state::EngineHostSteps>, super::engine_state::EngineStepRefusal>
+    {
+        use super::engine_state::EngineStepRefusal;
+        if !self.engines.contains_key(engine) {
+            return Err(EngineStepRefusal::UnknownEngine {
+                engine: engine.to_owned(),
+            });
+        }
+        self.host_steps
+            .get(engine)
+            .filter(|steps| steps.serves(operation))
+            .map(Arc::clone)
+            .ok_or_else(|| EngineStepRefusal::UndeclaredHostStep {
+                engine: engine.to_owned(),
+                operation: operation.to_owned(),
+            })
     }
 
     /// Apply one resolved cleanup to every installed engine's own store

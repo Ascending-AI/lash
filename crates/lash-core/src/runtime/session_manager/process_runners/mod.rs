@@ -26,9 +26,10 @@ impl RuntimeSessionServices {
     }
 
     /// The tools `process`'s steps run (ADR 0132 §10): its own plugin
-    /// session's catalog, and the round tools that pin and run a catalog
-    /// tool as a turn's round does, under `cx`, the process actor's claimed
-    /// context, with the lineage and originator its children start under.
+    /// session's catalog, the round tools that pin and run a catalog tool as
+    /// a turn's round does, under `cx`, the process actor's claimed context,
+    /// with the lineage and originator its children start under, and the
+    /// context its host steps run over, acting as its recorded originator.
     pub(in crate::runtime) fn process_step_tools(
         &self,
         cx: crate::ActorContext,
@@ -63,7 +64,12 @@ impl RuntimeSessionServices {
                 process_id: process.id.clone(),
             })
             .map_err(|error| crate::PluginError::Session(error.to_string()))?;
-        Ok(crate::runtime::ProcessStepTools { catalog, tools })
+        let host = context.with_process_record(process);
+        Ok(crate::runtime::ProcessStepTools {
+            catalog,
+            tools,
+            host,
+        })
     }
 
     /// The dispatch a process's tool steps run on (ADR 0132 §10): `surface`,
