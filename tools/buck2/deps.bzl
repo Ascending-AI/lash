@@ -559,6 +559,8 @@ PACKAGE_DEPS = {
             "lash_durable": "//crates/lash-durable:lash-durable",
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
+            "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
+            "rusqlite": "//third-party/rust:p0283",
             "serde": "//third-party/rust:p0307",
             "serde_json": "//third-party/rust:p0313",
             "sqlx": "//third-party/rust:p0333",

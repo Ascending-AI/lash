@@ -131,7 +131,8 @@ tokens, so any live node can run a due pass.
 
 Every node claims due obligations. PostgreSQL permits due claims on every node
 through skip-locked reads. A SQLite deployment is one database file, and its
-nodes serialize on its one writer. Park-feed compaction and opt-in evidence
+nodes, in every process that opens it, serialize their claims on its one
+writer. Park-feed compaction and opt-in evidence
 retention are idempotent duties any node may run; overlapping runs are safe.
 
 ### 1.8 Detection and delivery bounds

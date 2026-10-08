@@ -9,8 +9,17 @@
 //!
 //! Every write runs in [`SqliteConnection::write_flow`], so it holds the
 //! database's writer gate and `BEGIN IMMEDIATE` and passes the writer fence
-//! first; SQLite serializes writers, so a claim needs no row lock. Instants
-//! come from the store set's injected clock, read once per transaction.
+//! first. `BEGIN IMMEDIATE` takes the database's write lock for every
+//! connection of every process on the file, so writers serialize and a claim
+//! needs no row lock: two nodes, in one process or in two, never take one
+//! actor twice. Instants come from the store set's injected clock, read once
+//! per transaction; in production that is the machine's clock, which every
+//! process on the file shares and SQLite's own time functions read.
+//!
+//! Node wakes ([`SqliteNodeWakes`]) live beside this module: wake rows
+//! published after commit, never inside a writing transaction, and each
+//! boot's liveness lock, a file lock its listener holds
+//! ([`crate::liveness_locks`]).
 
 use std::sync::{Arc, LazyLock};
 
@@ -33,6 +42,7 @@ use lash_store_sql::durable::{ActorStatements, MailStatements, NodeStatements};
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::conn::{FencedTx, SqliteConnection, TxOutcome, cached_execute};
+use crate::liveness_locks::{LivenessLocks, Probed};
 
 mod park_events;
 pub(crate) mod processes;
@@ -45,6 +55,12 @@ pub(crate) use session_mail::cut_session_wakes;
 mod snapshots;
 mod turns;
 mod waits;
+
+#[path = "../node_wakes.rs"]
+mod node_wakes;
+
+pub(crate) use node_wakes::SqliteNodeWakes;
+pub(crate) use node_wakes::TABLES as NODE_WAKES_TABLES;
 
 // The domain tables I0 creates in the durable core database (FIG-5194);
 // each domain's own lane adds its tables beside them.
@@ -118,6 +134,9 @@ lash_store_sql::statements! {
         /// Whether boot `?2` of node `?1` holds a lease: its draining flag,
         /// or no row.
         node_live = "SELECT draining FROM nodes WHERE node_id = ?1 AND boot_id = ?2";
+
+        /// Every registered boot.
+        boots = "SELECT node_id, boot_id FROM nodes ORDER BY node_id, boot_id";
 
         /// Up to `?3` actors claimable at `?1` in a format set of JSON array
         /// `?2`, or process actors in another set with mail of kind `?4` (a
@@ -260,6 +279,99 @@ impl SqliteDurableStore {
             .await
             .map_err(store_failure)?
     }
+
+    /// Every registered boot, and whether some listener holds its liveness
+    /// lock in `locks`, each probed inside the one read.
+    async fn liveness(
+        &self,
+        locks: LivenessLocks,
+    ) -> Result<Vec<lash_durable::BootLiveness>, DurableError> {
+        self.read(move |tx| {
+            let boots = registered_boots(tx)?;
+            let mut liveness = Vec::with_capacity(boots.len());
+            for boot in boots {
+                let held = match locks.probe(&node_wakes::boot_lock(&boot.boot)) {
+                    Ok(Probed::Held) => true,
+                    Ok(Probed::Free(_)) => false,
+                    Err(error) => return Ok(Err(node_wakes::lock_failure(&error))),
+                };
+                liveness.push(lash_durable::BootLiveness { boot, held });
+            }
+            Ok(Ok(liveness))
+        })
+        .await
+    }
+
+    /// Reap `boot` when its liveness lock in `locks` is free and the
+    /// reaper's own is held, in one transaction under the reap's label. The
+    /// free lock is kept shared until the reap commits, so the boot cannot
+    /// lock again before it; a boot that locks after finds its lease gone.
+    /// Its lock file is deleted once the reap commits.
+    async fn reap_released(
+        &self,
+        locks: LivenessLocks,
+        reaper: &NodeLease,
+        boot: &Owner,
+    ) -> Result<Vec<Reaped>, DurableError> {
+        let reaper = reaper.owner.clone();
+        let boot = boot.clone();
+        let (reaped, released) = self
+            .write(CommitLabel::REAP, move |tx, now| {
+                if !node_live(tx, &reaper)? {
+                    return refuse(DurableError::NodeLeaseLost {
+                        node: reaper.node.clone(),
+                    });
+                }
+                match locks.probe(&node_wakes::boot_lock(&reaper.boot)) {
+                    Ok(Probed::Held) => {}
+                    Ok(Probed::Free(_)) => return commit((Vec::new(), None)),
+                    Err(error) => return refuse(node_wakes::lock_failure(&error)),
+                }
+                let released = match locks.probe(&node_wakes::boot_lock(&boot.boot)) {
+                    Ok(Probed::Free(released)) => released,
+                    Ok(Probed::Held) => return commit((Vec::new(), None)),
+                    Err(error) => return refuse(node_wakes::lock_failure(&error)),
+                };
+                let deleted = tx
+                    .prepare_cached(SQL.node.delete_boot.sql())?
+                    .query_row([boot.node.as_str(), boot.boot.as_str()], |_| Ok(()))
+                    .optional()?;
+                if deleted.is_none() {
+                    return commit((Vec::new(), released));
+                }
+                match release_owned_by(tx, &boot, now)? {
+                    Ok(owned) => commit((
+                        owned
+                            .into_iter()
+                            .map(|(actor, epoch)| Reaped {
+                                actor,
+                                from: boot.clone(),
+                                epoch,
+                            })
+                            .collect(),
+                        released,
+                    )),
+                    Err(error) => refuse(error),
+                }
+            })
+            .await?;
+        if let Some(released) = released {
+            released.delete();
+        }
+        Ok(reaped)
+    }
+}
+
+/// Every registered boot, oldest node first.
+fn registered_boots(tx: &Connection) -> rusqlite::Result<Vec<Owner>> {
+    tx.prepare_cached(SQL.sqlite.boots.sql())?
+        .query_map([], |row| {
+            Ok(Owner {
+                node: NodeId::new(row.get::<_, String>(0)?),
+                boot: BootId::new(row.get::<_, String>(1)?),
+            })
+        })?
+        .collect()
 }
 
 fn store_failure(error: rusqlite::Error) -> DurableError {

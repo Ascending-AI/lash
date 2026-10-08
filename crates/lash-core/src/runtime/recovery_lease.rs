@@ -2,15 +2,16 @@
 //!
 //! One deployment per engine authority runs the leader-only recovery duties:
 //! the parks arm, rate-bounded repair scans, drain hand-over, park-feed
-//! compaction and opt-in retention; on SQLite also the due-obligation claims.
-//! Every other duty runs on every deployment. The lease is load control, never
-//! a fence: every duty stays idempotent when two leaders overlap (ADR 0109 §1.6).
+//! compaction and opt-in retention. Every other duty, the due-obligation
+//! claims among them, runs on every deployment of every store. The lease is
+//! load control, never a fence: every duty stays idempotent when two leaders
+//! overlap (ADR 0109 §1.6).
 //!
 //! [`RecoveryLease::step`] makes one acquire-or-renew attempt against the
-//! store; the host repeats it on [`RecoveryLease::next_delay`]'s cadence. The
-//! artifact-cleanup pass asks [`RecoveryLease::duties`] before it claims: a leader
-//! whose last renew is older than its trust window acts as a follower until
-//! it renews again, so it stops leading before its row can expire.
+//! store; the host repeats it on [`RecoveryLease::next_delay`]'s cadence. A
+//! leader whose last renew is older than its trust window
+//! ([`RecoveryLease::leads`]) acts as a follower until it renews again, so it
+//! stops leading before its row can expire.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -28,25 +29,6 @@ pub enum Standing {
     Leader { term: i64, trusted_until_ms: u64 },
     /// Another process leads, or nobody could be elected.
     Follower,
-}
-
-/// Which recovery duties this process may run right now.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RecoveryDuties {
-    /// The leader-only duties: parks, repair scans, drain hand-over,
-    /// compaction, retention.
-    pub leader: bool,
-    /// Due-obligation claims: every deployment where the store lets claims
-    /// skip each other, the leader only where it does not.
-    pub due_claims: bool,
-}
-
-impl RecoveryDuties {
-    /// Every duty: what a caller that owns its storage alone runs.
-    pub const ALL: Self = Self {
-        leader: true,
-        due_claims: true,
-    };
 }
 
 /// The host half of the recovery leader lease over one store.
@@ -144,16 +126,6 @@ impl RecoveryLease {
             self.standing(),
             Standing::Leader { trusted_until_ms, .. } if now_ms < trusted_until_ms
         )
-    }
-
-    /// The duties this process may run at `now_ms`.
-    #[must_use]
-    pub fn duties(&self, now_ms: u64) -> RecoveryDuties {
-        let leader = self.leads(now_ms);
-        RecoveryDuties {
-            leader,
-            due_claims: leader || !self.store.due_claims_need_leader(),
-        }
     }
 
     /// One acquire-or-renew attempt: a leader renews its term, anyone else

@@ -327,10 +327,14 @@ impl SqliteStore {
         rows.sort_by(|a, b| a.digest.cmp(&b.digest));
         Ok(rows)
     }
-    /// Open one sweep pass: mint the next generation and register it live in
-    /// this process. SQLite runs in one process (ADR 0106), so the registry
-    /// is the whole liveness proof: a pass that ended, was cancelled, or died
-    /// with its process is absent from it.
+    /// Open one sweep pass: mint the next generation and hold it live for
+    /// the pass's life. Over a database file the proof is the generation's
+    /// liveness lock beside it ([`crate::liveness_locks`]), which every
+    /// process on the file sees and the kernel drops with a pass's process,
+    /// as PostgreSQL's session lock is dropped with its connection. A memory
+    /// database lives in one process, so this process's registry is its
+    /// whole proof: a pass that ended, was cancelled, or died with its
+    /// process is absent from it.
     pub(crate) async fn begin_attachment_sweep(
         &self,
     ) -> Result<lash_core_execution::AttachmentSweepGeneration, StoreError> {
@@ -351,10 +355,25 @@ impl SqliteStore {
                 format!("minted generation {generation} is negative"),
             )
         })?;
-        let liveness = LiveSweep::register(self.sweep_catalog_key(), generation);
+        let liveness: Box<dyn std::any::Any + Send + Sync> = match self.sweep_locks() {
+            Some(locks) => {
+                // A free sweep lock is a pass that ended or died: its file
+                // is litter.
+                let _ = locks.sweep(SWEEP_LOCK_PREFIX);
+                let held = locks
+                    .try_hold(&sweep_lock(generation))
+                    .map_err(|error| sweep_lock_failure(&error))?
+                    .ok_or_else(|| {
+                        StoreError::Backend(format!(
+                            "the liveness lock of fresh sweep generation {generation} is held"
+                        ))
+                    })?;
+                Box::new(FileSweep(Some(held)))
+            }
+            None => Box::new(LiveSweep::register(self.sweep_catalog_key(), generation)),
+        };
         Ok(lash_core_execution::AttachmentSweepGeneration::new(
-            generation,
-            Box::new(liveness),
+            generation, liveness,
         ))
     }
 
@@ -366,6 +385,7 @@ impl SqliteStore {
     ) -> Result<lash_core_execution::AttachmentCondemnationAdoption, StoreError> {
         let mine = sweep_generation_sql(generation)?;
         let catalog = self.sweep_catalog_key();
+        let locks = self.sweep_locks();
         let now = crate::clamp_epoch_ms(self.clock.timestamp_ms());
         self.conn
             .write_flow(move |tx| {
@@ -409,7 +429,10 @@ impl SqliteStore {
                                     ))
                             })
                             .transpose()?;
-                        let live = LiveSweep::is_live(&catalog, owner);
+                        let live = match &locks {
+                            Some(locks) => sweep_is_live(locks, owner)?,
+                            None => LiveSweep::is_live(&catalog, owner),
+                        };
                         let backing_off = phase != "deleting" && next_delete_at_ms > now;
                         if live || backing_off {
                             if stalled.is_some() {
@@ -452,6 +475,14 @@ impl SqliteStore {
     /// database target the host opened it at.
     fn sweep_catalog_key(&self) -> String {
         self.location.target().to_string()
+    }
+
+    /// The liveness locks beside a file database; none for a memory one.
+    fn sweep_locks(&self) -> Option<crate::liveness_locks::LivenessLocks> {
+        self.location
+            .target()
+            .file_path()
+            .map(crate::liveness_locks::LivenessLocks::beside)
     }
 
     /// `Condemned -> Deleting` under `generation`: the CAS that authorizes the
@@ -649,7 +680,54 @@ impl SqliteStore {
             .map_err(sqlite_error)?
     }
 }
-/// The sweep passes running in this process, by catalog and generation.
+/// The name of sweep generation `generation`'s liveness lock.
+fn sweep_lock(generation: impl std::fmt::Display) -> String {
+    format!("{SWEEP_LOCK_PREFIX}{generation}")
+}
+
+const SWEEP_LOCK_PREFIX: &str = "sweep-";
+
+fn sweep_lock_failure(error: &std::io::Error) -> StoreError {
+    StoreError::Backend(format!(
+        "an attachment sweep liveness lock could not be read: {error}"
+    ))
+}
+
+/// Whether generation `generation`'s pass still holds its lock. A dead pass
+/// never becomes live again, because no pass takes another generation's
+/// lock, so its file is deleted once it is seen free.
+fn sweep_is_live(
+    locks: &crate::liveness_locks::LivenessLocks,
+    generation: i64,
+) -> Result<bool, StoreError> {
+    match locks
+        .probe(&sweep_lock(generation))
+        .map_err(|error| sweep_lock_failure(&error))?
+    {
+        crate::liveness_locks::Probed::Held => Ok(true),
+        crate::liveness_locks::Probed::Free(dead) => {
+            if let Some(dead) = dead {
+                dead.delete();
+            }
+            Ok(false)
+        }
+    }
+}
+
+/// A live sweep pass over a database file: its generation's lock, given up
+/// and its file deleted when the pass ends.
+struct FileSweep(Option<crate::liveness_locks::HeldLock>);
+
+impl Drop for FileSweep {
+    fn drop(&mut self) {
+        if let Some(held) = self.0.take() {
+            held.release();
+        }
+    }
+}
+
+/// The sweep passes running in this process over a memory database, by
+/// catalog and generation.
 static LIVE_SWEEPS: LazyLock<std::sync::Mutex<std::collections::HashSet<(String, u64)>>> =
     LazyLock::new(Default::default);
 

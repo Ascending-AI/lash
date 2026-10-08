@@ -1,5 +1,6 @@
-//! A deployment under test: one PostgreSQL server, N node processes, the
-//! witness ledger, and the store as an operator reads it.
+//! A deployment under test: one lash database (a PostgreSQL server the case
+//! owns, or one SQLite file), N node processes, the witness ledger, and the
+//! store as an operator reads it.
 //!
 //! The test, not lash, starts the node processes
 //! (`lash-postgres-workers-node`), kills them with SIGKILL, stops them on
@@ -14,12 +15,11 @@ use std::time::{Duration, Instant};
 
 use lash_core_execution::{
     Backend, BackendParts, NoProjectionProviders, ProcessId, ProcessInput, ProcessProvenance,
-    ProcessRecord, ProcessRegistration, StoreSet,
+    ProcessRecord, ProcessRegistration,
 };
 use lash_durable::{DurableStore, Notifier};
-use lash_postgres_store::PostgresStoreSet;
 use lash_postgres_workers::events::{Command, Event, Report};
-use lash_postgres_workers::node::host_config;
+use lash_postgres_workers::node::{Database, stores};
 use lash_postgres_workers::process::WorkerEngine;
 use lash_postgres_workers::witness::Hold;
 use sqlx::postgres::PgPool;
@@ -95,12 +95,112 @@ pub struct ModelAttempt {
     pub node: String,
 }
 
+/// The lash database a deployment's nodes serve.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Substrate {
+    /// A PostgreSQL server the case owns.
+    Postgres,
+    /// One SQLite database file every node process opens.
+    Sqlite,
+}
+
+/// Where a deployment's databases live.
+enum Databases {
+    /// The server, with the lash database and the witness database on it.
+    Postgres(Box<Server>),
+    /// A directory holding the lash file and the witness file.
+    Sqlite(tempfile::TempDir),
+}
+
+impl Databases {
+    fn lash(&self) -> Database {
+        match self {
+            Self::Postgres(server) => Database::Postgres(server.url("lash", "lash")),
+            Self::Sqlite(dir) => Database::Sqlite(dir.path().join("lash.db")),
+        }
+    }
+
+    /// The witness ledger, as its writers reach it.
+    fn witness(&self) -> Database {
+        match self {
+            Self::Postgres(server) => {
+                Database::Postgres(server.url("lash_witness", "lash_witness_writer"))
+            }
+            Self::Sqlite(dir) => Database::Sqlite(dir.path().join("witness.db")),
+        }
+    }
+}
+
+/// The test's own handle on the witness ledger.
+enum WitnessReader {
+    Postgres(PgPool),
+    Sqlite(std::path::PathBuf),
+}
+
+impl WitnessReader {
+    /// Every row `sql` selects, decoded by `row` on a SQLite leg and by
+    /// `sqlx` on a PostgreSQL one.
+    async fn rows<T>(
+        &self,
+        sql: &str,
+        row: impl Fn(&rusqlite::Row<'_>) -> rusqlite::Result<T> + Send + 'static,
+    ) -> Vec<T>
+    where
+        T: for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> + Send + Unpin + 'static,
+    {
+        match self {
+            Self::Postgres(pool) => sqlx::query_as(sql)
+                .fetch_all(pool)
+                .await
+                .expect("read the witness"),
+            Self::Sqlite(path) => {
+                let (path, sql) = (path.clone(), sql.to_owned());
+                tokio::task::spawn_blocking(move || {
+                    let connection = lash_postgres_workers::witness::open_sqlite(&path)?;
+                    let mut statement = connection.prepare(&sql)?;
+                    statement
+                        .query_map([], |found| row(found))?
+                        .collect::<rusqlite::Result<Vec<T>>>()
+                })
+                .await
+                .expect("the witness read runs")
+                .expect("read the witness")
+            }
+        }
+    }
+
+    async fn nemesis(&self, kind: &str, node: Option<&str>) {
+        match self {
+            Self::Postgres(pool) => {
+                sqlx::query("INSERT INTO witness_nemesis (kind, node) VALUES ($1, $2)")
+                    .bind(kind)
+                    .bind(node)
+                    .execute(pool)
+                    .await
+                    .expect("record the nemesis");
+            }
+            Self::Sqlite(path) => {
+                let (path, kind, node) = (path.clone(), kind.to_owned(), node.map(str::to_owned));
+                tokio::task::spawn_blocking(move || {
+                    lash_postgres_workers::witness::open_sqlite(&path)?.execute(
+                        "INSERT INTO witness_nemesis (kind, node) VALUES (?1, ?2)",
+                        rusqlite::params![kind, node],
+                    )
+                })
+                .await
+                .expect("the nemesis write runs")
+                .expect("record the nemesis");
+            }
+        }
+    }
+}
+
 /// The deployment.
 pub struct Cluster {
-    server: Server,
+    databases: Databases,
     nodes: BTreeMap<String, Node>,
     reports: Arc<Reports>,
-    witness: PgPool,
+    witness: WitnessReader,
     durable: Arc<dyn DurableStore>,
     backend: Backend,
     notifier: Notifier,
@@ -108,32 +208,51 @@ pub struct Cluster {
 }
 
 impl Cluster {
-    /// Start a server, provision it, and boot `nodes` with `notifier` and
-    /// `hold`.
-    pub async fn start(nodes: &[&str], notifier: Notifier, hold: Hold) -> Self {
-        let server = Server::start().await;
-        let witness = server.pool("lash_witness").await.expect("open the witness");
-        let storage = lash_postgres_store::testing::connect_with(
-            &server.url("lash", "lash"),
-            &host_config(notifier),
-        )
-        .await
-        .expect("open the lash store");
-        let stores = PostgresStoreSet::new(
-            &storage,
-            Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
-        );
+    /// Provision `substrate`'s databases and boot `nodes` over them with
+    /// `notifier` and `hold`.
+    pub async fn start(
+        substrate: Substrate,
+        nodes: &[&str],
+        notifier: Notifier,
+        hold: Hold,
+    ) -> Self {
+        let (databases, witness) = match substrate {
+            Substrate::Postgres => {
+                let server = Server::start().await;
+                let witness = server.pool("lash_witness").await.expect("open the witness");
+                (
+                    Databases::Postgres(Box::new(server)),
+                    WitnessReader::Postgres(witness),
+                )
+            }
+            Substrate::Sqlite => {
+                let dir = tempfile::Builder::new()
+                    .prefix("lash-sqlite-workers-")
+                    .tempdir()
+                    .expect("a temporary directory");
+                let path = dir.path().join("witness.db");
+                lash_postgres_workers::witness::open_sqlite(&path)
+                    .and_then(|connection| {
+                        connection.execute_batch(lash_postgres_workers::witness::SQLITE_SCHEMA)
+                    })
+                    .expect("provision the witness");
+                (Databases::Sqlite(dir), WitnessReader::Sqlite(path))
+            }
+        };
+        let (stores, settings) = stores(&databases.lash(), notifier)
+            .await
+            .expect("open the lash store");
         let durable = stores.durable_store();
         let backend = Backend::assemble(BackendParts {
             formats: Vec::new(),
-            stores: Arc::new(stores),
-            settings: storage.effective_config().node,
+            stores,
+            settings,
             engines: vec![Arc::new(WorkerEngine)],
             providers: Arc::new(NoProjectionProviders),
         })
         .expect("the operator's backend assembles");
         let mut cluster = Self {
-            server,
+            databases,
             nodes: BTreeMap::new(),
             reports: Arc::default(),
             witness,
@@ -165,11 +284,8 @@ impl Cluster {
         };
         let mut child = tokio::process::Command::new(crate::NODE_BIN)
             .env("LASH_WORKERS_NODE", name)
-            .env("LASH_WORKERS_DATABASE_URL", self.server.url("lash", "lash"))
-            .env(
-                "LASH_WORKERS_WITNESS_URL",
-                self.server.url("lash_witness", "lash_witness_writer"),
-            )
+            .env("LASH_WORKERS_DATABASE_URL", self.databases.lash().url())
+            .env("LASH_WORKERS_WITNESS_URL", self.databases.witness().url())
             .env("LASH_WORKERS_NOTIFIER", notifier)
             .env("LASH_WORKERS_HOLD", self.hold.name())
             .stdin(Stdio::piped())
@@ -256,26 +372,26 @@ impl Cluster {
 
     /// Record a fault or marker in the witness ledger.
     pub async fn nemesis(&self, kind: &str, node: Option<&str>) {
-        sqlx::query("INSERT INTO witness_nemesis (kind, node) VALUES ($1, $2)")
-            .bind(kind)
-            .bind(node)
-            .execute(&self.witness)
-            .await
-            .expect("record the nemesis");
+        self.witness.nemesis(kind, node).await;
     }
 
-    /// The server, to stop and restart it.
+    /// The server, to stop and restart it: a PostgreSQL deployment's alone.
     pub fn server(&mut self) -> &mut Server {
-        &mut self.server
+        match &mut self.databases {
+            Databases::Postgres(server) => server,
+            Databases::Sqlite(_) => panic!("a SQLite deployment has no server"),
+        }
     }
 
     /// Every body entry and return, in the order the ledger took them.
     pub async fn effects(&self) -> Vec<Effect> {
-        let rows: Vec<(String, String, String, String)> =
-            sqlx::query_as("SELECT call_id, tool, node, phase FROM witness_effects ORDER BY id")
-                .fetch_all(&self.witness)
-                .await
-                .expect("read the effects");
+        let rows: Vec<(String, String, String, String)> = self
+            .witness
+            .rows(
+                "SELECT call_id, tool, node, phase FROM witness_effects ORDER BY id",
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .await;
         rows.into_iter()
             .map(|(call_id, tool, node, phase)| Effect {
                 call_id,
@@ -288,12 +404,13 @@ impl Cluster {
 
     /// Every model attempt, in the order the ledger took them.
     pub async fn model_attempts(&self) -> Vec<ModelAttempt> {
-        let rows: Vec<(i32, i32, String)> = sqlx::query_as(
-            "SELECT call_index, attempt, node FROM witness_model_attempts ORDER BY id",
-        )
-        .fetch_all(&self.witness)
-        .await
-        .expect("read the model attempts");
+        let rows: Vec<(i32, i32, String)> = self
+            .witness
+            .rows(
+                "SELECT call_index, attempt, node FROM witness_model_attempts ORDER BY id",
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .await;
         rows.into_iter()
             .map(|(call_index, attempt, node)| ModelAttempt {
                 call_index,
@@ -311,11 +428,9 @@ impl Cluster {
     /// Admit the runbook's turn: what a producer outside the deployment
     /// commits.
     pub async fn admit_turn(&self) {
-        let witness = lash_postgres_workers::witness::Witness::connect(
-            &self.server.url("lash_witness", "lash_witness_writer"),
-            "operator",
-        )
-        .expect("the witness URL parses");
+        let witness =
+            lash_postgres_workers::witness::Witness::connect(&self.databases.witness(), "operator")
+                .expect("the witness URL parses");
         let core = lash_postgres_workers::turn::core(&self.backend, witness, self.hold)
             .expect("the operator's core builds");
         lash_postgres_workers::turn::admit(&core)

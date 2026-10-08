@@ -2,8 +2,9 @@
 
 A scripted failover harness (gate evidence, not a judged runbook; see
 [RULES.md](../RULES.md)). It boots lash nodes as separate OS processes over
-one PostgreSQL store, kills, partitions, stops and restarts them at chosen
-points, and shows for each case that:
+one PostgreSQL store, and again over one SQLite database file, kills,
+partitions, stops and restarts them at chosen points, and shows for each case
+that:
 
 - **the work finishes on another node**: the store holds no unfinished turn
   and exactly one `turn.commit` committed (or the process holds its
@@ -35,10 +36,13 @@ kiln test //crates/lash-postgres-workers:failover__test \
   --test_arg=--exact --test_arg=<case> --test_arg=--nocapture --test_output all
 ```
 
-Each case boots its own PostgreSQL 18 (`native//:postgres`, handed to the
-test as `LASH_WORKERS_POSTGRES`; `LASH_WORKERS_NSS_WRAPPER` lets `initdb`
-run as a user the pool image does not list), so a case can stop and restart
-the server. Nothing else is needed: no Docker, no live services. The cases run
+Each case runs twice. Under its own name it boots its own PostgreSQL 18
+(`native//:postgres`, handed to the test as `LASH_WORKERS_POSTGRES`;
+`LASH_WORKERS_NSS_WRAPPER` lets `initdb` run as a user the pool image does not
+list), so a case can stop and restart the server. As `sqlite_file::<case>` it
+puts the lash database in one SQLite file that both node processes and the
+test open, with the witness ledger in a second file; that leg has no server
+to restart, so the restart case has none. Nothing else is needed: no Docker, no live services. The cases run
 one at a time (`RUST_TEST_THREADS=1`) and the target is `dev-deferred`: two
 cases wait out a 15 s node lease. Each passing case prints one `case=` line
 with what it measured. Outside kiln, point `LASH_WORKERS_POSTGRES` at any
@@ -49,16 +53,17 @@ and `bin/pg_ctl`).
 
 | Part | Where | Real or scripted |
 |---|---|---|
-| Node process | [`src/bin/node.rs`](../../crates/lash-postgres-workers/src/bin/node.rs), [`src/node.rs`](../../crates/lash-postgres-workers/src/node.rs) | real: `lash_core::runtime::durable::node::serve` over `PostgresStoreSet`, the production runner, session activation, process activation, fences, notifier and liveness lock, with the default `DurableSettings` |
+| Node process | [`src/bin/node.rs`](../../crates/lash-postgres-workers/src/bin/node.rs), [`src/node.rs`](../../crates/lash-postgres-workers/src/node.rs) | real: `lash_core::runtime::durable::node::serve` over `PostgresStoreSet` or a file `SqliteStoreSet`, the production runner, session activation, process activation, fences, notifier and liveness lock, with the default `DurableSettings` |
 | Turn | [`src/turn.rs`](../../crates/lash-postgres-workers/src/turn.rs) | real: the lash facade's session and send, the production turn driver, model pins, and a TypeScript cell on the RLM worker path with its durable snapshots; the model is scripted |
 | `ext_write` | [`src/turn.rs`](../../crates/lash-postgres-workers/src/turn.rs) | a `Once` tool called from the cell through the production tool dispatch; its body is the runbook's |
 | Process | [`src/process.rs`](../../crates/lash-postgres-workers/src/process.rs) | a host engine (`advance`) with two `Once` steps and a pinned key with a deadline |
 | Reports | [`src/recorded.rs`](../../crates/lash-postgres-workers/src/recorded.rs), [`src/events.rs`](../../crates/lash-postgres-workers/src/events.rs) | decorators over the durable store and signals that forward every call and print what the store answered; the partition's heartbeat hold is the one fault they inject |
 | Server, nodes, faults | [`tests/support/`](../../crates/lash-postgres-workers/tests/support/) | the test owns the server and the node processes (SIGKILL, stop on stdin, heartbeat hold) |
-| Witness ledger | [`witness.sql`](../../crates/lash-postgres-workers/witness.sql) | a separate database the nodes write through an insert-only role; the laws read it and the store, never the report lines, for effects |
+| Witness ledger | [`witness.sql`](../../crates/lash-postgres-workers/witness.sql), [`src/witness.rs`](../../crates/lash-postgres-workers/src/witness.rs) | a separate database the nodes write through an insert-only role, or on the SQLite leg a separate file whose triggers refuse updates and deletes; the laws read it and the store, never the report lines, for effects |
 
 A node reads its configuration from its environment (`LASH_WORKERS_NODE`,
-`LASH_WORKERS_DATABASE_URL`, `LASH_WORKERS_WITNESS_URL`,
+`LASH_WORKERS_DATABASE_URL` and `LASH_WORKERS_WITNESS_URL`, each a PostgreSQL
+URL or `sqlite:<path>`,
 `LASH_WORKERS_NOTIFIER` = `after-commit` or `poll-only`, `LASH_WORKERS_HOLD`,
 and `LASH_WORKERS_ADMIT_TURN` for runs by hand), its commands from stdin (`stop`, `block-heartbeat`,
 `unblock-heartbeat`; end of input stops it) and writes one JSON report per
@@ -77,6 +82,15 @@ Measured on the pool in FIG-5199's final run (all seven in one invocation on the
 | `a_node_whose_heartbeat_is_held_stops_itself_before_its_lease_lapses` | partition: the node's heartbeats are held while its `ext_write` body is running | the zombie stops `unrenewed`, its activations (the body among them) dropped, within `self_stop_after` + `claim_poll` of its last lease extension (asserted); the survivor reaps it and finishes the turn with the operation `Interrupted`; the zombie commits nothing while partitioned, and the body is never entered again | stopped 10 005 ms after its last lease extension (bound 10 250 ms), reaped through its liveness lock 9 999 ms after the hold (FIG-5178's run); see [findings](#findings), item 1 |
 | `a_cleanly_stopped_node_hands_its_turn_over_at_once` | `stop` while the node holds the first model call | the node releases its actors and stops `requested`; no reap; the survivor claims within a claim poll and finishes | released 2 ms after the request, claimed 7 ms after the release (up to 156 ms in earlier runs: the survivor's next claim poll) |
 | `a_postgres_restart_strands_no_work_and_reaps_no_node` | fast shutdown of the server for about 3 s while a model call is in flight | no node reaped, no node stopped; the turn finishes with `ext_write` run once and `Completed` | outage 3 141 ms; the turn finished on the node that held it, 2 862 ms after the server was back. In an earlier run the held call was re-sent once by the same owner (attempt 2) after its commit failed during the outage: a pinned model call may be re-sent, only `Once` bodies may not |
+
+The SQLite leg (`sqlite_file::<case>`, FIG-5422; all six in one invocation,
+34.6 s) measured: kill-mid-turn detected 163 ms after the kill and claimed
+0 ms after the reap; without the lock, detected 15 913 ms after the kill and
+claimed 168 ms after the reap; kill-mid-step detected 252 ms after the kill,
+outcome `Interrupted` under epoch 3; kill-mid-wait ended 4 073 ms after the
+kill; the partitioned zombie stopped 10 000 ms after its last lease extension
+and was reaped through its lock 9 902 ms after the hold; the clean handover
+released 2 ms after the request and claimed 64 ms after the release.
 
 A killed node cannot commit: in the kill cases the zombie law holds because
 the process is gone, and the store shows the outcome under the survivor's

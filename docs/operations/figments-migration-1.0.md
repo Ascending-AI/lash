@@ -141,7 +141,8 @@ None to change. Figments uses no lash SQLite store: its cutover guard,
 `scripts/ci/lash-runtime-cutover-guard.sh:33`, refuses `lash-sqlite-store` and
 `rusqlite` in the workspace. Local and test runs that want lash without
 PostgreSQL use one file through `SqliteStoreSet::open`, or
-`SqliteStoreSet::memory()`, with one process per file
+`SqliteStoreSet::memory()`; several processes on one machine may serve one
+file, each as a node of its own
 ([guide §3](durable-hosting.md#3-sqlite-is-one-file)).
 
 ## PostgreSQL topology assumptions

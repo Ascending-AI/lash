@@ -38,7 +38,8 @@ A host runs **lash nodes**. A node is one host process that serves lash's
 runner over a store set:
 
 - **PostgreSQL:** any number of nodes over one database;
-- **SQLite:** exactly one node over one database file ([§3](#3-sqlite-is-one-file)).
+- **SQLite:** any number of nodes over one database file, each in a process of
+  its own on one machine ([§3](#3-sqlite-is-one-file)).
 
 Work enters through the facade (`LashSession::send`, process starts,
 signals, trigger occurrences, `Completions::resolve`). Each write commits a
@@ -140,10 +141,13 @@ commit for them, even while it still runs: its write fails `OwnershipLost`,
 rolls back, and the node drops the actor. Lease expiry is never checked at
 commit time.
 
-On PostgreSQL with the `AfterCommit` notifier ([§2](#2-postgresql-topology)), a
-crashed node is also detected through its listener session: the other nodes
-reap it within about one claim poll instead of waiting out the lease. The
-failover runbook measured 257 ms with the lock and 15 963 ms without it
+With the `AfterCommit` notifier, a crashed node is also detected through its
+listener's liveness lock: a session advisory lock on PostgreSQL
+([§2](#2-postgresql-topology)), a file lock beside the database on SQLite
+([§3](#3-sqlite-is-one-file)). The other nodes reap it within about one claim
+poll instead of waiting out the lease. The failover runbook measured 257 ms
+with the lock and 15 963 ms without it on PostgreSQL, and 163 ms and 15 913 ms
+on SQLite
 ([failover bound](../../runbooks/lash-postgres-workers/README.md#failover-bound-l8-fig-5178)).
 
 ### Clean shutdown
@@ -290,14 +294,46 @@ transaction commits rows of every family
 
 - Open it with `lash::sqlite::SqliteStoreSet::open(path)`. Tests use
   `SqliteStoreSet::memory()`.
-- **One process per file.** Exactly one node serves it. SQLite has no
-  notification channel or liveness lock, so wakes stay in process.
-- **No shared multi-node SQLite.** Two processes over one file, or a file on a
-  network share, are not a supported deployment. Use PostgreSQL for more than
-  one node.
+- **Several processes on one machine.** Any number of lash processes on one
+  machine may open one file, each serving a node of its own, through the node
+  interface PostgreSQL uses: leases, epoch fencing, takeover, wake hints
+  between nodes, and crash detection by liveness lock. Every write takes
+  SQLite's write lock (`BEGIN IMMEDIATE`), so writers in every process
+  serialize and any node may claim any work. A writer that finds the lock
+  taken waits up to the connection's busy timeout (15 s by default).
+- **One owner per process.** Each process runs its own node boot under an
+  owner of its own (`LeaseOwnerIdentity::owner_id`, [§1](#node-identity)). A
+  second boot of an owner that is still registered fences the first by
+  design: the first boot's commits fail `OwnershipLost` and it stops. Two
+  processes that share an owner keep stopping each other. lash-cli uses one
+  owner per home directory, so two lash-cli processes over one home fence each
+  other; that is lash-cli's to fix.
+- **Wakes and liveness.** With `Notifier::AfterCommit`, a node publishes
+  what its commits woke as rows in the file, after those commits. Each node's
+  listener polls the file's data version every 25 ms on a thread of its own,
+  and reads the rows addressed to it when the version moves. A wake between
+  processes costs about one poll: about 25 ms at the median and about 100 ms
+  at worst over twenty measured mails. A wake between two nodes of one process
+  waits for no poll. An idle listener costs about 0.3% of one core. The
+  listener also holds its boot's liveness lock, an `flock` on a file in
+  `<database>-liveness/`. The kernel drops it when the process dies, however
+  it dies, so the other nodes reap a killed node within about one claim poll:
+  70 ms to 210 ms after `SIGKILL` in the measured runs. Wakes and liveness
+  only cut latency: a lost wake costs a poll, and the epoch is the only
+  fence.
+- **Local disk only.** The database, its `-wal` and `-shm` files and its
+  `-liveness` directory must be on a local filesystem. A network filesystem
+  breaks SQLite's locking and `flock`, and is not supported. Use PostgreSQL
+  for nodes on more than one machine.
+- **Scale.** One writer commits at a time, for every process on the file, so
+  SQLite scales less far than PostgreSQL.
 - A path that is a directory in the retired three-file layout is refused
   `retired_sqlite_layout`. Formats reset at 1.0; nothing migrates it.
-- Durable instants come from the injected clock.
+- Durable instants come from the injected clock: in production the machine's
+  clock, which every process on the file shares.
+- A memory store set lives in one process and has no node wakes. Its nodes
+  find each other's work through the claim poll and the mail scan, and a
+  dead node is reaped when its lease lapses.
 
 ## 4. Host process engines
 
@@ -684,7 +720,7 @@ rule.
 | `group_commit` | 64 members, 5 ms | Finished round members commit in batches (`GroupCommit { max_members, window }`). The window must be shorter than `lease.claim_poll`. |
 | `snapshot_every_fuel` | 1 000 000 | VM fuel spent without an effect after which a quiet point snapshots anyway. |
 | `cascade_batch` | 256 | How many `Until` children one cascade transaction marks. |
-| `notifier` | `AfterCommit` | `AfterCommit` publishes wake hints and holds the liveness lock on PostgreSQL; `PollOnly` relies on the claim poll alone. |
+| `notifier` | `AfterCommit` | `AfterCommit` publishes wake hints and holds the liveness lock, on PostgreSQL and on a SQLite file; `PollOnly` relies on the claim poll alone. |
 
 Counts must be at least 1 (`Zero`), durations at least 1 ms
 (`BelowResolution`), plus `ClaimBeyondCapacity`, `GroupWindowNotBeforePoll`

@@ -8,6 +8,11 @@
 //! that writes a process-registry row, a trigger row and a session row
 //! commits all of them or none. Every component is opened once and handed
 //! out as a shared handle.
+//!
+//! Several processes on one machine may open one database file, each serving
+//! its own node (FIG-5422): writers serialize on SQLite's write lock, and a
+//! file store set's node wakes carry wake hints and liveness between the
+//! processes. A memory store set lives in one process and has none.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -92,6 +97,8 @@ struct StoreParts {
     process_env_store: Arc<SqliteStore>,
     attachment_store: Arc<SqliteAttachmentStore>,
     recovery_leader: Arc<crate::recovery_leader::SqliteRecoveryLeader>,
+    /// A file store set's node wakes; a memory store set has none.
+    node_wakes: Option<Arc<crate::durable::SqliteNodeWakes>>,
 }
 
 fn system_clock() -> Arc<dyn Clock> {
@@ -234,6 +241,17 @@ impl SqliteStoreSet {
         let recovery_leader = Arc::new(crate::recovery_leader::SqliteRecoveryLeader::new(
             process_env_store.conn.clone(),
         ));
+        let node_wakes = match &location {
+            SqliteLocation::File { path } => {
+                let store = crate::SqliteDurableStore::new(
+                    process_env_store.conn.clone(),
+                    Arc::clone(&clock),
+                    process_env_store.options.blob_profile,
+                );
+                Some(Arc::new(crate::durable::SqliteNodeWakes::new(store, path)))
+            }
+            SqliteLocation::Memory { .. } => None,
+        };
         Ok(Self {
             inner: Arc::new(StoreParts {
                 binding: lash_core_execution::StoreBindingId::new(Arc::clone(&identity)),
@@ -247,6 +265,7 @@ impl SqliteStoreSet {
                 process_env_store,
                 attachment_store,
                 recovery_leader,
+                node_wakes,
             }),
         })
     }
@@ -315,6 +334,14 @@ impl SqliteStoreSet {
     pub async fn open_store(&self) -> tokio_rusqlite::Result<Arc<SqliteStore>> {
         Ok(Arc::clone(&self.inner.process_env_store))
     }
+
+    /// A file store set's node wakes, as their own type.
+    #[cfg(test)]
+    pub(crate) fn sqlite_node_wakes_for_testing(
+        &self,
+    ) -> Option<Arc<crate::durable::SqliteNodeWakes>> {
+        self.inner.node_wakes.clone()
+    }
 }
 
 impl lash_core_execution::StoreSet for SqliteStoreSet {
@@ -322,8 +349,13 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
         Arc::new(SqliteStoreSet::durable_store(self))
     }
 
+    /// A file store set's node wakes, which several processes on the file
+    /// share; `None` for a memory store set, which lives in one process.
     fn node_wakes(&self) -> Option<Arc<dyn lash_durable::NodeWakes>> {
-        None
+        self.inner
+            .node_wakes
+            .clone()
+            .map(|node_wakes| node_wakes as Arc<dyn lash_durable::NodeWakes>)
     }
 
     fn binding_identity(&self) -> &lash_core_execution::StoreBindingId {

@@ -106,9 +106,4 @@ pub trait RecoveryLeaderStore: Send + Sync {
         holder: &HolderId,
         term: i64,
     ) -> Result<bool, StoreError>;
-
-    /// Whether due-obligation claims are leader-only on this storage: true
-    /// where the database has one writer (SQLite), false where claims skip
-    /// each other's locked rows (PostgreSQL).
-    fn due_claims_need_leader(&self) -> bool;
 }

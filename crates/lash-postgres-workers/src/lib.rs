@@ -1,10 +1,11 @@
 //! The harness of the lash-postgres-workers runbook (FIG-5199,
-//! `runbooks/lash-postgres-workers`): lash nodes over one PostgreSQL store,
-//! killed, partitioned, stopped and restarted at chosen points, under a
-//! witness ledger the nodes cannot rewrite.
+//! `runbooks/lash-postgres-workers`): lash nodes over one PostgreSQL store or
+//! one SQLite database file (FIG-5422), killed, partitioned, stopped and
+//! restarted at chosen points, under a witness ledger the nodes cannot
+//! rewrite.
 //!
 //! A node ([`node::run`]) is one OS process serving the production runtime
-//! (`lash_core::runtime::durable::node::serve`) over PostgreSQL. It runs one
+//! (`lash_core::runtime::durable::node::serve`) over its store. It runs one
 //! workload of each kind the cases need:
 //!
 //! - **a turn** ([`turn`]): through the lash facade, a scripted model

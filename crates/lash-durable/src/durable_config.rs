@@ -14,17 +14,16 @@ pub enum Notifier {
     /// Only the claim poll and the per-node mail scan: correct on every
     /// store, at the poll's latency.
     PollOnly,
-    /// After each commit that woke an actor, the store's notification
-    /// channel hints the owner's node. A latency hint only; correctness
-    /// never depends on it. On a store with a notification channel
-    /// (PostgreSQL) the listener's session also holds the node's liveness
-    /// lock, so a crashed node is reaped as soon as its session ends rather
-    /// than when its lease lapses. A store without one (SQLite, one node)
-    /// hints in process only.
+    /// After each commit that woke an actor, the store's node wakes hint the
+    /// owner's node. A latency hint only; correctness never depends on it.
+    /// The listener also holds the node's liveness lock, so a crashed node
+    /// is reaped as soon as its listener ends rather than when its lease
+    /// lapses. A store without node wakes (a SQLite memory database) hints
+    /// in process only.
     ///
-    /// `LISTEN` and the session lock need a session of their own: connect
-    /// the store directly or through a session-mode pooler, never a
-    /// transaction-mode one.
+    /// On PostgreSQL, `LISTEN` and the session lock need a session of their
+    /// own: connect the store directly or through a session-mode pooler,
+    /// never a transaction-mode one.
     AfterCommit,
 }
 

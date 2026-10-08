@@ -281,22 +281,7 @@ async fn lease_transcript(stores: &dyn StoreSet, prefix: &str) -> Transcript {
         &lease.renew(&one, 1).await.expect("renew"),
         &holders,
     ));
-    out.push(format!(
-        "due claims need a leader -> {}",
-        lease.due_claims_need_leader()
-    ));
     out
-}
-
-/// The one line where the backends are meant to differ: SQLite has one
-/// writer, so its due claims are leader-only; PostgreSQL claims skip each
-/// other's locked rows, so every deployment claims.
-fn without_claim_policy(transcript: &Transcript) -> Transcript {
-    transcript
-        .iter()
-        .filter(|line| !line.starts_with("due claims need a leader"))
-        .cloned()
-        .collect()
 }
 
 #[expect(
@@ -341,20 +326,8 @@ pub(super) async fn compare_obligation_ledgers(
             "obligation ledger answers differ between {left} and {right}"
         );
         assert_eq!(
-            without_claim_policy(left_lease),
-            without_claim_policy(right_lease),
+            left_lease, right_lease,
             "recovery leader answers differ between {left} and {right}"
-        );
-    }
-    for (name, _, lease) in &observations {
-        assert_eq!(
-            lease.last().map(String::as_str),
-            Some(if *name == "postgres" {
-                "due claims need a leader -> false"
-            } else {
-                "due claims need a leader -> true"
-            }),
-            "{name} declares the wrong due-claim policy"
         );
     }
     eprintln!(

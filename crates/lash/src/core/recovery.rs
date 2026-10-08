@@ -4,18 +4,19 @@
 //! One slot per core. The election runs on a background task of its own,
 //! which keeps the lease's cadence and resigns when the slot is dropped or the
 //! core shuts down. The cleanup pass runs on another: every
-//! [`RECOVERY_TICK`] it claims a bounded page of due `ArtifactCleanup` rows
-//! when this deployment's duties include due claims, so a cleanup whose
-//! producer died before its immediate attempt is still delivered.
+//! [`RECOVERY_TICK`] it claims a bounded page of due `ArtifactCleanup` rows,
+//! on every deployment of every store (ADR 0109 §1.7), so a cleanup whose
+//! producer died before its immediate attempt is still delivered. Claim
+//! tokens fence each claim, so two deployments never deliver one row twice.
 
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use lash_core::engine::RecoveryLeaseConfig;
-use lash_core::runtime::obligations::relay::{ObligationRelay, RelayPass, relay_due};
+use lash_core::runtime::obligations::relay::{ObligationRelay, relay_due};
 use lash_core::runtime::obligations::{RECOVERY_TICK, RecoveryInterval};
 use lash_core::runtime::recovery_lease::RecoveryLease;
-use lash_core::store::{LeaseName, RecoveryLeaderStore, StoreError};
+use lash_core::store::{LeaseName, RecoveryLeaderStore};
 
 use crate::support::RuntimeEnvironment;
 
@@ -29,8 +30,6 @@ pub(crate) struct RecoverySlot {
     lease: Arc<RecoveryLease>,
     /// Set once the election task is started: exactly one per slot.
     started: std::sync::atomic::AtomicBool,
-    /// `true` once the election's first attempt answered.
-    first: Arc<tokio::sync::watch::Sender<bool>>,
     shutdown: tokio_util::sync::CancellationToken,
     clock: Arc<dyn lash_core::Clock>,
 }
@@ -68,7 +67,6 @@ impl RecoverySlot {
                 observer,
             )),
             started: std::sync::atomic::AtomicBool::new(false),
-            first: Arc::new(tokio::sync::watch::channel(false).0),
             shutdown: tokio_util::sync::CancellationToken::new(),
             clock,
         }
@@ -85,45 +83,31 @@ impl RecoverySlot {
             return;
         }
         let lease = Arc::clone(&self.lease);
-        let first = Arc::clone(&self.first);
         let shutdown = self.shutdown.clone();
         runtime.spawn(async move {
             let standing = lease.step().await;
-            first.send_replace(true);
             keep_cadence(lease, standing, shutdown).await;
         });
     }
 
     /// Run `relay`'s due pass every [`RECOVERY_TICK`] on a task of its own
-    /// until the slot is dropped or the core shuts down. The first pass waits
-    /// for the election's first answer, so an uncontested deployment claims
-    /// at once. Without a runtime to run it on, nothing starts: such a core
-    /// has no background work.
+    /// until the slot is dropped or the core shuts down. Without a runtime to
+    /// run it on, nothing starts: such a core has no background work.
     pub(crate) fn start_cleanup(&self, relay: Arc<dyn ObligationRelay>) {
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             return;
         };
         self.spawn_election(&runtime);
-        let lease = Arc::clone(&self.lease);
         let clock = Arc::clone(&self.clock);
         let shutdown = self.shutdown.clone();
-        let mut answered = self.first.subscribe();
         runtime.spawn(async move {
-            tokio::select! {
-                () = shutdown.cancelled() => return,
-                // The sender lives in the slot, so the wait ends on the
-                // answer or with the slot.
-                _ = answered.wait_for(|answered| *answered) => {}
-            }
             let mut interval = RecoveryInterval::new(Arc::clone(&clock), RECOVERY_TICK);
             loop {
                 tokio::select! {
                     () = shutdown.cancelled() => break,
                     _ = interval.tick() => {}
                 }
-                if let Err(error) =
-                    cleanup_pass(&lease, relay.as_ref(), clock.as_ref(), CLEANUP_PAGE).await
-                {
+                if let Err(error) = relay_due(relay.as_ref(), clock.as_ref(), CLEANUP_PAGE).await {
                     tracing::warn!(%error, "artifact cleanup pass failed; the next tick retries it");
                 }
             }
@@ -137,22 +121,6 @@ impl RecoverySlot {
             self.lease.resign().await;
         }
     }
-}
-
-/// One cleanup pass: claim and deliver at most `page` due cleanups when
-/// `lease`'s duties at `clock`'s now include due claims (ADR 0109 §1.7: the
-/// leader alone where claims do not skip each other, every deployment where
-/// they do). `None` when this deployment may not claim.
-pub(crate) async fn cleanup_pass(
-    lease: &RecoveryLease,
-    relay: &dyn ObligationRelay,
-    clock: &dyn lash_core::Clock,
-    page: NonZeroUsize,
-) -> Result<Option<RelayPass>, StoreError> {
-    if !lease.duties(clock.timestamp_ms()).due_claims {
-        return Ok(None);
-    }
-    relay_due(relay, clock, page).await.map(Some)
 }
 
 /// Step `lease` on its own cadence from the first attempt's `standing`
@@ -285,10 +253,6 @@ mod tests {
             }
             Ok(held)
         }
-
-        fn due_claims_need_leader(&self) -> bool {
-            true
-        }
     }
 
     /// FIG-3873 S5: a slot that goes while the store is granting its
@@ -358,147 +322,5 @@ mod tests {
         .await
         .expect("the core's cleanup pass delivers the armed cleanup");
         core.shutdown().await.expect("shut the core down");
-    }
-
-    /// A delivery the law counts, over the real artifact-cleanup relay.
-    struct Counted {
-        relay: lash_core::runtime::artifact_cleanup::ArtifactCleanupRelay,
-        delivered: std::sync::atomic::AtomicUsize,
-    }
-
-    #[async_trait::async_trait]
-    impl ObligationRelay for Counted {
-        fn ledger(&self) -> &dyn lash_core::store::ObligationLedger {
-            self.relay.ledger()
-        }
-
-        fn policy(&self) -> lash_core::runtime::obligations::relay::RelayPolicy {
-            self.relay.policy()
-        }
-
-        async fn deliver(
-            &self,
-            delivery: lash_core::runtime::obligations::relay::ObligationDelivery<'_>,
-        ) -> Result<(), lash_core::runtime::obligations::relay::DeliveryFailure> {
-            self.delivered
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            self.relay.deliver(delivery).await
-        }
-    }
-
-    /// ADR 0132 §12: an armed artifact cleanup whose producer died before its
-    /// immediate attempt is delivered by the due pass, and exactly one leader
-    /// runs it. Of two deployments over one SQLite store (whose claims need
-    /// the leader), the follower claims nothing; once the leader crashes
-    /// without resigning, the follower takes the lease at its TTL and
-    /// delivers the cleanup once.
-    #[tokio::test]
-    async fn an_armed_cleanup_is_delivered_after_a_crash_by_one_leader() {
-        use lash_core::StoreSet as _;
-
-        let stores = Arc::new(
-            lash_sqlite_store::SqliteStoreSet::memory()
-                .await
-                .expect("memory store set"),
-        );
-        let backend = lash_core::Backend::for_testing(stores.clone());
-        let clock: Arc<dyn lash_core::Clock> = Arc::new(lash_core::facade_support::SystemClock);
-        let referrer = lash_core::ArtifactReferrer::HostPin(lash_core::HostArtifactPin::mint());
-        // The producer armed its cleanup and died before its own attempt.
-        let id = backend
-            .artifact_cleanup()
-            .arm_cleanup(
-                &lash_core::ArtifactCleanup::ended(referrer, Vec::new(), None),
-                clock.timestamp_ms(),
-            )
-            .await
-            .expect("arm the cleanup");
-        let timings = RecoveryLeaseTimings {
-            ttl: Duration::from_millis(400),
-            trust_margin: Duration::from_millis(100),
-            min_tenure: Duration::ZERO,
-            ..RecoveryLeaseTimings::default()
-        };
-        let deployment = || {
-            (
-                RecoveryLease::new(
-                    stores.recovery_leader(),
-                    LeaseName::new("recovery:cleanup-law"),
-                    0,
-                    timings,
-                    Arc::clone(&clock),
-                    lash_core::operational_metrics::StoreObserver::default(),
-                ),
-                Counted {
-                    relay: lash_core::runtime::artifact_cleanup::ArtifactCleanupRelay::over_backend(
-                        &backend,
-                        lash_core::ProcessEngineRegistry::new(),
-                    ),
-                    delivered: std::sync::atomic::AtomicUsize::new(0),
-                },
-            )
-        };
-        let (leader, leader_relay) = deployment();
-        let (follower, follower_relay) = deployment();
-        assert!(matches!(
-            leader.step().await,
-            lash_core::runtime::recovery_lease::Standing::Leader { .. }
-        ));
-        assert_eq!(
-            follower.step().await,
-            lash_core::runtime::recovery_lease::Standing::Follower
-        );
-        let ledger = backend.obligation_ledger(lash_core::store::ObligationKind::ArtifactCleanup);
-
-        assert_eq!(
-            cleanup_pass(&follower, &follower_relay, clock.as_ref(), CLEANUP_PAGE)
-                .await
-                .expect("the follower's pass"),
-            None,
-            "a follower claims nothing where claims need the leader"
-        );
-        assert_eq!(
-            ledger.state(&id).await.expect("state"),
-            Some(lash_core::store::ObligationState::Due)
-        );
-
-        // The leader crashes: it never resigns, so its row stands until its
-        // TTL lapses and the follower's next attempt takes the lease.
-        drop(leader);
-        tokio::time::sleep(timings.ttl + Duration::from_millis(100)).await;
-        assert!(matches!(
-            follower.step().await,
-            lash_core::runtime::recovery_lease::Standing::Leader { .. }
-        ));
-        let pass = cleanup_pass(&follower, &follower_relay, clock.as_ref(), CLEANUP_PAGE)
-            .await
-            .expect("the new leader's pass")
-            .expect("the leader claims");
-        assert_eq!((pass.claimed, pass.delivered), (1, 1), "{pass:?}");
-        assert_eq!(
-            ledger.state(&id).await.expect("state"),
-            None,
-            "a delivered cleanup's row is deleted"
-        );
-        let again = cleanup_pass(&follower, &follower_relay, clock.as_ref(), CLEANUP_PAGE)
-            .await
-            .expect("a later pass")
-            .expect("the leader claims");
-        assert_eq!(
-            again.claimed, 0,
-            "a delivered cleanup is never claimed again"
-        );
-        assert_eq!(
-            (
-                leader_relay
-                    .delivered
-                    .load(std::sync::atomic::Ordering::SeqCst),
-                follower_relay
-                    .delivered
-                    .load(std::sync::atomic::Ordering::SeqCst),
-            ),
-            (0, 1),
-            "exactly one leader delivered the cleanup, once"
-        );
     }
 }

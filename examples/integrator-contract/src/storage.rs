@@ -622,9 +622,6 @@ impl RecoveryLeaderStore for Integrator {
     ) -> Result<bool, StoreError> {
         unreachable!("external signature witness")
     }
-    fn due_claims_need_leader(&self) -> bool {
-        unreachable!("external signature witness")
-    }
 }
 
 #[lash::async_trait]

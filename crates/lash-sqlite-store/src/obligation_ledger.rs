@@ -2,9 +2,10 @@
 //! each table's shared obligation statements.
 //!
 //! Every ledger's table lives in the deployment's one database, and each
-//! ledger holds a connection to it. SQLite has one writer, so
-//! a due claim is one `BEGIN IMMEDIATE` transaction that reads the due page
-//! and claims each row with its compare-and-set; the recovery leader runs it
+//! ledger holds a connection to it. A due claim is one `BEGIN IMMEDIATE`
+//! transaction that reads the due page and claims each row with its
+//! compare-and-set: SQLite's write lock serializes it against every other
+//! claim, in this process or another on the file, so any node may run it
 //! (ADR 0109 §1.7).
 
 use std::num::NonZeroUsize;

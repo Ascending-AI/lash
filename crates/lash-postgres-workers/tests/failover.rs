@@ -2,8 +2,10 @@
 //! §13): lash nodes over one PostgreSQL store lose a node at a chosen point,
 //! and the work finishes on another node.
 //!
-//! Every case boots its own server and two node processes, `a` and `b`, and
-//! judges three things from evidence the nodes cannot rewrite:
+//! Every case runs twice: over a PostgreSQL server of its own, and as
+//! `sqlite_file::<case>` over one SQLite database file that both node
+//! processes open (FIG-5422). Each boots two node processes, `a` and `b`,
+//! and judges three things from evidence the nodes cannot rewrite:
 //!
 //! - **the work finishes on another node**: the store holds no unfinished
 //!   turn and exactly one `turn.commit` committed, or the process holds its
@@ -34,7 +36,7 @@ use lash_postgres_workers::turn::{self, TOOL};
 use lash_postgres_workers::witness::Hold;
 use serde_json::Value;
 
-use support::cluster::{Cluster, Entry, until};
+use support::cluster::{Cluster, Entry, Substrate, until};
 
 /// The node binary the cases boot.
 const NODE_BIN: &str = env!("CARGO_BIN_EXE_lash-postgres-workers-node");
@@ -208,8 +210,8 @@ fn claim_epoch(cluster: &Cluster, node: &str) -> i64 {
 
 /// A turn whose node is killed mid-model-call finishes on the other node,
 /// which re-sends the pinned call; returns (detect, resume) as measured.
-async fn kill_mid_turn(notifier: Notifier, by: &str) -> (Duration, Duration) {
-    let mut cluster = Cluster::start(&NODES, notifier, Hold::Model).await;
+async fn kill_mid_turn(substrate: Substrate, notifier: Notifier, by: &str) -> (Duration, Duration) {
+    let mut cluster = Cluster::start(substrate, &NODES, notifier, Hold::Model).await;
     cluster.admit_turn().await;
     let held = cluster
         .wait(STEP, "the first model attempt", |entry| {
@@ -281,9 +283,8 @@ async fn kill_mid_turn(notifier: Notifier, by: &str) -> (Duration, Duration) {
 /// Kill -9 mid-turn, with the liveness lock: the crash is detected within
 /// about the lock's probe and the work resumes within a claim poll of the
 /// reap (L8's failover bound).
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_turn_killed_mid_model_call_finishes_on_another_node() {
-    let (detect, resume) = kill_mid_turn(Notifier::AfterCommit, "lock").await;
+async fn a_turn_killed_mid_model_call_finishes_on_another_node_on(substrate: Substrate) {
+    let (detect, resume) = kill_mid_turn(substrate, Notifier::AfterCommit, "lock").await;
     let lease = lease();
     assert!(
         detect <= lease.claim_poll + SLACK,
@@ -300,9 +301,10 @@ async fn a_turn_killed_mid_model_call_finishes_on_another_node() {
 /// Kill -9 mid-turn, without the liveness lock: the crash is found by the
 /// lease, within `ttl` + `reap_every`, and the work resumes within a claim
 /// poll of the reap.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_turn_killed_mid_model_call_without_the_liveness_lock_finishes_within_the_lease_bound() {
-    let (detect, resume) = kill_mid_turn(Notifier::PollOnly, "lease").await;
+async fn a_turn_killed_mid_model_call_without_the_liveness_lock_finishes_within_the_lease_bound_on(
+    substrate: Substrate,
+) {
+    let (detect, resume) = kill_mid_turn(substrate, Notifier::PollOnly, "lease").await;
     let lease = lease();
     let bound = lease.ttl + lease.reap_every + SLACK;
     assert!(
@@ -319,9 +321,8 @@ async fn a_turn_killed_mid_model_call_without_the_liveness_lock_finishes_within_
 /// Kill -9 mid-step: the node dies inside `ext.write`'s body, after its
 /// external work began. The other node records the started `Once` as
 /// `Interrupted` and never enters the body; the turn finishes there.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_once_step_killed_mid_body_settles_interrupted_on_another_node() {
-    let mut cluster = Cluster::start(&NODES, Notifier::AfterCommit, Hold::Step).await;
+async fn a_once_step_killed_mid_body_settles_interrupted_on_another_node_on(substrate: Substrate) {
+    let mut cluster = Cluster::start(substrate, &NODES, Notifier::AfterCommit, Hold::Step).await;
     cluster.admit_turn().await;
     let entered = cluster
         .wait(STEP, "ext.write is entered", |entry| {
@@ -375,11 +376,12 @@ async fn a_once_step_killed_mid_body_settles_interrupted_on_another_node() {
 /// the node that took it there dies. The other node fires the deadline,
 /// runs the step after it and ends the process; its start key, its event
 /// feed and its engine state all survive the move.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_feed_and_state() {
+async fn a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_feed_and_state_on(
+    substrate: Substrate,
+) {
     const START_KEY: &str = "workers-process";
     let wait = Duration::from_secs(4);
-    let mut cluster = Cluster::start(&NODES, Notifier::AfterCommit, Hold::Nothing).await;
+    let mut cluster = Cluster::start(substrate, &NODES, Notifier::AfterCommit, Hold::Nothing).await;
     let record = cluster.register_process(START_KEY, wait).await;
     let process = record.id.clone();
     let actor = ActorKey::process(process.as_str()).expect("a process actor key");
@@ -494,9 +496,16 @@ fn find<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
 /// `self_stop_after` and one poll of its last renewal, before its lease
 /// lapses; the other node reaps it and finishes the turn with the operation
 /// `Interrupted`, and the body is never entered again (FIG-5178).
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_node_whose_heartbeat_is_held_stops_itself_before_its_lease_lapses() {
-    let mut cluster = Cluster::start(&NODES, Notifier::AfterCommit, Hold::StepUntilRelease).await;
+async fn a_node_whose_heartbeat_is_held_stops_itself_before_its_lease_lapses_on(
+    substrate: Substrate,
+) {
+    let mut cluster = Cluster::start(
+        substrate,
+        &NODES,
+        Notifier::AfterCommit,
+        Hold::StepUntilRelease,
+    )
+    .await;
     cluster.admit_turn().await;
     let entered = cluster
         .wait(STEP, "ext.write is entered", |entry| {
@@ -602,9 +611,8 @@ async fn a_node_whose_heartbeat_is_held_stops_itself_before_its_lease_lapses() {
 
 /// Clean shutdown: a node told to stop releases its actors, and the other
 /// node takes the turn over within a claim poll, with no reap.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_cleanly_stopped_node_hands_its_turn_over_at_once() {
-    let mut cluster = Cluster::start(&NODES, Notifier::AfterCommit, Hold::Model).await;
+async fn a_cleanly_stopped_node_hands_its_turn_over_at_once_on(substrate: Substrate) {
+    let mut cluster = Cluster::start(substrate, &NODES, Notifier::AfterCommit, Hold::Model).await;
     cluster.admit_turn().await;
     let held = cluster
         .wait(STEP, "the first model attempt", |entry| {
@@ -676,7 +684,13 @@ async fn a_cleanly_stopped_node_hands_its_turn_over_at_once() {
 /// finishes with its `Once` operation run once.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_postgres_restart_strands_no_work_and_reaps_no_node() {
-    let mut cluster = Cluster::start(&NODES, Notifier::AfterCommit, Hold::ModelUntilRelease).await;
+    let mut cluster = Cluster::start(
+        Substrate::Postgres,
+        &NODES,
+        Notifier::AfterCommit,
+        Hold::ModelUntilRelease,
+    )
+    .await;
     cluster.admit_turn().await;
     let held = cluster
         .wait(STEP, "the first model attempt", |entry| {
@@ -726,4 +740,39 @@ async fn a_postgres_restart_strands_no_work_and_reaps_no_node() {
             .map(|attempt| (attempt.call_index, attempt.attempt, attempt.node.clone()))
             .collect::<Vec<_>>(),
     );
+}
+
+/// One test per case on `$substrate`, named after the case.
+macro_rules! legs {
+    ($substrate:expr; $($case:ident => $body:ident),* $(,)?) => {$(
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $case() {
+            $body($substrate).await;
+        }
+    )*};
+}
+
+/// Every case but the server restart, on `$substrate`.
+macro_rules! cases {
+    ($substrate:expr) => {
+        legs!(
+            $substrate;
+            a_turn_killed_mid_model_call_finishes_on_another_node => a_turn_killed_mid_model_call_finishes_on_another_node_on,
+            a_turn_killed_mid_model_call_without_the_liveness_lock_finishes_within_the_lease_bound => a_turn_killed_mid_model_call_without_the_liveness_lock_finishes_within_the_lease_bound_on,
+            a_once_step_killed_mid_body_settles_interrupted_on_another_node => a_once_step_killed_mid_body_settles_interrupted_on_another_node_on,
+            a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_feed_and_state => a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_feed_and_state_on,
+            a_node_whose_heartbeat_is_held_stops_itself_before_its_lease_lapses => a_node_whose_heartbeat_is_held_stops_itself_before_its_lease_lapses_on,
+            a_cleanly_stopped_node_hands_its_turn_over_at_once => a_cleanly_stopped_node_hands_its_turn_over_at_once_on,
+        );
+    };
+}
+
+cases!(Substrate::Postgres);
+
+/// The cases with both node processes over one SQLite database file
+/// (FIG-5422): a SQLite deployment has no server to restart.
+mod sqlite_file {
+    use super::*;
+
+    cases!(Substrate::Sqlite);
 }

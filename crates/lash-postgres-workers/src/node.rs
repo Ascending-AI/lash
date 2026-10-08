@@ -1,12 +1,13 @@
-//! One lash node: the production runtime over PostgreSQL, in its own OS
-//! process.
+//! One lash node: the production runtime over PostgreSQL or a SQLite
+//! database file, in its own OS process.
 //!
-//! The node connects to the lash database, assembles the durable backend
-//! with the runbook's engine, and serves sessions and
-//! processes through `lash_core::runtime::durable::node::serve` until it is
-//! told to stop on stdin, stdin ends, or it loses its lease. It reports on
-//! stdout ([`crate::events`]).
+//! The node opens the lash database, assembles the durable backend with the
+//! runbook's engine, and serves sessions and processes through
+//! `lash_core::runtime::durable::node::serve` until it is told to stop on
+//! stdin, stdin ends, or it loses its lease. It reports on stdout
+//! ([`crate::events`]).
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use lash_core::runtime::durable::node::{NodeServe, serve};
@@ -25,15 +26,45 @@ use crate::process::{WorkerEngine, WorkerSteps};
 use crate::recorded::{RecordedStore, RecordedStores};
 use crate::witness::{Hold, Witness};
 
+/// A database a node opens: the lash store or the witness ledger.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Database {
+    /// A PostgreSQL database at this URL.
+    Postgres(String),
+    /// A SQLite database file, which every node process opens.
+    Sqlite(PathBuf),
+}
+
+impl Database {
+    /// The database `url` names: `sqlite:<path>`, or a PostgreSQL URL.
+    #[must_use]
+    pub fn parse(url: &str) -> Self {
+        match url.strip_prefix("sqlite:") {
+            Some(path) => Self::Sqlite(PathBuf::from(path)),
+            None => Self::Postgres(url.to_owned()),
+        }
+    }
+
+    /// The URL that names this database.
+    #[must_use]
+    pub fn url(&self) -> String {
+        match self {
+            Self::Postgres(url) => url.clone(),
+            Self::Sqlite(path) => format!("sqlite:{}", path.display()),
+        }
+    }
+}
+
 /// What a node runs as, read from its environment.
 #[derive(Clone, Debug)]
 pub struct NodeConfig {
     /// `LASH_WORKERS_NODE`: the node's stable name.
     pub node: String,
-    /// `LASH_WORKERS_DATABASE_URL`: the lash database.
-    pub database_url: String,
+    /// `LASH_WORKERS_DATABASE_URL`: the lash database, a PostgreSQL URL or
+    /// `sqlite:<path>`.
+    pub database: Database,
     /// `LASH_WORKERS_WITNESS_URL`: the witness ledger, as its writer.
-    pub witness_url: String,
+    pub witness: Database,
     /// `LASH_WORKERS_NOTIFIER`: `after-commit` (wake hints and the liveness
     /// lock) or `poll-only`.
     pub notifier: Notifier,
@@ -63,8 +94,8 @@ impl NodeConfig {
             Hold::parse(&hold).ok_or_else(|| format!("LASH_WORKERS_HOLD={hold} is not a hold"))?;
         Ok(Self {
             node: required("LASH_WORKERS_NODE")?,
-            database_url: required("LASH_WORKERS_DATABASE_URL")?,
-            witness_url: required("LASH_WORKERS_WITNESS_URL")?,
+            database: Database::parse(&required("LASH_WORKERS_DATABASE_URL")?),
+            witness: Database::parse(&required("LASH_WORKERS_WITNESS_URL")?),
             notifier,
             hold,
             admit_turn: var("LASH_WORKERS_ADMIT_TURN").as_deref() == Some("1"),
@@ -72,16 +103,56 @@ impl NodeConfig {
     }
 }
 
-/// The host configuration every node runs with: the defaults, with the
+/// The substrate settings every node runs with: the defaults, with the
 /// notifier the case names.
+#[must_use]
+pub fn settings(notifier: Notifier) -> DurableSettings {
+    DurableSettings {
+        notifier,
+        ..DurableSettings::default()
+    }
+}
+
+/// The PostgreSQL host configuration every node runs with: the defaults,
+/// with [`settings`].
 #[must_use]
 pub fn host_config(notifier: Notifier) -> lash_postgres_store::PostgresHostConfig {
     lash_postgres_store::PostgresHostConfig {
-        node: DurableSettings {
-            notifier,
-            ..DurableSettings::default()
-        },
+        node: settings(notifier),
         ..lash_postgres_store::PostgresHostConfig::default()
+    }
+}
+
+/// The store set over `database` and the settings its nodes validate: a
+/// PostgreSQL host configuration's, or the defaults over a SQLite file.
+///
+/// # Errors
+///
+/// The store could not be opened.
+pub async fn stores(
+    database: &Database,
+    notifier: Notifier,
+) -> Result<(Arc<dyn StoreSet>, DurableSettings), String> {
+    match database {
+        Database::Postgres(url) => {
+            let endpoints = lash_postgres_store::PostgresEndpoints::from_url(url)
+                .map_err(|error| format!("connect the lash database: {error}"))?;
+            let storage =
+                PostgresStorage::connect(&endpoints, &host_config(notifier), Default::default())
+                    .await
+                    .map_err(|error| format!("connect the lash database: {error}"))?;
+            let stores = PostgresStoreSet::new(
+                &storage,
+                Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
+            );
+            Ok((Arc::new(stores), storage.effective_config().node))
+        }
+        Database::Sqlite(path) => {
+            let stores = lash_sqlite_store::SqliteStoreSet::open(path)
+                .await
+                .map_err(|error| format!("open the lash database: {error}"))?;
+            Ok((Arc::new(stores), settings(notifier)))
+        }
     }
 }
 
@@ -93,31 +164,19 @@ pub fn host_config(notifier: Notifier) -> lash_postgres_store::PostgresHostConfi
 /// The node could not connect or assemble, or the store refused its
 /// registration.
 pub async fn run(config: NodeConfig) -> Result<Stopped, String> {
-    let endpoints = lash_postgres_store::PostgresEndpoints::from_url(&config.database_url)
-        .map_err(|error| format!("connect the lash database: {error}"))?;
-    let storage = PostgresStorage::connect(
-        &endpoints,
-        &host_config(config.notifier),
-        Default::default(),
-    )
-    .await
-    .map_err(|error| format!("connect the lash database: {error}"))?;
-    let stores: Arc<dyn StoreSet> = Arc::new(PostgresStoreSet::new(
-        &storage,
-        Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
-    ));
+    let (stores, settings) = stores(&config.database, config.notifier).await?;
     let recorded = RecordedStores::new(stores, &config.node);
     let store = recorded.store();
     let backend = Backend::assemble(BackendParts {
         // Its cells run on the RLM worker path: actors hold the VM's state.
         formats: lash::formats::actor_state_surfaces(),
         stores: Arc::new(recorded),
-        settings: storage.effective_config().node,
+        settings,
         engines: vec![Arc::new(WorkerEngine)],
         providers: Arc::new(NoProjectionProviders),
     })
     .map_err(|error| format!("assemble the backend: {error}"))?;
-    let witness = Witness::connect(&config.witness_url, &config.node)
+    let witness = Witness::connect(&config.witness, &config.node)
         .map_err(|error| format!("connect the witness ledger: {error}"))?;
     let core = crate::turn::core(&backend, witness.clone(), config.hold)?;
     if config.admit_turn {

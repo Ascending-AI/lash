@@ -488,9 +488,10 @@ pub trait StoreSet: Send + Sync {
     fn durable_store(&self) -> Arc<dyn DurableStore>;
 
     /// The node wakes over this store set's database: wake hints after
-    /// commit and node liveness locks (L8, FIG-5178). `None` for a store
-    /// with one node per database (SQLite), whose wakes stay in process;
-    /// its runner relies on in-process hints and the polls.
+    /// commit and node liveness locks (L8, FIG-5178), shared by every node
+    /// over it, in this process or another. `None` for a store that lives
+    /// in one process (a SQLite memory database); its runner relies on
+    /// in-process hints and the polls.
     fn node_wakes(&self) -> Option<Arc<dyn lash_durable::NodeWakes>>;
 
     /// The identity of this store set's storage.

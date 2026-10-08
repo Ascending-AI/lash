@@ -46056,7 +46056,9 @@
         "lash-internal-durable",
         "lash-internal-postgres-store",
         "lash-internal-sansio",
+        "lash-internal-sqlite-store",
         "lash-runtime",
+        "rusqlite",
         "serde",
         "serde_json",
         "sqlx",
@@ -46098,7 +46100,7 @@
         {
           "build_label": "//crates/lash-postgres-workers:failover__test",
           "cargo": "failover",
-          "cargo_only": "seven multi-process failover cases over a private PostgreSQL server, two of which wait out a 15 s node lease; about two minutes serially",
+          "cargo_only": "thirteen multi-process failover cases, seven over a private PostgreSQL server and six over one SQLite file, four of which wait out a 15 s node lease; about two minutes serially",
           "check_label": "//crates/lash-postgres-workers:failover__test[check]",
           "clippy_label": "//crates/lash-postgres-workers:failover__test__clippy[clippy.txt]",
           "kind": "test",

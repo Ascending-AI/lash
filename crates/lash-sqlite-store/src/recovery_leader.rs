@@ -3,7 +3,7 @@
 //! The row lives in the durable core. Each operation reads the database clock
 //! and applies its statement inside one `BEGIN IMMEDIATE` transaction, so the
 //! comparison and the write see one instant and no second writer between
-//! them. SQLite has one writer, so due-obligation claims are leader-only here.
+//! them, in this process or any other on the file.
 
 use std::sync::LazyLock;
 
@@ -138,9 +138,5 @@ impl RecoveryLeaderStore for SqliteRecoveryLeader {
             })
             .await
             .map_err(sqlite_error)
-    }
-
-    fn due_claims_need_leader(&self) -> bool {
-        true
     }
 }

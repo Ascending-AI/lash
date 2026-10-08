@@ -40,9 +40,10 @@
 //! transaction fenced by the epoch it was claimed under, so a claim runs it
 //! again and no actor is left owned with no activation.
 //!
-//! With [`NodeWakes`] (PostgreSQL), the runner also listens: it opens its
-//! listener before its first claim, so no hint sent after that scan is
-//! missed; it rescans after the listener resubscribes; it publishes what
+//! With [`NodeWakes`] (PostgreSQL, or a SQLite database file), the runner
+//! also listens: it opens its listener before its first claim, so no hint
+//! sent after that scan is missed; it rescans after the listener
+//! resubscribes; it publishes what
 //! its node's commits woke, coalesced, after those commits; and it watches
 //! the other boots' liveness locks, reaping a boot whose lock it saw held
 //! and then free. A readied unowned actor wakes one node: this one when it

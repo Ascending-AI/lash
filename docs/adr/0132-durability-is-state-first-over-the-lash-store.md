@@ -26,9 +26,13 @@ engine and mirrored 293 statements across two dialects.
 ### 1. One durable engine over the lash store
 
 Lash's own runtime is the only durable engine. It persists state through the
-lash store: PostgreSQL for multi-node deployments, and one SQLite database file
-for a single node. Both run the same engine code. There is no external
-engine and no pluggable `EffectEngine` seam:
+lash store: PostgreSQL for nodes on any number of machines, and one SQLite
+database file for nodes on one machine, each node a process of its own. Both
+run the same engine code and offer one node interface: leases, epoch fences,
+takeover, wake hints between nodes and crash detection by liveness lock.
+SQLite's limits are scale, one writer at a time, and locality, a local file
+on one machine. There is no external engine and no pluggable `EffectEngine`
+seam:
 `Backend` builds the durable engine directly over its store set.
 
 Engine SQL is written once per dialect, in one module, behind a gate that
@@ -36,7 +40,7 @@ refuses engine-table SQL anywhere else. No engine statement is mirrored by
 hand across dialects.
 
 Lash runs no OS programs and writes no local files beyond the configured
-SQLite database.
+SQLite database and the lock files beside it.
 
 ### 2. The no-replay rule
 

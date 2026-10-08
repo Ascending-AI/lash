@@ -16,8 +16,11 @@
 //!   epoch stays the only fence: the reap bumps it, exactly as a lease reap
 //!   does, and a boot that is merely slow is fenced, never trusted.
 //!
-//! A dialect without a notification channel (SQLite: one node per database)
-//! has no `NodeWakes`; its runner relies on in-process hints and the polls.
+//! Both dialects have them: PostgreSQL through `NOTIFY` and session advisory
+//! locks, a SQLite database file through wake rows and file locks beside it,
+//! for several processes on one machine. A store with none (a SQLite memory
+//! database, which lives in one process) leaves its runner to in-process
+//! hints and the polls.
 
 use std::collections::{BTreeMap, BTreeSet};
 

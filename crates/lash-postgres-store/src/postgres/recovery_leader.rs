@@ -2,8 +2,8 @@
 //!
 //! Each operation reads `clock_timestamp()` and applies its statement in one
 //! transaction; the acquire's upsert takes the row lock, so concurrent
-//! claimants serialize on it. Every deployment claims due obligations on
-//! PostgreSQL (`SKIP LOCKED`), so the lease gates only the leader-only duties.
+//! claimants serialize on it. Every deployment claims due obligations
+//! (`SKIP LOCKED`), so the lease gates only the leader-only duties.
 
 use std::sync::LazyLock;
 
@@ -146,9 +146,5 @@ impl RecoveryLeaderStore for PostgresRecoveryLeader {
             .rows_affected();
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(changed == 1)
-    }
-
-    fn due_claims_need_leader(&self) -> bool {
-        false
     }
 }

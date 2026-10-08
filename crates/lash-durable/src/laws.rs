@@ -36,6 +36,7 @@ pub type Advance<'a> = &'a (dyn Fn(Duration) + Sync);
 
 mod formats;
 mod model_calls;
+pub mod node_wakes;
 mod prompts;
 mod session_close;
 mod turn_namespaces;
