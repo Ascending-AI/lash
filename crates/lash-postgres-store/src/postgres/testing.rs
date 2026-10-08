@@ -8,9 +8,9 @@
 //! turns; suites that do not need their own database instead of a turn.
 //!
 //! [`IsolatedDatabase`] gives a suite a uniquely named, freshly created
-//! database derived from the configured URL, and drops it on teardown.
-//! Creation clones a process-local template provisioned once from this build's
-//! committed `schema.sql` artifact, so a following
+//! database derived from the configured URL, and retires it on teardown.
+//! Creation provisions this build's committed `schema.sql` artifact in a fresh
+//! or recycled empty database shell, so a following
 //! [`PostgresStorage`](crate::PostgresStorage) open verifies a schema it did
 //! not create (FIG-3797).
 
@@ -558,67 +558,26 @@ pub async fn finalize_fleet_epoch(
     HeldFinalize::begin(pool, epoch).await?.commit().await
 }
 
-// Only database names survive a setup runtime: a matrix cell creates its
-// database on a new thread/runtime, so caching a connection or pool would bind
-// the next cell to a runtime that has already stopped. Each test action owns
-// its PostgreSQL server; that server's teardown also removes the template.
-static DATABASE_TEMPLATES: tokio::sync::Mutex<std::collections::BTreeMap<String, String>> =
+// Only database names survive a cell's runtime. Vacant shells are sealed and
+// contain no law's schema or sessions. Reusing them bounds allocation by peak live
+// fixtures per maintenance URL instead of the number of crash cuts. The test
+// server's teardown removes the shells; no cell requests a cluster checkpoint.
+static VACANT_DATABASES: tokio::sync::Mutex<std::collections::BTreeMap<String, Vec<String>>> =
     tokio::sync::Mutex::const_new(std::collections::BTreeMap::new());
 
-/// The sealed template for this process and maintenance URL. The lock covers
-/// provisioning so simultaneous first cells cannot apply the schema twice.
-async fn database_template(
-    base_url: &str,
-    admin: &mut PgConnection,
-) -> Result<String, sqlx::Error> {
-    let mut templates = DATABASE_TEMPLATES.lock().await;
-    if let Some(name) = templates.get(base_url) {
-        return Ok(name.clone());
-    }
-    let name = format!("lash_template_{}", uuid::Uuid::new_v4().simple());
-    // These identifiers are generated here, never supplied by the caller.
-    // WAL_LOG avoids FILE_COPY's two cluster-wide checkpoints even for the
-    // initial template; the template is small and never accepts cell writes.
-    sqlx::query(&format!(
-        "CREATE DATABASE \"{name}\" WITH STRATEGY = WAL_LOG"
-    ))
-    .execute(&mut *admin)
-    .await?;
-    let provisioned = async {
-        let mut connection = PgConnection::connect(&replace_database_name(base_url, &name)).await?;
-        sqlx::raw_sql(crate::schema::SCHEMA_DDL)
-            .execute(&mut connection)
-            .await?;
-        connection.close().await?;
-        // Cloning requires the source to have no sessions. Seal it after its
-        // provisioning connection closes, before publishing it to any cell.
-        sqlx::query(&format!(
-            "ALTER DATABASE \"{name}\" ALLOW_CONNECTIONS false"
-        ))
-        .execute(&mut *admin)
-        .await?;
-        Ok::<(), sqlx::Error>(())
-    }
-    .await;
-    if let Err(error) = provisioned {
-        let _ = sqlx::query(&format!("DROP DATABASE \"{name}\" WITH (FORCE)"))
-            .execute(&mut *admin)
-            .await;
-        return Err(error);
-    }
-    templates.insert(base_url.to_owned(), name.clone());
-    Ok(name)
-}
-
-/// A throwaway Postgres database, cloned for one test and dropped with it.
+/// A throwaway Postgres database with a fresh name, schema and catalog identity.
 ///
-/// Construction provisions a sealed template once per process and maintenance
-/// URL, then uses `CREATE DATABASE ... TEMPLATE ... STRATEGY = WAL_LOG` for
-/// each cell. The clone has its own catalog identity and still undergoes the
-/// store open's full catalog verification. `Drop` issues
-/// `DROP DATABASE ... WITH (FORCE)`, so a test that leaves pooled connections
-/// open — or panics — still cleans up its cell. The template lives until the
-/// test server is removed; callers supplying a server own that teardown.
+/// Construction reuses a sealed, empty database shell, or allocates one with
+/// `CREATE DATABASE ... STRATEGY = WAL_LOG` when concurrent demand grows, then
+/// provisions this build's baseline schema. Every store open still performs
+/// full catalog verification. `Drop` seals the cell, terminates its sessions
+/// and removes its schema before returning its shell to the process's pool.
+///
+/// Neither setup nor teardown requests a cluster-wide checkpoint: dropping a
+/// database would stall unrelated cells on the same server. The number of shells
+/// is bounded by peak simultaneous fixtures per process and maintenance URL.
+/// Callers supplying a server own
+/// its teardown, which removes the empty shells as well.
 #[derive(Debug)]
 pub struct IsolatedDatabase {
     maintenance_url: String,
@@ -641,15 +600,36 @@ impl IsolatedDatabase {
         let mut connection = PgConnection::connect(base_url)
             .await
             .expect("connect Postgres maintenance database for test isolation");
-        let template = database_template(base_url, &mut connection)
+        let vacant = VACANT_DATABASES
+            .lock()
             .await
-            .expect("provision the process's Postgres test template");
-        sqlx::query(&format!(
-            "CREATE DATABASE \"{database_name}\" WITH TEMPLATE = \"{template}\" STRATEGY = WAL_LOG"
-        ))
-        .execute(&mut connection)
-        .await
-        .unwrap_or_else(|error| panic!("clone isolated test database {database_name}: {error}"));
+            .get_mut(base_url)
+            .and_then(Vec::pop);
+        if let Some(vacant) = vacant {
+            // A retired URL must never reopen a later cell. Names are generated
+            // here, never supplied by callers, and rename happens while sealed.
+            sqlx::query(&format!(
+                "ALTER DATABASE \"{vacant}\" RENAME TO \"{database_name}\""
+            ))
+            .execute(&mut connection)
+            .await
+            .expect("rename the vacant database for its next cell");
+            sqlx::query(&format!(
+                "ALTER DATABASE \"{database_name}\" ALLOW_CONNECTIONS true"
+            ))
+            .execute(&mut connection)
+            .await
+            .expect("open the renamed database for its next cell");
+        } else {
+            sqlx::query(&format!(
+                "CREATE DATABASE \"{database_name}\" WITH STRATEGY = WAL_LOG"
+            ))
+            .execute(&mut connection)
+            .await
+            .unwrap_or_else(|error| {
+                panic!("allocate isolated test database {database_name}: {error}")
+            });
+        }
         connection
             .close()
             .await
@@ -659,12 +639,20 @@ impl IsolatedDatabase {
             database_name,
             url,
         };
-        // Cloning copies seed data as well as the schema. Catalogs must keep
-        // separate identities, even when their initial tables are identical.
-        // Open still verifies the catalog itself; it runs no provisioning DDL.
         let mut connection = PgConnection::connect(&isolated.url)
             .await
-            .expect("connect isolated database for its catalog identity");
+            .expect("connect isolated database for its baseline schema");
+        sqlx::raw_sql(
+            "CREATE SCHEMA IF NOT EXISTS public AUTHORIZATION pg_database_owner;
+             GRANT USAGE ON SCHEMA public TO PUBLIC",
+        )
+        .execute(&mut connection)
+        .await
+        .expect("create the isolated database's public schema");
+        sqlx::raw_sql(crate::schema::SCHEMA_DDL)
+            .execute(&mut connection)
+            .await
+            .expect("provision the isolated database's baseline schema");
         sqlx::query("UPDATE lash_catalog_identity SET catalog_id = gen_random_uuid()::text")
             .execute(&mut connection)
             .await
@@ -691,10 +679,9 @@ impl Drop for IsolatedDatabase {
     fn drop(&mut self) {
         let maintenance_url = self.maintenance_url.clone();
         let database_name = self.database_name.clone();
-        // Teardown is synchronous so the database is gone before the test
-        // process exits, and runs on its own thread + runtime so it works from
-        // inside any async context, including a current-thread runtime where
-        // blocking on the ambient runtime would panic.
+        let url = self.url.clone();
+        // Finish retirement before cell admission is released. The separate
+        // runtime also works when the cell's current-thread runtime has stopped.
         let dropped = std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -704,13 +691,56 @@ impl Drop for IsolatedDatabase {
                 let mut connection = PgConnection::connect(&maintenance_url)
                     .await
                     .map_err(|error| error.to_string())?;
+                // Keep one connection to the cell before sealing it. No new
+                // session can race termination, and even a held read transaction
+                // or a panicking law cannot keep the local schema alive.
+                let mut cell = PgConnection::connect(&url)
+                    .await
+                    .map_err(|error| error.to_string())?;
                 sqlx::query(&format!(
-                    "DROP DATABASE IF EXISTS \"{database_name}\" WITH (FORCE)"
+                    "ALTER DATABASE \"{database_name}\" ALLOW_CONNECTIONS false"
                 ))
                 .execute(&mut connection)
                 .await
-                .map(|_| ())
-                .map_err(|error| error.to_string())
+                .map_err(|error| error.to_string())?;
+                let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+                    .fetch_one(&mut cell)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                sqlx::query(
+                    "SELECT pg_terminate_backend(pid, 5000) FROM pg_stat_activity
+                     WHERE datname = $1 AND pid <> $2",
+                )
+                .bind(&database_name)
+                .bind(pid)
+                .execute(&mut connection)
+                .await
+                .map_err(|error| error.to_string())?;
+                let schemas: Vec<String> = sqlx::query_scalar(
+                    "SELECT format('DROP SCHEMA %I CASCADE', nspname) FROM pg_namespace
+                     WHERE nspname <> 'information_schema' AND nspname !~ '^pg_'",
+                )
+                .fetch_all(&mut cell)
+                .await
+                .map_err(|error| error.to_string())?;
+                for ddl in schemas {
+                    sqlx::raw_sql(&ddl)
+                        .execute(&mut cell)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                }
+                cell.close().await.map_err(|error| error.to_string())?;
+                connection
+                    .close()
+                    .await
+                    .map_err(|error| error.to_string())?;
+                VACANT_DATABASES
+                    .lock()
+                    .await
+                    .entry(maintenance_url)
+                    .or_default()
+                    .push(database_name);
+                Ok::<(), String>(())
             })
         })
         .join();
@@ -718,13 +748,13 @@ impl Drop for IsolatedDatabase {
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
                 eprintln!(
-                    "warning: could not drop isolated test database {}: {error}",
+                    "warning: could not retire isolated test database {}: {error}",
                     self.database_name
                 );
             }
             Err(_) => {
                 eprintln!(
-                    "warning: teardown thread panicked dropping isolated test database {}",
+                    "warning: teardown thread panicked retiring isolated test database {}",
                     self.database_name
                 );
             }

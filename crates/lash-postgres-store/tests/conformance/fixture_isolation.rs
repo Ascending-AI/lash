@@ -97,12 +97,20 @@ async fn conformance_resets_and_reopens_stay_in_the_laws_database() {
         .connect(&database_url().expect("configured fixture database"))
         .await
         .expect("connect database cleanup probe");
-    let remaining: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM pg_database WHERE datname = ANY($1)")
+    let retired: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pg_database WHERE datname = ANY($1) AND NOT datallowconn",
+    )
+    .bind(&databases)
+    .fetch_one(&cleanup)
+    .await
+    .expect("probe completed database retirement");
+    assert_eq!(retired, 2, "every retired cell is sealed until reuse");
+    let sessions: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM pg_stat_activity WHERE datname = ANY($1)")
             .bind(&databases)
             .fetch_one(&cleanup)
             .await
-            .expect("probe completed database teardown");
-    assert_eq!(remaining, 0, "a law left its database behind");
+            .expect("probe retired cell sessions");
+    assert_eq!(sessions, 0, "retirement ends even held read transactions");
     cleanup.close().await;
 }

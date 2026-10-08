@@ -8,7 +8,11 @@
 // hands it.
 #![allow(clippy::disallowed_methods)]
 
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+
+use tokio::time::Instant;
 
 use lash_durable::{
     ActorKey, CommitLabel, DurableError, DurableStore, FormatSet, MailKind, MailTx, NodeId,
@@ -242,7 +246,10 @@ async fn a_connection_lost_at_commit_is_reconciled_to_one_effect() {
 
 /// A commit that stays contended stops retrying at its operation's
 /// deadline, with the contention, however many attempts its policy allows.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// Freeze the operation's monotonic timer during off-clock PostgreSQL work.
+/// Advancing only after a failed attempt returned its connection drives the
+/// actual retry pauses, without racing SQL against machine scheduling.
+#[tokio::test]
 async fn durable_retries_end_within_the_operation_deadline() {
     let deadline = Duration::from_millis(800);
     let mut config = crate::testing::fixture_config();
@@ -256,11 +263,27 @@ async fn durable_retries_end_within_the_operation_deadline() {
         max_delay: Duration::from_millis(50),
         jitter: false,
     };
-    let Some((_database, storage)) =
-        storage("durable_retries_end_within_the_operation_deadline", &config).await
-    else {
+    let Some(url) = crate::postgres_test_support::database_url() else {
+        eprintln!(
+            "skipping durable_retries_end_within_the_operation_deadline: database URL is not set"
+        );
         return;
     };
+    let _database = IsolatedDatabase::create(&url).await;
+    let releases = Arc::new(AtomicUsize::new(0));
+    let released = Arc::clone(&releases);
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(16)
+        .after_release(move |_, _| {
+            released.fetch_add(1, Ordering::Release);
+            Box::pin(async { Ok(true) })
+        })
+        .connect(_database.url())
+        .await
+        .expect("open the observed work pool");
+    let storage = crate::testing::from_pool(pool.clone(), &config)
+        .await
+        .expect("open the isolated store");
     let store = storage.durable_store();
     let target = actor("stays-contended");
     create(&store, &target).await;
@@ -274,9 +297,37 @@ async fn durable_retries_end_within_the_operation_deadline() {
     )
     .await;
 
+    // Setup also releases connections. Wait until its releases are complete
+    // before counting the failed commits, and keep this task runnable during
+    // SQL so Tokio cannot auto-advance the frozen clock while I/O is pending.
+    while pool.num_idle() as u32 != pool.size() {
+        tokio::task::yield_now().await;
+    }
+    let mut observed = releases.load(Ordering::Acquire);
+    tokio::time::pause();
     let started = Instant::now();
-    let answered = append(&store, &target).await;
+    let mut operation = Box::pin(append(&store, &target));
+    let answered = loop {
+        tokio::select! {
+            biased;
+            answered = &mut operation => break answered,
+            () = tokio::task::yield_now() => {
+                let ended = releases.load(Ordering::Acquire);
+                if ended > observed && pool.num_idle() as u32 == pool.size() {
+                    // RetryPolicy never holds an attempt's connection across
+                    // its backoff. Once it is idle the pending work is the
+                    // retry pause, so the law, not wall time, ends that pause.
+                    observed = ended;
+                    // Tokio rounds a sleep to the next millisecond tick.
+                    // Include that tick so a fractional start cannot strand
+                    // the timer after advancing exactly the policy's 50 ms.
+                    tokio::time::advance(Duration::from_millis(51)).await;
+                }
+            }
+        }
+    };
     let took = started.elapsed();
+    tokio::time::resume();
     assert!(
         matches!(
             answered,
@@ -287,15 +338,13 @@ async fn durable_retries_end_within_the_operation_deadline() {
         ),
         "a commit that stays contended answers the contention: {answered:?}"
     );
-    assert!(
-        took <= deadline,
-        "the retries ran {took:?}, past the {deadline:?} deadline"
+    assert_eq!(
+        took,
+        Duration::from_millis(765),
+        "no retry pause reaches the 800 ms deadline"
     );
     let attempts = seen(&storage, "stuck_attempts").await;
-    assert!(
-        (2..1_000).contains(&attempts),
-        "the commit retried within its deadline: {attempts} attempts"
-    );
+    assert_eq!(attempts, 16, "the actual commits share one retry deadline");
     assert_eq!(
         pending_mail(&store, &target).await,
         0,

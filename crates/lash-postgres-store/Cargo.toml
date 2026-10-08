@@ -62,7 +62,7 @@ lashlang = { workspace = true, features = ["testing"] }
 lash-postgres-store = { package = "lash-internal-postgres-store", path = ".", features = ["testing"] }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }
-tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time", "test-util"] }
 tracing-subscriber = { workspace = true }
 
 

@@ -651,6 +651,13 @@ async fn isolated_cells_do_not_checkpoint_or_share_state() {
         IsolatedDatabase::create(&url),
         IsolatedDatabase::create(&url)
     );
+    let first_oid: i64 =
+        sqlx::query_scalar("SELECT oid::bigint FROM pg_database WHERE datname = $1")
+            .bind(first.database_name())
+            .fetch_one(&mut admin)
+            .await
+            .expect("read first shell identity");
+    let retired_url = first.url().to_owned();
     let first_storage = connect(first.url())
         .await
         .expect("verify first cell catalog");
@@ -698,9 +705,40 @@ async fn isolated_cells_do_not_checkpoint_or_share_state() {
         connect(first.url()).await.is_err(),
         "every open still verifies the catalog"
     );
+    sqlx::raw_sql("CREATE SCHEMA cell_scratch; CREATE TABLE cell_scratch.residue (value int)")
+        .execute(first_storage.pool())
+        .await
+        .expect("a law may also leave a scratch schema");
     drop(first_storage);
     drop(first);
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    sqlx::query("SELECT pg_stat_clear_snapshot()")
+        .execute(&mut admin)
+        .await
+        .expect("refresh teardown checkpoint statistics");
+    let after_teardown: i64 = sqlx::query_scalar("SELECT num_requested FROM pg_stat_checkpointer")
+        .fetch_one(&mut admin)
+        .await
+        .expect("read teardown checkpoints");
+    assert_eq!(
+        after_teardown, after,
+        "cell teardown must not checkpoint a live companion cell"
+    );
     let third = IsolatedDatabase::create(&url).await;
+    let third_oid: i64 =
+        sqlx::query_scalar("SELECT oid::bigint FROM pg_database WHERE datname = $1")
+            .bind(third.database_name())
+            .fetch_one(&mut admin)
+            .await
+            .expect("read later shell identity");
+    assert_eq!(
+        third_oid, first_oid,
+        "retired shells bound disk use across cuts"
+    );
+    assert!(
+        PgConnection::connect(&retired_url).await.is_err(),
+        "a retired URL cannot enter the later cell"
+    );
     let third_storage = connect(third.url())
         .await
         .expect("verify later cell catalog");
@@ -715,4 +753,29 @@ async fn isolated_cells_do_not_checkpoint_or_share_state() {
         .await
         .expect("read later cell");
     assert_eq!(count, 0, "a later cell sees no previous cell's rows");
+    let scratch: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM pg_namespace WHERE nspname = 'cell_scratch'")
+            .fetch_one(third_storage.pool())
+            .await
+            .expect("check the later cell's scratch schemas");
+    assert_eq!(
+        scratch, 0,
+        "a later cell sees no previous cell's scratch schema"
+    );
+    drop((second_storage, third_storage));
+    drop((second, third));
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    sqlx::query("SELECT pg_stat_clear_snapshot()")
+        .execute(&mut admin)
+        .await
+        .expect("refresh recycled-cell checkpoint statistics");
+    let final_checkpoints: i64 =
+        sqlx::query_scalar("SELECT num_requested FROM pg_stat_checkpointer")
+            .fetch_one(&mut admin)
+            .await
+            .expect("read recycled-cell checkpoints");
+    assert_eq!(
+        final_checkpoints, before,
+        "the entire cell lifetime must not force a checkpoint"
+    );
 }
