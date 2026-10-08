@@ -71,6 +71,11 @@ constant_path = "crates/lashlang/src/runtime/cache.rs"
 reason = "identifies a process-local cache rather than a serialized shape"
 
 [[unregistered]]
+constant = "FINAL_ANSWER_FORMAT"
+constant_path = "crates/lash-protocol-rlm/src/prompt_sections.rs"
+reason = "key of the RLM final-answer prompt section, not a stored-format version"
+
+[[unregistered]]
 constant = "ERROR_VERSION"
 constant_path = "crates/lash-core-execution/src/plugin/actions.rs"
 reason = "plugin-owned per-operation error codec version supplied by each PluginOperation implementation, not a lash surface counter"

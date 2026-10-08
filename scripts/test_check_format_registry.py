@@ -258,16 +258,31 @@ class FormatRegistryTests(unittest.TestCase):
     def test_a_consistent_registry_passes(self) -> None:
         self.assertEqual(self.problems(), [])
 
+    def test_a_prompt_section_exclusion_names_a_swept_constant(self) -> None:
+        self.write(
+            "crates/demo/src/prompt_sections.rs",
+            'pub const FINAL_ANSWER_FORMAT: &str = "final_answer_format";\n',
+        )
+        self.registry_text += '''
+[[unregistered]]
+constant = "FINAL_ANSWER_FORMAT"
+constant_path = "crates/demo/src/prompt_sections.rs"
+reason = "key of a prompt section, not a stored-format version"
+'''
+        self.assertEqual(self.problems(), [])
+
     def test_an_unknown_version_constant_is_named(self) -> None:
         self.write(
             "crates/demo/src/extra.rs",
             "pub(crate) const LEASE_ENCODING_VERSION: u8 = 3;\n"
-            "const INDEX_IDENTITY_EPOCH: u8 = 6;\n",
+            "const INDEX_IDENTITY_EPOCH: u8 = 6;\n"
+            "const SNAPSHOT_FORMAT: u8 = 1;\n",
         )
         problems = self.problems()
-        self.assertEqual(len(problems), 2, problems)
+        self.assertEqual(len(problems), 3, problems)
         self.assertIn("crates/demo/src/extra.rs:LEASE_ENCODING_VERSION", problems[1])
         self.assertIn("crates/demo/src/extra.rs:INDEX_IDENTITY_EPOCH", problems[0])
+        self.assertIn("crates/demo/src/extra.rs:SNAPSHOT_FORMAT", problems[2])
 
     def test_a_stale_exclusion_fails(self) -> None:
         self.write("crates/demo/src/lib.rs", SOURCE.replace("APP_VERSION", "APP_NAME"))
@@ -529,6 +544,32 @@ class FormatRegistryTests(unittest.TestCase):
 
 
 class RealRepositoryTests(unittest.TestCase):
+    def test_rlm_prompt_section_keys_are_not_stored_format_versions(self) -> None:
+        from discover_version_surfaces import _discover_file
+
+        path = "crates/lash-protocol-rlm/src/prompt_sections.rs"
+        registry = gate.load_registry(gate.DEFAULT_CONFIG)
+        source = (gate.ROOT / path).read_text(encoding="utf-8")
+        rows, problems = _discover_file(path, source, frozenset(registry.unregistered))
+        self.assertEqual(rows, ())
+        self.assertEqual(problems, ())
+
+    def test_prompt_section_exclusion_does_not_hide_other_format_constants(self) -> None:
+        from discover_version_surfaces import _discover_file
+
+        registry = gate.load_registry(gate.DEFAULT_CONFIG)
+        for path, constant in (
+            ("crates/lash-protocol-rlm/src/prompt_sections.rs", "STORED_ANSWER_FORMAT"),
+            ("crates/lash-protocol-rlm/src/snapshot.rs", "FINAL_ANSWER_FORMAT"),
+        ):
+            with self.subTest(path=path, constant=constant):
+                _, problems = _discover_file(
+                    path, f"pub const {constant}: u8 = 1;\n",
+                    frozenset(registry.unregistered),
+                )
+                self.assertEqual(len(problems), 1, problems)
+                self.assertIn(f"{path}:{constant} is a version-shaped constant", problems[0])
+
     def test_the_repository_registry_is_exhaustive(self) -> None:
         registry = gate.load_registry(gate.DEFAULT_CONFIG)
         manifest = (gate.ROOT / gate.MANIFEST).read_text(encoding="utf-8")

@@ -477,6 +477,8 @@ UNCONSUMED_CI_PATHS: Mapping[str, str] = {
     ".github/actionlint.yaml": "actionlint finds it by name in `lint`, which runs on every event",
     "scripts/ci_ensure_run.sh": "run by hand to recover a CI run GitHub dropped",
     "scripts/perf_baseline.py": "run by hand to compare two lash-perf ledgers",
+    "scripts/ci/cargo-parity.sh": "run by hand through kiln gate to check Cargo's isolated package graphs; docs/agents/hermetic-build.md documents the command",
+    "scripts/postgres-substrate-bench.py": "run by hand through kiln gate for the S2 SQL spike; crates/lash-perf/src/bin/postgres_substrate/README.md documents the command",
     "scripts/test_landing_gates.py": "run on the lander beside scripts/ci/landing-gates.sh; it needs `kiln` on PATH, which the repository-gates runners do not have",
     "scripts/generate-process-env-identity-golden.py": "run by hand to rewrite the process-environment identity fixture from the ignored generator's test log",
     "scripts/e2e-workbench-operation.py": "its engine E2E caller was deleted (FIG-5190); L9h (FIG-5186) rewires it",

@@ -4,7 +4,7 @@
 Source-declared constants form the inventory.
 `discover_version_surfaces.py` rejects unregistered version strings, inline
 family counters and constants, including those covered by a class exclusion.
-Every ``*_VERSION`` / ``*_EPOCH`` constant defined in non-test Rust under
+Every ``*_VERSION`` / ``*_EPOCH`` / ``*_FORMAT`` constant defined in non-test Rust under
 ``crates/`` and ``examples/`` must be one of:
 
 - a source ``version_surface`` declaration;
@@ -69,7 +69,7 @@ SWEPT_ROOTS = ("crates", "examples")
 
 VERSION_CONSTANT = re.compile(
     r"^[ \t]*(?:pub(?:\([^)]*\))?[ \t]+)?const[ \t]+"
-    r"(?P<name>[A-Z][A-Z0-9_]*(?:_VERSION|_EPOCH))[ \t]*:",
+    r"(?P<name>[A-Z][A-Z0-9_]*(?:_VERSION|_EPOCH|_FORMAT))[ \t]*:",
     re.MULTILINE,
 )
 MANIFEST_ROW = re.compile(
