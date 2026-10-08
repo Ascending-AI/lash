@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Barrier, Mutex, OnceLock};
 
 use lash_durable::domain::{PromptCallKey, PromptText, PromptWrite};
 use lash_durable::{DomainWrite, DurableError, DurableInstant, DurableReads};
@@ -78,17 +78,27 @@ pub struct PromptRenderPool {
 
 impl PromptRenderPool {
     /// A pool of up to `workers` threads behind a queue of `queue` jobs. A
-    /// worker the host cannot start is logged and left out.
+    /// worker the host cannot start is logged and left out. Every started
+    /// worker has entered its thread before the pool returns.
     pub fn new(workers: NonZeroUsize, queue: NonZeroUsize) -> Self {
         let (sender, receiver) = std::sync::mpsc::sync_channel::<RenderJob>(queue.get());
         let receiver = Arc::new(Mutex::new(receiver));
         for index in 0..workers.get() {
             let receiver = Arc::clone(&receiver);
-            if let Err(error) = std::thread::Builder::new()
+            let ready = Arc::new(Barrier::new(2));
+            let worker_ready = Arc::clone(&ready);
+            match std::thread::Builder::new()
                 .name(format!("lash-prompt-render-{index}"))
-                .spawn(move || work(&receiver))
-            {
-                tracing::error!(%error, "a prompt render worker did not start");
+                .spawn(move || {
+                    // Thread startup has installed the worker's native name.
+                    // Pool initialization is complete only past this point.
+                    worker_ready.wait();
+                    work(&receiver);
+                }) {
+                Ok(_) => {
+                    ready.wait();
+                }
+                Err(error) => tracing::error!(%error, "a prompt render worker did not start"),
             }
         }
         Self {

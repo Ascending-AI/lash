@@ -104,10 +104,12 @@ class RunnerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             xml = Path(tmp, "test.xml")
             out = Path(tmp, "stdout")
-            with out.open("w") as stdout:
+            err = Path(tmp, "stderr")
+            with out.open("w") as stdout, err.open("w") as stderr:
                 proc = subprocess.Popen(
-                    ["bash", str(RUNNER), "bash", "-c", script],
-                    stdin=subprocess.PIPE, stdout=stdout, stderr=subprocess.STDOUT,
+                    ["bash", str(RUNNER), "--selection-argv-count", "1", "bash",
+                     "bash", "-c", script],
+                    stdin=subprocess.PIPE, stdout=stdout, stderr=stderr,
                     text=True, start_new_session=True,
                     env=dict(os.environ, XML_OUTPUT_FILE=str(xml),
                              TEST_BINARY="crates/x/x__test", TEST_TMPDIR=tmp, **dict(env)),
@@ -122,7 +124,7 @@ class RunnerTests(unittest.TestCase):
                         os.killpg(proc.pid, signal.SIGKILL)
                     except ProcessLookupError:
                         pass
-            return proc.returncode, out.read_text(), (ET.parse(xml).getroot() if xml.exists() else None)
+            return proc.returncode, out.read_text() + err.read_text(), (ET.parse(xml).getroot() if xml.exists() else None)
 
     def test_exit_code_output_and_stdin_pass_through_and_report_is_written(self):
         code, output, report = self.run_under(
@@ -134,11 +136,42 @@ class RunnerTests(unittest.TestCase):
         (suite,) = report
         self.assertEqual(suite.get("name"), "crates/x/x__test")
         self.assertEqual(list(cases(suite)), ["a::b"])
-        self.assertEqual(suite.find("system-out").text, output)
+        self.assertEqual(suite.find("system-out").text, "got input\ntest a::b ... FAILED\n")
 
     def test_shards_get_distinct_suite_names(self):
         _, _, report = self.run_under("true", env={"TEST_TOTAL_SHARDS": "8", "TEST_SHARD_INDEX": "2"})
         self.assertEqual(report[0].get("name"), "crates/x/x__test_shard_3/8")
+
+    def test_stderr_between_result_fragments_cannot_corrupt_test_accounting(self):
+        code, output, report = self.run_under(
+            'printf "running 1 test\\ntest callback::law ... "; '
+            'printf "matrix cell=a:turn.commit#1/abort setup=" >&2; '
+            'printf "ok\\n"; '
+            'printf "0.123s\\n" >&2; '
+            'printf "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\\n"'
+        )
+        self.assertEqual(code, 0, output)
+        (suite,) = report
+        self.assertEqual(list(cases(suite)), ["callback::law"])
+        self.assertEqual(suite.get("errors"), "0")
+        self.assertIn("test callback::law ... ok\n", suite.find("system-out").text)
+        self.assertIn("matrix cell=a:turn.commit#1/abort setup=", output)
+
+    def test_a_failed_result_keeps_its_failure_with_stderr_between_fragments(self):
+        code, output, report = self.run_under(
+            'printf "running 1 test\\ntest callback::law ... "; '
+            'printf "matrix cell=a:turn.commit#1/abort setup=" >&2; '
+            'printf "FAILED\\n"; '
+            'printf "0.123s\\n" >&2; '
+            'printf "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out\\n"; '
+            'exit 101'
+        )
+        self.assertEqual(code, 101, output)
+        (suite,) = report
+        self.assertEqual(list(cases(suite)), ["callback::law"])
+        self.assertEqual(suite.get("failures"), "1")
+        self.assertEqual(suite.get("errors"), "0")
+        self.assertIsNotNone(cases(suite)["callback::law"].find("failure"))
 
     def test_a_report_the_test_wrote_is_kept(self):
         code, _, report = self.run_under(

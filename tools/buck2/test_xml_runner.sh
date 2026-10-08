@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Test launcher wrapper used by the external Buck2 runner. It preserves the
 # test's argv, stdin, cwd, environment, and exit code; streams output while
-# retaining a copy; and writes the declared JUnit report unless a batch runner
+# retaining a copy of stdout; and writes the declared JUnit report unless a batch runner
 # already produced it. The launcher watchdog owns timeout and cancellation.
 set -uo pipefail
 
@@ -28,7 +28,10 @@ done
 exec {copy}> >(trap '' TERM INT HUP; exec tee -- "$log")
 copier=$!
 started=${EPOCHREALTIME/./}
-"$@" >&"$copy" 2>&1 {copy}>&-
+# Libtest's result records are on stdout. Diagnostics on stderr can land
+# between a record's name and outcome, so stream them unchanged on their own
+# descriptor instead of letting them corrupt the report's input.
+"$@" >&"$copy" {copy}>&-
 code=$?
 elapsed=$((${EPOCHREALTIME/./} - started))
 exec {copy}>&-

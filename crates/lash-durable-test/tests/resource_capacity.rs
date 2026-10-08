@@ -161,6 +161,8 @@ fn process_and_session_lifecycles_release_their_native_resources() {
     // Tokio's first runtime initializes a process-wide signal socket pair,
     // and the first prompt composition starts the process's shared render
     // pool: warm that reusable infrastructure without running a lifecycle.
+    // Pool construction waits for every worker's startup, so the baseline
+    // sees their final native names even if scheduling delayed those threads.
     drop(lifecycle_runtime());
     let _ = lash_core_execution::plugin::prompt::PromptRenderPool::shared();
     let baseline = ThreadCensus::capture().expect("the baseline census");
