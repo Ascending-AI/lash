@@ -343,9 +343,9 @@ finish(String(await handle));
     workbench.shutdown().await;
 }
 
-// FIG-2359: every session-bound route resolves its id through the one
-// admission read, so a retired id gets the same typed 409 everywhere —
-// side-effect ingress included — instead of a 200 for a dead session.
+// FIG-2359 / FIG-5371: every session-bound use refuses a retired id with
+// the same typed 409, side-effect ingress included. The delete retry is
+// admitted so it can reconcile a durable tombstone idempotently (FIG-5347).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn every_session_bound_route_refuses_a_retired_id_with_the_same_conflict() {
     use futures_util::TryFutureExt as _;
@@ -431,10 +431,6 @@ async fn every_session_bound_route_refuses_a_retired_id_with_the_same_conflict()
                 )
                 .map_ok(drop),
             ),
-        ),
-        (
-            "DELETE /api/session",
-            Box::pin(Box::pin(reset_chat(State(state.clone()), Query(query()))).map_ok(drop)),
         ),
         (
             "POST /api/button-trigger",
@@ -567,6 +563,30 @@ async fn every_session_bound_route_refuses_a_retired_id_with_the_same_conflict()
     assert!(
         state.messages_snapshot().is_empty(),
         "no side-effect ingress committed anything for the retired session"
+    );
+
+    let Json(settled) = Box::pin(reset_chat(State(state.clone()), Query(query())))
+        .await
+        .expect("DELETE /api/session admits a retry against the durable tombstone");
+    assert_ne!(settled.settings.session_id, session_id);
+    assert_eq!(state.current_session_id(), settled.settings.session_id);
+    assert_eq!(
+        state.active_turns.retirement(&session_id),
+        Some(SessionRetirement::Retired),
+        "the delete retry confirms retirement"
+    );
+    super::reset_chat_tests::assert_tombstoned(state, &session_id).await;
+    let roster = serde_json::to_value(state.sessions.list()).expect("the roster encodes");
+
+    let Json(retried) = Box::pin(reset_chat(State(state.clone()), Query(query())))
+        .await
+        .expect("DELETE /api/session settles an already confirmed delete idempotently");
+    assert_eq!(retried.settings.session_id, settled.settings.session_id);
+    assert_eq!(state.current_session_id(), settled.settings.session_id);
+    assert_eq!(
+        serde_json::to_value(state.sessions.list()).expect("the roster encodes"),
+        roster,
+        "the delete retry preserves the settled roster"
     );
     workbench.shutdown().await;
 }
