@@ -1055,10 +1055,14 @@ impl IntoResponse for AppError {
 }
 
 pub(crate) fn workbench_attachment_acceptance() -> lash::provider::AttachmentCapabilitySnapshot {
-    use lash::provider::AttachmentMimeSource;
+    use lash::attachments::DeliveryForms;
     crate::attachment_acceptance::snapshot(
         "workbench-attachments-1",
-        &[AttachmentMimeSource::Inline, AttachmentMimeSource::Stored],
+        DeliveryForms {
+            bytes: true,
+            url: true,
+            provider_file: false,
+        },
         &["image/png"],
     )
 }

@@ -163,7 +163,7 @@ async fn every_retry_attempt_reapplies_the_sampling_controls() {
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let completion = handle
-        .complete(sampled_request())
+        .complete(sampled_request(), &lash_core::provider::NoSlotDeliveries)
         .await
         .expect("retry succeeds");
 
@@ -373,10 +373,14 @@ async fn unsupported_settings_are_refused_before_any_transport_call() {
             .with_transport(transport.clone());
         let error = if responses {
             let mut provider = OpenAiProvider { inner: provider };
-            provider.complete(req).await
+            provider
+                .complete(req, &lash_core::provider::NoSlotDeliveries)
+                .await
         } else {
             let mut provider = provider;
-            provider.complete(req).await
+            provider
+                .complete(req, &lash_core::provider::NoSlotDeliveries)
+                .await
         }
         .expect_err(label);
         assert_eq!(refusal_code(&error).as_deref(), Some(code), "{label}");

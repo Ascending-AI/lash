@@ -4,7 +4,12 @@ use lash_sansio::sync::MutexExt;
 pub(super) async fn prove_openai_compatible_tool_stream() -> Result<ProofRun, FixedScriptRunnerError>
 {
     let (mut provider, transport) = openai_compatible_provider(OPENAI_COMPAT_TOOL_CALL)?;
-    let response = provider.complete(openai_compatible_request(true)).await?;
+    let response = provider
+        .complete(
+            openai_compatible_request(true),
+            &lash_core::provider::NoSlotDeliveries,
+        )
+        .await?;
     require(
         response.terminal_reason == LlmTerminalReason::ToolUse,
         "OpenAI-compatible tool stream terminal reason was not tool_use",
@@ -47,7 +52,12 @@ pub(super) async fn prove_openai_responses_text_stream() -> Result<ProofRun, Fix
     )?);
     let mut provider =
         OpenAiProvider::new("test-key").with_transport(provider_transport(&transport));
-    let response = provider.complete(openai_responses_request()).await?;
+    let response = provider
+        .complete(
+            openai_responses_request(),
+            &lash_core::provider::NoSlotDeliveries,
+        )
+        .await?;
     require(
         response.terminal_reason == LlmTerminalReason::Stop,
         "OpenAI Responses stream terminal reason was not stop",
@@ -121,7 +131,7 @@ fn codex_request(tools: bool, stream_events: Option<LlmEventSender>) -> LlmReque
         )
         .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "lookup x")],
-        resolved_stored: Default::default(),
+
         tools: Arc::new(tool_specs),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
@@ -140,7 +150,12 @@ fn codex_request(tools: bool, stream_events: Option<LlmEventSender>) -> LlmReque
 pub(super) async fn prove_codex_responses_text_stream() -> Result<ProofRun, FixedScriptRunnerError>
 {
     let (mut provider, transport) = codex_provider(CODEX_RESPONSES_TEXT)?;
-    let response = provider.complete(codex_request(false, None)).await?;
+    let response = provider
+        .complete(
+            codex_request(false, None),
+            &lash_core::provider::NoSlotDeliveries,
+        )
+        .await?;
     require(
         response.terminal_reason == LlmTerminalReason::Stop,
         "Codex Responses stream terminal reason was not stop",
@@ -167,7 +182,12 @@ pub(super) async fn prove_codex_responses_text_stream() -> Result<ProofRun, Fixe
 pub(super) async fn prove_codex_responses_tool_call_stream()
 -> Result<ProofRun, FixedScriptRunnerError> {
     let (mut provider, transport) = codex_provider(CODEX_RESPONSES_TOOL_CALL)?;
-    let response = provider.complete(codex_request(true, None)).await?;
+    let response = provider
+        .complete(
+            codex_request(true, None),
+            &lash_core::provider::NoSlotDeliveries,
+        )
+        .await?;
     require(
         response.terminal_reason == LlmTerminalReason::ToolUse,
         "Codex Responses tool-call stream terminal reason was not tool_use",
@@ -205,7 +225,10 @@ pub(super) async fn prove_codex_responses_tool_call_stream()
 pub(super) async fn prove_codex_responses_rate_limit() -> Result<ProofRun, FixedScriptRunnerError> {
     let (mut provider, transport) = codex_provider(CODEX_RESPONSES_RATE_LIMIT)?;
     let err = provider
-        .complete(codex_request(false, None))
+        .complete(
+            codex_request(false, None),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect_err("codex rate-limit script should fail");
     require(
@@ -238,7 +261,10 @@ pub(super) async fn prove_codex_responses_rate_limit() -> Result<ProofRun, Fixed
 pub(super) async fn prove_codex_responses_disconnect() -> Result<ProofRun, FixedScriptRunnerError> {
     let (mut provider, transport) = codex_provider(CODEX_RESPONSES_DISCONNECT)?;
     let err = provider
-        .complete(codex_request(false, None))
+        .complete(
+            codex_request(false, None),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect_err("codex disconnect script should fail");
     require(
@@ -268,7 +294,12 @@ pub(super) async fn prove_anthropic_messages_text_stream()
     let mut provider = AnthropicProvider::new("test-key")
         .with_base_url(Some("https://anthropic.test".to_string()))
         .with_transport(provider_transport(&transport));
-    let response = provider.complete(anthropic_messages_request()).await?;
+    let response = provider
+        .complete(
+            anthropic_messages_request(),
+            &lash_core::provider::NoSlotDeliveries,
+        )
+        .await?;
     require(
         response.terminal_reason == LlmTerminalReason::Stop,
         "Anthropic Messages stream terminal reason was not stop",
@@ -302,7 +333,9 @@ pub(super) async fn prove_google_stream_generate_text() -> Result<ProofRun, Fixe
     ))
     .with_project_id(Some("project-1".to_string()))
     .with_transport(provider_transport(&transport));
-    let response = provider.complete(google_request(true)).await?;
+    let response = provider
+        .complete(google_request(true), &lash_core::provider::NoSlotDeliveries)
+        .await?;
     require(
         response.terminal_reason == LlmTerminalReason::Stop,
         "Google streamGenerateContent terminal reason was not stop",
@@ -343,7 +376,12 @@ pub(super) async fn prove_google_generate_text() -> Result<ProofRun, FixedScript
     ))
     .with_project_id(Some("project-1".to_string()))
     .with_transport(provider_transport(&transport));
-    let response = provider.complete(google_request(false)).await?;
+    let response = provider
+        .complete(
+            google_request(false),
+            &lash_core::provider::NoSlotDeliveries,
+        )
+        .await?;
     require(
         response.terminal_reason == LlmTerminalReason::Stop,
         "Google generateContent terminal reason was not stop",
@@ -383,7 +421,10 @@ pub(super) async fn prove_openai_compatible_rate_limit() -> Result<ProofRun, Fix
 {
     let (mut provider, transport) = openai_compatible_provider(OPENAI_COMPAT_RATE_LIMIT)?;
     let err = provider
-        .complete(openai_compatible_request(false))
+        .complete(
+            openai_compatible_request(false),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect_err("rate-limit script should fail");
     require(
@@ -417,7 +458,10 @@ pub(super) async fn prove_openai_compatible_validation() -> Result<ProofRun, Fix
 {
     let (mut provider, transport) = openai_compatible_provider(OPENAI_COMPAT_VALIDATION)?;
     let err = provider
-        .complete(openai_compatible_request(false))
+        .complete(
+            openai_compatible_request(false),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect_err("validation script should fail");
     require(
@@ -450,7 +494,10 @@ pub(super) async fn prove_openai_compatible_disconnect() -> Result<ProofRun, Fix
 {
     let (mut provider, transport) = openai_compatible_provider(OPENAI_COMPAT_DISCONNECT)?;
     let err = provider
-        .complete(openai_compatible_request(true))
+        .complete(
+            openai_compatible_request(true),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect_err("disconnect script should fail");
     require(
@@ -481,7 +528,10 @@ pub(super) async fn prove_openai_compatible_response_start_timeout()
     let (mut provider, transport) =
         openai_compatible_provider(OPENAI_COMPAT_RESPONSE_START_TIMEOUT)?;
     let err = provider
-        .complete(openai_compatible_request(true))
+        .complete(
+            openai_compatible_request(true),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect_err("response-start timeout script should fail");
     require(
@@ -517,7 +567,10 @@ pub(super) async fn prove_openai_compatible_stream_chunk_timeout()
     let (events, sender) = event_collector();
     let (mut provider, transport) = openai_compatible_provider(OPENAI_COMPAT_STREAM_CHUNK_TIMEOUT)?;
     let err = provider
-        .complete(openai_compatible_request_with_events(Some(sender)))
+        .complete(
+            openai_compatible_request_with_events(Some(sender)),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect_err("stream chunk timeout script should fail");
     let committed_events = events.lock_recover();
@@ -574,7 +627,10 @@ pub(super) async fn prove_openai_compatible_cancel_before_response_start()
 
     let task = tokio::spawn(async move {
         provider
-            .complete(openai_compatible_request_with_events(Some(sender)))
+            .complete(
+                openai_compatible_request_with_events(Some(sender)),
+                &lash_core::provider::NoSlotDeliveries,
+            )
             .await
     });
     schedule.wait_until_blocked(0, 0).await;
@@ -645,6 +701,7 @@ pub(super) async fn prove_openai_compatible_retry_exhaustion()
                     .expect("the two-attempt proof has one unsafe retry"),
                 max_duplicate_cost_tokens: None,
             },
+            &lash_core::provider::NoSlotDeliveries,
         )
         .await
         .expect_err("retry exhaustion should fail");
@@ -860,7 +917,7 @@ fn openai_compatible_request_with_events(stream_events: Option<LlmEventSender>) 
         )
         .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "lookup x")],
-        resolved_stored: Default::default(),
+
         tools: Arc::new(vec![LlmToolSpec {
             name: "lookup".to_string(),
             description: "Lookup".to_string(),
@@ -914,7 +971,7 @@ fn openai_responses_request() -> LlmRequest {
         )
         .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
-        resolved_stored: Default::default(),
+
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
@@ -953,7 +1010,7 @@ fn anthropic_messages_request() -> LlmRequest {
         )
         .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
-        resolved_stored: Default::default(),
+
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
@@ -986,7 +1043,7 @@ fn google_request(stream: bool) -> LlmRequest {
         )
         .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
-        resolved_stored: Default::default(),
+
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),

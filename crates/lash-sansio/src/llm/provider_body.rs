@@ -66,6 +66,7 @@ impl RecordedRequestTemplate {
                 generation,
                 segments: Vec::new(),
             },
+            literal: String::new(),
         }
     }
 
@@ -154,6 +155,8 @@ impl RecordedRequestTemplate {
     pub fn validate(&self) -> Result<(), TemplateError> {
         let mut text = String::new();
         let mut literal = false;
+        let mut in_string = false;
+        let mut escape = false;
         for segment in &self.segments {
             match segment {
                 RequestSegment::Literal { text: span } => {
@@ -165,8 +168,20 @@ impl RecordedRequestTemplate {
                     }
                     literal = true;
                     text.push_str(span);
+                    for byte in span.bytes() {
+                        if escape {
+                            escape = false;
+                        } else if in_string && byte == b'\\' {
+                            escape = true;
+                        } else if byte == b'"' {
+                            in_string = !in_string;
+                        }
+                    }
                 }
                 RequestSegment::Attachment { slot } => {
+                    if in_string {
+                        return Err(TemplateError::InvalidJson { offset: text.len() });
+                    }
                     if slot.accepts.is_empty() {
                         return Err(TemplateError::EmptyAcceptance);
                     }
@@ -210,30 +225,29 @@ impl RecordedRequestTemplate {
 
 pub struct RequestTemplateBuilder {
     template: RecordedRequestTemplate,
+    literal: String,
 }
 impl RequestTemplateBuilder {
     pub fn literal(&mut self, text: impl AsRef<str>) -> &mut Self {
-        let text = text.as_ref();
-        if text.is_empty() {
-            return self;
-        }
-        if let Some(RequestSegment::Literal { text: previous }) = self.template.segments.last_mut()
-        {
-            *previous = Arc::from(format!("{previous}{text}"));
-        } else {
-            self.template.segments.push(RequestSegment::Literal {
-                text: Arc::from(text),
-            });
-        }
+        self.literal.push_str(text.as_ref());
         self
     }
+    fn flush_literal(&mut self) {
+        if !self.literal.is_empty() {
+            self.template.segments.push(RequestSegment::Literal {
+                text: Arc::from(std::mem::take(&mut self.literal)),
+            });
+        }
+    }
     pub fn attachment(&mut self, slot: AttachmentSlot) -> &mut Self {
+        self.flush_literal();
         self.template.segments.push(RequestSegment::Attachment {
             slot: Box::new(slot),
         });
         self
     }
-    pub fn finish(self) -> Result<RecordedRequestTemplate, TemplateError> {
+    pub fn finish(mut self) -> Result<RecordedRequestTemplate, TemplateError> {
+        self.flush_literal();
         self.template.validate()?;
         Ok(self.template)
     }
@@ -360,7 +374,7 @@ impl LiveRequestBody {
     pub fn redacted(&self) -> String {
         self.template.redacted()
     }
-    pub fn scrubber(&self) -> Arc<dyn Fn(&str) -> String + Send + Sync> {
+    pub fn redactor(&self) -> DeliveryRedactor {
         let mut secrets: Vec<String> = self
             .values
             .iter()
@@ -368,14 +382,16 @@ impl LiveRequestBody {
             .collect();
         secrets.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
         secrets.dedup();
-        Arc::new(move |text| {
-            secrets.iter().fold(text.to_owned(), |text, secret| {
-                text.replace(secret, "[redacted attachment delivery]")
-            })
-        })
+        DeliveryRedactor {
+            secrets: Arc::new(secrets),
+        }
+    }
+    pub fn scrubber(&self) -> Arc<dyn Fn(&str) -> String + Send + Sync> {
+        let redactor = self.redactor();
+        Arc::new(move |text| redactor.scrub(text))
     }
     pub fn scrub(&self, text: &str) -> String {
-        self.scrubber()(text)
+        self.redactor().scrub(text)
     }
     pub fn has_secrets(&self) -> bool {
         self.values.iter().any(|value| !value.secrets.is_empty())
@@ -399,4 +415,23 @@ pub enum TemplateError {
     SlotCount { expected: usize, actual: usize },
     #[error("an attachment slot has empty acceptance")]
     EmptyAcceptance,
+}
+
+/// A transport may scrub captured provider text without access to secret values.
+/// It has no serialized form and its Debug omits its patterns.
+#[derive(Clone, PartialEq, Eq)]
+pub struct DeliveryRedactor {
+    secrets: Arc<Vec<String>>,
+}
+impl DeliveryRedactor {
+    pub fn scrub(&self, text: &str) -> String {
+        self.secrets.iter().fold(text.to_owned(), |text, secret| {
+            text.replace(secret, "[redacted attachment delivery]")
+        })
+    }
+}
+impl std::fmt::Debug for DeliveryRedactor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DeliveryRedactor(<redacted>)")
+    }
 }

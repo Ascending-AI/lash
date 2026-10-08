@@ -156,7 +156,7 @@ async fn a_pre_output_401_asks_the_source_once_and_resends_the_admitted_body() {
     let mut provider = sse_provider(Arc::clone(&tokens), Arc::clone(&http));
 
     let response = provider
-        .complete(streaming_request())
+        .complete(streaming_request(), &lash_core::provider::NoSlotDeliveries)
         .await
         .expect("the resend with the fresh token completes");
 
@@ -187,7 +187,7 @@ async fn a_401_after_output_started_is_surfaced_and_not_retried() {
     let mut provider = sse_provider(Arc::clone(&tokens), Arc::clone(&http));
 
     let error = provider
-        .complete(streaming_request())
+        .complete(streaming_request(), &lash_core::provider::NoSlotDeliveries)
         .await
         .expect_err("a 401 after output must surface");
 
@@ -207,7 +207,7 @@ async fn a_host_that_needs_a_new_sign_in_fails_the_call_with_its_typed_code() {
     let mut provider = sse_provider(Arc::clone(&tokens), Arc::clone(&http));
 
     let error = provider
-        .complete(streaming_request())
+        .complete(streaming_request(), &lash_core::provider::NoSlotDeliveries)
         .await
         .expect_err("no token, no call");
 
@@ -241,7 +241,7 @@ async fn a_rejected_websocket_handshake_replaces_the_token_instead_of_falling_ba
         .with_http_transport(Arc::clone(&http) as Arc<dyn LlmHttpTransport>);
 
     let response = provider
-        .complete(streaming_request())
+        .complete(streaming_request(), &lash_core::provider::NoSlotDeliveries)
         .await
         .expect("the WebSocket resend with the fresh token completes");
 

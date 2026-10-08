@@ -8,15 +8,14 @@ pub(crate) use serde_json::{Value, json};
 
 pub(crate) use lash_core::llm::transport::{
     LlmTransportError, ProviderFailureKind, TransportRetryVerdict, TurnFailureCode,
-    known_attachment_acceptors, unsupported_attachment_capability,
 };
 pub(crate) use lash_core::llm::types::{
-    AnthropicThinkingRetention, AttachmentSource, ExecutionEvidence, GenerationReceipt,
-    LlmContentBlock, LlmEventSender, LlmOutputPart, LlmOutputSpec, LlmRequest, LlmResponse,
-    LlmRole, LlmStreamEvent, LlmStreamEvidence, LlmTerminalReason, LlmToolChoice, LlmUsage,
-    ProviderReasoningReplay, ProviderReasoningRetentionSupport, ProviderRequestBody,
-    ProviderRouteIdentity, ReasoningRetentionSelection, ReasoningRetentionValidationError,
-    StreamBlockIdentity, tool_call_input_replay_value,
+    AnthropicThinkingRetention, AttachmentSlot, ExecutionEvidence, GenerationReceipt,
+    LiveRequestBody, LlmContentBlock, LlmEventSender, LlmOutputPart, LlmOutputSpec, LlmRequest,
+    LlmResponse, LlmRole, LlmStreamEvent, LlmStreamEvidence, LlmTerminalReason, LlmToolChoice,
+    LlmUsage, ProviderReasoningReplay, ProviderReasoningRetentionSupport, ProviderRouteIdentity,
+    ReasoningRetentionSelection, ReasoningRetentionValidationError, RecordedRequestTemplate,
+    StreamBlockIdentity, TransientJson, tool_call_input_replay_value,
 };
 pub(crate) use lash_core::provider::{
     CacheRetention, GenerationEmission, GenerationWire, OutputCapWire, Provider,
@@ -44,3 +43,12 @@ pub(crate) use std::sync::Arc;
 
 pub(crate) use crate::config::*;
 pub(crate) use crate::policy::*;
+
+pub(crate) use lash_core::provider::attachment_wire::{
+    attachment_operand, check_slot, lower_attachment_json, template_error,
+};
+pub(crate) use lash_core::provider::delivery_redaction::{protect_callbacks, protect_result};
+pub(crate) use lash_sansio::AttachmentRef;
+pub(crate) use lash_sansio::llm::attachment_delivery::{
+    AttachmentPosition, Delivery, ProviderAccepts, ProviderFileScope,
+};

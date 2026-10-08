@@ -51,32 +51,15 @@ pub(crate) fn needs_blocking(request: &crate::support::LlmRequest) -> bool {
     if !raw_budget::RawBudget::fits(request, BLOCKING_THRESHOLD) {
         return true;
     }
-    let mut remaining = BLOCKING_THRESHOLD;
-    for bytes in request.resolved_stored.values() {
-        let Some(rest) = remaining.checked_sub(bytes.len().max(1)) else {
-            return true;
-        };
-        remaining = rest;
-    }
-    // The cache is deduplicated; materialization is not. Charge each inline
-    // or stored occurrence for its final data URL, without allocating it.
-    // Raw traversal above bounds this message/block walk as well.
-    for source in request.attachments() {
-        if let Some(bytes) = request.attachment_bytes(source) {
-            let expanded = base64::encoded_len(bytes.len(), true)
-                .and_then(|len| len.checked_add(13))
-                .and_then(|len| {
-                    len.checked_add(source.media_type().map_or(0, |mime| mime.as_str().len()))
-                });
-            let Some(rest) = expanded.and_then(|len| remaining.checked_sub(len)) else {
-                return true;
-            };
-            remaining = rest;
-        }
-    }
     // Only bounded, small raw fields reach the escaping JSON writer. Keep
     // its aggregate check for punctuation and escape expansion.
-    serde_json::to_writer(&mut SizeProbe { remaining }, request).is_err()
+    serde_json::to_writer(
+        &mut SizeProbe {
+            remaining: BLOCKING_THRESHOLD,
+        },
+        request,
+    )
+    .is_err()
 }
 
 pub(crate) async fn run<T: Send + 'static>(
@@ -194,18 +177,6 @@ pub(crate) fn error_metadata(value: &serde_json::Value) -> Option<String> {
 
 pub(crate) fn bytes_need_blocking(len: usize) -> bool {
     len > BLOCKING_THRESHOLD
-}
-
-/// Serialize directly to the transport buffer. Sizing before writing avoids
-/// growth reallocations of large bodies; there is no second Value conversion.
-pub(crate) fn serialize_body(body: &impl Serialize) -> serde_json::Result<Vec<u8>> {
-    let mut probe = SizeProbe {
-        remaining: usize::MAX,
-    };
-    serde_json::to_writer(&mut probe, body)?;
-    let mut bytes = Vec::with_capacity(usize::MAX - probe.remaining);
-    serde_json::to_writer(&mut bytes, body)?;
-    Ok(bytes)
 }
 
 #[cfg(test)]

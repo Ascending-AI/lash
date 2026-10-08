@@ -126,16 +126,29 @@ impl fmt::Debug for HttpHeaderValue {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct HttpRequest {
     pub method: HttpMethod,
     pub url: String,
     pub headers: Vec<(String, HttpHeaderValue)>,
     pub body: Bytes,
+    /// Only template/ref text; the live body is solely for transport writes.
     pub body_for_error: Option<String>,
+    pub delivery_redactor: Option<lash_sansio::llm::provider_body::DeliveryRedactor>,
     pub response_start_timeout_message: Option<String>,
 }
 
+impl fmt::Debug for HttpRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HttpRequest")
+            .field("method", &self.method)
+            .field("url", &"<transport endpoint>")
+            .field("headers", &self.headers)
+            .field("body_bytes", &self.body.len())
+            .field("body_for_error", &self.body_for_error)
+            .finish_non_exhaustive()
+    }
+}
 impl HttpRequest {
     pub fn new(method: HttpMethod, url: impl Into<String>, body: impl Into<Bytes>) -> Self {
         Self {
@@ -144,6 +157,7 @@ impl HttpRequest {
             headers: Vec::new(),
             body: body.into(),
             body_for_error: None,
+            delivery_redactor: None,
             response_start_timeout_message: None,
         }
     }
@@ -172,6 +186,14 @@ impl HttpRequest {
                 .into_iter()
                 .map(|(name, value)| (name.into(), value.into())),
         );
+        self
+    }
+
+    pub fn with_delivery_redactor(
+        mut self,
+        redactor: lash_sansio::llm::provider_body::DeliveryRedactor,
+    ) -> Self {
+        self.delivery_redactor = Some(redactor);
         self
     }
 

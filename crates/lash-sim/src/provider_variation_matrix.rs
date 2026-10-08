@@ -680,11 +680,10 @@ async fn complete_websocket_with_events_and_capture(
         "Codex WebSocket route identity must name the WebSocket endpoint"
     );
     let result = provider
-        .complete(matrix_request(
-            "codex.responses-websocket",
-            row,
-            Arc::clone(events),
-        ))
+        .complete(
+            matrix_request("codex.responses-websocket", row, Arc::clone(events)),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .map_err(Box::new);
     (route, result, server.captured())
@@ -815,7 +814,10 @@ async fn complete_http_buffered(
     let mut provider = http_provider(dialect, transport);
     let mut request = matrix_request(dialect, row, Arc::new(Mutex::new(Vec::new())));
     request.stream_events = None;
-    provider.complete(request).await.map_err(Box::new)
+    provider
+        .complete(request, &lash_core::provider::NoSlotDeliveries)
+        .await
+        .map_err(Box::new)
 }
 
 async fn complete_http_with_events(
@@ -839,7 +841,10 @@ async fn complete_http_with_events(
         .max_delay_ms(0);
     provider.set_options(options);
     provider
-        .complete(matrix_request(dialect, row, Arc::clone(events)))
+        .complete(
+            matrix_request(dialect, row, Arc::clone(events)),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .map_err(Box::new)
 }
@@ -922,7 +927,7 @@ fn matrix_request(
         )
         .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
-        resolved_stored: Default::default(),
+
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),

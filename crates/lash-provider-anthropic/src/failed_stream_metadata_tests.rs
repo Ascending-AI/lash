@@ -20,7 +20,7 @@ async fn native_adapters_preserve_allowlisted_metadata_on_failed_streams() {
         req.model.metadata_mut().request_defaults.response_metadata_body_paths =
             vec!["/billing/cost".into(), "/missing".into()];
         let error = provider
-            .complete(req)
+            .complete(req, &lash_core::provider::NoSlotDeliveries)
             .await
             .expect_err("missing stop and explicit error fail");
         if case == 1 {

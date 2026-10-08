@@ -47,78 +47,6 @@ impl GoogleOAuthProvider {
 
     pub(crate) const PROVIDER_KIND: &'static str = "google_oauth";
 
-    #[expect(
-        clippy::expect_used,
-        reason = "this arm only matches Inline/Stored sources, which always carry a MIME, and validate_attachments refuses unresolved stored bytes before any part is built"
-    )]
-    pub(crate) fn inline_attachment_part(req: &LlmRequest, source: &AttachmentSource) -> Value {
-        match source {
-            AttachmentSource::ProviderFile { id, .. } => {
-                json!({"fileData": {"fileUri": id}})
-            }
-            AttachmentSource::ExternalUrl { media_type, url } => {
-                json!({"fileData": {"mimeType": media_type, "fileUri": url}})
-            }
-            AttachmentSource::Inline { .. } | AttachmentSource::Stored { .. } => {
-                let media_type = source.media_type().expect("MIME-bearing source");
-                let bytes = req
-                    .attachment_bytes(source)
-                    .expect("validated attachment bytes");
-                let data = base64::engine::general_purpose::STANDARD.encode(bytes);
-                json!({
-                    "inlineData": {
-                        "mimeType": media_type,
-                        "data": data,
-                    }
-                })
-            }
-        }
-    }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "Stored sources always carry attachment_ref.media_type; only ProviderFile can lack a caller MIME"
-    )]
-    pub(crate) fn validate_attachments(req: &LlmRequest) -> Result<(), LlmTransportError> {
-        for (message_index, message) in req.messages.iter().enumerate() {
-            for source in message
-                .blocks
-                .iter()
-                .flat_map(LlmContentBlock::attachment_sources)
-            {
-                let validation = (|| {
-                    let supported = req.attachment_acceptance.accepts("Google Gemini", source);
-                    if !supported {
-                        let accepted_by =
-                            known_attachment_acceptors(&req.attachment_acceptance, source);
-                        return Err(unsupported_attachment_capability(
-                            "Google Gemini",
-                            source,
-                            &accepted_by,
-                        ));
-                    }
-                    if matches!(source, AttachmentSource::Stored { .. })
-                        && req.attachment_bytes(source).is_none()
-                    {
-                        let mime = source.media_type().expect("stored source MIME");
-                        return Err(LlmTransportError::new(format!(
-                    "Google Gemini could not materialize stored attachment MIME `{mime}` because session-guard resolution did not provide its bytes"
-                ))
-                .with_kind(ProviderFailureKind::Validation)
-                .with_lash_code(TurnFailureCode::StoredAttachmentNotResolved));
-                    }
-
-                    Ok(())
-                })();
-                validation.map_err(|mut error: LlmTransportError| {
-                    error.message = format!("message index {message_index}: {}", error.message);
-                    error
-                })?;
-            }
-        }
-        Ok(())
-    }
-
     fn valid_text_signature(meta: &ResponseTextMeta) -> Option<String> {
         let signature = meta.provider_payload.as_deref()?.trim();
         if signature.is_empty() {
@@ -139,18 +67,10 @@ impl GoogleOAuthProvider {
     pub(crate) fn build_contents_with_attachment_parts(
         &self,
         req: &LlmRequest,
-        attachment_parts: &[(AttachmentSource, Value)],
     ) -> Result<Vec<Value>, LlmTransportError> {
         let safe_request = self.reasoning_retention_safe_request(req)?;
         let req = safe_request.as_ref();
         let mut out: Vec<Value> = Vec::new();
-        let attachment_part = |source: &AttachmentSource| {
-            attachment_parts
-                .iter()
-                .find(|(candidate, _)| candidate == source)
-                .map(|(_, part)| part.clone())
-                .unwrap_or_else(|| Self::inline_attachment_part(req, source))
-        };
         // Gemini 3 accepts media inside a function response; older dialects
         // (and Claude on Vertex) take it only as ordinary user parts.
         let multimodal_function_response = matches!(
@@ -202,9 +122,9 @@ impl GoogleOAuthProvider {
                         }
                         parts.push(part);
                     }
-                    LlmContentBlock::Attachment { source } => {
+                    LlmContentBlock::Attachment { reference } => {
                         if matches!(msg.role, LlmRole::User | LlmRole::System) {
-                            parts.push(attachment_part(source));
+                            parts.push(attachment_operand(reference, AttachmentPosition::Message));
                         }
                     }
                     LlmContentBlock::ToolCall {
@@ -261,11 +181,17 @@ impl GoogleOAuthProvider {
                             if multimodal_function_response
                                 && function_response_part_accepts(source)
                             {
-                                inside.push(attachment_part(source));
+                                inside.push(attachment_operand(
+                                    source,
+                                    AttachmentPosition::ToolResult,
+                                ));
                             } else {
                                 after
                                     .push(json!({ "text": format!("[Attachment {}]", index + 1) }));
-                                after.push(attachment_part(source));
+                                after.push(attachment_operand(
+                                    source,
+                                    AttachmentPosition::ToolResult,
+                                ));
                             }
                         }
                         if !inside.is_empty() {
@@ -617,11 +543,12 @@ impl GoogleOAuthProvider {
 /// Whether Gemini accepts `source` as a multimodal function-response part.
 /// Google documents images (PNG, JPEG, WebP) and documents (PDF, plain text)
 /// there; audio, video and anything else must travel as ordinary user parts.
-fn function_response_part_accepts(source: &AttachmentSource) -> bool {
-    source.media_type().is_some_and(|media_type| {
+fn function_response_part_accepts(source: &AttachmentRef) -> bool {
+    {
+        let media_type = &source.media_type;
         matches!(
             media_type.as_str(),
             "image/png" | "image/jpeg" | "image/webp" | "application/pdf" | "text/plain"
         )
-    })
+    }
 }

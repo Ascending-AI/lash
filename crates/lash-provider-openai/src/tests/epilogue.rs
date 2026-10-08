@@ -35,9 +35,10 @@ async fn chat_completion_epilogue_conformance() {
             let mut provider = openrouter_provider()
                 .with_transport(Arc::new(EpilogueTransport::new(body, streamed, scenario)));
             provider
-                .complete(streamed_request(Arc::new(
-                    std::sync::Mutex::new(Vec::new()),
-                )))
+                .complete(
+                    streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
+                    &lash_core::provider::NoSlotDeliveries,
+                )
                 .await
         })
         .await;
@@ -54,7 +55,7 @@ async fn responses_completion_epilogue_conformance() {
             provider
                 .complete(requiring_terminal_evidence(streamed_request(Arc::new(
                     std::sync::Mutex::new(Vec::new()),
-                ))))
+                ))), &lash_core::provider::NoSlotDeliveries)
                 .await
         })
         .await;
@@ -76,7 +77,7 @@ async fn codex_completion_epilogue_conformance() {
         provider
             .complete(requiring_terminal_evidence(streamed_request(Arc::new(
                 std::sync::Mutex::new(Vec::new()),
-            ))))
+            ))), &lash_core::provider::NoSlotDeliveries)
             .await
     })
     .await;

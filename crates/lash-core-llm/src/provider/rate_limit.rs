@@ -478,8 +478,14 @@ mod admission_tests {
         let mut second = first.clone();
         let completions = async {
             tokio::join!(
-                first.complete(super::super::tests::empty_request(),),
-                second.complete(super::super::tests::empty_request(),)
+                first.complete(
+                    super::super::tests::empty_request(),
+                    &crate::provider::NoSlotDeliveries
+                ),
+                second.complete(
+                    super::super::tests::empty_request(),
+                    &crate::provider::NoSlotDeliveries
+                )
             )
         };
         tokio::pin!(completions);
@@ -524,7 +530,7 @@ mod admission_tests {
         async fn send(
             &mut self,
             _request: LlmRequest,
-            _body: &ProviderRequestBody,
+            _body: &lash_sansio::llm::types::LiveRequestBody,
         ) -> Result<LlmResponse, LlmTransportError> {
             self.0.reliability.rate_limits.requests_per_window = Some(1);
             if std::mem::take(&mut self.1) {
@@ -569,7 +575,10 @@ mod admission_tests {
         let mut handle =
             super::super::handle::ProviderHandle::new(components(true).with_clock(clock.clone()));
         let completion = handle
-            .complete(super::super::tests::empty_request())
+            .complete(
+                super::super::tests::empty_request(),
+                &crate::provider::NoSlotDeliveries,
+            )
             .await
             .unwrap();
         assert_eq!(completion.call_record.attempts.len(), 2);
@@ -592,7 +601,10 @@ mod admission_tests {
         let limiter = Arc::clone(&components.rate_limiter);
         let mut first = super::super::handle::ProviderHandle::new(components.clone());
         first
-            .complete(super::super::tests::empty_request())
+            .complete(
+                super::super::tests::empty_request(),
+                &crate::provider::NoSlotDeliveries,
+            )
             .await
             .unwrap();
         let gate = limiter.state.lock_recover().semaphore.clone().unwrap();
@@ -614,13 +626,16 @@ mod admission_tests {
         let request = super::super::tests::empty_request();
         assert!(
             second_handle
-                .complete(request.clone())
+                .complete(request.clone(), &crate::provider::NoSlotDeliveries)
                 .now_or_never()
                 .is_none(),
             "the cloned binding shares the outstanding concurrency permit"
         );
         drop(held);
-        second_handle.complete(request).await.unwrap();
+        second_handle
+            .complete(request, &crate::provider::NoSlotDeliveries)
+            .await
+            .unwrap();
         assert_eq!(replacement.timestamp_ms(), 1000);
         assert_eq!(gate.available_permits(), 1);
     }

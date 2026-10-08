@@ -31,84 +31,8 @@ impl OpenAiCompatibleProvider {
         }
     }
 
-    fn validate_chat_attachments(req: &LlmRequest) -> Result<(), LlmTransportError> {
-        for (message_index, message) in req.messages.iter().enumerate() {
-            for source in message
-                .blocks
-                .iter()
-                .flat_map(LlmContentBlock::attachment_sources)
-            {
-                let validation = (|| {
-                    let supported = req
-                        .attachment_acceptance
-                        .accepts("OpenAI Chat Completions", source);
-                    if !supported {
-                        let accepted_by =
-                            known_attachment_acceptors(&req.attachment_acceptance, source);
-                        return Err(unsupported_attachment_capability(
-                            "OpenAI Chat Completions",
-                            source,
-                            &accepted_by,
-                        ));
-                    }
-                    // Chat's image_url wire part has no provider-file handle representation.
-                    if matches!(source, AttachmentSource::ProviderFile { .. }) {
-                        return Err(LlmTransportError::new(
-                            "Chat attachment wire parts cannot encode a provider-file handle",
-                        )
-                        .with_kind(ProviderFailureKind::Validation)
-                        .with_lash_code(TurnFailureCode::AttachmentSourceNotEncodable));
-                    }
-                    if matches!(source, AttachmentSource::Stored { .. })
-                        && req.attachment_bytes(source).is_none()
-                    {
-                        return Err(LlmTransportError::new(
-                    "OpenAI Chat Completions could not materialize a stored attachment because session-guard resolution did not provide its bytes",
-                )
-                .with_kind(ProviderFailureKind::Validation)
-                .with_lash_code(TurnFailureCode::StoredAttachmentNotResolved));
-                    }
-
-                    if !source.media_type().is_some_and(|mime| mime.is_image()) {
-                        return Err(LlmTransportError::new(
-                            "Chat attachment parts require an image media type",
-                        )
-                        .with_kind(ProviderFailureKind::Validation)
-                        .with_lash_code(TurnFailureCode::AttachmentSourceNotEncodable));
-                    }
-
-                    Ok(())
-                })();
-                validation.map_err(|mut error: LlmTransportError| {
-                    error.message = format!("message index {message_index}: {}", error.message);
-                    error
-                })?;
-            }
-        }
-        Ok(())
-    }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "`validate_chat_attachments` runs over the same request first and \
-                  refuses every source that is not an image with resolved bytes, so \
-                  both are present by the time the part is built"
-    )]
-    fn chat_attachment_part(req: &LlmRequest, source: &AttachmentSource) -> Value {
-        let media_type = source.media_type().expect("validated image source");
-        let url = match source {
-            AttachmentSource::ExternalUrl { url, .. } => url.clone(),
-            AttachmentSource::Inline { .. } | AttachmentSource::Stored { .. } => {
-                let bytes = req
-                    .attachment_bytes(source)
-                    .expect("validated attachment bytes");
-                crate::request_work::attachment_data_url(media_type.as_str(), bytes)
-            }
-            AttachmentSource::ProviderFile { .. } => unreachable!(),
-        };
-        let mut part = json!({"type": "image_url", "image_url": {}});
-        part["image_url"]["url"] = Value::String(url);
-        part
+    fn chat_attachment_part(reference: &AttachmentRef, position: AttachmentPosition) -> Value {
+        json!({"type": "image_url", "image_url": {"url": attachment_operand(reference, position)}})
     }
 
     fn build_chat_messages(req: &LlmRequest) -> Vec<Value> {
@@ -146,8 +70,13 @@ impl OpenAiCompatibleProvider {
                         }
                         text_parts.push(part);
                     }
-                    LlmContentBlock::Attachment { source } if matches!(msg.role, LlmRole::User) => {
-                        text_parts.push(Self::chat_attachment_part(req, source));
+                    LlmContentBlock::Attachment { reference }
+                        if matches!(msg.role, LlmRole::User) =>
+                    {
+                        text_parts.push(Self::chat_attachment_part(
+                            reference,
+                            AttachmentPosition::Message,
+                        ));
                     }
                     LlmContentBlock::ToolCall {
                         call_id,
@@ -192,9 +121,12 @@ impl OpenAiCompatibleProvider {
                                 "type": "text",
                                 "text": format!("Attachments from tool result {call_id}:"),
                             }));
-                            text_parts.extend(
-                                attachments.map(|source| Self::chat_attachment_part(req, source)),
-                            );
+                            text_parts.extend(attachments.map(|reference| {
+                                Self::chat_attachment_part(
+                                    reference,
+                                    AttachmentPosition::ToolResult,
+                                )
+                            }));
                         }
                         let mut tool_message = json!({
                             "role": "tool",
@@ -461,7 +393,6 @@ impl OpenAiCompatibleProvider {
             )
             .map_err(reasoning_retention_transport_error)?;
         let req = safe_request.as_ref();
-        Self::validate_chat_attachments(req)?;
         let compat = self.resolved_compat(CompletionEndpoint::ChatCompletions);
         let policy =
             resolve_generation_policy(req, self.kind(), &Self::chat_generation_wire(&compat, req))?;

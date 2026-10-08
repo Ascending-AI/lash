@@ -1,5 +1,5 @@
-#[cfg(test)]
-mod attachment_tests;
+mod attachment_delivery;
+
 mod config;
 mod policy;
 mod provider;
@@ -17,13 +17,13 @@ pub use config::{AnthropicAuthScheme, AnthropicProvider, DEFAULT_BASE_URL};
 
 #[cfg(test)]
 mod tests {
+    mod delivery_secret;
     mod request_support;
     use request_support::request;
     mod block_identity_tests;
     mod runtime_feedback;
     mod stream_bounds;
     mod tool_identity;
-    mod tool_result_shape;
     use runtime_feedback::request_with_instructions;
     mod epilogue;
     mod generation_tests;
@@ -32,11 +32,10 @@ mod tests {
     use crate::stream::StreamState;
     use crate::{AnthropicProvider, DEFAULT_BASE_URL};
     use lash_core::llm::types::{
-        AnthropicThinkingRetention, AttachmentSource, LlmContentBlock, LlmEventSender,
-        LlmJsonSchema, LlmMessage, LlmOutputPart, LlmOutputSpec, LlmRequest, LlmRole,
-        LlmStreamEvent, LlmTerminalReason, LlmToolChoice, LlmToolSpec, LlmUsage,
-        NonNegativeFiniteF64, ReasoningRetentionCapability, ReasoningRetentionPolicy,
-        ReasoningRetentionSelection,
+        AnthropicThinkingRetention, LlmContentBlock, LlmEventSender, LlmJsonSchema, LlmMessage,
+        LlmOutputPart, LlmOutputSpec, LlmRequest, LlmRole, LlmStreamEvent, LlmTerminalReason,
+        LlmToolChoice, LlmToolSpec, LlmUsage, NonNegativeFiniteF64, ReasoningRetentionCapability,
+        ReasoningRetentionPolicy, ReasoningRetentionSelection,
     };
     use lash_core::provider::{
         CacheRetention, LlmProfileCapability, Provider, ReasoningCapability, ReasoningEncoding,
@@ -209,7 +208,7 @@ mod tests {
             .with_transport(Arc::new(StaticSseTransport("")));
         assert_eq!(
             provider
-                .complete(base)
+                .complete(base, &lash_core::provider::NoSlotDeliveries)
                 .await
                 .unwrap_err()
                 .code
@@ -261,7 +260,7 @@ mod tests {
             .response_metadata_body_paths = vec!["/billing/cost".to_string()];
 
         let response = provider
-            .complete(req)
+            .complete(req, &lash_core::provider::NoSlotDeliveries)
             .await
             .expect("metadata fixture completes");
 
@@ -317,7 +316,7 @@ mod tests {
             .with_transport(Arc::new(StaticSseTransport(body)));
 
         let error = provider
-            .complete(req)
+            .complete(req, &lash_core::provider::NoSlotDeliveries)
             .await
             .expect_err("message_stop is required");
 
@@ -371,7 +370,10 @@ mod tests {
         let mut monotonic = AnthropicProvider::new("key")
             .with_transport(Arc::new(StaticSseTransport(monotonic_body)));
         let response = monotonic
-            .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+            .complete(
+                request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+                &lash_core::provider::NoSlotDeliveries,
+            )
             .await
             .expect("a cumulative trailing zero must not erase a positive count");
         assert_eq!(
@@ -391,7 +393,10 @@ mod tests {
         let mut drifting = AnthropicProvider::new("key")
             .with_transport(Arc::new(StaticSseTransport(drifting_body)));
         let error = drifting
-            .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+            .complete(
+                request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+                &lash_core::provider::NoSlotDeliveries,
+            )
             .await
             .expect_err("one stream cannot change provider response identity");
         assert!(
@@ -420,7 +425,7 @@ mod tests {
             .with_transport(Arc::new(StaticSseTransport(body)));
 
         let error = provider
-            .complete(req)
+            .complete(req, &lash_core::provider::NoSlotDeliveries)
             .await
             .expect_err("EOF mid-arguments must fail without message_stop");
         let partial = error.partial_response.as_deref().expect("partial response");
@@ -506,7 +511,7 @@ mod tests {
             .with_transport(Arc::new(StaticSseTransport(terminal_body)));
         assert_eq!(
             terminal
-                .complete(terminal_req)
+                .complete(terminal_req, &lash_core::provider::NoSlotDeliveries)
                 .await
                 .expect("terminal stream")
                 .full_text(),
@@ -524,7 +529,7 @@ mod tests {
             AnthropicProvider::new("key").with_transport(Arc::new(StaticSseTransport(eof_body)));
         assert_eq!(
             tolerant
-                .complete(tolerant_req)
+                .complete(tolerant_req, &lash_core::provider::NoSlotDeliveries)
                 .await
                 .expect("tolerated EOF")
                 .full_text(),
@@ -553,84 +558,6 @@ mod tests {
                 cache_write_input_tokens: 4,
                 reasoning_output_tokens: 3,
             }
-        );
-    }
-
-    #[test]
-    fn external_pdf_serializes_as_document_url_block() {
-        let provider = AnthropicProvider::new("key");
-        let attachment = AttachmentSource::external_url(
-            lash_core::MediaType::parse("application/pdf").unwrap(),
-            "https://example.test/report.pdf",
-        );
-        let req = request(vec![LlmMessage::new(
-            LlmRole::User,
-            vec![LlmContentBlock::Attachment {
-                source: Box::new(attachment),
-            }],
-        )]);
-
-        let body = provider.build_request_body(&req).expect("body");
-        let block = &body["messages"][0]["content"][0];
-        assert_eq!(block["type"], "document");
-        assert_eq!(block["source"]["type"], "url");
-        assert_eq!(block["source"]["url"], "https://example.test/report.pdf");
-    }
-
-    #[test]
-    fn provider_file_uses_media_type_to_select_image_or_document_block() {
-        let provider = AnthropicProvider::new("key");
-
-        for (mime, expected_block_type, file_id) in [
-            ("image/png", "image", "file-image"),
-            ("application/pdf", "document", "file-document"),
-        ] {
-            let attachment = AttachmentSource::provider_file(
-                lash_core::ProviderFileScope::new("anthropic", "credential"),
-                file_id,
-                Some(lash_core::MediaType::parse(mime).unwrap()),
-            );
-            let req = request(vec![LlmMessage::new(
-                LlmRole::User,
-                vec![LlmContentBlock::Attachment {
-                    source: Box::new(attachment),
-                }],
-            )]);
-
-            let body = provider.build_request_body(&req).expect("body");
-            let block = &body["messages"][0]["content"][0];
-            assert_eq!(block["type"], expected_block_type);
-            assert_eq!(block["source"], json!({"type": "file", "file_id": file_id}));
-        }
-    }
-
-    #[test]
-    fn provider_file_without_media_type_is_rejected_before_transport() {
-        let provider = AnthropicProvider::new("key");
-        let attachment = AttachmentSource::provider_file(
-            lash_core::ProviderFileScope::new("anthropic", "credential"),
-            "file-without-mime",
-            None,
-        );
-        let req = request(vec![LlmMessage::new(
-            LlmRole::User,
-            vec![LlmContentBlock::Attachment {
-                source: Box::new(attachment),
-            }],
-        )]);
-
-        let err = provider
-            .build_request_body(&req)
-            .expect_err("missing MIME should be rejected before transport");
-
-        assert_eq!(err.kind, lash_core::ProviderFailureKind::Validation);
-        assert_eq!(
-            err.code.as_ref().map(|code| code.to_string()),
-            Some("lash:provider_file_media_type_required".to_string())
-        );
-        assert_eq!(
-            err.message,
-            "message index 0: Anthropic Messages requires the media type for provider file ids in order to choose the image/document modality; supply `media_type` on `ProviderFile`"
         );
     }
 
@@ -965,7 +892,7 @@ mod tests {
             .enable_all()
             .build()
             .expect("test runtime")
-            .block_on(provider.complete(req))
+            .block_on(provider.complete(req, &lash_core::provider::NoSlotDeliveries))
             .expect("stream completes");
         let value = beta.lock_recover().clone();
         value.expect("anthropic-beta header sent")
@@ -987,7 +914,7 @@ mod tests {
             .enable_all()
             .build()
             .unwrap()
-            .block_on(provider.complete(req))
+            .block_on(provider.complete(req, &lash_core::provider::NoSlotDeliveries))
             .unwrap();
         assert_eq!(
             beta.lock_recover().as_deref(),

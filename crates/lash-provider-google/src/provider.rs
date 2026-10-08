@@ -19,9 +19,14 @@ impl GoogleOAuthProvider {
     /// Whether `err` is the API rejecting a file reference the body names.
     fn rejects_file_reference(err: &LlmTransportError) -> bool {
         matches!(err.http_status, Some(400 | 404))
-            || err.raw.as_deref().is_some_and(|raw| {
-                raw.contains("fileData") || raw.contains("fileUri") || raw.contains("file_uri")
+            && err.raw.as_deref().is_some_and(|raw| {
+                let lower = raw.to_ascii_lowercase();
+                (lower.contains("file") || lower.contains("fileuri"))
+                    && (lower.contains("not found")
+                        || lower.contains("expired")
+                        || lower.contains("does not exist"))
             })
+            && !matches!(err.kind, ProviderFailureKind::Auth)
     }
 
     /// Send `request` as a body, for a test that scripts the response.
@@ -35,14 +40,13 @@ impl GoogleOAuthProvider {
         reading: ResponseReading,
         generation_disposition: Option<GenerationReceipt>,
     ) -> Result<LlmResponse, LlmTransportError> {
-        let body = ProviderRequestBody {
-            route: self.route_identity_for_model("test"),
-            stream: stream_events.is_some(),
-            generation: generation_disposition,
-            body: serde_json::to_string(&request)
-                .map_err(|err| LlmTransportError::new(err.to_string()))?
-                .into(),
-        };
+        let template = RecordedRequestTemplate::literal(
+            self.route_identity_for_model("test"),
+            stream_events.is_some(),
+            generation_disposition,
+            request.to_string(),
+        );
+        let body = LiveRequestBody::fill(Arc::new(template), Vec::new()).map_err(template_error)?;
         self.execute_body(access_token, &body, stream_events, provider_trace, reading)
             .await
     }
@@ -51,7 +55,7 @@ impl GoogleOAuthProvider {
     pub(crate) async fn execute_body(
         &self,
         access_token: &str,
-        admitted: &ProviderRequestBody,
+        admitted: &LiveRequestBody,
         stream_events: Option<lash_core::llm::types::LlmEventSender>,
         provider_trace: Option<lash_core::llm::types::LlmProviderTraceSender>,
         reading: ResponseReading,
@@ -61,17 +65,17 @@ impl GoogleOAuthProvider {
             defaults,
         } = reading;
         let expose_thinking = defaults.expose_thinking;
-        let generation_disposition = admitted.generation;
+        let generation_disposition = admitted.generation();
         // The body decides whether the response streams.
-        let stream_events = if admitted.stream {
+        let stream_events = if admitted.stream() {
             stream_events.or_else(|| Some(lash_core::llm::types::LlmEventSender::new(|_| {})))
         } else {
             None
         };
-        let request_body_bytes = admitted.body.as_bytes().to_vec();
-        let request_body = Some(admitted.body.to_string());
+        let request_body_bytes = admitted.wire().into_bytes();
+        let request_body = Some(admitted.redacted());
         // The model the body names reads the response's parts.
-        let origin_model = serde_json::from_str::<Value>(&admitted.body)
+        let origin_model = serde_json::from_str::<Value>(&admitted.redacted())
             .ok()
             .and_then(|body| body.get("model").and_then(Value::as_str).map(str::to_owned));
         let method = if stream_events.is_some() {
@@ -83,7 +87,7 @@ impl GoogleOAuthProvider {
             provider_trace.as_ref(),
             "google",
             method,
-            &request_body_bytes,
+            admitted.redacted().as_bytes(),
         );
         let mut url = self.method_url(method);
         if stream_events.is_some() {
@@ -96,6 +100,7 @@ impl GoogleOAuthProvider {
             )
             .with_header("Content-Type", "application/json")
             .with_body_for_error(request_body.clone().unwrap_or_default())
+            .with_delivery_redactor(admitted.redactor())
             .with_response_start_timeout_message("Cloud Code response start timed out");
         merge_extra_headers(&mut http_request.headers, &self.extra_headers, false)?;
         let timeouts = self.options.llm_timeouts();
@@ -441,25 +446,20 @@ impl GoogleOAuthProvider {
             .map(|s| s.to_string()))
     }
 
-    /// Lower `req` with `lease`'s token: the project resolved, every stored
-    /// attachment uploaded or inlined, and the body built once. The upload
-    /// references it names are pinned in it.
+    /// Resolve the project and pin attachment slots without delivering bytes
+    /// or uploading provider files.
     async fn lower_with_token(
         &mut self,
         req: &LlmRequest,
         lease: &TokenLease,
-    ) -> Result<ProviderRequestBody, LlmTransportError> {
-        // The single deliberate exposure point: from here the plaintext only
-        // feeds request headers and the upload path.
-        let access_token = lease.token.secret().expose_secret();
-        // Uploads are cached per principal. A host that names none partitions
-        // them by token, which uploads again after a rotation.
-        let upload_scope = lease.token.principal().unwrap_or(access_token);
+    ) -> Result<RecordedRequestTemplate, LlmTransportError> {
         if self.project_id.is_none() {
             self.project_id = match self.resolved_project_id.get() {
                 Some(resolved) => Some(resolved.clone()),
                 None => {
-                    let resolved = self.resolve_project_id(access_token).await?;
+                    let resolved = self
+                        .resolve_project_id(lease.token.secret().expose_secret())
+                        .await?;
                     if let Some(resolved) = &resolved {
                         let _ = self.resolved_project_id.set(resolved.clone());
                     }
@@ -467,32 +467,29 @@ impl GoogleOAuthProvider {
                 }
             };
         }
-        let project_id = self.project_id.clone();
-        let attachment_parts = self
-            .prepare_attachment_parts(access_token, upload_scope, project_id.as_deref(), req)
-            .await?;
-        let contents = self.build_contents_with_attachment_parts(req, &attachment_parts)?;
+        let contents = self.build_contents_with_attachment_parts(req)?;
         let (request, receipt) =
-            Self::build_request_with_receipt(self, req, contents, project_id.as_deref())?;
-        let body = serde_json::to_string(&request).map_err(|err| {
-            LlmTransportError::new(format!("Failed to serialize Cloud Code body: {err}"))
-                .with_kind(lash_core::ProviderFailureKind::Validation)
-        })?;
-        Ok(ProviderRequestBody {
-            route: self.route_identity_for_model(req.model.wire_model()),
-            stream: req.stream_events.is_some(),
-            generation: Some(receipt),
-            body: body.into(),
-        })
+            Self::build_request_with_receipt(self, req, contents, self.project_id.as_deref())?;
+        lower_attachment_json(
+            |mime, position| self.attachment_accepts(req.model.wire_model(), mime, position),
+            req,
+            self.route_identity_for_model(req.model.wire_model()),
+            (req.stream_events.is_some(), Some(receipt)),
+            &request,
+            crate::attachment_delivery::CODEC,
+            &[
+                "/request/contents/*/parts/*",
+                "/request/contents/*/parts/*/functionResponse/parts/*",
+            ],
+        )
     }
 
-    /// Send `admitted` with `lease`'s token. A rejected file reference evicts
-    /// every upload the body names, so the next lowering uploads again; the
-    /// body itself is never rebuilt.
+    /// Send with the current token and report rejected file slots to the
+    /// caller, which invalidates the host-store derivatives before retry.
     async fn send_with_token(
         &self,
         req: &LlmRequest,
-        admitted: &ProviderRequestBody,
+        admitted: &LiveRequestBody,
         lease: &TokenLease,
     ) -> Result<LlmResponse, LlmTransportError> {
         let stream_events = req.stream_events.clone();
@@ -517,41 +514,20 @@ impl GoogleOAuthProvider {
             .await
         {
             Err(err) if Self::rejects_file_reference(&err) => {
-                let uris = file_uris(&admitted.body);
-                if !uris.is_empty() {
-                    Self::uploaded_attachment_cache()
-                        .lock()
-                        .await
-                        .remove_uris(&uris);
-                }
-                Err(err)
+                let slots = admitted
+                    .template()
+                    .slots()
+                    .enumerate()
+                    .filter(|(_, slot)| slot.accepts.provider_file.is_some())
+                    .map(|(index, _)| index)
+                    .collect();
+                Err(err
+                    .with_rejected_slots(slots)
+                    .with_retry_verdict(TransportRetryVerdict::RetryableTransient))
             }
             other => other,
         }
     }
-}
-
-/// Every `fileUri` the body names.
-fn file_uris(body: &str) -> Vec<String> {
-    fn walk(value: &Value, uris: &mut Vec<String>) {
-        match value {
-            Value::Object(map) => {
-                for (key, value) in map {
-                    match value {
-                        Value::String(uri) if key == "fileUri" => uris.push(uri.clone()),
-                        other => walk(other, uris),
-                    }
-                }
-            }
-            Value::Array(items) => items.iter().for_each(|item| walk(item, uris)),
-            _ => {}
-        }
-    }
-    let mut uris = Vec::new();
-    if let Ok(value) = serde_json::from_str::<Value>(body) {
-        walk(&value, &mut uris);
-    }
-    uris
 }
 
 #[async_trait]
@@ -562,6 +538,25 @@ impl Provider for GoogleOAuthProvider {
 
     fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
         self.route_identity_for_model(model)
+    }
+
+    fn attachment_accepts(
+        &self,
+        _model: &str,
+        mime: &lash_sansio::MediaType,
+        _position: AttachmentPosition,
+    ) -> ProviderAccepts {
+        self.accepts_attachment(mime)
+    }
+    fn attachment_file_scope(&self) -> Option<ProviderFileScope> {
+        self.file_scope()
+    }
+    fn encode_slot(
+        &self,
+        slot: &AttachmentSlot,
+        delivery: &Delivery,
+    ) -> Result<TransientJson, LlmTransportError> {
+        self.encode_attachment(slot, delivery)
     }
 
     fn options(&self) -> ProviderOptions {
@@ -604,7 +599,10 @@ impl Provider for GoogleOAuthProvider {
         serde_json::Value::Object(map)
     }
 
-    async fn lower(&mut self, req: &LlmRequest) -> Result<ProviderRequestBody, LlmTransportError> {
+    async fn lower(
+        &mut self,
+        req: &LlmRequest,
+    ) -> Result<RecordedRequestTemplate, LlmTransportError> {
         self.route_identity_for_model(req.model.wire_model())
             .validate_endpoint()
             .map_err(|error| {
@@ -613,7 +611,6 @@ impl Provider for GoogleOAuthProvider {
                     .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
             })?;
         let req = self.reasoning_retention_safe_request(req)?.into_owned();
-        Self::validate_attachments(&req)?;
         validate_extra_headers(
             &self.extra_headers,
             &["authorization", "content-type"],
@@ -645,40 +642,45 @@ impl Provider for GoogleOAuthProvider {
 
     async fn send(
         &mut self,
-        req: LlmRequest,
-        body: &ProviderRequestBody,
+        mut req: LlmRequest,
+        body: &LiveRequestBody,
     ) -> Result<LlmResponse, LlmTransportError> {
-        self.route_identity_for_model(req.model.wire_model())
-            .validate_endpoint()
-            .map_err(|error| {
-                LlmTransportError::new(error.to_string())
-                    .with_kind(ProviderFailureKind::Validation)
-                    .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
-            })?;
-        validate_extra_headers(
-            &self.extra_headers,
-            &["authorization", "content-type"],
-            false,
-        )?;
-        let route = self.route_identity_for_model(req.model.wire_model());
-        let tokens = Arc::clone(&self.tokens);
-        let mut lease = tokens.current(&route).await?;
-        match self.send_with_token(&req, body, &lease).await {
-            Err(error) if rejected_before_output(&error) => {
-                match tokens
-                    .replace(&route, &lease, TokenRequestReason::Rejected)
-                    .await?
-                {
-                    // Resend the admitted body once with the fresh token.
-                    Some(fresh) => {
-                        lease = fresh;
-                        self.send_with_token(&req, body, &lease).await
+        protect_callbacks(&mut req, body);
+        let result = async {
+            self.route_identity_for_model(req.model.wire_model())
+                .validate_endpoint()
+                .map_err(|error| {
+                    LlmTransportError::new(error.to_string())
+                        .with_kind(ProviderFailureKind::Validation)
+                        .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
+                })?;
+            validate_extra_headers(
+                &self.extra_headers,
+                &["authorization", "content-type"],
+                false,
+            )?;
+            let route = self.route_identity_for_model(req.model.wire_model());
+            let tokens = Arc::clone(&self.tokens);
+            let mut lease = tokens.current(&route).await?;
+            match self.send_with_token(&req, body, &lease).await {
+                Err(error) if rejected_before_output(&error) => {
+                    match tokens
+                        .replace(&route, &lease, TokenRequestReason::Rejected)
+                        .await?
+                    {
+                        // Resend the admitted body once with the fresh token.
+                        Some(fresh) => {
+                            lease = fresh;
+                            self.send_with_token(&req, body, &lease).await
+                        }
+                        None => Err(error),
                     }
-                    None => Err(error),
                 }
+                other => other,
             }
-            other => other,
         }
+        .await;
+        protect_result(result, body)
     }
 
     fn clone_boxed(&self) -> Box<dyn Provider> {
@@ -747,7 +749,7 @@ mod error_detail_tests {
                 LlmRole::User,
                 "hello",
             )],
-            resolved_stored: Default::default(),
+
             tools: Arc::new(Vec::<lash_core::llm::types::LlmToolSpec>::new()),
             tool_choice: LlmToolChoice::Auto,
             attachment_acceptance: Default::default(),
@@ -802,7 +804,10 @@ mod error_detail_tests {
                 lash_core::provider::ProviderToken::new("access"),
             ))
             .with_transport(transport.clone());
-            let error = provider.complete(req).await.expect_err(label);
+            let error = provider
+                .complete(req, &lash_core::provider::NoSlotDeliveries)
+                .await
+                .expect_err(label);
             assert_eq!(
                 error.code.as_ref().map(ToString::to_string).as_deref(),
                 Some(code),
@@ -829,7 +834,7 @@ mod error_detail_tests {
         for _ in 0..2 {
             let mut call_copy = provider.clone();
             let response = call_copy
-                .complete(completion_request())
+                .complete(completion_request(), &lash_core::provider::NoSlotDeliveries)
                 .await
                 .expect("credentialed completion succeeds");
             assert_eq!(response.full_text(), "done");
@@ -863,7 +868,7 @@ mod error_detail_tests {
             };
 
         let error = provider
-            .complete(request)
+            .complete(request, &lash_core::provider::NoSlotDeliveries)
             .await
             .expect_err("provider-native retention must be refused");
 
@@ -949,7 +954,10 @@ mod token_source_tests {
             .with_transport(transport.clone());
 
         let response = provider
-            .complete(super::error_detail_tests::completion_request())
+            .complete(
+                super::error_detail_tests::completion_request(),
+                &lash_core::provider::NoSlotDeliveries,
+            )
             .await
             .expect("the resend with the fresh token completes");
 

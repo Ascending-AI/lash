@@ -257,7 +257,7 @@ impl Dialect {
             )
             .with_reasoning(ReasoningSelection::ProviderDefault),
             messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
-            resolved_stored: Default::default(),
+
             tools: Arc::new(Vec::new()),
             tool_choice: LlmToolChoice::Auto,
             attachment_acceptance: Default::default(),
@@ -353,7 +353,10 @@ async fn run(
     let transport = Arc::new(ScriptedLlmHttpTransport::new(dialect.script()).expect("script"));
     let mut provider = dialect.provider(transport.clone(), Vec::new());
     let result = provider
-        .complete(with_llm_profile_cap(request, cap))
+        .complete(
+            with_llm_profile_cap(request, cap),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .map(|completion| {
             let body = completion
@@ -839,7 +842,10 @@ async fn route_headers_are_sent_or_refused_before_io() {
             vec![("x-matrix-route".into(), "selected".into())],
         );
         let completion = provider
-            .complete(with_llm_profile_cap(dialect.request(), cap))
+            .complete(
+                with_llm_profile_cap(dialect.request(), cap),
+                &lash_core::provider::NoSlotDeliveries,
+            )
             .await
             .unwrap_or_else(|error| panic!("{dialect:?}: {error}"));
         assert_eq!(
@@ -865,7 +871,10 @@ async fn route_headers_are_sent_or_refused_before_io() {
             vec![("CoNtEnT-TyPe".into(), "other".into())],
         );
         let error = provider
-            .complete(with_llm_profile_cap(dialect.request(), cap))
+            .complete(
+                with_llm_profile_cap(dialect.request(), cap),
+                &lash_core::provider::NoSlotDeliveries,
+            )
             .await
             .expect_err("header conflict");
         assert_eq!(
@@ -897,7 +906,7 @@ async fn thinking_visibility_and_summary_have_distinct_receipts() {
             .request_defaults
             .expose_thinking = true;
         let completion = provider
-            .complete(request)
+            .complete(request, &lash_core::provider::NoSlotDeliveries)
             .await
             .unwrap_or_else(|error| panic!("{dialect:?}: {error}"));
         let receipt = completion.generation_disposition.expect("receipt");
@@ -944,7 +953,7 @@ async fn receipt_survives_a_failure_after_send() {
     let mut request = dialect.request();
     request.generation.temperature = Some(NonNegativeFiniteF64::new(0.25).expect("finite"));
     let error = provider
-        .complete(request)
+        .complete(request, &lash_core::provider::NoSlotDeliveries)
         .await
         .expect_err("provider failure");
     assert_eq!(transport.exchanges().expect("exchanges").len(), 1);
@@ -997,7 +1006,9 @@ async fn websocket_generation_settings_have_the_same_dispositions_as_sse() {
         );
         let mut request = dialect.request();
         let expected = setting.apply(&mut request);
-        let result = provider.complete(request).await;
+        let result = provider
+            .complete(request, &lash_core::provider::NoSlotDeliveries)
+            .await;
         let captured = server.captured();
         if setting.supported(dialect) {
             let completion = result.unwrap_or_else(|error| panic!("{setting:?}: {error}"));

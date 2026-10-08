@@ -1,9 +1,9 @@
+use lash_sansio::llm::attachment_delivery::{AttachmentPosition, DeliveryForms};
 #[cfg(test)]
 pub(crate) fn attachment_test_acceptance()
 -> std::sync::Arc<lash_core::provider::AttachmentCapabilitySnapshot> {
     use lash_core::provider::{
         AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
-        AttachmentMimeSource,
     };
     let types_0 = [
         "image/jpeg",
@@ -15,25 +15,20 @@ pub(crate) fn attachment_test_acceptance()
     .into_iter()
     .map(str::to_owned)
     .collect::<Vec<_>>();
-    let rules_0 = [
-        AttachmentMimeSource::Inline,
-        AttachmentMimeSource::Stored,
-        AttachmentMimeSource::ExternalUrl,
-    ]
-    .into_iter()
-    .map(|source| AttachmentAcceptanceRule::Mime {
-        source,
+    let rules_0 = vec![AttachmentAcceptanceRule {
+        positions: vec![AttachmentPosition::Message, AttachmentPosition::ToolResult],
         media_types: types_0.clone(),
         media_families: [].into_iter().map(str::to_owned).collect(),
-    })
-    .chain([AttachmentAcceptanceRule::ProviderFile {
-        provider: "anthropic".into(),
-    }])
-    .collect();
+        forms: DeliveryForms {
+            bytes: true,
+            url: true,
+            provider_file: true,
+        },
+    }];
     std::sync::Arc::new(AttachmentCapabilitySnapshot {
         revision: "test-host-revision-1".into(),
         acceptors: vec![AttachmentAcceptor {
-            provider: "Anthropic Messages".into(),
+            provider: "anthropic".into(),
             rules: rules_0,
         }],
     })

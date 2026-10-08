@@ -677,7 +677,9 @@ PACKAGE_DEPS = {
         "normal": {
             "async_trait": "//third-party/rust:p0015",
             "base64": "//third-party/rust:p0024",
+            "chrono": "//third-party/rust:p0044",
             "lash_core": "//crates/lash-core:lash-core",
+            "lash_core_store": "//crates/lash-core-store:lash-core-store",
             "lash_llm_transport": "//crates/lash-llm-transport:lash-llm-transport",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "reqwest": "//third-party/rust:p0277",

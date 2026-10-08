@@ -54,7 +54,7 @@ fn request() -> LlmRequest {
         )
         .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "hello")],
-        resolved_stored: Default::default(),
+
         tools: Arc::new(Vec::<LlmToolSpec>::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
@@ -110,9 +110,11 @@ fn charge_safety_google_escaped_content_refuses_retry_with_typed_reason() {
         .expect("test runtime");
     let (mut handle, calls) = handle(body);
     let failure = runtime
-        .block_on(
-            handle.complete_with_charge_safety(request(), ChargeSafetyPolicy::RequireGuarantee),
-        )
+        .block_on(handle.complete_with_charge_safety(
+            request(),
+            ChargeSafetyPolicy::RequireGuarantee,
+            &lash_core::provider::NoSlotDeliveries,
+        ))
         .expect_err("escaped provider output must stop the retry ladder");
 
     assert_eq!(calls.load(Ordering::SeqCst), 1);
@@ -155,9 +157,11 @@ fn charge_safety_google_truly_empty_partial_schedules_empty_stream_retry() {
         .expect("test runtime");
     let (mut handle, calls) = handle(body);
     let failure = runtime
-        .block_on(
-            handle.complete_with_charge_safety(request(), ChargeSafetyPolicy::RequireGuarantee),
-        )
+        .block_on(handle.complete_with_charge_safety(
+            request(),
+            ChargeSafetyPolicy::RequireGuarantee,
+            &lash_core::provider::NoSlotDeliveries,
+        ))
         .expect_err("two truncated responses exhaust the retry budget");
 
     assert_eq!(calls.load(Ordering::SeqCst), 2);

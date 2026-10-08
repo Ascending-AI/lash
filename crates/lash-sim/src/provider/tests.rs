@@ -29,7 +29,10 @@ async fn provider_wire_script_openai_compatible_chat_stream_uses_real_provider_p
     let mut provider = scripted_provider(OPENAI_COMPAT_TOOL_CALL);
 
     let response = provider
-        .complete(request(Some(sender)))
+        .complete(
+            request(Some(sender)),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("scripted response");
 
@@ -61,7 +64,7 @@ async fn provider_wire_script_openai_compatible_rate_limit_error_preserves_envel
     let mut provider = scripted_provider(OPENAI_COMPAT_RATE_LIMIT);
 
     let err = provider
-        .complete(request(None))
+        .complete(request(None), &lash_core::provider::NoSlotDeliveries)
         .await
         .expect_err("rate limit error");
 
@@ -98,7 +101,7 @@ async fn provider_wire_script_openai_compatible_validation_error_preserves_envel
     let mut provider = scripted_provider(OPENAI_COMPAT_VALIDATION);
 
     let err = provider
-        .complete(request(None))
+        .complete(request(None), &lash_core::provider::NoSlotDeliveries)
         .await
         .expect_err("validation error");
 
@@ -131,7 +134,10 @@ async fn provider_wire_script_openai_compatible_mid_stream_disconnect_surfaces_s
     let mut provider = scripted_provider(OPENAI_COMPAT_DISCONNECT);
 
     let err = provider
-        .complete(request(Some(sender)))
+        .complete(
+            request(Some(sender)),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect_err("mid-stream disconnect");
 
@@ -148,7 +154,7 @@ async fn provider_wire_script_direct_openai_responses_uses_real_provider_parser(
     let mut provider = OpenAiProvider::new("test-key").with_transport(transport);
 
     let response = provider
-        .complete(responses_request())
+        .complete(responses_request(), &lash_core::provider::NoSlotDeliveries)
         .await
         .expect("scripted OpenAI Responses response");
 
@@ -170,7 +176,14 @@ async fn provider_wire_script_cancellation_before_response_start_commits_no_outp
     let mut provider = OpenAiCompatibleProvider::new("test-key", "https://provider.test")
         .with_transport(transport);
 
-    let task = tokio::spawn(async move { provider.complete(request(Some(sender))).await });
+    let task = tokio::spawn(async move {
+        provider
+            .complete(
+                request(Some(sender)),
+                &lash_core::provider::NoSlotDeliveries,
+            )
+            .await
+    });
     schedule.wait_until_blocked(0, 0).await;
     task.abort();
 
@@ -202,7 +215,10 @@ async fn scripted_transport_response_start_gate_timeout_uses_production_timeout_
         .with_transport(provider_transport);
 
     let err = provider
-        .complete(request(Some(sender)))
+        .complete(
+            request(Some(sender)),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect_err("response start gate should time out");
 
@@ -260,7 +276,10 @@ async fn scripted_transport_buffers_scheduler_releases_before_provider_parks() {
         .with_transport(provider_transport);
 
     let response = provider
-        .complete(request(Some(sender)))
+        .complete(
+            request(Some(sender)),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("early scheduler releases must be buffered, not retried into no-script");
 
@@ -633,7 +652,7 @@ fn request(stream_events: Option<LlmEventSender>) -> LlmRequest {
         )
         .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "lookup x")],
-        resolved_stored: Default::default(),
+
         tools: Arc::new(vec![LlmToolSpec {
             name: "lookup".to_string(),
             description: "Lookup".to_string(),
@@ -678,7 +697,7 @@ fn responses_request() -> LlmRequest {
         )
         .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
-        resolved_stored: Default::default(),
+
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),

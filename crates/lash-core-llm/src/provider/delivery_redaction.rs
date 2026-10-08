@@ -60,8 +60,17 @@ pub fn protect_callbacks(request: &mut LlmRequest, body: &LiveRequestBody) {
                 // Authoritative block-end and Part events carry the complete
                 // text, allowing secret matching across network chunk splits.
                 LlmStreamEvent::Delta { .. } | LlmStreamEvent::ReasoningDelta { .. } => return,
-                LlmStreamEvent::TextBlockEnd { text, .. }
-                | LlmStreamEvent::ReasoningBlockEnd { text, .. } => *text = scrub(text),
+                LlmStreamEvent::TextBlockStart { block }
+                | LlmStreamEvent::ReasoningBlockStart { block } => {
+                    block.id = scrub(&block.id);
+                    block.item_id = block.item_id.take().map(|id| scrub(&id));
+                }
+                LlmStreamEvent::TextBlockEnd { block, text }
+                | LlmStreamEvent::ReasoningBlockEnd { block, text } => {
+                    block.id = scrub(&block.id);
+                    block.item_id = block.item_id.take().map(|id| scrub(&id));
+                    *text = scrub(text);
+                }
                 LlmStreamEvent::Part(part) => {
                     if scrub_typed(part, &scrub).is_err() {
                         return;
@@ -76,8 +85,10 @@ pub fn protect_callbacks(request: &mut LlmRequest, body: &LiveRequestBody) {
                     if let Some(value) = &mut evidence.provider_usage {
                         scrub_value(value, &scrub);
                     }
-                    for value in evidence.response_metadata.values_mut() {
-                        scrub_value(value, &scrub);
+                    let metadata = std::mem::take(&mut evidence.response_metadata);
+                    for (key, mut value) in metadata {
+                        scrub_value(&mut value, &scrub);
+                        evidence.response_metadata.insert(scrub(&key), value);
                     }
                 }
                 LlmStreamEvent::RetryStatus { reason, .. } => *reason = scrub(reason),
@@ -95,10 +106,11 @@ pub fn protect_result(
     let scrub = body.scrubber();
     match result {
         Ok(mut response) => {
-            response.terminal_diagnostic = response.terminal_diagnostic.take().map(|s| scrub(&s));
+            let diagnostic = response.terminal_diagnostic.take().map(|s| scrub(&s));
             if body.has_secrets() {
                 scrub_typed(&mut response, &scrub)?;
             }
+            response.terminal_diagnostic = diagnostic;
             response.request_body = Some(body.redacted());
             Ok(response)
         }
@@ -117,12 +129,14 @@ pub fn protect_result(
                 error.partial_response = Some(Box::new(protect_result(Ok(*response), body)?));
             }
             if body.has_secrets()
-                && error
-                    .code
-                    .as_ref()
-                    .is_some_and(|code| scrub(code.spelling()) != code.spelling())
+                && error.code.as_ref().is_some_and(|code| {
+                    scrub(code.spelling()) != code.spelling()
+                        || scrub(code.namespace().as_str()) != code.namespace().as_str()
+                })
             {
-                error.code = None;
+                error.code = Some(lash_sansio::session_model::FailureCode::provider(
+                    "redacted_attachment_delivery",
+                ));
             }
             Err(error)
         }

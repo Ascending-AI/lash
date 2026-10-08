@@ -1,3 +1,4 @@
+mod attachment_delivery;
 mod chat;
 pub mod codex;
 mod common;

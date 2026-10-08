@@ -36,7 +36,7 @@ use lash_core_store::tool_run::{
     CompletionSource, KnownFailureReason, MaterialOwner, MaterialRole,
 };
 use lash_durable::domain::OwnerKey;
-use lash_sansio::llm::types::{ProviderRequestBody, ProviderRouteIdentity};
+use lash_sansio::llm::types::{ProviderRouteIdentity, RecordedRequestTemplate};
 use lash_sansio::sansio::ExecutionEnvironmentSync;
 use lash_sansio::{
     ExecutionBudgets, ExecutionPolicy, ModelToolReturn, SessionId, ToolCallOutput, ToolFailure,
@@ -619,7 +619,7 @@ impl TurnDrive for SimDrive {
             endpoint: "https://sim.test/v1".into(),
             model: request.model.wire_model().into(),
         };
-        let body = ProviderRequestBody::of_request(route, &request)
+        let body = RecordedRequestTemplate::of_request(route, &request)
             .map_err(|error| TurnError::Exec(error.to_string()))?;
         Ok(PreparedCall::Admit(Box::new(ComposedCall {
             request,
@@ -633,7 +633,7 @@ impl TurnDrive for SimDrive {
         _cx: &ActorContext,
         id: EffectId,
         request: Arc<LlmRequest>,
-        _body: &ProviderRequestBody,
+        _body: &RecordedRequestTemplate,
         _attempt: ModelCallAttempt,
     ) -> Result<(), TurnError> {
         let rendered =

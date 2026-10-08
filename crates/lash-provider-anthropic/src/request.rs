@@ -28,29 +28,16 @@ impl AnthropicProvider {
         }
     }
 
-    fn attachment_block_value(req: &LlmRequest, source: &AttachmentSource) -> Option<Value> {
-        let media_type = source.media_type()?;
-        let block_type = if media_type.is_image() {
+    fn attachment_block_value(
+        reference: &AttachmentRef,
+        position: AttachmentPosition,
+    ) -> Option<Value> {
+        let block_type = if reference.media_type.is_image() {
             "image"
         } else {
             "document"
         };
-        let wire_source = match source {
-            AttachmentSource::ExternalUrl { url, .. } => json!({"type": "url", "url": url}),
-            AttachmentSource::Inline { .. } | AttachmentSource::Stored { .. } => {
-                let bytes = req.attachment_bytes(source)?;
-                let data = base64::engine::general_purpose::STANDARD.encode(bytes);
-                json!({
-                    "type": "base64",
-                    "media_type": media_type,
-                    "data": data,
-                })
-            }
-            AttachmentSource::ProviderFile { id, .. } => {
-                json!({"type": "file", "file_id": id})
-            }
-        };
-        Some(json!({"type": block_type, "source": wire_source}))
+        Some(json!({"type": block_type, "source": attachment_operand(reference, position)}))
     }
 
     fn text_block_value(text: &str) -> Value {
@@ -75,7 +62,10 @@ impl AnthropicProvider {
                 }
                 Ok(Some(Self::text_block_value(text)))
             }
-            LlmContentBlock::Attachment { source } => Ok(Self::attachment_block_value(req, source)),
+            LlmContentBlock::Attachment { reference } => Ok(Self::attachment_block_value(
+                reference,
+                AttachmentPosition::Message,
+            )),
             LlmContentBlock::ToolCall {
                 call_id,
                 tool_name,
@@ -121,7 +111,10 @@ impl AnthropicProvider {
                                         Some(Self::text_block_value(&retained.witness))
                                     }
                                     ModelToolReturnPart::Attachment(source) => {
-                                        Self::attachment_block_value(req, source)
+                                        Self::attachment_block_value(
+                                            source,
+                                            AttachmentPosition::ToolResult,
+                                        )
                                     }
                                 })
                                 .collect(),
@@ -163,7 +156,7 @@ impl AnthropicProvider {
     fn message_has_content(msg: &LlmMessage) -> bool {
         msg.blocks.iter().any(|block| match block {
             LlmContentBlock::Text { text, .. } => !text.trim().is_empty(),
-            LlmContentBlock::Attachment { source } => source.media_type().is_some(),
+            LlmContentBlock::Attachment { .. } => true,
             LlmContentBlock::ToolCall { .. } | LlmContentBlock::ToolResult { .. } => true,
             LlmContentBlock::Reasoning { text, replay, .. } => {
                 !text.trim().is_empty()
@@ -479,57 +472,6 @@ impl AnthropicProvider {
                     .with_retry_verdict(TransportRetryVerdict::Forbidden)
             })?;
         let req = safe_request.as_ref();
-        for (message_index, message) in req.messages.iter().enumerate() {
-            for source in message
-                .blocks
-                .iter()
-                .flat_map(LlmContentBlock::attachment_sources)
-            {
-                let validation = (|| {
-                    if matches!(
-                        source,
-                        AttachmentSource::ProviderFile {
-                            media_type: None,
-                            ..
-                        }
-                    ) {
-                        return Err(LlmTransportError::new(
-                    "Anthropic Messages requires the media type for provider file ids in order to choose the image/document modality; supply `media_type` on `ProviderFile`",
-                )
-                .with_kind(ProviderFailureKind::Validation)
-                .with_lash_code(TurnFailureCode::ProviderFileMediaTypeRequired));
-                    }
-                    let supported = req
-                        .attachment_acceptance
-                        .accepts("Anthropic Messages", source);
-                    if !supported {
-                        let accepted_by =
-                            known_attachment_acceptors(&req.attachment_acceptance, source);
-                        return Err(unsupported_attachment_capability(
-                            "Anthropic Messages",
-                            source,
-                            &accepted_by,
-                        ));
-                    }
-                    if let AttachmentSource::Stored { attachment_ref } = source
-                        && req.attachment_bytes(source).is_none()
-                    {
-                        let mime = &attachment_ref.media_type;
-                        return Err(LlmTransportError::new(format!(
-                    "Anthropic Messages could not materialize stored attachment MIME `{mime}` because session-guard resolution did not provide its bytes"
-                ))
-                .with_kind(ProviderFailureKind::Validation)
-                .with_lash_code(TurnFailureCode::StoredAttachmentNotResolved));
-                    }
-
-                    Ok(())
-                })();
-                validation.map_err(|mut error: LlmTransportError| {
-                    error.message = format!("message index {message_index}: {}", error.message);
-                    error
-                })?;
-            }
-        }
         let policy = resolve_generation_policy(req, self.kind(), &Self::generation_wire(req))?;
         // Resolution refuses a call with no effective cap on this wire.
         let max_tokens = policy.max_output_tokens.ok_or_else(|| {

@@ -132,7 +132,7 @@ fn request() -> LlmRequest {
             LlmRole::User,
             format!("large prompt: {}", "x".repeat(3_000)),
         )],
-        resolved_stored: Default::default(),
+
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: crate::attachment_test_acceptance(),
@@ -157,7 +157,10 @@ async fn extended_provider_trace_captures_exact_serialized_chat_body() {
         event_sink.lock_recover().push(event);
     }));
 
-    let response = provider.complete(req).await.expect("completion succeeds");
+    let response = provider
+        .complete(req, &lash_core::provider::NoSlotDeliveries)
+        .await
+        .expect("completion succeeds");
 
     let request_event = events
         .lock_recover()
@@ -186,7 +189,7 @@ async fn extended_provider_trace_captures_exact_serialized_chat_body() {
         OpenAiCompatibleProvider::new(SECRET_SENTINEL, "https://example.test/v1")
             .with_transport(untraced_transport.clone());
     untraced_provider
-        .complete(request())
+        .complete(request(), &lash_core::provider::NoSlotDeliveries)
         .await
         .expect("untraced completion succeeds");
     let untraced_body = {
@@ -207,7 +210,7 @@ async fn extended_provider_trace_captures_exact_serialized_chat_body() {
     }));
 
     let error = error_provider
-        .complete(error_req)
+        .complete(error_req, &lash_core::provider::NoSlotDeliveries)
         .await
         .expect_err("provider error is returned");
     let error_event = error_events
@@ -236,7 +239,7 @@ async fn codex_sse_provider_trace_captures_exact_serialized_request_body() {
     let (req, events) = traced_request(&events);
 
     let error = provider
-        .complete(req)
+        .complete(req, &lash_core::provider::NoSlotDeliveries)
         .await
         .expect_err("provider error is returned");
 
@@ -273,7 +276,7 @@ async fn codex_websocket_provider_trace_captures_exact_serialized_request_body()
     let (req, events) = traced_request(&events);
 
     let error = provider
-        .complete(req)
+        .complete(req, &lash_core::provider::NoSlotDeliveries)
         .await
         .expect_err("provider error is returned");
 

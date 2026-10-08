@@ -167,6 +167,7 @@ pub struct OpenAiCompatibleProvider {
     pub(crate) tokens: std::sync::Arc<lash_llm_transport::TokenGate>,
     pub base_url: String,
     pub options: ProviderOptions,
+    pub(crate) attachment_credential_scope: Option<String>,
     pub compat: OpenAiCompat,
     pub wire: OpenAiWireConfig,
     pub(crate) transport: std::sync::Arc<dyn LlmHttpTransport>,

@@ -48,7 +48,7 @@ fn protocol53_lookalike_name_does_not_supply_dialect() {
         }],
     )];
     let contents = provider()
-        .build_contents_with_attachment_parts(&req, &[])
+        .build_contents_with_attachment_parts(&req)
         .expect("retention policy");
     assert!(contents[0]["parts"][0].get("thoughtSignature").is_none());
 }
@@ -171,7 +171,7 @@ fn protocol53_only_explicit_gemini_dialect_supplies_missing_signature() {
             }],
         )];
         let contents = provider()
-            .build_contents_with_attachment_parts(&req, &[])
+            .build_contents_with_attachment_parts(&req)
             .expect("retention policy");
         assert_eq!(
             contents[0]["parts"][0].get("thoughtSignature").cloned(),

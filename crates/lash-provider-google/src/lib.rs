@@ -1,5 +1,5 @@
-#[cfg(test)]
-mod attachment_tests;
+mod attachment_delivery;
+
 mod config;
 #[cfg(all(test, feature = "testing"))]
 mod conformance_route;
@@ -18,18 +18,17 @@ mod support;
 #[cfg(feature = "testing")]
 pub mod testing;
 mod upload;
-#[cfg(test)]
-mod upload_cache_tests;
 
 pub use config::GoogleOAuthProvider;
+pub use upload::GoogleFileUploader;
 
 #[cfg(test)]
 mod tests {
+    mod delivery_secret;
     mod request_support;
     use request_support::{request, request_with_capability};
     mod epilogue;
     mod generation_tests;
-    mod tool_result_shape;
     use lash_sansio::sync::MutexExt;
 
     use std::num::NonZeroUsize;
@@ -38,8 +37,8 @@ mod tests {
     use super::GoogleOAuthProvider;
     use base64::Engine;
     use lash_core::llm::types::{
-        AttachmentSource, LlmContentBlock, LlmEventSender, LlmMessage, LlmOutputPart, LlmRequest,
-        LlmRole, LlmStreamEvent, LlmTerminalReason, LlmToolChoice, LlmToolSpec, LlmUsage,
+        LlmContentBlock, LlmEventSender, LlmMessage, LlmOutputPart, LlmRequest, LlmRole,
+        LlmStreamEvent, LlmTerminalReason, LlmToolChoice, LlmToolSpec, LlmUsage,
         ProviderRouteIdentity, ResponseTextMeta,
     };
     use lash_core::provider::{
@@ -439,7 +438,7 @@ mod tests {
             lash_core::provider::ProviderToken::new("access"),
         ));
         let contents = provider
-            .build_contents_with_attachment_parts(&req, &[])
+            .build_contents_with_attachment_parts(&req)
             .expect("retention policy");
         GoogleOAuthProvider::build_request(&provider, &req, contents, None)
             .expect("schema projection")
@@ -785,58 +784,6 @@ mod tests {
     }
 
     #[test]
-    fn google_audio_attachment_serializes_as_inline_data_part() {
-        let bytes = vec![0x49, 0x44, 0x33];
-        let attachment = AttachmentSource::inline(
-            lash_core::MediaType::parse("audio/mpeg").unwrap(),
-            bytes.clone(),
-        );
-        let mut req = request(None);
-        req.messages.push(LlmMessage::new(
-            LlmRole::User,
-            vec![LlmContentBlock::Attachment {
-                source: Box::new(attachment.clone()),
-            }],
-        ));
-
-        GoogleOAuthProvider::validate_attachments(&req).expect("audio is supported");
-        let part = GoogleOAuthProvider::inline_attachment_part(&req, &attachment);
-
-        assert_eq!(part["inlineData"]["mimeType"], "audio/mpeg");
-        assert_eq!(
-            part["inlineData"]["data"],
-            base64::engine::general_purpose::STANDARD.encode(bytes)
-        );
-    }
-
-    #[test]
-    fn google_provider_file_ignores_optional_media_type_hint() {
-        for media_type in [
-            None,
-            Some(lash_core::MediaType::parse("image/png").unwrap()),
-        ] {
-            let attachment = AttachmentSource::provider_file(
-                lash_core::ProviderFileScope::new("google_oauth", "credential"),
-                "files/123",
-                media_type,
-            );
-            let mut req = request(None);
-            req.messages.push(LlmMessage::new(
-                LlmRole::User,
-                vec![LlmContentBlock::Attachment {
-                    source: Box::new(attachment.clone()),
-                }],
-            ));
-
-            GoogleOAuthProvider::validate_attachments(&req).expect("provider file is supported");
-            assert_eq!(
-                GoogleOAuthProvider::inline_attachment_part(&req, &attachment),
-                json!({"fileData": {"fileUri": "files/123"}})
-            );
-        }
-    }
-
-    #[test]
     fn google_unknown_finish_reason_maps_to_provider_error() {
         let terminal_reason = GoogleOAuthProvider::terminal_reason_from_value(
             &json!({"candidates":[{"finishReason":"NEW_REASON"}]}),
@@ -1152,7 +1099,7 @@ mod tests {
 
         let provider = GoogleOAuthProvider::for_test();
         let contents = provider
-            .build_contents_with_attachment_parts(&req, &[])
+            .build_contents_with_attachment_parts(&req)
             .expect("retention policy");
         let (body, disposition) =
             GoogleOAuthProvider::build_request_with_receipt(&provider, &req, contents, None)
@@ -1210,7 +1157,7 @@ mod tests {
             }],
         )];
         let contents = GoogleOAuthProvider::for_test()
-            .build_contents_with_attachment_parts(&req, &[])
+            .build_contents_with_attachment_parts(&req)
             .expect("retention policy");
         assert_eq!(contents[0]["parts"][0]["thoughtSignature"], signature);
     }
@@ -1308,7 +1255,7 @@ mod tests {
                 }],
             )];
             let contents = GoogleOAuthProvider::for_test()
-                .build_contents_with_attachment_parts(&req, &[])
+                .build_contents_with_attachment_parts(&req)
                 .expect("retention policy");
             assert!(contents[0]["parts"][0].get("thoughtSignature").is_none());
         }

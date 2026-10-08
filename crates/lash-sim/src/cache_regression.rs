@@ -75,7 +75,7 @@ fn request(model: &str, messages: Vec<LlmMessage>) -> LlmRequest {
         )
         .with_reasoning(Default::default()),
         messages,
-        resolved_stored: Default::default(),
+
         tools: Arc::new(Vec::new()),
         tool_choice: Default::default(),
         attachment_acceptance: Default::default(),

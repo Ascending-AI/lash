@@ -481,9 +481,9 @@ pub fn stage_execution_state_components(
 
 type CompletionFuture =
     Pin<Box<dyn Future<Output = Result<LlmResponse, LlmTransportError>> + Send>>;
-type CompletionFn =
-    dyn Fn(LlmRequest, crate::ProviderRequestBody) -> CompletionFuture + Send + Sync;
-type LowerFn = dyn Fn(&LlmRequest) -> String + Send + Sync;
+type CompletionFn = dyn Fn(LlmRequest, String) -> CompletionFuture + Send + Sync;
+type TemplateFn =
+    dyn Fn(&LlmRequest) -> lash_sansio::llm::types::RecordedRequestTemplate + Send + Sync;
 type SerializeConfigFn = dyn Fn() -> serde_json::Value + Send + Sync;
 
 fn empty_provider_config() -> serde_json::Value {
@@ -499,9 +499,8 @@ pub struct TestProvider {
     generation_retry_guarantee: crate::provider::GenerationRetryGuarantee,
     options: ProviderOptions,
     serialize_config: Arc<SerializeConfigFn>,
-    /// The provider's builder: the body it lowers a request to. `None`
-    /// lowers to the request's canonical encoding.
-    lower: Option<Arc<LowerFn>>,
+    /// Optional template builder for admission laws; otherwise canonical refs.
+    template: Option<Arc<TemplateFn>>,
     complete: Arc<CompletionFn>,
 }
 
@@ -544,7 +543,7 @@ impl TestProviderBuilder {
                 generation_retry_guarantee: crate::provider::GenerationRetryGuarantee::None,
                 options: ProviderOptions::default(),
                 serialize_config: Arc::new(empty_provider_config),
-                lower: None,
+                template: None,
                 complete: Arc::new(|_request, _body| {
                     Box::pin(async {
                         Err(LlmTransportError::new(
@@ -600,20 +599,22 @@ impl TestProviderBuilder {
     /// Answer each send from the request and the exact body it sends.
     pub fn send<F, Fut>(mut self, send: F) -> Self
     where
-        F: Fn(LlmRequest, crate::ProviderRequestBody) -> Fut + Send + Sync + 'static,
+        F: Fn(LlmRequest, String) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<LlmResponse, LlmTransportError>> + Send + 'static,
     {
         self.provider.complete = Arc::new(move |request, body| Box::pin(send(request, body)));
         self
     }
 
-    /// Lower each request to the body `lower` builds: this provider's
-    /// builder.
-    pub fn lower<F>(mut self, lower: F) -> Self
+    /// Build the recorded template for tests of admission and takeover.
+    pub fn template<F>(mut self, template: F) -> Self
     where
-        F: Fn(&LlmRequest) -> String + Send + Sync + 'static,
+        F: Fn(&LlmRequest) -> lash_sansio::llm::types::RecordedRequestTemplate
+            + Send
+            + Sync
+            + 'static,
     {
-        self.provider.lower = Some(Arc::new(lower));
+        self.provider.template = Some(Arc::new(template));
         self
     }
 
@@ -647,6 +648,19 @@ impl Provider for TestProvider {
         crate::ProviderRouteIdentity::new(self.kind(), self.kind(), model)
     }
 
+    fn attachment_accepts(
+        &self,
+        _model: &str,
+        _mime: &lash_sansio::MediaType,
+        _position: lash_sansio::llm::attachment_delivery::AttachmentPosition,
+    ) -> lash_sansio::llm::attachment_delivery::ProviderAccepts {
+        lash_sansio::llm::attachment_delivery::ProviderAccepts {
+            bytes: true,
+            url: true,
+            provider_file: None,
+        }
+    }
+
     fn options(&self) -> ProviderOptions {
         self.options.clone()
     }
@@ -662,26 +676,27 @@ impl Provider for TestProvider {
     async fn lower(
         &mut self,
         request: &LlmRequest,
-    ) -> Result<crate::ProviderRequestBody, LlmTransportError> {
-        let route = self.route_identity(request.model.wire_model());
-        match &self.lower {
-            Some(lower) => Ok(crate::ProviderRequestBody {
-                route,
-                stream: request.stream_events.is_some(),
-                generation: None,
-                body: lower(request).into(),
-            }),
-            None => crate::ProviderRequestBody::of_request(route, request)
-                .map_err(|error| LlmTransportError::new(error.to_string())),
+    ) -> Result<lash_sansio::llm::types::RecordedRequestTemplate, LlmTransportError> {
+        match &self.template {
+            Some(template) => Ok(template(request)),
+            None => lash_sansio::llm::types::RecordedRequestTemplate::of_request(
+                self.route_identity(request.model.wire_model()),
+                request,
+            )
+            .map_err(crate::provider::attachment_wire::template_error),
         }
     }
 
     async fn send(
         &mut self,
-        request: LlmRequest,
-        body: &crate::ProviderRequestBody,
+        mut request: LlmRequest,
+        body: &lash_sansio::llm::types::LiveRequestBody,
     ) -> Result<LlmResponse, LlmTransportError> {
-        let mut response = (self.complete)(request, body.clone()).await?;
+        crate::provider::delivery_redaction::protect_callbacks(&mut request, body);
+        let mut response = crate::provider::delivery_redaction::protect_result(
+            (self.complete)(request, body.wire()).await,
+            body,
+        )?;
         // A scripted answer that carries counters is one its provider
         // reported, and a real provider reports them beside its own raw usage
         // record: without one the attempt is unreported by the provider
@@ -697,7 +712,7 @@ impl Provider for TestProvider {
     fn generation_retry_guarantee(
         &self,
         _request: &LlmRequest,
-        _body: &crate::ProviderRequestBody,
+        _body: &lash_sansio::llm::types::LiveRequestBody,
     ) -> crate::provider::GenerationRetryGuarantee {
         self.generation_retry_guarantee
     }

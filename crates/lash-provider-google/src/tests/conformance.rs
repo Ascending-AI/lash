@@ -266,7 +266,7 @@ impl ProviderNormalizer for GoogleNormalizer {
             lash_core::provider::ProviderToken::new("access"),
         ));
         let contents = provider
-            .build_contents_with_attachment_parts(&req, &[])
+            .build_contents_with_attachment_parts(&req)
             .expect("retention policy");
         GoogleOAuthProvider::build_request(&provider, &req, contents, None)
             .expect("conformance schema projection")

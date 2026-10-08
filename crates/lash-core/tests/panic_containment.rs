@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use lash_core::facade_support::{
     LlmTransportError, Provider, ProviderComponents, ProviderHandle, ProviderOptions,
 };
-use lash_core::{GenerationOptions, LlmRequest, LlmRequestScope, LlmResponse, ProviderRequestBody};
+use lash_core::{GenerationOptions, LlmRequest, LlmRequestScope, LlmResponse};
 
 static PANIC_MODE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -39,7 +39,7 @@ impl Provider for PanicProvider {
     async fn send(
         &mut self,
         _request: LlmRequest,
-        _body: &ProviderRequestBody,
+        _body: &lash_sansio::llm::types::LiveRequestBody,
     ) -> Result<LlmResponse, LlmTransportError> {
         panic!("provider payload only")
     }
@@ -75,7 +75,7 @@ impl Provider for ClassifierKeywordPanicProvider {
     async fn send(
         &mut self,
         _request: LlmRequest,
-        _body: &ProviderRequestBody,
+        _body: &lash_sansio::llm::types::LiveRequestBody,
     ) -> Result<LlmResponse, LlmTransportError> {
         panic!("safety context length does not exist")
     }
@@ -104,7 +104,7 @@ fn request() -> LlmRequest {
         )
         .with_reasoning(Default::default()),
         messages: Vec::new(),
-        resolved_stored: Default::default(),
+
         tools: Arc::new(Vec::new()),
         tool_choice: Default::default(),
         attachment_acceptance: Default::default(),
@@ -122,7 +122,7 @@ async fn provider_panic_is_typed_and_non_retryable() {
     lash_core::panic_containment::set_loud(false);
     let mut provider = ProviderHandle::new(ProviderComponents::new(Box::new(PanicProvider)));
     let failure = provider
-        .complete(request())
+        .complete(request(), &lash_core::provider::NoSlotDeliveries)
         .await
         .expect_err("typed failure");
 
@@ -150,7 +150,7 @@ async fn manufactured_provider_panic_bypasses_text_classification() {
         ClassifierKeywordPanicProvider,
     )));
     let failure = provider
-        .complete(request())
+        .complete(request(), &lash_core::provider::NoSlotDeliveries)
         .await
         .expect_err("typed failure");
 
@@ -189,7 +189,7 @@ impl Provider for AuxiliaryPanicProvider {
     async fn send(
         &mut self,
         _: LlmRequest,
-        _: &ProviderRequestBody,
+        _: &lash_sansio::llm::types::LiveRequestBody,
     ) -> Result<LlmResponse, LlmTransportError> {
         let auxiliary = ProviderHandle::new(ProviderComponents::new(Box::new(self.clone())));
         auxiliary.close().await?;
@@ -315,7 +315,7 @@ impl Provider for DesugaredPanicProvider {
     fn send<'life0, 'life1, 'async_trait>(
         &'life0 mut self,
         _: LlmRequest,
-        _: &'life1 ProviderRequestBody,
+        _: &'life1 lash_sansio::llm::types::LiveRequestBody,
     ) -> std::pin::Pin<
         Box<
             dyn std::future::Future<Output = Result<LlmResponse, LlmTransportError>>
@@ -422,7 +422,7 @@ async fn provider_desugared_construction_panics_are_typed_in_quiet_and_loud_mode
     let direct = std::panic::AssertUnwindSafe(async {
         match callback {
             DesugaredPanicCallback::Complete => auxiliary
-                .complete(request())
+                .complete(request(), &lash_core::provider::NoSlotDeliveries)
                 .await
                 .map(|_| ())
                 .map_err(|failure| {

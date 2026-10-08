@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use lash::direct::ProviderRouteIdentity;
 use lash::provider::{
     GenerationRetryGuarantee, LlmRequest, LlmResponse, LlmTransportError, Provider,
-    ProviderComponents, ProviderFailureKind, ProviderOptions, ProviderRequestBody,
+    ProviderComponents, ProviderFailureKind, ProviderOptions, RecordedRequestTemplate,
     TransportRetryVerdict,
 };
 use serde::Deserialize;
@@ -116,7 +116,7 @@ impl Provider for Capped {
     fn generation_retry_guarantee(
         &self,
         request: &LlmRequest,
-        body: &ProviderRequestBody,
+        body: &RecordedRequestTemplate,
     ) -> GenerationRetryGuarantee {
         self.inner.generation_retry_guarantee(request, body)
     }
@@ -126,13 +126,13 @@ impl Provider for Capped {
     async fn lower(
         &mut self,
         request: &LlmRequest,
-    ) -> Result<ProviderRequestBody, LlmTransportError> {
+    ) -> Result<RecordedRequestTemplate, LlmTransportError> {
         self.inner.lower(request).await
     }
     async fn send(
         &mut self,
         request: LlmRequest,
-        body: &ProviderRequestBody,
+        body: &lash_sansio::llm::types::LiveRequestBody,
     ) -> std::result::Result<LlmResponse, LlmTransportError> {
         let bytes = serde_json::to_vec(&request).map_err(|error| refusal(error.to_string()))?;
         let output = request

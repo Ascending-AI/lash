@@ -23,6 +23,25 @@ impl Provider for AnthropicProvider {
         )
     }
 
+    fn attachment_accepts(
+        &self,
+        _model: &str,
+        mime: &lash_sansio::MediaType,
+        _position: AttachmentPosition,
+    ) -> ProviderAccepts {
+        self.accepts_attachment(mime)
+    }
+    fn attachment_file_scope(&self) -> Option<ProviderFileScope> {
+        self.file_scope()
+    }
+    fn encode_slot(
+        &self,
+        slot: &AttachmentSlot,
+        delivery: &Delivery,
+    ) -> Result<TransientJson, LlmTransportError> {
+        self.encode_attachment(slot, delivery)
+    }
+
     fn options(&self) -> ProviderOptions {
         self.options.clone()
     }
@@ -61,59 +80,68 @@ impl Provider for AnthropicProvider {
         serde_json::Value::Object(map)
     }
 
-    async fn lower(&mut self, req: &LlmRequest) -> Result<ProviderRequestBody, LlmTransportError> {
+    async fn lower(
+        &mut self,
+        req: &LlmRequest,
+    ) -> Result<RecordedRequestTemplate, LlmTransportError> {
         self.validate_route_and_headers(req)?;
         let (body, receipt) = self.build_request(req)?;
-        let body = serde_json::to_string(&body).map_err(|err| {
-            LlmTransportError::new(format!("Failed to serialize Anthropic body: {err}"))
-                .with_kind(ProviderFailureKind::Validation)
-                .with_retry_verdict(TransportRetryVerdict::Forbidden)
-        })?;
-        Ok(ProviderRequestBody {
-            route: self.route_identity(req.model.wire_model()),
-            stream: true,
-            generation: Some(receipt),
-            body: body.into(),
-        })
+        lower_attachment_json(
+            |mime, position| self.attachment_accepts(req.model.wire_model(), mime, position),
+            req,
+            self.route_identity(req.model.wire_model()),
+            (true, Some(receipt)),
+            &body,
+            crate::attachment_delivery::CODEC,
+            &[
+                "/messages/*/content/*/source",
+                "/messages/*/content/*/content/*/source",
+            ],
+        )
     }
 
     async fn send(
         &mut self,
         mut req: LlmRequest,
-        admitted: &ProviderRequestBody,
+        admitted: &LiveRequestBody,
     ) -> Result<LlmResponse, LlmTransportError> {
-        let minting_route = self.validate_route_and_headers(&req)?;
-        if let Some(downstream) = req.stream_events.take() {
-            let stream_route = minting_route.clone();
-            req.stream_events = Some(LlmEventSender::new(move |mut event| {
-                if let LlmStreamEvent::Part(part) = &mut event {
-                    let _ = part.stamp_replay_origin(&stream_route);
-                }
-                downstream.send(event);
-            }));
-        }
-        let tokens = Arc::clone(&self.tokens);
-        let mut lease = tokens.current(&minting_route).await?;
-        match self
-            .send_attempt(&req, admitted, &minting_route, &lease.token)
-            .await
-        {
-            Err(error) if rejected_before_output(&error) => {
-                match tokens
-                    .replace(&minting_route, &lease, TokenRequestReason::Rejected)
-                    .await?
-                {
-                    // Resend the admitted body once with the fresh token.
-                    Some(fresh) => {
-                        lease = fresh;
-                        self.send_attempt(&req, admitted, &minting_route, &lease.token)
-                            .await
+        protect_callbacks(&mut req, admitted);
+        let result = async {
+            let minting_route = self.validate_route_and_headers(&req)?;
+            if let Some(downstream) = req.stream_events.take() {
+                let stream_route = minting_route.clone();
+                req.stream_events = Some(LlmEventSender::new(move |mut event| {
+                    if let LlmStreamEvent::Part(part) = &mut event {
+                        let _ = part.stamp_replay_origin(&stream_route);
                     }
-                    None => Err(error),
-                }
+                    downstream.send(event);
+                }));
             }
-            other => other,
+            let tokens = Arc::clone(&self.tokens);
+            let mut lease = tokens.current(&minting_route).await?;
+            match self
+                .send_attempt(&req, admitted, &minting_route, &lease.token)
+                .await
+            {
+                Err(error) if rejected_before_output(&error) => {
+                    match tokens
+                        .replace(&minting_route, &lease, TokenRequestReason::Rejected)
+                        .await?
+                    {
+                        // Resend the admitted body once with the fresh token.
+                        Some(fresh) => {
+                            lease = fresh;
+                            self.send_attempt(&req, admitted, &minting_route, &lease.token)
+                                .await
+                        }
+                        None => Err(error),
+                    }
+                }
+                other => other,
+            }
         }
+        .await;
+        protect_result(result, admitted)
     }
 
     fn clone_boxed(&self) -> Box<dyn Provider> {
@@ -126,7 +154,7 @@ impl AnthropicProvider {
     async fn send_attempt(
         &self,
         req: &LlmRequest,
-        admitted: &ProviderRequestBody,
+        admitted: &LiveRequestBody,
         minting_route: &ProviderRouteIdentity,
         token: &ProviderToken,
     ) -> Result<LlmResponse, LlmTransportError> {
@@ -138,21 +166,21 @@ impl AnthropicProvider {
             .clone()
             .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
 
-        let body: Value = serde_json::from_str(&admitted.body).map_err(|err| {
+        let body: Value = serde_json::from_str(&admitted.redacted()).map_err(|err| {
             LlmTransportError::new(format!("The Anthropic request body does not decode: {err}"))
                 .with_kind(ProviderFailureKind::Validation)
                 .with_lash_code(TurnFailureCode::AdmittedRequestUnavailable)
                 .with_retry_verdict(TransportRetryVerdict::Forbidden)
         })?;
-        let generation_disposition = admitted.generation;
-        let request_body_bytes = admitted.body.as_bytes().to_vec();
+        let generation_disposition = admitted.generation();
+        let request_body_bytes = admitted.wire().into_bytes();
         emit_provider_request_trace(
             provider_trace.as_ref(),
             "anthropic",
             "messages",
-            &request_body_bytes,
+            admitted.redacted().as_bytes(),
         );
-        let request_body = Some(admitted.body.to_string());
+        let request_body = Some(admitted.redacted());
         // `fine-grained-tool-streaming-2025-05-14` streams partial JSON so we
         // can surface tool arguments incrementally. Interleaved thinking is
         // built-in on adaptive thinking; the beta is only needed for the
@@ -181,6 +209,7 @@ impl AnthropicProvider {
             .with_header("Content-Type", "application/json")
             .with_header("Accept", "text/event-stream")
             .with_body_for_error(request_body.clone().unwrap_or_default())
+            .with_delivery_redactor(admitted.redactor())
             .with_response_start_timeout_message("Anthropic response start timed out");
         let (name, value) = match self.auth_scheme {
             crate::AnthropicAuthScheme::ApiKey => {

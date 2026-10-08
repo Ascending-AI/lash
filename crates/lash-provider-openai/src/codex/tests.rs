@@ -76,7 +76,7 @@ fn request(messages: Vec<LlmMessage>) -> LlmRequest {
             ),
         ),
         messages,
-        resolved_stored: Default::default(),
+
         tools: Arc::new(Vec::<LlmToolSpec>::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: crate::attachment_test_acceptance(),
@@ -656,21 +656,31 @@ async fn assert_trace_cached_delta_for_transport(transport: CodexTransport) {
     let trace = Arc::new(Mutex::new(Vec::new()));
 
     provider
-        .complete(traced_request(
-            vec![LlmMessage::text(LlmRole::User, "hello")],
-            Arc::clone(&trace),
-        ))
+        .complete(
+            traced_request(
+                vec![LlmMessage::text(LlmRole::User, "hello")],
+                Arc::clone(&trace),
+            ),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("first response");
     let response = provider
-        .complete(traced_request(
-            vec![
-                LlmMessage::text(LlmRole::User, "hello"),
-                assistant_message_with_meta(&provider.route_identity("gpt-5.4"), "msg_1", "answer"),
-                LlmMessage::text(LlmRole::User, "next"),
-            ],
-            Arc::clone(&trace),
-        ))
+        .complete(
+            traced_request(
+                vec![
+                    LlmMessage::text(LlmRole::User, "hello"),
+                    assistant_message_with_meta(
+                        &provider.route_identity("gpt-5.4"),
+                        "msg_1",
+                        "answer",
+                    ),
+                    LlmMessage::text(LlmRole::User, "next"),
+                ],
+                Arc::clone(&trace),
+            ),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("cached follow-up response");
 
@@ -713,21 +723,31 @@ async fn assert_trace_stale_retry_for_transport(transport: CodexTransport) {
     let trace = Arc::new(Mutex::new(Vec::new()));
 
     provider
-        .complete(traced_request(
-            vec![LlmMessage::text(LlmRole::User, "hello")],
-            Arc::clone(&trace),
-        ))
+        .complete(
+            traced_request(
+                vec![LlmMessage::text(LlmRole::User, "hello")],
+                Arc::clone(&trace),
+            ),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("first response");
     let response = provider
-        .complete(traced_request(
-            vec![
-                LlmMessage::text(LlmRole::User, "hello"),
-                assistant_message_with_meta(&provider.route_identity("gpt-5.4"), "msg_1", "answer"),
-                LlmMessage::text(LlmRole::User, "next"),
-            ],
-            Arc::clone(&trace),
-        ))
+        .complete(
+            traced_request(
+                vec![
+                    LlmMessage::text(LlmRole::User, "hello"),
+                    assistant_message_with_meta(
+                        &provider.route_identity("gpt-5.4"),
+                        "msg_1",
+                        "answer",
+                    ),
+                    LlmMessage::text(LlmRole::User, "next"),
+                ],
+                Arc::clone(&trace),
+            ),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("stale retry response");
 
@@ -769,7 +789,10 @@ async fn codex_scripted_websocket_default_timeout_survives_a_scheduler_stall() {
     );
     let completion = tokio::spawn(async move {
         provider
-            .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+            .complete(
+                request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+                &lash_core::provider::NoSlotDeliveries,
+            )
             .await
     });
 
@@ -807,7 +830,10 @@ async fn codex_scripted_websocket_full_turn_sends_response_create() {
     );
 
     let response = provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("websocket response");
 
@@ -855,7 +881,10 @@ async fn codex_scripted_websocket_cached_follow_up_omits_previous_assistant_outp
     );
 
     provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("first response");
     let second = request(vec![
@@ -876,7 +905,10 @@ async fn codex_scripted_websocket_cached_follow_up_omits_previous_assistant_outp
         ),
         LlmMessage::text(LlmRole::User, "next"),
     ]);
-    let response = provider.complete(second).await.expect("second response");
+    let response = provider
+        .complete(second, &lash_core::provider::NoSlotDeliveries)
+        .await
+        .expect("second response");
 
     assert_eq!(response.full_text(), "done");
     assert!(
@@ -910,7 +942,10 @@ async fn codex_provider_close_sends_websocket_close_frame_for_cached_session() {
     // A completed turn leaves a reusable WebSocket session cached.
     let mut running = provider.clone();
     running
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("first response");
     assert_eq!(ws.close_frame_count(), 0, "no close before shutdown");
@@ -962,7 +997,10 @@ async fn codex_provider_close_drains_a_dead_cached_socket_within_bound() {
 
     let mut running = provider.clone();
     running
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("first response");
     // Let the peer's Close frame land so the cached socket is genuinely dead,
@@ -1025,7 +1063,10 @@ async fn codex_scripted_websocket_same_session_different_frame_does_not_reuse_co
     );
 
     provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("first response");
     let mut second = request(vec![
@@ -1051,7 +1092,10 @@ async fn codex_scripted_websocket_same_session_different_frame_does_not_reuse_co
         "session-1:frame:other",
         "session-1:request:other",
     );
-    let response = provider.complete(second).await.expect("second response");
+    let response = provider
+        .complete(second, &lash_core::provider::NoSlotDeliveries)
+        .await
+        .expect("second response");
 
     assert_eq!(response.full_text(), "done");
     assert!(
@@ -1107,7 +1151,10 @@ async fn codex_scripted_websocket_stale_previous_response_retries_full_context_o
     );
 
     provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("first response");
     let second = request(vec![
@@ -1130,7 +1177,7 @@ async fn codex_scripted_websocket_stale_previous_response_retries_full_context_o
     ]);
     let full_body = provider.build_request_body(&second, true).unwrap();
     let response = provider
-        .complete(second)
+        .complete(second, &lash_core::provider::NoSlotDeliveries)
         .await
         .expect("stale retry response");
 
@@ -1175,7 +1222,10 @@ async fn codex_stale_continuation_after_allocation_only_event_still_recovers() {
     );
 
     provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("first response");
     let second = request(vec![
@@ -1198,7 +1248,9 @@ async fn codex_stale_continuation_after_allocation_only_event_still_recovers() {
     ]);
     let full_body = provider.build_request_body(&second, true).unwrap();
 
-    let result = provider.complete(second).await;
+    let result = provider
+        .complete(second, &lash_core::provider::NoSlotDeliveries)
+        .await;
     let captured = ws.captured();
     assert_eq!(captured.len(), 3);
     let response = result.expect("allocation-only stale response retries with full context");
@@ -1230,7 +1282,10 @@ async fn codex_scripted_websocket_dead_reused_socket_reconnects_full_context() {
     );
 
     provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("first response");
     tokio::time::sleep(Duration::from_millis(20)).await;
@@ -1254,7 +1309,7 @@ async fn codex_scripted_websocket_dead_reused_socket_reconnects_full_context() {
     ]);
     let full_body = provider.build_request_body(&second, true).unwrap();
     let response = provider
-        .complete(second)
+        .complete(second, &lash_core::provider::NoSlotDeliveries)
         .await
         .expect("dead reused socket reconnect response");
 
@@ -1295,7 +1350,10 @@ async fn codex_scripted_websocket_incomplete_terminal_response_is_not_cached() {
     );
 
     provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("incomplete terminal response");
     let second = request(vec![
@@ -1305,7 +1363,7 @@ async fn codex_scripted_websocket_incomplete_terminal_response_is_not_cached() {
     ]);
     let full_body = provider.build_request_body(&second, true).unwrap();
     let response = provider
-        .complete(second)
+        .complete(second, &lash_core::provider::NoSlotDeliveries)
         .await
         .expect("fresh response after incomplete terminal");
 
@@ -1348,8 +1406,14 @@ async fn codex_auto_with_distinct_scopes_uses_uncached_websockets() {
     let mut second = request(vec![LlmMessage::text(LlmRole::User, "next")]);
     second.scope = LlmRequestScope::new("direct-b", "direct-b:frame", "direct-b:request");
 
-    let first_response = provider.complete(first).await.expect("first response");
-    let second_response = provider.complete(second).await.expect("second response");
+    let first_response = provider
+        .complete(first, &lash_core::provider::NoSlotDeliveries)
+        .await
+        .expect("first response");
+    let second_response = provider
+        .complete(second, &lash_core::provider::NoSlotDeliveries)
+        .await
+        .expect("second response");
 
     assert_eq!(first_response.full_text(), "one");
     assert_eq!(second_response.full_text(), "two");
@@ -1428,8 +1492,14 @@ async fn codex_uncached_websockets_survive_a_failed_accept_between_connections()
     let mut second = request(vec![LlmMessage::text(LlmRole::User, "next")]);
     second.scope = LlmRequestScope::new("direct-b", "direct-b:frame", "direct-b:request");
 
-    let first_response = provider.complete(first).await.expect("first response");
-    let second_response = provider.complete(second).await.expect("second response");
+    let first_response = provider
+        .complete(first, &lash_core::provider::NoSlotDeliveries)
+        .await
+        .expect("first response");
+    let second_response = provider
+        .complete(second, &lash_core::provider::NoSlotDeliveries)
+        .await
+        .expect("second response");
 
     assert_eq!(first_response.full_text(), "one");
     assert_eq!(second_response.full_text(), "two");
@@ -1488,7 +1558,10 @@ async fn codex_scripted_websocket_accept_loop_retries_every_error_kind() {
     let mut only = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     only.scope = LlmRequestScope::new("direct-a", "direct-a:frame", "direct-a:request");
 
-    let response = provider.complete(only).await.expect("response");
+    let response = provider
+        .complete(only, &lash_core::provider::NoSlotDeliveries)
+        .await
+        .expect("response");
 
     assert_eq!(response.full_text(), "one");
     assert_eq!(
@@ -1553,7 +1626,10 @@ async fn codex_auto_allocation_only_event_failure_does_not_fallback_to_sse() {
         websocket_test_provider(CodexTransport::Auto, http.url.clone(), ws.url.clone());
 
     let err = provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect_err("events-seen websocket failure");
     assert!(err.message.contains("stream exploded"));
@@ -1575,7 +1651,10 @@ async fn codex_auto_output_started_failure_does_not_fallback_to_sse() {
         websocket_test_provider(CodexTransport::Auto, http.url.clone(), ws.url.clone());
 
     let err = provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect_err("output-started websocket failure");
     assert!(err.message.contains("stream exploded"));
@@ -1616,7 +1695,10 @@ async fn codex_sse_stream_evidence_carries_allowlisted_response_headers() {
         event_sink.lock_recover().push(event);
     }));
 
-    let response = provider.complete(req).await.expect("SSE response");
+    let response = provider
+        .complete(req, &lash_core::provider::NoSlotDeliveries)
+        .await
+        .expect("SSE response");
 
     let expected_route = provider.route_identity("gpt-5.4");
     assert!(response.parts.iter().any(|part| {
@@ -1684,7 +1766,10 @@ async fn codex_websocket_output_started_forced_delay_pins_hardened_ordering() {
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let result = handle
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await;
 
     assert_eq!(
@@ -1727,7 +1812,7 @@ async fn codex_websocket_clean_eof_completes_by_default_and_fails_when_terminal_
         .capability
         .stream_termination = Some(StreamTermination::RequireTerminalEvidence);
     let error = strict
-        .complete(strict_request)
+        .complete(strict_request, &lash_core::provider::NoSlotDeliveries)
         .await
         .expect_err("required terminal evidence refuses a clean EOF without it");
 
@@ -1749,7 +1834,7 @@ async fn codex_websocket_clean_eof_completes_by_default_and_fails_when_terminal_
         tolerant_ws.url.clone(),
     );
     let response = tolerant
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]), &lash_core::provider::NoSlotDeliveries)
         .await
         .expect("a clean close after output completes by default");
     assert_eq!(response.full_text(), "partial");

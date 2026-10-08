@@ -75,7 +75,7 @@ fn request() -> LlmRequest {
             LlmRole::User,
             format!("large prompt: {}", "x".repeat(3_000)),
         )],
-        resolved_stored: Default::default(),
+
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: crate::attachment_test_acceptance(),
@@ -121,7 +121,10 @@ async fn extended_provider_trace_captures_exact_serialized_anthropic_body_withou
         event_sink.lock_recover().push(event);
     }));
 
-    let response = provider.complete(req).await.expect("completion succeeds");
+    let response = provider
+        .complete(req, &lash_core::provider::NoSlotDeliveries)
+        .await
+        .expect("completion succeeds");
     let request_event = events
         .lock_recover()
         .iter()
@@ -155,7 +158,7 @@ async fn extended_provider_trace_captures_exact_serialized_anthropic_body_withou
     }));
 
     let error = error_provider
-        .complete(error_req)
+        .complete(error_req, &lash_core::provider::NoSlotDeliveries)
         .await
         .expect_err("provider error is returned");
     let error_event = error_events

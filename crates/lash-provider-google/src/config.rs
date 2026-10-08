@@ -1,9 +1,7 @@
 //! Provider construction: the [`GoogleOAuthProvider`] struct, its builders,
-//! endpoint-URL helpers, and the uploaded-attachment cache types.
+//! endpoint-URL helpers, and host-owned file scope configuration.
 
-use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, OnceLock};
-use std::time::{Duration, Instant};
 
 use crate::support::*;
 #[cfg(test)]
@@ -14,82 +12,6 @@ pub(crate) const CODE_ASSIST_API_VERSION: &str = "v1internal";
 
 pub(crate) static DEFAULT_HTTP_TRANSPORT: LazyLock<Arc<dyn LlmHttpTransport>> =
     LazyLock::new(|| Arc::new(ReqwestLlmHttpTransport::new()));
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct UploadedAttachmentCacheKey {
-    pub(crate) provider: &'static str,
-    pub(crate) credential_scope: String,
-    pub(crate) mime: String,
-    pub(crate) hash: String,
-}
-
-/// Gemini Files deletes uploads server-side after 48 hours; entries expire
-/// well before that so a dead URI is never served from this cache.
-const UPLOADED_ATTACHMENT_TTL: Duration = Duration::from_secs(24 * 60 * 60);
-
-/// Process-wide bound on distinct (provider, credential, project, MIME,
-/// content) upload entries retained; oldest insertion is evicted past it.
-const UPLOADED_ATTACHMENT_CACHE_CAPACITY: usize = 1024;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct UploadedAttachmentRef {
-    pub(crate) uri: String,
-    pub(crate) uploaded_at: Instant,
-}
-
-/// Bounded, expiring cache of uploaded Gemini Files URIs. Entries expire after
-/// [`UPLOADED_ATTACHMENT_TTL`] and are also removed explicitly when a request
-/// proves a cached URI dead (the provider's inline-retry path).
-#[derive(Debug, Default)]
-pub(crate) struct UploadedAttachmentCache {
-    entries: HashMap<UploadedAttachmentCacheKey, UploadedAttachmentRef>,
-}
-
-impl UploadedAttachmentCache {
-    pub(crate) fn get(
-        &mut self,
-        key: &UploadedAttachmentCacheKey,
-        now: Instant,
-    ) -> Option<UploadedAttachmentRef> {
-        match self.entries.get(key) {
-            Some(entry) if now.duration_since(entry.uploaded_at) < UPLOADED_ATTACHMENT_TTL => {
-                Some(entry.clone())
-            }
-            Some(_) => {
-                self.entries.remove(key);
-                None
-            }
-            None => None,
-        }
-    }
-
-    pub(crate) fn insert(
-        &mut self,
-        key: UploadedAttachmentCacheKey,
-        entry: UploadedAttachmentRef,
-        now: Instant,
-    ) {
-        self.entries.retain(|_, existing| {
-            now.duration_since(existing.uploaded_at) < UPLOADED_ATTACHMENT_TTL
-        });
-        if self.entries.len() >= UPLOADED_ATTACHMENT_CACHE_CAPACITY
-            && let Some(oldest) = self
-                .entries
-                .iter()
-                .min_by_key(|(_, existing)| existing.uploaded_at)
-                .map(|(oldest, _)| oldest.clone())
-        {
-            self.entries.remove(&oldest);
-        }
-        self.entries.insert(key, entry);
-    }
-
-    /// Forget every upload whose URI is one of `uris`: the API rejected a
-    /// body that named them.
-    pub(crate) fn remove_uris(&mut self, uris: &[String]) {
-        self.entries.retain(|_, entry| !uris.contains(&entry.uri));
-    }
-}
 
 /// Google (Gemini via Code Assist) provider. The host owns the Google OAuth
 /// login, refresh and client registration, and supplies access tokens through
@@ -106,6 +28,7 @@ pub struct GoogleOAuthProvider {
     /// after its call; this keeps the lookup to once per provider.
     pub(crate) resolved_project_id: Arc<OnceLock<String>>,
     pub options: ProviderOptions,
+    pub(crate) attachment_credential_scope: Option<String>,
     pub extra_headers: lash_llm_transport::ExtraHeaders,
     pub stream_termination: StreamTermination,
     pub(crate) transport: Arc<dyn LlmHttpTransport>,
@@ -117,16 +40,11 @@ impl GoogleOAuthProvider {
         Self::new(Arc::new(ProviderToken::new("access")))
     }
 
-    pub(crate) fn uploaded_attachment_cache() -> &'static tokio::sync::Mutex<UploadedAttachmentCache>
-    {
-        static CACHE: OnceLock<tokio::sync::Mutex<UploadedAttachmentCache>> = OnceLock::new();
-        CACHE.get_or_init(|| tokio::sync::Mutex::new(UploadedAttachmentCache::default()))
-    }
-
     /// A provider that asks `tokens` for an access token before every attempt.
     pub fn new(tokens: Arc<dyn TokenSource>) -> Self {
         Self {
             tokens: Arc::new(TokenGate::new(tokens, Self::PROVIDER_KIND)),
+            attachment_credential_scope: None,
             endpoint: CODE_ASSIST_ENDPOINT.to_string(),
             api_version: CODE_ASSIST_API_VERSION.to_string(),
             project_id: None,
@@ -159,6 +77,12 @@ impl GoogleOAuthProvider {
             "Google API version must not be empty"
         );
         self.api_version = api_version.to_string();
+        self
+    }
+
+    /// Bind uploaded file ids to a host-owned, non-secret credential identity.
+    pub fn with_attachment_credential_scope(mut self, scope: impl Into<String>) -> Self {
+        self.attachment_credential_scope = Some(scope.into());
         self
     }
 

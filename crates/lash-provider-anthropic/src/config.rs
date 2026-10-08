@@ -31,6 +31,7 @@ pub struct AnthropicProvider {
     pub auth_scheme: AnthropicAuthScheme,
     pub base_url: Option<String>,
     pub options: ProviderOptions,
+    pub(crate) attachment_credential_scope: Option<String>,
     pub extra_headers: lash_llm_transport::ExtraHeaders,
     pub stream_termination: StreamTermination,
     pub(crate) transport: Arc<dyn LlmHttpTransport>,
@@ -46,6 +47,7 @@ impl AnthropicProvider {
     pub fn with_token_source(tokens: Arc<dyn TokenSource>) -> Self {
         Self {
             tokens: Arc::new(TokenGate::new(tokens, "anthropic")),
+            attachment_credential_scope: None,
             auth_scheme: AnthropicAuthScheme::default(),
             base_url: None,
             options: ProviderOptions::default(),
@@ -62,6 +64,12 @@ impl AnthropicProvider {
 
     pub fn with_base_url(mut self, base_url: Option<String>) -> Self {
         self.base_url = base_url;
+        self
+    }
+
+    /// Bind uploaded file ids to a host-owned, non-secret credential identity.
+    pub fn with_attachment_credential_scope(mut self, scope: impl Into<String>) -> Self {
+        self.attachment_credential_scope = Some(scope.into());
         self
     }
 

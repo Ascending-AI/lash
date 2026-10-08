@@ -153,10 +153,10 @@ fn call_of(request: &LlmRequest) -> usize {
 }
 
 /// The digest of the exact body a call sends.
-fn body_digest(body: &lash_core::ProviderRequestBody) -> u64 {
+fn body_digest(body: &str) -> u64 {
     use std::hash::{Hash as _, Hasher as _};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    body.body.hash(&mut hasher);
+    body.hash(&mut hasher);
     hasher.finish()
 }
 

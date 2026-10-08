@@ -54,7 +54,7 @@ fn request() -> LlmRequest {
         )
         .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "hello")],
-        resolved_stored: Default::default(),
+
         tools: Arc::new(Vec::<LlmToolSpec>::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: crate::attachment_test_acceptance(),
@@ -88,7 +88,7 @@ fn fig1123_google_fallback_evicts_whole_genuine_user_segments() {
     };
 
     let contents = GoogleOAuthProvider::for_test()
-        .build_contents_with_attachment_parts(&req, &[])
+        .build_contents_with_attachment_parts(&req)
         .expect("fallback request");
 
     assert_eq!(contents.len(), 2);
@@ -163,7 +163,7 @@ fn foreign_openai_chat_opaque_tool_replay_is_not_forwarded_to_google() {
     )];
 
     let contents = GoogleOAuthProvider::for_test()
-        .build_contents_with_attachment_parts(&req, &[])
+        .build_contents_with_attachment_parts(&req)
         .expect("retention policy");
 
     assert!(contents[0]["parts"][0].get("thoughtSignature").is_none());

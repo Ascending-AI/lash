@@ -20,7 +20,10 @@ async fn codex_websocket_first_response_frame_emits_establishment_marker_first()
         event_sink.lock_recover().push(event);
     }));
 
-    provider.complete(req).await.expect("websocket response");
+    provider
+        .complete(req, &lash_core::provider::NoSlotDeliveries)
+        .await
+        .expect("websocket response");
 
     assert!(matches!(
         events.lock_recover().first(),
@@ -49,7 +52,11 @@ async fn codex_websocket_idle_before_response_start_emits_no_stream_events() {
         event_sink.lock_recover().push(event);
     }));
 
-    let completion = tokio::spawn(async move { provider.complete(req).await });
+    let completion = tokio::spawn(async move {
+        provider
+            .complete(req, &lash_core::provider::NoSlotDeliveries)
+            .await
+    });
     advance_scripted_websocket_idle_timeout(&idle_ready).await;
     let error = tokio::time::timeout(Duration::from_secs(5), completion)
         .await
@@ -83,7 +90,11 @@ async fn codex_scripted_websocket_idle_before_start_falls_back_to_sse() {
     );
 
     let request = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    let completion = tokio::spawn(async move { provider.complete(request).await });
+    let completion = tokio::spawn(async move {
+        provider
+            .complete(request, &lash_core::provider::NoSlotDeliveries)
+            .await
+    });
     advance_scripted_websocket_idle_timeout(&idle_ready).await;
     let response = tokio::time::timeout(Duration::from_secs(5), completion)
         .await
@@ -112,7 +123,10 @@ async fn codex_scripted_websocket_idle_after_output_is_terminal_error() {
     );
 
     let err = provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect_err("idle after output");
 
@@ -144,7 +158,10 @@ async fn codex_websocket_regular_frames_cannot_outlive_request_deadline() {
 
     let err = tokio::time::timeout(
         Duration::from_secs(5),
-        provider.complete(request(vec![LlmMessage::text(LlmRole::User, "hello")])),
+        provider.complete(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &lash_core::provider::NoSlotDeliveries,
+        ),
     )
     .await
     .expect("regular frames must not let the stream outlive the request deadline")

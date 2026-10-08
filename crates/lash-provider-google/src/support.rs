@@ -8,15 +8,14 @@ pub(crate) use serde_json::{Value, json};
 
 pub(crate) use lash_core::llm::transport::{
     LlmTransportError, ProviderFailureKind, TransportRetryVerdict, TurnFailureCode,
-    known_attachment_acceptors, unsupported_attachment_capability,
 };
 pub(crate) use lash_core::llm::types::{
-    AttachmentSource, ExecutionEvidence, GenerationReceipt, LlmContentBlock, LlmOutputPart,
-    LlmOutputSpec, LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, LlmStreamEvidence,
-    LlmTerminalReason, LlmToolChoice, LlmUsage, ProviderReasoningReplay,
-    ProviderReasoningRetentionSupport, ProviderReplayMeta, ProviderRequestBody,
-    ProviderRouteIdentity, ReasoningRetentionValidationError, ResponseTextMeta,
-    StreamBlockIdentity, tool_call_input_replay_value,
+    AttachmentSlot, ExecutionEvidence, GenerationReceipt, LiveRequestBody, LlmContentBlock,
+    LlmOutputPart, LlmOutputSpec, LlmRequest, LlmResponse, LlmRole, LlmStreamEvent,
+    LlmStreamEvidence, LlmTerminalReason, LlmToolChoice, LlmUsage, ProviderReasoningReplay,
+    ProviderReasoningRetentionSupport, ProviderReplayMeta, ProviderRouteIdentity,
+    ReasoningRetentionValidationError, RecordedRequestTemplate, ResponseTextMeta,
+    StreamBlockIdentity, TransientJson, tool_call_input_replay_value,
 };
 pub(crate) use lash_core::provider::{
     GenerationEmission, GenerationWire, OutputCapWire, Provider, ProviderComponents,
@@ -42,3 +41,12 @@ pub(crate) use lash_sansio::{ModelToolReturnPart, tool_result_text};
 pub(crate) use crate::config::*;
 
 pub(crate) use crate::stream::GoogleStreamState;
+
+pub(crate) use lash_core::provider::attachment_wire::{
+    attachment_operand, check_slot, lower_attachment_json, template_error,
+};
+pub(crate) use lash_core::provider::delivery_redaction::{protect_callbacks, protect_result};
+pub(crate) use lash_sansio::AttachmentRef;
+pub(crate) use lash_sansio::llm::attachment_delivery::{
+    AttachmentPosition, Delivery, ProviderAccepts, ProviderFileScope,
+};

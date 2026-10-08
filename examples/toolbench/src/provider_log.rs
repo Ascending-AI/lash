@@ -87,6 +87,26 @@ impl Provider for LoggedProvider {
     fn route_identity(&self, model: &str) -> lash::direct::ProviderRouteIdentity {
         self.inner.route_identity(model)
     }
+    fn attachment_accepts(
+        &self,
+        model: &str,
+        mime: &lash_sansio::MediaType,
+        position: lash_sansio::llm::attachment_delivery::AttachmentPosition,
+    ) -> lash_sansio::llm::attachment_delivery::ProviderAccepts {
+        self.inner.attachment_accepts(model, mime, position)
+    }
+    fn attachment_file_scope(
+        &self,
+    ) -> Option<lash_sansio::llm::attachment_delivery::ProviderFileScope> {
+        self.inner.attachment_file_scope()
+    }
+    fn encode_slot(
+        &self,
+        slot: &lash_sansio::llm::types::AttachmentSlot,
+        delivery: &lash_sansio::llm::attachment_delivery::Delivery,
+    ) -> Result<lash_sansio::llm::types::TransientJson, LlmTransportError> {
+        self.inner.encode_slot(slot, delivery)
+    }
     fn options(&self) -> ProviderOptions {
         self.inner.options()
     }
@@ -102,7 +122,7 @@ impl Provider for LoggedProvider {
     fn generation_retry_guarantee(
         &self,
         request: &LlmRequest,
-        body: &ProviderRequestBody,
+        body: &RecordedRequestTemplate,
     ) -> GenerationRetryGuarantee {
         self.inner.generation_retry_guarantee(request, body)
     }
@@ -119,7 +139,7 @@ impl Provider for LoggedProvider {
     async fn lower(
         &mut self,
         request: &LlmRequest,
-    ) -> Result<ProviderRequestBody, LlmTransportError> {
+    ) -> Result<RecordedRequestTemplate, LlmTransportError> {
         self.inner.lower(request).await
     }
     #[expect(
@@ -131,7 +151,7 @@ impl Provider for LoggedProvider {
     async fn send(
         &mut self,
         request: LlmRequest,
-        body: &ProviderRequestBody,
+        body: &lash_sansio::llm::types::LiveRequestBody,
     ) -> Result<LlmResponse, LlmTransportError> {
         let request_id = request.scope.request_id.clone();
         let attempt_index = self.capture.rows().len() + 1;
@@ -166,7 +186,8 @@ impl Provider for LoggedProvider {
             .cloned();
         let http_json = http_body
             .as_deref()
-            .and_then(|b| serde_json::from_slice::<Value>(b).ok());
+            .and_then(|b| std::str::from_utf8(b).ok())
+            .and_then(|text| serde_json::from_str::<Value>(&body.scrub(text)).ok());
         row["http_response_json"] = http_json.clone().unwrap_or(Value::Null);
         let raw_usage = response
             .and_then(|r| r.provider_usage.clone())

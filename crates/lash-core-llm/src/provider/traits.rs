@@ -88,10 +88,13 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
         deliveries: &dyn super::SlotDeliveries,
     ) -> Result<LlmResponse, LlmTransportError> {
         let timeout = self.options().llm_timeouts().request_timeout;
+        let horizon =
+            timeout.unwrap_or_else(|| lash_sansio::ProviderAttemptLimits::default().per_request());
         let operation = async {
             let template = std::sync::Arc::new(self.lower(&request).await?);
             let slots: Vec<_> = template.slots().collect();
             let mut values = Vec::new();
+            let mut delivered = Vec::new();
             if !slots.is_empty() {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -99,9 +102,9 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
                     .as_millis();
                 let valid_through_ms = u64::try_from(now)
                     .unwrap_or(u64::MAX)
-                    .saturating_add(u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX))
+                    .saturating_add(u64::try_from(horizon.as_millis()).unwrap_or(u64::MAX))
                     .saturating_add(60_000);
-                let delivered = deliveries
+                delivered = deliveries
                     .deliver(
                         &slots,
                         &lash_sansio::llm::attachment_delivery::DeliveryContext {
@@ -120,17 +123,31 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
                     values.push(self.encode_slot(slot, delivery)?);
                 }
             }
-            let live = LiveRequestBody::fill(template, values)
+            let live = LiveRequestBody::fill(std::sync::Arc::clone(&template), values)
                 .map_err(super::attachment_wire::template_error)?;
-            self.send(request, &live).await
+            let result = self.send(request, &live).await;
+            if let Err(error) = &result {
+                for &index in error.rejected_slots() {
+                    if let (Some(slot), Some(value)) = (slots.get(index), delivered.get(index)) {
+                        deliveries
+                            .invalidate(&slot.reference, value)
+                            .await
+                            .map_err(|error| error.into_transport_error())?;
+                    }
+                }
+            }
+            result
         };
-        tokio::time::timeout(timeout, operation)
-            .await
-            .map_err(|_| {
-                LlmTransportError::new("provider call timed out")
-                    .with_kind(ProviderFailureKind::Timeout)
-                    .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-            })?
+        match timeout {
+            None => operation.await,
+            Some(timeout) => tokio::time::timeout(timeout, operation)
+                .await
+                .map_err(|_| {
+                    LlmTransportError::new("provider call timed out")
+                        .with_kind(ProviderFailureKind::Timeout)
+                        .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
+                })?,
+        }
     }
     fn generation_retry_guarantee(
         &self,

@@ -29,10 +29,9 @@ use crate::schema::{classify_openai_error, sse_error_event_retry_verdict};
 use lash_core::facade_support::{ModelToolReturnPart, tool_result_text};
 use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind, TransportRetryVerdict};
 use lash_core::llm::types::{
-    AttachmentSource, ExecutionEvidence, LlmContentBlock, LlmMessage, LlmOutputPart, LlmRequest,
-    LlmResponse, LlmRole, LlmStreamEvent, LlmToolChoice, LlmUsage, ProviderReasoningReplay,
-    ProviderReplayMeta, ResponsePhase, ResponseTextMeta, StreamBlockIdentity,
-    tool_call_input_replay_string,
+    ExecutionEvidence, LlmContentBlock, LlmMessage, LlmOutputPart, LlmRequest, LlmResponse,
+    LlmRole, LlmStreamEvent, LlmToolChoice, LlmUsage, ProviderReasoningReplay, ProviderReplayMeta,
+    ResponsePhase, ResponseTextMeta, StreamBlockIdentity, tool_call_input_replay_string,
 };
 use lash_core::{
     SchemaContract, TurnFailureCode, facade_support::ProviderSchemaCapabilities,
@@ -63,88 +62,11 @@ pub fn role_name(role: &LlmRole) -> &'static str {
     }
 }
 
-pub fn validate_responses_attachments(
-    req: &LlmRequest,
-    provider: &str,
-) -> Result<(), LlmTransportError> {
-    for (message_index, message) in req.messages.iter().enumerate() {
-        for source in message
-            .blocks
-            .iter()
-            .flat_map(LlmContentBlock::attachment_sources)
-        {
-            let validation = (|| {
-                if !req
-                    .attachment_acceptance
-                    .accepts("OpenAI Responses", source)
-                {
-                    let accepted = req.attachment_acceptance.acceptors(source);
-                    return Err(
-                        lash_core::llm::transport::unsupported_attachment_capability(
-                            provider, source, &accepted,
-                        ),
-                    );
-                }
-                if let AttachmentSource::Stored { attachment_ref } = source
-                    && req.attachment_bytes(source).is_none()
-                {
-                    let mime = &attachment_ref.media_type;
-                    return Err(LlmTransportError::new(format!("{provider} could not materialize stored attachment MIME `{mime}` because session-guard resolution did not provide its bytes"))
-                .with_kind(ProviderFailureKind::Validation).with_lash_code(TurnFailureCode::StoredAttachmentNotResolved));
-                }
-
-                Ok(())
-            })();
-            validation.map_err(|mut error: LlmTransportError| {
-                error.message = format!("message index {message_index}: {}", error.message);
-                error
-            })?;
-        }
-    }
-
-    Ok(())
-}
-
-/// `validate_responses_attachments` runs over the same request first and
-/// refuses every source without a media type or resolved bytes.
-#[expect(clippy::expect_used, reason = "the validator refused these")]
-pub fn input_attachment_part(req: &LlmRequest, source: &AttachmentSource) -> Value {
-    if let AttachmentSource::ProviderFile { id, .. } = source {
-        return json!({"type": "input_file", "file_id": id});
-    }
-    let media_type = source.media_type().expect("validated MIME-bearing source");
-    if media_type.is_image() {
-        let image_url = match source {
-            AttachmentSource::ExternalUrl { url, .. } => url.clone(),
-            AttachmentSource::Inline { .. } | AttachmentSource::Stored { .. } => {
-                let bytes = req
-                    .attachment_bytes(source)
-                    .expect("validated attachment bytes");
-                crate::request_work::attachment_data_url(media_type.as_str(), bytes)
-            }
-            AttachmentSource::ProviderFile { .. } => unreachable!(),
-        };
-        let mut part = json!({"type": "input_image"});
-        part["image_url"] = Value::String(image_url);
-        return part;
-    }
-    match source {
-        AttachmentSource::ExternalUrl { url, .. } => {
-            json!({"type": "input_file", "file_url": url})
-        }
-        AttachmentSource::Inline { .. } | AttachmentSource::Stored { .. } => {
-            let bytes = req
-                .attachment_bytes(source)
-                .expect("validated attachment bytes");
-            let mut part = json!({"type": "input_file"});
-            part["file_data"] = Value::String(crate::request_work::attachment_data_url(
-                media_type.as_str(),
-                bytes,
-            ));
-            part
-        }
-        AttachmentSource::ProviderFile { .. } => unreachable!(),
-    }
+pub fn input_attachment_part(
+    reference: &lash_sansio::AttachmentRef,
+    position: lash_sansio::llm::attachment_delivery::AttachmentPosition,
+) -> Value {
+    lash_core::provider::attachment_wire::attachment_operand(reference, position)
 }
 
 pub fn tool_choice_value(choice: &LlmToolChoice) -> &'static str {

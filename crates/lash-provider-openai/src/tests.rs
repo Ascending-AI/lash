@@ -1,4 +1,7 @@
+mod attachment_tests;
+mod delivery_secret;
 mod request_support;
+mod request_work_tests;
 use request_support::request;
 mod runtime_feedback;
 mod schema_projection;
@@ -19,7 +22,6 @@ use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
-mod attachment_tests;
 #[cfg(feature = "testing")]
 pub(crate) mod conformance;
 mod driver_stream_tests;
@@ -31,12 +33,10 @@ mod generation_tests;
 mod output_started_tests;
 mod reasoning_retention_tests;
 mod replay_provenance_tests;
-mod request_work_tests;
 mod response_body_budget;
 mod responses_text_slot_tests;
 mod session_affinity_tests;
 mod strict_tool_omission_tests;
-mod tool_result_shape_tests;
 
 type ScriptedHttpResponse = (u16, Vec<(String, String)>, &'static str);
 
@@ -334,7 +334,10 @@ async fn session_affinity_is_disabled_without_endpoint_capability() {
         OpenAiCompatibleProvider::new("key", OPENROUTER_BASE_URL).with_transport(transport.clone());
     let req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
 
-    provider.complete(req).await.expect("request succeeds");
+    provider
+        .complete(req, &lash_core::provider::NoSlotDeliveries)
+        .await
+        .expect("request succeeds");
 
     let requests = transport.requests.lock_recover();
     let wire_request = requests.first().expect("captured request");
@@ -349,7 +352,10 @@ async fn default_wire_config_uses_bearer_authorization() {
         .with_transport(transport.clone());
 
     provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("request succeeds");
 
@@ -375,7 +381,10 @@ async fn custom_wire_config_controls_auth_header_and_prefix() {
         })
         .with_transport(transport.clone());
     provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("request succeeds");
     let requests = transport.requests.lock_recover();
@@ -403,7 +412,10 @@ async fn empty_auth_value_prefix_sends_raw_key_without_spacing() {
         .with_transport(transport.clone());
     provider.wire.auth_header_name = "x-api-key".to_string();
     provider.wire.auth_value_prefix.clear();
-    provider.complete(request(vec![])).await.unwrap();
+    provider
+        .complete(request(vec![]), &lash_core::provider::NoSlotDeliveries)
+        .await
+        .unwrap();
     let requests = transport.requests.lock_recover();
     assert!(
         requests[0]
@@ -439,7 +451,10 @@ async fn static_query_params_append_to_urls_with_and_without_existing_query() {
             .with_transport(transport.clone());
 
         provider
-            .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+            .complete(
+                request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+                &lash_core::provider::NoSlotDeliveries,
+            )
             .await
             .expect("request succeeds");
 
@@ -458,7 +473,10 @@ async fn direct_openai_prompt_cache_key_does_not_enable_body_session_affinity() 
     let req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     let expected_cache_key = req.provider_prompt_cache_key();
 
-    provider.complete(req).await.expect("request succeeds");
+    provider
+        .complete(req, &lash_core::provider::NoSlotDeliveries)
+        .await
+        .expect("request succeeds");
 
     let requests = transport.requests.lock_recover();
     let wire_request = requests.first().expect("captured request");
@@ -493,7 +511,10 @@ async fn response_metadata_captures_only_allowlisted_headers() {
     }));
 
     let response = provider
-        .complete(capturing(req, &["X-Opper-Cost"], &[]))
+        .complete(
+            capturing(req, &["X-Opper-Cost"], &[]),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("request succeeds");
 
@@ -522,11 +543,14 @@ async fn response_metadata_captures_buffered_responses_endpoint_observations() {
     let mut provider = OpenAiProvider::new("key").with_transport(transport);
 
     let response = provider
-        .complete(capturing(
-            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
-            &["X-Opper-Cost"],
-            &["/cost"],
-        ))
+        .complete(
+            capturing(
+                request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+                &["X-Opper-Cost"],
+                &["/cost"],
+            ),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("Responses request succeeds");
 
@@ -535,60 +559,6 @@ async fn response_metadata_captures_buffered_responses_endpoint_observations() {
         json!("0.000008")
     );
     assert_eq!(response.response_metadata["body:/cost"], json!(0.000063));
-}
-
-#[test]
-fn chat_unsupported_image_mime_is_rejected_at_request_boundary() {
-    let provider = openrouter_provider();
-    let attachment = AttachmentSource::inline(
-        lash_core::MediaType::parse("image/bmp").unwrap(),
-        vec![0x42, 0x4D],
-    );
-    let req = request(vec![LlmMessage::new(
-        LlmRole::User,
-        vec![LlmContentBlock::Attachment {
-            source: Box::new(attachment),
-        }],
-    )]);
-
-    let err = provider
-        .build_chat_request_body(&req, false)
-        .expect_err("bmp should be rejected before wire");
-    assert_eq!(err.kind, ProviderFailureKind::Validation);
-    assert_eq!(
-        err.code.as_ref().map(|code| code.to_string()),
-        Some("lash:unsupported_attachment_capability".to_string())
-    );
-    assert_eq!(
-        err.message,
-        "message index 0: OpenAI Chat Completions cannot materialize attachment MIME `image/bmp` from source `inline`; providers accepting this MIME/source: none"
-    );
-}
-
-#[test]
-fn responses_unsupported_image_mime_is_rejected_at_request_boundary() {
-    let provider = OpenAiProvider::new("key");
-    let attachment = AttachmentSource::inline(
-        lash_core::MediaType::parse("image/bmp").unwrap(),
-        vec![0x42, 0x4D],
-    );
-    let req = request(vec![LlmMessage::new(
-        LlmRole::User,
-        vec![LlmContentBlock::Attachment {
-            source: Box::new(attachment),
-        }],
-    )]);
-
-    let err = provider
-        .build_responses_request_body(&req, false)
-        .expect_err("bmp should be rejected before wire");
-
-    assert_eq!(err.kind, ProviderFailureKind::Validation);
-    assert_eq!(
-        err.code.as_ref().map(|code| code.to_string()),
-        Some("lash:unsupported_attachment_capability".to_string())
-    );
-    assert!(err.message.contains("OpenAI"));
 }
 
 #[test]
@@ -1547,7 +1517,10 @@ async fn openrouter_handle_records_failed_request_id_then_served_model_evidence(
     let mut req = request(Vec::new());
     req.model.metadata_mut().wire_model = "openrouter/auto".to_string();
 
-    let completion = handle.complete(req).await.expect("retry succeeds");
+    let completion = handle
+        .complete(req, &lash_core::provider::NoSlotDeliveries)
+        .await
+        .expect("retry succeeds");
     assert_eq!(completion.call_record.attempts.len(), 2);
     let failed = &completion.call_record.attempts[0];
     assert_eq!(failed.outcome, lash_core::AttemptOutcome::Failed);
@@ -1765,7 +1738,7 @@ async fn responses_handle_does_not_retry_unfinished_tool_arguments() {
     let result = handle
         .complete(requiring_terminal_evidence(streamed_request(Arc::new(
             std::sync::Mutex::new(Vec::new()),
-        ))))
+        ))), &lash_core::provider::NoSlotDeliveries)
         .await;
 
     assert_eq!(
@@ -1802,7 +1775,7 @@ async fn responses_handle_does_not_retry_opaque_reasoning_output() {
     let result = handle
         .complete(requiring_terminal_evidence(streamed_request(Arc::new(
             std::sync::Mutex::new(Vec::new()),
-        ))))
+        ))), &lash_core::provider::NoSlotDeliveries)
         .await;
 
     assert_eq!(
@@ -1834,7 +1807,10 @@ async fn chat_stream_ending_without_finish_reason_is_retryable_truncation_with_p
         .with_transport(single_stream_transport(body));
 
     let error = provider
-        .complete(streamed_request(Arc::clone(&events)))
+        .complete(
+            streamed_request(Arc::clone(&events)),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect_err("missing finish_reason must fail");
 
@@ -1871,9 +1847,10 @@ async fn chat_stream_with_finish_reason_succeeds_and_eof_tolerated_preserves_com
     );
     let mut strict = openrouter_provider().with_transport(single_stream_transport(terminal_body));
     let response = strict
-        .complete(streamed_request(Arc::new(
-            std::sync::Mutex::new(Vec::new()),
-        )))
+        .complete(
+            streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("finish_reason is terminal evidence");
     assert_eq!(response.full_text(), "done");
@@ -1888,9 +1865,10 @@ async fn chat_stream_with_finish_reason_succeeds_and_eof_tolerated_preserves_com
         .with_compat(compat)
         .with_transport(single_stream_transport(eof_body));
     let response = tolerant
-        .complete(streamed_request(Arc::new(
-            std::sync::Mutex::new(Vec::new()),
-        )))
+        .complete(
+            streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("explicit EOF tolerance preserves compatibility");
     assert_eq!(response.full_text(), "legacy");
@@ -1912,7 +1890,7 @@ async fn responses_stream_without_terminal_event_completes_by_default_and_fails_
     let response = tolerant
         .complete(streamed_request(Arc::new(
             std::sync::Mutex::new(Vec::new()),
-        )))
+        )), &lash_core::provider::NoSlotDeliveries)
         .await
         .expect("a stream without its terminal event completes by default");
     assert_eq!(response.full_text(), "partial");
@@ -1950,9 +1928,10 @@ async fn responses_stream_without_terminal_event_completes_by_default_and_fails_
     let mut terminal =
         OpenAiProvider::new("key").with_transport(single_stream_transport(terminal_body));
     let response = terminal
-        .complete(streamed_request(Arc::new(
-            std::sync::Mutex::new(Vec::new()),
-        )))
+        .complete(
+            streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("response.incomplete is terminal evidence");
     assert_eq!(response.full_text(), "bounded");

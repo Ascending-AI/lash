@@ -134,7 +134,10 @@ async fn malformed_start_is_terminal_and_preserves_only_the_valid_prefix() {
     );
     let error = AnthropicProvider::new("key")
         .with_transport(Arc::new(StaticSseTransport(body)))
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect_err("a later terminal marker cannot turn a malformed stream into success");
     assert_eq!(error.kind, ProviderFailureKind::Stream);

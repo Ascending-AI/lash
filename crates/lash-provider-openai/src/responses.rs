@@ -52,7 +52,6 @@ impl OpenAiCompatibleProvider {
             )
             .map_err(reasoning_retention_transport_error)?;
         let req = safe_request.as_ref();
-        shared::validate_responses_attachments(req, "OpenAI Responses")?;
         let compat = self.resolved_compat(CompletionEndpoint::Responses);
         let policy =
             resolve_generation_policy(req, self.kind(), &Self::responses_generation_wire(&compat))?;

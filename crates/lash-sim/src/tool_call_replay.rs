@@ -51,7 +51,7 @@ fn malformed_history_request(model: &str) -> LlmRequest {
             ),
             LlmMessage::text(LlmRole::User, "try again with valid JSON"),
         ],
-        resolved_stored: Default::default(),
+
         tools: Arc::new(Vec::new()),
         tool_choice: Default::default(),
         attachment_acceptance: Default::default(),

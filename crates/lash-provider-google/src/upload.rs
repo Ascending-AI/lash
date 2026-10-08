@@ -1,107 +1,28 @@
-//! Gemini Files resumable upload: Lash-content-id caching of stored
-//! attachments and the two-step (start / upload+finalize) upload protocol.
-
-/// version_surface = "coexist"
-/// version_guard(items(LASH_GOOGLE_UPLOAD_CREDENTIAL_SCOPE_DOMAIN_VERSION, upload_cache_key))
-const LASH_GOOGLE_UPLOAD_CREDENTIAL_SCOPE_DOMAIN_VERSION: &str =
-    "lash-google-upload-credential-scope/v2";
-
-use crate::config::{UploadedAttachmentCacheKey, UploadedAttachmentRef};
+//! Google's Files API uploader. Reuse and invalidation belong to the host store.
 use crate::support::*;
+use lash_core_store::attachments::provider_files::{ProviderFileUploader, UploadedProviderFile};
+use lash_core_store::attachments::{AttachmentStoreError, AttachmentStoreFailureClass};
+use lash_sansio::llm::attachment_delivery::DeliverySecret;
 
 const GEMINI_FILES_UPLOAD_URL: &str =
     "https://generativelanguage.googleapis.com/upload/v1beta/files";
 
-fn upload_http_error_envelope(
-    message: impl Into<String>,
-    status: u16,
-    headers: Vec<(String, String)>,
-    body: impl Into<String>,
-) -> LlmTransportError {
-    let failure = http_error_envelope(message, status, headers, body, None);
-    if status == 413 {
-        failure
-            .with_kind(ProviderFailureKind::Validation)
-            .with_retry_verdict(TransportRetryVerdict::Forbidden)
-    } else {
-        failure
-    }
+/// A scoped uploader the host registers with ProviderFileDelivery.
+/// Original blobs, cached handles and their lifetime remain store-owned.
+#[derive(Clone, Debug)]
+pub struct GoogleFileUploader {
+    provider: GoogleOAuthProvider,
+    scope: ProviderFileScope,
 }
-
 impl GoogleOAuthProvider {
-    fn upload_cache_key(
-        upload_scope: &str,
-        project_id: Option<&str>,
-        media_type: &lash_core::MediaType,
-        content_id: &lash_core::AttachmentId,
-    ) -> UploadedAttachmentCacheKey {
-        let credential_hash = lash_sansio::core_support::blake3_domain_hash_hex(
-            LASH_GOOGLE_UPLOAD_CREDENTIAL_SCOPE_DOMAIN_VERSION,
-            upload_scope.as_bytes(),
-        );
-        UploadedAttachmentCacheKey {
-            provider: Self::PROVIDER_KIND,
-            credential_scope: format!("{}:{}", credential_hash, project_id.unwrap_or_default()),
-            mime: media_type.to_string(),
-            hash: content_id.to_string(),
-        }
+    /// Configure a credential scope (and project) before constructing this
+    /// uploader, then register it on the host's attachment store.
+    pub fn file_uploader(&self) -> Option<GoogleFileUploader> {
+        self.file_scope().map(|scope| GoogleFileUploader {
+            provider: self.clone(),
+            scope,
+        })
     }
-
-    fn uploaded_attachment_filename(key: &UploadedAttachmentCacheKey) -> String {
-        let ext = match key.mime.as_str() {
-            "image/png" => "png",
-            "image/jpeg" => "jpg",
-            "image/jpg" => "jpg",
-            "image/webp" => "webp",
-            "image/gif" => "gif",
-            "image/heic" => "heic",
-            "image/heif" => "heif",
-            "image/bmp" => "bmp",
-            "image/tiff" => "tiff",
-            _ => "bin",
-        };
-        format!("lash-{}.{}", &key.hash[..12], ext)
-    }
-
-    async fn upload_attachment_cached(
-        &self,
-        access_token: &str,
-        upload_scope: &str,
-        project_id: Option<&str>,
-        attachment_ref: &lash_core::AttachmentRef,
-        bytes: &[u8],
-    ) -> Result<UploadedAttachmentRef, LlmTransportError> {
-        let key = Self::upload_cache_key(
-            upload_scope,
-            project_id,
-            &attachment_ref.media_type,
-            &attachment_ref.id,
-        );
-        if let Some(existing) = Self::uploaded_attachment_cache()
-            .lock()
-            .await
-            .get(&key, std::time::Instant::now())
-        {
-            return Ok(existing);
-        }
-
-        let uploaded = self
-            .upload_attachment(
-                access_token,
-                project_id,
-                &attachment_ref.media_type,
-                bytes,
-                &Self::uploaded_attachment_filename(&key),
-            )
-            .await?;
-        Self::uploaded_attachment_cache().lock().await.insert(
-            key,
-            uploaded.clone(),
-            std::time::Instant::now(),
-        );
-        Ok(uploaded)
-    }
-
     async fn upload_attachment(
         &self,
         access_token: &str,
@@ -109,7 +30,7 @@ impl GoogleOAuthProvider {
         media_type: &lash_core::MediaType,
         bytes: &[u8],
         filename: &str,
-    ) -> Result<UploadedAttachmentRef, LlmTransportError> {
+    ) -> Result<UploadedProviderFile, LlmTransportError> {
         let start_body = json!({
             "file": {
                 "displayName": filename,
@@ -221,16 +142,13 @@ impl GoogleOAuthProvider {
             .as_deref()
             .is_some_and(|status| status != "final")
         {
-            return Err(LlmTransportError::new(format!(
-                "Gemini Files upload finalize returned unexpected status `{}`",
-                upload_status.unwrap_or_default()
-            ))
-            .with_raw(body));
+            return Err(LlmTransportError::new(
+                "Gemini Files upload finalize returned an unexpected status",
+            ));
         }
 
         let value: Value = serde_json::from_str(&body).map_err(|err| {
             LlmTransportError::new(format!("Invalid Gemini Files upload JSON: {err}"))
-                .with_raw(body.clone())
         })?;
         let file = value.get("file").unwrap_or(&value);
         let uri = if let Some(uri) = file.get("uri").and_then(|value| value.as_str()) {
@@ -238,151 +156,74 @@ impl GoogleOAuthProvider {
         } else if let Some(name) = file.get("name").and_then(|value| value.as_str()) {
             format!("https://generativelanguage.googleapis.com/v1beta/{name}")
         } else {
-            return Err(
-                LlmTransportError::new("Gemini Files upload response missing file uri")
-                    .with_raw(body.clone()),
-            );
+            return Err(LlmTransportError::new(
+                "Gemini Files upload response missing file uri",
+            ));
         };
 
-        Ok(UploadedAttachmentRef {
-            uri,
-            uploaded_at: std::time::Instant::now(),
+        let valid_until_ms = file
+            .get("expirationTime")
+            .and_then(Value::as_str)
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+            .and_then(|expiry| u64::try_from(expiry.timestamp_millis()).ok());
+        Ok(UploadedProviderFile {
+            id: DeliverySecret::new(uri),
+            valid_until_ms,
         })
-    }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "validate_attachments refuses a Stored source whose bytes are unresolved before any upload path runs"
-    )]
-    pub(crate) async fn prepare_attachment_parts(
-        &self,
-        access_token: &str,
-        upload_scope: &str,
-        project_id: Option<&str>,
-        req: &LlmRequest,
-    ) -> Result<Vec<(AttachmentSource, Value)>, LlmTransportError> {
-        let mut parts = Vec::with_capacity(req.attachments().len());
-
-        for source in &req.attachments() {
-            if let AttachmentSource::Stored { attachment_ref } = source {
-                let bytes = req
-                    .attachment_bytes(source)
-                    .expect("stored attachment validated as resolved");
-                match self
-                    .upload_attachment_cached(
-                        access_token,
-                        upload_scope,
-                        project_id,
-                        attachment_ref,
-                        bytes,
-                    )
-                    .await
-                {
-                    Ok(uploaded) => {
-                        parts.push((
-                            (*source).clone(),
-                            json!({
-                                "fileData": {
-                                    "mimeType": attachment_ref.media_type,
-                                    "fileUri": uploaded.uri,
-                                }
-                            }),
-                        ));
-                    }
-                    Err(error) if error.http_status == Some(401) => return Err(error),
-                    Err(_) => {
-                        parts.push(((*source).clone(), Self::inline_attachment_part(req, source)))
-                    }
-                }
-            } else {
-                parts.push(((*source).clone(), Self::inline_attachment_part(req, source)));
-            }
-        }
-
-        Ok(parts)
     }
 }
 
-#[cfg(test)]
-mod error_detail_tests {
-    use std::collections::VecDeque;
-    use std::sync::{Arc, Mutex};
-
-    use super::*;
-    use lash_core::provider::{DefaultProviderFailureClassifier, ProviderFailureClassifier};
-    use lash_llm_transport::{LlmHttpBody, LlmHttpResponse};
-    use lash_sansio::sync::MutexExt;
-
-    #[derive(Debug)]
-    struct ResponseQueue(Mutex<VecDeque<LlmHttpResponse>>);
-
-    #[async_trait::async_trait]
-    impl LlmHttpTransport for ResponseQueue {
-        async fn send(
-            &self,
-            _request: LlmHttpRequest,
-            _timeout: Option<std::time::Duration>,
-        ) -> Result<LlmHttpResponse, LlmTransportError> {
-            Ok(self
-                .0
-                .lock_recover()
-                .pop_front()
-                .expect("scripted response"))
-        }
+fn upload_http_error_envelope(
+    _message: impl Into<String>,
+    status: u16,
+    _headers: Vec<(String, String)>,
+    _body: impl Into<String>,
+) -> LlmTransportError {
+    LlmTransportError::new("Google Files upload failed").with_http_status(status)
+}
+fn safe_upload_error(error: LlmTransportError) -> AttachmentStoreError {
+    let class = if matches!(error.http_status, Some(401 | 403))
+        || error.kind == ProviderFailureKind::Auth
+    {
+        AttachmentStoreFailureClass::Credentials
+    } else if error.is_retryable() {
+        AttachmentStoreFailureClass::Transient
+    } else {
+        AttachmentStoreFailureClass::Terminal
+    };
+    AttachmentStoreError::Backend {
+        operation: "provider file upload",
+        class,
+        source: Box::new(std::io::Error::other("Google Files upload failed")),
     }
-
-    fn response(
-        status: u16,
-        headers: Vec<(String, String)>,
-        body: &'static str,
-    ) -> LlmHttpResponse {
-        LlmHttpResponse {
-            status,
-            headers,
-            body: LlmHttpBody::buffered(body),
-        }
+}
+#[async_trait]
+impl ProviderFileUploader for GoogleFileUploader {
+    fn scope(&self) -> &ProviderFileScope {
+        &self.scope
     }
-
-    async fn upload_with(responses: Vec<LlmHttpResponse>) -> LlmTransportError {
-        let provider = GoogleOAuthProvider::new(std::sync::Arc::new(
-            lash_core::provider::ProviderToken::new("access"),
-        ))
-        .with_transport(Arc::new(ResponseQueue(Mutex::new(responses.into()))));
-        provider
+    async fn upload(
+        &self,
+        reference: &AttachmentRef,
+        bytes: &[u8],
+    ) -> Result<UploadedProviderFile, AttachmentStoreError> {
+        let route = self.provider.route_identity_for_model("");
+        let lease = self
+            .provider
+            .tokens
+            .current(&route)
+            .await
+            .map_err(safe_upload_error)?;
+        let filename = format!("lash-{}", reference.id.as_str());
+        self.provider
             .upload_attachment(
-                "access",
-                None,
-                &lash_core::MediaType::parse("image/png").expect("valid MIME"),
-                b"png",
-                "fixture.png",
+                lease.token.secret().expose_secret(),
+                self.provider.project_id.as_deref(),
+                &reference.media_type,
+                bytes,
+                &filename,
             )
             .await
-            .expect_err("fixture is an HTTP error")
-    }
-
-    #[tokio::test]
-    async fn upload_missing_url_is_explicitly_non_retryable() {
-        let error = upload_with(vec![response(200, Vec::new(), "")]).await;
-
-        assert!(!error.is_retryable());
-        assert!(error.retry_verdict_is_classified());
-        let failure = DefaultProviderFailureClassifier.classify(error);
-        assert!(!failure.is_retryable());
-    }
-
-    #[tokio::test]
-    async fn upload_413_request_too_large_is_non_retryable_validation() {
-        let error = upload_with(vec![response(
-            413,
-            Vec::new(),
-            r#"{"error":{"message":"Request too large: attachment exceeds upload limit"}}"#,
-        )])
-        .await;
-
-        let failure = DefaultProviderFailureClassifier.classify(error);
-
-        assert_eq!(failure.kind, ProviderFailureKind::Validation);
-        assert!(!failure.is_retryable());
-        assert_eq!(failure.terminal_reason, LlmTerminalReason::ProviderError);
+            .map_err(safe_upload_error)
     }
 }

@@ -645,7 +645,7 @@ pub(super) fn empty_request() -> LlmRequest {
         )
         .with_reasoning(Default::default()),
         messages: Vec::new(),
-        resolved_stored: Default::default(),
+
         tools: std::sync::Arc::new(Vec::new()),
         tool_choice: Default::default(),
         generation: Default::default(),

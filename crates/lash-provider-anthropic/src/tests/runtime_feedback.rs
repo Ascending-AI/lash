@@ -75,51 +75,6 @@ fn runtime_feedback_native_trailing_section_retains_conversation_cache() {
 }
 
 #[test]
-fn runtime_feedback_native_nontext_and_empty_messages_use_tagged_fallback() {
-    let mut req = request(vec![
-        LlmMessage::text(LlmRole::User, "U"),
-        LlmMessage::new(
-            LlmRole::System,
-            vec![
-                LlmContentBlock::Text {
-                    text: "F".into(),
-                    response_meta: None,
-                    cache_breakpoint: false,
-                },
-                LlmContentBlock::Attachment {
-                    source: Box::new(AttachmentSource::inline(
-                        lash_core::MediaType::parse("image/png").unwrap(),
-                        vec![1, 2, 3],
-                    )),
-                },
-            ],
-        ),
-    ]);
-    req.model
-        .metadata_mut()
-        .capability
-        .native_mid_conversation_system = true;
-    let body = AnthropicProvider::new("key")
-        .build_request_body(&req)
-        .unwrap();
-    assert!(body.get("system").is_none());
-    assert_eq!(body["messages"][0]["role"], "user");
-    assert_eq!(
-        body["messages"][0]["content"][1]["text"],
-        "<runtime_feedback>F</runtime_feedback>"
-    );
-    assert_eq!(body["messages"][0]["content"][2]["type"], "image");
-    req.messages[1] = LlmMessage::text(LlmRole::System, "");
-    let body = AnthropicProvider::new("key")
-        .build_request_body(&req)
-        .unwrap();
-    assert_eq!(
-        body["messages"][0]["content"][1]["text"],
-        "<runtime_feedback></runtime_feedback>"
-    );
-}
-
-#[test]
 fn runtime_feedback_native_sections_respect_neighboring_fallback_blocks() {
     let mut req = request(vec![
         LlmMessage::text(LlmRole::User, "U"),

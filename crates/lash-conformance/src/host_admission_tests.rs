@@ -1,6 +1,6 @@
 use lash_core::facade_support::LlmTransportError;
 use lash_core::provider::{Provider, ProviderComponents, ProviderHandle, ProviderOptions};
-use lash_core::{LlmRequest, LlmResponse, ProviderRequestBody, ProviderRouteIdentity};
+use lash_core::{LlmRequest, LlmResponse, ProviderRouteIdentity, RecordedRequestTemplate};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -31,7 +31,7 @@ impl Provider for PendingTransport {
     async fn send(
         &mut self,
         _: LlmRequest,
-        _body: &ProviderRequestBody,
+        _body: &lash_sansio::llm::types::LiveRequestBody,
     ) -> Result<LlmResponse, LlmTransportError> {
         self.entered.notify_one();
         std::future::pending().await
@@ -77,13 +77,13 @@ impl Provider for HostAdmission {
     async fn lower(
         &mut self,
         request: &LlmRequest,
-    ) -> Result<ProviderRequestBody, LlmTransportError> {
+    ) -> Result<RecordedRequestTemplate, LlmTransportError> {
         self.inner.lower(request).await
     }
     async fn send(
         &mut self,
         request: LlmRequest,
-        body: &ProviderRequestBody,
+        body: &lash_sansio::llm::types::LiveRequestBody,
     ) -> Result<LlmResponse, LlmTransportError> {
         let _permit = self
             .permits
@@ -130,7 +130,7 @@ async fn host_admission_permit_releases_on_cancellation_and_forwards_close() {
         scope: lash_core::LlmRequestScope::new("tenant", "frame", "request"),
         instructions: None,
         messages: vec![],
-        resolved_stored: Default::default(),
+
         tools: Arc::new(vec![]),
         tool_choice: lash_core::llm::types::LlmToolChoice::None,
         attachment_acceptance: Default::default(),
@@ -139,13 +139,15 @@ async fn host_admission_permit_releases_on_cancellation_and_forwards_close() {
         stream_events: None,
         provider_trace: None,
     };
-    let mut first_call = Box::pin(first.complete(request.clone()));
+    let mut first_call =
+        Box::pin(first.complete(request.clone(), &lash_core::provider::NoSlotDeliveries));
     tokio::select! {
         _ = entered.notified() => {},
         _ = &mut first_call => panic!("fixture transport must remain pending"),
     }
     assert_eq!(permits.available_permits(), 0);
-    let mut second_call = Box::pin(second.complete(request.clone()));
+    let mut second_call =
+        Box::pin(second.complete(request.clone(), &lash_core::provider::NoSlotDeliveries));
     assert!(futures_util::poll!(&mut second_call).is_pending());
     assert_eq!(closed.load(Ordering::SeqCst), 0);
     drop(second_call);
@@ -162,7 +164,8 @@ async fn host_admission_permit_releases_on_cancellation_and_forwards_close() {
     );
     let mut next_request = request;
     next_request.scope.request_id = "next-request".into();
-    let mut next_call = Box::pin(second.complete(next_request));
+    let mut next_call =
+        Box::pin(second.complete(next_request, &lash_core::provider::NoSlotDeliveries));
     tokio::select! {
         _ = entered.notified() => {},
         _ = &mut next_call => panic!("fixture transport must remain pending"),

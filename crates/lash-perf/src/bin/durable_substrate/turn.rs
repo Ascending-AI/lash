@@ -33,7 +33,7 @@ use lash_core_execution::{ActorContext, Backend};
 use lash_core_store::effect_opener::EffectOpener;
 use lash_core_store::tool_run::{CompletionSource, MaterialOwner, MaterialRole};
 use lash_durable::ActorKey;
-use lash_sansio::llm::types::{ProviderRequestBody, ProviderRouteIdentity};
+use lash_sansio::llm::types::{ProviderRouteIdentity, RecordedRequestTemplate};
 use lash_sansio::sansio::ExecutionEnvironmentSync;
 use lash_sansio::sync::MutexExt as _;
 use lash_sansio::{
@@ -512,7 +512,7 @@ impl TurnDrive for BenchDrive {
             endpoint: "https://perf.test/v1".into(),
             model: "scripted".into(),
         };
-        let body = ProviderRequestBody::of_request(route, &request)
+        let body = RecordedRequestTemplate::of_request(route, &request)
             .map_err(|error| TurnError::Exec(error.to_string()))?;
         Ok(PreparedCall::Admit(Box::new(ComposedCall {
             request,
@@ -526,7 +526,7 @@ impl TurnDrive for BenchDrive {
         _cx: &ActorContext,
         id: EffectId,
         request: Arc<LlmRequest>,
-        _body: &ProviderRequestBody,
+        _body: &RecordedRequestTemplate,
         attempt: ModelCallAttempt,
     ) -> Result<(), TurnError> {
         let ModelCallAttempt {

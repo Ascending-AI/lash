@@ -141,7 +141,8 @@ impl RecordingExchange {
         recorded_paths: Arc<Mutex<Vec<PathBuf>>>,
     ) -> Result<Self, LlmTransportError> {
         validate_name_prefix(&config.name_prefix)?;
-        let scrubber = CaptureScrubber::new(&request.headers, &config.user_content_markers);
+        let mut scrubber = CaptureScrubber::new(&request.headers, &config.user_content_markers);
+        scrubber.delivery = request.delivery_redactor.clone();
         let request_match = scrubber.redact_request_match(&config.request_match)?;
         Ok(Self {
             endpoint: ProviderWireEndpoint {
@@ -352,6 +353,7 @@ impl RecordingByteStream {
 #[derive(Clone)]
 struct CaptureScrubber {
     literals: Vec<String>,
+    delivery: Option<lash_sansio::llm::provider_body::DeliveryRedactor>,
 }
 
 impl std::fmt::Debug for CaptureScrubber {
@@ -385,7 +387,10 @@ impl CaptureScrubber {
         }
         literals.sort_by_key(|literal| std::cmp::Reverse(literal.len()));
         literals.dedup();
-        Self { literals }
+        Self {
+            literals,
+            delivery: None,
+        }
     }
 
     fn redact_headers(&self, headers: &[(String, String)]) -> Vec<ProviderWireHeader> {
@@ -409,11 +414,12 @@ impl CaptureScrubber {
     }
 
     fn redact_text(&self, input: &str) -> String {
-        self.literals
-            .iter()
-            .fold(input.to_string(), |text, literal| {
-                text.replace(literal, REDACTED)
-            })
+        self.literals.iter().fold(
+            self.delivery
+                .as_ref()
+                .map_or_else(|| input.to_owned(), |d| d.scrub(input)),
+            |text, literal| text.replace(literal, REDACTED),
+        )
     }
 
     fn redact_request_match(
@@ -725,6 +731,7 @@ mod tests {
             body: Bytes::from(format!(
                 r#"{{"messages":[{{"role":"user","content":"{USER_MARKER}"}}]}}"#
             )),
+            delivery_redactor: None,
             body_for_error: None,
             response_start_timeout_message: None,
         };
@@ -811,6 +818,7 @@ mod tests {
                     url: "https://api.example/v1/responses".to_string(),
                     headers: Vec::new(),
                     body: Bytes::new(),
+                    delivery_redactor: None,
                     body_for_error: None,
                     response_start_timeout_message: None,
                 },

@@ -393,13 +393,16 @@ mod tests {
                 let trace_events = Arc::new(Mutex::new(Vec::<LlmProviderTraceEvent>::new()));
                 let trace_sink = Arc::clone(&trace_events);
                 let response = provider
-                    .complete(provider_request(
-                        &model,
-                        variation,
-                        LlmProviderTraceSender::new(move |event| {
-                            trace_sink.lock_recover().push(event);
-                        }),
-                    ))
+                    .complete(
+                        provider_request(
+                            &model,
+                            variation,
+                            LlmProviderTraceSender::new(move |event| {
+                                trace_sink.lock_recover().push(event);
+                            }),
+                        ),
+                        &lash_core::provider::NoSlotDeliveries,
+                    )
                     .await
                     .unwrap_or_else(|error| {
                         panic!(
@@ -647,7 +650,7 @@ mod tests {
             )
             .with_reasoning(Default::default()),
             messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
-            resolved_stored: Default::default(),
+
             tools: Arc::new(Vec::new()),
             tool_choice: LlmToolChoice::None,
             attachment_acceptance: Default::default(),

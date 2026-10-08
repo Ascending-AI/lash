@@ -21,6 +21,7 @@ impl OpenAiCompatibleProvider {
             tokens: Arc::new(TokenGate::new(tokens, kind)),
             base_url: base_url.into(),
             options: ProviderOptions::default(),
+            attachment_credential_scope: None,
             compat: OpenAiCompat::default(),
             wire: OpenAiWireConfig::default(),
             transport: DEFAULT_HTTP_TRANSPORT.clone(),
@@ -88,6 +89,12 @@ impl OpenAiProvider {
         }
     }
 
+    /// Bind the Files namespace to a host-owned, non-secret credential identity.
+    pub fn with_attachment_credential_scope(mut self, scope: impl Into<String>) -> Self {
+        self.inner.attachment_credential_scope = Some(scope.into());
+        self
+    }
+
     pub fn with_options(mut self, options: ProviderOptions) -> Self {
         self.inner.options = options;
         self
@@ -141,6 +148,33 @@ impl Provider for OpenAiCompatibleProvider {
         ProviderRouteIdentity::for_endpoint(self.kind(), &self.base_url, model)
     }
 
+    fn attachment_accepts(
+        &self,
+        _model: &str,
+        mime: &lash_sansio::MediaType,
+        position: AttachmentPosition,
+    ) -> ProviderAccepts {
+        if position != AttachmentPosition::Message || !crate::attachment_delivery::image(mime) {
+            return ProviderAccepts::NONE;
+        }
+        ProviderAccepts {
+            bytes: true,
+            url: true,
+            provider_file: None,
+        }
+    }
+    fn encode_slot(
+        &self,
+        slot: &AttachmentSlot,
+        delivery: &Delivery,
+    ) -> Result<TransientJson, LlmTransportError> {
+        crate::attachment_delivery::encode(
+            slot,
+            delivery,
+            crate::attachment_delivery::CHAT_CODEC,
+            None,
+        )
+    }
     fn options(&self) -> ProviderOptions {
         self.options.clone()
     }
@@ -178,14 +212,17 @@ impl Provider for OpenAiCompatibleProvider {
         serde_json::Value::Object(map)
     }
 
-    async fn lower(&mut self, req: &LlmRequest) -> Result<ProviderRequestBody, LlmTransportError> {
+    async fn lower(
+        &mut self,
+        req: &LlmRequest,
+    ) -> Result<RecordedRequestTemplate, LlmTransportError> {
         lower(self, req, CompletionEndpoint::ChatCompletions).await
     }
 
     async fn send(
         &mut self,
         req: LlmRequest,
-        body: &ProviderRequestBody,
+        body: &LiveRequestBody,
     ) -> Result<LlmResponse, LlmTransportError> {
         send(self, req, body, CompletionEndpoint::ChatCompletions).await
     }
@@ -205,6 +242,36 @@ impl Provider for OpenAiProvider {
         ProviderRouteIdentity::for_endpoint(self.kind(), &self.inner.base_url, model)
     }
 
+    fn attachment_file_scope(&self) -> Option<ProviderFileScope> {
+        self.inner
+            .attachment_credential_scope
+            .as_ref()
+            .map(|scope| ProviderFileScope {
+                provider: self.kind().into(),
+                endpoint: self.route_identity("").endpoint,
+                credential_scope: scope.clone(),
+            })
+    }
+    fn attachment_accepts(
+        &self,
+        _model: &str,
+        mime: &lash_sansio::MediaType,
+        _position: AttachmentPosition,
+    ) -> ProviderAccepts {
+        crate::attachment_delivery::responses_accepts(mime, self.attachment_file_scope())
+    }
+    fn encode_slot(
+        &self,
+        slot: &AttachmentSlot,
+        delivery: &Delivery,
+    ) -> Result<TransientJson, LlmTransportError> {
+        crate::attachment_delivery::encode(
+            slot,
+            delivery,
+            crate::attachment_delivery::RESPONSES_CODEC,
+            self.attachment_file_scope(),
+        )
+    }
     fn options(&self) -> ProviderOptions {
         self.inner.options.clone()
     }
@@ -224,14 +291,17 @@ impl Provider for OpenAiProvider {
         serde_json::Value::Object(map)
     }
 
-    async fn lower(&mut self, req: &LlmRequest) -> Result<ProviderRequestBody, LlmTransportError> {
+    async fn lower(
+        &mut self,
+        req: &LlmRequest,
+    ) -> Result<RecordedRequestTemplate, LlmTransportError> {
         lower(&self.inner, req, CompletionEndpoint::Responses).await
     }
 
     async fn send(
         &mut self,
         req: LlmRequest,
-        body: &ProviderRequestBody,
+        body: &LiveRequestBody,
     ) -> Result<LlmResponse, LlmTransportError> {
         send(&mut self.inner, req, body, CompletionEndpoint::Responses).await
     }
@@ -239,8 +309,11 @@ impl Provider for OpenAiProvider {
     fn generation_retry_guarantee(
         &self,
         request: &LlmRequest,
-        body: &ProviderRequestBody,
+        body: &RecordedRequestTemplate,
     ) -> GenerationRetryGuarantee {
+        if body.slots().next().is_some() {
+            return GenerationRetryGuarantee::None;
+        }
         self.inner
             .responses_resume
             .as_ref()

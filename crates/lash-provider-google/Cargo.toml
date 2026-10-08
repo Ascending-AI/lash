@@ -28,6 +28,8 @@ workspace = true
 [dependencies]
 lash-sansio = { workspace = true }
 lash-core = { workspace = true }
+lash-core-store = { workspace = true }
+chrono = { workspace = true }
 lash-llm-transport = { workspace = true }
 async-trait = { workspace = true }
 base64 = { workspace = true }

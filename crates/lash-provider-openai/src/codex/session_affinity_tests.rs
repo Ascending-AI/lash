@@ -14,7 +14,10 @@ async fn codex_auto_skips_websocket_while_session_fallback_is_active() {
     );
 
     let first = provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("first SSE fallback response");
 
@@ -33,7 +36,10 @@ async fn codex_auto_skips_websocket_while_session_fallback_is_active() {
     .await;
     provider.websocket_url = ws.url.clone();
     let second = provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "next")]))
+        .complete(
+            request(vec![LlmMessage::text(LlmRole::User, "next")]),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("second SSE fallback response");
 

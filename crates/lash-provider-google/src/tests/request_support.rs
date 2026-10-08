@@ -26,7 +26,7 @@ pub(super) fn request_with_capability(
                 .unwrap_or_default(),
         ),
         messages: vec![LlmMessage::text(LlmRole::User, "hello")],
-        resolved_stored: Default::default(),
+
         tools: Arc::new(Vec::<LlmToolSpec>::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: crate::attachment_test_acceptance(),

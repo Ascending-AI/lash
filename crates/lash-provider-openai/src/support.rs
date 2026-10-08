@@ -7,14 +7,14 @@ pub(crate) use std::collections::HashMap;
 
 pub(crate) use lash_core::llm::transport::{
     LlmTransportError, ProviderFailureKind, TransportRetryVerdict, TurnFailureCode,
-    known_attachment_acceptors, unsupported_attachment_capability,
 };
 pub(crate) use lash_core::llm::types::{
-    AttachmentSource, ExecutionEvidence, LlmContentBlock, LlmEventSender, LlmOutputPart,
-    LlmOutputSpec, LlmProviderTraceSender, LlmRequest, LlmResponse, LlmRole, LlmStreamEvent,
-    LlmStreamEvidence, LlmTerminalReason, LlmUsage, ProviderReasoningRetentionSupport,
-    ProviderReplayMeta, ProviderRequestBody, ProviderRouteIdentity, ReasoningRetentionSelection,
-    StreamBlockIdentity, tool_call_input_replay_string,
+    AttachmentSlot, ExecutionEvidence, LiveRequestBody, LlmContentBlock, LlmEventSender,
+    LlmOutputPart, LlmOutputSpec, LlmProviderTraceSender, LlmRequest, LlmResponse, LlmRole,
+    LlmStreamEvent, LlmStreamEvidence, LlmTerminalReason, LlmUsage,
+    ProviderReasoningRetentionSupport, ProviderReplayMeta, ProviderRouteIdentity,
+    ReasoningRetentionSelection, RecordedRequestTemplate, StreamBlockIdentity, TransientJson,
+    tool_call_input_replay_string,
 };
 pub(crate) use lash_core::{
     facade_support::ProviderSchemaCapabilities, facade_support::SchemaPurpose,
@@ -110,3 +110,12 @@ pub(crate) fn reasoning_part_block_texts(
     }
     minted
 }
+
+pub(crate) use lash_core::provider::attachment_wire::{
+    attachment_operand, check_slot, lower_attachment_json, template_error,
+};
+pub(crate) use lash_core::provider::delivery_redaction::{protect_callbacks, protect_result};
+pub(crate) use lash_sansio::AttachmentRef;
+pub(crate) use lash_sansio::llm::attachment_delivery::{
+    AttachmentPosition, Delivery, ProviderAccepts, ProviderFileScope,
+};

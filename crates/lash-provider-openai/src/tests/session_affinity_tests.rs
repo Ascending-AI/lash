@@ -17,7 +17,10 @@ async fn host_enabled_session_affinity_works_through_a_custom_proxy_url() {
     };
     let expected = req.scope.provider_session_affinity_key();
 
-    provider.complete(req).await.expect("request succeeds");
+    provider
+        .complete(req, &lash_core::provider::NoSlotDeliveries)
+        .await
+        .expect("request succeeds");
 
     let requests = transport.requests.lock_recover();
     let wire_request = requests.first().expect("captured request");

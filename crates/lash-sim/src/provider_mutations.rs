@@ -479,18 +479,33 @@ async fn run_mutation_script(
         MutationRequestKind::OpenAiCompatible { stream } => {
             let mut provider = OpenAiCompatibleProvider::new("test-key", "https://provider.test")
                 .with_transport(provider_transport(&transport));
-            provider.complete(openai_compatible_request(stream)).await
+            provider
+                .complete(
+                    openai_compatible_request(stream),
+                    &lash_core::provider::NoSlotDeliveries,
+                )
+                .await
         }
         MutationRequestKind::OpenAiResponses => {
             let mut provider =
                 OpenAiProvider::new("test-key").with_transport(provider_transport(&transport));
-            provider.complete(openai_responses_request()).await
+            provider
+                .complete(
+                    openai_responses_request(),
+                    &lash_core::provider::NoSlotDeliveries,
+                )
+                .await
         }
         MutationRequestKind::Anthropic => {
             let mut provider = AnthropicProvider::new("test-key")
                 .with_base_url(Some("https://anthropic.test".to_string()))
                 .with_transport(provider_transport(&transport));
-            provider.complete(anthropic_messages_request()).await
+            provider
+                .complete(
+                    anthropic_messages_request(),
+                    &lash_core::provider::NoSlotDeliveries,
+                )
+                .await
         }
         MutationRequestKind::Google { stream } => {
             let mut provider = GoogleOAuthProvider::new(std::sync::Arc::new(
@@ -498,7 +513,12 @@ async fn run_mutation_script(
             ))
             .with_project_id(Some("project-1".to_string()))
             .with_transport(provider_transport(&transport));
-            provider.complete(google_request(stream)).await
+            provider
+                .complete(
+                    google_request(stream),
+                    &lash_core::provider::NoSlotDeliveries,
+                )
+                .await
         }
     };
     let err = result.map_or_else(Ok, |_| {
@@ -578,7 +598,7 @@ fn openai_compatible_request(stream: bool) -> LlmRequest {
         )
         .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "lookup x")],
-        resolved_stored: Default::default(),
+
         tools: Arc::new(vec![LlmToolSpec {
             name: "lookup".to_string(),
             description: "Lookup".to_string(),
@@ -623,7 +643,7 @@ fn openai_responses_request() -> LlmRequest {
         )
         .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
-        resolved_stored: Default::default(),
+
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
@@ -662,7 +682,7 @@ fn anthropic_messages_request() -> LlmRequest {
         )
         .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
-        resolved_stored: Default::default(),
+
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
@@ -695,7 +715,7 @@ fn google_request(stream: bool) -> LlmRequest {
         )
         .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
-        resolved_stored: Default::default(),
+
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),

@@ -1,5 +1,4 @@
 //! Adapter helpers for structural slot binding and the delivery secrecy boundary.
-use super::Provider;
 use crate::llm::transport::{LlmTransportError, ProviderFailureKind, TransportRetryVerdict};
 use lash_sansio::AttachmentRef;
 use lash_sansio::llm::attachment_delivery::{AttachmentPosition, Delivery};
@@ -25,11 +24,13 @@ pub fn template_error(error: impl std::fmt::Display) -> LlmTransportError {
 /// Patterns name only native attachment part positions, with `*` for array
 /// indexes. The walker never treats a marker elsewhere as an attachment.
 pub fn lower_attachment_json(
-    provider: &dyn Provider,
+    accepts: impl Fn(
+        &lash_sansio::MediaType,
+        AttachmentPosition,
+    ) -> lash_sansio::llm::attachment_delivery::ProviderAccepts,
     request: &LlmRequest,
     route: ProviderRouteIdentity,
-    stream: bool,
-    generation: Option<GenerationReceipt>,
+    settings: (bool, Option<GenerationReceipt>),
     value: &Value,
     codec: &str,
     patterns: &[&str],
@@ -71,17 +72,16 @@ pub fn lower_attachment_json(
         }
         Ok(())
     }
+    let (stream, generation) = settings;
     let mut found = Vec::new();
     walk(value, "", patterns, &mut found)?;
     let mut slots = Vec::new();
     for (path, reference, position) in found {
-        let accepts = provider
-            .attachment_accepts(request.model.wire_model(), &reference.media_type, position)
-            .narrowed(request.attachment_acceptance.forms(
-                &route.provider,
-                &reference.media_type,
-                position,
-            ));
+        let accepts = accepts(&reference.media_type, position).narrowed(
+            request
+                .attachment_acceptance
+                .forms(&route.provider, &reference.media_type, position),
+        );
         if accepts.is_empty() {
             return Err(crate::llm::transport::unsupported_attachment_capability(
                 &route.provider,

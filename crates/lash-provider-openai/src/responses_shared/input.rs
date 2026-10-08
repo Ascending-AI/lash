@@ -178,7 +178,10 @@ fn function_call_output(req: &LlmRequest, content: &[ModelToolReturnPart]) -> Va
                 ModelToolReturnPart::Retained(retained) => {
                     Some(json!({"type": "input_text", "text": retained.witness}))
                 }
-                ModelToolReturnPart::Attachment(source) => Some(input_attachment_part(req, source)),
+                ModelToolReturnPart::Attachment(source) => Some(input_attachment_part(
+                    source,
+                    lash_sansio::llm::attachment_delivery::AttachmentPosition::ToolResult,
+                )),
             })
             .collect(),
     )
@@ -245,9 +248,12 @@ pub fn build_responses_input(req: &LlmRequest) -> Vec<Value> {
                         }));
                     }
                 }
-                LlmContentBlock::Attachment { source } => {
+                LlmContentBlock::Attachment { reference } => {
                     if is_user {
-                        pending_content.push(input_attachment_part(req, source));
+                        pending_content.push(input_attachment_part(
+                            reference,
+                            lash_sansio::llm::attachment_delivery::AttachmentPosition::Message,
+                        ));
                     }
                 }
                 LlmContentBlock::Reasoning { text, replay, .. } => {

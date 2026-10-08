@@ -70,7 +70,10 @@ async fn codex_non_sse_body_read_failure_preserves_observed_response_evidence() 
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let failure = handle
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect_err("the injected body timeout must fail the Codex attempt");
 

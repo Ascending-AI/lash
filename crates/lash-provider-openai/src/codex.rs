@@ -77,6 +77,7 @@ pub(crate) enum CodexTransport {
 pub struct CodexProvider {
     tokens: Arc<TokenGate>,
     pub options: ProviderOptions,
+    attachment_credential_scope: Option<String>,
     pub extra_headers: lash_llm_transport::ExtraHeaders,
     pub(crate) transport: CodexTransport,
     websocket_sessions: CodexWebsocketSessionCache,
@@ -93,6 +94,7 @@ impl CodexProvider {
     /// A provider that asks `tokens` for a token before every attempt.
     pub fn new(tokens: Arc<dyn TokenSource>) -> Self {
         Self {
+            attachment_credential_scope: None,
             tokens: Arc::new(TokenGate::new(tokens, "codex")),
             options: ProviderOptions {
                 reliability: Self::reliability(),
@@ -124,6 +126,11 @@ impl CodexProvider {
             },
             ..ProviderReliability::default()
         }
+    }
+
+    pub fn with_attachment_credential_scope(mut self, scope: impl Into<String>) -> Self {
+        self.attachment_credential_scope = Some(scope.into());
+        self
     }
 
     pub fn with_options(mut self, options: ProviderOptions) -> Self {
@@ -252,7 +259,6 @@ impl CodexProvider {
             )
             .map_err(reasoning_retention_transport_error)?;
         let req = safe_request.as_ref();
-        shared::validate_responses_attachments(req, "OpenAI Codex")?;
         let policy = resolve_generation_policy(req, self.kind(), &Self::GENERATION_WIRE)?;
         // Codex is Responses in the OpenAI reasoning dialect.
         let mut reasoning_body = json!({});

@@ -35,7 +35,10 @@ async fn valid_empty_terminal_completions_succeed_across_chat_and_responses() {
     ));
     let mut chat_buffered = openrouter_provider().with_transport(chat_buffered_transport.clone());
     let response = chat_buffered
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("buffered Chat normal stop may carry no content");
     assert_valid_empty_completion(&response, "stop", 9);
@@ -49,9 +52,10 @@ async fn valid_empty_terminal_completions_succeed_across_chat_and_responses() {
     let mut chat_streamed =
         openrouter_provider().with_transport(Arc::clone(&chat_streamed_transport) as _);
     let response = chat_streamed
-        .complete(streamed_request(Arc::new(
-            std::sync::Mutex::new(Vec::new()),
-        )))
+        .complete(
+            streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("streamed Chat normal stop may carry no content");
     assert_valid_empty_completion(&response, "stop", 10);
@@ -65,7 +69,10 @@ async fn valid_empty_terminal_completions_succeed_across_chat_and_responses() {
     let mut responses_buffered =
         OpenAiProvider::new("key").with_transport(responses_buffered_transport.clone());
     let response = responses_buffered
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("buffered Responses normal completion may carry no content");
     assert_valid_empty_completion(&response, "completed", 11);
@@ -82,9 +89,10 @@ async fn valid_empty_terminal_completions_succeed_across_chat_and_responses() {
     let mut responses_streamed =
         OpenAiProvider::new("key").with_transport(Arc::clone(&responses_streamed_transport) as _);
     let response = responses_streamed
-        .complete(streamed_request(Arc::new(
-            std::sync::Mutex::new(Vec::new()),
-        )))
+        .complete(
+            streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("streamed Responses normal completion may carry no content");
     assert_valid_empty_completion(&response, "completed", 12);
@@ -136,7 +144,7 @@ async fn eof_tolerance_does_not_turn_empty_unterminated_streams_into_success() {
             req.model.metadata_mut().capability.stream_termination =
                 Some(StreamTermination::EofTolerated);
             let error = provider
-                .complete(req)
+                .complete(req, &lash_core::provider::NoSlotDeliveries)
                 .await
                 .expect_err("empty EOF without terminal evidence must be retryable truncation");
             assert_eq!(
@@ -176,9 +184,10 @@ async fn assert_empty_responses_stream_is_rejected(body: &'static str, descripti
     let transport = single_stream_transport(body);
     let mut provider = OpenAiProvider::new("key").with_transport(Arc::clone(&transport) as _);
     let error = provider
-        .complete(streamed_request(Arc::new(
-            std::sync::Mutex::new(Vec::new()),
-        )))
+        .complete(
+            streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect_err(description);
     assert_eq!(
@@ -247,7 +256,10 @@ async fn empty_buffered_responses_require_completed_status() {
         let transport = Arc::new(RecordingHttpTransport::responding_with(Vec::new(), body));
         let mut provider = OpenAiProvider::new("key").with_transport(transport.clone());
         let error = provider
-            .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+            .complete(
+                request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+                &lash_core::provider::NoSlotDeliveries,
+            )
             .await
             .expect_err(description);
         assert_eq!(
@@ -281,7 +293,10 @@ async fn empty_chat_requires_wire_stop_even_when_native_evidence_exists() {
     ));
     let mut provider = openrouter_provider().with_transport(transport.clone());
     let error = provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect_err("native evidence cannot replace a missing wire finish_reason");
     assert_eq!(

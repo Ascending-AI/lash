@@ -96,7 +96,7 @@ fn request(model: &str, stream: bool, structured: bool) -> LlmRequest {
         )
         .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
-        resolved_stored: Default::default(),
+
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
@@ -134,7 +134,10 @@ async fn google_per_minute_throttle_is_retryable_and_honors_retry_info() {
     .with_project_id(Some("project-1".to_string()))
     .with_transport(transport(GOOGLE_PER_MINUTE));
     let failure = provider
-        .complete(request("gemini-3.1-pro-preview", false, false))
+        .complete(
+            request("gemini-3.1-pro-preview", false, false),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect_err("recorded 429");
     assert_eq!(failure.retry_after(), Some(Duration::from_secs(55)));
@@ -153,7 +156,10 @@ async fn google_hard_quota_is_not_retried_as_a_per_minute_throttle() {
     .with_transport(transport(GOOGLE_HARD_QUOTA));
     let failure = classify(
         provider
-            .complete(request("gemini-3.1-pro-preview", false, false))
+            .complete(
+                request("gemini-3.1-pro-preview", false, false),
+                &lash_core::provider::NoSlotDeliveries,
+            )
             .await
             .expect_err("recorded hard quota"),
     );
@@ -168,7 +174,10 @@ async fn openai_per_minute_throttle_stays_retryable_without_inventing_backoff() 
         .with_transport(transport(OPENAI_PER_MINUTE));
     let failure = classify(
         provider
-            .complete(request("gpt-5.4", false, false))
+            .complete(
+                request("gpt-5.4", false, false),
+                &lash_core::provider::NoSlotDeliveries,
+            )
             .await
             .expect_err("recorded OpenAI throttle"),
     );
@@ -189,7 +198,10 @@ async fn openai_insufficient_quota_is_non_retryable() {
         .with_transport(transport(OPENAI_HARD_QUOTA));
     let failure = classify(
         provider
-            .complete(request("gpt-5.4", false, false))
+            .complete(
+                request("gpt-5.4", false, false),
+                &lash_core::provider::NoSlotDeliveries,
+            )
             .await
             .expect_err("recorded OpenAI hard quota"),
     );
@@ -205,7 +217,10 @@ async fn anthropic_rate_limit_and_credit_exhaustion_take_different_retry_paths()
         .with_transport(transport(ANTHROPIC_RATE_LIMIT));
     let rate_failure = classify(
         rate_limited
-            .complete(request("claude-sonnet-4-20250514", true, false))
+            .complete(
+                request("claude-sonnet-4-20250514", true, false),
+                &lash_core::provider::NoSlotDeliveries,
+            )
             .await
             .expect_err("recorded Anthropic rate limit"),
     );
@@ -218,7 +233,10 @@ async fn anthropic_rate_limit_and_credit_exhaustion_take_different_retry_paths()
         .with_transport(transport(ANTHROPIC_HARD_QUOTA));
     let quota_failure = classify(
         exhausted
-            .complete(request("claude-sonnet-4-20250514", true, false))
+            .complete(
+                request("claude-sonnet-4-20250514", true, false),
+                &lash_core::provider::NoSlotDeliveries,
+            )
             .await
             .expect_err("recorded Anthropic credit exhaustion"),
     );
@@ -231,7 +249,10 @@ async fn structured_output_refusal_is_content_filter_not_empty_provider_error() 
     let mut provider = OpenAiCompatibleProvider::new("test-key", "https://provider.test")
         .with_transport(transport(STRUCTURED_REFUSAL));
     let response = provider
-        .complete(request("gpt-4o-2024-08-06", false, true))
+        .complete(
+            request("gpt-4o-2024-08-06", false, true),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("documented refusal is a terminal response");
     assert_eq!(response.terminal_reason, LlmTerminalReason::ContentFilter);
@@ -246,7 +267,10 @@ async fn structured_output_truncation_is_output_limit_not_provider_error() {
     let mut provider =
         OpenAiProvider::new("test-key").with_transport(transport(STRUCTURED_TRUNCATION));
     let response = provider
-        .complete(request("gpt-4o-mini-2024-07-18", true, true))
+        .complete(
+            request("gpt-4o-mini-2024-07-18", true, true),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("documented incomplete event is terminal evidence");
     assert_eq!(response.terminal_reason, LlmTerminalReason::OutputLimit);
@@ -514,7 +538,7 @@ async fn no_credentials_reach_request_debug_recordings_or_traces() {
             sink.lock_recover().push(event)
         }));
         let failure = provider
-            .complete(req)
+            .complete(req, &lash_core::provider::NoSlotDeliveries)
             .await
             .expect_err("scripted provider rejection");
         assert_eq!(failure.http_status, Some(400), "{lane}: {failure:?}");

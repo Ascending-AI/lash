@@ -63,7 +63,7 @@ fn request(events: Arc<Mutex<Vec<LlmStreamEvent>>>) -> LlmRequest {
         )
         .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "hello")],
-        resolved_stored: Default::default(),
+
         tools: Arc::new(Vec::<LlmToolSpec>::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
@@ -96,7 +96,10 @@ fn text_runs_around_a_tool_call_get_distinct_sealed_blocks() {
         .enable_all()
         .build()
         .expect("test runtime")
-        .block_on(provider.complete(request(Arc::clone(&events))))
+        .block_on(provider.complete(
+            request(Arc::clone(&events)),
+            &lash_core::provider::NoSlotDeliveries,
+        ))
         .expect("canonical stream completes");
 
     let events = events.lock_recover();

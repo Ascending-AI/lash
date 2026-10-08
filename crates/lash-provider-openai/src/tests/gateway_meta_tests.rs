@@ -53,10 +53,10 @@ async fn allowlisted_meta_is_captured_on_a_buffered_chat_completion() {
         OpenAiCompatibleProvider::new("key", "https://proxy.example/v1").with_transport(transport);
 
     let response = provider
-        .complete(with_meta_allowlist(request(vec![LlmMessage::text(
-            LlmRole::User,
-            "hello",
-        )])))
+        .complete(
+            with_meta_allowlist(request(vec![LlmMessage::text(LlmRole::User, "hello")])),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("request succeeds");
 
@@ -92,10 +92,10 @@ async fn allowlisted_meta_capture_is_last_wins_on_a_buffered_sse_chat_completion
         OpenAiCompatibleProvider::new("key", "https://proxy.example/v1").with_transport(transport);
 
     let response = provider
-        .complete(with_meta_allowlist(request(vec![LlmMessage::text(
-            LlmRole::User,
-            "hello",
-        )])))
+        .complete(
+            with_meta_allowlist(request(vec![LlmMessage::text(LlmRole::User, "hello")])),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("buffered SSE-shaped response succeeds");
 
@@ -112,9 +112,12 @@ async fn allowlisted_meta_capture_is_last_wins_on_a_streaming_chat_completion() 
         OpenAiCompatibleProvider::new("key", "https://proxy.example/v1").with_transport(transport);
 
     let response = provider
-        .complete(with_meta_allowlist(streamed_request(Arc::new(
-            std::sync::Mutex::new(Vec::new()),
-        ))))
+        .complete(
+            with_meta_allowlist(streamed_request(Arc::new(
+                std::sync::Mutex::new(Vec::new()),
+            ))),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("terminal stream succeeds");
 
@@ -130,10 +133,10 @@ async fn allowlisted_meta_is_captured_on_a_buffered_responses_request() {
     let mut provider = OpenAiProvider::new("key").with_transport(transport);
 
     let response = provider
-        .complete(with_meta_allowlist(request(vec![LlmMessage::text(
-            LlmRole::User,
-            "hello",
-        )])))
+        .complete(
+            with_meta_allowlist(request(vec![LlmMessage::text(LlmRole::User, "hello")])),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("Responses request succeeds");
 
@@ -168,10 +171,10 @@ async fn allowlisted_meta_capture_is_last_wins_on_a_buffered_sse_responses_reque
     let mut provider = OpenAiProvider::new("key").with_transport(transport);
 
     let response = provider
-        .complete(with_meta_allowlist(request(vec![LlmMessage::text(
-            LlmRole::User,
-            "hello",
-        )])))
+        .complete(
+            with_meta_allowlist(request(vec![LlmMessage::text(LlmRole::User, "hello")])),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("buffered SSE-shaped Responses body succeeds");
 
@@ -187,9 +190,12 @@ async fn allowlisted_meta_capture_is_last_wins_on_a_streaming_responses_request(
     let mut provider = OpenAiProvider::new("key").with_transport(transport);
 
     let response = provider
-        .complete(with_meta_allowlist(streamed_request(Arc::new(
-            std::sync::Mutex::new(Vec::new()),
-        ))))
+        .complete(
+            with_meta_allowlist(streamed_request(Arc::new(
+                std::sync::Mutex::new(Vec::new()),
+            ))),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("terminal stream succeeds");
 
@@ -206,7 +212,10 @@ async fn without_an_allowlist_a_gateway_meta_block_captures_nothing() {
         OpenAiCompatibleProvider::new("key", "https://proxy.example/v1").with_transport(transport);
 
     let response = provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("request succeeds");
 
@@ -227,9 +236,10 @@ async fn without_an_allowlist_a_gateway_meta_block_captures_nothing() {
         OpenAiCompatibleProvider::new("key", "https://proxy.example/v1").with_transport(transport);
 
     let response = provider
-        .complete(streamed_request(Arc::new(
-            std::sync::Mutex::new(Vec::new()),
-        )))
+        .complete(
+            streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("terminal stream succeeds");
 
