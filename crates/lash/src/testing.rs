@@ -99,6 +99,12 @@ pub use lash_core::testing::behavior_transcript;
 /// a scenario can render durable-write transcript lines from real facts.
 pub use lash_core::testing::checkpoint_observer;
 
+/// The decoded plugin-namespace map a
+/// [`PluginState`](checkpoint_observer::CheckpointComponentWriteKind::PluginState)
+/// checkpoint write carries: each namespace's values address and host-owned
+/// generation (FIG-5301).
+pub use lash_core_store::plugin_state::PluginStateMap;
+
 /// Store-construction fixtures shared by kernel tests and certification
 /// scenarios: session-store requests, lease claims, commit helpers, and the
 /// completion-deferral authorization seam.
