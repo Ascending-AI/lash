@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 53,
-  "cargo_target_count": 205,
+  "cargo_target_count": 206,
   "facade_production_check_targets": [
     "//crates/lash-core-effect:lash-core-effect__fv_48d34494[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_e38b9031[check]",
@@ -43281,7 +43281,7 @@
       "//crates/lashlang:lashlang__unit_test__fv_fc3b3750"
     ]
   },
-  "generated_label_count": 266,
+  "generated_label_count": 267,
   "packages": [
     {
       "declared_features": [
@@ -47434,6 +47434,7 @@
         "reqwest",
         "serde",
         "serde_json",
+        "tempfile",
         "tokio"
       ],
       "doc": null,
@@ -47457,6 +47458,15 @@
           "clippy_label": "//examples/e2e-consumer:e2e-consumer__unit_test__clippy[clippy.txt]",
           "kind": "bin-unit-test",
           "label": "//examples/e2e-consumer:e2e-consumer__unit_test",
+          "tags": []
+        },
+        {
+          "build_label": "//examples/e2e-consumer:otlp_export__test",
+          "cargo": "otlp_export",
+          "check_label": "//examples/e2e-consumer:otlp_export__test[check]",
+          "clippy_label": "//examples/e2e-consumer:otlp_export__test__clippy[clippy.txt]",
+          "kind": "test",
+          "label": "//examples/e2e-consumer:otlp_export__test",
           "tags": []
         }
       ],
@@ -48248,6 +48258,7 @@
     "//examples/agent-workbench:agent-workbench__unit_test__fv_d2d5e7aa": 300,
     "//examples/delegation:delegation__unit_test": 300,
     "//examples/e2e-consumer:e2e-consumer__unit_test": 300,
+    "//examples/e2e-consumer:otlp_export__test": 300,
     "//examples/integrator-contract:integrator-contract__unit_test": 300,
     "//examples/toolbench:toolbench__unit_test": 300,
     "//examples/workflow-graph-roundtrip:authoring__test": 300,
@@ -48510,6 +48521,7 @@
     "//examples/delegation:delegation__unit_test",
     "//examples/e2e-consumer:e2e-consumer",
     "//examples/e2e-consumer:e2e-consumer__unit_test",
+    "//examples/e2e-consumer:otlp_export__test",
     "//examples/integrator-contract:integrator-contract[static]",
     "//examples/integrator-contract:integrator-contract__unit_test",
     "//examples/toolbench:toolbench",
@@ -48826,6 +48838,7 @@
     "//examples/delegation:delegation__unit_test[check]",
     "//examples/e2e-consumer:e2e-consumer[check]",
     "//examples/e2e-consumer:e2e-consumer__unit_test[check]",
+    "//examples/e2e-consumer:otlp_export__test[check]",
     "//examples/integrator-contract:integrator-contract[check]",
     "//examples/integrator-contract:integrator-contract__unit_test[check]",
     "//examples/toolbench:toolbench[check]",
@@ -49093,6 +49106,7 @@
     "//examples/delegation:delegation__unit_test__clippy[clippy.txt]",
     "//examples/e2e-consumer:e2e-consumer__clippy[clippy.txt]",
     "//examples/e2e-consumer:e2e-consumer__unit_test__clippy[clippy.txt]",
+    "//examples/e2e-consumer:otlp_export__test__clippy[clippy.txt]",
     "//examples/integrator-contract:integrator-contract__clippy[clippy.txt]",
     "//examples/integrator-contract:integrator-contract__unit_test__clippy[clippy.txt]",
     "//examples/toolbench:toolbench__clippy[clippy.txt]",
@@ -49360,6 +49374,7 @@
     "//examples/delegation:delegation__unit_test",
     "//examples/e2e-consumer:e2e-consumer",
     "//examples/e2e-consumer:e2e-consumer__unit_test",
+    "//examples/e2e-consumer:otlp_export__test",
     "//examples/integrator-contract:integrator-contract",
     "//examples/integrator-contract:integrator-contract__unit_test",
     "//examples/toolbench:toolbench",
@@ -49628,6 +49643,7 @@
     "//examples/delegation:delegation__unit_test",
     "//examples/e2e-consumer:e2e-consumer",
     "//examples/e2e-consumer:e2e-consumer__unit_test",
+    "//examples/e2e-consumer:otlp_export__test",
     "//examples/integrator-contract:integrator-contract",
     "//examples/integrator-contract:integrator-contract__unit_test",
     "//examples/toolbench:toolbench",
@@ -49922,6 +49938,7 @@
     "//examples/agent-workbench:agent-workbench__unit_test",
     "//examples/delegation:delegation__unit_test",
     "//examples/e2e-consumer:e2e-consumer__unit_test",
+    "//examples/e2e-consumer:otlp_export__test",
     "//examples/integrator-contract:integrator-contract__unit_test",
     "//examples/toolbench:toolbench__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
@@ -50096,6 +50113,7 @@
     "//examples/agent-workbench:agent-workbench__unit_test",
     "//examples/delegation:delegation__unit_test",
     "//examples/e2e-consumer:e2e-consumer__unit_test",
+    "//examples/e2e-consumer:otlp_export__test",
     "//examples/integrator-contract:integrator-contract__unit_test",
     "//examples/toolbench:toolbench__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
@@ -50220,6 +50238,7 @@
     "//examples/agent-workbench:agent-workbench__unit_test",
     "//examples/delegation:delegation__unit_test",
     "//examples/e2e-consumer:e2e-consumer__unit_test",
+    "//examples/e2e-consumer:otlp_export__test",
     "//examples/integrator-contract:integrator-contract__unit_test",
     "//examples/toolbench:toolbench__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
@@ -50442,6 +50461,7 @@
     "//examples/agent-workbench:agent-workbench__unit_test",
     "//examples/delegation:delegation__unit_test",
     "//examples/e2e-consumer:e2e-consumer__unit_test",
+    "//examples/e2e-consumer:otlp_export__test",
     "//examples/integrator-contract:integrator-contract__unit_test",
     "//examples/toolbench:toolbench__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
@@ -50627,6 +50647,7 @@
     "//examples/agent-workbench:agent-workbench__unit_test",
     "//examples/delegation:delegation__unit_test",
     "//examples/e2e-consumer:e2e-consumer__unit_test",
+    "//examples/e2e-consumer:otlp_export__test",
     "//examples/integrator-contract:integrator-contract__unit_test",
     "//examples/toolbench:toolbench__unit_test",
     "//examples/workflow-graph-roundtrip:authoring__test",

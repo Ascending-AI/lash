@@ -52,7 +52,10 @@ PACKAGE_DEPS = {
     },
     "e2e-consumer": {
         "build": {},
-        "dev": {},
+        "dev": {
+            "tempfile": "//third-party/rust:p0362",
+            "tokio": "//third-party/rust:p0371"
+        },
         "normal": {
             "anyhow": "//third-party/rust:p0011",
             "axum": "//third-party/rust:p0021",

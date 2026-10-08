@@ -62,6 +62,29 @@ lash_rust_unit_test(
     version = "0.0.0-dev",
 )
 
+lash_rust_integration_test(
+    name = "otlp_export__test",
+    crate_features = [],
+    crate_name = "otlp_export",
+    crate_root = "tests/otlp_export.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("e2e-consumer", "otlp_export", "//examples/e2e-consumer:otlp_export__test"),
+    extra_compile_data = [
+        "//examples:shared_rust_sources",
+    ],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    library = None,
+    library_crate_name = None,
+    manifest_dir = "examples/e2e-consumer",
+    package_name = "e2e-consumer",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
 filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),

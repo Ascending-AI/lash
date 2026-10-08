@@ -457,3 +457,96 @@ async fn retryable_mid_stream_failure_preserves_durable_charge_safety_evidence()
     );
     core.shutdown().await.expect("shutdown");
 }
+
+/// An authentication failure stops its turn as a classified provider
+/// failure on its one attempt, never as a cancellation, and the session's
+/// next turn answers under its own input identity (ported by FIG-5308 from
+/// the deleted upgrade harness's s27 law).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn authentication_failure_stops_unretried_and_permits_the_next_turn() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let model = crate::testing::TestProvider::builder()
+        .kind("openai-compatible")
+        .requires_streaming(true)
+        .options(reliability(3))
+        .complete({
+            let calls = Arc::clone(&calls);
+            move |_request: LlmRequest| {
+                let call = calls.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    if call == 0 {
+                        return Err(
+                            LlmTransportError::new("invalid credentials").with_http_status(401)
+                        );
+                    }
+                    Ok(text_response("recovered"))
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let core = core_over(sqlite_memory_store_backend().await, model);
+    let session = created(&core, "authentication-failure").await;
+    let first = session
+        .send(crate::TurnInput::text("invalid credentials"))
+        .id(crate::TurnId::parse("auth-turn-0").expect("a turn id"))
+        .output()
+        .await
+        .expect("the failed turn settles");
+    assert!(
+        matches!(
+            first.result.outcome,
+            crate::TurnOutcome::Stopped(crate::TurnStop::ProviderError)
+        ),
+        "a 401 stops as a provider failure: {:?}",
+        first.result.outcome
+    );
+    assert!(
+        first.result.outcome.cancellation().is_none(),
+        "a 401 is no cancellation"
+    );
+    let [call] = first.result.llm_calls.as_slice() else {
+        panic!("one model call: {:?}", first.result.llm_calls);
+    };
+    let [attempt] = call.attempts.as_slice() else {
+        panic!(
+            "an authentication failure is not retried: {:?}",
+            call.attempts
+        );
+    };
+    // A durable send's report is rebuilt from the store (D1 §1.5 3b): the
+    // classification is read from the sealed call ledger.
+    assert_eq!(
+        attempt.error.as_ref().map(|error| error.class),
+        Some(lash_core::ProviderFailureKind::Auth),
+        "the failure keeps its authentication classification"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    let second = session
+        .send(crate::TurnInput::text("fresh valid request"))
+        .id(crate::TurnId::parse("auth-turn-1").expect("a turn id"))
+        .output()
+        .await
+        .expect("the next turn answers");
+    assert_eq!(second.assistant_message(), Some("recovered"));
+    let first_input = first
+        .result
+        .acceptance
+        .as_ref()
+        .map(|receipt| &receipt.input_id);
+    assert!(
+        first_input.is_some(),
+        "the failed turn's input was accepted"
+    );
+    assert_ne!(
+        first_input,
+        second
+            .result
+            .acceptance
+            .as_ref()
+            .map(|receipt| &receipt.input_id),
+        "the next turn does not inherit the failed turn's input identity"
+    );
+    core.shutdown().await.expect("shutdown");
+}

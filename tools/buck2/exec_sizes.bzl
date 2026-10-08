@@ -717,6 +717,7 @@ TEST_RUN_REQUESTS = {
     "//examples/agent-workbench:agent-workbench__unit_test__fv_d2d5e7aa": {"cpu_count": 3, "memory_kb": 1572864},
     "//examples/delegation:delegation__unit_test": {"cpu_count": 2, "memory_kb": 524288},
     "//examples/e2e-consumer:e2e-consumer__unit_test": {"cpu_count": 2, "memory_kb": 524288},
+    "//examples/e2e-consumer:otlp_export__test": {"cpu_count": 2, "memory_kb": 524288},
     "//examples/integrator-contract:integrator-contract__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//examples/toolbench:toolbench__unit_test": {"cpu_count": 2, "memory_kb": 786432},
     "//examples/workflow-graph-roundtrip:authoring__test": {"cpu_count": 2, "memory_kb": 524288},
