@@ -9,7 +9,8 @@ use lash_durable::DurableInstant;
 use lash_durable::domain::{AdmittedId, Ordinal, OwnerKey, RunRecordKind, RunRecordRow, RunSeq};
 
 use super::records::{
-    ADMIT_ORDINAL, AdmitBody, OutcomeBody, PresentBody, RetryBody, StartBody, first_start,
+    ADMIT_ORDINAL, AdmitBody, DecideBody, OutcomeBody, PresentBody, RetryBody, StartBody,
+    first_start,
 };
 use super::{
     AdmittedExecution, ExecutionDraft, FoldRefusal, Material, PolicyView, Recovery, RunCursor,
@@ -169,6 +170,9 @@ pub struct RoundView {
     members: Vec<RoundMember>,
     cursor: Arc<RunCursor>,
     presented: Option<Vec<ToolCallId>>,
+    /// Whether an owner recorded that it exported the trace admissions the
+    /// admission retained.
+    trace_exported: bool,
 }
 
 impl RoundView {
@@ -194,6 +198,14 @@ impl RoundView {
     #[must_use]
     pub fn presented(&self) -> Option<&[ToolCallId]> {
         self.presented.as_deref()
+    }
+
+    /// Whether an owner recorded that it exported the trace admissions the
+    /// admission retained, discharging the export the admission owes
+    /// (FIG-5452).
+    #[must_use]
+    pub fn trace_exported(&self) -> bool {
+        self.trace_exported
     }
 
     /// Whether every member has its final outcome.
@@ -339,6 +351,7 @@ fn fold_run(run: RunSeq, records: &[&RunRecordRow]) -> Result<RoundView, FoldRef
             reason: reason.to_owned(),
         })?;
     let mut presented = None;
+    let mut trace_exported = false;
     for row in &records[1..] {
         match row.kind {
             RunRecordKind::Admit => return Err(out_of_order(row)),
@@ -450,7 +463,9 @@ fn fold_run(run: RunSeq, records: &[&RunRecordRow]) -> Result<RoundView, FoldRef
             }
             // A coordinator decision is the tool round's to fold; the
             // primitive's recoveries do not depend on it.
-            RunRecordKind::Decide => {}
+            RunRecordKind::Decide => match decode(row)? {
+                DecideBody::TraceExported => trace_exported = true,
+            },
         }
     }
     // The admission commits every member's first start with it, so a
@@ -470,6 +485,7 @@ fn fold_run(run: RunSeq, records: &[&RunRecordRow]) -> Result<RoundView, FoldRef
         members,
         cursor: RunCursor::at(Ordinal(records.len() as u64)),
         presented,
+        trace_exported,
     })
 }
 

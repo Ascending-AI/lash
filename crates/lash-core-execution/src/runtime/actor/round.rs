@@ -101,7 +101,9 @@ pub use lifecycle::{Discharge, MemberBodies, MemberBody, MemberResult, Presented
 pub use output::{Material, NamesMaterial, SettledOutput, SettledOutputRefusal};
 pub use parked::{CallOwner, ParkedCall, parked};
 pub use records::RUN_RECORD_FORMAT_VERSION;
-pub use rounds::{admit_round, present, presentation, settle_retry, start_retry};
+pub use rounds::{
+    admit_round, present, presentation, record_trace_exported, settle_retry, start_retry,
+};
 pub use runner::{RoundEnd, RoundError, RoundRunner, SettledRound};
 pub use tools::{
     CompletedCall, MemberPin, RoundCalls, RoundCallsRefusal, RoundTools, TraceProposal, call_draft,

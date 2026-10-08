@@ -20,7 +20,10 @@
 //! - **One tool admission (FIG-5382):** the parked call's scope is selected
 //!   exactly once, the `lash.tool.admitted` span an adapter exports, on the
 //!   turn's trace: the resume reads the scope its round's admission retained
-//!   back instead of admitting the call again.
+//!   back instead of admitting the call again. A taking-over node is
+//!   another process, whose adapter remembers nothing the parking node
+//!   exported: the call's admission export is owed only until an owner
+//!   discharged it, and the takeover reconciles nothing (FIG-5452).
 //!
 //! The crash half, a turn cut at a phase commit and resumed on the other
 //! node, is `Turn::Trace` in `tool_crash_laws.rs`.
@@ -168,8 +171,13 @@ async fn resumed_turn_keeps_its_trace_scope(tier: Tier, resume: Resume) {
         .expect("the tool hands over its key");
     released_waiting(&world.backend, &name).await;
     if let Resume::Takeover = resume {
+        // The taking-over node is another process: its adapter remembers
+        // nothing the parking node exported (FIG-5452).
         world
-            .restart("trace-takeover-boot", builder(&telemetry, &keys))
+            .restart(
+                "trace-takeover-boot",
+                builder(&telemetry.restarted(), &keys),
+            )
             .await;
     }
     lash_core::waits::resolve_host(

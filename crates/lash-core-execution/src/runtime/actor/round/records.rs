@@ -21,7 +21,10 @@ use crate::{ToolCallId, ToolId};
 /// version_guard(
 ///     shapes(
 ///         path = "crates/lash-core-execution/src/runtime/actor/round/records.rs",
-///         cover(AdmitBody, AdmittedMember, StartBody, OutcomeBody, RetryBody, PresentBody),
+///         cover(
+///             AdmitBody, AdmittedMember, StartBody, OutcomeBody, RetryBody, PresentBody,
+///             DecideBody,
+///         ),
 ///     ),
 /// )
 /// version_surface = "drain"
@@ -161,6 +164,16 @@ pub(super) struct PresentBody {
     pub(super) calls: Vec<ToolCallId>,
 }
 
+/// A `decide` record's body: a decision of the round's coordinator, which
+/// no member's recovery depends on.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(super) enum DecideBody {
+    /// The trace admissions the round's admission retained are exported:
+    /// the admission's export obligation is discharged (FIG-5452).
+    TraceExported,
+}
+
 fn millis(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
@@ -226,5 +239,22 @@ pub(super) fn start_record(
         RunRecordKind::XStart,
         Some(draft.call()),
         encode(&StartBody { member, attempt }),
+    )
+}
+
+/// The `decide` record of `decision`, at `ordinal` of `owner`'s run `run`.
+pub(super) fn decide_record(
+    owner: &OwnerKey,
+    run: RunSeq,
+    ordinal: Ordinal,
+    decision: &DecideBody,
+) -> DomainWrite {
+    append(
+        owner,
+        run,
+        ordinal,
+        RunRecordKind::Decide,
+        None,
+        encode(decision),
     )
 }

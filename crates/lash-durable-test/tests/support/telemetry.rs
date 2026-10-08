@@ -4,13 +4,15 @@
 //!
 //! The factory mints a fresh trace for every root or linked proposal and
 //! keeps its parent's trace for an owned one, as an exporting adapter does,
-//! and records every admission it exported: the `lash.turn.admitted` span
-//! an adapter exports for a turn's scope, and the `lash.tool.admitted` span
-//! for a tool call's, whether a candidate was selected for it or a reader
-//! reconciled it (FIG-5395). Like an exporting adapter, it dedupes an
-//! admission's identity, its anchor, and holds a deferred candidate until a
-//! reconcile of its anchor selects it. The projector records the scope
-//! every record was made under.
+//! and its collector records every admission any process exported: the
+//! `lash.turn.admitted` span an adapter exports for a turn's scope, and the
+//! `lash.tool.admitted` span for a tool call's, whether a candidate was
+//! selected for it or a reader reconciled it (FIG-5395). Like an exporting
+//! adapter, each process's adapter dedupes an admission's identity, its
+//! anchor, and holds a deferred candidate until a reconcile of its anchor
+//! selects it; that memory is the process's own, so a restarted process
+//! ([`Telemetry::restarted`]) remembers nothing another exported
+//! (FIG-5452). The projector records the scope every record was made under.
 
 #![allow(dead_code)]
 
@@ -24,27 +26,38 @@ use lash::tracing::{
 };
 use lash_sansio::sync::MutexExt as _;
 
-/// What the recording adapter saw.
+/// What the collector received from every process's adapter.
 #[derive(Default)]
 struct Recorded {
     /// How many candidates were proposed: each mints the next span.
     proposed: u64,
     /// Every exported admission, with the anchor it gave its scope.
     admitted: Vec<(TraceScopeId, TraceCarrier)>,
-    /// The candidates held deferred.
-    deferred: Vec<(TraceScopeId, TraceCarrier)>,
     /// Every projected record's scope and turn.
     projected: Vec<(DurableTraceScope, Option<lash_sansio::TurnId>)>,
 }
 
-/// The recording adapter: its scope factory and its projector.
+/// What one process's adapter remembers, and loses with its process.
+#[derive(Default)]
+struct Memory {
+    /// The identities of the admissions it exported.
+    exported: Vec<TraceCarrier>,
+    /// The candidates it holds deferred.
+    deferred: Vec<(TraceScopeId, TraceCarrier)>,
+}
+
+/// One process's recording adapter: its scope factory and its projector,
+/// over the collector every process exports to.
 #[derive(Clone, Default)]
-pub struct Telemetry(Arc<Mutex<Recorded>>);
+pub struct Telemetry {
+    recorded: Arc<Mutex<Recorded>>,
+    memory: Arc<Mutex<Memory>>,
+}
 
 struct Candidate {
     scope: TraceScopeId,
     carrier: TraceCarrier,
-    recorded: Arc<Mutex<Recorded>>,
+    telemetry: Telemetry,
 }
 
 impl TraceAdmissionCandidate for Candidate {
@@ -54,32 +67,32 @@ impl TraceAdmissionCandidate for Candidate {
 
     fn settle(self: Box<Self>, outcome: TraceCandidateOutcome) {
         if outcome == TraceCandidateOutcome::Selected {
-            self.recorded
-                .lock_recover()
-                .export(self.scope, self.carrier);
+            self.telemetry.export(self.scope, self.carrier);
         }
     }
 
     fn defer(self: Box<Self>) {
-        self.recorded
+        self.telemetry
+            .memory
             .lock_recover()
             .deferred
             .push((self.scope, self.carrier));
     }
 }
 
-impl Recorded {
-    /// Export the admission of `scope` under `carrier` unless its identity
-    /// already was: the deferred candidates of the scope are settled.
-    fn export(&mut self, scope: TraceScopeId, carrier: TraceCarrier) {
-        self.deferred.retain(|(deferred, _)| *deferred != scope);
-        if !self
-            .admitted
-            .iter()
-            .any(|(_, exported)| *exported == carrier)
+impl Telemetry {
+    /// Export the admission of `scope` under `carrier` unless this process
+    /// already did: its deferred candidates of the scope are settled.
+    fn export(&self, scope: TraceScopeId, carrier: TraceCarrier) {
         {
-            self.admitted.push((scope, carrier));
+            let mut memory = self.memory.lock_recover();
+            memory.deferred.retain(|(deferred, _)| *deferred != scope);
+            if memory.exported.contains(&carrier) {
+                return;
+            }
+            memory.exported.push(carrier.clone());
         }
+        self.recorded.lock_recover().admitted.push((scope, carrier));
     }
 }
 
@@ -94,7 +107,7 @@ impl TraceScopeFactory for Telemetry {
         cause: &TraceCause,
     ) -> Box<dyn TraceAdmissionCandidate> {
         let proposed = {
-            let mut recorded = self.0.lock_recover();
+            let mut recorded = self.recorded.lock_recover();
             recorded.proposed += 1;
             recorded.proposed
         };
@@ -115,15 +128,13 @@ impl TraceScopeFactory for Telemetry {
         Box::new(Candidate {
             scope: scope.clone(),
             carrier,
-            recorded: Arc::clone(&self.0),
+            telemetry: self.clone(),
         })
     }
 
     fn export_admitted(&self, scope: &DurableTraceScope) {
         if let TraceAnchor::Context(carrier) = &scope.anchor {
-            self.0
-                .lock_recover()
-                .export(scope.scope.clone(), carrier.clone());
+            self.export(scope.scope.clone(), carrier.clone());
         }
     }
 }
@@ -136,7 +147,7 @@ impl TraceDomainProjector for Telemetry {
         _source: &EmissionSource,
         record: &TraceRecord,
     ) {
-        self.0
+        self.recorded
             .lock_recover()
             .projected
             .push((scope.clone(), record.context.turn_id.clone()));
@@ -151,12 +162,23 @@ impl Telemetry {
             .with_projector(Arc::new(self.clone()))
     }
 
+    /// The adapter of a process started after this one's: it exports to the
+    /// same collector and remembers nothing this one exported or deferred,
+    /// as a node that takes a session over (FIG-5452).
+    #[must_use]
+    pub fn restarted(&self) -> Self {
+        Self {
+            recorded: Arc::clone(&self.recorded),
+            memory: Arc::default(),
+        }
+    }
+
     /// How `session`'s first turn broke its trace scope: unless its
     /// admission scope was exported exactly once, and every record of the
     /// turn carries the trace that admission started (every record of the
     /// turn's own scope, its anchor).
     pub fn first_turn_violations(&self, session: &str) -> Vec<String> {
-        let recorded = self.0.lock_recover();
+        let recorded = self.recorded.lock_recover();
         let turn_admissions = recorded
             .admitted
             .iter()
@@ -216,7 +238,7 @@ impl Telemetry {
     /// once (the `lash.tool.admitted` span an adapter exports), on the trace
     /// the turn's admission started.
     pub fn first_turn_tool_violations(&self, session: &str) -> Vec<String> {
-        let recorded = self.0.lock_recover();
+        let recorded = self.recorded.lock_recover();
         let Some((turn_scope, turn_anchor)) = recorded.admitted.iter().find(|(scope, _)| {
             scope.boundary == 0
                 && matches!(

@@ -29,7 +29,7 @@ use lash_core::{
 use lash_core_execution::ActorContext;
 use lash_core_execution::runtime::actor::round::{
     AdmittedExecution, CompletedCall, Material, MemberBody, MemberPin, MemberResult, PolicyView,
-    RoundTools, SettledOutput,
+    RoundTools, SettledOutput, TraceProposal,
 };
 use lash_core_store::effect_opener::EffectOpener;
 use lash_core_store::tool_run::{
@@ -750,7 +750,45 @@ struct Catalog {
     run: TurnId,
 }
 
+/// A round call's trace admission candidate: an anchor exported nowhere.
+struct Untold(lash::tracing::TraceAnchor);
+
+impl lash::tracing::TraceAdmissionCandidate for Untold {
+    fn anchor(&self) -> lash::tracing::TraceAnchor {
+        self.0.clone()
+    }
+
+    fn settle(self: Box<Self>, _outcome: lash::tracing::TraceCandidateOutcome) {}
+}
+
 impl RoundTools for Catalog {
+    /// A [`TurnScript::Round`] turn's calls are traced, so its admission's
+    /// exports are recorded under `round.traced`, which the matrix cuts
+    /// (FIG-5452).
+    fn propose_trace(&self, call: &PendingToolCall) -> Option<TraceProposal> {
+        if TurnScript::of(&self.session) != Some(TurnScript::Round) {
+            return None;
+        }
+        let carrier = lash::tracing::TraceCarrier::new(
+            lash::tracing::W3cTraceId::from_bytes(1_u128.to_be_bytes()).ok()?,
+            lash::tracing::W3cSpanId::from_bytes(1_u64.to_be_bytes()).ok()?,
+            lash::tracing::W3cTraceFlags::from_byte(lash::tracing::W3cTraceFlags::SAMPLED),
+            lash::tracing::W3cTraceState::default(),
+        );
+        let anchor = lash::tracing::TraceAnchor::Context(carrier);
+        let mut scope = lash_core_execution::trace::tool_trace_scope(
+            &EffectOpener::turn(self.session.clone(), self.run.clone()),
+            None,
+            &call.call_id,
+            0,
+        );
+        scope.anchor = anchor.clone();
+        Some(TraceProposal {
+            scope,
+            candidate: Box::new(Untold(anchor)),
+        })
+    }
+
     fn pin(&self, call: &PendingToolCall, now_ms: u64) -> MemberPin {
         let tool = Tool::named(&call.tool_name).unwrap_or(Tool::WriteNow);
         // No tool of this catalog parks; each body is bounded as its host

@@ -1817,7 +1817,8 @@ async fn a_turns_puts_are_held_by_its_execution_across_a_crash(tier: Tier) {
 /// and every record of the turn carries that admission's trace (FIG-5363,
 /// FIG-5395). Its call's scope, admitted with its round, is admitted
 /// exactly once on that trace, also when its owner was killed after the
-/// round's admission committed, before it learned so (FIG-5382, FIG-5395).
+/// round's admission committed, before it learned so (FIG-5382, FIG-5395),
+/// and when the record of its export (`round.traced`) is cut (FIG-5452).
 async fn a_turns_and_its_calls_trace_admissions_are_exported_once_across_a_crash(tier: Tier) {
     prove_at(
         Turn::Trace,
@@ -1826,6 +1827,7 @@ async fn a_turns_and_its_calls_trace_admissions_are_exported_once_across_a_crash
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_DONE,
+            CommitLabel::ROUND_TRACED,
             CommitLabel::ROUND_OUTCOME,
         ],
     )

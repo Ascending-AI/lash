@@ -15,11 +15,16 @@
 //!   without an outcome is `Interrupted`, a started `Repeatable` reruns at
 //!   its ordinal, and nothing it recorded runs again.
 //! - **Trace admission.** Each call's trace scope is retained by the
-//!   round's admission, whose commit selects its candidate. Until the round
-//!   is presented, its admission owes each call's admission export: the
-//!   admitting owner may have lost its life or the commit's acknowledgement
-//!   first, so every owner that resumes the round reconciles it, and the
-//!   exporter dedupes its identity (FIG-5382, FIG-5395).
+//!   round's admission, whose commit selects its candidate. The admission
+//!   owes each traced call's admission export until an owner records that
+//!   it exported them (`round.traced`): the admitting owner does once its
+//!   candidates are selected, and an owner that resumes a round without the
+//!   record reconciles the exports first, as the admitting owner may have
+//!   lost its life or the commit's acknowledgement before it selected them.
+//!   A process's exporter dedupes an identity only in its own memory, so a
+//!   resume of a round whose exports are recorded exports nothing: a node
+//!   that takes the round over never exports a call's admission again
+//!   (FIG-5382, FIG-5395, FIG-5452).
 //! - **Cancel.** An `Immediate` cancel the turn accepted before the round's
 //!   admission admits none of it, and one it accepts while the round runs
 //!   ends its unfinished members `Cancelled`; the turn then ends as every
@@ -66,6 +71,20 @@ pub(super) enum RoundExit {
         /// The earliest retry due time or parked wait deadline.
         due: Option<DurableInstant>,
     },
+}
+
+/// Whether a call's trace scope anchored by `anchor` is exported.
+fn traced(anchor: &lash_trace::TraceAnchor) -> bool {
+    matches!(anchor, lash_trace::TraceAnchor::Context(_))
+}
+
+/// Commit the record that `round`'s traced calls' admissions are exported,
+/// discharging the export its admission owes (FIG-5452).
+async fn record_trace_exported(cx: &ActorContext, round: &AdmittedRound) -> Result<(), TurnError> {
+    let mut tx = cx.begin().await?;
+    round::record_trace_exported(&mut tx, round);
+    cx.commit(tx, CommitLabel::ROUND_TRACED).await?;
+    Ok(())
 }
 
 /// The label of the turn's next model call: `round.present+model.start` when
@@ -133,8 +152,19 @@ pub(super) async fn run(
         Some(view) => {
             let drafts: Vec<_> = view.members().iter().map(|member| member.draft()).collect();
             round::require_admitted(&opener, run, &drafts, &calls).map_err(exec)?;
-            for scope in drafts.iter().filter_map(|draft| draft.trace()) {
-                tools.export_admitted(scope);
+            let owed: Vec<_> = drafts
+                .iter()
+                .filter_map(|draft| draft.trace())
+                .filter(|scope| traced(&scope.anchor))
+                .collect();
+            if !view.trace_exported() && !owed.is_empty() {
+                for scope in owed {
+                    tools.export_admitted(scope);
+                }
+                let admitted = folded
+                    .admitted_round(run)
+                    .ok_or_else(|| exec(DurableError::Store(missing_round(run))))?;
+                record_trace_exported(cx, &admitted).await?;
             }
             RoundRunner::resumed(cx, owner.clone(), run, policies, bodies)
         }
@@ -199,12 +229,21 @@ pub(super) async fn run(
             // A commit whose acknowledgement was lost may have landed: its
             // candidates are deferred, and the owner that resumes the round
             // reconciles their admissions if so.
+            let exports = candidates
+                .iter()
+                .any(|candidate| traced(&candidate.anchor()));
             let committed = cx.commit(tx, CommitLabel::MODEL_DONE).await;
             for candidate in candidates {
                 super::session::settle_trace_admission(candidate, &committed);
             }
             committed?;
             drive.run_changes_committed(&written);
+            // The candidates are selected: their exports are discharged
+            // before any body runs, so an owner that takes the round over
+            // exports none again.
+            if exports {
+                record_trace_exported(cx, &admitted).await?;
+            }
             if refused.is_some() {
                 RoundRunner::resumed(cx, owner.clone(), run, policies, bodies)
             } else {
