@@ -92,38 +92,18 @@ fn main() {
                     "effect responses must not renew the checkout CPU bound"
                 );
             } else {
-                cpu_ceiling = Some(limit.rlim_cur);
-                let mut now = libc::timespec {
-                    tv_sec: 0,
-                    tv_nsec: 0,
-                };
+                assert!(limit.rlim_cur > 1 && limit.rlim_cur < libc::RLIM_INFINITY);
+                // Tighten the finite bound by one second. Any renewal from
+                // current CPU usage would raise it again, even without burning
+                // CPU or depending on the host giving us a scheduling slice.
+                limit.rlim_cur -= 1;
                 #[expect(
                     unsafe_code,
-                    reason = "the fixture measures CPU it burns to cross a kernel limit second"
+                    reason = "the fixture tightens its own kernel CPU bound to detect a renewal"
                 )]
-                unsafe {
-                    assert_eq!(
-                        libc::clock_gettime(libc::CLOCK_PROCESS_CPUTIME_ID, &mut now),
-                        0
-                    );
-                }
-                let start = now.tv_sec * 1_000_000_000 + now.tv_nsec;
-                loop {
-                    std::hint::black_box((0..10000).fold(0_u64, u64::wrapping_add));
-                    #[expect(
-                        unsafe_code,
-                        reason = "the fixture observes its own process CPU clock"
-                    )]
-                    unsafe {
-                        assert_eq!(
-                            libc::clock_gettime(libc::CLOCK_PROCESS_CPUTIME_ID, &mut now),
-                            0
-                        );
-                    }
-                    if now.tv_sec * 1_000_000_000 + now.tv_nsec - start > 1_100_000_000 {
-                        break;
-                    }
-                }
+                let result = unsafe { libc::setrlimit(libc::RLIMIT_CPU, &limit) };
+                assert_eq!(result, 0);
+                cpu_ceiling = Some(limit.rlim_cur);
             }
         }
         if mode == "abort" && matches!(message, lash_vm_protocol::ParentMessage::EffectResponse(_))
