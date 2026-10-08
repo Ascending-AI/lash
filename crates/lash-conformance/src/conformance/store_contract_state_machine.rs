@@ -433,7 +433,7 @@ fn session_id(index: u8) -> SessionId {
 
 /// A generated process: an `Engine` input with its execution env.
 fn registration(label: &str) -> ProcessRegistration {
-    let registration = ProcessRegistration::new(
+    ProcessRegistration::new(
         ProcessInput::Engine {
             kind: "store-contract-property".to_string(),
             payload: serde_json::json!({"label": label}),
@@ -441,8 +441,7 @@ fn registration(label: &str) -> ProcessRegistration {
         ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
-    .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref()));
-    registration
+    .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref()))
 }
 
 fn invocation_authority(
@@ -607,7 +606,6 @@ async fn apply_operation(
                 expected.external_ref = Some(external_ref);
             }
         }
-
         StoreContractOp::CancelRequest { process, requester } => {
             let id = model.slot_id(*process);
             if let Ok(process_id) = handles.registry.require_process_id(&id).await
@@ -705,7 +703,6 @@ async fn apply_operation(
                 }
             }
         }
-
         StoreContractOp::Prune { watermark } => {
             let cursor = cursor_after_full_relist_if_required(&handles.registry).await?;
             model.projection_cursor = cursor;

@@ -3613,4 +3613,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # `durable_surfaces` imports this file by name. Run as a script it would be
+    # loaded a second time, and the copy's `_Unresolved` would not be the one
+    # raised here, so a durable root the head deleted escaped as a traceback.
+    sys.modules.setdefault("check_version_bumps", sys.modules[__name__])
     raise SystemExit(main())

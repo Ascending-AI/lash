@@ -12,6 +12,7 @@ use crate::runtime_perf::measurement::{
     run_once_durable_checkpoint_curve, run_once_store_hardening_hot_paths,
 };
 use crate::runtime_perf::scenarios::ScenarioPhaseContract;
+use lash_core::runtime::RuntimeTurnPhaseProbe;
 use lash_core::store::QueuedWorkStore as _;
 use lash_core::{SessionCatalogStore as _, SessionListFilter};
 

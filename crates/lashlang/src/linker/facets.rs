@@ -244,25 +244,6 @@ impl<'module> Linker<'module> {
     }
 }
 
-/// The [`AstPath`] of `child`, which must be a direct `children()` element of
-/// `parent` under `parent_path`.
-///
-/// Child indexes are a property of the variant, so callers that already know
-/// the index can use [`AstPath::child`] directly; this helper is for the cases
-/// where the child was selected by shape (a record entry named `source`, the
-/// value an `Assign` writes) rather than by position.
-#[expect(
-    clippy::expect_used,
-    reason = "the caller selects `child` from `parent`'s own fields, so it is always a children() element, per the message"
-)]
-pub(super) fn child_ast_path(parent: &Expr, parent_path: &AstPath, child: &Expr) -> AstPath {
-    let index = parent
-        .children()
-        .position(|candidate| std::ptr::eq(candidate, child))
-        .expect("child is a direct children() element of parent");
-    parent_path.child(index as u32)
-}
-
 /// The [`AstPath`] the workflow projector reads facts from for `expr` at
 /// `path`, or `None` when the node keeps its own facts.
 ///

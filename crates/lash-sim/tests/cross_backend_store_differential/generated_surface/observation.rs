@@ -84,7 +84,6 @@ pub(super) fn normalize_json_fields(value: &mut serde_json::Value) {
     clippy::unwrap_used,
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
-
 pub(super) fn read_sqlite_surface(process_path: &Path) -> SurfaceState {
     let process = rusqlite::Connection::open(process_path).expect("open SQLite process reader");
 

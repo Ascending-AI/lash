@@ -13,14 +13,6 @@ const RUNTIME_REQUIRED_EVIDENCE: &[&str] = &["queued_ingress", "cancellation"];
 pub const RUNTIME_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
     ScenarioContractSpec {
         suite: "runtime",
-        test_name: "runtime_scenario_drains_command_before_turn_work_and_commits_checkpoint",
-        owned_invariant: "Session-command gate, checkpoint persistence, stale queue completion rejection, final queue drain.",
-        semantic_oracle: "runtime.command_before_turn_work",
-        required_sim_evidence: RUNTIME_REQUIRED_EVIDENCE,
-        oracle_id: "sim.oracle.scenario.runtime-contract.v1",
-    },
-    ScenarioContractSpec {
-        suite: "runtime",
         test_name: "runtime_scenario_command_only_queue_drain_completes_without_turn_work",
         owned_invariant: "Command-only queued work admits no turn work and explicitly commits.",
         semantic_oracle: "runtime.command_only_queue_drain",

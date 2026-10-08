@@ -828,7 +828,6 @@ pub fn workflow_effect_from_ir(
     let (effect, result_steps) = peel_result_steps(expression);
     let (kind, args) = match effect {
         Expr::Await(value) => (WorkflowEffectKind::AwaitJoin, vec![value.as_ref().clone()]),
-
         Expr::SleepFor(value) => (WorkflowEffectKind::SleepFor, vec![value.as_ref().clone()]),
         Expr::Print(value) => (WorkflowEffectKind::Print, vec![value.as_ref().clone()]),
         Expr::Break => (WorkflowEffectKind::Break, Vec::new()),
@@ -854,7 +853,6 @@ pub fn workflow_effect_to_ir(
         .collect::<Vec<_>>();
     let expression = match (effect, values.as_slice()) {
         (WorkflowEffectKind::AwaitJoin, [value]) => Expr::Await(Box::new(value.clone())),
-
         (WorkflowEffectKind::SleepFor, [value]) => Expr::SleepFor(Box::new(value.clone())),
         (WorkflowEffectKind::Print, [value]) => Expr::Print(Box::new(value.clone())),
         (WorkflowEffectKind::Break, []) => Expr::Break,
@@ -934,7 +932,6 @@ fn apply_result_steps(mut expression: Expr, result_steps: &[WorkflowResultStep])
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowEffectKind {
     AwaitJoin,
-
     SleepFor,
     Print,
     Break,

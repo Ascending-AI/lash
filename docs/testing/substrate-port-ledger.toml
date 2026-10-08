@@ -2,13 +2,9 @@
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
 # 1732 rows over 870 files, 4094 laws.
-# By class: mechanical 213, semantic 156, delete 905, replace 458.
+# By class: mechanical 196, semantic 140, delete 953, replace 443.
 # By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 99, L9c 367, L9d 124, L9e 141, L9f 125, L9g 98, L9h 122, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 22, P5 2.
-# By status: todo 0, ported 211, deleted 1521.
-# 1736 rows over 873 files, 4098 laws.
-# By class: mechanical 196, semantic 140, delete 955, replace 445.
-# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 99, L9c 368, L9d 124, L9e 141, L9f 125, L9g 98, L9h 124, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
-# By status: todo 0, ported 191, deleted 1545.
+# By status: todo 0, ported 191, deleted 1541.
 #
 # New laws owed (replace rows), by owning lane:
 # - none
@@ -9395,7 +9391,7 @@ laws = [
   "the_backend_process_registry_stamps_from_the_backend_clock",
   "backend_trigger_store_observes_the_backend_clock_for_the_worker_config",
   "fork_distinguishes_collected_revision_from_unknown_and_deleted_sources",
-  "fork_observer_selection_is_recoverable_selective_and_wake_independent",
+  "fork_observer_selection_is_recoverable_and_selective",
   "duplicate_only_fork_intents_are_canonical_on_sqlite_memory",
   "session_create_observer_intent_replays_idempotently_on_open",
   "session_observer_intents_settle_in_one_pass_before_open_returns",
@@ -9403,7 +9399,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5308: every law restored in place on a SQLite memory backend. FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
+note = "FIG-5308: every law restored in place on a SQLite memory backend. FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired. FIG-5421: the registry clock and fork observer laws keep their generic halves; their wake arms are retired, and the trigger-store clock probe goes with the trigger store."
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_delete_finalizer.rs"
@@ -23613,9 +23609,9 @@ lane = "L3s"
 laws = [
   "sqlite_a_partial_admission_rolls_back_through_both_entry_points",
 ]
-disposition = "covered-by:crates/lash-sqlite-store/tests/conformance/admission_atomicity.rs::sqlite_a_partial_checkpoint_admission_rolls_back"
+disposition = "subject-deleted"
 status = "deleted"
-note = "the checkpoint entry lives on renamed; the run entry (store admit_run) is deleted and its atomicity is the session mail drain's (MAIL-ATOMIC); only the laws listed were deleted, the file's other tests stay"
+note = "the run entry (store admit_run) is deleted and its atomicity is the session mail drain's (MAIL-ATOMIC); the checkpoint entry admitted only process-wake turn work, which FIG-5421 deleted with the host-events cutover, together with the file"
 
 [[row]]
 path = "crates/lash-sqlite-store/tests/conformance/admission_atomicity.rs"
@@ -23656,9 +23652,9 @@ lane = "L3s"
 laws = [
   "postgres_a_partial_admission_rolls_back_through_both_entry_points",
 ]
-disposition = "covered-by:crates/lash-postgres-store/tests/conformance/admission_atomicity.rs::postgres_a_partial_checkpoint_admission_rolls_back"
+disposition = "subject-deleted"
 status = "deleted"
-note = "the checkpoint entry lives on renamed; the run entry is the mail drain's (MAIL-ATOMIC); only the laws listed were deleted, the file's other tests stay"
+note = "the run entry is the mail drain's (MAIL-ATOMIC); the checkpoint entry admitted only process-wake turn work, which FIG-5421 deleted with the host-events cutover, together with the file"
 
 [[row]]
 path = "crates/lash-postgres-store/tests/conformance/admission_atomicity.rs"

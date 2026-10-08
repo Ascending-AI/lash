@@ -23,7 +23,6 @@ pub enum AbilityOp {
     Print(#[serde(with = "super::effect_value")] Value),
     Finish(#[serde(with = "super::effect_value")] Value),
     Fail(#[serde(with = "super::effect_value")] Value),
-
     Sleep(Sleep),
 }
 

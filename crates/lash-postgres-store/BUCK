@@ -121,9 +121,7 @@ lash_rust_integration_test(
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-postgres-store", "conformance", "//crates/lash-postgres-store:conformance__test"),
-    extra_compile_data = [
-        "//crates/lash-core:queued_admission_atomicity",
-    ],
+    extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
@@ -440,9 +438,7 @@ lash_rust_feature_test(
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-postgres-store", "conformance", "//crates/lash-postgres-store:conformance__test__fv_56bf93f6"),
-    extra_compile_data = [
-        "//crates/lash-core:queued_admission_atomicity",
-    ],
+    extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
@@ -475,9 +471,7 @@ lash_rust_feature_test(
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-postgres-store", "conformance", "//crates/lash-postgres-store:conformance__test__fv_830fdb9f"),
-    extra_compile_data = [
-        "//crates/lash-core:queued_admission_atomicity",
-    ],
+    extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
@@ -511,9 +505,7 @@ lash_rust_feature_test(
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-postgres-store", "conformance", "//crates/lash-postgres-store:conformance__test__fv_bbf330bd"),
-    extra_compile_data = [
-        "//crates/lash-core:queued_admission_atomicity",
-    ],
+    extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],

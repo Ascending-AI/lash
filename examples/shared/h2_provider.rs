@@ -30,18 +30,7 @@ pub fn scripted_provider(
     ensure!(
         matches!(
             scenario,
-            "S01"
-                | "S02"
-                | "S05"
-                | "S08"
-                | "S09"
-                | "S10"
-                | "S11"
-                | "S12"
-                | "S18"
-                | "S23"
-                | "S31"
-                | "S32"
+            "S01" | "S02" | "S05" | "S11" | "S12" | "S18" | "S23" | "S31" | "S32"
         ),
         "unknown H2 scenario"
     );
@@ -229,7 +218,7 @@ fn response(
                 "S01" => "echo",
                 "S02" => "A|B",
                 "S05" => "A|B|C",
-                _ => "intent",
+                _ => return Err(anyhow!("scenario needs an RLM channel")),
             };
             vec![LlmOutputPart::Text {
                 text: answer.to_owned(),
@@ -242,9 +231,6 @@ fn response(
                 "RLM fixture should finish in its single cell"
             );
             let code = match config.scenario.as_str() {
-                "S10" => {
-                    "const a = tools.rank_one({}); const b = tools.rank_two({}); const c = tools.rank_three({}); await Promise.all([a,b,c,sleep(10000)]); finish('drained');"
-                }
                 "S11" => {
                     "const winner = tools.winner({}); const loser = tools.loser({}); const value = await Promise.race([winner,loser]); await tools.after({}); finish(value);"
                 }

@@ -16,7 +16,7 @@ pub(crate) async fn reclaim(
         Box::new(lash_core_execution::MaintenanceFailure::failed_before_any_work(error))
     };
     let cutoff = clamp_epoch_ms(bound.committed_before_epoch_ms);
-    let report = store
+    let mut report = store
         .conn
         .write_flow(move |tx| {
             Ok(
@@ -75,6 +75,14 @@ pub(crate) async fn reclaim(
         .await
         .map_err(|error| failed_before_any_work(sqlite_error(error)))?
         .map_err(failed_before_any_work)?;
+    report.removed_tool_intent_submission_count = reclaim_tool_intent_submissions(store, cutoff)
+        .await
+        .map_err(|error| {
+            Box::new(lash_core_execution::MaintenanceFailure::failed(
+                error,
+                report.clone(),
+            ))
+        })?;
     Ok(report)
 }
 

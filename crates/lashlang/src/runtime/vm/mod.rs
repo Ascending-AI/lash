@@ -648,7 +648,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::SleepFor => {
                 return Ok(Some(VmStep::Effect(VmEffect::Sleep(SleepKind::For))));
             }
-
             Instruction::ProcessFail => {
                 if self.mode != VmMode::Process {
                     return Err(RuntimeError::SessionProcessAdminOutsideProcess {

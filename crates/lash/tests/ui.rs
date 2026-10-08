@@ -108,7 +108,6 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/pending_attempt_cannot_carry_intents.rs");
     t.compile_fail("tests/ui/pending_start_cannot_carry_intents.rs");
     t.compile_fail("tests/ui/declared_start_is_sealed.rs");
-    t.compile_fail("tests/ui/pending_announcement_requires_a_replay_key.rs");
     t.compile_fail("tests/ui/after_turn_cannot_abort.rs");
     t.compile_fail("tests/ui/frame_key_is_not_a_frame_node_id.rs");
     // FIG-4024: the resident runtime state changes only through the

@@ -50,7 +50,6 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
                 dialect: self.dialect.as_ref(),
                 events: ctx.events,
                 turn_messages: ctx.messages,
-                turn_causes: ctx.turn_causes,
                 max_output_chars: self.max_output_chars,
                 protocol_iteration: ctx.protocol_iteration + 1,
             },

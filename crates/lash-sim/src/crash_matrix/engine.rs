@@ -187,7 +187,6 @@ impl ProcessEngine for SimProcessEngine {
             EngineEvent::ProcessEnded { .. } if root => {
                 ended(json!({ "timed_out": false, "key": script["key"] }))
             }
-
             _ => EngineAction::Idle,
         };
         let bytes = serde_json::to_vec(&script).map_err(infra)?;
@@ -233,7 +232,6 @@ impl ProcessEngine for SimProcessEngine {
     > {
         Ok(lash_core_execution::ProcessDefinitionResolution::new(
             lash_core_execution::ProcessSignature::Unknown,
-            Vec::new(),
         ))
     }
 }

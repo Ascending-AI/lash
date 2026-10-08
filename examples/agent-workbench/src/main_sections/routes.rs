@@ -411,7 +411,7 @@ pub(crate) async fn list_triggers(
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<Vec<host_triggers::Subscription>>, AppError> {
     let session_id = state.admit_session(&query, "api.triggers.list").await?;
-    Ok(Json(state.trigger_subscriptions(&session_id)?))
+    Ok(Json(state.host_trigger_registrations(&session_id)?))
 }
 
 pub(crate) async fn delete_trigger(
@@ -941,7 +941,7 @@ pub(crate) async fn await_work(
         };
         events.extend(page_events.into_iter().map(|event| WorkAwaitEvent {
             sequence: event.sequence,
-            event_type: event.event_type,
+            event_type: event.kind.as_str().to_owned(),
         }));
         from = match (page.more, read.cursor) {
             (lash::process::ProcessEventPageMore::More { .. }, Some(cursor)) => {

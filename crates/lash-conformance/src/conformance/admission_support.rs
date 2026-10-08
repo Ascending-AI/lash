@@ -39,21 +39,3 @@ pub(crate) async fn head_commit(
     };
     crate::RuntimeCommit::persisted_state_for_test(&state)
 }
-
-/// Start `run` running: open its record with nothing bound to it. Input may
-/// address a turn only while that turn runs or once it has ended (ADR 0101
-/// §5.1), so a law that addresses `run`'s turns starts it first.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: the run record is established by the setup"
-)]
-pub(crate) async fn active_run(
-    store: &Arc<dyn crate::RuntimeStore>,
-    session_id: &crate::SessionId,
-    run: &crate::TurnId,
-) {
-    store
-        .bind_run_inputs(session_id, run, &[])
-        .await
-        .expect("open the running run");
-}

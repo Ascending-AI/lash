@@ -571,7 +571,6 @@ pub enum Expr {
     },
     Await(Box<Expr>),
     SleepFor(Box<Expr>),
-
     ResultUnwrap(Box<Expr>),
     Print(Box<Expr>),
     Finish(Box<Expr>),
@@ -1451,7 +1450,6 @@ pub fn format_type_expr(ty: &TypeExpr) -> String {
             ),
             None => "Process".to_string(),
         },
-
         TypeExpr::Union(items) => items
             .iter()
             .map(format_type_expr)

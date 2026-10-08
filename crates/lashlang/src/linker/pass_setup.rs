@@ -95,7 +95,6 @@ impl<'module> Linker<'module> {
             recover_workflow_errors: Cell::new(false),
             workflow_diagnostic_owner: RefCell::new(None),
             workflow_error_path: RefCell::new(None),
-
             lifted_declarations: RefCell::new(Vec::new()),
             lifted_process_aliases: RefCell::new(BTreeMap::new()),
             open_places: OpenPlaces::of(program),
@@ -431,7 +430,6 @@ impl<'module> Linker<'module> {
                     .expect("resolved checked process signature remains valid"),
                 )),
             },
-
             TypeExpr::Any
             | TypeExpr::Str
             | TypeExpr::Int
@@ -916,7 +914,6 @@ fn forbidden_function_construct(expr: &Expr) -> Option<&'static str> {
         Expr::ReceiverCall { .. } => Some("a module operation call"),
         Expr::Await(_) => Some("await"),
         Expr::SleepFor(_) => Some("sleep for"),
-
         Expr::ProcessRef { .. } => Some("a process reference"),
         Expr::ProcessLiteral(_) => Some("a process literal"),
         Expr::Print(_) => Some("print"),

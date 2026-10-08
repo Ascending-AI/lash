@@ -92,9 +92,9 @@ mod tests {
         let documents = documents().expect("schemas generate");
         assert_eq!(documents.len(), SHAPES.len());
         for (document, (_, event_type, _)) in documents.iter().zip(SHAPES) {
-            let registered = runtime_lifecycle_event_type(event_type)
+            let registered = ProcessEventKind::parse(event_type)
+                .and_then(ProcessEventKind::payload_schema)
                 .expect("runtime-owned kind")
-                .payload_schema
                 .into_value();
             let mut unstamped = document.schema.clone();
             let root = unstamped.as_object_mut().expect("object schema");

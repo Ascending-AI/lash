@@ -43,8 +43,6 @@ fn process_tool_accessor_selects_each_capability_contract() {
         (Tool::Start, "start_process"),
         (Tool::List, "list_process_handles"),
         (Tool::Await, "await_process"),
-        (Tool::Signal, "signal_process"),
-        (Tool::Emit, "emit_process_event"),
         (Tool::Get, "get_process_definition"),
         (Tool::Cancel, "cancel_process"),
     ] {
@@ -100,34 +98,5 @@ async fn facade_change_feeds_share_bounded_pages_and_typed_cutoffs() -> crate::R
     assert!(faults.changes.is_empty());
     assert_eq!(faults.next, Some(after));
     assert_eq!(faults.retained_after, None);
-    let triggers: crate::ChangePage<
-        crate::triggers::TriggerSubscriptionChange,
-        crate::triggers::TriggerSubscriptionChangeCursor,
-    > = core
-        .triggers()
-        .changed_since(
-            crate::triggers::TriggerSubscriptionChangeCursor::initial(),
-            limit,
-        )
-        .await?;
-    assert!(triggers.changes.is_empty());
-    assert_eq!(
-        triggers.next,
-        crate::triggers::TriggerSubscriptionChangeCursor::initial()
-    );
-    assert_eq!(
-        core.triggers()
-            .compact_subscription_tombstones(std::time::UNIX_EPOCH)
-            .await?,
-        0
-    );
-    assert!(
-        core.triggers()
-            .compact_subscription_tombstones(
-                std::time::UNIX_EPOCH - std::time::Duration::from_millis(1)
-            )
-            .await
-            .is_err()
-    );
     Ok(())
 }

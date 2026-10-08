@@ -371,9 +371,8 @@ async fn at_checkpoint(
     .await
 }
 
-/// Prove checkpoint admission probes stay read-only for empty queues and for
-/// deferred queue heads, while real checkpoint work still shares one write
-/// transaction and deferred work remains admissible at the idle boundary.
+/// Prove checkpoint admission probes stay read-only when a session has
+/// nothing for the checkpoint: no open ingress, or only next-turn input.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -399,7 +398,7 @@ pub async fn checkpoint_admission_probe_transaction_counts(
     assert!(empty.is_empty());
     assert_eq!(counts(), (1, 0));
 
-    let deferred = store
+    store
         .enqueue_pending_turn_input(pending_next_turn_input_draft(
             session_id,
             "deferred checkpoint head",
@@ -423,38 +422,6 @@ pub async fn checkpoint_admission_probe_transaction_counts(
         (2, 0),
         "a deferred input opens no checkpoint write transaction"
     );
-    expect_cancelled_pending_input(
-        store
-            .cancel_pending_turn_input(session_id, &deferred.input_id)
-            .await
-            .expect("withdraw deferred input"),
-        &deferred.input_id,
-    );
-    super::super::admission_support::active_run(&store, session_id, &turn_id).await;
-    store
-        .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
-            session_id,
-            crate::TurnInputIngress::active_turn(
-                turn_id.clone(),
-                crate::TurnInputCheckpointBoundary::AfterWork,
-            ),
-            crate::TurnInput::text("pending checkpoint work"),
-        ))
-        .await
-        .expect("enqueue active checkpoint input");
-    let pending = at_checkpoint(
-        &store,
-        session_id,
-        &turn_id,
-        crate::CheckpointKind::AfterWork,
-        "counter:step:3",
-        64,
-        crate::testing::queued_work_admission_policy(64),
-    )
-    .await
-    .expect("admit active checkpoint input");
-    assert!(pending.inputs.is_some());
-    assert_eq!(counts(), (3, 1));
 }
 
 pub(super) fn queued_session_command_draft(

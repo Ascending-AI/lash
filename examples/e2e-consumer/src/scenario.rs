@@ -20,12 +20,11 @@ use lash::plugins::{
 use lash::provider::{LlmContentBlock, LlmRequest, LlmResponse, LlmRole, ProviderHandle};
 use lash::sync::MutexExt as _;
 use lash::tools::{
-    CancelHint, EmitProcessEventIntent, ExecutionPolicy, PendingCompletion, StaticToolExecute,
-    StaticToolProvider, ToolAttemptOutcome, ToolCall, ToolDeclaration, ToolDefinition, ToolFailure,
-    ToolFailureClass, ToolIntent, ToolIntents, ToolOutcome, ToolOutcomeDone,
+    CancelHint, ExecutionPolicy, PendingCompletion, StaticToolExecute, StaticToolProvider,
+    ToolAttemptOutcome, ToolCall, ToolDeclaration, ToolDefinition, ToolFailure, ToolFailureClass,
+    ToolIntents, ToolOutcome, ToolOutcomeDone,
 };
 
-use crate::receiver;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -47,8 +46,6 @@ pub struct Fixture {
     pub control_url: String,
     /// Where the case's reducers record each reduction they run.
     pub reducer_ledger: PathBuf,
-    /// The file naming the case's intent receiver process, once started.
-    pub receiver: PathBuf,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -80,9 +77,6 @@ pub struct ToolPlan {
     /// The body's result is its plugin's published namespace.
     #[serde(default)]
     pub reads: bool,
-    /// The body declares one event for the case's receiver process.
-    #[serde(default)]
-    pub emit: bool,
 }
 
 fn one() -> String {
@@ -381,9 +375,6 @@ impl<P: CaseId> SessionPlugin for CasePlugin<P> {
             .map(|plan| {
                 let declaration = if plan.deferred {
                     ToolDeclaration::deferring()
-                } else if plan.emit {
-                    ToolDeclaration::default()
-                        .with_intents([lash::tools::ToolIntentKind::EmitProcessEvent])
                 } else {
                     ToolDeclaration::default()
                 };
@@ -496,20 +487,9 @@ impl Bodies {
                 StatePlan::Append { key, input } => commands.apply(key, "append", input.clone()),
             };
         }
-        let intents = if plan.emit {
-            let process = receiver::bound(&self.shared.fixture.receiver)?;
-            ToolIntents::v3(vec![ToolIntent::EmitProcessEvent(EmitProcessEventIntent {
-                owner: call.context.owner().runtime_owner(),
-                process_id: process,
-                event_type: receiver::EVENT.to_owned(),
-                payload: json!({"call_id": delivery.call_id, "value": value}),
-            })])
-        } else {
-            ToolIntents::default()
-        };
         Ok(ToolAttemptOutcome::done(
             ToolOutcomeDone::ok(value).with_state(commands),
-            intents,
+            ToolIntents::default(),
         ))
     }
 

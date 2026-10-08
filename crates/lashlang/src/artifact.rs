@@ -563,7 +563,6 @@ fn resolve_artifact_type(
                 .expect("resolved checked process signature remains valid"),
             )),
         },
-
         _ => ty.clone(),
     }
 }
@@ -1218,7 +1217,6 @@ fn write_type(writer: &mut HashWriter, ty: &TypeExpr) {
             }
             write_type(writer, signature.output());
         }
-
         TypeExpr::Union(items) => {
             writer.atom("type:union");
             writer.usize(items.len());
@@ -1390,7 +1388,6 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr) {
         }
         Expr::Await(expr) => write_unary_expr(writer, "await", expr),
         Expr::SleepFor(expr) => write_unary_expr(writer, "sleep-for", expr),
-
         Expr::ResultUnwrap(expr) => write_unary_expr(writer, "unwrap", expr),
         Expr::Print(expr) => write_unary_expr(writer, "print", expr),
         Expr::Finish(expr) => write_unary_expr(writer, "finish", expr),

@@ -502,12 +502,6 @@ fn an_await_stands_until_its_process_ends() {
     ));
 }
 
-
-
-
-
-
-
 /// A `vm_run` that reached no quiet point left nothing: the same run is
 /// asked again from the same snapshot with the same injection, up to the
 /// fault budget, and then the process ends with a typed failure.
@@ -576,8 +570,6 @@ fn the_vms_end_is_the_processs_terminal() {
     );
     assert_eq!(driven.phase(), Phase::Ended);
 }
-
-
 
 /// A lashlang process pins no host key; a pinned or resolved key is a
 /// corrupt mailbox, not an event to fold.
@@ -767,8 +759,6 @@ async fn a_resumed_vm_run_is_answered_from_its_injection_and_reissues_nothing() 
         other => panic!("the process ends, got {other:?}"),
     }
 }
-
-
 
 /// A snapshot captured under another program identity is refused before it
 /// resumes, naming the identity it recorded.

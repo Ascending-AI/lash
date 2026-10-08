@@ -146,14 +146,8 @@ async fn a_live_process_is_walked_with_its_record_and_terminal_ones_are_not() {
     };
     let scratch = ScratchSchema::provision(&database_url).await;
     let live = ProcessId::fixture("proc-live");
-    seed_process(&scratch, &live, "running", Some("session-1")).await;
-    seed_process(
-        &scratch,
-        &ProcessId::fixture("proc-done"),
-        "completed",
-        Some("session-2"),
-    )
-    .await;
+    seed_process(&scratch, &live, "running").await;
+    seed_process(&scratch, &ProcessId::fixture("proc-done"), "completed").await;
 
     let preflight = PostgresStorePreflight::from_pool(scratch.pool.clone());
     let page = preflight
@@ -167,7 +161,7 @@ async fn a_live_process_is_walked_with_its_record_and_terminal_ones_are_not() {
     assert_eq!(item.surface, DurableSurface::StartedProcess);
     assert_eq!(item.cursor, live.as_str());
     assert_eq!(item.process_id.as_ref(), Some(&live));
-    assert_eq!(item.session_id.as_deref(), Some("session-1"));
+    assert_eq!(item.session_id, None);
     assert_eq!(item.status.as_deref(), Some("running"));
     assert_eq!(
         item.payload,
@@ -189,7 +183,7 @@ async fn paging_a_surface_one_item_at_a_time_is_exact() {
         .map(ProcessIdMint::sequential_id_for_testing)
         .collect();
     for (id, status) in ids.iter().zip(["waiting", "running", "waiting"]) {
-        seed_process(&scratch, id, status, None).await;
+        seed_process(&scratch, id, status).await;
     }
 
     let preflight = PostgresStorePreflight::from_pool(scratch.pool.clone());
@@ -366,12 +360,7 @@ fn encode_manifest(
     bytes
 }
 
-async fn seed_process(
-    scratch: &ScratchSchema,
-    process_id: &ProcessId,
-    status: &str,
-    _wake: Option<&str>,
-) {
+async fn seed_process(scratch: &ScratchSchema, process_id: &ProcessId, status: &str) {
     scratch
         .apply(&format!(
             "INSERT INTO lash_processes (

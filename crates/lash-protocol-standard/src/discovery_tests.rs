@@ -53,7 +53,6 @@ fn an_open_nested_schema_reaches_the_provider_spec_and_the_schema_docs_whole() {
     .build_preamble(ProtocolBuildInput {
         tool_catalog: Arc::new(catalog.clone()),
         plugin_extensions: Default::default(),
-        trigger_events: Default::default(),
         writer_formats: lash_core::build_newest_writer_formats(),
     });
     assert_eq!(preamble.tool_specs.len(), 1);
@@ -123,7 +122,6 @@ fn standard_discovery_filters_provider_specs_and_requires_an_inline_member() {
         let preamble = driver.build_preamble(ProtocolBuildInput {
             tool_catalog: Arc::new(catalog.clone()),
             plugin_extensions: Default::default(),
-            trigger_events: Default::default(),
             writer_formats: lash_core::build_newest_writer_formats(),
         });
         assert_eq!(preamble.tool_specs.len(), expected);

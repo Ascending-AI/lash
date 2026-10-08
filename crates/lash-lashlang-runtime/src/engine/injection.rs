@@ -157,7 +157,6 @@ fn op_name(op: &AbilityOp) -> &'static str {
         AbilityOp::Print(_) => "a print",
         AbilityOp::Finish(_) => "a finish",
         AbilityOp::Fail(_) => "a fail",
-
         AbilityOp::Sleep(_) => "a sleep",
     }
 }
@@ -208,7 +207,6 @@ pub(crate) fn answer(
             process_value(&outcome, cancellation).map(AbilityOutcome::Value)
         }
         (AbilityOp::Sleep(_), Injection::Woke { .. }) => Ok(AbilityOutcome::Value(Value::Null)),
-
         (_, inject) => return Err(mismatch(&inject)),
     })
 }

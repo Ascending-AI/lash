@@ -36,9 +36,8 @@ use std::time::Duration;
 use lash_core_execution::runtime::actor::process::ProcessActivation;
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
-    Backend, EngineStepRefusal, EngineStepRun, EngineSteps as _, LifetimeDecision, ProcessId,
-    ProcessIdMint, ProcessInput, ProcessProvenance, ProcessRecord, ProcessRegistration,
-    StepRequest, StoreSet,
+    Backend, EngineStepRun, EngineSteps as _, LifetimeDecision, ProcessId, ProcessIdMint,
+    ProcessInput, ProcessProvenance, ProcessRecord, ProcessRegistration, StepRequest, StoreSet,
 };
 use lash_durable::runner::{Activation, Stopped};
 use lash_durable::{ActorKey, ActorKind, ActorState, CommitLabel, DurableStore, LeaseConfig};
@@ -133,11 +132,6 @@ impl ProcessSteps for LashlangSteps {
                 step: step.0.clone(),
                 tool: tool.as_str().to_owned(),
             }),
-            StepRequest::Host { operation, .. } => Err(EngineStepRefusal::UndeclaredHostStep {
-                engine: LASHLANG_ENGINE_KIND.to_owned(),
-                operation: operation.clone(),
-            }
-            .into()),
         }
     }
 

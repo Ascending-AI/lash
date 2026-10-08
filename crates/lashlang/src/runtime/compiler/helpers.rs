@@ -97,7 +97,6 @@ pub fn execution_site_descriptor(expr: &Expr) -> Option<(ExecutionNodeKind, Cow<
             Cow::Borrowed(operation.as_str()),
         ),
         Expr::SleepFor(_) => (ExecutionNodeKind::Sleep, Cow::Borrowed("sleep for")),
-
         Expr::Await(handle) if await_wraps_direct_operation(handle) => {
             return None;
         }
@@ -251,9 +250,4 @@ pub(super) fn is_terminal_expr(expr: &Expr) -> bool {
         } => is_terminal_expr(then_block) && is_terminal_expr(else_block),
         _ => false,
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{TypeExpr, TypeField, runtime::Value, testing::ast_builders as builders};
 }

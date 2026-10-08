@@ -243,7 +243,6 @@ impl ModelStore {
                     input.state = ModelPendingInputState::Cancelled;
                 }
             }
-
             BoundaryKind::BackendFailure => {
                 let session = self.ensure_session(boundary_session_alias(event));
                 session.backend_failure_count += 1;
@@ -554,7 +553,9 @@ impl ModelStore {
                 }
                 observed
             }
-            BoundaryKind::ProviderEvent | BoundaryKind::ContractExecution => json!({
+            // The world answers a contract execution with its payload.
+            BoundaryKind::ContractExecution => event.payload.clone(),
+            BoundaryKind::ProviderEvent => json!({
                 "session": event.actor_alias,
                 "provider_event_release": true,
                 "turn_boundary_id": event
@@ -761,7 +762,6 @@ impl ModelStore {
                     "cancel_outcome": outcome,
                 })
             }
-
             BoundaryKind::BackendFailure => {
                 let operation = event
                     .payload

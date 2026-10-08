@@ -236,7 +236,6 @@ impl StandardProtocolScenario {
                                 origin: None,
                                 reply_marker: None,
                             }],
-                            ..sansio::CheckpointDelivery::default()
                         },
                     });
                 }

@@ -435,7 +435,6 @@ impl TurnServices for L3Services {
             messages,
             Vec::new(),
             0,
-            Vec::new(),
         );
         Ok(self.drive(row, machine))
     }
@@ -1933,7 +1932,6 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
         )]),
         Vec::new(),
         0,
-        Vec::new(),
     );
     let pinned = loop {
         match machine
@@ -1953,7 +1951,6 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
     let checkpoint = serde_json::to_string(&PhaseCheckpoint {
         saved: machine.checkpoint(),
         delivered: Vec::new(),
-        delivered_work: Vec::new(),
         before_turn: Vec::new(),
         trace: None,
     })
@@ -1980,8 +1977,8 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
         session: session(),
         run: run(),
         admission: RunAdmissionRecord::Turn {
-            took: AdmittedTurnRows::Batch {
-                id: lash_core::BatchId::from("l3-batch"),
+            took: AdmittedTurnRows::Inputs {
+                ids: AdmittedInputIds::one(lash_sansio::InputId::from("l3-batch")),
             },
             trace: None,
         },

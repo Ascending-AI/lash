@@ -1435,7 +1435,6 @@ impl lash_core_execution::ProcessEngine for StateEngine {
     > {
         Ok(lash_core_execution::ProcessDefinitionResolution::new(
             lash_core_execution::ProcessSignature::Unknown,
-            Vec::new(),
         ))
     }
 }

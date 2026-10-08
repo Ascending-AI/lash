@@ -148,7 +148,6 @@ impl ProcessEngine for LawEngine {
                         .with_origin(origin),
                 )))
             }
-
             ("sleep", EngineEvent::Started { .. }) => EngineAction::Sleep {
                 until: DurableInstant(script["until_ms"].as_i64().unwrap_or_default()),
             },
@@ -178,7 +177,6 @@ impl ProcessEngine for LawEngine {
                 }])
             }
             ("refused_step", EngineEvent::StepSettled { .. }) => success(json!({ "ran": true })),
-
             ("flaky", EngineEvent::Started { .. }) => success(json!({ "ran": true })),
             _ => EngineAction::Idle,
         };
@@ -225,7 +223,6 @@ impl ProcessEngine for LawEngine {
     > {
         Ok(lash_core_execution::ProcessDefinitionResolution::new(
             lash_core_execution::ProcessSignature::Unknown,
-            Vec::new(),
         ))
     }
 }

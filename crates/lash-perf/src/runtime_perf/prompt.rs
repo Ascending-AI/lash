@@ -74,7 +74,6 @@ pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize)
             turn_index + 1,
             expected_reply()
         ),
-
         RuntimePerfScenario::RlmProcessAsyncToolCompletion => format!(
             "Turn {} in RLM mode. Exercise pending benchmark_async completion inside a started process, then finish exactly: {}",
             turn_index + 1,

@@ -387,7 +387,7 @@ where
         .await
         .expect("list queued config command")
         .into_iter()
-        .find(crate::QueuedWorkBatch::is_session_command_work)
+        .next()
         .expect("config setter enqueued its command");
     let cancelled = store
         .cancel_queued_work_batch(&request.session_id, &command_batch.batch_id)
@@ -461,7 +461,7 @@ where
             .await
             .expect("list queued config command")
             .into_iter()
-            .find(crate::QueuedWorkBatch::is_session_command_work)
+            .next()
         {
             break batch;
         }

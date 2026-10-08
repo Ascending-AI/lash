@@ -257,7 +257,7 @@ mod walk {
         store::EXECUTION_STATE_CHECKPOINT_COMPONENT,
     };
     use lash_core_execution::{ProcessLifecycle as _, ProcessRegistrar as _};
-    use lash_sansio::{ProcessId, SessionId};
+    use lash_sansio::ProcessId;
 
     use super::super::SqliteStorePreflight;
     use crate::{SqliteProcessRegistry, SqliteStore};

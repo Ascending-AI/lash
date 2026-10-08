@@ -1,38 +1,25 @@
 //! Durable await-event wait identity.
 
-use crate::{ExecutionScope, ProcessId, RuntimeError};
+use crate::{ExecutionScope, RuntimeError};
+use lash_sansio::ToolCallId;
 use serde::{Deserialize, Serialize};
+/// The wait a Deferred source resolves: the deferring tool call it parked
+/// on, by its stable call id (ADR 0117).
 #[derive(
     Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AwaitEventWaitIdentity {
-    ProcessSignal {
-        process_id: ProcessId,
-        signal_name: String,
-        ordinal: u64,
-    },
+    ToolCall { call_id: ToolCallId },
 }
 impl AwaitEventWaitIdentity {
-    pub fn process_signal(
-        process_id: impl Into<ProcessId>,
-        signal_name: impl Into<String>,
-        ordinal: u64,
-    ) -> Self {
-        Self::ProcessSignal {
-            process_id: process_id.into(),
-            signal_name: signal_name.into(),
-            ordinal,
-        }
+    pub fn tool_call(call_id: ToolCallId) -> Self {
+        Self::ToolCall { call_id }
     }
 
     pub fn validate(&self) -> Result<(), RuntimeError> {
         let invalid = match self {
-            Self::ProcessSignal {
-                signal_name,
-                ordinal,
-                ..
-            } => signal_name.trim().is_empty() || *ordinal == 0,
+            Self::ToolCall { call_id } => call_id.as_str().trim().is_empty(),
         };
         if invalid {
             return Err(RuntimeError::new(

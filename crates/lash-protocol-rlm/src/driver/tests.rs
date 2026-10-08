@@ -1,5 +1,4 @@
 use lash_core::llm::types::LlmRole;
-use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 /// These fixtures cover the prompt wording; the walker in
@@ -158,7 +157,6 @@ fn project_iteration_request_with_generation(
             config: &config,
             messages: &lash_core::facade_support::MessageSequence::default(),
             events,
-            turn_causes: &[],
             protocol_iteration,
             use_tools: false,
             environment: &lash_core::sansio::ExecutionEnvironmentSync::default(),
@@ -210,7 +208,6 @@ pub(crate) fn projected_request_with_facts(
             config: &config,
             messages: &messages,
             events: &events,
-            turn_causes: &[],
             protocol_iteration: 0,
             use_tools: false,
             environment: &Default::default(),
@@ -322,7 +319,6 @@ fn folded_step_renders_as_emission_cell_not_history_echo() {
         dialect: projector.dialect.as_ref(),
         events: &events,
         turn_messages: &lash_core::facade_support::MessageSequence::default(),
-        turn_causes: &[],
         max_output_chars: 1000,
         protocol_iteration: 1,
     })
@@ -382,7 +378,6 @@ fn committed_transcript_supersedes_terminal_step_by_turn_provenance() {
         dialect: projector.dialect.as_ref(),
         events: &events,
         turn_messages: &lash_core::facade_support::MessageSequence::default(),
-        turn_causes: &[],
         max_output_chars: 1000,
         protocol_iteration: 0,
     })
@@ -468,7 +463,6 @@ fn natural_prose_history_is_byte_unchanged() {
         dialect: projector.dialect.as_ref(),
         events: &events,
         turn_messages: &lash_core::facade_support::MessageSequence::default(),
-        turn_causes: &[],
         max_output_chars: 1000,
         protocol_iteration: 0,
     })
@@ -501,7 +495,6 @@ fn committed_transcript_remains_the_rolling_cache_fence() {
         dialect: projector.dialect.as_ref(),
         events: &events,
         turn_messages: &lash_core::facade_support::MessageSequence::default(),
-        turn_causes: &[],
         max_output_chars: 1000,
         protocol_iteration: 0,
     })
@@ -616,7 +609,6 @@ fn printed_images_render_as_llm_image_blocks() {
         dialect: projector.dialect.as_ref(),
         events: &events,
         turn_messages: &lash_core::facade_support::MessageSequence::default(),
-        turn_causes: &[],
         max_output_chars: 1000,
         protocol_iteration: 1,
     })
@@ -656,7 +648,6 @@ fn rlm_prompt_projects_history_as_chat_messages_with_rolling_cache_breakpoint() 
         dialect: projector.dialect.as_ref(),
         events: &events,
         turn_messages: &lash_core::facade_support::MessageSequence::default(),
-        turn_causes: &[],
         max_output_chars: 1000,
         protocol_iteration: 2,
     })

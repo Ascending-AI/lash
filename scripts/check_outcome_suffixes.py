@@ -58,8 +58,6 @@ RESULT_ALIASES = frozenset(
     {
         "Result",
         "MaintenanceResult",
-        "TriggerEffectResult",
-        "TriggerOccurrenceReclamationResult",
     }
 )
 

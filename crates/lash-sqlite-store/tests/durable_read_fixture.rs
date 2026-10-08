@@ -182,7 +182,6 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
     .expect("open the coherent SQLite fixture");
     let runtime = stores.session_store_factory();
     let processes = stores.process_registry();
-    let durable = Arc::new(stores.durable_store());
     drop(stores);
     // The handles outlive the dropped assembly; take ownership only to pin
     // the fixture's otherwise random identities.
@@ -198,7 +197,6 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
         processes: Arc::clone(&processes)
             as Arc<dyn lash_core_execution::ConformanceProcessRegistry>,
         process_envs: runtime as Arc<dyn ProcessExecutionEnvStore>,
-        durable: durable as Arc<dyn lash_core_execution::DurableStore>,
     }
 }
 

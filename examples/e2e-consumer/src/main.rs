@@ -22,7 +22,6 @@ use serde_json::{Value, json};
 #[path = "../../shared/e2e_commit_ledger.rs"]
 mod commit_ledger;
 mod fixture;
-mod receiver;
 mod scenario;
 mod telemetry;
 mod telemetry_scenario;
@@ -33,7 +32,6 @@ struct Host {
     controls: Arc<fixture::Controls>,
     telemetry: Option<Arc<telemetry::HostTelemetry>>,
     ledger: Option<Arc<commit_ledger::CommitLedger>>,
-    case: Option<Arc<scenario::Fixture>>,
 }
 
 type ApiResult = Result<Json<Value>, (axum::http::StatusCode, String)>;
@@ -241,34 +239,6 @@ async fn drain_status(State(host): State<Host>) -> ApiResult {
     }
 }
 
-/// Start the case's intent receiver for `session`.
-async fn start_receiver(State(host): State<Host>, Path(session): Path<String>) -> ApiResult {
-    let case = host
-        .case
-        .as_ref()
-        .context("no case fixture is installed")
-        .map_err(api_error)?;
-    let process = receiver::start(
-        &host.core,
-        &SessionId::parse(session).map_err(api_error)?,
-        &case.receiver,
-    )
-    .await
-    .map_err(api_error)?;
-    Ok(Json(json!({"process": process})))
-}
-
-/// The events the case's receiver holds.
-async fn receiver_events(State(host): State<Host>, Path(process): Path<String>) -> ApiResult {
-    let events = receiver::events(
-        &host.core,
-        &lash::ProcessId::parse(&process).map_err(api_error)?,
-    )
-    .await
-    .map_err(api_error)?;
-    Ok(Json(serde_json::to_value(events).map_err(api_error)?))
-}
-
 async fn release_cut(State(host): State<Host>, Json(label): Json<String>) -> ApiResult {
     let ledger = host
         .ledger
@@ -406,8 +376,7 @@ async fn main() -> Result<()> {
         Some(case) => case
             .plugins()?
             .into_iter()
-            .fold(builder, |builder, plugin| builder.plugin(plugin))
-            .plugin(Arc::new(receiver::ReceiverEnginePlugin)),
+            .fold(builder, |builder, plugin| builder.plugin(plugin)),
         None => builder,
     };
     let builder = match scenario.as_ref() {
@@ -439,8 +408,6 @@ async fn main() -> Result<()> {
             .route("/control/drain", post(drain))
             .route("/control/drain-status", get(drain_status))
             .route("/control/cuts/release", post(release_cut))
-            .route("/receiver/{session}", post(start_receiver))
-            .route("/receiver/{process}/events", get(receiver_events))
             .route(
                 "/control/entered",
                 get(|State(host): State<Host>| async move { Json(host.controls.receipts()) }),
@@ -471,7 +438,6 @@ async fn main() -> Result<()> {
                 controls,
                 telemetry: telemetry.clone(),
                 ledger,
-                case: case.clone().map(Arc::new),
             });
         let app = match scenario {
             Some(scenario) => app.merge(scenario.router(stores.clone())),

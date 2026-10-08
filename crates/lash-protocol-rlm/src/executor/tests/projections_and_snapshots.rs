@@ -673,8 +673,8 @@ pub(super) fn measured_commit_budget_carries_only_changed_leaf_bodies() {
             initial_budget.checkpoint_bytes, changed_budget.checkpoint_bytes
         );
         // Pin serializer measurements for the counter-only header and list-owned holes.
-        assert_eq!(initial_budget.checkpoint_bytes, 82_028);
-        assert_eq!(changed_budget.checkpoint_bytes, 13_381);
+        assert_eq!(initial_budget.checkpoint_bytes, 81_846);
+        assert_eq!(changed_budget.checkpoint_bytes, 13_199);
     });
 }
 
@@ -916,8 +916,8 @@ pub(super) fn measured_commit_growth_tracks_changed_state_not_session_size() {
         );
         assert_eq!(full_state_bytes, 136_767);
         // Pin serializer measurements for the counter-only header and list-owned holes.
-        assert_eq!(minimum, 19_548);
-        assert_eq!(maximum, 19_550);
+        assert_eq!(minimum, 19_366);
+        assert_eq!(maximum, 19_368);
     });
 }
 
@@ -1005,8 +1005,8 @@ pub(super) fn measured_commit_growth_stays_flat_for_many_mid_size_bindings() {
             measured.len()
         );
         // Pin serializer measurements for the counter-only header and list-owned holes.
-        assert_eq!(minimum, 94_481);
-        assert_eq!(maximum, 94_483);
+        assert_eq!(minimum, 94_299);
+        assert_eq!(maximum, 94_301);
     });
 }
 

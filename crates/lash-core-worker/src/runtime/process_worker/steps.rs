@@ -15,14 +15,6 @@
 //!   the registration of the process's engine declares, under the pinned
 //!   `Repeatable` policy. A registration that declares none, or not this
 //!   kind, refuses the step before admission.
-//! - **Host steps** run through the
-//!   [`EngineHostSteps`](lash_core_execution::EngineHostSteps) the
-//!   registration of the process's engine declares, admitted `Once` under
-//!   the tool default limit, over the step tools' host context, which acts
-//!   as the process's recorded originator. Their store write is their
-//!   store-local effect: a crash inside one is `Interrupted`, never a
-//!   second write. A registration that declares none for the operation
-//!   refuses the step before admission.
 
 use std::sync::Arc;
 
@@ -32,13 +24,13 @@ use lash_core_execution::runtime::actor::round::{
 };
 use lash_core_execution::runtime::actor::waits::Resolution;
 use lash_core_execution::runtime::process::steps::{
-    ProcessSteps, StepAdmission, StepRefusal, StepRuntime, engine_step_policy, host_step_output,
-    tool_step_output, tool_step_resolved,
+    ProcessSteps, StepAdmission, StepRefusal, StepRuntime, engine_step_policy, tool_step_output,
+    tool_step_resolved,
 };
 use lash_core_execution::tool_run::CompletionSource;
 use lash_core_execution::{
-    ActorContext, EngineStepRun, ExecutionLimit, ExecutionPolicy, HostStepRun, MaxToolCalls,
-    ProcessInput, ProcessRecord, StepRequest, ToolCatalog,
+    ActorContext, EngineStepRun, ExecutionLimit, MaxToolCalls, ProcessInput, ProcessRecord,
+    StepRequest, ToolCatalog,
 };
 
 use super::DurableProcessWorker;
@@ -113,9 +105,6 @@ impl DurableProcessWorker {
         let language_execution = match step {
             StepRequest::Tool {
                 language_execution, ..
-            }
-            | StepRequest::Host {
-                language_execution, ..
             } => language_execution,
             StepRequest::Engine { .. } => return,
         };
@@ -162,60 +151,6 @@ impl DurableProcessWorker {
                     .await
             })
             .await
-    }
-
-    /// The host step `execution` of `process`, run once by its engine's
-    /// registration over the step tools' host context. It is never stopped
-    /// halfway: its one store write lands or does not.
-    async fn host_step(
-        &self,
-        runtime: Arc<StepRuntime>,
-        process: ProcessRecord,
-        step: StepRequest,
-        execution: AdmittedExecution,
-    ) -> MemberResult {
-        let StepRequest::Host {
-            operation, input, ..
-        } = step
-        else {
-            return SettledOutput::Interrupted.into();
-        };
-        let engine = engine_kind(&process).unwrap_or_default();
-        let steps = match self
-            .config
-            .runtime_host
-            .process_engines
-            .host_steps(engine, &operation)
-        {
-            Ok(steps) => steps,
-            // Admitted under a registration this deployment no longer
-            // holds: the body cannot run here.
-            Err(refusal) => {
-                tracing::warn!(process = %process.id, %refusal, "an admitted host step has no body here");
-                return SettledOutput::Interrupted.into();
-            }
-        };
-        let tools = match self.built_step_tools(&runtime, &process).await {
-            Ok(tools) => tools,
-            // The context did not build: the operation never ran, and its
-            // admission stands, so it is answered as one that may have
-            // taken effect, never run again.
-            Err(error) => {
-                tracing::warn!(process = %process.id, %error, "a process host step could not reach its context");
-                return SettledOutput::Interrupted.into();
-            }
-        };
-        let output = steps
-            .run(
-                tools.host.clone(),
-                HostStepRun {
-                    call: execution.call().clone(),
-                    operation,
-                    input,
-                },
-            )
-            .await;
-        host_step_output(&process.id, &output).into()
     }
 }
 
@@ -274,21 +209,6 @@ impl ProcessSteps for WorkerSteps {
                     .execution(kind);
                 Ok(StepAdmission {
                     policy: engine_step_policy(),
-                    limit: ExecutionLimit::starting_at(now_ms, total, total),
-                    park: None,
-                })
-            }
-            StepRequest::Host { operation, .. } => {
-                let engine = engine_kind(process).unwrap_or_default();
-                let total = self
-                    .0
-                    .config
-                    .runtime_host
-                    .process_engines
-                    .host_steps(engine, operation)?
-                    .execution(operation);
-                Ok(StepAdmission {
-                    policy: ExecutionPolicy::Once,
                     limit: ExecutionLimit::starting_at(now_ms, total, total),
                     park: None,
                 })
@@ -356,17 +276,14 @@ impl ProcessSteps for WorkerSteps {
                             .engine_step(runtime.cx().clone(), process, step, token)
                             .await
                     }
-                    StepRequest::Host { .. } => {
-                        worker.host_step(runtime, process, step, execution).await
-                    }
                 }
             })
         })
     }
 
     /// A parked catalog tool step settles with the tool output its
-    /// resolution answers, as a round member does. An engine or host step
-    /// never parks.
+    /// resolution answers, as a round member does. An engine step never
+    /// parks.
     fn resolved(
         &self,
         process: &ProcessRecord,

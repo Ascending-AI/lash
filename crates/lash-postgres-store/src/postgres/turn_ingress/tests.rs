@@ -143,7 +143,6 @@ async fn open_ingress_reads_seek_state_indexes_with_settled_history() {
                 PlanParam::Text("history"),
                 PlanParam::Text("turn"),
                 PlanParam::Number(16),
-                PlanParam::Number(16),
                 PlanParam::Text("root"),
                 PlanParam::Text("admit"),
             ],
@@ -154,7 +153,6 @@ async fn open_ingress_reads_seek_state_indexes_with_settled_history() {
             vec![
                 PlanParam::Text("history"),
                 PlanParam::Text("turn"),
-                PlanParam::Number(16),
                 PlanParam::Number(16),
                 PlanParam::Text("root"),
                 PlanParam::Text("admit"),

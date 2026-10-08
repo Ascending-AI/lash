@@ -64,10 +64,6 @@ pub(crate) fn sqlite_memory_artifact_store_blocking() -> lashlang::LashlangArtif
     lashlang::LashlangArtifacts::of_backend(&sqlite_recording_backend_blocking())
 }
 
-pub(crate) async fn sqlite_memory_process_registry() -> Arc<dyn lash_core::ProcessRegistry> {
-    lash_core::StoreSet::process_registry(sqlite_memory_store_set().await.as_ref())
-}
-
 /// The scope a context built with no parent invocation claims: the builder's
 /// default test turn. Open the [`DurableHost`] whose context serves it for it.
 pub(crate) fn default_cell_scope() -> lash_core::AdmittedScope {

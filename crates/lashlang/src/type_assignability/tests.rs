@@ -1,4 +1,6 @@
 use super::*;
+use crate::json_schema_to_type_expr;
+use serde_json::json;
 
 fn required_field(name: &str, ty: TypeExpr) -> TypeField {
     TypeField {

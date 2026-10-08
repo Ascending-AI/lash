@@ -570,7 +570,6 @@ impl QuietPointHost {
                 };
                 Issue::Park(IssuedOperation::Sleep { until_ms })
             }
-
             AbilityOp::Finish(_) | AbilityOp::Fail(_) | AbilityOp::Print(_) => {
                 return Err(ExecutionHostError::new("answered before issue"));
             }

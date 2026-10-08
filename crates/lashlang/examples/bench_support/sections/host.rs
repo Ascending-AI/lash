@@ -139,7 +139,6 @@ fn bench_call(name: &str, args: &Record) -> Result<Value, ExecutionHostError> {
         }
         "list_process_handles" => Ok(process_handles_record()),
         "continue_as" => Ok(continue_as_record(args)),
-
         _ => Err(unknown_tool(name)),
     }
 }
@@ -184,13 +183,6 @@ fn continue_as_record(args: &Record) -> Value {
         Value::Number(global_count as f64),
     );
     Value::Record(Arc::new(record))
-}
-
-fn string_ref(value: &Value) -> Option<&str> {
-    match value {
-        Value::String(value) => Some(value.as_str()),
-        _ => None,
-    }
 }
 
 fn process_handles_record() -> Value {

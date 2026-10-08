@@ -25,7 +25,6 @@ use lash_sqlite_store::{SqliteStore, SqliteStoreSet, SqliteStoreSetOptions};
 const DEFAULT_CASES: usize = 4;
 const DEFAULT_SEED: u64 = 852;
 const OPS_PER_CASE: usize = 55;
-const SURFACE_SESSION: &str = "surface-session";
 /// The session the scenario's runtime store is bound to: the runtime ops the
 /// generated contract history executes all commit against it.
 const SURFACE_RUNTIME_SESSION: &str = "prop-runtime-session";

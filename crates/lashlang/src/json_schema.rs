@@ -173,7 +173,6 @@ pub fn type_expr_to_schema_shape(ty: &TypeExpr) -> lash_sansio::SchemaShape {
                 output: Box::new(type_expr_to_schema_shape(signature.output())),
             }
         })),
-
         TypeExpr::Union(members) => ShapeKind::Union(
             members
                 .as_slice()
@@ -308,7 +307,6 @@ impl SchemaImporter<'_> {
             })?;
         match declaration {
             XLashType::ProcessUnknown => Ok(TypeExpr::Process(ProcessType::unknown())),
-
             XLashType::Process { signature } => {
                 let mut params = Vec::new();
                 for (index, param) in signature.params.iter().enumerate() {

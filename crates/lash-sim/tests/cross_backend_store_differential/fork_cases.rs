@@ -513,23 +513,6 @@ pub(super) async fn selected_observer_intents(
                 .count(),
             1
         );
-        // Old observer authors remain opaque historical audit data, not a
-        // selector that can attach or redirect a live edge.
-        let mut historical = events
-            .iter()
-            .find(|event| event.fact.event_type() == "process.observer_added")
-            .expect("observer audit event")
-            .clone();
-        historical.payload["by"] = serde_json::json!({"kind": "fork_inheritance"});
-        let historical: lash_core::ProcessEvent = serde_json::from_slice(
-            &serde_json::to_vec(&historical).expect("encode historical audit event"),
-        )
-        .expect("hydrate opaque historical author");
-        let mut projected = first.clone();
-        lash_core::runtime::apply_process_event_projection(&mut projected, &historical)
-            .expect("historical observer author has no lifecycle projection");
-        assert_eq!(projected.status(), first.status());
-        assert_eq!(historical.payload["by"]["kind"], "fork_inheritance");
         let mut meta = store
             .load_session_meta(&session_id)
             .await

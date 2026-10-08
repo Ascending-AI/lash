@@ -18,8 +18,6 @@ def public_outcome_inventory_matches_adr_0068():
 
 def public_outcome_names_follow_declared_suffix_roles():
     witnesses = [
-        ("crates/lash-core-execution/src/triggers/report.rs", "TriggerEmitReport", "struct", "pub deliveries: Vec<TriggerDeliveryEmitReceipt>"),
-        ("crates/lash-core-execution/src/triggers/report.rs", "TriggerDeliveryEmitReceipt", "struct", "pub outcome: TriggerDeliveryEmitOutcome"),
         ("crates/lash-core-execution/src/runtime/process/model.rs", "ProcessRegistrationOutcome", "enum", "Existing"),
         ("crates/lash-sansio/src/tool_contract.rs", "ExecutionPolicy", "enum", "Repeatable"),
     ]
@@ -31,7 +29,7 @@ def public_outcome_names_follow_declared_suffix_roles():
         end = text.find("\n}", match.end())
         if member not in text[match.end():end]:
             raise AssertionError(f"{name} lost its role witness {member}")
-    if gate.RESULT_ALIASES != frozenset({"Result", "MaintenanceResult", "TriggerEffectResult", "TriggerOccurrenceReclamationResult"}):
+    if gate.RESULT_ALIASES != frozenset({"Result", "MaintenanceResult"}):
         raise AssertionError("the Result exception inventory changed without a role ruling")
 
 

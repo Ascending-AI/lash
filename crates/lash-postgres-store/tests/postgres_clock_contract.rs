@@ -1,14 +1,17 @@
 //! Behavioral laws and lexical fences for PostgreSQL clock provenance.
 
-use lash_sansio::{ProcessId, SessionId};
+use lash_sansio::SessionId;
 use std::sync::Arc;
 
+use lash_core_execution::runtime::QueuedWorkBatchDraft;
+use lash_core_execution::store::{CheckpointAdmissionRequest, RunStore};
 use lash_core_execution::testing::TestClock;
 use lash_core_execution::{
-    Clock, PendingTurnInputCancelOutcome, PendingTurnInputCancelTarget, PendingTurnInputDraft,
-    PendingTurnInputReadStatus, RuntimeCommit, RuntimeSessionState, SessionCatalogStore as _,
+    CheckpointKind, Clock, DeliveryPolicy, PendingTurnInputCancelOutcome,
+    PendingTurnInputCancelTarget, PendingTurnInputDraft, PendingTurnInputReadStatus,
+    QueuedWorkStore, RuntimeCommit, RuntimeSessionState, SessionCatalogStore as _,
     SessionCommitStore, SessionCreationHead, SessionRelation, SessionStoreCreateRequest, TurnId,
-    TurnInput, TurnInputIngress, TurnInputStore,
+    TurnInput, TurnInputIngress, TurnInputStore, facade_support::SessionCommand,
 };
 use lash_postgres_store::PostgresStorage;
 
@@ -191,6 +194,170 @@ fn lint_process_event_timestamps_use_the_injected_clock() {
             "process-event entry points must sample the injected registry clock"
         );
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn session_command_and_pending_input_decisions_follow_the_postgres_clock() {
+    let Some((_lock, storage)) =
+        configured_storage("session-command/pending-input PostgreSQL clock contract").await
+    else {
+        return;
+    };
+    let session_id = unique_id("clock-contract-session");
+    let session = SessionId::fixture(session_id.clone());
+    let server_before = db_now_ms(&storage).await;
+    let clock = Arc::new(TestClock::new(server_before.saturating_add(CLOCK_SKEW_MS)));
+    let factory = storage
+        .session_store_factory()
+        .with_clock(Arc::clone(&clock) as Arc<dyn Clock>);
+    factory
+        .admit_session(&SessionStoreCreateRequest {
+            owning_process_id: None,
+            pending_observer_intents: Vec::new(),
+            session_id: session.clone(),
+            relation: SessionRelation::Root,
+            config: lash_core_execution::SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
+                lash_core_execution::MaxToolCalls::new(1024),
+            )
+            .into(),
+            head: SessionCreationHead::Config,
+        })
+        .await
+        .expect("create skewed-clock session store");
+    let store = factory;
+
+    let withdrawable = store
+        .enqueue_queued_work(QueuedWorkBatchDraft::new(
+            SessionId::fixture(&session_id),
+            DeliveryPolicy::EarliestSafeBoundary,
+            SessionCommand::RefreshToolCatalog {
+                reason: "clock-contract withdrawn command".to_string(),
+            },
+        ))
+        .await
+        .expect("enqueue a command before admission under skewed client clock");
+    assert_eq!(
+        store
+            .cancel_queued_work_batch(&session, &withdrawable.batch_id)
+            .await
+            .expect("withdraw an unread command against PostgreSQL time")
+            .expect("an unapplied command is withdrawable")
+            .batch_id,
+        withdrawable.batch_id
+    );
+    let command = store
+        .enqueue_queued_work(QueuedWorkBatchDraft::new(
+            SessionId::fixture(&session_id),
+            DeliveryPolicy::EarliestSafeBoundary,
+            SessionCommand::RefreshToolCatalog {
+                reason: "clock-contract command".to_string(),
+            },
+        ))
+        .await
+        .expect("enqueue session command under skewed client clock");
+
+    // The command lane is bindless: its read takes no binding (FIG-4202).
+    let commands = store
+        .open_session_command_run(&session)
+        .await
+        .expect("the command run must validate against PostgreSQL time");
+    assert_eq!(
+        commands
+            .iter()
+            .map(|batch| batch.batch_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![command.batch_id.as_str()],
+        "the session command is readable despite a future-skewed client clock"
+    );
+    assert!(
+        store
+            .queued_work_batch_completion(&session, &command.batch_id)
+            .await
+            .expect("read the unapplied command's completion")
+            .is_none(),
+        "a read alone does not apply the command"
+    );
+    let mut state = RuntimeSessionState {
+        session_id: session.clone(),
+        ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
+        ))
+    };
+    let mut command_commit = RuntimeCommit::persisted_state_for_test(&state);
+    command_commit.applied_commands = Some(lash_core_execution::runtime::QueuedWorkCompletion {
+        session_id: session.clone(),
+        batch_ids: vec![command.batch_id.clone()],
+    });
+    let command_receipt = store
+        .commit_runtime_state(command_commit)
+        .await
+        .expect("apply the read command");
+    state.head_revision = command_receipt.head_revision;
+    assert_eq!(
+        store
+            .queued_work_batch_completion(&session, &command.batch_id)
+            .await
+            .expect("read the applied command's completion")
+            .expect("the command commit records its receipt")
+            .head_revision,
+        command_receipt.head_revision,
+        "the command and session head settle in the same commit"
+    );
+
+    // A checkpoint finds nothing to admit and leaves the next-turn input
+    // open.
+    let run = TurnId::from("clock-contract-run");
+    let next_input = store
+        .enqueue_pending_turn_input(PendingTurnInputDraft::new(
+            SessionId::fixture(&session_id),
+            TurnInputIngress::NextTurn,
+            TurnInput::text("clock-contract pending input"),
+        ))
+        .await
+        .expect("enqueue pending input under skewed client clock");
+    let checkpoint = store
+        .admit_at_checkpoint(&CheckpointAdmissionRequest {
+            session_id: session.clone(),
+            run: run.clone(),
+            turn_id: run.clone(),
+            checkpoint: CheckpointKind::AfterWork,
+            step: "clock-contract-checkpoint".to_string(),
+            max_inputs: 1,
+            policy: lash_core_execution::testing::queued_work_admission_policy(1),
+        })
+        .await
+        .expect("the checkpoint admission must validate against PostgreSQL time");
+    assert!(
+        checkpoint.is_empty(),
+        "a next-turn input is no checkpoint work"
+    );
+    assert_eq!(
+        store
+            .list_pending_turn_inputs(&session)
+            .await
+            .expect("list pending inputs against PostgreSQL time")
+            .iter()
+            .map(|read| (read.input.input_id.as_str(), read.status.clone()))
+            .collect::<Vec<_>>(),
+        vec![(
+            next_input.input_id.as_str(),
+            PendingTurnInputReadStatus::Open
+        )],
+        "a checkpoint leaves the next-turn input open"
+    );
+    let cancel = store
+        .cancel_pending_turn_inputs(
+            &session,
+            &[PendingTurnInputCancelTarget::input_id(&next_input.input_id)],
+        )
+        .await
+        .expect("cancel the open input against PostgreSQL time");
+    assert!(matches!(
+        &cancel[0].outcome,
+        PendingTurnInputCancelOutcome::Cancelled(input) if input.input_id == next_input.input_id
+    ));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

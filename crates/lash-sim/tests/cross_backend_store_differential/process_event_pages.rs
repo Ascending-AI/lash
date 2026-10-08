@@ -368,7 +368,8 @@ pub(super) async fn compare_bounded_process_event_pages(
                 occurrence,
                 if is_failure { "fixture.write" } else { "now" },
                 class,
-                is_failure.then(|| "fixture_refused".to_string()),
+                is_failure
+                    .then(|| lash_core::FailureCode::from(&lash_core::RuntimeErrorCode::Plugin)),
                 replay_key,
                 lash_core::FleetFormat::current(),
             )

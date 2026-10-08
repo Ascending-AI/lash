@@ -52,7 +52,6 @@ impl OperationRequestCodec for OperationRequest {
             Self::Print(_) => EffectKind::Print,
             Self::Finish(_) => EffectKind::Finish,
             Self::Fail(_) => EffectKind::Fail,
-
             Self::Sleep(_) => EffectKind::Sleep,
         }
     }

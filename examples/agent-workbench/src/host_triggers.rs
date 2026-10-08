@@ -90,7 +90,7 @@ pub(crate) struct CronTick {
 /// What `workbench.register_trigger` takes.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RegisterTrigger {
+struct TriggerRegistrationInput {
     source: TriggerSource,
     /// A definition from `processes.create`.
     definition: lash::process::ProcessDefinition,
@@ -245,7 +245,7 @@ impl HostTriggers {
     }
 
     pub(crate) fn provider(&self) -> Arc<dyn ToolProvider> {
-        Arc::new(RegisterTriggerProvider {
+        Arc::new(TriggerRegistrationProvider {
             triggers: self.clone(),
         })
     }
@@ -255,7 +255,7 @@ impl HostTriggers {
         &self,
         call_id: &str,
         owner: &SessionId,
-        input: RegisterTrigger,
+        input: TriggerRegistrationInput,
     ) -> Result<String, String> {
         if let TriggerSource::Cron { expr, tz } = &input.source {
             crate::cron::schedule(expr, tz.as_deref())?;
@@ -283,7 +283,7 @@ impl HostTriggers {
         &self,
         call_id: &str,
         owner: &SessionId,
-        input: &RegisterTrigger,
+        input: &TriggerRegistrationInput,
     ) -> Result<lash::process::HostArtifactPin, HostTriggerError> {
         let now_ms = self.now_ms();
         let connection = self.connection()?;
@@ -644,7 +644,7 @@ fn delivered_process_environment() -> lash::process::ProcessExecutionEnvSpec {
     )
 }
 
-struct RegisterTriggerProvider {
+struct TriggerRegistrationProvider {
     triggers: HostTriggers,
 }
 
@@ -708,7 +708,7 @@ pub(crate) fn register_trigger_tool_definition() -> ToolDefinition {
 }
 
 #[async_trait]
-impl ToolProvider for RegisterTriggerProvider {
+impl ToolProvider for TriggerRegistrationProvider {
     fn tool_manifests(&self) -> Vec<ToolManifest> {
         vec![register_trigger_tool_definition().manifest()]
     }
@@ -732,7 +732,7 @@ impl ToolProvider for RegisterTriggerProvider {
                 Ok(owner) => owner.clone(),
                 Err(error) => return ToolOutcome::err_fmt(error),
             };
-            let input = match RegisterTrigger::deserialize(call.args) {
+            let input = match TriggerRegistrationInput::deserialize(call.args) {
                 Ok(input) => input,
                 Err(error) => return ToolOutcome::err_fmt(error),
             };
@@ -903,7 +903,7 @@ async fn send_process_end_notice(
 
 impl crate::AppState {
     /// The registrations the triggers page lists for `session_id`.
-    pub(crate) fn trigger_subscriptions(
+    pub(crate) fn host_trigger_registrations(
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<Subscription>, crate::AppError> {

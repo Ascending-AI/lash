@@ -15,15 +15,13 @@ pub(super) struct RlmHistoryRenderInput<'a> {
     pub(super) dialect: &'a SessionDialect,
     pub(super) events: &'a [lash_core::SessionHistoryRecord],
     pub(super) turn_messages: &'a lash_core::facade_support::MessageSequence,
-    pub(super) turn_causes: &'a [lash_core::TurnCause],
     pub(super) max_output_chars: usize,
     pub(super) protocol_iteration: usize,
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct CurrentIterationMessageInput<'a> {
+pub(super) struct CurrentIterationMessageInput {
     pub(super) protocol_iteration: usize,
-    pub(super) turn_causes: &'a [lash_core::TurnCause],
 }
 
 /// Standalone assistant prose buffered until the next chronological boundary.
@@ -53,7 +51,6 @@ pub(super) fn build_rlm_history_messages_from_turn(
         &mut messages,
         CurrentIterationMessageInput {
             protocol_iteration: input.protocol_iteration,
-            turn_causes: input.turn_causes,
         },
     );
     Ok(messages)
@@ -75,18 +72,10 @@ pub(super) fn render_history_messages(
     );
     let transport = super::transport::NativeTransportIndex::new(&chronological);
     let history_projection = rlm_history_projection(&chronological)?;
-    let active_cause_ids = input
-        .turn_causes
-        .iter()
-        .map(|cause| cause.id.as_str())
-        .collect::<HashSet<_>>();
     let mut pending: Option<PendingProse> = None;
     let superseded = superseded_failure_indices(input.events, input.turn_messages, &transport);
 
     lash_core::facade_support::visit_turn_view(input.events, input.turn_messages, |entry| {
-        if borrowed_entry_is_active_cause(entry, &active_cause_ids) {
-            return;
-        }
         if history_projection.suppresses_chronological(entry.index)
             || superseded.contains(&entry.index)
         {
@@ -298,38 +287,20 @@ fn flush_pending_prose(messages: &mut Vec<LlmMessage>, pending: &mut Option<Pend
     }
 }
 
-/// The current iteration's history prefix: its number and turn causes only.
+/// The current iteration's history prefix: its number only.
 /// All instruction text is supplied by prompt sections (ADR 0133).
 fn append_current_iteration_message(
     messages: &mut Vec<LlmMessage>,
-    input: CurrentIterationMessageInput<'_>,
+    input: CurrentIterationMessageInput,
 ) {
-    let mut current_prompt = format!(
+    let current_prompt = format!(
         "\n\n\n=== CURRENT ITERATION: {} ===",
         input.protocol_iteration
     );
-    if let Some(turn_events) =
-        lash_core::facade_support::render_turn_causes_prompt(input.turn_causes)
-    {
-        current_prompt.push_str("\n\n");
-        current_prompt.push_str(&turn_events);
-    }
     messages.push(LlmMessage::new(
         LlmRole::User,
         vec![text_block(current_prompt, false)],
     ));
-}
-
-fn borrowed_entry_is_active_cause(
-    entry: BorrowedChronologicalEntry<'_>,
-    active_cause_ids: &HashSet<&str>,
-) -> bool {
-    matches!(
-        entry.payload,
-        BorrowedChronologicalPayload::Message(message)
-            if matches!(message.role, lash_core::MessageRole::Event)
-                && active_cause_ids.contains(message.id)
-    )
 }
 
 fn text_block(text: impl Into<Arc<str>>, cache_breakpoint: bool) -> LlmContentBlock {

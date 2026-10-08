@@ -586,19 +586,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .filter(|value| !value.trim().is_empty());
     let stores = WorkbenchStores::open(&data_dir, database_url.as_deref()).await?;
     #[cfg(feature = "e2e-tools")]
-    let stores = match tool_fixture
-        .as_ref()
-        .map(|fixture| fixture.receiver_hold())
-        .transpose()?
-        .flatten()
-    {
-        Some(hold) => WorkbenchStores {
-            backend: stores.backend,
-            stores: crate::e2e_receiver_hold::hold_stores(stores.stores, hold),
-        },
-        None => stores,
-    };
-    #[cfg(feature = "e2e-tools")]
     let commit_ledger = crate::e2e_commit_ledger::CommitLedger::from_env(
         "AGENT_WORKBENCH_COMMIT_LEDGER",
         "AGENT_WORKBENCH_COMMIT_CUTS",
@@ -650,7 +637,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                 event = process_event_rx.recv() => match event {
                     Some(event) => eprintln!(
                         "agent-workbench process event: process={} seq={} type={}",
-                        event.process_id, event.sequence, event.event_type
+                        event.process_id, event.sequence, event.fact.event_type()
                     ),
                     None => break,
                 }
@@ -912,20 +899,15 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         // production provider and binds no fixture body to a process.
         #[cfg(feature = "e2e-tools")]
         let app = {
-            let (receiver, retained_path, event_type) = match &tool_fixture {
+            let (receiver, retained_path) = match &tool_fixture {
                 Some(fixture) => fixture.receiver_binding(),
-                None => (
-                    Arc::new(OnceLock::new()),
-                    data_dir.join("receiver.json"),
-                    "h2_mutation".to_owned(),
-                ),
+                None => (Arc::new(OnceLock::new()), data_dir.join("receiver.json")),
             };
             app.merge(crate::e2e_receiver::routes(
                 crate::e2e_receiver::ReceiverState {
                     app: state.clone(),
                     receiver,
                     retained_path,
-                    event_type,
                     ledger: commit_ledger.clone(),
                 },
             ))

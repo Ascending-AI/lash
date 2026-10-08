@@ -1,11 +1,5 @@
 //! Integration contracts compiled together for each runtime feature lane.
 
-// The store witnesses refer to this module through `crate::facade_support`.
-#[cfg(feature = "testing")]
-mod facade_support {
-    pub use lash_core::facade_support::*;
-}
-
 #[path = "integration/embed_plugins.rs"]
 mod embed_plugins;
 #[path = "integration/facade_host_wrappers.rs"]

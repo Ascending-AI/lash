@@ -380,7 +380,6 @@ fn render_execution_section(request: ExecutionSectionRequest<'_>) -> ExecutionSe
 mod tests {
     use lash_sansio::SessionId;
 
-    use super::*;
     use crate::dialect::{RlmDialectServices, SessionDialect};
     use lash_core::plugin::ToolCatalogContext;
     use lash_lashlang_runtime::LashlangSurface;

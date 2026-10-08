@@ -166,7 +166,6 @@ fn a_started_handle_may_be_the_inferred_output_of_a_process() {
     finishes_a_handle.declarations = vec![Declaration::Process(ProcessDecl {
         name: "main".into(),
         params: Vec::new(),
-
         return_ty: Some(TypeExpr::Object(vec![TypeField {
             name: "joined".into(),
             ty: unknown.clone(),
@@ -182,7 +181,6 @@ fn a_started_handle_may_be_the_inferred_output_of_a_process() {
     declares_a_handle_param.declarations = vec![Declaration::Process(ProcessDecl {
         name: "main".into(),
         params: vec![param("handle", unknown)],
-
         return_ty: None,
         label: None,
         origin: Default::default(),

@@ -528,10 +528,7 @@ async fn agent_scenario_plugin_reserved_source_key_refusal_is_typed() -> Result<
             .await
             .open()
             .await?;
-        for key in [
-            "command:refresh_tool_catalog:foreign",
-            "process:foreign:event:1:wake",
-        ] {
+        for key in ["command:refresh_tool_catalog:foreign"] {
             let refused = session
                 .plugin_operations()
                 .run_command::<Command>(key.into())

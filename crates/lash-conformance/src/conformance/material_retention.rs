@@ -88,11 +88,9 @@ where
             lash_core::SessionId::fixture(source_session),
             "material-turn",
         ),
-        wait: lash_core::AwaitEventWaitIdentity::process_signal(
-            lash_core::ProcessId::fixture("material-process"),
-            "material-signal",
-            1,
-        ),
+        wait: lash_core::AwaitEventWaitIdentity::tool_call(lash_core::ToolCallId::fixture(
+            "material-call",
+        )),
         key_id: "material-key".into(),
         signature: "material-signature".into(),
     };

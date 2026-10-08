@@ -573,7 +573,6 @@ pub(super) fn scenario_evidence_satisfied(
                 .any(|session| !session.exec_code_outputs.is_empty())
                 && exec_runtime_outcome_observed(events)
         }
-
         "backend_failure" => events.iter().any(|event| {
             event.kind == BoundaryKind::BackendFailure
                 && event

@@ -820,10 +820,8 @@ fn smoke_workload_covers_every_durable_operation_class_in_its_first_turns() {
                 !plan.tool_batches.is_empty() && !plan.parallel_tools,
             );
             hit("child-process", !plan.child_processes.is_empty());
-
             for process in &plan.host_processes {
                 hit("host-process", true);
-
                 hit("host-cancelled", process.cancel);
             }
             hit("attachment", !plan.attachments.is_empty());
@@ -850,7 +848,7 @@ fn smoke_workload_covers_every_durable_operation_class_in_its_first_turns() {
     for (class, count) in &covered {
         assert!(*count > 0, "the smoke workload never exercises {class}");
     }
-    assert_eq!(covered.len(), 17);
+    assert_eq!(covered.len(), 15);
 }
 
 struct PaddingHost;

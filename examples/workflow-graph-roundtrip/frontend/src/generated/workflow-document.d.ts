@@ -22,7 +22,6 @@ export type NodeData =
       name?: string | null;
       nameSource: 'label';
       params?: EditableProcessField[];
-      signals?: EditableProcessField[];
       title: string;
     }
   | {
@@ -166,7 +165,6 @@ export type NodeData =
       name?: string | null;
       nameSource: 'derived';
       params?: EditableProcessField[];
-      signals?: EditableProcessField[];
       title: string;
     }
   | {
@@ -331,7 +329,7 @@ export type EditableValue =
         [k: string]: EditableValue;
       };
     };
-export type WorkflowEffectKind = 'await_join' | 'wait_signal' | 'sleep_for' | 'print' | 'break' | 'continue';
+export type WorkflowEffectKind = 'await_join' | 'sleep_for' | 'print' | 'break' | 'continue';
 export type WorkflowTerminalKind = 'finish' | 'fail';
 
 export interface WorkflowDocument {

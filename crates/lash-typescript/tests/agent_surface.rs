@@ -770,7 +770,6 @@ impl ExecutionHost for ProcessDurabilityHost {
                         .collect(),
                 ),
             )),
-
             AbilityOp::Sleep(_) => Ok(AbilityOutcome::Value(Value::Null)),
 
             // A start names the process it is asked to start: the fixture's

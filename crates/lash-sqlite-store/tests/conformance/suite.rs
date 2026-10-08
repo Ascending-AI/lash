@@ -30,8 +30,6 @@ use lash_core_execution::{
 use super::SUBSTRATE;
 use crate::backend_fixture::{Substrate, TestBackend, sync_await};
 
-#[path = "admission_atomicity.rs"]
-mod admission_atomicity;
 #[path = "attachment_store.rs"]
 mod attachment_store;
 #[path = "durable_laws.rs"]

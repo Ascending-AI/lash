@@ -225,13 +225,13 @@ pub(super) async fn contract(
         .full_event_window(&unrun_ref, 0)
         .await
         .expect("read failed-start event");
+    // The start-failed cancel is the one event, and its fold ends the record.
     assert_eq!(events.len(), 1);
-    assert_eq!(
-        events[0]
-            .terminal()
-            .expect("terminal event semantics")
-            .status(),
-        crate::TerminalProcessStatus::Cancelled
+    assert!(
+        matches!(&events[0].fact, crate::ProcessLifecycleFact::CancelRequested(request)
+        if request.origin == CancelOrigin::StartFailed),
+        "the failed start is recorded as its own cancel: {:?}",
+        events[0].fact
     );
     let standing = failed
         .cancel_request

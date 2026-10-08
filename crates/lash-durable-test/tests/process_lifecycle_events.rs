@@ -262,7 +262,6 @@ impl lash_core::ProcessEngine for ScriptEngine {
     ) -> Result<lash_core::ProcessDefinitionResolution, lash_core::ProcessDefinitionRefusal> {
         Ok(lash_core::ProcessDefinitionResolution::new(
             lash_core::ProcessSignature::Unknown,
-            Vec::new(),
         ))
     }
 }
@@ -508,7 +507,7 @@ async fn each_committed_effect_is_one_effect_outcome_event(tier: Tier) {
 
     let omissions = of_type(&events, lash_core::PROCESS_EFFECT_OMISSIONS_EVENT_TYPE);
     assert_eq!(omissions.len(), 1, "one omissions record: {events:#?}");
-    let omitted = lash_core::ProcessEffectOmissions::decode(omissions[0].payload.clone(), fleet)
+    let omitted = lash_core::ProcessEffectOmissions::decode(omissions[0].fact.payload(), fleet)
         .expect("the omissions decode");
     assert_eq!(omitted.nodes[NODE].success, 1);
     assert_eq!(omitted.nodes[NODE].total(), 1);
@@ -926,12 +925,15 @@ async fn a_deferred_call_records_one_waiting_event_and_resumes(tier: Tier) {
         "a deferred call records exactly one waiting event"
     );
     assert_eq!(
-        waits[0].payload["wait"]["kind"]["call_id"],
+        waits[0].fact.payload()["wait"]["kind"]["call_id"],
         serde_json::json!(call_id)
     );
-    assert_eq!(waits[0].payload["wait"]["kind"]["tool_id"], WRITE_TOOL);
+    assert_eq!(
+        waits[0].fact.payload()["wait"]["kind"]["tool_id"],
+        WRITE_TOOL
+    );
     assert!(
-        !waits[0].payload.to_string().contains(&key),
+        !waits[0].fact.payload().to_string().contains(&key),
         "the event never publishes a bearer key"
     );
     core.completions()

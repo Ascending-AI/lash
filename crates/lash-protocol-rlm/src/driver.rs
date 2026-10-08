@@ -105,7 +105,6 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
                 dialect: self.dialect.as_ref(),
                 events: ctx.events,
                 turn_messages: ctx.messages,
-                turn_causes: ctx.turn_causes,
                 max_output_chars: self.max_output_chars,
                 protocol_iteration: ctx.protocol_iteration + 1,
             },
@@ -198,7 +197,6 @@ impl RlmContextProjector {
             dialect: self.dialect.as_ref(),
             events,
             turn_messages: &lash_core::facade_support::MessageSequence::default(),
-            turn_causes: &[],
             max_output_chars: self.max_output_chars,
             protocol_iteration: 0,
         })
@@ -233,7 +231,6 @@ pub(crate) fn render_conformance_history_message(
         dialect: &dialect,
         events: &events,
         turn_messages: &lash_core::facade_support::MessageSequence::default(),
-        turn_causes: &[],
         max_output_chars: 10_000,
         protocol_iteration: 0,
     })

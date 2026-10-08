@@ -42,7 +42,6 @@ mod cancel;
 mod feeds;
 mod fleet;
 mod handover;
-mod intents;
 mod mcp;
 mod operations;
 mod provider;

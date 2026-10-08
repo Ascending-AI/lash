@@ -174,7 +174,6 @@ fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::Fixtur
         processes: Arc::clone(&processes)
             as Arc<dyn lash_core_execution::ConformanceProcessRegistry>,
         process_envs: process_envs as Arc<dyn ProcessExecutionEnvStore>,
-        durable: Arc::new(storage.durable_store()) as Arc<dyn lash_core_execution::DurableStore>,
     }
 }
 

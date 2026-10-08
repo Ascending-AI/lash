@@ -15,7 +15,7 @@ use lash_core::llm::types::{
 use lash_core::testing::TestProvider;
 use lash_core::{
     Resolution, ToolAttemptOutcome, ToolContract, ToolDefinition, ToolManifest, ToolOutcome,
-    ToolOutcomeDone, ToolOutputContract, ToolProvider, facade_support::DirectJsonSchema,
+    ToolOutputContract, ToolProvider, facade_support::DirectJsonSchema,
     facade_support::DirectRequest,
 };
 use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};

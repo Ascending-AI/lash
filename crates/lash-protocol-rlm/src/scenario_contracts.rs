@@ -14,7 +14,7 @@ pub const RLM_PROTOCOL_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
         test_name: "rlm_protocol_scenario_typed_prose_only_response_requests_finish",
         owned_invariant: "Typed RLM output requires explicit finish rather than prose-only success.",
         semantic_oracle: "rlm.typed_prose_requires_finish",
-        required_sim_evidence: &["trigger", "provider_turn"],
+        required_sim_evidence: &["provider_turn"],
         oracle_id: "sim.oracle.scenario.rlm-contract.v1",
     },
     ScenarioContractSpec {
@@ -102,7 +102,7 @@ pub const RLM_PROTOCOL_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
         test_name: "rlm_protocol_scenario_exec_any_tool_control_frame_switch_is_terminal",
         owned_invariant: "Tool control frame-switch from exec is terminal.",
         semantic_oracle: "rlm.exec_tool_control_frame_switch_terminal",
-        required_sim_evidence: &["exec_code", "trigger"],
+        required_sim_evidence: &["exec_code"],
         oracle_id: "sim.oracle.scenario.rlm-contract.v1",
     },
     ScenarioContractSpec {

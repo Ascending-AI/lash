@@ -90,7 +90,6 @@ fn render(events: &[SessionHistoryRecord]) -> Vec<lash_core::llm::types::LlmMess
         dialect: &dialect,
         events,
         turn_messages: &lash_core::facade_support::MessageSequence::default(),
-        turn_causes: &[],
         max_output_chars: 1000,
         protocol_iteration: 0,
     })
@@ -558,7 +557,6 @@ fn fig1123_cell_history_marks_only_real_turn_inputs_as_segment_boundaries() {
         dialect: &dialect,
         events: &events,
         turn_messages: &Default::default(),
-        turn_causes: &[],
         max_output_chars: 1000,
         protocol_iteration: 1,
     })

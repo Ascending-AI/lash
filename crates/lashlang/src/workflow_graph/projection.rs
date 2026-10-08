@@ -210,7 +210,6 @@ impl Session<'_, '_> {
             description,
             name_source,
             params: process.params.clone(),
-
             return_ty: process.return_ty.clone(),
             origin: process.origin.clone(),
             body: self.project_body(
@@ -246,7 +245,6 @@ impl Session<'_, '_> {
             description: None,
             name_source: WorkflowNodeNameSource::Derived,
             params: literal.params.clone(),
-
             return_ty: literal.return_ty.clone(),
             origin: ProcessOrigin::Lifted {
                 site,

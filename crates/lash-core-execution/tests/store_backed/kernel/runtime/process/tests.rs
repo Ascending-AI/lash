@@ -76,7 +76,7 @@ async fn prune_retains_exact_artifact_cleanup_until_acknowledged() {
     );
     assert_eq!(
         registry
-            .compact_process_tombstones(u64::MAX, ProjectionWatermark::NoProjector, None)
+            .compact_process_tombstones(u64::MAX, ProjectionWatermark::NoProjector)
             .await
             .expect("compact while cleanup is pending"),
         1,
@@ -102,7 +102,7 @@ async fn prune_retains_exact_artifact_cleanup_until_acknowledged() {
     );
     assert_eq!(
         registry
-            .compact_process_tombstones(u64::MAX, ProjectionWatermark::NoProjector, None)
+            .compact_process_tombstones(u64::MAX, ProjectionWatermark::NoProjector)
             .await
             .expect("compact after cleanup acknowledgement"),
         0

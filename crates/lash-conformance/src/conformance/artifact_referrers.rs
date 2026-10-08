@@ -426,11 +426,9 @@ where
         )),
         ArtifactReferrer::Source(Box::new(lash_core::AwaitEventKey {
             scope: lash_core::ExecutionScope::turn("canonical-session", "canonical-turn"),
-            wait: lash_core::AwaitEventWaitIdentity::process_signal(
-                lash_core::ProcessId::fixture("canonical-process"),
-                "canonical-signal",
-                1,
-            ),
+            wait: lash_core::AwaitEventWaitIdentity::tool_call(lash_core::ToolCallId::fixture(
+                "canonical-call",
+            )),
             key_id: "canonical-key".into(),
             signature: "canonical-signature".into(),
         })),

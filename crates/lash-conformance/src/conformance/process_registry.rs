@@ -1465,7 +1465,6 @@ pub async fn session_delete_preserves_process_bytes(registry: Arc<dyn ProcessReg
         .await
         .expect("delete session process state");
     assert_eq!(report.removed_observer_count, 1);
-    assert_eq!(report.cleared_subscription_count, 1);
     let after = serde_json::to_vec(
         &registry
             .get_process(&process_id)

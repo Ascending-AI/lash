@@ -710,7 +710,6 @@ fn graph_to_program(
                 Declaration::Process(ProcessDecl {
                     name: process.name.clone().into(),
                     params: process.params.clone(),
-
                     return_ty: process.return_ty.clone(),
                     label,
                     origin: process.origin.clone(),

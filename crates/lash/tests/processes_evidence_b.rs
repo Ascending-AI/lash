@@ -401,10 +401,6 @@ fn processes_area_witnesses_b() {
     field_witness(|value: &lash::plugins::ProtocolBeforeLlmCallContext| {
         let _ = &value.processes;
     });
-    // W0533: lash::plugins::RuntimeExecutionContext::append_process_events [function]
-    let _ = lash::plugins::RuntimeExecutionContext::append_process_events;
-    // W0535: lash::plugins::RuntimeExecutionContext::captured_process_execution_env_ref [function]
-    let _ = lash::plugins::RuntimeExecutionContext::captured_process_execution_env_ref;
     // W0536: lash::plugins::RuntimeExecutionContext::process_handle_json [function]
     let _ = lash::plugins::RuntimeExecutionContext::process_handle_json;
     // W0539: lash::plugins::RuntimeExecutionContext::start_child_process [function]
@@ -454,31 +450,11 @@ fn processes_area_witnesses_b() {
     let _ = lash::plugins::ProcessEngineRegistry::new;
     // W0625: lash::plugins::ProcessEngineRegistry::require [function]
     let _ = lash::plugins::ProcessEngineRegistry::require;
-    // W0636: lash::process::ProcessTerminalSemantics [struct]
-    type_witness::<lash::process::ProcessTerminalSemantics>();
-    // W0637: lash::process::ProcessTerminalSemantics::outcome [field]
-    field_witness(|value: &lash::process::ProcessTerminalSemantics| {
-        let _ = &value.outcome;
-    });
-    // W0638: lash::process::ProcessTerminalSemantics::status [field]
-    field_witness(|value: &lash::process::ProcessTerminalSemantics| {
-        let _ = &value.status();
-    });
     // W0640: lash::persistence::QueuedCheckpointTurnInput [struct]
     type_witness::<lash::persistence::QueuedCheckpointTurnInput>();
     // W0641: lash::persistence::QueuedCheckpointTurnInput::messages [field]
     field_witness(|value: &lash::persistence::QueuedCheckpointTurnInput| {
         let _ = &value.messages;
-    });
-    // W0642: lash::persistence::QueuedCheckpointTurnInput::turn_causes [field]
-    field_witness(|value: &lash::persistence::QueuedCheckpointTurnInput| {
-        let _ = &value.turn_causes;
-    });
-    // W0646: lash::persistence::QueuedCheckpointWork [struct]
-    type_witness::<lash::persistence::QueuedCheckpointWork>();
-    // W0649: lash::persistence::QueuedCheckpointWork::turn_causes [field]
-    field_witness(|value: &lash::persistence::QueuedCheckpointWork| {
-        let _ = &value.turn_causes;
     });
     // W0655: lash::plugins::PluginError::ProcessRegistryCursorBackendMismatch [variant]
     variant_witness(|value: &lash::plugins::PluginError| {
@@ -504,10 +480,6 @@ fn processes_area_witnesses_b() {
             let _ = expected;
         }
     });
-    // W0659: lash::process::ProcessService::emit_event [function]
-    fn meth_0659<T: lash::process::ProcessService>(_: &T) {
-        let _ = T::emit_event;
-    }
     // W0660: lash::process::ProcessService::list_visible_for_attempt [function]
     fn meth_0660<T: lash::process::ProcessService>(_: &T) {
         let _ = T::list_visible_for_attempt;

@@ -279,7 +279,6 @@ fn operational_cases_for_evidence(evidence: &str) -> &'static [&'static str] {
         "max_turn_stop" => &["tool-boundary", "max-turn-stop"],
         "final_value" => &["semantic-final-value", "final-value-event"],
         "exec_code" => &["exec-boundary", "rlm-lashlang-exec"],
-
         "durable_effect" => &["durable-effect", "crash-reopen-effect-replay"],
         "provider_mutation" => &[
             "provider-failure",
@@ -370,7 +369,6 @@ fn scenario_transition_kind(contract: &ScenarioContractSpec) -> &'static str {
             "runtime.queued-turn-input-claim-completion-transition"
         }
         "runtime.command_only_queue_drain" => "runtime.command-only-queue-drain-transition",
-
         "runtime.observation_replay_preserves_input" => {
             "runtime.observer-reconnect-preserves-input-transition"
         }
@@ -433,7 +431,6 @@ fn scenario_evidence_boundary_kind(evidence: &str) -> &'static str {
         "observer_convergence" | "observer_reconnect" => "observer",
         "runtime_session_graph" => "ingress/provider",
         "exec_code" => "exec_code",
-
         "durable_effect" => "durable_effect",
         "multi_session" => "multi_session",
         "provider_mutation" => "provider_mutation",
@@ -460,7 +457,6 @@ fn scenario_evidence_assertion(evidence: &str) -> &'static str {
         "observer_convergence" => "observer sees the generated final provider turn",
         "runtime_session_graph" => "session graph advances with generated ingress/provider turns",
         "exec_code" => "exec-code result crosses runtime effect-controller outcome DTO",
-
         "durable_effect" => "durable effect records first completion and replay evidence",
         "multi_session" => "trace slice contains at least two generated sessions",
         "observer_reconnect" => "observer reconnect converges to the same session state",
@@ -481,7 +477,6 @@ fn scenario_negative_fixture_for_contract(
         "runtime.queued_work_keeps_pending_input" => {
             return scenario_negative_fixture("queued_input_operational_missing");
         }
-
         "standard.max_turns_after_tool_result" => {
             return scenario_negative_fixture("standard_max_turn_stop_missing");
         }
@@ -547,7 +542,6 @@ fn scenario_negative_fixture(fixture_id: &str) -> ScenarioNegativeFixture {
             expected_oracle_id: "sim.oracle.state-machine-semantic-invariants.v1",
             expected_reason_contains: "queued active-turn input",
         },
-
         "standard_provider_error_missing_parser_matrix" => ScenarioNegativeFixture {
             fixture_id: "standard-provider-error-missing-parser-matrix",
             fixture_path: "crates/lash-sim/failure-fixtures/standard-provider-error-missing-parser-matrix.json",
@@ -744,7 +738,6 @@ fn semantic_scenario_evidence(semantic_oracle: &str) -> Vec<&'static str> {
             vec!["queued_ingress", "provider_turn"]
         }
         "runtime.command_only_queue_drain" => vec!["queued_ingress"],
-
         "runtime.observation_replay_preserves_input" => vec!["observer_reconnect"],
         _ => Vec::new(),
     }
@@ -908,7 +901,6 @@ fn event_satisfies_scenario_evidence(
             event.kind == BoundaryKind::ExecCode
                 && event.observed.get("runtime_effect_outcome").is_some()
         }
-
         "durable_effect" => {
             event.kind == BoundaryKind::DurableEffect
                 && event.observed.get("runtime_effect").is_some()

@@ -139,17 +139,6 @@ impl DecoratedBackend {
         }
     }
 
-    pub(crate) fn process_env_store(
-        self,
-        decorate: impl FnOnce(
-            Arc<dyn lash_core::ProcessExecutionEnvStore>,
-        ) -> Arc<dyn lash_core::ProcessExecutionEnvStore>,
-    ) -> Self {
-        Self {
-            layered: self.layered.map_process_env_store(decorate),
-        }
-    }
-
     pub(crate) fn session_store_factory(
         self,
         decorate: impl FnOnce(

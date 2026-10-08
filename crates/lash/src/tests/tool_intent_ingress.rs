@@ -183,7 +183,6 @@ impl lash_core::ProcessEngine for IngressAdmissionEngine {
     > {
         Ok(lash_core::ProcessDefinitionResolution::new(
             lash_core::ProcessSignature::Unknown,
-            Vec::new(),
         ))
     }
 }

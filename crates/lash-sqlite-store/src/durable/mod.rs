@@ -1391,9 +1391,12 @@ mod constraint_tests {
         let conn = Connection::open_in_memory().expect("open wait fixture");
         conn.execute_batch(crate::durable::WAITS_TABLES)
             .expect("create schema");
-        conn.execute_batch("INSERT INTO waits (wait_id, owner_actor, owner_scope, kind, host_resolvable, state, created_epoch) VALUES ('wait', 's/session', 's/session', 'custom', 0, 'pending', 1)").expect("valid pending custom wait");
+        conn.execute_batch("INSERT INTO waits (wait_id, owner_actor, owner_scope, kind, host_resolvable, state, created_epoch) VALUES ('wait', 's/session', 's/session', 'custom', 1, 'pending', 1)").expect("valid pending custom wait");
         for (assignment, constraint) in [
-            ("kind = 'timer'", "ck_waits_timer_deadline"),
+            (
+                "kind = 'timer', host_resolvable = 0",
+                "ck_waits_timer_deadline",
+            ),
             ("resolved_at_ms = 1", "ck_waits_settled_at"),
             ("state = 'revoked'", "ck_waits_settled_at"),
             (
@@ -1404,7 +1407,7 @@ mod constraint_tests {
         ] {
             assert_check_rejects(&conn, &format!("UPDATE waits SET {assignment}"), constraint);
         }
-        conn.execute_batch("UPDATE waits SET kind = 'timer', deadline_ms = 1, state = 'resolved', resolution_digest = 'timer', resolved_at_ms = 1").expect("resolved timer needs no payload");
+        conn.execute_batch("UPDATE waits SET kind = 'timer', host_resolvable = 0, deadline_ms = 1, state = 'resolved', resolution_digest = 'timer', resolved_at_ms = 1").expect("resolved timer needs no payload");
         assert_check_rejects(
             &conn,
             "UPDATE waits SET resolution_ref = 'payload'",

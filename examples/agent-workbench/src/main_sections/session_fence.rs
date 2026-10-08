@@ -319,7 +319,7 @@ async fn retire_session_attempt(state: &AppState, session_id: &SessionId) -> Res
         json!({
             "session_id": session_id,
             "deletion": format!("{deletion:?}"),
-            "trigger_subscriptions": subscriptions,
+            "host_trigger_registrations": subscriptions,
             "process_retention": retention,
         }),
     );

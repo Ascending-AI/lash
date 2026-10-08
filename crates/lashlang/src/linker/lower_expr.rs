@@ -158,7 +158,6 @@ impl<'module> Linker<'module> {
             } => self.lower_receiver_call(receiver, operation, args, path, scope),
             Expr::Await(inner) => self.lower_await(inner, path, scope, expected),
             Expr::SleepFor(inner) => self.lower_sleep_for(inner, path, scope),
-
             Expr::ResultUnwrap(inner) => self.lower_result_unwrap(inner, path, scope, expected),
             Expr::Print(inner) => self.lower_print(inner, path, scope),
             Expr::Finish(inner) => self.lower_finish(path, inner, scope),

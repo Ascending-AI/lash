@@ -113,13 +113,11 @@ macro_rules! spans {
 #[cfg(feature = "otel")]
 spans! {
     AdmissionAttempt => ("lash.admission.attempt", Internal, Candidate),
-    TriggerAdmissionAttempt => ("lash.admission.attempt", Producer, Candidate),
     RunAdmitted => ("lash.run.admitted", Internal, Candidate),
     TurnAdmitted => ("lash.turn.admitted", Internal, Candidate),
     ToolAdmitted => ("lash.tool.admitted", Internal, Candidate),
     IntentAdmitted => ("lash.tool_intent.admitted", Internal, Candidate),
     ProcessAdmitted => ("lash.process.admitted", Internal, Candidate),
-    TriggerFire => ("lash.trigger.fire", Producer, Candidate),
     Send => ("lash.send", Producer, Live),
     Run => ("lash.run", Internal, Transition),
     Turn => ("invoke_agent", Internal, Transition),

@@ -117,7 +117,6 @@ impl<'program> RequirementsCollector<'program> {
                     self.collect_type(signature.output());
                 }
             }
-
             TypeExpr::Ref(name) if self.is_host_data_type_name(name) => {
                 let data_type = self
                     .resource_catalog
@@ -301,7 +300,6 @@ impl<'program> RequirementsCollector<'program> {
                 self.collect_expr(expr, scope);
                 Some(RequirementBinding::Value)
             }
-
             Expr::Await(expr) | Expr::ResultUnwrap(expr) | Expr::Print(expr) | Expr::Fail(expr) => {
                 self.collect_expr(expr, scope);
                 Some(RequirementBinding::Value)

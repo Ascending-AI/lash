@@ -270,18 +270,16 @@ fn test_host_environment() -> lashlang::LashlangHostEnvironment {
             TypeExpr::Any,
         )
         .expect("host catalog operation must not conflict");
-    for operation in ["cancel"] {
-        resources
-            .add_module_operation(
-                ["processes"],
-                "Processes",
-                operation,
-                operation,
-                TypeExpr::Any,
-                TypeExpr::Any,
-            )
-            .expect("host catalog operation must not conflict");
-    }
+    resources
+        .add_module_operation(
+            ["processes"],
+            "Processes",
+            "cancel",
+            "cancel",
+            TypeExpr::Any,
+            TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
     lashlang::LashlangHostEnvironment::new(resources, lashlang::LashlangAbilities::all())
 }
 

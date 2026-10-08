@@ -55,10 +55,14 @@ in their wait descriptor, never the key.
 `session.send(input).id(TurnId)` admits idempotent turn input. The engine
 owns its drive and continuation; hosts send and observe its handle.
 `ProcessStartRequest::with_host_start_key` makes process starts idempotent
-while the process is retained. The start-args check validates a host's input
-mapping against the definition's authoritative signature, in partial mode at
-registration and complete mode before start. Checking arguments does not
-register a process or pin its definition.
+while the process is retained. The start-args check,
+`core.process_definitions()` (a `lash::process::ProcessDefinitions`) and its
+`async check_args(&self, definition: &ProcessDefinition, args:
+&serde_json::Map<String, Value>, mode: ArgsMode) -> Result<(), ArgsMismatch>`,
+validates a host's input mapping against the definition's authoritative
+signature: `ArgsMode::Partial` at registration and `ArgsMode::Complete` before
+start. Checking arguments does not register a process or pin its
+definition.
 
 ### 2. Lifecycle facts are a closed vocabulary
 

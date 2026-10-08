@@ -385,20 +385,6 @@ compile_data = ["//:perf_guard_budgets"]
 [[rule]]
 packages = ["lash-internal-postgres-store", "lash-internal-sqlite-store"]
 kinds = ["bin", "test", "example", "bench"]
-targets = ["conformance"]
-compile_data = ["//crates/lash-core:queued_admission_atomicity"]
-
-# The SQLite conformance suite runs a second time over memory backends
-# (ADR 0102), from its own test root.
-[[rule]]
-packages = ["lash-internal-sqlite-store"]
-kinds = ["bin", "test", "example", "bench"]
-targets = ["conformance_memory"]
-compile_data = ["//crates/lash-core:queued_admission_atomicity"]
-
-[[rule]]
-packages = ["lash-internal-postgres-store", "lash-internal-sqlite-store"]
-kinds = ["bin", "test", "example", "bench"]
 targets = ["durable_read_fixture"]
 compile_data = ["//crates/lash-core:durable_read_fixture_source"]
 
@@ -563,7 +549,6 @@ provider-wire-fixtures = ["//crates/lash-sim:package_files"]
 # Package files other packages' targets name as compile or runtime inputs.
 [filegroups.lash-internal-core]
 durable_read_fixture_source = { srcs = ["tests/support/durable_read_fixture.rs"] }
-queued_admission_atomicity = { srcs = ["tests/support/queued_admission_atomicity.rs"] }
 
 [filegroups.lash-internal-lashlang]
 old_module_fixture = { srcs = ["tests/fixtures/module-artifact-old.json"] }

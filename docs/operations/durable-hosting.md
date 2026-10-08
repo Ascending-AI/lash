@@ -431,9 +431,9 @@ checks arguments without starting a process or acquiring a lasting pin.
 
 ### Worked example: a 40-minute CI suite
 
-A tool `run_full_suite` runs a CI suite that takes about 40 minutes. It is far
-above the inline ceiling, so it is declared as a process tool that starts a
-`ci` process. The process submits the job, then waits for CI to call back with
+A tool `run_full_suite` runs a CI suite that takes about 40 minutes. That is
+far longer than a turn should hold a tool body, so it is declared as a process
+tool that starts a `ci` process. The process submits the job, then waits for CI to call back with
 the key.
 
 ```text
@@ -631,6 +631,7 @@ validates an `ExecutionBudgetsConfig`:
 | `control_phase` | 60 s | One admission or checkpoint phase, all its checks together. |
 | `stop_grace` | 2 s | Spent once after a stretch ends at its limit or on cancel, to collect evidence. |
 | `provider` | see below | `ProviderAttemptLimits` |
+| `agent_frame_switch_limit` | 16 | A chain of agent frame switches; the follow-on at this depth stops with `AgentFrameSwitchLimit` before calling the model. |
 
 `ProviderAttemptLimits::new(per_request, response_start, chunk_idle,
 max_attempts)` defaults to 5 min per request, 2 min to the response start,
@@ -659,6 +660,11 @@ non-deferring tool supplies none. Registration refuses a missing bound as
 a park on a non-deferring tool as `ParkWithoutDeferral { tool }`. Admission
 of an ungated manifest refuses as `ToolAdmissionRefusal::Bounds`.
 Lash defaults neither bound and caps neither with a tool or wait ceiling.
+The shipped tools follow the same rule: an MCP tool's body bound is its
+server's `call_max_total_timeout_ms`, and `processes.await` parks
+`UntilScopeEnd`. A process engine sets each step body's bound through the
+required `EngineSteps::execution(kind)`. A turn's parks are scoped to the
+turn: an `UntilScopeEnd` park is revoked when the turn that admitted it ends.
 
 The body bound ends the running body. The park bound is independent, so a
 human approval can outlive a short tool body. Admission computes a bounded

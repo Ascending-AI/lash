@@ -12,8 +12,6 @@ use lash_trace::{
     TraceLashlangGraphStore, TraceRuntimeScope,
 };
 
-const TICK: &str = "fixture.tick";
-
 fn record(process_id: &ProcessId, attempt: u32, occurrence: u64) -> TraceRecord {
     let payload = if occurrence == 0 {
         TraceLanguageExecutionPayload::ExecutionStarted {
@@ -80,12 +78,17 @@ fn finished_record(process_id: &ProcessId) -> TraceRecord {
     finished
 }
 
-fn tick_type() -> lash_core::ProcessEventType {
-    lash_core::ProcessEventType {
-        name: TICK.to_string(),
-        payload_schema: lash_core::JsonSchema::any(),
-        semantics: lash_core::ProcessEventSemanticsSpec::default(),
-    }
+/// One host-owned lifecycle append: the `n`th tick enters a wait on the
+/// `n`th call, so every tick is a new event at the next sequence.
+fn tick(process_id: &ProcessId, n: u64) -> lash_core::ProcessEventAppendRequest {
+    let wait = lash_core::WaitState {
+        since_ms: n,
+        kind: lash_core::WaitKind::Call {
+            call_id: lash_core::ToolCallId::fixture(&format!("l8-call-{n}")),
+            tool_id: lash_core::ToolId::from("l8-fixture"),
+        },
+    };
+    lash_core::ProcessEventAppendRequest::wait_entered(process_id, &wait)
 }
 
 /// An engine process that writes runtime-owned summary events, or an external
@@ -103,8 +106,7 @@ fn registration(label: &str, engine_owned: bool) -> lash_core::ProcessRegistrati
         input,
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
-    )
-    .with_extra_event_types([tick_type()]);
+    );
     if engine_owned {
         registration
             .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref()))
@@ -129,6 +131,7 @@ struct Fixture {
     hub: Arc<ProcessObservationHub>,
     process_id: ProcessId,
     execution_authority: Option<lash_core::ProcessExecutionWriteAuthority>,
+    ticks: std::sync::atomic::AtomicU64,
 }
 
 impl Fixture {
@@ -188,6 +191,7 @@ impl Fixture {
             hub: Arc::new(ProcessObservationHub::new(config)),
             process_id,
             execution_authority,
+            ticks: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -197,7 +201,11 @@ impl Fixture {
             .registry
             .append_event(
                 &self.process_id,
-                lash_core::ProcessEventAppendRequest::new(TICK, serde_json::json!({})),
+                tick(
+                    &self.process_id,
+                    self.ticks
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+                ),
             )
             .await
             .expect("commit a tick")
@@ -281,11 +289,7 @@ impl Fixture {
         };
         for event in events.iter().filter(|event| event.sequence <= high_water) {
             summary
-                .fold_event(
-                    &event.event_type,
-                    &event.payload,
-                    lash_core::FleetFormat::current(),
-                )
+                .fold_event(&event.fact, lash_core::FleetFormat::current())
                 .expect("fold");
         }
         summary
@@ -822,11 +826,7 @@ async fn a_released_prefix_is_a_typed_gap_in_reads_and_snapshots() {
     let mut expected = ProcessEffectReport::default();
     for event in &retained {
         expected
-            .fold_event(
-                &event.event_type,
-                &event.payload,
-                lash_core::FleetFormat::current(),
-            )
+            .fold_event(&event.fact, lash_core::FleetFormat::current())
             .expect("fold");
     }
     let mut subscription = fixture.subscribe(None).await;
@@ -1025,10 +1025,7 @@ async fn the_facade_routes_commits_to_the_hub_and_pages_by_cursor() {
     quiet(&mut subscription).await;
 
     let committed = watched
-        .append_event(
-            &process_id,
-            lash_core::ProcessEventAppendRequest::new(TICK, serde_json::json!({})),
-        )
+        .append_event(&process_id, tick(&process_id, 0))
         .await
         .expect("commit through the watched registry")
         .event;

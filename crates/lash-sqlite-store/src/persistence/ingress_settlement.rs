@@ -99,6 +99,7 @@ pub(super) fn settle_commit_ingress_conn(
                         match disposition {
                             // A deferred command keeps its ingress position.
                             lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer => {
+                                admitted_batch_conn(tx, session_id, run, batch_id)?;
                                 release_admitted_batch_conn(tx, session_id, run, batch_id)?;
                             }
                             lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop => {

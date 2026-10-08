@@ -132,7 +132,6 @@ pub(crate) fn host_operation_description(module: &str, operation: &str) -> Optio
         ("processes", "list") => Some(
             "List visible process runs. Empty arguments select running runs; `definition` selects a definition and `status: \"any\"` includes visible run history.",
         ),
-
         _ => None,
     }
 }

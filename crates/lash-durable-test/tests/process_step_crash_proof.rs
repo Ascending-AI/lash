@@ -1,17 +1,12 @@
-//! A host engine's catalog tool step and host step on the production
-//! process steps, killed at every commit label (FIG-5216, FIG-5313).
+//! A host engine's catalog tool step on the production process steps,
+//! killed at every commit label (FIG-5216).
 //!
 //! A host starts one process of a host engine through the core's process
-//! API. Its engine asks for one step, then ends with what the step
-//! answered:
-//!
-//! - a tool step that runs `ext_write`, a host catalog tool declared `Once`
-//!   whose body writes to an [`ExternalWorld`] that survives every node; the
-//!   tool is pinned from the process's catalog and runs through the round a
-//!   turn's tools run on;
-//! - or a host step its engine's registration declares, whose body
-//!   records an external write in the deployment's external world as
-//!   the process's originator: its store-local effect.
+//! API. Its engine asks for one tool step that runs `ext_write`, a host
+//! catalog tool declared `Once` whose body writes to an [`ExternalWorld`]
+//! that survives every node, then ends with what the step answered. The
+//! tool is pinned from the process's catalog and runs through the round a
+//! turn's tools run on.
 //!
 //! The process actor runs on the production process activation with the
 //! core's own durable process worker as its steps. The nodes are simulated
@@ -56,16 +51,6 @@ use lash_sansio::sync::MutexExt as _;
 const ENGINE: &str = "process-step-proof";
 const TOOL: &str = "ext_write";
 const WROTE: &str = "wrote";
-/// The host operation the engine's host step performs.
-const HOST_WRITE: &str = "proof.write";
-/// Which step the engine asks for.
-#[derive(Clone, Copy, Debug)]
-enum StepKind {
-    /// `ext_write`, a catalog tool.
-    Tool,
-    /// [`HOST_WRITE`], a host step of the engine's registration.
-    Host,
-}
 
 fn process_actor(process: &ProcessId) -> ActorKey {
     ActorKey::process(process.as_str()).expect("a process actor key")
@@ -120,90 +105,7 @@ fn ext_write(world: &Arc<ExternalWorld>) -> Arc<dyn lash_core::ToolProvider> {
 
 /// The engine: one step on its start payload, then a terminal carrying the
 /// step's payload.
-struct WriteEngine {
-    step: StepKind,
-}
-
-/// The engine's host step records its call and input in the external world.
-struct HostWrite {
-    world: Arc<ExternalWorld>,
-}
-
-#[async_trait::async_trait]
-impl lash_core::EngineHostSteps for HostWrite {
-    fn serves(&self, operation: &str) -> bool {
-        operation == HOST_WRITE
-    }
-
-    fn execution(&self, _operation: &str) -> std::time::Duration {
-        std::time::Duration::from_secs(30)
-    }
-
-    async fn run(
-        &self,
-        _context: lash_core::RuntimeExecutionContext<'static>,
-        run: lash_core::HostStepRun,
-    ) -> lash_core::ToolCallOutput {
-        self.world
-            .writes
-            .lock_recover()
-            .push((run.call.clone(), run.input.clone()));
-        lash_core::ToolCallOutput::success(serde_json::json!({ WROTE: run.input }))
-    }
-}
-
-/// A plugin that contributes the engine with its host step: a host step is
-/// declared by the engine's registration.
-struct HostStepPlugin {
-    world: Arc<ExternalWorld>,
-}
-
-struct NoSessionPlugin;
-
-impl lash_core::plugin::SessionPlugin for NoSessionPlugin {
-    fn id(&self) -> &'static str {
-        "process-step-proof-plugin"
-    }
-    fn register(
-        &self,
-        _registrar: &mut lash_core::plugin::PluginRegistrar,
-    ) -> Result<(), lash_core::PluginError> {
-        Ok(())
-    }
-}
-
-impl lash_core::plugin::PluginFactory for HostStepPlugin {
-    fn id(&self) -> &'static str {
-        "process-step-proof-plugin"
-    }
-
-    fn process_engine_contributions(
-        &self,
-        _ctx: &lash_core::ProcessEngineContributionContext<'_>,
-    ) -> Result<Vec<lash_core::ProcessEngineRegistration>, lash_core::PluginError> {
-        Ok(vec![
-            lash_core::ProcessEngineRegistration::accepting(Arc::new(WriteEngine {
-                step: StepKind::Host,
-            }))
-            .with_host_steps(Arc::new(HostWrite {
-                world: Arc::clone(&self.world),
-            })),
-        ])
-    }
-
-    fn build(
-        &self,
-        _ctx: &lash_core::plugin::PluginSessionContext,
-    ) -> Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError> {
-        Ok(Arc::new(NoSessionPlugin))
-    }
-}
-
-impl lash_core::plugin::PluginDefinition for HostStepPlugin {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial("process-step-proof-plugin")
-    }
-}
+struct WriteEngine;
 
 fn infra(error: impl std::fmt::Display) -> ProcessInfraError {
     ProcessInfraError::new(lash_core::PluginError::Session(error.to_string()))
@@ -259,21 +161,12 @@ impl ProcessEngine for WriteEngine {
         let action = match event {
             EngineEvent::Started { payload } => {
                 let step = lash_core_execution::StepName("write".to_owned());
-                EngineAction::Steps(vec![match self.step {
-                    StepKind::Tool => lash_core_execution::StepRequest::Tool {
-                        language_execution: None,
-                        step,
-                        tool: lash_sansio::ToolId::new(TOOL),
-                        input: payload,
-                        site: None,
-                    },
-                    StepKind::Host => lash_core_execution::StepRequest::Host {
-                        language_execution: None,
-                        step,
-                        operation: HOST_WRITE.to_owned(),
-                        input: payload,
-                        site: None,
-                    },
+                EngineAction::Steps(vec![lash_core_execution::StepRequest::Tool {
+                    language_execution: None,
+                    step,
+                    tool: lash_sansio::ToolId::new(TOOL),
+                    input: payload,
+                    site: None,
                 }])
             }
             EngineEvent::StepSettled { outcome, .. } => {
@@ -333,7 +226,6 @@ impl ProcessEngine for WriteEngine {
     > {
         Ok(lash_core_execution::ProcessDefinitionResolution::new(
             lash_core_execution::ProcessSignature::Unknown,
-            Vec::new(),
         ))
     }
 }
@@ -361,7 +253,6 @@ fn environment() -> lash_core_execution::ProcessExecutionEnvSpec {
 }
 
 struct StepProof {
-    step: StepKind,
     world: Arc<ExternalWorld>,
     tripwire: Arc<Tripwire>,
     backend: Mutex<Option<Backend>>,
@@ -370,9 +261,8 @@ struct StepProof {
 }
 
 impl StepProof {
-    fn new(step: StepKind) -> Self {
+    fn new() -> Self {
         Self {
-            step,
             world: Arc::default(),
             tripwire: Arc::default(),
             backend: Mutex::default(),
@@ -400,12 +290,6 @@ impl StepProof {
                     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
                     .tools(ext_write(&self.world));
-                let builder = match self.step {
-                    StepKind::Tool => builder,
-                    StepKind::Host => builder.plugin(Arc::new(HostStepPlugin {
-                        world: Arc::clone(&self.world),
-                    })),
-                };
                 builder
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
                         "process-step-deployment",
@@ -452,22 +336,16 @@ impl Scenario for StepProof {
         let stores = sim::memory(clock).await;
         let database: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
         let stores: Arc<dyn StoreSet> = Arc::new(stores);
-        // A host step's engine is its plugin's contribution.
-        let builder = lash::durable::DurableBackendBuilder::new(stores);
-        let builder = match self.step {
-            StepKind::Tool => builder.process_engine(Arc::new(WriteEngine {
-                step: StepKind::Tool,
-            })),
-            StepKind::Host => builder,
-        };
-        let backend = builder.build().expect("the backend assembles");
+        let backend = lash::durable::DurableBackendBuilder::new(stores)
+            .process_engine(Arc::new(WriteEngine))
+            .build()
+            .expect("the backend assembles");
         *self.backend.lock_recover() = Some(backend);
         database
     }
 
     fn config(&self) -> SimNodesConfig {
-        // The node's backend decodes every engine the core registers, a
-        // plugin's contribution among them.
+        // The node's backend decodes every engine the core registers.
         let (node, _) =
             lash::testing::node_activation(&self.core(), Arc::clone(&self.tripwire) as _)
                 .expect("the core's node activation");
@@ -610,10 +488,7 @@ fn uncut_labels() -> Vec<CommitLabel> {
 /// answer.
 #[tokio::test]
 async fn a_host_engines_tool_step_runs_on_the_production_steps() {
-    let report = Matrix::new()
-        .faults(&[])
-        .run_test(|| StepProof::new(StepKind::Tool))
-        .await;
+    let report = Matrix::new().faults(&[]).run_test(StepProof::new).await;
     report.assert_held();
     let labels: Vec<CommitLabel> = report
         .baseline
@@ -637,62 +512,11 @@ async fn a_host_engines_once_tool_step_killed_at_every_label_runs_at_most_once()
             Fault::CommitThenAbort,
         ])
         .horizon(Duration::from_secs(600))
-        .run_test(|| StepProof::new(StepKind::Tool))
+        .run_test(StepProof::new)
         .await;
     let labels: Vec<&str> = report.labels().iter().map(|label| label.as_str()).collect();
     eprintln!(
         "process step: {} cells over {} labels ({})",
-        report.cells.len(),
-        labels.len(),
-        labels.join(", ")
-    );
-    report.assert_held();
-    for label in uncut_labels() {
-        assert!(
-            report.labels().contains(&label),
-            "the matrix never cut {label}"
-        );
-    }
-}
-
-/// The uncut run of a host step: it registers its external write once, as the
-/// process's originator, and the process ends with its answer.
-#[tokio::test]
-async fn a_host_engines_host_step_runs_on_the_production_steps() {
-    let report = Matrix::new()
-        .faults(&[])
-        .run_test(|| StepProof::new(StepKind::Host))
-        .await;
-    report.assert_held();
-    let labels: Vec<CommitLabel> = report
-        .baseline
-        .iter()
-        .filter(|write| write.kind == WriteKind::Actor && write.committed())
-        .map(|write| write.point.label)
-        .collect();
-    assert_eq!(labels, uncut_labels());
-}
-
-/// A host engine's host step killed at every process commit label resumes
-/// on another owner, never registers its external write twice, and ends its
-/// process once: its external write is its store-local effect, admitted
-/// `Once` (FIG-5313).
-#[tokio::test]
-async fn a_host_engines_host_step_killed_at_every_label_writes_at_most_once() {
-    let report = Matrix::new()
-        .faults(&[
-            Fault::FailBefore,
-            Fault::AckHidden,
-            Fault::Zombie,
-            Fault::Abort,
-            Fault::CommitThenAbort,
-        ])
-        .horizon(Duration::from_secs(600))
-        .run_test(|| StepProof::new(StepKind::Host))
-        .await;
-    let labels: Vec<&str> = report.labels().iter().map(|label| label.as_str()).collect();
-    eprintln!(
-        "host step: {} cells over {} labels ({})",
         report.cells.len(),
         labels.len(),
         labels.join(", ")

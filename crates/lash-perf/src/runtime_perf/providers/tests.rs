@@ -1,4 +1,4 @@
-use super::profiles::{empty_request, high_traffic_stream_profile, typescript_block};
+use super::profiles::{empty_request, typescript_block};
 use super::tools::{
     GMAIL_LIKE_TOOL_NAMES, benchmark_oblique_search_tool_definition,
     benchmark_oblique_tool_definitions, oblique_search_output_schema,

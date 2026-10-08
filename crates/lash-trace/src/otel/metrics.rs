@@ -501,7 +501,7 @@ mod tests {
         metrics.tool_intent.record_executed("start_process");
         metrics
             .tool_intent
-            .record_refused("signal_process", "closed");
+            .record_refused("cancel_process", "closed");
         metrics.obligations.record_attempt("turn", "success");
         metrics.obligations.record_stalled("turn", 1);
         metrics.obligations.record_leadership("recovery", true, 1);

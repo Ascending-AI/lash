@@ -1,52 +1,6 @@
 use super::*;
 
 impl<'module> Linker<'module> {
-    pub(super) fn validate_process_arg_binding(
-        &self,
-        process: &str,
-        arg: &str,
-        expected_ty: &TypeExpr,
-        actual: &Binding,
-        span: Option<Span>,
-    ) -> Result<(), LinkError> {
-        if let Some(expected_resource) = self.resource_type_for_type(expected_ty) {
-            return match actual {
-                Binding::Resource { resource_type } if *resource_type == expected_resource => {
-                    Ok(())
-                }
-                Binding::Resource { resource_type } => {
-                    Err(LinkError::IncompatibleProcessArgument {
-                        process: process.into(),
-                        arg: arg.into(),
-                        expected: expected_resource.into(),
-                        actual: resource_type.as_str().into(),
-                        span,
-                    })
-                }
-                _ => Err(LinkError::IncompatibleProcessArgument {
-                    process: process.into(),
-                    arg: arg.into(),
-                    expected: expected_resource.into(),
-                    actual: "value".into(),
-                    span,
-                }),
-            };
-        }
-        let actual_ty = binding_type(actual);
-        if self.is_type_assignable(&actual_ty, expected_ty) {
-            Ok(())
-        } else {
-            Err(LinkError::IncompatibleProcessArgument {
-                process: process.into(),
-                arg: arg.into(),
-                expected: format_type_expr(&self.resolve_type_aliases(expected_ty))
-                    .into_boxed_str(),
-                actual: format_type_expr(&self.resolve_type_aliases(&actual_ty)).into_boxed_str(),
-                span,
-            })
-        }
-    }
-
     pub(super) fn infer_process_output(
         &self,
         process: &ProcessDecl,

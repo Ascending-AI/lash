@@ -210,7 +210,6 @@ impl Case {
                 "provider_ledger": self.dir.join("provider.jsonl"),
                 "control_url": self.control.url(),
                 "reducer_ledger": self.dir.join("reducers.jsonl"),
-                "receiver": self.dir.join("receiver.json"),
             }),
         )
     }

@@ -346,7 +346,6 @@ impl Compiler {
                     self.mark_lashlang_execution_site(instruction, site);
                 }
             }
-
             Expr::ResultUnwrap(inner) => {
                 if self.compile_awaitable_effect_expr(expr, None, path) {
                     return;

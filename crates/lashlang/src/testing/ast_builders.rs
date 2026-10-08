@@ -108,7 +108,6 @@ pub fn process(name: &str, params: Vec<ProcessParam>, body: Expr) -> Declaration
     Declaration::Process(ProcessDecl {
         name: name.into(),
         params,
-
         return_ty: None,
         label: None,
         origin: crate::ProcessOrigin::Declared,
@@ -157,7 +156,6 @@ pub fn labelled_process(
     Declaration::Process(ProcessDecl {
         name: name.into(),
         params,
-
         return_ty: None,
         label: Some(label),
         origin: crate::ProcessOrigin::Declared,

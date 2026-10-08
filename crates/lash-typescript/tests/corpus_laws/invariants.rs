@@ -523,7 +523,6 @@ fn declared_process_holding_a_literal() -> Result<LinkedModule, lashlang::LinkEr
         .push(Declaration::Process(lashlang::ProcessDecl {
             name: "worker".into(),
             params: Vec::new(),
-
             return_ty: None,
             label: None,
             origin: ProcessOrigin::Declared,

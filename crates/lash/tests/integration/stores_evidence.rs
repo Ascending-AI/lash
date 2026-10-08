@@ -5,8 +5,6 @@
 #![cfg(feature = "testing")]
 #![allow(dead_code, unreachable_code, unused_variables)]
 
-use lash_sansio::SessionId;
-
 fn type_witness<T>() {}
 fn member_witness<T>(_: T) {}
 fn field_witness<T>(_: impl FnOnce(&T)) {}

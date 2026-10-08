@@ -13,7 +13,6 @@ struct RuntimePerfPhaseProbeState {
     open: HashMap<String, Vec<PhaseStart>>,
     completed: BTreeMap<String, RuntimePerfPhaseRunResult>,
     first_started_at: Option<Instant>,
-    deferred_closes: HashSet<String>,
 }
 
 #[derive(Default)]
@@ -64,34 +63,6 @@ impl RuntimePerfPhaseProbe {
             .and_then(|started| started.checked_duration_since(operation_started))
             .map_or(0.0, |elapsed| round3(elapsed.as_secs_f64() * 1000.0))
     }
-
-    fn defer_named_close(&self, phase: &str) {
-        let inserted = self
-            .state
-            .lock_recover()
-            .deferred_closes
-            .insert(phase.to_string());
-        assert!(inserted, "named phase close already deferred: {phase}");
-    }
-
-    fn close_deferred_named(&self, phase: &str) {
-        let mut state = self.state.lock_recover();
-        assert!(
-            state.deferred_closes.remove(phase),
-            "named phase close was not deferred: {phase}"
-        );
-        let starts = state
-            .open
-            .get_mut(phase)
-            .unwrap_or_else(|| panic!("deferred named phase never opened: {phase}"));
-        let start = starts
-            .pop()
-            .unwrap_or_else(|| panic!("deferred named phase had no start: {phase}"));
-        if starts.is_empty() {
-            state.open.remove(phase);
-        }
-        record_completed_phase(&mut state.completed, phase.to_string(), start);
-    }
 }
 
 impl RuntimeTurnPhaseProbe for RuntimePerfPhaseProbe {
@@ -106,14 +77,6 @@ impl RuntimeTurnPhaseProbe for RuntimePerfPhaseProbe {
     fn begin_named(&self, phase: &str) {
         let mut state = self.state.lock_recover();
         state.first_started_at.get_or_insert_with(Instant::now);
-        if state.deferred_closes.contains(phase)
-            && state
-                .open
-                .get(phase)
-                .is_some_and(|starts| !starts.is_empty())
-        {
-            return;
-        }
         let start = PhaseStart {
             started_at: Instant::now(),
             alloc_before: allocator_stats(),
@@ -124,9 +87,6 @@ impl RuntimeTurnPhaseProbe for RuntimePerfPhaseProbe {
 
     fn end_named(&self, phase: &str) {
         let mut state = self.state.lock_recover();
-        if state.deferred_closes.contains(phase) {
-            return;
-        }
         let Some(starts) = state.open.get_mut(phase) else {
             return;
         };
@@ -590,13 +550,9 @@ async fn run_once_inner(
         }
 
         // The run closure moves the turn input in, so pre-bind shared
-        // references for everything else it touches; the delivery
-        // observation crosses into the await span through the Mutex.
-
+        // references for everything else it touches.
         let runtime_ref = &runtime;
         let counters_ref = &extra_counters;
-
-        let probe_ref = &phase_probe;
         let deep_session_ref = &deep_session;
         executed
             .turn_then(
@@ -604,8 +560,6 @@ async fn run_once_inner(
                 async move {
                     let runtime = runtime_ref;
                     let extra_counters = counters_ref;
-
-                    let phase_probe = probe_ref;
                     let cancel = CancellationToken::new();
                     let turn = if matches!(scenario, RuntimePerfScenario::ScopedEffects) {
                         let turn_id =
@@ -761,7 +715,6 @@ async fn run_once_inner(
                             turn_index + 1
                         )
                     })?;
-
                     Ok(())
                 },
                 |_, _, tail| {

@@ -59,7 +59,6 @@ fn render(events: &[SessionHistoryRecord]) -> Vec<LlmMessage> {
         dialect: &dialect,
         events,
         turn_messages: &turn_messages,
-        turn_causes: &[],
         max_output_chars: 1000,
         protocol_iteration: 1,
     })

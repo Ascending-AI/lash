@@ -33,15 +33,6 @@ where
         .head_revision
 }
 
-pub(crate) fn admit(scope: crate::ExecutionScope) -> crate::AdmittedScope {
-    match &scope {
-        crate::ExecutionScope::Process { process_id } => {
-            crate::AdmittedScope::process(process_id.clone())
-        }
-        _ => crate::AdmittedScope::new(scope),
-    }
-}
-
 /// Record one completed attachment write: acquire the write fence, then stamp
 /// the upload evidence. This is the only way a manifest row comes into being,
 /// and the stamp is the only thing that makes a digest adoptable.

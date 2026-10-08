@@ -568,8 +568,6 @@ pub enum TraceScopeOwner {
     },
     /// A registered process, across all of its segments.
     Process { process_id: ProcessId },
-    /// One accepted trigger occurrence.
-    TriggerOccurrence { occurrence_id: String },
 }
 
 /// The logical owner of a tool call, independent of its execution route.
@@ -598,7 +596,6 @@ pub enum TraceScopeKind {
     Tool,
     ToolIntent,
     Process,
-    TriggerOccurrence,
 }
 
 impl TraceScopeKind {
@@ -609,7 +606,6 @@ impl TraceScopeKind {
             Self::Tool => "tool",
             Self::ToolIntent => "tool_intent",
             Self::Process => "process",
-            Self::TriggerOccurrence => "trigger_occurrence",
         }
     }
 }
@@ -654,7 +650,6 @@ impl TraceScopeId {
             TraceScopeOwner::Tool { .. } => TraceScopeKind::Tool,
             TraceScopeOwner::ToolIntent { .. } => TraceScopeKind::ToolIntent,
             TraceScopeOwner::Process { .. } => TraceScopeKind::Process,
-            TraceScopeOwner::TriggerOccurrence { .. } => TraceScopeKind::TriggerOccurrence,
         }
     }
 }

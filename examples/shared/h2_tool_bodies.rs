@@ -40,16 +40,6 @@ pub enum BodyResult {
         intents: ToolIntents,
     },
     Deferred,
-    EmitToReceiver {
-        value: serde_json::Value,
-        receiver: Arc<OnceLock<lash::ProcessId>>,
-        event_type: String,
-    },
-    EmitEvent {
-        value: serde_json::Value,
-        process_id: lash::ProcessId,
-        event_type: String,
-    },
     /// Answers the handle of the case's bound process.
     Handle {
         process: Arc<OnceLock<lash::ProcessId>>,
@@ -115,8 +105,6 @@ impl ToolBodies {
                         .with_intents(intents.intents.iter().map(ToolIntent::kind)),
                     BodyResult::Deferred => ToolDeclaration::deferring(),
                     BodyResult::Handle { .. } => ToolDeclaration::default(),
-                    BodyResult::EmitEvent { .. } | BodyResult::EmitToReceiver { .. } => ToolDeclaration::default()
-                        .with_intents([lash::tools::ToolIntentKind::EmitProcessEvent]),
                 };
                 // A deferred body parks until the scenario's host resolves
                 // it, or the turn that called it ends.
@@ -144,10 +132,7 @@ impl ToolBodies {
             .ok_or_else(|| anyhow!("unplanned tool body {}", call.name()))?;
         let completion = match result {
             BodyResult::Deferred => Some(call.context.completion_key()?.as_str().to_owned()),
-            BodyResult::Inline { .. }
-            | BodyResult::EmitEvent { .. }
-            | BodyResult::EmitToReceiver { .. }
-            | BodyResult::Handle { .. } => None,
+            BodyResult::Inline { .. } | BodyResult::Handle { .. } => None,
         };
         let delivery = ToolDelivery {
             label: call.name().to_owned(),
@@ -168,21 +153,6 @@ impl ToolBodies {
             file.sync_all()?;
         }
         (self.barrier)(delivery).await?;
-        let emitted = |value: &serde_json::Value,
-                       process_id: &lash::ProcessId,
-                       event_type: &String| {
-            ToolAttemptOutcome::done(
-                ToolOutcomeDone::ok(value.clone()),
-                ToolIntents::v3(vec![ToolIntent::EmitProcessEvent(
-                    lash::tools::EmitProcessEventIntent {
-                        owner: call.context.owner().runtime_owner(),
-                        process_id: process_id.clone(),
-                        event_type: event_type.clone(),
-                        payload: serde_json::json!({"call_id":call.context.call_id(), "value":value}),
-                    },
-                )]),
-            )
-        };
         Ok(match result {
             BodyResult::Inline { value, intents } => {
                 ToolAttemptOutcome::done(ToolOutcomeDone::ok(value.clone()), intents.clone())
@@ -192,11 +162,6 @@ impl ToolBodies {
                 completion.on_cancel = CancelHint::Ignore;
                 ToolAttemptOutcome::pending(completion)
             }
-            BodyResult::EmitEvent {
-                value,
-                process_id,
-                event_type,
-            } => emitted(value, process_id, event_type),
             BodyResult::Handle { process } => {
                 let process = process
                     .get()
@@ -209,17 +174,6 @@ impl ToolBodies {
                     ToolIntents::default(),
                 )
             }
-            BodyResult::EmitToReceiver {
-                value,
-                receiver,
-                event_type,
-            } => emitted(
-                value,
-                receiver.get().ok_or_else(|| {
-                    anyhow!("intent receiver was not registered before submission")
-                })?,
-                event_type,
-            ),
         })
     }
 }

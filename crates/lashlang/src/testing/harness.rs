@@ -117,18 +117,16 @@ pub fn add_process_control_operations(resources: &mut LashlangHostCatalog) {
             TypeExpr::Any,
         )
         .expect("host catalog operation must not conflict");
-    for operation in ["cancel"] {
-        resources
-            .add_module_operation(
-                ["processes"],
-                "Processes",
-                operation,
-                operation,
-                TypeExpr::Any,
-                TypeExpr::Any,
-            )
-            .expect("host catalog operation must not conflict");
-    }
+    resources
+        .add_module_operation(
+            ["processes"],
+            "Processes",
+            "cancel",
+            "cancel",
+            TypeExpr::Any,
+            TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
 }
 
 /// The host environment the scaffolding links against: a `tools` module with

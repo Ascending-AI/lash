@@ -108,7 +108,6 @@ fn transition(
             }
             _ => standing(state),
         },
-
         EngineEvent::ProcessEnded { process, outcome } => match &state.phase {
             Phase::Parked {
                 operation,
@@ -125,7 +124,6 @@ fn transition(
             }
             _ => standing(state),
         },
-
         EngineEvent::ProcessWaitTimedOut { .. } => standing(state),
         EngineEvent::KeyPinned { .. }
         | EngineEvent::ExternalResolved { .. }
@@ -159,7 +157,6 @@ fn standing(state: &LashlangEngineState) -> Result<EngineAction, ProcessInfraErr
             wait: Wait::Leaves { .. },
             ..
         } => EngineAction::Idle,
-
         Phase::Ended => return Err(infra("an ended process has no standing action")),
     })
 }
@@ -309,7 +306,6 @@ fn park(
                                 outcome: None,
                             })
                         }
-
                         IssuedLeaf::Timer { until_ms } => {
                             steps.push(StepRequest::Engine {
                                 step: step.clone(),

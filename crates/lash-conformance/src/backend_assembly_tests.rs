@@ -168,7 +168,6 @@ impl lash_core::ProcessEngine for MismatchedEngine {
     ) -> Result<lash_core::ProcessDefinitionResolution, lash_core::ProcessDefinitionRefusal> {
         Ok(lash_core::ProcessDefinitionResolution::new(
             lash_core::ProcessSignature::Unknown,
-            Vec::new(),
         ))
     }
 }

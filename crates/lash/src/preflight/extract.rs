@@ -426,7 +426,7 @@ mod tests {
         ))
         .expect("frozen fixture should be JSON");
         let object = raw.as_object_mut().expect("artifact should be an object");
-        // Reach the predecessor carrier after its explicit retired fields.
+        // Reach the predecessor carrier past its retired top-level fields.
         object.remove("trigger_key_manifest");
         object.remove("compilation_dialect");
         let extractions = extract(&item(
@@ -449,42 +449,6 @@ mod tests {
             detail.contains("unsupported artifact shape artifact shape: unknown field"),
             "{detail}"
         );
-        assert!(detail.contains("recompile and republish"), "{detail}");
-    }
-
-    #[tokio::test]
-    #[cfg(feature = "rlm")]
-    async fn a_frozen_trigger_manifest_artifact_is_a_shape_refusal() {
-        let raw: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../lashlang/tests/fixtures/module-artifact-old.json"
-        ))
-        .expect("frozen fixture should be JSON");
-        let artifact =
-            lashlang::ModuleArtifact::from_program(lashlang::testing::ast_builders::module(
-                Vec::new(),
-                vec![lashlang::testing::ast_builders::null()],
-            ))
-            .expect("current artifact");
-        let mut envelope: serde_json::Value =
-            serde_json::from_slice(&artifact.to_store_bytes().expect("current envelope"))
-                .expect("envelope JSON");
-        envelope["artifact"] = raw;
-        let extractions = extract(&item(
-            DurableSurface::ModuleArtifact,
-            DurablePayload::Json(envelope.to_string()),
-        ))
-        .await;
-        let detail = extractions
-            .iter()
-            .find_map(|extraction| match extraction {
-                Extraction::IdentityMismatch {
-                    format: DurableFormat::ModuleArtifact,
-                    detail,
-                } => Some(detail.as_str()),
-                _ => None,
-            })
-            .expect("the trigger-manifest artifact should be refused by its shape fence");
-        assert!(detail.contains("trigger_key_manifest"), "{detail}");
         assert!(detail.contains("recompile and republish"), "{detail}");
     }
 

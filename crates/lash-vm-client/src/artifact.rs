@@ -7,7 +7,6 @@ use std::collections::BTreeMap;
 pub struct ProcessMetadata {
     pub lifted: bool,
     pub params: BTreeMap<String, lashlang::TypeExpr>,
-
     pub process_type: Option<lashlang::TypeExpr>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

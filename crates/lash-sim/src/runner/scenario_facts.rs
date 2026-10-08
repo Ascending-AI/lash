@@ -29,7 +29,6 @@ pub(super) fn scenario_transition_facts(
                 "runtime.command_only_queue_drain" => {
                     facts.push(command_queue_drain_fact(contract, selected_events)?);
                 }
-
                 "runtime.observation_replay_preserves_input" => {
                     facts.push(observer_reconnect_transition_fact(
                         contract,
@@ -82,7 +81,6 @@ pub(super) fn scenario_backend_regression_reference(
             "queued-active-turn-cancel-race",
             "active-turn queued input stays hidden, then cancellation terminalizes the pending row before any later idle claim can surface it",
         ),
-
         "standard.provider_error_without_checkpoint" => (
             "provider-protocol-terminalization",
             "scripted provider mutation matrices classify retryable 429 and dropped-terminal parser failures through every migrated provider parser",

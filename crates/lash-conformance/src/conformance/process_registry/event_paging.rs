@@ -17,7 +17,7 @@ pub(super) async fn assert_out_of_range_sequences_are_rejected(registry: Arc<dyn
                 call_wait_event(
                     &process_id,
                     "cursor.event",
-                    "cursor.event",
+                    &index.to_string(),
                     serde_json::json!({ "index": index }),
                 ),
             )

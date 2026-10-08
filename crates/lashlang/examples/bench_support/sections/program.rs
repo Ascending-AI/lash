@@ -16,9 +16,7 @@
 /// corpus to keep that true. The corpus still builds from the AST, for the
 /// reason above rather than that one.
 pub fn benchmark_program(scenario: Scenario) -> Program {
-    let mut declarations = benchmark_declarations();
-    declarations.extend(scenario_declarations(scenario));
-    b::module(declarations, benchmark_main(scenario))
+    b::module(benchmark_declarations(), benchmark_main(scenario))
 }
 
 /// The three processes every scenario can start.
@@ -52,13 +50,6 @@ fn benchmark_declarations() -> Vec<Declaration> {
             ]))]),
         ),
     ]
-}
-
-/// Declarations a single scenario adds on top of the shared three.
-fn scenario_declarations(scenario: Scenario) -> Vec<Declaration> {
-    match scenario {
-        _ => Vec::new(),
-    }
 }
 
 /// The top-level expressions of each scenario, in execution order.
@@ -245,7 +236,6 @@ Scenario::Baseline => vec![
             b::assign("frame", b::await_expr(b::unwrap(b::receiver_call(b::var("control"), "continue_as", vec![b::record(vec![("task", b::string("continue from compact state")), ("seed", b::record(vec![("projected_problem", b::field(b::var("proj"), "text")), ("nested_projected", b::record(vec![("body", b::field(b::var("proj"), "json"))])), ("computed_summary", b::builtin("format", vec![b::string("{0}:{1}"), b::field(b::var("ctx"), "user"), b::builtin("len", vec![b::var("history")])])), ("live_agent", b::index(b::var("handles"), b::num(0.0))), ("started_agent", b::var("agent"))]))])])))),
             b::finish(b::record(vec![("frame_key", b::field(b::var("frame"), "frame_key")), ("task", b::field(b::var("frame"), "task")), ("seed_keys", b::field(b::var("frame"), "seed_keys")), ("projected_count", b::field(b::var("frame"), "projected_count")), ("global_count", b::field(b::var("frame"), "global_count"))])),
         ],
-
         Scenario::SyntaxTextHostEnvironment => vec![
             b::assign("patch", b::string("*** Begin Patch\n*** Update File: crates/lashlang/src/lib.rs\n@@\n-old\n+new\n\\n { braces stay raw }\n*** End Patch")),
             b::assign("script", b::string("python3 - <<'PY'\nprint(\"\"\"double quotes are preserved\"\"\")\n\\n { braces stay raw }\nPY")),

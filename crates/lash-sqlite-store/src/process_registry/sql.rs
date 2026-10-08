@@ -166,7 +166,7 @@ lash_store_sql::statements! {
        AND (?6 IS NULL OR created_at_ms >= ?6)
        AND (?7 IS NULL OR created_at_ms < ?7)
      ORDER BY process_id ASC";
-        /// The same, narrowed to lifetime scope `?10` / `?11`.
+        /// The same, narrowed to lifetime scope `?8` / `?9`.
         list_by_lifetime_scope = "SELECT record_json FROM processes
      WHERE (?1 IS NULL OR status IN (SELECT value FROM json_each(?1)))
        AND (?2 IS NULL OR originator_id = ?2)
@@ -179,7 +179,7 @@ lash_store_sql::statements! {
            AND lifetime_scope_kind = ?8
            AND lifetime_scope_id IS ?9
      ORDER BY process_id ASC";
-        /// The same, narrowed to rows whose cancel request is older than `?10`
+        /// The same, narrowed to rows whose cancel request is older than `?8`
         /// and whose outcome is still open.
         list_pending_cancel = "SELECT record_json FROM processes
      WHERE (?1 IS NULL OR status IN (SELECT value FROM json_each(?1)))
@@ -210,7 +210,7 @@ lash_store_sql::statements! {
            AND cancel_requested_at_ms < ?10
            AND {{nonterminal_process_status(status)}}
      ORDER BY process_id ASC";
-        /// Every live process plus those retired since `?10`.
+        /// Every live process plus those retired since `?8`.
         ///
         /// The union is the point: each arm is planned on its own partial
         /// index, where one disjunction over both would be planned on neither.
@@ -238,7 +238,7 @@ lash_store_sql::statements! {
            AND (?6 IS NULL OR created_at_ms >= ?6)
            AND (?7 IS NULL OR created_at_ms < ?7)
      ) ORDER BY process_id ASC";
-        /// The same, narrowed to lifetime scope `?11` / `?12`.
+        /// The same, narrowed to lifetime scope `?9` / `?10`.
         list_recent_retired_by_lifetime_scope = "SELECT record_json FROM (
          SELECT process_id, record_json FROM processes
          WHERE {{live_process_status(status)}}
@@ -267,7 +267,7 @@ lash_store_sql::statements! {
            AND lifetime_scope_kind = ?9
            AND lifetime_scope_id IS ?10
      ) ORDER BY process_id ASC";
-        /// The same, narrowed to rows whose cancel request is older than `?11`
+        /// The same, narrowed to rows whose cancel request is older than `?9`
         /// and whose outcome is still open.
         list_recent_retired_pending_cancel = "SELECT record_json FROM (
          SELECT process_id, record_json FROM processes

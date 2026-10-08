@@ -71,15 +71,15 @@ use lash_core::runtime::{
 };
 use lash_core::{
     ArtifactReferrer, AttachmentId, AttachmentReferrers, AttachmentWrite, Clock, DeploymentStore,
-    ExecutionScope, JsonSchema, MessageOrigin, MessageRole, OperationId, PartKind,
-    PendingTurnInputDraft, PluginNamespaceState, PluginState, ProcessAwaitOutput, ProcessChange,
-    ProcessChangeCursor, ProcessCompletionAuthority, ProcessEventLogTestSupport as _,
-    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
-    ProcessExecutionWriteAuthority, ProcessIdentity, ProcessInput, ProcessProvenance,
-    ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStatus, ProjectionWatermark,
-    ReferrerClaim, RuntimeCommit, RuntimeSessionState, SessionAppendNode, SessionCreationHead,
-    SessionNodePayload, SessionPolicy, SessionRelation, SessionStoreCreateRequest, StoreError,
-    TokenUsage, TurnInput, TurnInputIngress, WaitKind, WaitState,
+    ExecutionScope, MessageOrigin, MessageRole, OperationId, PartKind, PendingTurnInputDraft,
+    PluginNamespaceState, PluginState, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
+    ProcessCompletionAuthority, ProcessEventLogTestSupport as _, ProcessExecutionEnvRef,
+    ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
+    ProcessIdentity, ProcessInput, ProcessProvenance, ProcessRecord, ProcessRegistration,
+    ProcessRegistry, ProcessStatus, ProjectionWatermark, ReferrerClaim, RuntimeCommit,
+    RuntimeSessionState, SessionAppendNode, SessionCreationHead, SessionNodePayload, SessionPolicy,
+    SessionRelation, SessionStoreCreateRequest, StoreError, TokenUsage, TurnInput,
+    TurnInputIngress, WaitKind, WaitState,
 };
 use serde::{Deserialize, Serialize};
 
@@ -503,25 +503,14 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .enqueue_queued_work(fixture_cancelled_command())
         .await
         .expect("enqueue fixture command to cancel");
-    // The command sits behind the fixture's queued work, which stays
-    // pending, so the command lane never reaches it: its host cancel is its
-    // terminal transition.
+    // The fixture's first command stays open and owns the head, so the
+    // command lane never reaches this one: its host cancel is its terminal
+    // transition, and no head commit follows it.
     session
         .cancel_queued_work_batch(&cancelled_batch.batch_id)
         .await
         .expect("cancel fixture command")
         .expect("fixture command is open");
-    let cancel_state = load_fixture_state(&session).await;
-    let cancel_operation = OperationId::new(
-        ExecutionScope::runtime_operation("durable-read-cancel-settlement"),
-        "commit",
-    );
-    let cancel_commit =
-        RuntimeCommit::persisted_state_with_operation_for_testing(&cancel_state, cancel_operation);
-    session
-        .commit_runtime_state(cancel_commit)
-        .await
-        .expect("commit the fixture head after the command's cancel");
 
     let read = load_fixture_window(&session).await;
     let waiting_process = handles

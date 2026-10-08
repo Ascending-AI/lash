@@ -188,7 +188,6 @@ pub enum WorkflowDiagnosticClassification {
 pub enum WorkflowDiagnosticKind {
     DuplicateDeclaration,
     DuplicateProcessParam,
-
     UnknownProcess,
     UnknownName,
     UnknownBuiltin,
@@ -206,9 +205,7 @@ pub enum WorkflowDiagnosticKind {
     ForbiddenInFunction,
     FunctionNameIsNotAValue,
     FunctionShadowsBuiltin,
-
     ProcessLiteralOutsideProcessSlot,
-
     UnresolvedReceiver,
     UnknownResourceOperation,
     AmbiguousModuleOperation,

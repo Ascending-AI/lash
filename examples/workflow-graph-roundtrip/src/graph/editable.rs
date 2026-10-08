@@ -223,13 +223,10 @@ pub(super) fn apply_fields(
         }
         return Ok(());
     }
-    match expression {
-        Expr::SleepFor(value) => {
-            if let Some(duration) = fields.get("duration") {
-                **value = duration.to_expr(node_id, "fields.duration", scope)?;
-            }
-        }
-        _ => {}
+    if let Expr::SleepFor(value) = expression
+        && let Some(duration) = fields.get("duration")
+    {
+        **value = duration.to_expr(node_id, "fields.duration", scope)?;
     }
     Ok(())
 }

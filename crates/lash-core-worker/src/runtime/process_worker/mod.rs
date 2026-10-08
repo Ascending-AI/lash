@@ -26,7 +26,7 @@ use lash_core_execution::runtime::actor::process::{
 pub struct DurableProcessWorkerConfig {
     pub plugin_host: Arc<PluginHost>,
     /// The host config and its one backend, which supplies the session
-    /// catalog and trigger store this worker reaches (ADR 0102, D2).
+    /// catalog this worker reaches (ADR 0102, D2).
     pub runtime_host: RuntimeHostConfig,
     /// Pacing of the registry waits a process run makes through this
     /// worker's process work.
@@ -61,11 +61,6 @@ impl DurableProcessWorkerConfig {
     /// creates, opens or reconstructs goes through.
     pub fn session_store_factory(&self) -> Arc<dyn DeploymentStore> {
         self.runtime_host.session_store_factory()
-    }
-
-    /// The backend's trigger store.
-    pub fn trigger_store(&self) -> Arc<dyn crate::TriggerStore> {
-        self.runtime_host.trigger_store()
     }
 
     pub fn process_registry(&self) -> &Arc<dyn ProcessRegistry> {

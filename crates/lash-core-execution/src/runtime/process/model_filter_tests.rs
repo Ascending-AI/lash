@@ -75,7 +75,7 @@ fn retained_host_start_requires_the_same_persisted_engine_definition() {
     let retained: ProcessRecord =
         serde_json::from_value(serde_json::to_value(retained).expect("persist retained process"))
             .expect("reopen retained process");
-    super::validation::check_retained_start(&registration, &retained, None)
+    super::validation::check_retained_start(&registration, &retained)
         .expect("the same host start returns the persisted process");
 
     for changed in [
@@ -97,7 +97,7 @@ fn retained_host_start_requires_the_same_persisted_engine_definition() {
             )),
         );
         assert!(matches!(
-            super::validation::check_retained_start(&conflicting, &retained, None),
+            super::validation::check_retained_start(&conflicting, &retained),
             Err(crate::PluginError::StartKeyConflict { start_key })
                 if registration.start_key.as_ref() == Some(&start_key)
         ));

@@ -108,13 +108,6 @@ fn processes_area_witnesses() {
     fn meth_0097<T: lash::persistence::ProcessExecutionEnvStore>(_: &T) {
         let _ = T::get_process_execution_env;
     }
-    // W0100: lash::persistence::QueuedWorkBatchDraft::with_process_wake_source [function]
-    let _: fn(
-        lash::persistence::QueuedWorkBatchDraft,
-        lash::ProcessId,
-        u64,
-    ) -> lash::persistence::QueuedWorkBatchDraft =
-        lash::persistence::QueuedWorkBatchDraft::with_process_wake_source;
     // W0111: lash::plugins::PluginError::ProcessAlreadyTerminal [variant]
     variant_witness(|value: &lash::plugins::PluginError| {
         matches!(
@@ -538,18 +531,6 @@ fn processes_area_witnesses() {
     // W0265: lash::process::ProcessService::list_visible [function]
     fn meth_0265<T: lash::process::ProcessService>(_: &T) {
         let _ = T::list_visible;
-    }
-    // W0266: lash::process::ProcessService::emit_event_recorded_intent [function]
-    fn meth_0266<T: lash::process::ProcessService>(_: &T) {
-        let _ = T::emit_event_recorded_intent;
-    }
-    // W0267: lash::process::ProcessService::stage_recorded_signal [function]
-    fn meth_0267<T: lash::process::ProcessService>(_: &T) {
-        let _ = T::stage_recorded_signal;
-    }
-    // W0268: lash::process::ProcessService::signal_possessed [function]
-    fn meth_0268<T: lash::process::ProcessService>(_: &T) {
-        let _ = T::signal_possessed;
     }
     // W0269: lash::process::ProcessService::start [function]
     fn meth_0269<T: lash::process::ProcessService>(_: &T) {

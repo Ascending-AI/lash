@@ -18,9 +18,6 @@
       "format": "uint32",
       "minimum": 1
     },
-    "cron": {
-      "$ref": "#/$defs/Cron"
-    },
     "delete_per_turn": {
       "type": "number",
       "format": "double",
@@ -30,11 +27,6 @@
       "type": "integer",
       "format": "uint32",
       "minimum": 1
-    },
-    "external_occurrences_per_turn": {
-      "type": "number",
-      "format": "double",
-      "minimum": 0
     },
     "fault_window_s": {
       "type": "integer",
@@ -232,11 +224,6 @@
     "tools": {
       "$ref": "#/$defs/Tools"
     },
-    "trigger_edits_per_turn": {
-      "type": "number",
-      "format": "double",
-      "minimum": 0
-    },
     "turn_cancel_share": {
       "type": "number",
       "format": "double",
@@ -274,8 +261,6 @@
     "minimum_completed_turns",
     "llm_requests_per_turn",
     "host_process_starts_per_turn",
-    "external_occurrences_per_turn",
-    "trigger_edits_per_turn",
     "promotion_reads_per_turn",
     "prompt_bytes",
     "input_bytes",
@@ -286,7 +271,6 @@
     "processes",
     "attachments",
     "queued",
-    "cron",
     "turn_cancel_share",
     "delete_per_turn",
     "observation",
@@ -388,31 +372,6 @@
         "comparison_repetitions",
         "bootstrap_resamples",
         "confidence"
-      ]
-    },
-    "Cron": {
-      "type": "object",
-      "properties": {
-        "cadence_s": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
-        },
-        "jitter": {
-          "type": "string",
-          "pattern": "^seeded_phase$"
-        },
-        "subscriptions": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "subscriptions",
-        "cadence_s",
-        "jitter"
       ]
     },
     "Distribution": {
@@ -541,11 +500,6 @@
           "format": "uint32",
           "minimum": 1
         },
-        "subscription_reconcile_s": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
-        },
         "workflow_read_sets_per_start": {
           "type": "integer",
           "format": "uint32",
@@ -561,7 +515,6 @@
         "workflow_read_sets_per_start",
         "projector_poll_s",
         "projector_idle_s",
-        "subscription_reconcile_s",
         "process_prune_s"
       ]
     },
@@ -594,28 +547,11 @@
         "fanout": {
           "$ref": "#/$defs/Distribution"
         },
-        "park_share": {
-          "type": "number",
-          "format": "double",
-          "maximum": 1,
-          "minimum": 0
-        },
-        "signal_share": {
-          "type": "number",
-          "format": "double",
-          "maximum": 1,
-          "minimum": 0
-        },
         "turn_share": {
           "type": "number",
           "format": "double",
           "maximum": 1,
           "minimum": 0
-        },
-        "wake_delay_ms": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
         }
       },
       "additionalProperties": false,
@@ -623,9 +559,6 @@
         "turn_share",
         "fanout",
         "await_share",
-        "signal_share",
-        "park_share",
-        "wake_delay_ms",
         "cancel_share"
       ]
     },
@@ -691,27 +624,11 @@
               "type": "string",
               "pattern": "^[IV](: .+)?$"
             },
-            "/cron/cadence_s": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
-            "/cron/jitter": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
-            "/cron/subscriptions": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
             "/delete_per_turn": {
               "type": "string",
               "pattern": "^[IV](: .+)?$"
             },
             "/drain_timeout_s": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
-            "/external_occurrences_per_turn": {
               "type": "string",
               "pattern": "^[IV](: .+)?$"
             },
@@ -803,10 +720,6 @@
               "type": "string",
               "pattern": "^[IV](: .+)?$"
             },
-            "/observation/subscription_reconcile_s": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
             "/observation/workflow_read_sets_per_start": {
               "type": "string",
               "pattern": "^[IV](: .+)?$"
@@ -823,19 +736,7 @@
               "type": "string",
               "pattern": "^[IV](: .+)?$"
             },
-            "/processes/park_share": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
-            "/processes/signal_share": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
             "/processes/turn_share": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
-            "/processes/wake_delay_ms": {
               "type": "string",
               "pattern": "^[IV](: .+)?$"
             },
@@ -939,10 +840,6 @@
               "type": "string",
               "pattern": "^[IV](: .+)?$"
             },
-            "/trigger_edits_per_turn": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
             "/turn_cancel_share": {
               "type": "string",
               "pattern": "^[IV](: .+)?$"
@@ -970,12 +867,8 @@
             "/collection/retention_s",
             "/collection/scrape_s",
             "/compact_every_turns",
-            "/cron/cadence_s",
-            "/cron/jitter",
-            "/cron/subscriptions",
             "/delete_per_turn",
             "/drain_timeout_s",
-            "/external_occurrences_per_turn",
             "/fault_window_s",
             "/faults/rolling_deploy_s",
             "/faults/rolling_worker_pause_s",
@@ -998,15 +891,11 @@
             "/observation/projector_poll_s",
             "/observation/reconnect_share",
             "/observation/streams_per_turn",
-            "/observation/subscription_reconcile_s",
             "/observation/workflow_read_sets_per_start",
             "/processes/await_share",
             "/processes/cancel_share",
             "/processes/fanout",
-            "/processes/park_share",
-            "/processes/signal_share",
             "/processes/turn_share",
-            "/processes/wake_delay_ms",
             "/promotion_reads_per_turn",
             "/prompt_bytes",
             "/provider/chunks",
@@ -1032,7 +921,6 @@
             "/tools/fanout",
             "/tools/parallel_share",
             "/tools/turn_share",
-            "/trigger_edits_per_turn",
             "/turn_cancel_share",
             "/turns_per_session_s",
             "/warmup_s"

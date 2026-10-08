@@ -437,7 +437,6 @@ impl TurnServices for SimServices {
             messages,
             Vec::new(),
             0,
-            Vec::new(),
         );
         Ok(self.drive(row, machine))
     }
@@ -863,7 +862,6 @@ impl RoundTools for Catalog {
                             return refused(&opener, &error);
                         }
                     },
-
                     Tool::WriteNow | Tool::Flaky => {}
                 }
                 let output = turn_output(&opener, format!("{}#{attempt}", tool.name()));

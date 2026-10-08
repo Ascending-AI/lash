@@ -1036,10 +1036,7 @@ async fn send_batch_refuses_reserved_source_keys_without_admitting_other_members
         .session(crate::SessionId::parse("reserved-batch").expect("nonblank host identity"))
         .open()
         .await?;
-    for key in [
-        "command:refresh_tool_catalog:foreign",
-        "process:foreign:event:1:wake",
-    ] {
+    for key in ["command:refresh_tool_catalog:foreign"] {
         let refused = session
             .send_batch([
                 (

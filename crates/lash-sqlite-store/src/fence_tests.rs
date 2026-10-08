@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use lash_core_execution::compat::{CompatRefusal, VersionRange};
 use lash_core_execution::{
-    FleetFormat, FleetFormatStore, ProcessOriginator, ProcessRegistrar as _,
-    SessionCatalogStore as _, SessionId, SessionMeta, SessionRelation, StoreError,
+    FleetFormat, FleetFormatStore, ProcessRegistrar as _, SessionCatalogStore as _, SessionId,
+    SessionMeta, SessionRelation, StoreError,
 };
 use rusqlite::Connection;
 

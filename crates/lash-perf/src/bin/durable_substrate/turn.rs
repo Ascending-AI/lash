@@ -431,7 +431,6 @@ impl TurnServices for BenchServices {
             messages,
             Vec::new(),
             0,
-            Vec::new(),
         );
         Ok(self.drive(row, machine))
     }

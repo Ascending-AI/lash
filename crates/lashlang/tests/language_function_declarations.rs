@@ -501,7 +501,6 @@ async fn a_function_may_be_called_from_a_process_body() {
             Declaration::Process(lashlang::ProcessDecl {
                 name: "greet".into(),
                 params: Vec::new(),
-
                 return_ty: None,
                 label: None,
                 origin: Default::default(),
@@ -573,7 +572,6 @@ async fn a_process_name_is_rejected_in_a_function() {
     let worker = Declaration::Process(lashlang::ProcessDecl {
         name: "worker".into(),
         params: Vec::new(),
-
         return_ty: None,
         label: None,
         origin: Default::default(),

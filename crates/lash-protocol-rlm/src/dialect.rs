@@ -282,10 +282,6 @@ impl SessionDialect {
         self.services.code_renderer.clone()
     }
 
-    pub(crate) fn artifact_store(&self) -> lashlang::LashlangArtifacts {
-        self.services.artifact_store.clone()
-    }
-
     /// The lashlang host surface a cell of this session links against.
     pub(crate) fn surface(&self) -> LashlangSurface {
         self.surface.clone()

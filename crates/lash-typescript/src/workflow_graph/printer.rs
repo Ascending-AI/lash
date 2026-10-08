@@ -824,7 +824,6 @@ impl<'p> Printer<'p> {
             }
             Expr::Await(value) => Ok(format!("await {}", self.unary_operand(value)?)),
             Expr::SleepFor(value) => Ok(format!("await sleep({})", self.expression(value)?)),
-
             Expr::Print(value) => Ok(format!("print({})", self.expression(value)?)),
             Expr::Finish(value) => Ok(format!("finish({})", self.expression(value)?)),
             Expr::Fail(value) => Ok(format!("fail({})", self.expression(value)?)),

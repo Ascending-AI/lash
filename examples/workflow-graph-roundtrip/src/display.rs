@@ -232,7 +232,7 @@ impl HostTools {
         self.approvals
             .lock_recover()
             .get(call_id)
-            .filter(|call| &call.process == process)
+            .filter(|call| call.process == *process)
             .map(|call| call.key.clone())
     }
 

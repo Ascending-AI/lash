@@ -785,7 +785,6 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                             AbilityOp::Print(_) => EffectKind::Print,
                             AbilityOp::Finish(_) => EffectKind::Finish,
                             AbilityOp::Fail(_) => EffectKind::Fail,
-
                             AbilityOp::Sleep(_) => EffectKind::Sleep,
                         };
                         // A request rebuilt from the continuation need not be

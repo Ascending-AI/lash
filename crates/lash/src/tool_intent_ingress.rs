@@ -138,6 +138,10 @@ pub enum ToolIntentIngressRefusal {
 /// the repeat is caught by the effect host's journal or, on a fresh invocation
 /// with an empty journal or a host that journals nothing, by the durable key
 /// the store already holds.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "one per submission, returned to the host: boxing the outcome would only add an allocation and deref churn to the public result"
+)]
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ToolIntentIngressOutcome {
@@ -165,9 +169,6 @@ pub enum ToolIntentIngressOutcome {
 /// A host-submitted intent is realized through the process command surface.
 enum RealizedIntent {
     Process(lash_core::ProcessEffectOutcome),
-    // Boxed: a registration handle carries the whole admitted subscription
-    // record, including its captured source contract and route, and is an
-    // order of magnitude larger than the other two variants.
 }
 
 /// Session-and-scope-bound host front door for durable intent realization.
@@ -363,6 +364,7 @@ impl ToolIntentIngress {
             return ToolIntentIngressOutcome::Refused { refusal };
         }
         let identity = key.identity;
+        let submitted_intent = intent.clone();
         let (outcome, replayed) = match self.realize(&identity, intent, trace).await {
             Ok((result, replayed)) => (
                 lash_core::ToolIntentExecutionOutcome::Executed {
@@ -507,6 +509,7 @@ impl ToolIntentIngress {
         trace: &SubmissionTrace,
     ) -> std::result::Result<(lash_core::ToolIntentRealized, bool), RealizationFailure> {
         let kind = intent.kind();
+        let submitted_intent = intent.clone();
         if let Some(recorded) = self.admit_submission(identity, &intent, trace).await? {
             return Ok((recorded, true));
         }

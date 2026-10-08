@@ -1199,7 +1199,6 @@ async fn pinned_source_preserves_provider_execute_result_and_intents() {
         intent.owner,
         crate::RuntimeOwner::Session(SessionId::from("registry-test"))
     );
-    assert_eq!(intent.payload, json!({ "route": "id" }));
 }
 
 #[tokio::test]

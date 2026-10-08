@@ -367,18 +367,6 @@ fn sql_counter_value(counter: &'static str, value: u64) -> Result<i64, StoreErro
     })
 }
 
-fn plugin_sql_counter_value(
-    counter: &'static str,
-    value: u64,
-) -> Result<i64, lash_core_execution::PluginError> {
-    i64::try_from(value).map_err(
-        |_| lash_core_execution::PluginError::MonotonicCounterOverflow {
-            counter: counter.to_string(),
-            current: value,
-        },
-    )
-}
-
 fn map_record_decode_error(record_kind: &'static str, error: StoreError) -> StoreError {
     match error {
         StoreError::UnsupportedRecordSchemaVersion { .. }

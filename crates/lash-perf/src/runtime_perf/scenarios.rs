@@ -339,7 +339,7 @@ impl RuntimePerfScenario {
         Self::FrameResidencyCurvePostgres,
     ];
 
-    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 52] = [
+    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 51] = [
         runtime_perf_metadata!(
             Standard,
             "standard",
@@ -758,7 +758,7 @@ impl RuntimePerfScenario {
             false
         ),
     ];
-    pub(crate) const KNOWN: [Self; 52] = runtime_perf_known_scenarios();
+    pub(crate) const KNOWN: [Self; 51] = runtime_perf_known_scenarios();
     // Durable scenarios are intentionally opt-in (or selected by `all`) so the
     // main-push quick profile remains provider- and database-free.
     pub(crate) const DEFAULTS: [Self; RUNTIME_PERF_DEFAULT_COUNT] =
@@ -884,7 +884,7 @@ impl RuntimePerfScenario {
     }
 }
 
-const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 52] {
+const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 51] {
     [
         RuntimePerfScenario::METADATA[0].scenario,
         RuntimePerfScenario::METADATA[1].scenario,
@@ -937,7 +937,6 @@ const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 52] {
         RuntimePerfScenario::METADATA[48].scenario,
         RuntimePerfScenario::METADATA[49].scenario,
         RuntimePerfScenario::METADATA[50].scenario,
-        RuntimePerfScenario::METADATA[51].scenario,
     ]
 }
 

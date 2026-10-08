@@ -1,5 +1,5 @@
 use super::*;
-use crate::ast::AstPath;
+use crate::ast::{AstPath, CoercingUnaryOp};
 
 fn assert_link_and_facet_binding(expr: Expr, expected: TypeExpr) {
     let surface = full_host_environment();
@@ -134,23 +134,6 @@ fn canonical_walk_visits_index_and_unary_operands_for_link_and_facets() {
             "the recovered diagnostic must reach the owning statement for {source}"
         );
     }
-}
-
-fn registration_call(expr: &Expr) -> (&Expr, &[Expr]) {
-    let mut expr = expr;
-    while let Expr::Await(inner) | Expr::ResultUnwrap(inner) = expr {
-        expr = inner;
-    }
-    let Expr::ReceiverCall {
-        receiver,
-        operation,
-        args,
-    } = expr
-    else {
-        panic!("expected a registration call, got {expr:?}")
-    };
-    assert_eq!(operation.as_str(), "register");
-    (receiver, args)
 }
 
 /// The statements of a block, or the one statement a non-block body is.
@@ -469,34 +452,6 @@ fn recovered_diagnostics_follow_the_workflow_projection_owner() {
         assert_eq!(owner.diagnostics[0].error.kind(), "unknown_name");
         assert!(owner.diagnostics[0].error.to_string().contains("missing"));
     }
-
-    // value = missing
-    //     ? timer.Schedule({ expr: "0 8 * * *" })
-    //     : timer.Schedule({ expr: "0 9 * * *" })
-    let program = builders::program(vec![builders::assign(
-        "value",
-        builders::if_else(
-            builders::var("missing"),
-            timer_schedule("0 8 * * *"),
-            timer_schedule("0 9 * * *"),
-        ),
-    )]);
-    let analysis = analyze_workflow_program(&program, &environment);
-    let owner = statement_facts(&analysis, &statements(&program)[0], &AstPath::main(vec![0]));
-    assert_eq!(owner.diagnostics.len(), 1);
-    assert_eq!(owner.diagnostics[0].error.kind(), "unknown_name");
-    assert_eq!(owner.expected_arguments.len(), 4);
-    assert_eq!(
-        owner
-            .expected_arguments
-            .iter()
-            .filter(|argument| {
-                argument.slot.to_string().ends_with("arg[0][\"expr\"]")
-                    && argument.ty == TypeExpr::Str
-            })
-            .count(),
-        2
-    );
 }
 
 #[test]

@@ -313,12 +313,7 @@ impl TraceScopeFactory for OtelTelemetry {
         scope: &TraceScopeId,
         cause: &TraceCause,
     ) -> Box<dyn TraceAdmissionCandidate> {
-        let definition = if scope.kind() == TraceScopeKind::TriggerOccurrence {
-            DomainSpan::TriggerAdmissionAttempt
-        } else {
-            DomainSpan::AdmissionAttempt
-        }
-        .definition();
+        let definition = DomainSpan::AdmissionAttempt.definition();
         let parent = match cause {
             TraceCause::Parent(context) => {
                 let Some(context) = span_context(context) else {
@@ -537,7 +532,6 @@ fn admitted(kind: TraceScopeKind) -> DomainSpan {
         TraceScopeKind::Tool => DomainSpan::ToolAdmitted,
         TraceScopeKind::ToolIntent => DomainSpan::IntentAdmitted,
         TraceScopeKind::Process => DomainSpan::ProcessAdmitted,
-        TraceScopeKind::TriggerOccurrence => DomainSpan::TriggerFire,
     }
 }
 

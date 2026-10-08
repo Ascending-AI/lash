@@ -122,7 +122,6 @@ impl crate::ProcessEngine for MissingCarryEngine {
     ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionRefusal> {
         Ok(crate::ProcessDefinitionResolution::new(
             crate::ProcessSignature::Unknown,
-            Vec::new(),
         ))
     }
 }

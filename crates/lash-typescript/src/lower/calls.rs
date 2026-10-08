@@ -527,7 +527,6 @@ impl Lowerer {
                 name: "__lashlang_pending_timer".into(),
                 args: vec![self.lower_expr(milliseconds)?],
             }),
-
             _ => Err(Diagnostic::defect(
                 DiagnosticCode::UnsupportedExpression,
                 format!(

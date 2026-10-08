@@ -64,7 +64,6 @@ pub async fn process_change_feed_never_misses_concurrent_terminal_writers(
 ) {
     const WRITER_COUNT: usize = 48;
     const PAGE_LIMIT: usize = 2;
-    const MUTATION_EVENT_TYPE: &str = "producer.concurrent_mutation";
 
     let expected_ids = (0..WRITER_COUNT)
         .map(|index| format!("proc-change-concurrent-{index:02}"))

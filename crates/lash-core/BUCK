@@ -382,15 +382,6 @@ filegroup(
     visibility = ["PUBLIC"],
 )
 
-filegroup(
-    name = "queued_admission_atomicity",
-    srcs = [
-        "tests/support/queued_admission_atomicity.rs",
-    ],
-    copy = False,
-    visibility = ["PUBLIC"],
-)
-
 load("//tools/buck2:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(

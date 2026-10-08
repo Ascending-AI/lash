@@ -7,9 +7,8 @@ use lashlang::{Expr, FunctionExpr, ResourceRefExpr, StructuralRole};
 use crate::LOWERED_BINDING_PREFIX;
 use crate::signatures::INSTANCE_STDLIB_SIGNATURES;
 
-use super::processes::authored_params;
 use super::templates::{template_parts, template_text};
-use super::{Printed, Printer, TypeScriptSourceError, javascript_binary_op, key, stdlib_call};
+use super::{Printed, Printer, TypeScriptSourceError, javascript_binary_op, stdlib_call};
 
 impl<'p> Printer<'p> {
     /// Re-sugar one lowered shape, or `Ok(None)` if this is not one.
@@ -311,23 +310,6 @@ fn all_settled_results_source<'a>(items: &'a Expr, function: &'a Expr) -> Option
                                 && field(&cause[0].1, "cause")))
     });
     (fields.len() == 2 && has_status && has_reason).then_some(source)
-}
-
-/// Whether a `Variable` named `name` occurs under `expression` — the IR
-/// trace of an authored identifier read.
-fn mentions_variable(expression: &Expr, name: &str) -> bool {
-    matches!(expression, Expr::Variable(found) if found.as_str() == name)
-        || expression
-            .children()
-            .any(|child| mentions_variable(child, name))
-}
-
-/// The expression a label annotation or transparent role wraps.
-fn unmarked(expression: &Expr) -> &Expr {
-    match expression {
-        Expr::LabelAnnotated { expr, .. } | Expr::Role { expr, .. } => unmarked(expr),
-        other => other,
-    }
 }
 
 /// A `__lashlang_closure` wrap prints as the function it carries — the

@@ -728,10 +728,7 @@ async fn acquire_durable(
             if event.sequence > high_water {
                 break 'pages;
             }
-            if summary
-                .fold_event(event.fact.event_type(), &event.fact.payload(), fleet_format)
-                .is_err()
-            {
+            if summary.fold_event(&event.fact, fleet_format).is_err() {
                 completeness = ProcessDurableCompleteness::Incomplete {
                     reason: ProcessDurableGapReason::SummaryUndecodable,
                 };
@@ -1108,3 +1105,7 @@ pub(crate) async fn read_events(
         cursor: Some(cursor),
     })
 }
+
+#[cfg(test)]
+#[path = "process_observation/tests.rs"]
+mod tests;

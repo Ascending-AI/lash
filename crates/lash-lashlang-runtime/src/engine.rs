@@ -66,3 +66,16 @@ impl lash_core::EngineSteps for LashlangEngineSteps {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "engine/advance_tests.rs"]
+mod advance_tests;
+
+impl LashlangProcessEngine {
+    /// Observes process language execution through the deployment's trace sinks.
+    #[must_use]
+    pub fn with_trace_runtime(mut self, runtime: lash_core::trace::TraceRuntime) -> Self {
+        self.trace_runtime = Some(runtime);
+        self
+    }
+}

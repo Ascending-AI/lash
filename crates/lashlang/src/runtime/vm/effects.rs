@@ -32,7 +32,6 @@ pub(super) enum VmEffect {
     ResourceOperationBatch(usize),
     AwaitHandle,
     Sleep(SleepKind),
-
     AwaitHandleUnwrap,
     Print,
     Finish,
@@ -319,7 +318,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 self.last_value = Some(Value::Null);
                 self.stack.push(Value::Null);
             }
-
             VmEffect::AwaitHandleUnwrap => {
                 let settled = self.take_settled_await_results(reissued)?;
                 let handle = self.pop_stack()?;

@@ -97,7 +97,6 @@ impl crate::ProcessEngine for ModuleDefinitionEngine {
         })?;
         Ok(crate::ProcessDefinitionResolution::new(
             crate::ProcessSignature::known(serde_json::json!({"returns": "null"})),
-            Vec::new(),
         ))
     }
 

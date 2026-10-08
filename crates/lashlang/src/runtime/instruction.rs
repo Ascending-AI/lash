@@ -343,7 +343,6 @@ pub(crate) enum Instruction {
     ResourceOperationBatch(usize),
     AwaitHandle,
     SleepFor,
-
     AwaitHandleUnwrap,
     Intrinsic(IntrinsicOp),
     MakeClosure {

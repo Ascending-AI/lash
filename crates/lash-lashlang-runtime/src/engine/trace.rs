@@ -249,7 +249,6 @@ impl ProcessTrace {
                         });
                 (site, crate::TraceNodeAwaited::Sleep { deadline_ms })
             }
-
             _ => return,
         };
         let payload = if resumed {

@@ -184,16 +184,6 @@ pub(crate) fn sql_counter_value(counter: &'static str, value: u64) -> Result<i64
     })
 }
 
-pub(crate) fn plugin_sql_counter_value(
-    counter: &'static str,
-    value: u64,
-) -> Result<i64, PluginError> {
-    i64::try_from(value).map_err(|_| PluginError::MonotonicCounterOverflow {
-        counter: counter.to_string(),
-        current: value,
-    })
-}
-
 /// Postgres SQLSTATEs that signal transient write contention rather than a hard
 /// failure: serialization failure, deadlock, and lock-acquisition timeout.
 /// These mean the transaction can retry its identical commit unchanged.

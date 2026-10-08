@@ -354,9 +354,6 @@ impl lash::StoreSet for DeleteStores {
     fn process_registry(&self) -> Arc<dyn lash::process::ProcessRegistry> {
         self.inner.process_registry()
     }
-    fn trigger_store(&self) -> Arc<dyn lash::triggers::TriggerStore> {
-        self.inner.trigger_store()
-    }
     fn process_env_store(&self) -> Arc<dyn lash::persistence::ProcessExecutionEnvStore> {
         self.inner.process_env_store()
     }

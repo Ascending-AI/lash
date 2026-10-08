@@ -1,5 +1,6 @@
-//! H2's process receiver: realization appends an actual keyed event
-//! to the persistent registry. The fixture routes expose those raw receipts.
+//! H2's host engine processes and case routes: a receiver or sleeper the
+//! fixture's `handle` body binds to, a source that awaits its own pinned
+//! key, and the turn, completion, drain and cut controls a case drives.
 use crate::{AppError, AppState};
 type AppResult<T> = Result<T, AppError>;
 use axum::extract::{Path, State};
@@ -15,9 +16,8 @@ pub(crate) struct ReceiverState {
     pub(crate) app: AppState,
     pub(crate) receiver: Arc<OnceLock<lash::ProcessId>>,
     /// The case-owned file the receiver's id is kept in, so a node that
-    /// resumes another node's work emits to the same process.
+    /// resumes another node's work binds the same process.
     pub(crate) retained_path: std::path::PathBuf,
-    pub(crate) event_type: String,
     pub(crate) ledger: Option<Arc<crate::e2e_commit_ledger::CommitLedger>>,
 }
 
@@ -73,10 +73,9 @@ async fn setup(
     Path(session): Path<lash::SessionId>,
 ) -> AppResult<Json<lash::process::ProcessStartReceipt>> {
     let core = &state.app.core;
-    let receipt =
-        receiver::register_receiver(core, &session, &state.event_type, core.effect_host())
-            .await
-            .map_err(error)?;
+    let receipt = receiver::register_receiver(core, &session, core.effect_host())
+        .await
+        .map_err(error)?;
     std::fs::write(
         &state.retained_path,
         serde_json::to_vec(&receipt.process_id).map_err(error)?,
@@ -160,20 +159,6 @@ async fn release_cut(
     Ok(Json(serde_json::json!({"released": label})))
 }
 
-async fn receipts(
-    State(state): State<ReceiverState>,
-    Path(id): Path<String>,
-) -> AppResult<Json<serde_json::Value>> {
-    let process_id = lash::ProcessId::parse(&id).map_err(error)?;
-    if state.receiver.get() != Some(&process_id) {
-        return Err(error("receiver receipt requested for another process"));
-    }
-    let receipts = receiver::receiver_events(&state.app.core, &process_id)
-        .await
-        .map_err(error)?;
-    Ok(Json(serde_json::to_value(receipts).map_err(error)?))
-}
-
 #[derive(Deserialize)]
 struct CompletionRequest {
     key: String,
@@ -223,9 +208,5 @@ pub(crate) fn routes(state: ReceiverState) -> Router {
             axum::routing::post(release_cut),
         )
         .route("/api/e2e/receiver/{session_id}", axum::routing::post(setup))
-        .route(
-            "/api/e2e/receiver/{process_id}/receipts",
-            axum::routing::get(receipts),
-        )
         .with_state(state)
 }

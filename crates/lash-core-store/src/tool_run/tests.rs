@@ -473,11 +473,7 @@ fn source_holder() -> MaterialHolder {
     MaterialHolder::Source {
         source: AwaitEventKey {
             scope: ExecutionScope::turn("s", "t"),
-            wait: AwaitEventWaitIdentity::process_signal(
-                crate::ProcessId::fixture("p"),
-                "signal",
-                1,
-            ),
+            wait: AwaitEventWaitIdentity::tool_call(ToolCallId::fixture("call")),
             key_id: "key".into(),
             signature: "signature".into(),
         },

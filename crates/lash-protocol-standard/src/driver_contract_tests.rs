@@ -287,7 +287,6 @@ fn the_preamble_offers_batch_only_when_enabled() {
         .build_preamble(ProtocolBuildInput {
             tool_catalog: Arc::new(catalog.clone()),
             plugin_extensions: Default::default(),
-            trigger_events: Default::default(),
             writer_formats: lash_core::build_newest_writer_formats(),
         })
     };

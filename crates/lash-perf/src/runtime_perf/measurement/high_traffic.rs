@@ -370,7 +370,6 @@ async fn run_high_traffic_step(
 
     for (session_index, session) in sessions.into_iter().enumerate() {
         let config = config.clone();
-        let core = runtime.core();
         let queue_depth = Arc::clone(&queue_depth);
         let queue_depth_samples = Arc::clone(&queue_depth_samples);
         workers.spawn(async move {
@@ -392,7 +391,6 @@ async fn run_high_traffic_step(
                 let depth = queue_depth.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
                 queue_depth_samples.lock_recover().push(depth as u64);
                 let operation = run_high_traffic_operation(
-                    &core,
                     &session,
                     ordinal,
                     config.operation_kind(ordinal),
@@ -452,7 +450,6 @@ async fn run_high_traffic_step(
 }
 
 async fn run_high_traffic_operation(
-    _core: &lash::LashCore,
     session: &lash::LashSession,
     ordinal: usize,
     kind: HighTrafficOperationKind,
@@ -483,7 +480,6 @@ async fn run_high_traffic_operation(
     } else {
         run_high_traffic_direct_turn(session, ordinal, kind).await?
     };
-
     let latency_ms = elapsed_ms(operation_started);
     let pre_phase_dispatch_ms = probe.first_phase_delay_ms(operation_started);
     let mut phase_profile = probe.take_completed();
@@ -670,7 +666,7 @@ mod high_traffic_tests {
         let config = HighTrafficConfig::parse(4, 0, "plain=1,tool=1,queued=1,child=1", "4,8", 1.25)
             .expect("valid mix");
         assert_eq!(
-            (0..6)
+            (0..4)
                 .map(|ordinal| config.operation_kind(ordinal))
                 .collect::<Vec<_>>(),
             HighTrafficOperationKind::ALL

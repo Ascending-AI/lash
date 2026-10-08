@@ -477,7 +477,7 @@ async fn execute_code_in_worker_scope(
         // ambient Tool Catalog is built, before its collision validation can
         // preempt recorded authority. Unrelated catalog errors remain ordinary host
         // failures.
-        let mut effective_surface = lashlang_surface;
+        let effective_surface = lashlang_surface;
 
         // The cell's ambient binding set is journaled before its first effect
         // and a redrive links against the recorded set, not the live registry

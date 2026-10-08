@@ -24,23 +24,21 @@ tool the catalogue declares
 | --- | --- |
 | Define a process | `const approval = async (request) => { ... };` (uncalled, top level) |
 | Start one | `await processes.start({ definition: approval, args: { request } })` |
-| Signal one | `await processes.signal({ handle, name: "approved", payload })` |
 | Wait for its terminal | `await handle`, or `await processes.await({ handle })` |
 | List running ones | `await processes.list({})` |
-| Wait inside the process | `await waitSignal("approved")` |
+| Wait inside the process for a decision | call a deferring host tool, here the Workbench's approval-gated `workbench_ops_apply_change` |
 | Sleep durably | `await sleep(25)` |
-| Report progress | `await processes.emit({ value: { stage: "approved" } })` |
 
-`defineProcess`, a bare `start`, `wake`, `registerTrigger` and the `signals:`
-configuration block are **deleted**. There is no signal declaration: the set is
-inferred from the `waitSignal` calls the body reaches, and the payload type is
-fixed at the await site.
+`defineProcess`, a bare `start` and `wake` are **deleted**, and lash has no
+process signals, emitted progress or triggers: a decision reaches a process as
+the result of a deferring host tool call, which the host resolves through its
+completion key ([ADR 0136](../../docs/adr/0136-the-host-owns-events-routing-and-scheduling.md)).
 
 `processes.start` answers the one handle kind — `{"__handle__": "lash", "id":
 "p.<incarnation>.<process id>", "process_id": "<process id>"}`. The `id` is
 opaque to the cell: a row that asks the model to parse, build or spell it is
-judging the wrong contract. Pass the handle itself to `processes.signal`,
-`processes.await` or `processes.cancel`.
+judging the wrong contract. Pass the handle itself to `processes.await` or
+`processes.cancel`.
 
 ## Golden rules
 
@@ -109,8 +107,8 @@ ordered items. Save
 ## Phase 3 — Durable process start and suspension
 
 Ask the model — in outcome terms, never by dictating source — to start a
-durable process that reports progress, waits for a named decision, sleeps
-durably, and returns the decision it was given.
+durable process that asks the operator for approval through the Workbench's
+approval-gated tool, sleeps durably, and returns the decision it was given.
 
 Require, from the executed cell and the trace:
 
@@ -118,8 +116,9 @@ Require, from the executed cell and the trace:
   `processes.start`, with the definition passed as a value;
 * the answered handle is the one handle kind, and the cell holds it rather than
   spelling an id;
-* `waitSignal` is the wait and there is no `signals:` block anywhere in the
-  cell;
+* the wait is the approval tool's call, parked in the process: `/api/work` shows
+  the process `waiting` on that call (`call_id`, `tool_id`) and the Workbench
+  approvals panel lists it;
 * the cell that created the process artifact is TypeScript: read
   `/api/state.transcript[].language`, which is the **only** observable language evidence.
   There is no dialect or language field on the process artifact itself — the `/api/work`
@@ -128,26 +127,27 @@ Require, from the executed cell and the trace:
   artifact is dialect-neutral IR, while the creating cell proves the source dialect;
 * a running handle and a visible waiting state.
 
-Any reach for `defineProcess`, a bare `start(...)`, `wake(...)` or
-`registerTrigger(...)` is a fluency hit: record the verbatim text in
+Any reach for `defineProcess`, a bare `start(...)` or `wake(...)` is a
+fluency hit: record the verbatim text in
 `fluency-hits.json` and fail the row. Save
 `03-suspended-{dom,state,store,trace}.json` and `03-suspended.png`.
 
-## Phase 4 — Worker restart, signal and resume
+## Phase 4 — Worker restart, approval and resume
 
 Restart the Workbench worker while the process is waiting, using the same run
 and data directories. Gate readiness, reopen the same session, and require the
 restored execution engine id to remain `typescript`.
 
-In a new full judged codemode turn, ask the model to find the still-running
-process, deliver the decision to it, observe the resumed run, and finish with
-the returned payload. Require that the delivery went through
-`processes.signal` carrying the handle (recovered through `processes.list`, not
-rebuilt from a spelled id), one durable run (not a replacement), terminal
-success, the pre-restart process id, and a TypeScript cell in the resumed turn.
+Approve the parked call in the Workbench approvals panel: the host resolves its
+completion key, which resumes the process. In a new full judged codemode turn,
+ask the model to find the process, await it, and finish with the returned
+payload. Require that the approval was resolved once through the host's
+completion, the handle was recovered through `processes.list` (not rebuilt from
+a spelled id), one durable run (not a replacement), terminal success, the
+pre-restart process id, and a TypeScript cell in the resumed turn.
 "One durable run, not a replacement" is read off the **process count and id in
 `/api/work`** — one process row, same id across the restart — not off the number of cell
-executions: a wake legitimately redrives the turn and runs another cell without creating
+executions: a resumption legitimately redrives the turn and runs another cell without creating
 another process.
 Save `04-resumed-{dom,state,store,trace,judge}.json` and `04-resumed.png`.
 
@@ -163,13 +163,12 @@ Stop everything started by this row. Write `fluency-hits.json` even when empty.
 | Process is a lifted arrow started through `processes.start` | | `03-suspended-*` |
 | Creating cell and restored execution state identify TypeScript | | `03-suspended-*` |
 | Worker restart preserves process id and execution state | | `04-resumed-*` |
-| Resume is delivered through `processes.signal` on the held handle | | `04-resumed-*` |
+| Resume is delivered by resolving the parked approval call | | `04-resumed-*` |
 | Full resumed judged turn finishes correctly | | `04-resumed-judge.json` |
 | No deleted form reached for; hit list recorded | | `fluency-hits.json` |
 
 The exact first-settled rejection ordering remains covered by the TypeScript
 conformance tests in `crates/lash-typescript/tests/agent_surface.rs` —
-`durable_processes_resume_across_await_signal_sleep_and_pending_finally`,
 `uncaught_throw_fails_a_durable_process` and
 `durable_process_resumes_after_shared_promise_batch` — and the worked cells this
 row's contract table quotes are linked in

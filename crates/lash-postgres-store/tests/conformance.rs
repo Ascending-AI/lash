@@ -49,8 +49,6 @@ fn attachment_bytes(root: &tempfile::TempDir) -> lash_conformance::AttachmentByt
     })
 }
 
-#[path = "conformance/admission_atomicity.rs"]
-mod admission_atomicity;
 #[path = "conformance/artifact_races.rs"]
 mod artifact_races;
 #[path = "conformance/attachment_catalog.rs"]

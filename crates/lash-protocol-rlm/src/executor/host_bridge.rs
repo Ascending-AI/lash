@@ -638,12 +638,6 @@ impl HostBridge<'_> {
         Ok(AbilityOutcome::Value(FlowValue::Null))
     }
 
-    /// An ability a cell may not use: its broker admitted it under its own
-    /// ordinal, and it is refused before it reaches the host.
-    fn refused_in_cell(&self, message: &'static str) -> Result<AbilityOutcome, ExecutionHostError> {
-        Err(ExecutionHostError::new(message))
-    }
-
     fn perform_selected_ability<'a>(&'a self, op: AbilityOp) -> HostAbilityFuture<'a> {
         match op {
             AbilityOp::ResourceOperation(operation) => Box::pin(async move {
@@ -664,7 +658,6 @@ impl HostBridge<'_> {
                 Ok(AbilityOutcome::Unit)
             }),
             AbilityOp::Sleep(sleep) => Box::pin(async move { self.sleep(sleep).await }),
-
             AbilityOp::Finish(value) | AbilityOp::Fail(value) => {
                 Box::pin(async move { Ok(AbilityOutcome::Value(value)) })
             }

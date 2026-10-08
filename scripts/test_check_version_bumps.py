@@ -335,6 +335,27 @@ class FreezeVerdicts(Fixture):
         self.assertIn("1 of 2 surfaces evaluated", result.stderr)
         self.assertIn("does not find missing_decoder", result.stderr)
 
+    def test_a_durable_record_deleted_with_its_constant_is_a_verdict_not_a_traceback(self) -> None:
+        source = "crates/demo/src/durable.rs"
+        self.write(source, """
+            /// version_surface = "migrate"
+            pub const GONE_FORMAT_VERSION: u32 = 1;
+
+            #[derive(Serialize, Deserialize)]
+            pub struct Gone {
+                pub id: String,
+            }
+
+            impl DurableRecord for Gone {
+                const SURFACE: SurfaceFormat = surface_format!(GONE_FORMAT_VERSION);
+            }
+        """)
+        base = self.commit("declare a durable record")
+        self.write(source, "pub struct Kept;\n")
+        result = self.run_command(base, self.commit("delete the record"), strict=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("2 of 2 surfaces evaluated", result.stdout)
+
 
 class HistoricalHookDecision(unittest.TestCase):
     def test_0059_retains_the_historical_rule_and_links_0128(self):

@@ -73,25 +73,21 @@ impl Workload for EffectsCase {
             Err(error) => return vec![error],
         };
         for (tool, call, completed) in outcomes {
-            match tool {
-                Tool::Spawn => {
-                    let registered = match world.backend() {
-                        Ok(backend) => backend
-                            .process_registry()
-                            .get_process_by_start_key(&spawn_key(&call))
-                            .await
-                            .map(|record| record.is_some())
-                            .unwrap_or(false),
-                        Err(_) => false,
-                    };
-                    if registered != completed {
-                        violations.push(format!(
-                            "store-local start: call {call} completed {completed}, its process registered {registered}"
-                        ));
-                    }
+            if tool == Tool::Spawn {
+                let registered = match world.backend() {
+                    Ok(backend) => backend
+                        .process_registry()
+                        .get_process_by_start_key(&spawn_key(&call))
+                        .await
+                        .map(|record| record.is_some())
+                        .unwrap_or(false),
+                    Err(_) => false,
+                };
+                if registered != completed {
+                    violations.push(format!(
+                        "store-local start: call {call} completed {completed}, its process registered {registered}"
+                    ));
                 }
-
-                _ => {}
             }
         }
         violations

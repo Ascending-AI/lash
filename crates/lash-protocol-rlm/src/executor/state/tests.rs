@@ -80,7 +80,7 @@ async fn large_scalar_edit_commits_changed_state_not_retained_session() {
 
     // Pin the heap-backed state and single changed leaf for the current wire shape.
     assert_eq!(retained_bytes, 5_122_656);
-    assert_eq!(changed_bytes, 117_925);
+    assert_eq!(changed_bytes, 117_882);
     assert_eq!(initial_leaves, 50);
     assert_eq!(changed_bodies, 1);
 }
@@ -225,18 +225,6 @@ async fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
             if expected == "typescript" && found == "lashlang"
     ));
 }
-
-/// Fixed-byte authority for the 1.0 root encoding (ADR 0056).
-///
-/// Encoding both sides of a comparison with the currently linked encoder
-/// cannot see the drift that matters: a dependency bump or serializer change
-/// moves both sides together, and the root validator deliberately accepts
-/// any declared-field order, so the same logical state could silently
-/// acquire different bytes — and therefore a different component identity —
-/// without detection. These bytes pin the current shape. Under the pre-1.0
-/// version freeze, regenerate this witness from the encoder after an intended
-/// shape change; the version stays fixed.
-// The golden pins N's encoding; the synthetic N+1 moves the root's stamps.
 
 /// A real version-22 capture, written by the build before the durable-heap
 /// cutover (FIG-3605) for the cell
@@ -572,6 +560,17 @@ async fn excludes_custom_projected_globals_without_rendering_or_materializing() 
     assert_eq!(projected.materialize_count.load(Ordering::SeqCst), 0);
 }
 
+/// Fixed-byte authority for the 1.0 root encoding (ADR 0056).
+///
+/// Encoding both sides of a comparison with the currently linked encoder
+/// cannot see the drift that matters: a dependency bump or serializer change
+/// moves both sides together, and the root validator deliberately accepts
+/// any declared-field order, so the same logical state could silently
+/// acquire different bytes — and therefore a different component identity —
+/// without detection. These bytes pin the current shape. Under the pre-1.0
+/// version freeze, regenerate this witness from the encoder after an intended
+/// shape change; the version stays fixed.
+// The golden pins N's encoding; the synthetic N+1 moves the root's stamps.
 #[cfg(not(feature = "synthetic-next"))]
 #[test]
 fn the_1_0_root_encodes_to_golden_bytes() {

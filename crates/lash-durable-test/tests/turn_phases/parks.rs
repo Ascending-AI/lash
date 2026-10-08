@@ -163,8 +163,8 @@ impl Activation for PoisonFirst {
                 session: session(),
                 run: run(),
                 admission: RunAdmissionRecord::Turn {
-                    took: AdmittedTurnRows::Batch {
-                        id: lash_core::BatchId::from("poisoned-batch"),
+                    took: AdmittedTurnRows::Inputs {
+                        ids: AdmittedInputIds::one(lash_sansio::InputId::from("poisoned-batch")),
                     },
                     trace: None,
                 },

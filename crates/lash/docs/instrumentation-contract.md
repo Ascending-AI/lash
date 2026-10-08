@@ -5,13 +5,11 @@ Scope `lash`, version `1.0`. GenAI snapshot `b31e9e8ea26ac1c086d3313d474e31d7c3f
 | Span name or prefix | Kind | Ownership |
 |---|---|---|
 | `lash.admission.attempt` | Internal | Candidate |
-| `lash.admission.attempt` | Producer | Candidate |
 | `lash.run.admitted` | Internal | Candidate |
 | `lash.turn.admitted` | Internal | Candidate |
 | `lash.tool.admitted` | Internal | Candidate |
 | `lash.tool_intent.admitted` | Internal | Candidate |
 | `lash.process.admitted` | Internal | Candidate |
-| `lash.trigger.fire` | Producer | Candidate |
 | `lash.send` | Producer | Live |
 | `lash.run` | Internal | Transition |
 | `invoke_agent` | Internal | Transition |

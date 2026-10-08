@@ -564,13 +564,6 @@ fn drain_area_witnesses() {
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(value, lash::runtime::RuntimeErrorCode::SessionToolRegistry)
     });
-    // W0188: lash::runtime::RuntimeErrorCode::QueuedWorkRowExceedsContextWindow [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::QueuedWorkRowExceedsContextWindow
-        )
-    });
     // W0190: lash::runtime::RuntimeErrorCode::ToolDeferralNotDeclared [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(
@@ -1298,8 +1291,6 @@ fn drain_area_witnesses() {
     let _ = lash::runtime::ExecutionScope::from_journal_key;
     // W0506: lash::durability::CanonicalRuntimeEffectEnvelope::json [function]
     let _ = lash::durability::CanonicalRuntimeEffectEnvelope::json;
-    // W0509: lash::IngressAdmissionRefusal::as_str [function]
-    let _ = lash::IngressAdmissionRefusal::as_str;
     // W0510: lash::runtime::AssembledTurn::turn_cancel_input_outcome [field]
     field_witness(|value: &lash::runtime::AssembledTurn| {
         let _ = &value.turn_cancel_input_outcome;

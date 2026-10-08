@@ -502,7 +502,6 @@ impl ProcessEngine for SleepEngine {
     > {
         Ok(lash_core_execution::ProcessDefinitionResolution::new(
             lash_core_execution::ProcessSignature::Unknown,
-            Vec::new(),
         ))
     }
 }

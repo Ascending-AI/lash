@@ -1,22 +1,19 @@
-//! H2's mutation receiver uses the real process registry and returns its
-//! original event records. The caller lends an admitted handler scope. The
-//! receiver is a host engine process: it holds the events tools append to it
-//! and runs until it is cancelled.
-use std::sync::Arc;
+//! H2's host engine processes: a receiver that runs until it is cancelled, a
+//! source that awaits its own pinned key, and a sleeper. The caller lends an
+//! admitted handler scope.
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 
-use anyhow::{Result, ensure};
+use anyhow::Result;
 use lash::plugins::{
     PluginDeclaration, PluginError, PluginFactory, PluginRegistrar, PluginSessionContext,
     ProcessEngine, ProcessEngineContributionContext, ProcessEngineRegistration, ProcessInfraError,
     SessionPlugin,
 };
 use lash::process::{
-    ProcessAwaitOutput, ProcessEvent, ProcessEventPageEvents, ProcessEventPageMore,
-    ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventType, ProcessInput,
-    ProcessOriginator, ProcessStartReceipt, ProcessStartRequest,
+    ProcessAwaitOutput, ProcessInput, ProcessOriginator, ProcessStartReceipt, ProcessStartRequest,
 };
-
-use serde::{Deserialize, Serialize};
+use lash::sync::MutexExt as _;
 
 /// The kind of [`ReceiverEngine`].
 pub const RECEIVER_ENGINE_KIND: &str = "h2-receiver";
@@ -30,8 +27,7 @@ pub fn receiver_input(session: &lash::SessionId) -> ProcessInput {
     }
 }
 
-/// The receiver's engine: its process runs until it is cancelled, holding
-/// the events tools append to it.
+/// The receiver's engine: its process runs until it is cancelled.
 pub struct ReceiverEngine;
 
 #[lash::async_trait]
@@ -106,7 +102,6 @@ impl ProcessEngine for ReceiverEngine {
     > {
         Ok(lash::process::ProcessDefinitionResolution::new(
             lash::process::ProcessSignature::Unknown,
-            Vec::new(),
         ))
     }
 
@@ -138,25 +133,17 @@ impl ProcessEngine for ReceiverEngine {
 /// The kind of [`SourceEngine`].
 pub const SOURCE_ENGINE_KIND: &str = "h2-source";
 
-/// The event a source process appends once its key is pinned: the key the
-/// host resolves it by.
-pub const SOURCE_PINNED: &str = "h2_source_pinned";
-
-fn source_pinned_type() -> std::result::Result<ProcessEventType, ProcessInfraError> {
-    Ok(ProcessEventType {
-        name: SOURCE_PINNED.to_owned(),
-        payload_schema: lash::schema::JsonSchema::admit(serde_json::json!({
-            "type": "object", "required": ["key"],
-            "properties": {"key": {"type": "string"}}, "additionalProperties": false,
-        }))
-        .map_err(|error| ProcessInfraError::new(PluginError::Session(error.to_string())))?,
-        semantics: Default::default(),
-    })
+/// The keys source processes pinned on this node, by their start payload:
+/// the source engine is host code, so it hands its key to its host directly
+/// rather than through the process's lifecycle log.
+fn pinned_sources() -> &'static Mutex<HashMap<String, String>> {
+    static PINNED: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    PINNED.get_or_init(Mutex::default)
 }
 
-/// A source process: it pins one host-resolvable key, appends the key as
-/// [`SOURCE_PINNED`], awaits its resolution and ends with the resolved
-/// value. Each transition follows from its event alone.
+/// A source process: it pins one host-resolvable key, hands the key to its
+/// host, awaits its resolution and ends with the resolved value. Its state
+/// is its start payload, which names it to the host.
 pub struct SourceEngine;
 
 #[lash::async_trait]
@@ -212,18 +199,26 @@ impl ProcessEngine for SourceEngine {
         use lash::plugins::{EngineAction, EngineEvent, HostWaitKind, KeyName};
         let name = || KeyName("source".to_owned());
         let output = |output| EngineAction::Terminal(ProcessAwaitOutput::from_tool_output(output));
+        let mut state = state;
         let action = match event {
-            EngineEvent::Started { .. } => EngineAction::PinKey {
-                name: name(),
-                kind: HostWaitKind::Custom,
-                // The receiver waits for its source as long as it lives.
-                bound: lash::tools::ParkBound::UntilScopeEnd,
-            },
-            EngineEvent::KeyPinned { key, .. } => EngineAction::Emit {
-                event_type: source_pinned_type()?,
-                payload: serde_json::json!({"key": key.as_str()}),
-            },
-            EngineEvent::Emitted => EngineAction::AwaitExternal { name: name() },
+            EngineEvent::Started { payload } => {
+                state.bytes = serde_json::to_vec(&payload).map_err(|error| {
+                    ProcessInfraError::new(PluginError::Session(error.to_string()))
+                })?;
+                EngineAction::PinKey {
+                    name: name(),
+                    kind: HostWaitKind::Custom,
+                    // The receiver waits for its source as long as it lives.
+                    bound: lash::tools::ParkBound::UntilScopeEnd,
+                }
+            }
+            EngineEvent::KeyPinned { key, .. } => {
+                pinned_sources().lock_recover().insert(
+                    String::from_utf8_lossy(&state.bytes).into_owned(),
+                    key.as_str().to_owned(),
+                );
+                EngineAction::AwaitExternal { name: name() }
+            }
             EngineEvent::ExternalResolved { resolution, .. } => match resolution {
                 lash::Resolution::Ok(value) => output(lash::tools::ToolCallOutput::success(value)),
                 other => output(lash::tools::ToolCallOutput::cancelled(
@@ -249,7 +244,6 @@ impl ProcessEngine for SourceEngine {
     > {
         Ok(lash::process::ProcessDefinitionResolution::new(
             lash::process::ProcessSignature::Unknown,
-            Vec::new(),
         ))
     }
 
@@ -363,7 +357,6 @@ impl ProcessEngine for SleeperEngine {
     > {
         Ok(lash::process::ProcessDefinitionResolution::new(
             lash::process::ProcessSignature::Unknown,
-            Vec::new(),
         ))
     }
 
@@ -441,7 +434,6 @@ impl SessionPlugin for ReceiverEnginePlugin {
 pub async fn register_receiver(
     core: &lash::LashCore,
     session: &lash::SessionId,
-    event_type: &str,
     scoped: lash::runtime::ActorContext,
 ) -> Result<ProcessStartReceipt> {
     // The receiver runs under an execution environment the host publishes; a
@@ -466,15 +458,7 @@ pub async fn register_receiver(
     )
     .with_env_ref(env_ref)
     .with_host_start_key(format!("h2-receiver:{session}"))
-    .with_observers([session.clone()])
-    .with_extra_event_types([ProcessEventType {
-        name: event_type.to_owned(),
-        payload_schema: lash::schema::JsonSchema::admit(
-            serde_json::json!({"type":"object","required":["call_id","value"],
-            "properties":{"call_id":{"type":"string"},"value":{}},"additionalProperties":false}),
-        )?,
-        semantics: Default::default(),
-    }]);
+    .with_observers([session.clone()]);
     Ok(core.processes().start(start, scoped).await?)
 }
 
@@ -501,15 +485,14 @@ pub async fn start_source(
     let start = ProcessStartRequest::new(
         ProcessInput::Engine {
             kind: SOURCE_ENGINE_KIND.to_owned(),
-            payload: serde_json::json!({"fixture": "h2-source", "session": session}),
+            payload: source_payload(session, key),
         },
         ProcessOriginator::host_scoped(format!("h2-source:{session}")),
         lash::process::Lifetime::Detached,
     )
     .with_env_ref(env_ref)
     .with_host_start_key(format!("h2-source:{session}:{key}"))
-    .with_observers([session.clone()])
-    .with_extra_event_types([source_pinned_type().map_err(|error| anyhow::anyhow!("{error}"))?]);
+    .with_observers([session.clone()]);
     Ok(core.processes().start(start, scoped).await?)
 }
 
@@ -552,53 +535,28 @@ pub async fn start_sleeper(
     Ok(core.processes().start(start, scoped).await?)
 }
 
-/// The key source process `process` pinned, once it appended it.
+/// The start payload of `session`'s source `key`: what names the source to
+/// its host.
+fn source_payload(session: &lash::SessionId, key: &str) -> serde_json::Value {
+    serde_json::json!({"fixture": "h2-source", "session": session, "source": key})
+}
+
+/// The key source process `process` pinned on this node, once it pinned it.
 pub async fn source_key(
     core: &lash::LashCore,
     process: &lash::ProcessId,
 ) -> Result<Option<String>> {
-    let events = receiver_events(core, process).await?;
-    Ok(events
-        .events
-        .iter()
-        .find(|event| event.event_type == SOURCE_PINNED)
-        .and_then(|event| event.payload["key"].as_str().map(ToOwned::to_owned)))
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ReceiverEvents {
-    pub kind: String,
-    pub process_id: lash::ProcessId,
-    pub events: Vec<ProcessEvent>,
-}
-
-pub async fn receiver_events(
-    core: &lash::LashCore,
-    process_id: &lash::ProcessId,
-) -> Result<ReceiverEvents> {
-    let read = core
+    let record = core
         .process_registry()
-        .event_page_after(
-            process_id,
-            0,
-            std::num::NonZeroUsize::new(1024)
-                .ok_or_else(|| anyhow::anyhow!("receiver page must be nonzero"))?,
-            ProcessEventQueryMode::Full,
-        )
-        .await?;
-    let ProcessEventReadOutcome::Retained(page) = read else {
-        anyhow::bail!("receiver events no longer retained");
+        .get_process(process)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("no source process {process}"))?;
+    let ProcessInput::Engine { payload, .. } = record.input.as_ref() else {
+        anyhow::bail!("{process} is not a source process");
     };
-    ensure!(
-        page.more == ProcessEventPageMore::Complete,
-        "receiver evidence page truncated"
-    );
-    let ProcessEventPageEvents::Full(events) = page.events else {
-        anyhow::bail!("receiver evidence is not full");
-    };
-    Ok(ReceiverEvents {
-        kind: "h2_receiver_events".to_owned(),
-        process_id: process_id.clone(),
-        events,
-    })
+    let state = serde_json::to_vec(payload)?;
+    Ok(pinned_sources()
+        .lock_recover()
+        .get(String::from_utf8_lossy(&state).as_ref())
+        .cloned())
 }

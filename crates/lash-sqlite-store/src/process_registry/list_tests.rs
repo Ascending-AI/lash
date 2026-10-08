@@ -21,8 +21,6 @@ fn recently_retired_query_uses_bounded_live_and_retired_indexes() {
                 Option::<String>::None,
                 Option::<String>::None,
                 Option::<String>::None,
-                Option::<String>::None,
-                Option::<String>::None,
                 Option::<i64>::None,
                 Option::<i64>::None,
                 100_i64,
