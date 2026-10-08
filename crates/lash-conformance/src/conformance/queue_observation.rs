@@ -195,6 +195,9 @@ impl crate::LiveReplayStore for FailingQueuePublication {
     ) -> crate::SessionCursor {
         self.inner.current_cursor(session, revision)
     }
+    fn earliest_cursor(&self, session: &SessionId) -> crate::SessionCursor {
+        self.inner.earliest_cursor(session)
+    }
     async fn trim_session(&self, session: &SessionId) -> Result<(), crate::LiveReplayStoreError> {
         self.inner.trim_session(session).await
     }

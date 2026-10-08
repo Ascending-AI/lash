@@ -572,7 +572,12 @@ impl TurnDrive for BenchDrive {
         Ok(())
     }
 
-    async fn restart_live_stream(&mut self, _cx: &ActorContext) -> Result<(), TurnError> {
+    async fn restart_live_stream(
+        &mut self,
+        _cx: &ActorContext,
+        _id: EffectId,
+        _attempt: u32,
+    ) -> Result<(), TurnError> {
         Ok(())
     }
 

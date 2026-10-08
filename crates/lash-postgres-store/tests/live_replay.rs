@@ -402,3 +402,78 @@ async fn invalidation_closes_subscriptions_on_every_replica() {
         "fresh continuity follows"
     );
 }
+
+/// A takeover across replicas (FIG-5366): replica B streams a session and
+/// dies with a batch in flight; replica A, which took the turn over, reads
+/// back everything B published from its earliest cursor, so a re-sent call
+/// can retract B's abandoned attempt, and its own publication continues the
+/// sequence: a subscriber on A follows B's events and A's in one order,
+/// without a gap.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_takeover_replica_reads_back_a_dead_replicas_stream_and_continues_it() {
+    let Replicas {
+        database: _database,
+        a,
+        b,
+        ..
+    } = replicas().await;
+    let session = SessionId::from("taken-over");
+    let start = a.current_cursor(&session, SessionRevision::new(0));
+    let mut on_a = subscribed(a.subscribe_after_cursor(&start).await);
+    publish(&b, &session, "attempt-1#0", "abandoned one").await;
+    publish(&b, &session, "attempt-1#1", "abandoned two").await;
+    let in_flight = {
+        let b = Arc::clone(&b);
+        let session = session.clone();
+        tokio::spawn(async move {
+            b.publish(
+                &session,
+                SessionRevision::new(1),
+                vec![LiveReplayEventDraft::new(
+                    None::<lash_core::TurnId>,
+                    text("attempt-1#2", "abandoned three"),
+                )],
+            )
+            .await
+        })
+    };
+    in_flight.abort();
+    drop(b);
+
+    let window = match a
+        .replay_after_cursor(&a.earliest_cursor(&session))
+        .await
+        .expect("replay on A")
+    {
+        LiveReplayOutcome::Replayed(events) => events,
+        LiveReplayOutcome::Gap(reason) => panic!("A's earliest cursor gapped: {reason:?}"),
+    };
+    let labels: Vec<String> = window.iter().map(|event| label(event)).collect();
+    assert_eq!(
+        labels[..2],
+        ["abandoned one", "abandoned two"],
+        "A reads back what B published"
+    );
+    let resumed = publish(&a, &session, "attempt-2#0", "resumed").await;
+    assert_eq!(
+        live_position(&resumed.cursor),
+        live_position(&window.last().expect("B published").cursor) + 1,
+        "A's publication continues B's sequence"
+    );
+    let mut followed = Vec::new();
+    while followed.len() < window.len() + 1 {
+        followed.push(next(&mut on_a).await);
+    }
+    assert_eq!(
+        followed
+            .iter()
+            .map(|event| event.cursor.clone())
+            .collect::<Vec<_>>(),
+        window
+            .iter()
+            .chain(std::iter::once(&resumed))
+            .map(|event| event.cursor.clone())
+            .collect::<Vec<_>>(),
+        "A's subscriber follows B's events and A's in one order"
+    );
+}

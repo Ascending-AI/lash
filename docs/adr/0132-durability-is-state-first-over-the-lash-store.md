@@ -123,7 +123,10 @@ effect the checkpoint names.
   `model_total` deadline recorded before the first byte is sent. A crash
   re-sends the pinned request as the next attempt while the deadline allows.
 - Streaming is not durable. Deltas go to the live replay store; a re-sent call
-  opens a new live incarnation and clients discard the abandoned stream. The
+  retracts what its earlier attempts streamed with one `ModelAttemptReset`
+  read back from the live replay, then streams under ids of its own
+  ([ADR 0040](0040-retried-model-attempts-retract-live-text-by-correlation.md)),
+  so clients discard the abandoned stream and keep their cursors. The
   completed response commits with the next checkpoint and the round's
   admission in one transaction.
 - The turn commit is one transaction: the session head compare-and-set,

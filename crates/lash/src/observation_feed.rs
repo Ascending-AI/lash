@@ -202,7 +202,9 @@ impl FeedSource {
     ) -> Result<(SessionObservation, LiveReplayGap)> {
         let snapshot = self.snapshot().await?;
         let latest_revision = self.requested_revision(&snapshot.cursor)?;
-        let latest_cursor = self.fresh_cursor(requested, snapshot.cursor, latest_revision);
+        let latest_cursor = self
+            .fresh_cursor(requested, snapshot.cursor, latest_revision)
+            .await;
         Ok((
             SessionObservation {
                 read_view: snapshot.read_view,
@@ -218,10 +220,15 @@ impl FeedSource {
         ))
     }
 
-    /// The cursor a gap continues from: the snapshot's, or the live
-    /// replay's current one at the snapshot's revision when the snapshot's
-    /// is the position that gapped, whichever sits earlier.
-    fn fresh_cursor(
+    /// The cursor a gap continues from: the earlier of the snapshot's and
+    /// the live replay's current one at the snapshot's revision, leaving out
+    /// the position that gapped and any the live replay cannot continue.
+    /// A snapshot's cursor can trail a discontinuity it never saw (a
+    /// resident runtime's, behind another process's activity and an
+    /// invalidation after it); continuing from it would gap again. The
+    /// current cursor is the fallback: it starts the live replay's fresh
+    /// continuity.
+    async fn fresh_cursor(
         &self,
         requested: &SessionCursor,
         snapshot: SessionCursor,
@@ -229,21 +236,27 @@ impl FeedSource {
     ) -> SessionCursor {
         let session_id = &self.session_id;
         let current = self.live_replay.current_cursor(session_id, revision);
-        match (
-            requested.parse_for_session(session_id),
-            snapshot.parse_for_session(session_id),
-            current.parse_for_session(session_id),
-        ) {
-            (Ok(requested), Ok(at_snapshot), Ok(at_current)) => [
-                (at_snapshot.live_position, &snapshot),
-                (at_current.live_position, &current),
-            ]
-            .into_iter()
-            .filter(|(position, _)| *position != requested.live_position)
-            .min_by_key(|(position, _)| *position)
-            .map_or_else(|| snapshot.clone(), |(_, cursor)| cursor.clone()),
-            _ => snapshot.clone(),
+        let position =
+            |cursor: &SessionCursor| Some(cursor.parse_for_session(session_id).ok()?.live_position);
+        let (Some(gapped), Some(at_snapshot), Some(at_current)) =
+            (position(requested), position(&snapshot), position(&current))
+        else {
+            return snapshot;
+        };
+        let mut candidates = [(at_snapshot, &snapshot), (at_current, &current)];
+        candidates.sort_by_key(|(position, _)| *position);
+        for (position, candidate) in candidates {
+            if position == gapped {
+                continue;
+            }
+            if matches!(
+                self.live_replay.replay_after_cursor(candidate).await,
+                Ok(LiveReplayOutcome::Replayed(_))
+            ) {
+                return candidate.clone();
+            }
         }
+        current.clone()
     }
 }
 

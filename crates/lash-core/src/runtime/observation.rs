@@ -774,6 +774,10 @@ mod tests {
             self.inner.current_cursor(session_id, revision)
         }
 
+        fn earliest_cursor(&self, session_id: &SessionId) -> SessionCursor {
+            self.inner.earliest_cursor(session_id)
+        }
+
         async fn invalidate_session(
             &self,
             session_id: &SessionId,

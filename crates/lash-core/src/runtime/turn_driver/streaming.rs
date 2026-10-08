@@ -333,9 +333,9 @@ impl RuntimeTurnDriver<'_> {
             });
         let mut host_forwarder = ProviderHostForwarder::new(
             event_tx,
-            crate::engine::ObservationCursor::new(crate::engine::ReplayKey::new(format!(
-                "{stream_base}:stream"
-            ))),
+            crate::engine::ObservationCursor::new(crate::engine::ReplayKey::new(
+                super::abandoned_stream::model_stream_key(&stream_base, self.model_attempt),
+            )),
         );
         let mut call_record = None;
         let mut stream_closed = false;

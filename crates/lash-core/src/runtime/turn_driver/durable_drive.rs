@@ -36,6 +36,9 @@ pub(in crate::runtime) struct RuntimeDrive {
     /// commits.
     trace_scope: lash_trace::DurableTraceScope,
     live: Arc<dyn crate::LiveReplayStore>,
+    /// The revision the turn's activity is published at: the head it opened
+    /// at.
+    revision: crate::SessionRevision,
     /// Publishes the turn's activity to the live stream: drained once the
     /// turn committed, aborted when the drive is dropped without a commit.
     publisher: tokio::task::JoinHandle<()>,
@@ -71,6 +74,7 @@ pub(in crate::runtime) struct DriveParts {
     pub(in crate::runtime) observer: TurnObserver,
     pub(in crate::runtime) settlement: crate::store::IngressSettlement,
     pub(in crate::runtime) live: Arc<dyn crate::LiveReplayStore>,
+    pub(in crate::runtime) revision: crate::SessionRevision,
     pub(in crate::runtime) publisher: tokio::task::JoinHandle<()>,
     pub(in crate::runtime) commit: Option<CommitBase>,
     pub(in crate::runtime) published: Arc<PublishedHeads>,
@@ -196,6 +200,7 @@ impl RuntimeDrive {
             observer,
             settlement,
             live,
+            revision,
             publisher,
             commit,
             published,
@@ -215,6 +220,7 @@ impl RuntimeDrive {
             before_turn,
             trace_scope,
             live,
+            revision,
             publisher,
             commit,
             published,
@@ -327,7 +333,7 @@ impl TurnDrive for RuntimeDrive {
         id: crate::EffectId,
         request: Arc<LlmRequest>,
         body: &lash_sansio::llm::types::ProviderRequestBody,
-        _attempt: u32,
+        attempt: u32,
         _limit: crate::ExecutionLimit,
     ) -> Result<(), TurnError> {
         self.driver
@@ -338,6 +344,7 @@ impl TurnDrive for RuntimeDrive {
             id,
             request,
             body,
+            attempt,
             &self.observer,
         ))
         .await
@@ -397,10 +404,66 @@ impl TurnDrive for RuntimeDrive {
         self.driver.session.plugins().run_changes_committed(written);
     }
 
-    async fn restart_live_stream(&mut self, _cx: &ActorContext) -> Result<(), TurnError> {
+    /// The call's earlier attempts streamed into the session's live replay
+    /// (on this node or a dead owner's): the replay names their prose and
+    /// reasoning, which one `ModelAttemptReset` retracts before the re-sent
+    /// attempt streams under its own key. A replay that no longer holds all
+    /// of it, or that cannot be read, restarts the stream with a gap.
+    async fn restart_live_stream(
+        &mut self,
+        _cx: &ActorContext,
+        id: crate::EffectId,
+        attempt: u32,
+    ) -> Result<(), TurnError> {
+        let invocation = self
+            .driver
+            .turn_effect_invocation(&self.machine, id, RuntimeEffectKind::LlmCall)
+            .map_err(|error| TurnError::Exec(format!("the model call's identity: {error}")))?;
+        let base = invocation.effect_replay_key().to_owned();
+        let session = &self.driver.session_id;
+        let from = self.live.earliest_cursor(session);
+        let reset = match self.live.replay_after_cursor(&from).await {
+            Ok(crate::LiveReplayOutcome::Replayed(events)) => {
+                super::abandoned_stream::attempt_reset(&events, &self.driver.turn_id, &base)
+            }
+            Ok(crate::LiveReplayOutcome::Gap(_)) => None,
+            Err(error) => {
+                tracing::warn!(%session, %error, "the live replay of a re-sent call's earlier attempts did not read");
+                None
+            }
+        };
+        let Some(reset) = reset else {
+            return self
+                .live
+                .invalidate_session(session)
+                .await
+                .map_err(|error| {
+                    TurnError::Exec(format!("the live stream did not restart: {error}"))
+                });
+        };
+        let id = crate::TurnActivityId::observed(
+            format!(
+                "{}:reset",
+                super::abandoned_stream::model_stream_key(&base, attempt)
+            ),
+            0,
+        );
+        let activity = crate::TurnActivity {
+            correlation_id: id.clone(),
+            id,
+            event: reset,
+        };
         self.live
-            .invalidate_session(&self.driver.session_id)
+            .publish(
+                session,
+                self.revision,
+                vec![crate::LiveReplayEventDraft::new(
+                    Some(&self.driver.turn_id),
+                    crate::SessionObservationEventPayload::TurnActivity(activity),
+                )],
+            )
             .await
+            .map(drop)
             .map_err(|error| TurnError::Exec(format!("the live stream did not restart: {error}")))
     }
 

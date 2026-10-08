@@ -92,10 +92,12 @@ impl RuntimeTurnDriver<'_> {
         id: crate::sansio::EffectId,
         request: Arc<LlmRequest>,
         body: &lash_sansio::llm::types::ProviderRequestBody,
+        attempt: u32,
         event_tx: &TurnObserver,
     ) -> Result<(), RuntimeError> {
         self.trace_before_llm_call(machine, &request);
         self.admitted_body = Some(body.clone());
+        self.model_attempt = attempt;
         let crate::runtime::RuntimeLlmCallOutcome {
             result,
             text_streamed,

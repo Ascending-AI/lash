@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 53,
-  "cargo_target_count": 210,
+  "cargo_target_count": 211,
   "facade_production_check_targets": [
     "//crates/lash-core-effect:lash-core-effect__fv_48d34494[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_e38b9031[check]",
@@ -43520,7 +43520,7 @@
       "//crates/lashlang:lashlang__unit_test__fv_fc3b3750"
     ]
   },
-  "generated_label_count": 271,
+  "generated_label_count": 272,
   "packages": [
     {
       "declared_features": [
@@ -44344,6 +44344,15 @@
           "tags": [
             "hermetic-postgres"
           ]
+        },
+        {
+          "build_label": "//crates/lash-durable-test:live_stream_takeover__test",
+          "cargo": "live_stream_takeover",
+          "check_label": "//crates/lash-durable-test:live_stream_takeover__test[check]",
+          "clippy_label": "//crates/lash-durable-test:live_stream_takeover__test__clippy[clippy.txt]",
+          "kind": "test",
+          "label": "//crates/lash-durable-test:live_stream_takeover__test",
+          "tags": []
         },
         {
           "build_label": "//crates/lash-durable-test:one_slot_process_await__test",
@@ -48151,6 +48160,7 @@
     "//crates/lash-durable-test:frame_switch_crash_proof__test": 300,
     "//crates/lash-durable-test:frame_switch_laws__test": 300,
     "//crates/lash-durable-test:lash-durable-test__unit_test": 300,
+    "//crates/lash-durable-test:live_stream_takeover__test": 300,
     "//crates/lash-durable-test:one_slot_process_await__test": 300,
     "//crates/lash-durable-test:open_session_commands__test": 300,
     "//crates/lash-durable-test:plugin_state_storage_laws__test": 300,
@@ -48616,6 +48626,7 @@
     "//crates/lash-durable-test:frame_switch_laws__test",
     "//crates/lash-durable-test:lash-durable-test[static]",
     "//crates/lash-durable-test:lash-durable-test__unit_test",
+    "//crates/lash-durable-test:live_stream_takeover__test",
     "//crates/lash-durable-test:one_slot_process_await__test",
     "//crates/lash-durable-test:open_session_commands__test",
     "//crates/lash-durable-test:plugin_state_storage_laws__test",
@@ -48903,6 +48914,7 @@
     "//crates/lash-durable-test:frame_switch_laws__test[check]",
     "//crates/lash-durable-test:lash-durable-test[check]",
     "//crates/lash-durable-test:lash-durable-test__unit_test[check]",
+    "//crates/lash-durable-test:live_stream_takeover__test[check]",
     "//crates/lash-durable-test:one_slot_process_await__test[check]",
     "//crates/lash-durable-test:open_session_commands__test[check]",
     "//crates/lash-durable-test:plugin_state_storage_laws__test[check]",
@@ -49210,6 +49222,7 @@
     "//crates/lash-durable-test:frame_switch_laws__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:lash-durable-test__clippy[clippy.txt]",
     "//crates/lash-durable-test:lash-durable-test__unit_test__clippy[clippy.txt]",
+    "//crates/lash-durable-test:live_stream_takeover__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:one_slot_process_await__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:open_session_commands__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:plugin_state_storage_laws__test__clippy[clippy.txt]",
@@ -49482,6 +49495,7 @@
     "//crates/lash-durable-test:frame_switch_laws__test",
     "//crates/lash-durable-test:lash-durable-test",
     "//crates/lash-durable-test:lash-durable-test__unit_test",
+    "//crates/lash-durable-test:live_stream_takeover__test",
     "//crates/lash-durable-test:one_slot_process_await__test",
     "//crates/lash-durable-test:open_session_commands__test",
     "//crates/lash-durable-test:plugin_state_storage_laws__test",
@@ -49754,6 +49768,7 @@
     "//crates/lash-durable-test:frame_switch_laws__test",
     "//crates/lash-durable-test:lash-durable-test",
     "//crates/lash-durable-test:lash-durable-test__unit_test",
+    "//crates/lash-durable-test:live_stream_takeover__test",
     "//crates/lash-durable-test:one_slot_process_await__test",
     "//crates/lash-durable-test:open_session_commands__test",
     "//crates/lash-durable-test:plugin_state_storage_laws__test",
@@ -50009,6 +50024,7 @@
     "//crates/lash-durable-test:frame_switch_crash_proof__test",
     "//crates/lash-durable-test:frame_switch_laws__test",
     "//crates/lash-durable-test:lash-durable-test__unit_test",
+    "//crates/lash-durable-test:live_stream_takeover__test",
     "//crates/lash-durable-test:one_slot_process_await__test",
     "//crates/lash-durable-test:open_session_commands__test",
     "//crates/lash-durable-test:plugin_state_storage_laws__test",
@@ -50152,6 +50168,7 @@
     "//crates/lash-durable-test:frame_switch_crash_proof__test",
     "//crates/lash-durable-test:frame_switch_laws__test",
     "//crates/lash-durable-test:lash-durable-test__unit_test",
+    "//crates/lash-durable-test:live_stream_takeover__test",
     "//crates/lash-durable-test:one_slot_process_await__test",
     "//crates/lash-durable-test:open_session_commands__test",
     "//crates/lash-durable-test:plugin_state_storage_laws__test",
@@ -50309,6 +50326,7 @@
     "//crates/lash-durable-test:frame_switch_crash_proof__test",
     "//crates/lash-durable-test:frame_switch_laws__test",
     "//crates/lash-durable-test:lash-durable-test__unit_test",
+    "//crates/lash-durable-test:live_stream_takeover__test",
     "//crates/lash-durable-test:one_slot_process_await__test",
     "//crates/lash-durable-test:open_session_commands__test",
     "//crates/lash-durable-test:plugin_state_storage_laws__test",
@@ -50675,6 +50693,7 @@
     "//crates/lash-durable-test:frame_switch_crash_proof__test",
     "//crates/lash-durable-test:frame_switch_laws__test",
     "//crates/lash-durable-test:lash-durable-test__unit_test",
+    "//crates/lash-durable-test:live_stream_takeover__test",
     "//crates/lash-durable-test:one_slot_process_await__test",
     "//crates/lash-durable-test:open_session_commands__test",
     "//crates/lash-durable-test:plugin_state_storage_laws__test",
@@ -50840,6 +50859,7 @@
     "//crates/lash-durable-test:frame_switch_crash_proof__test",
     "//crates/lash-durable-test:frame_switch_laws__test",
     "//crates/lash-durable-test:lash-durable-test__unit_test",
+    "//crates/lash-durable-test:live_stream_takeover__test",
     "//crates/lash-durable-test:one_slot_process_await__test",
     "//crates/lash-durable-test:open_session_commands__test",
     "//crates/lash-durable-test:plugin_state_storage_laws__test",

@@ -158,6 +158,7 @@ impl RuntimeTurnServices {
         let controller = cx.scoped(AdmittedScope::turn(row.session.clone(), row.run.clone()))?;
         let live = self.runtimes.live_replay();
         let commit = CommitBase::of(&runtime);
+        let revision = crate::SessionRevision::from_runtime(&runtime);
         let (observer, publisher) = live_observer(&runtime, &live, &row.run);
         // The run starts from the head the runtime opened at: what it
         // changes from here is what its phases record (FIG-5301).
@@ -176,6 +177,7 @@ impl RuntimeTurnServices {
                 observer,
                 settlement,
                 live,
+                revision,
                 publisher,
                 commit,
                 published: Arc::clone(&self.published),

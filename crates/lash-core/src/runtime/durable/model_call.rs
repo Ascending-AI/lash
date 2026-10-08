@@ -16,8 +16,10 @@
 //!   once, without sending.
 //! - **Only the completed response is durable.** It commits with the next
 //!   phase; streamed deltas go to the live replay store, and a re-send
-//!   restarts the session's live stream first, so an observer sees a gap and
-//!   reloads rather than old partial text joined to new.
+//!   restarts the session's live stream first: the stream retracts what the
+//!   earlier attempts streamed and the re-sent attempt streams under ids of
+//!   its own, so an observer follows on without old partial text joined to
+//!   new.
 
 use std::time::Duration;
 
@@ -177,7 +179,7 @@ pub(super) async fn send(
         ModelStart::Send { pin, limit, resent } => (pin, *limit, *resent),
     };
     if resent {
-        drive.restart_live_stream(cx).await?;
+        drive.restart_live_stream(cx, id, pin.attempt).await?;
     }
     cx.note_due(DueSource::ModelDeadline, pin.deadline);
     let now = cx.durable_now().await?;

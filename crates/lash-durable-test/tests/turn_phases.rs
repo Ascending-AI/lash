@@ -9,7 +9,8 @@
 //!
 //! - **Model re-send:** every attempt of one model call carries the same
 //!   request bytes, attempts count up from where the pin left them, and an
-//!   attempt after the first restarts the session's live stream first. A
+//!   attempt after the first restarts the session's live stream (retracts
+//!   what the earlier attempts streamed) first. A
 //!   crash after `model.start` commits re-sends the call as attempt 2.
 //! - **Atomic turn progress:** the head advances once, with the terminal.
 //! - **F1:** a zombie's owner writes after its reap are refused.
@@ -722,7 +723,12 @@ impl TurnDrive for L3Drive {
         Ok(Arc::new(NoTools))
     }
 
-    async fn restart_live_stream(&mut self, _cx: &ActorContext) -> Result<(), TurnError> {
+    async fn restart_live_stream(
+        &mut self,
+        _cx: &ActorContext,
+        _id: EffectId,
+        _attempt: u32,
+    ) -> Result<(), TurnError> {
         let mut seen = self.services.seen.lock_recover();
         let next = seen.calls.last().map_or(0, |call| call.attempt);
         seen.restarts.push(next);

@@ -229,16 +229,25 @@ pub trait TurnDrive: Send {
     /// [`run_changes`](Self::run_changes) named.
     fn run_changes_committed(&self, _written: &[lash_durable::domain::TurnNamespace]) {}
 
-    /// Restart the session's live stream before a re-sent model call streams:
-    /// existing cursors gap and observers reload (the live replay store's
-    /// `invalidate_session`), so no one sees an abandoned attempt's partial
-    /// text joined to the new attempt's.
+    /// Restart the session's live stream before attempt `attempt` of the
+    /// call `id` is re-sent, so no one sees an abandoned attempt's partial
+    /// text joined to the new attempt's: the stream retracts what the
+    /// call's earlier attempts streamed (a `ModelAttemptReset`), and the
+    /// re-sent attempt streams under ids of its own. Observers keep their
+    /// cursors; only when the live replay no longer holds what the earlier
+    /// attempts streamed does the stream restart with a gap (the live
+    /// replay store's `invalidate_session`).
     ///
     /// # Errors
     ///
     /// [`TurnError`] when the live stream cannot restart; the call is not
     /// sent.
-    async fn restart_live_stream(&mut self, cx: &ActorContext) -> Result<(), TurnError>;
+    async fn restart_live_stream(
+        &mut self,
+        cx: &ActorContext,
+        id: EffectId,
+        attempt: u32,
+    ) -> Result<(), TurnError>;
 
     /// The tools the turn's rounds run: the turn's catalog, which pins each
     /// call at admission and gives each member its body (L4, FIG-5174).

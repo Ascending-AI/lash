@@ -1,6 +1,7 @@
 use super::*;
 use crate::ActorContext;
 
+mod abandoned_stream;
 mod after_turn;
 mod context;
 mod durable_drive;
@@ -90,6 +91,10 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// effect sends (ADR 0133 §6): handed to that effect's body, never
     /// rebuilt there.
     pub(super) admitted_body: Option<lash_sansio::llm::types::ProviderRequestBody>,
+    /// The attempt of the admitted call the next model-call effect sends, its
+    /// pin's: a re-sent attempt streams under an observation key of its own
+    /// (`abandoned_stream::model_stream_key`).
+    pub(super) model_attempt: u32,
     /// The lifetime this value is bound to; the context it carries is `'static`.
     pub(crate) run: std::marker::PhantomData<&'a ()>,
 }

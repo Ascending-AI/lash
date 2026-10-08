@@ -15,8 +15,9 @@ use pretty_assertions::assert_eq;
 ///
 /// This suite covers the non-durable live observation contract used for host
 /// reconnects: cursors track per-session live positions, replay returns only
-/// events after the cursor, subscriptions deliver buffered events before live
-/// ones, malformed cursors fail before replay, cursors ahead of the tail
+/// events after the cursor, the earliest cursor replays the whole window,
+/// subscriptions deliver buffered events before live ones, malformed cursors
+/// fail before replay, cursors ahead of the tail
 /// report a recoverable unavailable gap, and a redrive of streamed deltas,
 /// framed alike or not, adds no text twice and loses none silently.
 pub async fn live_replay_store<F>(make: F)
@@ -29,6 +30,7 @@ where
     drop((first, second));
     exclusive_after_valid_cursor(make()).await;
     live_replay_store_cursor_preserves_newer_revisions(make()).await;
+    the_earliest_cursor_replays_the_whole_window(make()).await;
     live_replay_store_subscribe_replays_then_yields_live_events(make()).await;
     live_replay_store_rejects_malformed_cursors(make()).await;
     empty_is_proven_continuity_not_missing_history(make()).await;
@@ -995,6 +997,46 @@ where
             "the append racing subscription creation must not be duplicated"
         );
     }
+}
+
+/// The earliest cursor sits before every retained event, whatever its
+/// revision: a session that never committed publishes at revision zero,
+/// which no current cursor reaches behind. A session with nothing retained
+/// replays empty from it.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn the_earliest_cursor_replays_the_whole_window(store: Arc<dyn LiveReplayStore>) {
+    let session = SessionId::from("earliest-session");
+    let empty = expect_live_replay_replayed(
+        store
+            .replay_after_cursor(&store.earliest_cursor(&session))
+            .await,
+        "replay from an empty session's earliest cursor",
+    );
+    assert!(empty.is_empty(), "nothing is retained yet");
+    for (revision, text) in [(0, "before the first commit"), (2, "after a commit")] {
+        publish_one(
+            &store,
+            &session,
+            SessionRevision::new(revision),
+            Some(&TurnId::from("earliest-turn")),
+            live_replay_text_payload(text),
+        )
+        .await
+        .expect("append an event");
+    }
+    let replay = expect_live_replay_replayed(
+        store
+            .replay_after_cursor(&store.earliest_cursor(&session))
+            .await,
+        "replay from the earliest cursor",
+    );
+    assert_live_replay_labels(
+        &replay,
+        &["text:before the first commit", "text:after a commit"],
+    );
 }
 
 fn live_replay_text_payload(text: &str) -> SessionObservationEventPayload {

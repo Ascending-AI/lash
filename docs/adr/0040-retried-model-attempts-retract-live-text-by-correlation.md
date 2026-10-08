@@ -18,6 +18,18 @@ Every re-generation is a visible generation boundary, including a reset before
 any visible output. Empty correlation lists mean no retraction; they never
 mean retract-all.
 
+A call re-sent after a takeover ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md)
+§4) is a re-generation too, by another owner. The new owner reads the call's
+earlier attempts back from the session's live replay, after the store's
+`earliest_cursor`, and publishes one reset naming their prose and reasoning
+before the re-sent attempt streams. The re-sent attempt streams under an
+observation key of its own (`{call}:stream@{attempt}`), so the store's
+redelivery deduplication never takes it for the abandoned attempt's. When the
+replay no longer reaches back to a marker of the turn (`TurnStarted` or a
+`CheckpointRecorded`) before the call's stream, the abandoned text cannot all
+be named: the new owner invalidates the session's continuity instead, and
+observers recover through a gap (FIG-5366).
+
 The reset shares the session observation activity path with deltas. Retained
 replay re-applies both; a cursor after the reset needs no old retraction. A gap
 recovers from the committed Session Read View. The host supplies observation
@@ -44,6 +56,7 @@ a retry by content.
 ## Implementation
 
 [Reset collection and emission](../../crates/lash-core/src/runtime/turn_driver/streaming/support.rs),
+[a takeover re-send's reset](../../crates/lash-core/src/runtime/turn_driver/abandoned_stream.rs),
 [plugin reset and accumulator lifecycle](../../crates/lash-core/src/runtime/turn_driver/streaming.rs)
 and [observation vocabulary](../../crates/lash-core-execution/src/runtime/vocabulary.rs)
 define the boundary.

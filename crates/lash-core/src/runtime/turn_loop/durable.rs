@@ -373,6 +373,7 @@ impl LashRuntime {
             turn_observations: turn_observation_cursor(&controller, run, "shift"),
             trace: self.host.core.tracing.turn_execution(&controller),
             admitted_body: None,
+            model_attempt: 1,
         });
         Ok(DurableTurn {
             driver,

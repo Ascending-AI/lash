@@ -377,6 +377,9 @@ impl LiveReplayStore for Integrator {
     fn current_cursor(&self, session_id: &SessionId, revision: SessionRevision) -> SessionCursor {
         unreachable!("external signature witness")
     }
+    fn earliest_cursor(&self, session_id: &SessionId) -> SessionCursor {
+        unreachable!("external signature witness")
+    }
     async fn trim_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
         unreachable!("external signature witness")
     }
