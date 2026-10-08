@@ -728,15 +728,6 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
                         .map_err(process_sqlite_error)?;
                         record_subscription_change(tx, record)?;
                     }
-                    // A session's subscription moved: the session reads its
-                    // scheduled ticks again (FIG-5348), so the wake commits
-                    // with the move.
-                    for session in lash_core_execution::facade_support::trigger_mutation_sessions(
-                        &result,
-                    ) {
-                        crate::durable::wake_session_tx(tx, &session, false, now)
-                            .map_err(lash_core_execution::PluginError::from)?;
-                    }
                     crate::conn::cached_execute(tx,
                         sql.receipt.insert.sql(),
                         params![

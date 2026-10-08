@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 53,
-  "cargo_target_count": 216,
+  "cargo_target_count": 215,
   "facade_production_check_targets": [
     "//crates/lash-core-effect:lash-core-effect__fv_48d34494[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_e38b9031[check]",
@@ -44034,7 +44034,7 @@
       "//crates/lashlang:lashlang__unit_test__fv_fc3b3750"
     ]
   },
-  "generated_label_count": 277,
+  "generated_label_count": 276,
   "packages": [
     {
       "declared_features": [
@@ -45043,17 +45043,6 @@
           "kind": "test",
           "label": "//crates/lash-durable-test:round_crash_matrix__test",
           "tags": []
-        },
-        {
-          "build_label": "//crates/lash-durable-test:schedule_tick_crash_proof__test",
-          "cargo": "schedule_tick_crash_proof",
-          "check_label": "//crates/lash-durable-test:schedule_tick_crash_proof__test[check]",
-          "clippy_label": "//crates/lash-durable-test:schedule_tick_crash_proof__test__clippy[clippy.txt]",
-          "kind": "test",
-          "label": "//crates/lash-durable-test:schedule_tick_crash_proof__test",
-          "tags": [
-            "hermetic-postgres"
-          ]
         },
         {
           "build_label": "//crates/lash-durable-test:session_send__test",
@@ -48646,7 +48635,6 @@
       "//crates/lash-durable-test:recorded_behaviour_laws__test",
       "//crates/lash-durable-test:rlm_execution_maps__test",
       "//crates/lash-durable-test:rlm_session_globals__test",
-      "//crates/lash-durable-test:schedule_tick_crash_proof__test",
       "//crates/lash-durable-test:session_send__test",
       "//crates/lash-durable-test:standard_turn_outcomes__test",
       "//crates/lash-durable-test:steering_crash_laws__test",
@@ -48782,7 +48770,6 @@
     "//crates/lash-durable-test:rlm_execution_maps__test": 300,
     "//crates/lash-durable-test:rlm_session_globals__test": 300,
     "//crates/lash-durable-test:round_crash_matrix__test": 300,
-    "//crates/lash-durable-test:schedule_tick_crash_proof__test": 300,
     "//crates/lash-durable-test:session_send__test": 300,
     "//crates/lash-durable-test:standard_turn_outcomes__test": 300,
     "//crates/lash-durable-test:steering_crash_laws__test": 300,
@@ -49282,7 +49269,6 @@
     "//crates/lash-durable-test:rlm_execution_maps__test",
     "//crates/lash-durable-test:rlm_session_globals__test",
     "//crates/lash-durable-test:round_crash_matrix__test",
-    "//crates/lash-durable-test:schedule_tick_crash_proof__test",
     "//crates/lash-durable-test:session_send__test",
     "//crates/lash-durable-test:standard_turn_outcomes__test",
     "//crates/lash-durable-test:steering_crash_laws__test",
@@ -49575,7 +49561,6 @@
     "//crates/lash-durable-test:rlm_execution_maps__test[check]",
     "//crates/lash-durable-test:rlm_session_globals__test[check]",
     "//crates/lash-durable-test:round_crash_matrix__test[check]",
-    "//crates/lash-durable-test:schedule_tick_crash_proof__test[check]",
     "//crates/lash-durable-test:session_send__test[check]",
     "//crates/lash-durable-test:standard_turn_outcomes__test[check]",
     "//crates/lash-durable-test:steering_crash_laws__test[check]",
@@ -49888,7 +49873,6 @@
     "//crates/lash-durable-test:rlm_execution_maps__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:rlm_session_globals__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:round_crash_matrix__test__clippy[clippy.txt]",
-    "//crates/lash-durable-test:schedule_tick_crash_proof__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:session_send__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:standard_turn_outcomes__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:steering_crash_laws__test__clippy[clippy.txt]",
@@ -50166,7 +50150,6 @@
     "//crates/lash-durable-test:rlm_execution_maps__test",
     "//crates/lash-durable-test:rlm_session_globals__test",
     "//crates/lash-durable-test:round_crash_matrix__test",
-    "//crates/lash-durable-test:schedule_tick_crash_proof__test",
     "//crates/lash-durable-test:session_send__test",
     "//crates/lash-durable-test:standard_turn_outcomes__test",
     "//crates/lash-durable-test:steering_crash_laws__test",
@@ -50444,7 +50427,6 @@
     "//crates/lash-durable-test:rlm_execution_maps__test",
     "//crates/lash-durable-test:rlm_session_globals__test",
     "//crates/lash-durable-test:round_crash_matrix__test",
-    "//crates/lash-durable-test:schedule_tick_crash_proof__test",
     "//crates/lash-durable-test:session_send__test",
     "//crates/lash-durable-test:standard_turn_outcomes__test",
     "//crates/lash-durable-test:steering_crash_laws__test",
@@ -50705,7 +50687,6 @@
     "//crates/lash-durable-test:rlm_execution_maps__test",
     "//crates/lash-durable-test:rlm_session_globals__test",
     "//crates/lash-durable-test:round_crash_matrix__test",
-    "//crates/lash-durable-test:schedule_tick_crash_proof__test",
     "//crates/lash-durable-test:session_send__test",
     "//crates/lash-durable-test:standard_turn_outcomes__test",
     "//crates/lash-durable-test:steering_crash_laws__test",
@@ -50853,7 +50834,6 @@
     "//crates/lash-durable-test:rlm_execution_maps__test",
     "//crates/lash-durable-test:rlm_session_globals__test",
     "//crates/lash-durable-test:round_crash_matrix__test",
-    "//crates/lash-durable-test:schedule_tick_crash_proof__test",
     "//crates/lash-durable-test:session_send__test",
     "//crates/lash-durable-test:standard_turn_outcomes__test",
     "//crates/lash-durable-test:steering_crash_laws__test",
@@ -51015,7 +50995,6 @@
     "//crates/lash-durable-test:rlm_execution_maps__test",
     "//crates/lash-durable-test:rlm_session_globals__test",
     "//crates/lash-durable-test:round_crash_matrix__test",
-    "//crates/lash-durable-test:schedule_tick_crash_proof__test",
     "//crates/lash-durable-test:session_send__test",
     "//crates/lash-durable-test:standard_turn_outcomes__test",
     "//crates/lash-durable-test:steering_crash_laws__test",
@@ -51386,7 +51365,6 @@
     "//crates/lash-durable-test:rlm_execution_maps__test",
     "//crates/lash-durable-test:rlm_session_globals__test",
     "//crates/lash-durable-test:round_crash_matrix__test",
-    "//crates/lash-durable-test:schedule_tick_crash_proof__test",
     "//crates/lash-durable-test:session_send__test",
     "//crates/lash-durable-test:standard_turn_outcomes__test",
     "//crates/lash-durable-test:steering_crash_laws__test",
@@ -51556,7 +51534,6 @@
     "//crates/lash-durable-test:rlm_execution_maps__test",
     "//crates/lash-durable-test:rlm_session_globals__test",
     "//crates/lash-durable-test:round_crash_matrix__test",
-    "//crates/lash-durable-test:schedule_tick_crash_proof__test",
     "//crates/lash-durable-test:session_send__test",
     "//crates/lash-durable-test:standard_turn_outcomes__test",
     "//crates/lash-durable-test:steering_crash_laws__test",

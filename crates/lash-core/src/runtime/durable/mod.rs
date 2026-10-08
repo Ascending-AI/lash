@@ -14,8 +14,6 @@
 //! - `head_commit`: the session's head commits outside `turn.commit`, a
 //!   session command's (`session.command`, FIG-5230) and a context-pressure
 //!   frame's open (`pressure.frame`, FIG-5355), on its fenced transaction.
-//! - [`schedules`]: the ticks of the scheduled trigger sources a session
-//!   subscribes to, fired at the session's due time (FIG-5348).
 //! - [`turn_scope`]: a turn's scope ending with its commit or cancel, the
 //!   cascade's cursor work and the bounded wait for its children (L6b).
 
@@ -25,7 +23,6 @@ pub(crate) mod head_commit;
 mod model_call;
 pub mod node;
 pub mod phases;
-pub mod schedules;
 pub mod services;
 pub mod session;
 pub mod session_close;

@@ -59,6 +59,7 @@ impl Workbench {
     }
 
     pub(crate) async fn shutdown(self) {
+        self.state.cron.stop();
         self.state
             .core
             .shutdown()

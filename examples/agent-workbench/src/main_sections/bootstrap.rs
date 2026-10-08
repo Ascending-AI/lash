@@ -314,10 +314,7 @@ pub(crate) async fn workbench_core_builder(
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
     .live_replay_store(live_replay)
-    .delta_coalescing(delta_coalescing_from_environment()?)
-    // `cron.Schedule`, which the prompt offers the model, ticks on the
-    // durable substrate (FIG-5348).
-    .trigger_schedule(CRON_SCHEDULE_SOURCE_TYPE, Arc::new(crate::cron::CronSchedule));
+    .delta_coalescing(delta_coalescing_from_environment()?);
     if let Some(tool_provider) = tool_provider {
         builder = builder.tools(tool_provider);
     }
@@ -455,13 +452,16 @@ pub(crate) fn workbench_app_state(
         active_turns: host.active_turns,
         authorization: WorkbenchAuthorization::allow_all(),
         approvals: host.approvals,
+        cron: crate::cron::CronTimer::new(stores.clock()),
     })
 }
 
 /// What a workbench does before it serves: create its current session,
-/// reconcile the approvals decided while it was down, and take up the turns a
+/// reconcile the approvals decided while it was down, take up the turns a
 /// previous incarnation was following (the session's engine settles them
-/// whoever follows them) and the current session's runs.
+/// whoever follows them) and the current session's runs, and start its
+/// `cron.Schedule` timer, which first catches up the ticks missed while no
+/// workbench ran.
 pub(crate) async fn start_workbench(state: &AppState) -> AnyhowResult<()> {
     state
         .ensure_current_session()
@@ -470,6 +470,7 @@ pub(crate) async fn start_workbench(state: &AppState) -> AnyhowResult<()> {
     reconcile_decided_approvals(state).await;
     turns::resume_turn_followers(state).await;
     turns::watch_session_runs(state, &state.current_session_id()).await;
+    state.cron.start(state.clone());
     Ok(())
 }
 
@@ -915,6 +916,8 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             .await
             .context("serve");
         let _ = host_shutdown.send(true);
+        // No tick is emitted into a core that is shutting down.
+        state.cron.stop();
         serve_result
     }
     .await;

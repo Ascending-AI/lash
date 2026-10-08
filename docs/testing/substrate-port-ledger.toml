@@ -214,8 +214,8 @@ law = "a process commit the store refuses as corrupt ends the process Failed on 
 path = "crates/lash-durable-test/tests/process_actor_laws.rs::an_emit_the_registry_refuses_ends_the_process_failed_with_the_refusal"
 
 [planned."CRON1"]
-owner = "FIG-5348"
-law = "a cron.Schedule registered from a turn fires one occurrence, one wake delivery and one completed turn per tick; a disabled schedule stays silent at its next boundary, re-enabling resumes ticks without a second subscription, and a deleted one stays silent"
+owner = "FIG-5394"
+law = "a cron.Schedule registered from a turn and ticked by the workbench's own timer, on two hosts over one store, fires one occurrence, one wake delivery and one completed turn per tick; a disabled schedule stays silent at its next boundary, re-enabling resumes ticks without a second subscription, and a deleted one stays silent"
 path = "examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_registered_cron_schedule_fires_one_turn_per_tick_and_obeys_disable_enable_and_delete"
 
 [planned."SIMGEN"]
@@ -10909,7 +10909,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5348 ported the property onto the in-process workbench harness as examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_deleted_sessions_cron_schedule_never_fires: the session actor fires its schedule's ticks (lash's durable cron driver), so a deleted session's close ends them and no tick fires after its tombstone; there is no separate job left to cancel"
+note = "FIG-5348 ported the property onto the in-process workbench harness as examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_deleted_sessions_cron_schedule_never_fires: the workbench's cron timer ticks only enabled registrations, and a deleted session's close deletes its registrations, so no tick fires after its tombstone; there is no separate job left to cancel (FIG-5394: lash has no scheduler)"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests.rs"
@@ -10923,7 +10923,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5348 ported the property onto the in-process workbench harness as examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_cron_schedule_disabled_while_its_tick_turn_runs_never_fires_again: a disable made while a tick's wake turn still runs commits with a wake of the owning session, so no later boundary fires"
+note = "FIG-5348 ported the property onto the in-process workbench harness as examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_cron_schedule_disabled_while_its_tick_turn_runs_never_fires_again: a disable made while a tick's wake turn still runs is read by the workbench's cron timer before its next emission, so no later boundary fires (FIG-5394)"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs"
@@ -11101,7 +11101,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "The reset's Restate cron-job cancellation was removed in 5ad9641f9e (FIG-5190). The durable cron driver (FIG-5348) keeps no host-side job for a reset to cancel: the deleted session's close ends its ticks (examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_deleted_sessions_cron_schedule_never_fires)"
+note = "The reset's Restate cron-job cancellation was removed in 5ad9641f9e (FIG-5190). The workbench's cron timer (FIG-5394) keeps no per-session job for a reset to cancel: the deleted session's close deletes its registrations, so the timer ticks none (examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_deleted_sessions_cron_schedule_never_fires)"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs"
@@ -11115,7 +11115,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "The reset's Restate cron-job cancellation and its close were removed in 5ad9641f9e (FIG-5190). The durable cron driver (FIG-5348) keeps no host-side job for a reset to cancel: the deleted session's close ends its ticks (examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_deleted_sessions_cron_schedule_never_fires)"
+note = "The reset's Restate cron-job cancellation and its close were removed in 5ad9641f9e (FIG-5190). The workbench's cron timer (FIG-5394) keeps no per-session job for a reset to cancel: the deleted session's close deletes its registrations, so the timer ticks none (examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_deleted_sessions_cron_schedule_never_fires)"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs"
@@ -11237,7 +11237,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "cron-trigger helpers over the live Restate cron workflow; the workflow is gone. The workbench's cron laws run on the durable cron driver (FIG-5348) in examples/agent-workbench/src/main_sections/tests/cron_schedule.rs, over a frozen store clock"
+note = "cron-trigger helpers over the live Restate cron workflow; the workflow is gone. The workbench's cron laws run on its own cron timer (FIG-5394) in examples/agent-workbench/src/main_sections/tests/cron_schedule.rs, over a frozen store clock"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/session_delete_workflow.rs"
@@ -11367,7 +11367,7 @@ laws = [
 ]
 disposition = "covered-by:examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_registered_cron_schedule_fires_one_turn_per_tick_and_obeys_disable_enable_and_delete"
 status = "deleted"
-note = "The Restate cron handler these laws drove went with FIG-5190. On the durable cron driver (FIG-5348) a disabled or deleted registration is not among the enabled subscriptions the session reads at its next boundary, so it emits nothing and arms no next tick (CRON1); a deleted session's actor ends with its close and reads nothing (examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_deleted_sessions_cron_schedule_never_fires)"
+note = "The Restate cron handler these laws drove went with FIG-5190. The workbench's cron timer (FIG-5394) reads the enabled registrations before every emission, so a disabled or deleted registration emits nothing at its next boundary (CRON1); a deleted session's close deletes its registrations (examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_deleted_sessions_cron_schedule_never_fires)"
 
 [[row]]
 path = "examples/agent-workbench/src/restate/tests/cron_replay.rs"
@@ -11443,7 +11443,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "Laws of the Restate cron job (its route-synchronous arm and cancel, ingress calls, journaled tick basis and terminal codes, and the registration-state aggregate it decided on), which went with FIG-5190. The durable cron driver (FIG-5348) keeps no job to arm or cancel: a subscription mutation wakes its owning session in its own transaction, and the session fires its enabled subscriptions' due ticks. The properties that remain are laws of the driver: a disable, re-enable or delete takes effect at the next boundary (CRON1, examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_registered_cron_schedule_fires_one_turn_per_tick_and_obeys_disable_enable_and_delete), a deleted session fires nothing (examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_deleted_sessions_cron_schedule_never_fires, whose schedule names no time zone and still starts its delivery), and a tick fires once across a crash at it (crates/lash-durable-test/tests/schedule_tick_crash_proof.rs)"
+note = "Laws of the Restate cron job (its route-synchronous arm and cancel, ingress calls, journaled tick basis and terminal codes, and the registration-state aggregate it decided on), which went with FIG-5190. Lash has no scheduler (FIG-5394): the workbench's cron timer keeps no job to arm or cancel, and emits the due tick of every enabled registration it reads. The properties that remain are laws of that timer: a disable, re-enable or delete takes effect at the next boundary (CRON1, examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_registered_cron_schedule_fires_one_turn_per_tick_and_obeys_disable_enable_and_delete), a deleted session fires nothing (examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_deleted_sessions_cron_schedule_never_fires, whose schedule names no time zone and still starts its delivery), and a tick emitted by two hosts lands once (CRON1); a tick's occurrence starts through the router's crash-proven start (crates/lash-durable-test/tests/trigger_start_proof.rs)"
 
 [[row]]
 path = "examples/agent-workbench/src/restate/tests/cron_tests.rs"
@@ -19936,7 +19936,7 @@ laws = [
 disposition = "replaced-by:planned:CRON1"
 status = "deleted"
 owed = "a recurring schedule registered from a Workbench chat turn fires one turn per tick; disable, re-enable and delete take effect at the next boundary (judged runbook)"
-note = "FIG-5190 follow-up (5a64db23e0) deleted the runbook: every phase read the Restate cron object and its trace spans. FIG-5348 built the durable cron driver (the session actor fires its scheduled sources' ticks at its due time) and landed the planned law CRON1 on the in-process workbench harness"
+note = "FIG-5190 follow-up (5a64db23e0) deleted the runbook: every phase read the Restate cron object and its trace spans. FIG-5348 landed the planned law CRON1 on the in-process workbench harness; FIG-5394 deleted lash's cron driver, and the workbench's own timer ticks the schedule"
 
 [[row]]
 path = "runbooks/process-operations/runbook.md"

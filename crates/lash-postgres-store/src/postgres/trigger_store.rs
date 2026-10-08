@@ -537,13 +537,6 @@ impl TriggerStore for PostgresTriggerStore {
                 .map_err(plugin_sqlx_error)?;
             record_subscription_change(&mut tx, record).await?;
         }
-        // A session's subscription moved: the session reads its scheduled
-        // ticks again (FIG-5348), so the wake commits with the move.
-        for session in lash_core_execution::facade_support::trigger_mutation_sessions(&result) {
-            crate::durable::wake_session_tx(&mut tx, &session, false, now)
-                .await
-                .map_err(plugin_store_error)?;
-        }
         sqlx::query(sql.receipt.insert.sql())
             .bind(&preparation.receipt_id)
             .bind(preparation.owner_scope.owner_kind_column())

@@ -559,13 +559,18 @@ finish(
 </typescript>
 ```
 
-The workbench registers the schedule `cron.Schedule` means on its core
-(`LashCoreBuilder::trigger_schedule`, `src/cron.rs`), and lash fires each tick
-from the session that owns the registration: the session actor keeps the next
-tick as its durable due time and emits the tick's `cron.Tick { fired_at }`
-occurrence once, even across a crash or a failover. A disable, re-enable or
-delete takes effect at the next tick, and a re-enabled schedule keeps its
-subscription.
+Lash has no scheduler: a host dispatches every trigger occurrence itself. The
+workbench runs its own `cron.Schedule` timer (`src/cron.rs`). Every quarter
+second it reads the enabled `cron.Schedule` registrations and, for each
+session's source, emits the latest tick it has not passed yet through the
+host trigger emit (`core.triggers().emit`), scoped to that session. The
+occurrence carries `cron.Tick { fired_at }`, and its idempotency key names the
+session, the source and the tick instant, so a second workbench over the same
+database, a restart or a retried emission lands each tick once. On boot the
+timer catches up the latest tick missed since the registration last changed,
+once. Because the timer reads the registration before it emits, a disable, a
+re-enable or a delete takes effect at the next tick, and a re-enabled
+schedule keeps its subscription. While no workbench runs, nothing ticks.
 
 Host wiring has two pieces: source constructors such as `cron.Schedule` and
 `mail.received` are declared through the plugin's `lashlang_resources()` hook,

@@ -388,7 +388,6 @@ pub mod facade_support {
     pub use crate::triggers::trigger_command_fingerprint;
     pub use crate::triggers::trigger_delivery_start_key;
     pub use crate::triggers::trigger_mutation_records;
-    pub use crate::triggers::trigger_mutation_sessions;
     pub use crate::triggers::trigger_occurrence_request_matches_record;
     pub use crate::triggers::trigger_operation_receipt_id;
     pub use crate::triggers::validate_trigger_occurrence_request;
@@ -569,11 +568,10 @@ pub use triggers::{
     TriggerOccurrenceReclamationReport, TriggerOccurrenceReclamationResult,
     TriggerOccurrenceRecord, TriggerOccurrenceRequest, TriggerOperationError, TriggerOwnerScope,
     TriggerProviderRoute, TriggerRetentionReconciliationReport, TriggerRouteRefusal,
-    TriggerRouteRestore, TriggerRouteRestorer, TriggerSchedule, TriggerScheduleError,
-    TriggerSchedules, TriggerSourceCapture, TriggerStore, TriggerSubscriptionChange,
-    TriggerSubscriptionChangeCursor, TriggerSubscriptionDraft, TriggerSubscriptionFilter,
-    TriggerSubscriptionRecord, admit_trigger_registration_target, trigger_handle,
-    trigger_handle_outcome_value, trigger_incarnation,
+    TriggerRouteRestore, TriggerRouteRestorer, TriggerSourceCapture, TriggerStore,
+    TriggerSubscriptionChange, TriggerSubscriptionChangeCursor, TriggerSubscriptionDraft,
+    TriggerSubscriptionFilter, TriggerSubscriptionRecord, admit_trigger_registration_target,
+    trigger_handle, trigger_handle_outcome_value, trigger_incarnation,
 };
 
 pub(crate) mod facade_ops {}

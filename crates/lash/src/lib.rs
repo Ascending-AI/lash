@@ -407,11 +407,6 @@ pub mod triggers {
         facade_support::TriggerEventType, facade_support::TriggerRegistration,
         facade_support::TriggerTarget, facade_support::empty_trigger_source_key,
     };
-    /// What a scheduled source type's configuration means in time: a host
-    /// registers one with [`LashCoreBuilder::trigger_schedule`](crate::LashCoreBuilder::trigger_schedule),
-    /// and lash fires each tick of every enabled subscription to the source
-    /// from the session that owns it (FIG-5348).
-    pub use lash_core::{TriggerSchedule, TriggerScheduleError, TriggerSchedules};
 }
 
 /// Tool definitions, providers, and execution types.

@@ -1,6 +1,7 @@
 //! What the workbench does with its own administrative authority: cancel a
 //! process, reclaim a deleted session's finished work, and emit the
-//! occurrences of its host trigger sources (the button and the mail world).
+//! occurrences of its host trigger sources (the button, the mail world and
+//! the `cron.Schedule` timer).
 //!
 //! Each act runs under a context the core's session administration mints for
 //! one runtime operation, the same authority any host acting on external
@@ -224,6 +225,54 @@ impl AppState {
             .await
             // Audited: trigger delivery consumes per-subscription failures into its report, so emission cannot return a typed session tombstone.
             .map_err(AppError::internal)
+    }
+
+    /// Emit the `cron.Schedule` tick occurrence `payload` of the source
+    /// `source_key` in `session_id`, under `idempotency_key` (FIG-5394): the
+    /// workbench's cron timer, not lash, fires the tick.
+    pub(crate) async fn emit_cron_tick(
+        &self,
+        session_id: &SessionId,
+        source_key: &str,
+        source: Value,
+        payload: Value,
+        idempotency_key: String,
+    ) -> Result<lash::triggers::TriggerEmitReport, AppError> {
+        // A delivery wakes the session with a run its engine starts on its
+        // own; follow it so the page sees it.
+        turns::watch_session_runs(self, session_id).await;
+        let operation = self
+            .host_operation(format!("trigger:{idempotency_key}"))
+            .await?;
+        let report = self
+            .core
+            .triggers()
+            .emit(
+                lash::triggers::TriggerOccurrenceRequest::new(
+                    CRON_SCHEDULE_SOURCE_TYPE,
+                    source_key,
+                    payload.clone(),
+                    idempotency_key,
+                )
+                .with_source(source)
+                .for_session(session_id),
+                operation,
+            )
+            .await
+            // Audited: trigger delivery consumes per-subscription failures into its report, so emission cannot return a typed session tombstone.
+            .map_err(AppError::internal)?;
+        self.trace_for_session(
+            session_id,
+            "cron.trigger_occurrence",
+            json!({
+                "source_key": source_key,
+                "payload": payload,
+                "occurrence_id": report.occurrence_id,
+                "started_process_ids": report.started_process_ids(),
+                "deliveries": trigger_delivery_trace(&report),
+            }),
+        );
+        Ok(report)
     }
 
     /// Publish the one row a host trigger occurrence shows (FIG-5036).

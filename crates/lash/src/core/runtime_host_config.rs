@@ -72,7 +72,6 @@ impl LashCoreBuilder {
         // theirs from it (FIG-4246).
         core.control.recovery_pass = self.recovery_pass;
         core.control.trigger_route_restorer = self.trigger_route_restorer.take();
-        core.control.trigger_schedules = std::mem::take(&mut self.trigger_schedules);
         if let Some(models) = self.models.clone() {
             core.providers.models = models;
         }

@@ -77,7 +77,7 @@ runs ([guide §1](durable-hosting.md#no-engine-server)).
 | [ ] | `apps/lash-runtime/src/turns.rs:60` | `run_process_start_work_item`, `run_process_cancel_work_item` (`:88`), `run_process_signal_work_item` (`:110`) and `run_trigger_emit_work_item` (`:136`) call `processes()` and `triggers()` under `controller.scoped_effect_controller(..)`. | Call the same facade methods with the core's `ActorContext` (`LashCore::effect_host()`). Start, signal and trigger writes commit with their mailbox wakes. | mechanical |
 | [ ] | `apps/lash-runtime/src/turns.rs:160` | `run_direct_llm_work_item` journals model resolution and the provider call in the Restate object. | Not lash work. It moves with the work-item decision (D1). | decision needed |
 | [ ] | `apps/lash-runtime/src/providers.rs:35` | `resolve_model` journals the model-registry lookup with `run_fallible_json_send`. | For turns, resolve before `send()` and record the choice in the run spec; lash pins the model request before the first byte. | contract change |
-| [ ] | `apps/lash-runtime/src/cron.rs:215` | `LashCronJob`, a Restate object that schedules itself with delayed sends (`:263`, `:278`, `:314`). | Keep it as a Figments object that calls `triggers().emit` (D1), or register the source type's schedule with `LashCoreBuilder::trigger_schedule` so the session that owns each subscription fires its ticks once, at its durable due time (session-owned subscriptions only). | decision needed |
+| [ ] | `apps/lash-runtime/src/cron.rs:215` | `LashCronJob`, a Restate object that schedules itself with delayed sends (`:263`, `:278`, `:314`). | Keep it as a Figments scheduler that calls `triggers().emit` with an idempotency key naming the subscription's tick (D1). Lash has no scheduler and dispatches no trigger occurrence for a host. | decision needed |
 | [ ] | `apps/lash-runtime/src/cron/journaled.rs:114` | Emits the cron occurrence under `RestateRuntimeEffectController::new(ctx)` (also `apps/lash-runtime/src/cron/legacy.rs:80`). | `triggers().emit(request, core.effect_host())`; the occurrence's idempotency key stays the dedupe. | mechanical |
 | [ ] | `apps/lash-runtime/src/restate.rs:32` | Lists active `LashCronJob` invocations through the Restate admin API. | Follows the cron decision (D1). | decision needed |
 | [ ] | `apps/lash-runtime/src/sessions.rs:552` | `request_turn_cancel_with_driver` cancels through `TurnWorkDriver::request_cancel` and reports its `durability_tier`. | Cancel through the facade's session cancel. A turn cancel is session mail and reaches the owning node. There is no tier. | mechanical |
@@ -183,8 +183,9 @@ Figments' own ADRs that describe lash on Restate need superseding notes:
   `LashCronJob` and `LashBootstrap` live in lash-runtime and drive lash inside
   their handlers. Either keep them as Figments objects that only submit to
   lash (`send()`, facade process and trigger calls) and wait on lash's
-  handles, or delete them and submit from the HTTP routes, with cron as a lash
-  trigger schedule (`LashCoreBuilder::trigger_schedule`) or a Figments scheduler. Keeping them keeps a second durable log in
+  handles, or delete them and submit from the HTTP routes, with cron as a
+  Figments scheduler that emits each tick through `triggers().emit`: lash has
+  no scheduler. Keeping them keeps a second durable log in
   front of lash.
 - **D2. PostgreSQL topology** for the lash database: synchronous standby, a
   single primary without failover, or an asynchronous replica with the

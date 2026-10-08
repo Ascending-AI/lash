@@ -39,6 +39,8 @@ pub(crate) struct AppState {
     pub(crate) active_turns: ActiveTurns,
     pub(crate) authorization: WorkbenchAuthorization,
     pub(crate) approvals: approvals::WorkbenchApprovals,
+    /// The `cron.Schedule` timer: the host, not lash, fires each tick.
+    pub(crate) cron: crate::cron::CronTimer,
 }
 
 #[derive(Clone, Debug, Serialize)]

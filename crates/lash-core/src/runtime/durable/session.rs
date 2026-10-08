@@ -37,15 +37,13 @@ use std::sync::Arc;
 use lash_durable::domain::{MailAnswer, MailDomainWrite, ParkEventWrite, TurnWrite};
 use lash_durable::runner::{Activation, Exit, Owned};
 use lash_durable::{
-    ActorTx, CommitLabel, DomainWrite, DueSource, DurableError, DurableInstant, DurableProbe,
-    MailSeq, MailTx, Release,
+    ActorTx, CommitLabel, DomainWrite, DurableError, DurableInstant, DurableProbe, MailTx, Release,
 };
 use lash_sansio::SavedTurn;
 use lash_sansio::llm::types::ProviderRequestBody;
 use tokio_util::sync::CancellationToken;
 
 use super::head::{HeadCache, SessionHead};
-use super::schedules::ScheduledTriggers;
 use super::{phases, turn_cancel};
 use crate::{
     ActorContext, AdmittedScope, Backend, Effect, EffectId, HostTurnProtocol, LlmRequest,
@@ -402,9 +400,6 @@ pub struct SessionActivation {
     backend: Backend,
     services: Arc<dyn TurnServices>,
     probe: Arc<dyn DurableProbe>,
-    /// The deployment's scheduled trigger sources, whose ticks a session
-    /// that subscribes to them fires (FIG-5348).
-    schedules: Option<Arc<ScheduledTriggers>>,
 }
 
 impl std::fmt::Debug for SessionActivation {
@@ -426,17 +421,7 @@ impl SessionActivation {
             backend,
             services,
             probe,
-            schedules: None,
         }
-    }
-
-    /// Fire the ticks of `schedules`' scheduled sources in the sessions that
-    /// subscribe to them (FIG-5348). A deployment that schedules no source
-    /// type keeps none.
-    #[must_use]
-    pub fn with_schedules(mut self, schedules: ScheduledTriggers) -> Self {
-        self.schedules = (!schedules.is_empty()).then(|| Arc::new(schedules));
-        self
     }
 
     /// The backend it runs over.
@@ -455,7 +440,6 @@ impl SessionActivation {
         session: &SessionId,
         release: bool,
         heads: &mut HeadCache,
-        ticks: &mut ScheduleCache,
     ) -> Result<Pass, TurnError> {
         // A turn's scope whose cascade a crash cut short is marked to its end
         // before anything else (L6b).
@@ -487,8 +471,6 @@ impl SessionActivation {
             {
                 Some(SessionCloseExit::Closed) => Ok(Pass::Released),
                 Some(SessionCloseExit::Waiting) => {
-                    // A closing session fires no tick.
-                    cx.clear_due(DueSource::ScheduleTick);
                     let mut tx = cx.begin().await?;
                     tx.give_up(Release::Waiting {
                         next_due: cx.next_due(),
@@ -498,17 +480,6 @@ impl SessionActivation {
                 }
                 None => Ok(Pass::Again),
             };
-        }
-        // The ticks of the session's scheduled sources fire before its own
-        // work, whenever one fell due or its subscriptions may have moved.
-        if let Some(schedules) = &self.schedules
-            && ticks.stale(&tx)
-        {
-            let (now, seen) = (tx.opened_at(), tx.seen());
-            drop(tx);
-            ticks.due = schedules.fire_due(cx, session, now).await?;
-            ticks.read = Some(seen);
-            tx = cx.begin().await?;
         }
         let open = cx.durable_reads()?.turn(session).await?;
         let Some(row) = open else {
@@ -535,15 +506,8 @@ impl SessionActivation {
                     heads.evict();
                     Ok(Pass::Again)
                 }
-                // With nothing else to do, a session that fires ticks waits
-                // for the next one.
                 None if release => {
-                    tx.give_up(match ticks.due {
-                        Some(next_due) => Release::Waiting {
-                            next_due: Some(next_due),
-                        },
-                        None => Release::Idle,
-                    });
+                    tx.give_up(Release::Idle);
                     cx.commit(tx, CommitLabel::SESSION_RELEASE).await?;
                     Ok(Pass::Released)
                 }
@@ -641,27 +605,6 @@ async fn drain_release(cx: &ActorContext) -> Result<Pass, TurnError> {
     Ok(Pass::Released)
 }
 
-/// What a claim knows of its session's scheduled ticks.
-#[derive(Debug, Default)]
-struct ScheduleCache {
-    /// The mailbox position as of the last read of the session's
-    /// subscriptions; `None` before the claim's first. Every subscription
-    /// mutation wakes the session, so a position past it may mean a moved
-    /// subscription.
-    read: Option<MailSeq>,
-    /// The earliest next tick that read found.
-    due: Option<DurableInstant>,
-}
-
-impl ScheduleCache {
-    /// Whether the session's ticks must be fired or read again before the
-    /// pass that opened `tx` goes on.
-    fn stale(&self, tx: &ActorTx) -> bool {
-        self.read.is_none_or(|read| tx.seen() > read)
-            || self.due.is_some_and(|due| due <= tx.opened_at())
-    }
-}
-
 /// What one activation pass left.
 enum Pass {
     /// Run another pass.
@@ -707,8 +650,6 @@ impl Activation for SessionActivation {
         let mut idle_since = None;
         // The owner cache of the session's head, for this claim's epoch.
         let mut heads = HeadCache::default();
-        // What this claim knows of the session's scheduled ticks.
-        let mut ticks = ScheduleCache::default();
         // The passes in a row that failed with an error that does not pass
         // by itself: at the activation-loop budget the session parks
         // (FIG-5230), so a poison session holds no slot.
@@ -724,8 +665,7 @@ impl Activation for SessionActivation {
                 drain_release(&cx).await
             } else {
                 self.services.announce_head(&cx, &session).await;
-                self.pass(&cx, &session, release, &mut heads, &mut ticks)
-                    .await
+                self.pass(&cx, &session, release, &mut heads).await
             };
             if pass.is_ok() {
                 failed_passes = 0;

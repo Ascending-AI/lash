@@ -1,10 +1,11 @@
-//! `cron.Schedule` on the durable substrate (FIG-5348).
+//! `cron.Schedule` ticked by the workbench (FIG-5394).
 //!
-//! A schedule a turn registers fires from its session: the session actor
-//! keeps the schedule's next tick as its due time and emits each tick's
-//! occurrence once. Every law runs the binary's own workbench over a SQLite
-//! memory store whose wall clock stands still until the law moves it, so a
-//! tick happens exactly when the law crosses its boundary.
+//! Lash dispatches no trigger occurrence for its host: the workbench's own
+//! cron timer reads the enabled registrations and emits each tick through
+//! the host trigger emit, under a key naming the session, the source and the
+//! tick. Every law runs the binary's own workbench over a SQLite memory store
+//! whose wall clock stands still until the law moves it, so a tick happens
+//! exactly when the law crosses its boundary.
 
 use super::*;
 use lash::SessionId;
@@ -98,6 +99,10 @@ fn cron_provider(tz: Option<&'static str>) -> ProviderHandle {
 /// schedule with one turn.
 struct CronFixture {
     workbench: Workbench,
+    /// A second workbench over the same store set, when the law runs two
+    /// hosts: each runs its own cron timer.
+    second: Option<Workbench>,
+    provider: ProviderHandle,
     clock: Arc<FrozenClock>,
     session: SessionId,
     /// The tick the clock was last moved to.
@@ -116,7 +121,10 @@ impl CronFixture {
             .await
             .expect("open a SQLite memory store set on the frozen clock"),
         );
-        let workbench = Workbench::builder(provider).stores(stores).build().await;
+        let workbench = Workbench::builder(provider.clone())
+            .stores(stores)
+            .build()
+            .await;
         let session = workbench.state.current_session_id();
         let output = workbench
             .state
@@ -130,6 +138,8 @@ impl CronFixture {
         assert_eq!(output.final_value(), Some(&json!("cron registered")));
         Self {
             workbench,
+            second: None,
+            provider,
             clock,
             session,
             tick_ms: START_MS - START_MS % TICK_MS,
@@ -138,6 +148,25 @@ impl CronFixture {
 
     fn state(&self) -> &AppState {
         &self.workbench.state
+    }
+
+    /// Start a second workbench over the same store set: from now on two
+    /// cron timers emit every tick.
+    async fn with_second_host(mut self) -> Self {
+        self.second = Some(
+            Workbench::builder(self.provider.clone())
+                .stores(Arc::clone(&self.workbench.stores))
+                .build()
+                .await,
+        );
+        self
+    }
+
+    async fn shutdown(self) {
+        if let Some(second) = self.second {
+            second.shutdown().await;
+        }
+        self.workbench.shutdown().await;
     }
 
     fn query(&self) -> Query<SessionQuery> {
@@ -307,13 +336,17 @@ impl CronFixture {
     }
 }
 
-/// CRON1: a `cron.Schedule` registered from a turn fires one occurrence, one
-/// wake delivery and one completed turn per tick; a disabled schedule stays
-/// silent at its next boundary, re-enabling resumes ticks without a second
-/// subscription, and a deleted one stays silent.
+/// CRON1: a `cron.Schedule` registered from a turn, ticked by two workbench
+/// hosts over one store, fires one occurrence, one wake delivery and one
+/// completed turn per tick; a disabled schedule stays silent at its next
+/// boundary, re-enabling resumes ticks without a second subscription, and a
+/// deleted one stays silent.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_registered_cron_schedule_fires_one_turn_per_tick_and_obeys_disable_enable_and_delete() {
-    let mut fixture = CronFixture::registered(cron_provider(Some("UTC"))).await;
+    let mut fixture = CronFixture::registered(cron_provider(Some("UTC")))
+        .await
+        .with_second_host()
+        .await;
     let registered = fixture.subscription().await;
     assert_eq!(registered.subscription_key, SUBSCRIPTION_KEY);
     assert_eq!(fixture.turns().await, 1);
@@ -356,7 +389,7 @@ async fn a_registered_cron_schedule_fires_one_turn_per_tick_and_obeys_disable_en
         .silent_boundary(Some(&registered.subscription_id))
         .await;
     assert_eq!(fixture.fired().await.len(), 3, "three ticks fired in all");
-    fixture.workbench.shutdown().await;
+    fixture.shutdown().await;
 }
 
 /// A schedule disabled while its tick's turn still runs never fires again:
@@ -406,10 +439,10 @@ async fn a_cron_schedule_disabled_while_its_tick_turn_runs_never_fires_again() {
     fixture.workbench.shutdown().await;
 }
 
-/// A deleted session's schedule never fires: its close ends the session
-/// actor that fired the ticks. Its schedule names no time zone, and its tick
-/// still starts its delivery: the occurrence's source omits `tz` rather than
-/// sending `null`.
+/// A deleted session's schedule never fires: its close deletes the session's
+/// registrations, so the timer reads none. Its schedule names no time zone,
+/// and its tick still starts its delivery: the occurrence's source omits `tz`
+/// rather than sending `null`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_deleted_sessions_cron_schedule_never_fires() {
     let mut fixture = CronFixture::registered(cron_provider(None)).await;
@@ -426,4 +459,42 @@ async fn a_deleted_sessions_cron_schedule_never_fires() {
         "a deleted session fires nothing"
     );
     fixture.workbench.shutdown().await;
+}
+
+/// A workbench that boots after ticks passed with no workbench running fires
+/// the latest of them once, and the boundaries after it as they come.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_booting_workbench_fires_the_latest_missed_tick_once() {
+    let mut fixture = CronFixture::registered(cron_provider(Some("UTC"))).await;
+    let registered = fixture.subscription().await;
+    fixture.workbench.state.cron.stop();
+    fixture.settle().await;
+    // Two ticks pass while no timer runs.
+    fixture.cross_boundary();
+    let latest = fixture.cross_boundary();
+    fixture.settle().await;
+    assert!(fixture.fired().await.is_empty(), "no timer, no tick");
+
+    // A booting workbench catches up the latest tick, once.
+    fixture = fixture.with_second_host().await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    while fixture.fired().await.is_empty() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the booting workbench never caught up"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    while fixture.turns().await < 2 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the caught-up tick's wake turn never committed"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    fixture.settle().await;
+    assert_eq!(fixture.fired().await, vec![latest], "one tick, the latest");
+    assert_eq!(fixture.turns().await, 2, "one turn for the caught-up tick");
+    fixture.tick(&registered.subscription_id).await;
+    fixture.shutdown().await;
 }
