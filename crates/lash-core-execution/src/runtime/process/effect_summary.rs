@@ -87,9 +87,10 @@ pub enum ProcessEffectOutcomeClass {
     Cancelled,
 }
 
-/// Strict durable payload for one effect occurrence.
+/// Strict durable payload for one effect occurrence. Only a failure may
+/// carry a failure code; success and cancellation carry none.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "ProcessEffectOccurrenceFields")]
 pub struct ProcessEffectOccurrence {
     pub vocabulary_version: u32,
     pub node_id: String,
@@ -99,6 +100,37 @@ pub struct ProcessEffectOccurrence {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code: Option<lash_sansio::FailureCode>,
     pub replay_key: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProcessEffectOccurrenceFields {
+    vocabulary_version: u32,
+    node_id: String,
+    occurrence: u64,
+    operation: String,
+    outcome_class: ProcessEffectOutcomeClass,
+    code: Option<lash_sansio::FailureCode>,
+    replay_key: String,
+}
+
+impl TryFrom<ProcessEffectOccurrenceFields> for ProcessEffectOccurrence {
+    type Error = &'static str;
+
+    fn try_from(fields: ProcessEffectOccurrenceFields) -> Result<Self, Self::Error> {
+        if fields.outcome_class != ProcessEffectOutcomeClass::Failure && fields.code.is_some() {
+            return Err("only a failed effect occurrence may carry a failure code");
+        }
+        Ok(Self {
+            vocabulary_version: fields.vocabulary_version,
+            node_id: fields.node_id,
+            occurrence: fields.occurrence,
+            operation: fields.operation,
+            outcome_class: fields.outcome_class,
+            code: fields.code,
+            replay_key: fields.replay_key,
+        })
+    }
 }
 
 impl ProcessEffectOccurrence {
@@ -439,6 +471,8 @@ pub(super) fn effect_outcome_payload_schema() -> crate::JsonSchema {
             "vocabulary_version", "node_id", "occurrence", "operation",
             "outcome_class", "replay_key"
         ],
+        "if": { "properties": { "outcome_class": { "const": "failure" } } },
+        "else": { "not": { "required": ["code"] } },
         "properties": {
             "vocabulary_version": vocabulary_version_schema(),
             "node_id": { "type": "string", "minLength": 1 },

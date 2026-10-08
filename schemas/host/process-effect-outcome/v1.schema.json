@@ -2,6 +2,20 @@
   "$id": "https://lash.dev/schemas/process-effect-outcome/v1",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
+  "else": {
+    "not": {
+      "required": [
+        "code"
+      ]
+    }
+  },
+  "if": {
+    "properties": {
+      "outcome_class": {
+        "const": "failure"
+      }
+    }
+  },
   "properties": {
     "code": {
       "minLength": 1,

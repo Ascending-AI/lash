@@ -39,6 +39,59 @@ fn the_append_payload_is_the_serde_encoding_and_round_trips() {
 }
 
 #[test]
+fn only_failed_effects_can_carry_failure_codes() {
+    let fleet = crate::FleetFormat::current();
+    let schema = effect_outcome_payload_schema();
+    for class in [
+        ProcessEffectOutcomeClass::Success,
+        ProcessEffectOutcomeClass::Failure,
+        ProcessEffectOutcomeClass::Cancelled,
+    ] {
+        for code in [
+            None,
+            Some(lash_sansio::FailureCode::lash(
+                lash_sansio::TurnFailureCode::from_wire("trigger_conflict"),
+            )),
+        ] {
+            let allowed = class == ProcessEffectOutcomeClass::Failure || code.is_none();
+            let outcome = ProcessEffectOccurrence::new(
+                "node",
+                1,
+                "triggers.disable",
+                class,
+                code,
+                "effect:node:1",
+                fleet,
+            );
+            let request = outcome.append_request();
+            let mut report = ProcessEffectReport::default();
+            let result = report.fold_event(&request.event_type, &request.payload, fleet);
+            if allowed {
+                result.expect("a valid class-and-code pair must fold");
+                assert_eq!(report.node("node").unwrap().occurrences, vec![outcome]);
+                schema.validate(&request.payload).unwrap();
+            } else {
+                assert!(
+                    matches!(result, Err(ProcessEffectReportError::InvalidPayload(_))),
+                    "{class:?} must refuse a failure code: {result:?}"
+                );
+                assert_eq!(
+                    report.nodes().len(),
+                    0,
+                    "an invalid event changes no report"
+                );
+                assert!(
+                    serde_json::from_value::<ProcessEffectOccurrence>(request.payload.clone())
+                        .is_err(),
+                    "direct deserialization must enforce the same rule"
+                );
+                assert!(schema.validate(&request.payload).is_err());
+            }
+        }
+    }
+}
+
+#[test]
 fn decode_refuses_other_versions_unknown_fields_and_uncapped_occurrences() {
     let mut payload = occurrence("node", 1).append_request().payload;
     payload["vocabulary_version"] = serde_json::json!(0);
