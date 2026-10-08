@@ -21,7 +21,7 @@ registered (ADR 0126), and a fact with no command never changes.
 
 ### Read the recorded facts
 
-`RlmSessionConfig` carries `termination` as an `Option`. `None` means the session records no statement for that fact, which is
+`RlmRecordedConfig` carries `termination` as an `Option`. `None` means the session records no statement for that fact, which is
 different from explicitly recording its default value. Read it through
 `RlmSessionReadViewExt::rlm_config` or `RlmSessionExt::rlm_config`.
 
@@ -65,9 +65,10 @@ channel and the dialect have no command, so a
 transaction cannot name them: a host that states one is refused
 `UnknownCommand` at submission. The owner's validation refuses a candidate
 that moves the recorded channel or dialect with `RlmConfigRefusal::PinChanged`.
-A run cannot name them either: its options are the owner's typed
-`RlmTurnOptions`, which the owner applies over the recorded namespace, and a
-payload that states a pin or the prompt does not decode (FIG-4652).
+A run may state termination through `RlmRunOptions`, which the owner applies
+over the recorded namespace. Its options have no field for the channel,
+dialect or behaviour pins; a payload that states a pin or the prompt does
+not decode (FIG-4652).
 Refusals travel as data in the transaction's `Refused` outcome, where only the
 `owner` reason carries the owner's refusal type; error prose is presentation.
 

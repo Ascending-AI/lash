@@ -9,9 +9,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-serde_json = "1"
 lash-internal-sansio = { path = "../crates/lash-sansio" }
-lash-internal-lashlang = { path = "../crates/lashlang" }
 
 [[bin]]
 name = "attachment_metadata"

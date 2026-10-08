@@ -5,20 +5,6 @@
 //! context: no engine trait, no controller trait, no default bodies. The
 //! context's core ([`ActorContext::begin`], [`ActorContext::commit`], the
 //! clock, the cancel token, the replay probe and the due times) is real.
-//! What each runtime lane builds on it lives in that lane's file, as
-//! [`ActorContext`] methods and free functions whose bodies are tagged
-//! `todo!()`s until the lane fills them:
-//!
-//! | File | Owner |
-//! |---|---|
-//! | `core.rs` | I0 (real) |
-//! | [`turn`] | L3 |
-//! | [`round`] | V0, then L4 |
-//! | [`ingress`] | L3s |
-//! | [`waits`], `wait_effects.rs` | L5 |
-//! | [`process`] | L6 |
-//! | [`vm`] | V0, then L7 |
-//! | [`projection`] | L7p |
 
 mod core;
 pub mod ingress;

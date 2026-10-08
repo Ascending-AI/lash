@@ -28,10 +28,6 @@ The trace-parent order is:
 3. a fallback derived from a real attributed turn;
 4. no parent when none of those facts exists.
 
-A known trigger cause includes occurrence id, subscription id, subscription incarnation, and
-subscription revision. Partial causes remain partial; the verifier must not fabricate missing
-fields.
-
 ## Safety and stop conditions
 
 1. Work in the owned Kiln fork. Use the exact Buck2 label for each deterministic
@@ -46,8 +42,8 @@ fields.
    gate and named by `LASH_POSTGRES_DATABASE_URL`.
 3. Do not run schema probes against a user or shared database. Do not change schema stamps to
    make an incompatible store open.
-4. Stop on any local/controller/store call after a wrong-scope refusal, any invented session id,
-   any missing known trigger field, or any difference between the core trace parent.
+4. Stop on any local/controller/store call after a wrong-scope refusal, any invented session id
+   or any difference between the core trace parent.
 
 ## Phase 1 — Representation and admission
 
@@ -55,17 +51,12 @@ From the repository root:
 
 ```sh
 . ./env.sh
-kiln test --test_output=all //crates/lash-core-execution:lash-core-execution__unit_test --test_arg=scoped_controller_refuses_wrong_scope_before_controller_or_local_execution
-kiln test --test_output=all //crates/lash-core-execution:lash-core-execution__unit_test --test_arg=task_proxy_refuses_wrong_scope_before_handoff
 kiln test --test_output=all //crates/lash-sansio:lash-sansio__unit_test --test_arg=same_replay_key_in_distinct_scopes_has_distinct_graph_identity
-kiln test --test_output=all //crates/lash-core-execution:lash-core-execution__unit_test --test_arg=effect_header_round_trips_without_universal_subject_or_replay_slots
 kiln test --test_output=all //crates/lash-core-execution:lash-core-execution__unit_test --test_arg=legacy_universal_effect_header_is_refused
 ```
 
-The first two tests must refuse before the wrapped controller, local executor or task
-handoff. The graph test must produce distinct addresses for identical local replay keys in
-different scopes. The header tests must show a required `address` and no
-universal `subject` or optional duplicate `replay` slot, while refusing the old shape.
+The graph test must produce distinct addresses for identical local replay keys in
+different scopes. The header test must refuse the old universal shape.
 
 For an owned PostgreSQL gate, let the repository's service owner provide the database rather
 than hand-rolling a container, and run it inside `kiln gate` so the container lands in your
@@ -83,30 +74,15 @@ kiln gate lash <fork> -- scripts/ci/with-service.sh pg -- \
 
 ```sh
 kiln test --test_output=all //crates/lash-core-execution:lash-core-execution__unit_test --test_arg=parentless_effect_envelopes_use_process_originator_not_ambient_session
-kiln test --test_output=all //crates/lash-lashlang-runtime:lash-lashlang-runtime__unit_test --test_arg=process_trace_session_attribution_comes_only_from_a_session_originator
 kiln test --test_output=all //crates/lash-core-execution:lash-core-execution__unit_test --test_arg=session_node_identity_is_structural_and_missing_identity_is_refused
 ```
 
-Require foreground session effects to retain their real session. A session-origin process must
-carry the origin session. A host-origin process must remain sessionless in both its effect header
-and Lashlang graph identity even when the execution service has an ambient session capability.
+A host-origin process must remain sessionless in its effect header even when the
+execution service has an ambient session capability.
 A session-node causal fact must carry its own structural session id and refuse the former shape
 that omitted it.
 
-## Phase 3 — Cause and shared trace projection
-
-```sh
-kiln test --test_output=all //crates/lash-core-execution:lash-core-execution__unit_test --test_arg=turn_keeps_causal_parent_when_present
-```
-
-(`same_replay_key_in_distinct_scopes_has_distinct_graph_identity` belongs to Phase 1 and is
-run there; repeating it here under a second rationale inflates the phase count without adding
-a witness.)
-
-Inspect failures as identity failures. Do not accept matching display labels as proof. The core projection must retain every known trigger field and use the scoped
-causal graph address while retaining unrelated base trace metadata.
-
-## Phase 4 — Identity grammar and cutover
+## Phase 3 — Identity grammar and cutover
 
 ```sh
 kiln test --test_output=all //crates/lash-sansio:lash-sansio__unit_test --test_arg=journal_identity_v2_bytes_remain_unchanged_for_all_scope_variants
@@ -161,6 +137,6 @@ procedure, while local verification may recreate only stores owned by the curren
 
 Record the exact commit, command, exit status, and bounded terminal log for each phase. A pass
 requires scope mismatch before side effects, distinct scoped addresses, truthful optional
-attribution, complete known cause, matching core parent selection, exact owner grammar,
+attribution, matching core parent selection, exact owner grammar,
 and explicit old-format refusal. Preserve the logs with the delivery evidence; never substitute
 source inspection for a failed command.

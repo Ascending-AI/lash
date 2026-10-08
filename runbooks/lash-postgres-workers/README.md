@@ -217,8 +217,6 @@ not failover rows; each names where its property is held now.
 | Old row | Disposition |
 |---|---|
 | `e2e-main`, `e2e-main-wake` | a turn that commits and wakes its session: every turn case here; L9h (FIG-5186) boots example hosts on the durable substrate |
-| `e2e-trigger-setup`, `e2e-trigger-emit` | triggers: L6's trigger follow-up (`fig-5175-trigger`, start in the reservation transaction) and L9h |
-| `e2e-signal-suspend-setup`, `e2e-signal-first`, `e2e-signal-second` | process signals as mail (`EngineEvent::Signal`): L6 (FIG-5175) and L7b (FIG-5198) |
 | `e2e-async-completion`, `e2e-durable-input`, `e2e-parent-durable-input-after-child` | completion keys and waits: `an_unresolved_wait_suspends_and_resumes_on_resolution`, `a_completion_before_the_await_is_already_resolved`, `the_first_resolution_wins` (wait laws, L5) |
 | `e2e-process-llm-query` | a process step through the admitted-execution primitive: `a_process_cut_at_every_label_runs_no_step_before_its_state_commits` (`process_crash_proof`) |
 | `e2e-tool-batch` | rounds: `round_crash_matrix` (L4, FIG-5174) |

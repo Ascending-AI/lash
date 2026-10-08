@@ -14,7 +14,7 @@ is `Option<CacheControlDialect>`. `None` emits no Chat Completions
 tools, and explicit conversation breakpoints, and supports the one-hour TTL.
 `Gemini` emits one ephemeral breakpoint without a TTL, choosing the last
 explicit breakpoint or a trailing text block. The capability travels with the
-model through turn, direct, and remote requests under ADR 0026.
+model through turn and direct requests under ADR 0026.
 
 Session affinity is endpoint compatibility data.
 `OpenAiCompat.cache_session_affinity` defaults to disabled. Enabling it emits

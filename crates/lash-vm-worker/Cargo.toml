@@ -57,7 +57,6 @@ lash-vm-worker = { package = "lash-internal-vm-worker", path = ".", features = [
 lashlang = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-tokio-util = { workspace = true }
 
 [[test]]
 name = "pool_laws"

@@ -162,18 +162,6 @@ impl CurrentOwnerCapability {
             .is_some_and(|session| session.session_id == *session_id)
     }
 
-    /// The runtime store of the session these services resolve; a process
-    /// runtime has none.
-    #[expect(
-        dead_code,
-        reason = "L6 (FIG-5175): the engine process drive reads it; ProcessEngine::run, its only reader, is deleted (I0)"
-    )]
-    pub(in crate::runtime) fn session_runtime_store(&self) -> Option<Arc<dyn crate::RuntimeStore>> {
-        self.session()
-            .and_then(|session| session.store.as_ref())
-            .map(|store| Arc::clone(store.store()))
-    }
-
     /// Who a dispatch built from these services runs for: the session on its
     /// current agent frame, or the process.
     pub(in crate::runtime) fn execution_owner(

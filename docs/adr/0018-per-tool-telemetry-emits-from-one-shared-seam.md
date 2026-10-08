@@ -8,7 +8,7 @@ accepted
 
 Per-tool reporting originates in shared tool execution. `emit_tool_call_started_trace` and `emit_tool_call_completed_trace` emit typed trace events; the same tool-execution path emits `TurnEvent::ToolCallStarted` and `ToolCallCompleted`. Standard native calls and tools invoked during code execution use that path, producing one start/completion pair for each completed call. Identity, provider correlation and issuing language-node containment remain explicit.
 
-Consumers use typed events. `TraceEvent::kind()` defines trace tag strings, the OpenTelemetry sink maps typed events to spans, and exhaustive remote conversion handles each `TurnEvent` variant. `TurnEvent` is closed so a new variant requires updating its exhaustive consumers. There is no exhaustive turn-event-to-trace conversion; the trace and turn vocabularies have their own producers.
+Consumers use typed events. `TraceEvent::kind()` defines trace tag strings, the OpenTelemetry sink maps typed events to spans. `TurnEvent` is closed so a new variant requires updating its exhaustive consumers. There is no exhaustive turn-event-to-trace conversion; the trace and turn vocabularies have their own producers.
 
 ## Why and alternatives
 

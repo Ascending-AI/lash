@@ -43,8 +43,6 @@ lash-protocol-standard = { workspace = true }
 lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-rlm-types = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
-lash-typescript = { workspace = true }
-lash-vm-broker = { workspace = true }
 lashlang = { workspace = true, features = ["testing"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -56,7 +54,6 @@ tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync
 [dev-dependencies]
 lash-s3-store = { workspace = true, features = ["testing"] }
 lash-conformance.workspace = true
-insta = "1"
 lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-provider-anthropic = { workspace = true, features = ["testing"] }
 lash-provider-google = { workspace = true, features = ["testing"] }

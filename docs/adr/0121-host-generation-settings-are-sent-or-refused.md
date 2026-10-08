@@ -83,7 +83,7 @@ dialect can move an unsupported selection past local validation without
 honoring it.
 
 A closed, serializable dialect travels with the host's route configuration.
-A custom trait object cannot supply the same durable and remote contract.
+A custom trait object cannot supply the same durable contract.
 
 **Generation options resolve once, against the wire.**
 `resolve_generation_policy` takes the request, the provider kind and a

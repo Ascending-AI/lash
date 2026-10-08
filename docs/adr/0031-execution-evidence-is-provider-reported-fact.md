@@ -30,7 +30,7 @@ An interrupted attempt retains its typed usage disposition and any partial
 usage in the call result. A host settles receipts and retains outstanding
 billing evidence at the provider boundary under ADR 0127.
 
-Turn, trace and remote projections carry execution evidence and usage
+Turn and trace projections carry execution evidence and usage
 dispositions. Higher-level model attribution remains host policy under
 ADR 0033.
 

@@ -71,12 +71,6 @@ activity and before an after-step stop at that boundary. It is live
 observation, not durable history. Hosts use it with ADR 0040's correlation
 retractions to identify an immediate stop's uncommitted tail.
 
-The remote cancellation DTOs carry the same request mode and terminal
-checkpoint evidence. Their conversions preserve `Immediate`, `AfterStep`,
-`honoured_after_step`, and the distinct `Escalated` receipt outcome through
-JSON transport. These shapes change in place under the pre-1.0 version
-freeze (FIG-3846).
-
 ## A queued input: withdrawn before its run opens
 
 A host addresses a turn whose input is still queued by the run that input

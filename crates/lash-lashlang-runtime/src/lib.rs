@@ -109,20 +109,6 @@ pub fn lashlang_surface_extension(
 /// each dialect spells in its own syntax (ADR 0096).
 pub trait ToolBindingResolutionExt {
     fn executable_for(&self, tool_name: &str) -> Result<ResolvedToolBinding, ToolBindingError>;
-
-    fn required_for_remote(
-        manifest: &lash_core::ToolManifest,
-    ) -> Result<ResolvedToolBinding, ToolBindingError>
-    where
-        Self: Sized,
-    {
-        required_tool_executable(manifest)
-    }
-
-    fn required_executable_for_remote(
-        &self,
-        tool_name: &str,
-    ) -> Result<ResolvedToolBinding, ToolBindingError>;
 }
 
 impl ToolBindingResolutionExt for ToolBinding {
@@ -154,13 +140,6 @@ impl ToolBindingResolutionExt for ToolBinding {
             authority_type,
             aliases: self.aliases.clone(),
         })
-    }
-
-    fn required_executable_for_remote(
-        &self,
-        tool_name: &str,
-    ) -> Result<ResolvedToolBinding, ToolBindingError> {
-        self.executable_for(tool_name)
     }
 }
 

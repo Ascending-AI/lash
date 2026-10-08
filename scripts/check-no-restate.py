@@ -78,10 +78,6 @@ PERMANENT = (
 )
 
 PENDING = (
-    Allowance(("tools/buck2/native-tools-lock.json",
-                "tools/buck2/bootstrap_native_tools.py", "tools/buck2/README.md"),
-               "the native engine-server pin only the deleted workbench E2E driver built "
-               "is unbuilt; it goes with the build-tool pins it sits beside"),
     Allowance(("tools/buck2/test-shard-weights.json",),
                "a measured table nobody hand-edits; the next `tools/buck2/shard_weights.py "
                "--refresh` drops the deleted case's name",

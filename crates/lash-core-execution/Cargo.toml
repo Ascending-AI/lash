@@ -54,10 +54,6 @@ futures-util = { workspace = true }
 tracing-subscriber = { workspace = true, optional = true }
 
 [dev-dependencies]
-# The process worker a double serves process segments from, for a kernel law
-# whose process intents reach the engine's process workflow. The same
-# dev-dependency cycle as the double's, and version-less for the same reason.
-lash-core-worker = { package = "lash-internal-core-worker", path = "../lash-core-worker" }
 lash-conformance = { workspace = true }
 # The guarded-surface laws (FIG-3802) this crate runs over its own decoders.
 lash-core-store = { workspace = true, features = ["testing"] }

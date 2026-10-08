@@ -54,8 +54,6 @@ lash-lashlang-runtime = { workspace = true, features = ["testing"] }
 lash = { workspace = true, features = ["postgres"] }
 lash-conformance = { workspace = true, features = ["lashlang"] }
 lash-core = { workspace = true, features = ["testing"] }
-# The process worker a turn runner lends the tier's process workflow.
-lash-core-worker = { workspace = true }
 lashlang = { workspace = true, features = ["testing"] }
 # Integration tests need this crate's own `testing` seams (the conformance
 # factory and probe impls), the same way lash-sqlite-store wires itself.

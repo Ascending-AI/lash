@@ -68,14 +68,6 @@
       "required": [
         "libnss_wrapper.so"
       ]
-    },
-    "restate": {
-      "version": "1.7.13",
-      "url": "https://github.com/restatedev/restate/releases/download/v1.7.13/restate-server-x86_64-unknown-linux-musl.tar.xz",
-      "sha256": "5429b216b68f3fa52b7f0e6627a2c2a86fc0c75d19b1e152cd2e7dcd8bab4c82",
-      "required": [
-        "restate-server"
-      ]
     }
   }
 }

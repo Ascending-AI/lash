@@ -38,7 +38,7 @@ keeps one verified copy of each for every checkout of this user:
 | `buck2` | archive and executable checksums in `pins.json` | `.buck2/bin/buck2`, cloned |
 | `prelude` | Buck2 executable checksum and `prelude_overlay.py` | `.buck2/prelude`, cloned; its receipt is written locally |
 | `rust` | `toolchain-lock.json` | `tools/buck2/toolchains/rust-files`, cloned |
-| `native-<tool>` | the tool's archive record in `native-tools-lock.json` (LLVM, headers, Node, PostgreSQL, Restate, `nss_wrapper`) | `.buck2/native/<tool>`, cloned; `BUCK` and the receipt are written locally |
+| `native-<tool>` | the tool's archive record in `native-tools-lock.json` (LLVM, headers, Node, PostgreSQL, `nss_wrapper`) | `.buck2/native/<tool>`, cloned; `BUCK` and the receipt are written locally |
 | `reindeer` | the asset in `reindeer-lock.json` | `tools/buck2/bin/reindeer`, cloned |
 | `vendor` | the checksums `bootstrap_vendor.py` already records | `vendor`, a symlink to the entry |
 

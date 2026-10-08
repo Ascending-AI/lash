@@ -21,14 +21,8 @@ lashlang = ["lashlang/testing"]
 [dependencies]
 lashlang.workspace = true
 lash-core = { workspace = true, features = ["testing"] }
-# A batch issued from inside a process only reaches the leaves if something
-# executes the registry. The durable process worker is that something, and it is
-# the same one a deployment runs; the law stands one up for the producers that
-# need it (FIG-3400).
+# Enable the worker testing surface in the workspace feature graph.
 lash-core-worker = { workspace = true, features = ["testing"] }
-# The frame-open laws replay the production compactor and overflow recovery,
-# not only the laws' synthetic compactor (FIG-4134).
-lash-plugin-standard-compaction.workspace = true
 lash-sansio = { workspace = true, features = ["schema-validation"] }
 async-trait.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
@@ -47,4 +41,3 @@ tracing.workspace = true
 # The store-contract self-tests replay their cases against a real store: a
 # SQLite memory store set.
 lash-sqlite-store.workspace = true
-tempfile.workspace = true

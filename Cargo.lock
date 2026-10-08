@@ -33,7 +33,6 @@ dependencies = [
  "dotenvy",
  "futures-util",
  "http",
- "http-body-util",
  "lash-runtime",
  "lash-sim",
  "percent-encoding",
@@ -43,7 +42,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "sqlx",
  "tempfile",
  "thiserror",
  "tokio",
@@ -1541,7 +1539,6 @@ dependencies = [
  "http",
  "http-body",
  "pin-project-lite",
- "tokio",
 ]
 
 [[package]]
@@ -2003,7 +2000,6 @@ dependencies = [
  "lash-internal-core",
  "lash-internal-core-worker",
  "lash-internal-lashlang",
- "lash-internal-plugin-standard-compaction",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "pretty_assertions",
@@ -2011,7 +2007,6 @@ dependencies = [
  "rmp-serde",
  "serde",
  "serde_json",
- "tempfile",
  "tokio",
  "tokio-util",
  "tracing",
@@ -2033,14 +2028,11 @@ dependencies = [
  "lash-internal-core-ids",
  "lash-internal-core-llm",
  "lash-internal-core-store",
- "lash-internal-core-worker",
  "lash-internal-durable",
- "lash-internal-postgres-store",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-trace",
  "libc",
- "opentelemetry_sdk",
  "rmp-serde",
  "schemars",
  "serde",
@@ -2058,12 +2050,10 @@ dependencies = [
 name = "lash-internal-core-effect"
 version = "0.0.0-dev"
 dependencies = [
- "async-trait",
  "lash-internal-core-store",
  "lash-internal-sansio",
  "serde",
  "serde_json",
- "tokio-util",
 ]
 
 [[package]]
@@ -2079,7 +2069,6 @@ dependencies = [
  "lash-internal-core-ids",
  "lash-internal-core-llm",
  "lash-internal-core-store",
- "lash-internal-core-worker",
  "lash-internal-durable",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
@@ -2149,13 +2138,11 @@ dependencies = [
  "lash-internal-sansio",
  "lash-internal-trace",
  "lash-internal-vm-protocol",
- "proptest",
  "rmp-serde",
  "schemars",
  "serde",
  "serde_bytes",
  "serde_json",
- "tempfile",
  "thiserror",
  "tokio",
  "tracing",
@@ -2211,8 +2198,6 @@ dependencies = [
  "lash-internal-provider-anthropic",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
- "lash-internal-typescript",
- "lash-internal-vm-broker",
  "lash-internal-vm-client",
  "lash-internal-vm-protocol",
  "lash-runtime",
@@ -2278,7 +2263,6 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "chrono",
- "lash-internal-conformance",
  "lash-internal-core",
  "lash-internal-core-execution",
  "lash-internal-core-worker",
@@ -2392,7 +2376,6 @@ dependencies = [
  "lash-internal-conformance",
  "lash-internal-core",
  "lash-internal-core-execution",
- "lash-internal-core-worker",
  "lash-internal-durable",
  "lash-internal-lashlang",
  "lash-internal-lashlang-runtime",
@@ -2442,11 +2425,8 @@ dependencies = [
  "lash-internal-conformance",
  "lash-internal-core",
  "lash-internal-core-store",
- "lash-internal-core-worker",
  "lash-internal-lashlang",
  "lash-internal-lashlang-runtime",
- "lash-internal-plugin-process-controls",
- "lash-internal-postgres-store",
  "lash-internal-render",
  "lash-internal-rlm-types",
  "lash-internal-sansio",
@@ -2465,7 +2445,6 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "tokio-util",
 ]
 
 [[package]]
@@ -2476,7 +2455,6 @@ dependencies = [
  "insta",
  "lash-internal-conformance",
  "lash-internal-core",
- "lash-internal-core-worker",
  "lash-internal-postgres-store",
  "lash-internal-render",
  "lash-internal-sansio",
@@ -2487,7 +2465,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
- "tokio-util",
 ]
 
 [[package]]
@@ -2519,7 +2496,6 @@ dependencies = [
  "lash-internal-sansio",
  "lash-runtime",
  "reqwest",
- "serde",
  "serde_json",
  "tokio",
  "uuid",
@@ -2605,7 +2581,6 @@ dependencies = [
  "lash-internal-core",
  "lash-internal-core-execution",
  "lash-internal-core-store",
- "lash-internal-core-worker",
  "lash-internal-durable",
  "lash-internal-lashlang",
  "lash-internal-lashlang-runtime",
@@ -2622,7 +2597,6 @@ dependencies = [
  "tokio",
  "tokio-rusqlite",
  "tracing",
- "tracing-subscriber",
  "uuid",
 ]
 
@@ -2720,7 +2694,6 @@ dependencies = [
  "syn 2.0.118",
  "thiserror",
  "tokio",
- "uuid",
 ]
 
 [[package]]
@@ -2760,7 +2733,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
- "tokio-util",
 ]
 
 [[package]]
@@ -2769,7 +2741,6 @@ version = "0.0.0-dev"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64 0.23.1",
  "chrono",
  "clap",
  "crc32fast",
@@ -2778,11 +2749,9 @@ dependencies = [
  "flate2",
  "futures-util",
  "jsonschema",
- "lash-internal-conformance",
  "lash-internal-core",
  "lash-internal-core-execution",
  "lash-internal-core-store",
- "lash-internal-core-worker",
  "lash-internal-durable",
  "lash-internal-lashlang",
  "lash-internal-lashlang-runtime",
@@ -2796,14 +2765,12 @@ dependencies = [
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-typescript",
- "lash-internal-vm-broker",
  "lash-internal-vm-client",
  "lash-internal-vm-protocol",
  "lash-internal-vm-worker",
  "lash-runtime",
  "libc",
  "rand_chacha 0.9.0",
- "reqwest",
  "rmp-serde",
  "schemars",
  "serde",
@@ -2885,7 +2852,6 @@ dependencies = [
  "chrono",
  "delegation",
  "fastrand",
- "insta",
  "lash-internal-conformance",
  "lash-internal-core",
  "lash-internal-core-execution",
@@ -2907,8 +2873,6 @@ dependencies = [
  "lash-internal-s3-store",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
- "lash-internal-typescript",
- "lash-internal-vm-broker",
  "lash-internal-vm-client",
  "lash-runtime",
  "rmp-serde",

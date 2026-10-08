@@ -35,8 +35,6 @@ default = []
 # The recording backend a storage-only test builds over a bare store set
 # (D1 F3).
 lash-conformance = { workspace = true }
-# The durable process worker the intents scenario installs on the double.
-lash-core-worker = { workspace = true }
 insta = "1"
 # Zero-dependency attribute crate providing `#[mutants::skip]`. Used only under
 # `cfg(test)`, to exempt one provably equivalent mutant from the Confidence
@@ -49,4 +47,3 @@ lash-sqlite-store = { workspace = true }
 lash-postgres-store = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
-tokio-util = { workspace = true }

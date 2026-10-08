@@ -906,7 +906,7 @@ features = []
 package = "http-body-util"
 version = "=0.1.3"
 default-features = false
-features = ["channel", "default"]
+features = ["default"]
 
 [dependencies.p0150]
 package = "httparse"

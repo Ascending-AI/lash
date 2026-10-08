@@ -58,8 +58,6 @@ lash-lashlang-runtime = { workspace = true, features = ["testing"] }
 lash.workspace = true
 lash-conformance = { workspace = true, features = ["lashlang"] }
 lash-core = { workspace = true, features = ["testing"] }
-# The process worker a turn runner lends the tier's process workflow.
-lash-core-worker = { workspace = true }
 # The guarded-surface laws (FIG-3802) this crate runs over its own decoders.
 lash-core-store = { workspace = true, features = ["testing"] }
 lashlang = { workspace = true, features = ["testing"] }
@@ -67,7 +65,6 @@ lash-sqlite-store = { package = "lash-internal-sqlite-store", path = ".", featur
 rusqlite = { version = "0.37", features = ["bundled", "trace"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
-tracing-subscriber = { workspace = true }
 
 
 [[test]]

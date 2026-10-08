@@ -16,11 +16,11 @@
 turn, deliver that exact content-addressed attachment to the model, and retrieve identical
 bytes after replacing the web process.
 
-**Contract cited.** Lash's host turn contract accepts MIME-tagged attachment sources.
-The workbench deliberately remains PNG-only: it creates an inline `image/png` source,
-runtime [`normalize_input_items`](../../crates/lash-core/src/runtime/turn_loop/prepare.rs) persists those
-bytes, and the provider adapter materializes the resulting stored source. Generic document
-support is available in Lash but is not enabled by this workbench surface.
+**Contract cited.** Lash's host turn contract accepts durable attachment refs.
+The workbench deliberately remains PNG-only: the host stores the `image/png` bytes
+before sending their ref, and the attachment store delivers the ref in the form
+the provider adapter requests. Generic document support is available in Lash but
+is not enabled by this workbench surface.
 
 This PNG boundary belongs to the **WORKBENCH upload surface**. Attachment
 acceptance is host-owned `LlmProfileCapability::attachment_acceptance` data, including
@@ -49,12 +49,10 @@ cross-surface identity, not the quality of the model's image description.
    does not prove the affordance.
 2. **One id across host surfaces.** The upload response's `attachment.id`, the next
    `/api/turn.attachment_id`, the retrieval response's `x-lash-attachment-id`, and the
-   retrieval URL must agree. Durable effects normalize inline bytes to a stored source
-   before `llm_call_started`, so correlate three trace records: the upload event carries
-   id/byte length/MIME, `llm_call_started` carries the stored source/MIME and the exact
-   reference in the rendered prompt, and `provider_event` (direction `request`) carries the serialized wire
-   body's length and SHA-256. `bytes_sha256`/`bytes_len` on a trace attachment are
-   inline-source fields and are intentionally absent after this normalization.
+   retrieval URL must agree. The host stores the bytes before sending the ref.
+   Correlate the upload event's id, byte length and MIME with the attachment ref in
+   `llm_call_started` and the serialized wire body's length and SHA-256 in
+   `provider_event` (direction `request`).
 3. **Compare bytes, not availability.** Save the source and both retrievals; SHA-256 and
    byte length must match exactly before and after restart.
 4. **Replace the web process.** Run `bash scripts/agent-workbench-dev.sh restart --port
@@ -145,7 +143,7 @@ Complete the three-layer attachment cross-check before continuing:
    length and content must match the source exactly.
 
 From the matching trace turn, save the `llm_call_started` record as
-`02-provider-request.json`. Require one request attachment with `source: stored` and MIME
+`02-provider-request.json`. Require one request attachment with a durable attachment ref and MIME
 `image/png`, and require the request's rendered attachment descriptor to contain the upload
 id as its `reference`. Save the matching upload record as `02-upload-trace.json` — it is a
 `type: "custom"` record with `name: "agent_workbench.api.attachment.uploaded"`, and its
@@ -158,7 +156,7 @@ its fields are nested under `event` (`raw_len`, `raw_sha256`,
 `raw_json_omitted_reason`). On a real attachment turn the body itself is **expected to be
 absent** with `raw_json_omitted_reason: "size_limit"`, so require a positive `raw_len` and
 a non-empty `raw_sha256` rather than a serialized body. These correlated records prove the exact
-stored source reached a real provider request while the upload/retrieval/blob checks prove
+stored attachment reached a real provider request while the upload/retrieval/blob checks prove
 its content facts. A plausible visual answer without this trace chain is not a pass. Save
 `/api/state` as `02-state.json` and screenshot the settled scrolled transcript as
 `02-referenced-turn.png`.

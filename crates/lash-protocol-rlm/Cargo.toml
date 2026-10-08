@@ -35,7 +35,6 @@ lash-vm-protocol = { workspace = true }
 lash-trace = { workspace = true }
 lash-sansio = { workspace = true }
 lash-core = { workspace = true }
-lash-core-worker = { workspace = true }
 lash-lashlang-runtime = { workspace = true }
 lash-typescript = { workspace = true }
 lashlang = { workspace = true }
@@ -52,17 +51,14 @@ tokio = { workspace = true, features = ["rt", "sync"] }
 [dev-dependencies]
 lash-vm-client = { workspace = true, features = ["testing"] }
 lash-conformance = { workspace = true }
-lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-core = { workspace = true, features = ["testing"] }
 # The guarded-surface laws (FIG-3802) this crate runs over its own decoders.
 lash-core-store = { workspace = true, features = ["testing"] }
-lash-plugin-process-controls = { workspace = true }
 lashlang = { workspace = true, features = ["testing"] }
 lash-sansio = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
 insta = "1"
 tempfile = { workspace = true }
-tokio-util = { workspace = true }
 
 # The build script parses this crate's own `src/executor/state.rs` with `syn`
 # and emits the declaration order of the two types declared there. It must not

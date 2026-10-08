@@ -8387,10 +8387,7 @@ third_party_rust_library(
         "CARGO_PKG_VERSION_PATCH": "3",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = [
-        "channel",
-        "default",
-    ],
+    features = ["default"],
     platform = {
         "linux-x86_64": dict(),
     },
@@ -8401,7 +8398,6 @@ third_party_rust_library(
         ":http-1",
         ":http-body-1",
         ":pin-project-lite-0.2",
-        ":tokio-1",
     ],
 )
 

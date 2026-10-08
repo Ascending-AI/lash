@@ -834,20 +834,6 @@ impl AppError {
         }
     }
 
-    /// A request that needs the durable engine, which serves nothing until
-    /// L3 (FIG-5172) lands. Only the H2 receiver stub still answers it.
-    #[cfg(feature = "e2e-tools")]
-    pub(crate) fn no_engine(what: &str) -> Self {
-        Self {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            message: format!(
-                "{what} needs the durable engine, which serves nothing until L3 (FIG-5172)"
-            ),
-            verdict: AppErrorVerdict::Terminal,
-            retirement: None,
-        }
-    }
-
     pub(crate) fn not_found(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::NOT_FOUND,

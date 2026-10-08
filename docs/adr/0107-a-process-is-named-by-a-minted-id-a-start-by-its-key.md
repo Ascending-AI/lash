@@ -78,7 +78,7 @@ A recorded start is `process:start:{start key}`. Its staging referrer is
 recorded result contains the minted id and `Created` or `Existing`, so a
 resumed caller reads the disposition the first execution observed.
 
-Host and remote start receipts carry the id, key and disposition. A repeat
+Host start receipts carry the id, key and disposition. A repeat
 that returns `Existing` releases its staged content rather than adopting it
 into the retained process.
 

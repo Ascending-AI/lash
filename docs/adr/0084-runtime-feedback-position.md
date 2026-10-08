@@ -68,7 +68,7 @@ authority. Model-name capability heuristics cannot describe a host's route.
 
 ## Consequences
 
-Remote and durable request carriers preserve the explicit instruction field.
+Durable request carriers preserve the explicit instruction field.
 Composition tracing includes instruction presence, text, and the host instruction
 role. Runtime feedback remains conversation evidence and participates in cache
 prefix comparison.

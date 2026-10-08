@@ -40,8 +40,6 @@ lash-provider-anthropic = { workspace = true }
 lash-plugin-standard-compaction = { workspace = true }
 lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
-lash-typescript = { workspace = true }
-lash-vm-broker = { workspace = true }
 lash-vm-client = { workspace = true }
 lash-vm-protocol = { workspace = true }
 lashlang = { workspace = true, features = ["testing"] }

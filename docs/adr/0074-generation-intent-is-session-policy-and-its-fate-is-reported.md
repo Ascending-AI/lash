@@ -56,7 +56,7 @@ session uses an explicit replacement or update to clear incompatible intent.
 
 `GenerationReceipt` joins resolved intent with adapter emission evidence.
 `Applied` means sent, not provider compliance. Receipts accompany responses,
-attempt accounting, durable effects, tracing, and remote responses.
+attempt accounting, durable effects, and tracing.
 `ExecutionEvidence` remains provider-reported execution facts under ADR 0031.
 An absent receipt means unreported, not that nothing is requested.
 

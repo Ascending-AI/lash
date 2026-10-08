@@ -48,7 +48,7 @@ frame.
 
 ## Consequences
 
-The policy behaves identically in standard, RLM cell, RLM native-tool, remote,
+The policy behaves identically in standard, RLM cell, RLM native-tool,
 and cold-reopened execution because those paths share the durable model
 capability and explicit message-boundary marker. Unsupported choices fail
 deterministically before transport.
@@ -59,8 +59,7 @@ decode as provider-default. A missing message-boundary marker decodes as
 never introduce a client-side retention cut. The explicit `true` marker is
 written only for committed `TurnInput` and direct API user messages.
 
-The durable model snapshot carries the selected policy across reopen and
-remote execution. The pre-1.0 version freeze changes shapes in place;
+The durable model snapshot carries the selected policy across reopen. The pre-1.0 version freeze changes shapes in place;
 [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md) governs
 upgrade read contracts.
 

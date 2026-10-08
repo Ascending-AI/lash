@@ -46,7 +46,6 @@ test = false
 workspace = true
 
 [dependencies]
-base64 = { workspace = true }
 lash-sansio = { workspace = true }
 lashlang = { workspace = true }
 lash-typescript = { workspace = true }
@@ -55,13 +54,10 @@ lash-vm-worker = { workspace = true }
 lash-vm-protocol = { workspace = true }
 rmp-serde = { workspace = true }
 libc = { workspace = true }
-lash-conformance = { workspace = true }
 lash-core = { workspace = true, features = ["perf-witness", "testing"] }
-lash-core-worker = { workspace = true }
 lash-core-execution = { workspace = true, features = ["testing"] }
 lash-core-store = { workspace = true, features = ["testing"] }
 lash-durable = { workspace = true }
-lash-vm-broker = { workspace = true }
 lash-lashlang-runtime = { workspace = true }
 lash-postgres-store = { workspace = true, features = ["perf-witness", "testing"] }
 lash = { workspace = true, features = ["rlm", "sqlite", "testing"] }
@@ -84,7 +80,6 @@ sha2 = { workspace = true }
 rand_chacha = "=0.9.0"
 flate2 = "=1.1.9"
 crc32fast = "=1.5.0"
-reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sqlx = { workspace = true, features = ["runtime-tokio-rustls", "postgres"] }
