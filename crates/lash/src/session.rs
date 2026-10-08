@@ -28,8 +28,8 @@ use lash_remote_protocol::{
 /// Every facade session's store comes from the core's backend catalog;
 /// there is no way to hand a session a store from anywhere else.
 ///
-/// The builder carries only what one open supplies — the tool-source policy:
-/// physical binding and acquisition, never behaviour. A session's behaviour is recorded config:
+/// The builder carries only the session's id: physical binding and
+/// acquisition, never behaviour. A session's behaviour is recorded config:
 /// the model it runs is the binding it recorded, and the plugins it runs are
 /// the core's, configured by the plugin config it recorded at creation
 /// (FIG-4396). It is stated once, in the [`SessionCreation`] passed to
@@ -38,9 +38,6 @@ use lash_remote_protocol::{
 pub struct SessionBuilder {
     pub(crate) core: LashCore,
     pub(crate) session_id: SessionId,
-
-    /// Per-open override of the core's tool-source policy (FIG-3367).
-    pub(crate) tool_source_policy: Option<lash_core::ToolSourcePolicy>,
 }
 
 /// What a session is created with: the argument of
@@ -116,22 +113,6 @@ struct ResolvedSessionStore {
 }
 
 impl SessionBuilder {
-    /// Override the core's tool-source policy for the runs this open hosts.
-    ///
-    /// The core's choice is the deployment default; this states it for one
-    /// session — an unattended reopen that must not run without its tools sets
-    /// [`Require`](lash_core::ToolSourcePolicy::Require) even on a core that
-    /// tolerates loss elsewhere. The open itself builds no capabilities and
-    /// never refuses: a run this open hosts that would lose a persisted
-    /// member is refused at its plugin transition, and its sender reads
-    /// [`SendOutcome::Refused`](crate::SendOutcome::Refused) with a
-    /// [`RuntimeErrorCode::ToolSourcesUnavailable`](lash_core::RuntimeErrorCode::ToolSourcesUnavailable)
-    /// refusal that carries the restore report (FIG-5134).
-    pub fn tool_source_policy(mut self, policy: lash_core::ToolSourcePolicy) -> Self {
-        self.tool_source_policy = Some(policy);
-        self
-    }
-
     /// Open this session's runtime.
     ///
     /// Open never creates: it resolves an existing session through the
@@ -480,12 +461,6 @@ impl SessionBuilder {
     ) -> Result<(LashRuntime, Arc<BoundSession>)> {
         let policy = state.effective_policy().clone();
         let mut env = self.core.env.clone();
-        if let Some(policy) = self.tool_source_policy {
-            // Per-open override of the deployment default. It rides the env's
-            // host config so every construction this open performs below the
-            // facade sees the same choice.
-            env.core.control.tool_source_policy = policy;
-        }
 
         let plugin_host = build_plugin_host(
             self.core.protocol_factory.as_ref(),

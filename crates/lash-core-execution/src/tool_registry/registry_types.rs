@@ -185,8 +185,8 @@ impl ToolRegistryInner {
 /// Unattended and fixed-tool deployments opt into [`Require`](Self::Require).
 ///
 /// Opening a session builds no capabilities (FIG-4857), so an open never
-/// consults this policy. A turn run's recorded plugin transition does: under
-/// `Require` it refuses the run before the transition publishes anything, and
+/// consults this policy. A turn run does, when it builds the session it runs
+/// in: under `Require` it refuses the run before it installs anything, and
 /// the sender reads the refusal as the run's terminal answer (FIG-5134).
 /// Installing persisted tool state onto a session that already holds
 /// capabilities — a host restore command, a persisted-state install, the
@@ -196,8 +196,8 @@ impl ToolRegistryInner {
 pub enum ToolSourcePolicy {
     #[default]
     Tolerate,
-    /// A turn run refuses at its plugin transition when restoring the
-    /// session's persisted tool state would lose a member. Parked opt-outs
+    /// A turn run is refused when restoring the session's persisted tool
+    /// state would lose a member. Parked opt-outs
     /// and superseded identities never refuse: neither is a missing
     /// capability.
     Require,

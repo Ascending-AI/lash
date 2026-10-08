@@ -234,8 +234,8 @@ pub enum TurnEvent {
         batch_ids: Vec<String>,
         causes: Vec<crate::TurnCause>,
     },
-    /// The run's plugin transition restored the session's persisted tool
-    /// state and some persisted id had no registered source (FIG-5134). It
+    /// The run's construction restored the session's persisted tool state
+    /// and some persisted id had no registered source (FIG-5134). It
     /// follows the run's first `TurnStarted`; a clean restore emits nothing.
     /// Under `ToolSourcePolicy::Tolerate` the run goes on without the lost
     /// members; under `Require` a run that would lose one is refused with

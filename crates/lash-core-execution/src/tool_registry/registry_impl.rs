@@ -207,8 +207,8 @@ impl ToolRegistry {
 
     /// What [`restore_state`](Self::restore_state) would report for
     /// `snapshot` over the sources registered now, without changing the
-    /// registry. A run's plugin transition reads it to decide
-    /// `ToolSourcePolicy::Require` before it publishes anything (FIG-5134).
+    /// registry. A turn run reads it to decide `ToolSourcePolicy::Require`
+    /// before it installs anything (FIG-5134).
     pub fn preview_restore(
         &self,
         snapshot: &ToolState,

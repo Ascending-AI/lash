@@ -92,18 +92,45 @@ impl RuntimeEffectLocalRunner for NativeTransitionRunner {
 }
 
 impl crate::runtime::LashRuntime {
+    /// Build the session a turn run (fresh or resumed) runs in, under the
+    /// host's [`ToolSourcePolicy`](crate::ToolSourcePolicy): under `Require`
+    /// a run whose restore would lose a recorded member is refused, typed,
+    /// before anything is installed (FIG-5134). Its preparation's terminal
+    /// error ends the run as `Refused`, in the run's own commit.
+    pub(in crate::runtime) async fn materialize_turn_session(
+        &mut self,
+        scoped_effect_controller: &crate::ActorContext,
+    ) -> Result<(), crate::RuntimeError> {
+        let policy = self.host.core.control.tool_source_policy;
+        self.materialize_run_session(scoped_effect_controller, policy)
+            .await
+    }
+
+    /// Build the session a command run applies against. A command run
+    /// tolerates tool loss whatever the host's policy: a host's restore
+    /// answers its report instead of being refused (ADR 0119).
+    pub(in crate::runtime) async fn materialize_command_session(
+        &mut self,
+        scoped_effect_controller: &crate::ActorContext,
+    ) -> Result<(), crate::RuntimeError> {
+        self.materialize_run_session(scoped_effect_controller, crate::ToolSourcePolicy::Tolerate)
+            .await
+    }
+
     /// Publish the native plugin view before resolving a run's protocol config.
     /// A deferred session supplies no driver or renderer until this activation.
     ///
     /// A store-backed session runs the plugins its head recorded: its
     /// session actor materializes them as admitted, and a build that does
     /// not serve that admission is refused typed (ADR 0132 §4).
-    pub(in crate::runtime) async fn materialize_turn_session(
+    async fn materialize_run_session(
         &mut self,
         scoped_effect_controller: &crate::ActorContext,
+        policy: crate::ToolSourcePolicy,
     ) -> Result<(), crate::RuntimeError> {
         if self.session.is_none() {
             if self.is_store_backed() {
+                self.require_tool_sources(policy)?;
                 return Box::pin(self.materialize_published_session())
                     .await
                     .map_err(|error| match error {
@@ -162,6 +189,7 @@ impl crate::runtime::LashRuntime {
                 self.state.set_plugin_admission_snapshot(bytes);
             }
             self.state.authority.plugin_config = (*plugins.admitted_plugin_config().config).clone();
+            self.require_tool_sources(policy)?;
             Box::pin(self.materialize_published_session())
                 .await
                 .map_err(|error| {
@@ -170,6 +198,47 @@ impl crate::runtime::LashRuntime {
                         error.to_string(),
                     )
                 })?;
+        }
+        Ok(())
+    }
+
+    /// Under `Require`, refuse when restoring the session's recorded tool
+    /// state over the materialized plugins' sources would lose a member. It
+    /// previews the restore without changing the registry, so a refused run
+    /// installs nothing, restores no protocol session and emits no
+    /// `SessionRestored`. Parked opt-outs and superseded identities never
+    /// refuse: neither is a capability the session lost.
+    fn require_tool_sources(
+        &self,
+        policy: crate::ToolSourcePolicy,
+    ) -> Result<(), crate::RuntimeError> {
+        let (crate::ToolSourcePolicy::Require, Some(snapshot)) =
+            (policy, self.state.tool_state_snapshot())
+        else {
+            return Ok(());
+        };
+        let plugin_error =
+            |error| crate::RuntimeEffectControllerError::from(error).into_runtime_error();
+        self.services.plugins.materialize().map_err(plugin_error)?;
+        let report = self
+            .services
+            .plugins
+            .tool_registry()
+            .preview_restore(snapshot)
+            .map_err(|error| {
+                crate::RuntimeError::new(
+                    crate::RuntimeErrorCode::Plugin,
+                    format!("tool restore preview failed: {error}"),
+                )
+            })?;
+        if report.has_lost_members() {
+            return Err(
+                crate::RuntimeEffectControllerError::tool_sources_unavailable(
+                    &self.state.session_id,
+                    report,
+                )
+                .into_runtime_error(),
+            );
         }
         Ok(())
     }

@@ -958,7 +958,7 @@ impl LashRuntime {
                 | crate::SessionCommand::RunPluginTask { .. }
                 | crate::SessionCommand::CompactContext { .. }]
         ) {
-            Box::pin(self.materialize_turn_session(effect_controller)).await?;
+            Box::pin(self.materialize_command_session(effect_controller)).await?;
         }
         // Compaction and host commands apply alone, under their own scope,
         // in the commit that settles them (FIG-4201, FIG-4202).

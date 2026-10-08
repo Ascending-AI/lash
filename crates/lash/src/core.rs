@@ -245,8 +245,6 @@ impl LashCore {
         SessionBuilder {
             core: self.clone(),
             session_id,
-
-            tool_source_policy: None,
         }
     }
 
@@ -881,19 +879,23 @@ impl LashCoreBuilder {
     }
 
     /// The default is [`ToolSourcePolicy::Tolerate`](lash_core::ToolSourcePolicy::Tolerate):
-    /// the session opens and the host receives a typed
+    /// a turn run goes on without a lost member and reports a typed
     /// [`ToolRestoreReport`](crate::support::ToolRestoreReport), because
     /// locking a user out of a conversation is worse than degrading it.
     /// Unattended and fixed-tool deployments set
-    /// [`Require`](lash_core::ToolSourcePolicy::Require), which refuses an open
-    /// whose report has lost members — a persisted Tool Catalog member no
-    /// registered source resolves. Parked opt-outs and superseded identities
-    /// never refuse.
+    /// [`Require`](lash_core::ToolSourcePolicy::Require): a turn run whose
+    /// restore would lose a member — a persisted Tool Catalog member no
+    /// registered source resolves — is refused before it installs anything,
+    /// and its sender reads [`SendOutcome::Refused`](crate::SendOutcome::Refused)
+    /// with a
+    /// [`RuntimeErrorCode::ToolSourcesUnavailable`](lash_core::RuntimeErrorCode::ToolSourcesUnavailable)
+    /// refusal that carries the report (FIG-5134). Parked opt-outs and
+    /// superseded identities never refuse. An open builds no capabilities
+    /// and never refuses, and a command run, such as a host's tool restore,
+    /// tolerates whatever the policy.
     ///
-    /// The choice is carried on the core's host config, so runtime-initiated
-    /// constructions (process-spawned children, the queued-work driver, resume) honour
-    /// it too. One open may override it with
-    /// [`SessionBuilder::tool_source_policy`](crate::SessionBuilder::tool_source_policy).
+    /// The choice is carried on the core's host config, which every turn
+    /// run the core's node executes reads, whichever session it serves.
     pub fn tool_source_policy(mut self, policy: lash_core::ToolSourcePolicy) -> Self {
         self.tool_source_policy = Some(policy);
         self

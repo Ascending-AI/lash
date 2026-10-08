@@ -76,8 +76,8 @@ impl LashRuntime {
     /// in the returned [`crate::ToolRestoreReport`].
     ///
     /// It never refuses: the host's
-    /// [`ToolSourcePolicy`](crate::ToolSourcePolicy) applies to a turn run's
-    /// transition, not to a restore the host asked for. A lost member comes
+    /// [`ToolSourcePolicy`](crate::ToolSourcePolicy) applies to a turn run,
+    /// not to a restore the host asked for. A lost member comes
     /// back in the report, which is also kept for
     /// [`tool_restore_report`](Self::tool_restore_report).
     pub async fn restore_tool_state(

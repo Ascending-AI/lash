@@ -216,10 +216,10 @@ pub struct RuntimeControlConfig {
     /// [`ToolRestoreReport`](crate::ToolRestoreReport) as its
     /// `TurnEvent::ToolRestoreReported`. Set
     /// [`Require`](crate::ToolSourcePolicy::Require) in unattended or
-    /// fixed-tool deployments to refuse, at its plugin transition, a run that
-    /// would lose a catalog member (FIG-5134). It is carried on the host
-    /// config of the runtime that executes the run, so a session's resident
-    /// open applies the policy its open stated.
+    /// fixed-tool deployments to refuse, before it builds the session, a turn
+    /// run that would lose a catalog member (FIG-5134). It is carried on the
+    /// host config of the runtime that executes the run; a command run
+    /// tolerates whatever it says.
     pub tool_source_policy: crate::ToolSourcePolicy,
     /// The host's bound on one obligation delivery (ADR 0109 §1.8). This is
     /// the one source every relay reads: [`relay_policy`](Self::relay_policy)

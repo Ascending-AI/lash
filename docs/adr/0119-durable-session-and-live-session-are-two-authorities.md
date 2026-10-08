@@ -161,17 +161,18 @@ Source: `crates/lash-core/src/runtime/tool_restore.rs`.
 
 ### Tool-source policy
 
-`ToolSourcePolicy::Tolerate` is the default. Under `Require`, a turn run's
-recorded plugin transition previews the restore over the capabilities it
-built and refuses when it would lose a member, before the transition
-publishes anything. The refusal is the run's typed terminal,
+`ToolSourcePolicy::Tolerate` is the default. Under `Require`, a turn run,
+fresh or resumed, previews the restore over the plugins it materialized
+before it installs the session's tool state, and refuses when it would lose
+a member (FIG-5325). The refusal is the run's typed terminal,
 `RuntimeErrorCode::ToolSourcesUnavailable` with the report as its
-`RuntimeErrorCause`, which the sender reads as `SendOutcome::Refused`.
-Parked opt-outs and replaced identities do not refuse. The refused run makes
-no config or state commit, restores no protocol session and emits no
-`SessionRestored`. Command runs tolerate, so a host's tool restore still
-applies on a `Require` core. The core sets the policy, and the session
-builder can override it for the runs an open hosts.
+`RuntimeErrorCause`, which the session actor commits as the run's `Refused`
+terminal and the sender reads as `SendOutcome::Refused`. Parked opt-outs and
+replaced identities do not refuse. The refused run makes no config or state
+commit, restores no protocol session and emits no `SessionRestored`. Command
+runs build their session under `Tolerate`, so a host's tool restore still
+applies on a `Require` core. The core sets the policy for every run its node
+executes.
 
 Tolerate permits reading and continuing a conversation during tool-source
 outages. A deployment whose tool set is part of its execution contract can

@@ -316,8 +316,8 @@ impl LashRuntime {
             // persisted generation rebuilds. A changed live surface bumps once
             // to make the next commit capture it.
             //
-            // It never refuses: a turn run's transition step decided
-            // `ToolSourcePolicy::Require` before it published (FIG-5134).
+            // It never refuses: a turn run decided `ToolSourcePolicy::Require`
+            // before it built this session (FIG-5134).
             let registry = session.plugins().tool_registry();
             tool_restore_report = Some(crate::runtime::tool_restore::install_persisted_tool_state(
                 registry.as_ref(),

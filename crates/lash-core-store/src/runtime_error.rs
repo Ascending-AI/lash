@@ -221,9 +221,9 @@ runtime_error_codes! {
         SessionConfigRefused = "session_config_refused" => Terminal,
         // the deployment's sources decide it; a run admitted on them is refused again.
         /// A turn run under `ToolSourcePolicy::Require` found a persisted Tool
-        /// Catalog member no registered source resolves, and was refused at its
-        /// plugin transition before the transition published anything
-        /// (FIG-5134). Its typed half is
+        /// Catalog member no registered source resolves, and was refused
+        /// before it installed the session's tool state (FIG-5134). Its
+        /// typed half is
         /// [`RuntimeErrorCause::ToolSourcesUnavailable`], which carries the
         /// restore report.
         ToolSourcesUnavailable = "tool_sources_unavailable" => Terminal,

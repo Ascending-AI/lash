@@ -1,16 +1,16 @@
 //! The one owner of "install a persisted tool snapshot onto a session", and of
 //! the run-time [`ToolSourcePolicy`] check.
 //!
-//! Every construction that restores a session's `ToolState` — a run's plugin
-//! transition building the session's capabilities, a host restore command, a
-//! persisted-state install, a resident re-sync — calls
+//! Every construction that restores a session's `ToolState` — a run building
+//! the session's capabilities, a host restore command, a persisted-state
+//! install, a resident re-sync — calls
 //! [`install_persisted_tool_state`]. It reconciles the snapshot against the
 //! live sources, classifies what no source resolved, and delivers that report
 //! (as a typed value the caller keeps and as trace evidence). The runtime
 //! keeps the report until its next turn reports it as
 //! `TurnEvent::ToolRestoreReported` (FIG-5134).
 //!
-//! # Installs never refuse; a turn run's transition does
+//! # Installs never refuse; a turn run does
 //!
 //! An install commits the reconciled surface (through
 //! `ToolRegistry::restore_state`) before anything could consult a policy, so
@@ -18,13 +18,16 @@
 //! No install refuses.
 //!
 //! An open builds no capabilities (FIG-4857), so it has nothing to restore and
-//! nothing to refuse. [`ToolSourcePolicy::Require`] is a run policy: a turn
-//! run's recorded plugin transition calls [`require_tool_sources`] on the
-//! capabilities it built, before it publishes anything, and refuses the run
-//! with the typed `RuntimeErrorCode::ToolSourcesUnavailable` when the restore
-//! would lose a member. That reads the registry without changing it, so the
-//! refused run leaves no durable write, restores no protocol session and
-//! emits no `SessionRestored`.
+//! nothing to refuse. [`ToolSourcePolicy::Require`] is a turn-run policy:
+//! when a turn run builds the session it runs in
+//! (`LashRuntime::materialize_turn_session`), it previews the restore over the
+//! materialized plugins' sources before installing the snapshot, and refuses
+//! the run with the typed `RuntimeErrorCode::ToolSourcesUnavailable` when the
+//! restore would lose a member. The preview reads the registry without
+//! changing it, so the refused run restores no protocol session and emits no
+//! `SessionRestored`; the session actor records the refusal as the run's
+//! `Refused` terminal. A command run builds its session under `Tolerate`, so
+//! a host restore answers its report.
 
 use crate::{SessionId, ToolRestoreReport, ToolState};
 
