@@ -43,62 +43,99 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
     /// provider kind layers that on top.
     fn serialize_config(&self) -> serde_json::Value;
 
-    /// Lower `request` to the exact body this provider sends for it
-    /// (ADR 0133 §6): after attachment normalization, with every upload or
-    /// other material the body names resolved and pinned. Lash lowers a
-    /// call once, before admitting it; every attempt and every resend of
-    /// the admitted call sends the body this returned, so nothing that
-    /// varies between attempts (authentication, transport headers, the
-    /// attempt ordinal) belongs in it.
-    ///
-    /// Implementations must apply [`LlmRequest::reasoning_retention_safe_for`]
-    /// for their exact [`Provider::route_identity`] before serializing the
-    /// body. `ProviderHandle` applies the semantic gate too; this raw-trait
-    /// obligation is the structural backstop for direct callers.
-    ///
-    /// The default is the logical request's own canonical encoding
-    /// ([`ProviderRequestBody::of_request`]): it suits a provider with no
-    /// wire format of its own, such as an in-process double. A provider that
-    /// speaks a wire protocol lowers to its exact wire body.
+    fn attachment_accepts(
+        &self,
+        _model: &str,
+        _media_type: &lash_sansio::MediaType,
+        _position: lash_sansio::llm::attachment_delivery::AttachmentPosition,
+    ) -> lash_sansio::llm::attachment_delivery::ProviderAccepts {
+        lash_sansio::llm::attachment_delivery::ProviderAccepts::NONE
+    }
+    fn attachment_file_scope(
+        &self,
+    ) -> Option<lash_sansio::llm::attachment_delivery::ProviderFileScope> {
+        None
+    }
+
+    /// Lower literal JSON and effective attachment acceptance exactly once.
     async fn lower(
         &mut self,
         request: &LlmRequest,
-    ) -> Result<ProviderRequestBody, LlmTransportError> {
-        ProviderRequestBody::of_request(self.route_identity(request.model.wire_model()), request)
-            .map_err(|error| {
-                LlmTransportError::new(format!("the request does not encode: {error}"))
-                    .with_kind(ProviderFailureKind::Validation)
-                    .with_retry_verdict(TransportRetryVerdict::Forbidden)
-            })
+    ) -> Result<RecordedRequestTemplate, LlmTransportError> {
+        RecordedRequestTemplate::of_request(
+            self.route_identity(request.model.wire_model()),
+            request,
+        )
+        .map_err(super::attachment_wire::template_error)
     }
-
-    /// Send `body`, which [`Provider::lower`] produced for `request`, as
-    /// one attempt, binding authentication and transport fresh. The body is
-    /// sent byte for byte: an implementation never rebuilds it from
-    /// `request`, which it reads only to decode the response (its stream
-    /// sender, trace sender, model metadata and output contract). A body
-    /// lowered by an earlier build of the provider is sent all the same.
+    fn encode_slot(
+        &self,
+        slot: &AttachmentSlot,
+        delivery: &lash_sansio::llm::attachment_delivery::Delivery,
+    ) -> Result<TransientJson, LlmTransportError> {
+        super::attachment_wire::canonical_slot(slot, delivery)
+    }
     async fn send(
         &mut self,
         request: LlmRequest,
-        body: &ProviderRequestBody,
+        body: &LiveRequestBody,
     ) -> Result<LlmResponse, LlmTransportError>;
 
-    /// Lower `request` and send its body once: one live call outside any
-    /// admission, retry or charge-safety policy.
-    async fn complete(&mut self, request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
-        let body = self.lower(&request).await?;
-        self.send(request, &body).await
+    /// One live call outside admission. Delivery stays inside the timeout.
+    async fn complete(
+        &mut self,
+        request: LlmRequest,
+        deliveries: &dyn super::SlotDeliveries,
+    ) -> Result<LlmResponse, LlmTransportError> {
+        let timeout = self.options().llm_timeouts().request_timeout;
+        let operation = async {
+            let template = std::sync::Arc::new(self.lower(&request).await?);
+            let slots: Vec<_> = template.slots().collect();
+            let mut values = Vec::new();
+            if !slots.is_empty() {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis();
+                let valid_through_ms = u64::try_from(now)
+                    .unwrap_or(u64::MAX)
+                    .saturating_add(u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX))
+                    .saturating_add(60_000);
+                let delivered = deliveries
+                    .deliver(
+                        &slots,
+                        &lash_sansio::llm::attachment_delivery::DeliveryContext {
+                            valid_through_ms,
+                            live_file_scope: self.attachment_file_scope(),
+                        },
+                    )
+                    .await
+                    .map_err(|error| error.into_transport_error())?;
+                if delivered.len() != slots.len() {
+                    return Err(super::attachment_wire::template_error(
+                        "delivery slot count differs",
+                    ));
+                }
+                for (slot, delivery) in slots.iter().zip(&delivered) {
+                    values.push(self.encode_slot(slot, delivery)?);
+                }
+            }
+            let live = LiveRequestBody::fill(template, values)
+                .map_err(super::attachment_wire::template_error)?;
+            self.send(request, &live).await
+        };
+        tokio::time::timeout(timeout, operation)
+            .await
+            .map_err(|_| {
+                LlmTransportError::new("provider call timed out")
+                    .with_kind(ProviderFailureKind::Timeout)
+                    .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
+            })?
     }
-
-    /// Return the guarantee, if any, that makes retrying `body`, lowered
-    /// for `request`, safe after output has started. The default is
-    /// deliberately no guarantee: ordinary retryability does not imply
-    /// idempotency or resume.
     fn generation_retry_guarantee(
         &self,
         _request: &LlmRequest,
-        _body: &ProviderRequestBody,
+        _template: &RecordedRequestTemplate,
     ) -> GenerationRetryGuarantee {
         GenerationRetryGuarantee::None
     }

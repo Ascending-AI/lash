@@ -840,204 +840,72 @@ pub struct AttachmentCapabilitySnapshot {
     pub revision: String,
     pub acceptors: Vec<AttachmentAcceptor>,
 }
-
 impl AttachmentCapabilitySnapshot {
     pub fn is_empty(&self) -> bool {
         self.revision.is_empty() && self.acceptors.is_empty()
     }
-
-    /// [`Self::is_empty`] for the shared snapshot a request or a session
-    /// carries, as serde's `skip_serializing_if` hands it over.
     pub fn is_empty_arc(snapshot: &std::sync::Arc<Self>) -> bool {
         snapshot.is_empty()
     }
-
-    /// Provider labels whose host-supplied rules accept this exact source.
-    pub fn acceptors(&self, source: &super::types::AttachmentSource) -> Vec<&str> {
+    pub fn forms(
+        &self,
+        provider: &str,
+        media_type: &crate::MediaType,
+        position: super::attachment_delivery::AttachmentPosition,
+    ) -> super::attachment_delivery::DeliveryForms {
+        let mut forms = super::attachment_delivery::DeliveryForms::default();
+        for rule in self
+            .acceptors
+            .iter()
+            .filter(|a| a.provider == provider)
+            .flat_map(|a| &a.rules)
+            .filter(|r| r.accepts(media_type, position))
+        {
+            forms.bytes |= rule.forms.bytes;
+            forms.url |= rule.forms.url;
+            forms.provider_file |= rule.forms.provider_file;
+        }
+        forms
+    }
+    pub fn acceptors(
+        &self,
+        media_type: &crate::MediaType,
+        position: super::attachment_delivery::AttachmentPosition,
+    ) -> Vec<&str> {
         self.acceptors
             .iter()
-            .filter(|acceptor| acceptor.rules.iter().any(|rule| rule.accepts(source)))
-            .map(|acceptor| acceptor.provider.as_str())
+            .filter(|a| {
+                a.rules.iter().any(|r| {
+                    r.accepts(media_type, position)
+                        && (r.forms.bytes || r.forms.url || r.forms.provider_file)
+                })
+            })
+            .map(|a| a.provider.as_str())
             .collect()
     }
-
-    pub fn accepts(&self, provider: &str, source: &super::types::AttachmentSource) -> bool {
-        self.acceptors.iter().any(|acceptor| {
-            acceptor.provider == provider && acceptor.rules.iter().any(|rule| rule.accepts(source))
-        })
-    }
 }
-
-/// Acceptance rules supplied by the host for a transport dialect.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AttachmentAcceptor {
     pub provider: String,
     pub rules: Vec<AttachmentAcceptanceRule>,
 }
-
-/// MIME-bearing sources and scoped provider handles have distinct admission facts.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum AttachmentAcceptanceRule {
-    Mime {
-        source: AttachmentMimeSource,
-        media_types: Vec<String>,
-        media_families: Vec<String>,
-    },
-    ProviderFile {
-        provider: String,
-    },
+#[serde(deny_unknown_fields)]
+pub struct AttachmentAcceptanceRule {
+    pub positions: Vec<super::attachment_delivery::AttachmentPosition>,
+    pub media_types: Vec<String>,
+    pub media_families: Vec<String>,
+    pub forms: super::attachment_delivery::DeliveryForms,
 }
-
-/// The source modes which carry a required MIME type.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum AttachmentMimeSource {
-    Inline,
-    Stored,
-    ExternalUrl,
-}
-
 impl AttachmentAcceptanceRule {
-    fn accepts(&self, attachment: &super::types::AttachmentSource) -> bool {
-        use super::types::AttachmentSource;
-        match (self, attachment) {
-            (
-                Self::ProviderFile { provider },
-                AttachmentSource::ProviderFile { provider_scope, .. },
-            ) => provider.eq_ignore_ascii_case(&provider_scope.provider),
-            (
-                Self::Mime {
-                    source,
-                    media_types,
-                    media_families,
-                },
-                attachment,
-            ) => {
-                let actual = match attachment {
-                    AttachmentSource::Inline { .. } => AttachmentMimeSource::Inline,
-                    AttachmentSource::Stored { .. } => AttachmentMimeSource::Stored,
-                    AttachmentSource::ExternalUrl { .. } => AttachmentMimeSource::ExternalUrl,
-                    AttachmentSource::ProviderFile { .. } => return false,
-                };
-                actual == *source
-                    && attachment.media_type().is_some_and(|mime| {
-                        media_types
-                            .iter()
-                            .any(|candidate| candidate == mime.as_str())
-                            || media_families.iter().any(|family| family == mime.family())
-                    })
-            }
-            (
-                Self::ProviderFile { .. },
-                AttachmentSource::Inline { .. }
-                | AttachmentSource::Stored { .. }
-                | AttachmentSource::ExternalUrl { .. },
-            ) => false,
-        }
-    }
-}
-
-#[cfg(test)]
-mod attachment_acceptance_tests {
-    use super::*;
-    use crate::llm::types::{AttachmentSource, ProviderFileScope};
-    use crate::{AttachmentId, AttachmentRef, MediaType};
-
-    #[test]
-    fn attachment_acceptance_matches_source_mime_and_provider_scope() {
-        let mime_sources = [
-            AttachmentMimeSource::Inline,
-            AttachmentMimeSource::Stored,
-            AttachmentMimeSource::ExternalUrl,
-        ];
-        let sources = |mime: &str| {
-            let mime = MediaType::parse(mime).unwrap();
-            [
-                AttachmentSource::inline(mime.clone(), vec![1]),
-                AttachmentSource::stored(AttachmentRef::new(
-                    AttachmentId::parse("matrix").unwrap(),
-                    mime.clone(),
-                    1,
-                    None,
-                    None,
-                )),
-                AttachmentSource::external_url(mime, "https://example.test/image"),
-            ]
-        };
-        for (rule_index, source) in mime_sources.into_iter().enumerate() {
-            for (media_types, media_families, accepted) in [
-                (vec!["image/png".into()], vec![], [true, false, false]),
-                (vec![], vec!["image".into()], [true, true, false]),
-                (vec![], vec![], [false, false, false]),
-            ] {
-                let snapshot = AttachmentCapabilitySnapshot {
-                    revision: "matrix".into(),
-                    acceptors: vec![AttachmentAcceptor {
-                        provider: "route".into(),
-                        rules: vec![AttachmentAcceptanceRule::Mime {
-                            source,
-                            media_types,
-                            media_families,
-                        }],
-                    }],
-                };
-                for (mime_index, mime) in ["image/png", "image/jpeg", "application/pdf"]
-                    .into_iter()
-                    .enumerate()
-                {
-                    for (source_index, attachment) in sources(mime).into_iter().enumerate() {
-                        let expected = source_index == rule_index && accepted[mime_index];
-                        assert_eq!(
-                            snapshot.accepts("route", &attachment),
-                            expected,
-                            "rule={source:?} attachment={attachment:?}"
-                        );
-                        assert_eq!(
-                            snapshot.acceptors(&attachment),
-                            if expected { vec!["route"] } else { vec![] }
-                        );
-                        assert!(!snapshot.accepts("other-route", &attachment));
-                        assert!(
-                            !AttachmentCapabilitySnapshot::default().accepts("route", &attachment)
-                        );
-                    }
-                }
-                for provider in ["vendor", "VENDOR", "other"] {
-                    for mime in [None, Some(MediaType::parse("image/png").unwrap())] {
-                        let attachment = AttachmentSource::provider_file(
-                            ProviderFileScope::new(provider, "account"),
-                            "file",
-                            mime,
-                        );
-                        assert!(!snapshot.accepts("route", &attachment));
-                    }
-                }
-            }
-        }
-        let snapshot = AttachmentCapabilitySnapshot {
-            revision: "matrix".into(),
-            acceptors: vec![AttachmentAcceptor {
-                provider: "route".into(),
-                rules: vec![AttachmentAcceptanceRule::ProviderFile {
-                    provider: "vendor".into(),
-                }],
-            }],
-        };
-        for provider in ["vendor", "VENDOR", "other"] {
-            for mime in [None, Some(MediaType::parse("application/pdf").unwrap())] {
-                let attachment = AttachmentSource::provider_file(
-                    ProviderFileScope::new(provider, "account"),
-                    "file",
-                    mime,
-                );
-                assert_eq!(snapshot.accepts("route", &attachment), provider != "other");
-                assert!(!snapshot.accepts("other-route", &attachment));
-            }
-        }
-        for attachment in sources("image/png") {
-            assert!(!snapshot.accepts("route", &attachment));
-        }
+    fn accepts(
+        &self,
+        mime: &crate::MediaType,
+        position: super::attachment_delivery::AttachmentPosition,
+    ) -> bool {
+        self.positions.contains(&position)
+            && (self.media_types.iter().any(|m| m == mime.as_str())
+                || self.media_families.iter().any(|f| f == mime.family()))
     }
 }

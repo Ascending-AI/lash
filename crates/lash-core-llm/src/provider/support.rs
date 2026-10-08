@@ -8,11 +8,12 @@ pub(super) use crate::llm::transport::{
     LlmTransportError, ProviderFailureKind, TransportRetryVerdict,
 };
 pub(super) use crate::llm::types::{
-    AttemptOutcome, AttemptRecord, ChargeSafetyDecision, ChargeSafetyDenialReason,
-    ExecutionEvidence, GenerationOptionOutcome, GenerationReceipt, LlmCallId, LlmCallRecord,
-    LlmContentBlock, LlmRequest, LlmRequestScope, LlmResponse, LlmTerminalReason, NormalizedError,
-    ProtocolPosition, ProviderReplayOriginConflict, ProviderRequestBody, ProviderRouteIdentity,
-    RetryClass, RetryDecision, RetryDeclineCause, RetryWait,
+    AttachmentSlot, AttemptOutcome, AttemptRecord, ChargeSafetyDecision, ChargeSafetyDenialReason,
+    ExecutionEvidence, GenerationOptionOutcome, GenerationReceipt, LiveRequestBody, LlmCallId,
+    LlmCallRecord, LlmContentBlock, LlmRequest, LlmRequestScope, LlmResponse, LlmTerminalReason,
+    NormalizedError, ProtocolPosition, ProviderReplayOriginConflict, ProviderRouteIdentity,
+    RecordedRequestTemplate, RetryClass, RetryDecision, RetryDeclineCause, RetryWait,
+    TransientJson,
 };
 pub(super) use lash_sansio::llm::capability::ReasoningIntent;
 pub(super) use lash_sansio::session_model::{FailureCode, Namespace, TurnFailureCode};

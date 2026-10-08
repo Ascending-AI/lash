@@ -360,17 +360,25 @@ impl LiveRequestBody {
     pub fn redacted(&self) -> String {
         self.template.redacted()
     }
-    pub fn scrub(&self, text: &str) -> String {
-        let mut secrets: Vec<&str> = self
+    pub fn scrubber(&self) -> Arc<dyn Fn(&str) -> String + Send + Sync> {
+        let mut secrets: Vec<String> = self
             .values
             .iter()
-            .flat_map(|value| value.secrets.iter().map(String::as_str))
+            .flat_map(|value| value.secrets.iter().cloned())
             .collect();
         secrets.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
         secrets.dedup();
-        secrets.into_iter().fold(text.to_owned(), |text, secret| {
-            text.replace(secret, "[redacted attachment delivery]")
+        Arc::new(move |text| {
+            secrets.iter().fold(text.to_owned(), |text, secret| {
+                text.replace(secret, "[redacted attachment delivery]")
+            })
         })
+    }
+    pub fn scrub(&self, text: &str) -> String {
+        self.scrubber()(text)
+    }
+    pub fn has_secrets(&self) -> bool {
+        self.values.iter().any(|value| !value.secrets.is_empty())
     }
 }
 impl std::fmt::Debug for LiveRequestBody {

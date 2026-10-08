@@ -66,6 +66,7 @@ pub struct LlmTransportError {
     pub message: String,
     pub retry_verdict: TransportRetryVerdict,
     retry_verdict_classified: bool,
+    rejected_slots: Vec<usize>,
     /// The HTTP status, when the failure observed one. Carried exactly once —
     /// `code` never mirrors it.
     pub http_status: Option<u16>,
@@ -97,6 +98,7 @@ impl LlmTransportError {
             message: message.into(),
             retry_verdict: TransportRetryVerdict::NotRetryable,
             retry_verdict_classified: false,
+            rejected_slots: Vec::new(),
             http_status: None,
             raw: None,
             code: None,
@@ -130,6 +132,14 @@ impl LlmTransportError {
             received_at_least,
         });
         error
+    }
+
+    pub fn with_rejected_slots(mut self, slots: Vec<usize>) -> Self {
+        self.rejected_slots = slots;
+        self
+    }
+    pub fn rejected_slots(&self) -> &[usize] {
+        &self.rejected_slots
     }
 
     pub fn with_kind(mut self, kind: ProviderFailureKind) -> Self {

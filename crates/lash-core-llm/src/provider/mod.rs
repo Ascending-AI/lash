@@ -10,9 +10,11 @@
 //! in a [`LlmProfileRegistry`]; sessions record the registry-minted binding and
 //! bind it to its handle only to execute.
 
+pub mod attachment_wire;
 #[cfg(test)]
 mod charge_safety_tests;
 mod credential;
+pub mod delivery_redaction;
 pub(crate) mod handle;
 mod models;
 mod options;
@@ -31,8 +33,8 @@ pub use handle::{
 };
 pub use lash_sansio::llm::capability::{
     AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,
-    AttachmentCapabilitySnapshot, AttachmentMimeSource, CacheControlDialect, CacheRetention,
-    GoogleDialect, InstructionRole, LlmProfileCapability, LlmProfileEffortValidationCategory,
+    AttachmentCapabilitySnapshot, CacheControlDialect, CacheRetention, GoogleDialect,
+    InstructionRole, LlmProfileCapability, LlmProfileEffortValidationCategory,
     LlmProfileEffortValidationError, LlmProfileRequestDefaults, OpenAiReasoningContext,
     ReasoningCapability, ReasoningEncoding, ReasoningIntent, ReasoningRetentionCapability,
     ReasoningRetentionPolicy, ReasoningRetentionSelection, ReasoningRetentionValidationCategory,
