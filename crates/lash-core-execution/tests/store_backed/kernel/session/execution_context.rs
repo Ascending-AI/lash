@@ -67,7 +67,14 @@ mod tests {
             .session_id("session")
             .build()
             .into_runtime()
-            .with_process_execution(crate::ProcessId::fixture("parent"), &parent, None);
+            .with_process_execution(
+                &crate::ProcessRecord::from_registration(
+                    parent.clone(),
+                    crate::ProcessId::fixture("parent"),
+                ),
+                parent.wake_session_id.clone(),
+                None,
+            );
         let prepared = crate::process_start_execution_env(&context, engine_start().into())
             .await
             .expect("capture child");

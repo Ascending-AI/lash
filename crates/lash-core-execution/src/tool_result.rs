@@ -47,16 +47,22 @@ impl PendingAnnouncement {
         }
     }
 
-    pub(crate) fn into_append_request(self) -> crate::ProcessEventAppendRequest {
-        // An announcement is progress metadata about a wait that has not
-        // settled, not a wake. The session it would reach is the session parked
-        // on the announced call, and re-prompting that turn against its own
-        // unsettled wait is not something a tool should be able to cause by
-        // describing its park. The event is still appended and still visible to
-        // observers; only the wake is withheld.
-        crate::ProcessEventAppendRequest::new(self.event_type, self.payload)
-            .with_replay_key(self.replay_key)
-            .without_wake()
+    /// The rows that announce this park on `process`. The wake its event type
+    /// declares is withheld when they commit: the session it would reach is
+    /// the session parked on the announced call, and re-prompting that turn
+    /// against its own unsettled wait is not something a tool should be able
+    /// to cause by describing its park. The event is still appended and still
+    /// visible to observers.
+    pub(crate) fn into_rows(
+        self,
+        process: crate::ProcessId,
+    ) -> crate::runtime::actor::round::ParkAnnouncementRows {
+        crate::runtime::actor::round::ParkAnnouncementRows {
+            process,
+            event_type: self.event_type,
+            payload_json: self.payload.to_string(),
+            replay_key: self.replay_key,
+        }
     }
 }
 

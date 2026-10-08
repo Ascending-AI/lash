@@ -435,7 +435,6 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
 }
 
 #[tokio::test]
-#[ignore = "FIG-5339: a process step's display tool sees no enclosing process, so the run fails"]
 async fn newly_catalogued_nodes_save_reproject_and_run_from_their_catalog_shapes() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -845,7 +844,7 @@ async fn data_terminal_call_and_effect_edits_round_trip_without_raw_constructor_
 }
 
 #[tokio::test]
-#[ignore = "FIG-5339: a process step's display tool sees no enclosing process, so the run fails"]
+#[ignore = "FIG-5372: the host learns a workflow's signal wait only from process.waiting or the language-execution trace, and the durable engine emits neither"]
 async fn lists_selects_projects_and_runs_built_in_workflows() {
     let state = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -1118,7 +1117,7 @@ async fn lists_selects_projects_and_runs_built_in_workflows() {
 }
 
 #[tokio::test]
-#[ignore = "FIG-5339: a process step's display tool sees no enclosing process, so the run fails"]
+#[ignore = "FIG-5372: the host learns a workflow's signal wait only from process.waiting or the language-execution trace, and the durable engine emits neither"]
 async fn project_mutate_save_and_run_streams_correlated_events() {
     let state = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -1215,7 +1214,6 @@ async fn project_mutate_save_and_run_streams_correlated_events() {
 }
 
 #[tokio::test]
-#[ignore = "FIG-5339: a process step's display tool sees no enclosing process, so the run fails"]
 async fn edited_counter_loop_condition_saves_reprojects_and_runs() {
     let state = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -1275,7 +1273,6 @@ async fn edited_counter_loop_condition_saves_reprojects_and_runs() {
 }
 
 #[tokio::test]
-#[ignore = "FIG-5339: a process step's display tool sees no enclosing process, so the run fails"]
 async fn bare_counter_loop_condition_rewraps_canonically_and_runs() {
     let state = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -1390,7 +1387,7 @@ async fn expression_valued_call_fields_save_reproject_and_reject_malformed_edits
 }
 
 #[tokio::test]
-#[ignore = "FIG-5339: a process step's display tool sees no enclosing process, so the run fails"]
+#[ignore = "FIG-5372: the host learns a workflow's signal wait only from process.waiting or the language-execution trace, and the durable engine emits neither"]
 async fn edited_if_condition_and_for_iterable_save_reproject_and_run() {
     let state = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -1543,7 +1540,7 @@ async fn edited_if_condition_and_for_iterable_save_reproject_and_run() {
 }
 
 #[tokio::test]
-#[ignore = "FIG-5339: a process step's display tool sees no enclosing process, so the run fails"]
+#[ignore = "FIG-5372: the host learns a workflow's signal wait only from process.waiting or the language-execution trace, and the durable engine emits neither"]
 async fn delete_node_edit_round_trips_and_runs_the_saved_graph() {
     let state = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -1626,7 +1623,7 @@ async fn delete_node_edit_round_trips_and_runs_the_saved_graph() {
 }
 
 #[tokio::test]
-#[ignore = "FIG-5339: a process step's display tool sees no enclosing process, so the run fails"]
+#[ignore = "FIG-5338: the host correlates a call node with its display only through the durable language-execution trace's call binding"]
 async fn new_call_node_saves_reprojects_and_runs_with_canonical_correlation() {
     let state = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -1706,7 +1703,6 @@ async fn new_call_node_saves_reprojects_and_runs_with_canonical_correlation() {
 }
 
 #[tokio::test]
-#[ignore = "FIG-5339: a process step's display tool sees no enclosing process, so the run fails"]
 async fn new_if_while_and_for_containers_save_reproject_and_run() {
     let state = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -1850,7 +1846,6 @@ async fn new_statement_containers_allow_empty_bodies() {
 }
 
 #[tokio::test]
-#[ignore = "FIG-5339: a process step's display tool sees no enclosing process, so the run fails"]
 async fn reordered_process_statements_save_reproject_and_run_in_node_id_order() {
     let state = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -1926,7 +1921,7 @@ async fn reordered_process_statements_save_reproject_and_run_in_node_id_order() 
 }
 
 #[tokio::test]
-#[ignore = "FIG-5339: a process step's display tool sees no enclosing process, so the run fails"]
+#[ignore = "FIG-5372: the host learns a workflow's signal wait only from process.waiting or the language-execution trace, and the durable engine emits neither"]
 async fn moved_statement_between_scopes_saves_reprojects_and_runs_in_new_scope() {
     let state = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

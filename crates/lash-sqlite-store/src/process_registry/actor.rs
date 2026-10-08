@@ -81,21 +81,16 @@ impl SqliteProcessRegistry {
         Ok(true)
     }
 
-    /// Append `event_type` with `payload` to `process_id` under
-    /// `replay_key`, on a durable commit's connection: a repeat under the
-    /// same key is a no-op.
+    /// Append `request`, replay-keyed, to `process_id` on a durable
+    /// commit's connection: a repeat under the same key is a no-op.
     pub(crate) fn record_event_conn(
         conn: &rusqlite::Connection,
         process_id: &ProcessId,
-        event_type: &str,
-        payload: serde_json::Value,
-        replay_key: &str,
+        request: ProcessEventAppendRequest,
         now_ms: u64,
         fleet_format: lash_core_execution::FleetFormat,
     ) -> Result<(), lash_core_execution::PluginError> {
         let mut record = Self::require_process_conn(conn, process_id)?;
-        let request =
-            ProcessEventAppendRequest::new(event_type, payload).with_replay_key(replay_key);
         Self::append_event_conn(conn, &mut record, request, now_ms, fleet_format)?;
         Ok(())
     }

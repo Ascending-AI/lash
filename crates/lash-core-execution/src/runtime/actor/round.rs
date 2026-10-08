@@ -569,6 +569,10 @@ pub enum StoreLocalEffect {
     /// Send a signal: its event on the target, its mail and the target's
     /// wake.
     SignalSend(SignalSendRows),
+    /// Announce a parked call's wait on the process it runs inside: the
+    /// event its pending completion declared, journaled with the park and
+    /// waking nobody.
+    ParkAnnouncement(ParkAnnouncementRows),
     /// Create a trigger subscription.
     TriggerCreate(StoreLocalRows),
     /// Delete a trigger subscription.
@@ -603,6 +607,22 @@ pub struct SignalSendRows {
     pub process: crate::ProcessId,
     /// The signal, encoded.
     pub signal_json: String,
+}
+
+/// The event a parked call announces its wait with, as a store-local
+/// effect: appended once, under its replay key, in the transaction that
+/// records the park, so the announcement exists if and only if the park
+/// does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParkAnnouncementRows {
+    /// The process the call runs inside.
+    pub process: crate::ProcessId,
+    /// The event's type.
+    pub event_type: String,
+    /// Its payload, encoded.
+    pub payload_json: String,
+    /// Its replay key.
+    pub replay_key: String,
 }
 
 /// The rows of one store-local effect no producer stages yet.

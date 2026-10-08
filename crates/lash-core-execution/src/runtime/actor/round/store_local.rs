@@ -37,6 +37,19 @@ fn write_effect(tx: &mut ActorTx, effect: StoreLocalEffect) -> Result<(), StoreL
             }));
             Ok(())
         }
+        // An announcement is progress metadata about a wait that has not
+        // settled, not a wake: the session it would reach is the one parked
+        // on the announced call.
+        StoreLocalEffect::ParkAnnouncement(rows) => {
+            tx.write(DomainWrite::Process(ProcessWrite::Emit {
+                process: rows.process,
+                event_type: rows.event_type,
+                payload_json: rows.payload_json,
+                replay_key: rows.replay_key,
+                wake_suppressed: true,
+            }));
+            Ok(())
+        }
         effect @ (StoreLocalEffect::TriggerCreate(_)
         | StoreLocalEffect::TriggerDelete(_)
         | StoreLocalEffect::ChildSessionSpawn(_)

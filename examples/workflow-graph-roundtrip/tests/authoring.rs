@@ -8,7 +8,6 @@ use workflow_graph_roundtrip::{
 };
 
 #[tokio::test]
-#[ignore = "FIG-5339: a process step's display tool sees no enclosing process, so the run fails"]
 async fn blank_workflow_full_authoring_round_trip_rejects_malformed_then_runs() {
     let state = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

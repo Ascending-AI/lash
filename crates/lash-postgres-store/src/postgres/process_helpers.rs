@@ -615,20 +615,16 @@ pub(crate) async fn record_terminal_tx(
     Ok(true)
 }
 
-/// Append `event_type` with `payload` to `process_id` under `replay_key`, on
-/// a durable commit's connection: a repeat under the same key is a no-op
-/// (L6, FIG-5175).
+/// Append `request`, replay-keyed, to `process_id` on a durable commit's
+/// connection: a repeat under the same key is a no-op (L6, FIG-5175).
 pub(crate) async fn record_event_tx(
     tx: &mut GuardedTx<'_>,
     process_id: &ProcessId,
-    event_type: &str,
-    payload: serde_json::Value,
-    replay_key: &str,
+    request: ProcessEventAppendRequest,
     now_ms: u64,
     fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<(), PluginError> {
     let mut record = require_process_tx(tx, process_id).await?;
-    let request = ProcessEventAppendRequest::new(event_type, payload).with_replay_key(replay_key);
     append_process_event_tx(tx, &mut record, request, now_ms, fleet_format).await?;
     Ok(())
 }

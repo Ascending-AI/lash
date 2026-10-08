@@ -949,24 +949,6 @@ impl<'run> ToolCallFixture<'run> {
         self
     }
 
-    /// Makes the call run inside the durable process `process_id` of
-    /// `registry`, writing under `execution_write_authority`. The append
-    /// target and the enclosing process are one fact: a process the fixture
-    /// already names must be this one.
-    pub fn inside_process(
-        mut self,
-        process_id: impl Into<ProcessId>,
-        registry: Arc<dyn crate::ProcessRegistry>,
-        execution_write_authority: crate::ProcessExecutionWriteAuthority,
-    ) -> Self {
-        self.context = self.context.with_process_events_for_testing(
-            process_id,
-            registry,
-            execution_write_authority,
-        );
-        self
-    }
-
     /// The attempt context a body executing this call under
     /// `execution_scope_id` receives. No completion key is reserved: a test
     /// harness is not the attempt coordinator.
@@ -1283,7 +1265,11 @@ pub fn code_execution_context_for_process<'run>(
     TestExecutionContextBuilder::new(ports.into())
         .build()
         .into_runtime()
-        .with_process_execution(process_id, registration, None)
+        .with_process_execution(
+            &crate::ProcessRecord::from_registration(registration.clone(), process_id),
+            registration.wake_session_id.clone(),
+            None,
+        )
 }
 
 /// Build an empty code-execution context whose cancellation is already visible.

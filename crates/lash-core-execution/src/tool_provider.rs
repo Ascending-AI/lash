@@ -14,7 +14,6 @@ mod attachments;
 mod completion_support;
 mod direct_completion;
 mod isolation;
-pub mod process_events;
 mod session;
 
 pub use attachments::ToolAttachmentClient;
@@ -498,7 +497,6 @@ pub(crate) struct ToolContext<'run> {
     pub(crate) cancellation_token: Option<tokio_util::sync::CancellationToken>,
     /// The process this call executes inside.
     pub(crate) enclosing_process: Option<ProcessId>,
-    pub(crate) process_events: Option<ToolProcessEventContext>,
     pub(crate) attachment_store: Arc<crate::RuntimeAttachmentStore>,
     pub(crate) direct_completions: crate::DirectCompletionClient<'run>,
     pub(crate) prepared_payload: serde_json::Value,
@@ -546,38 +544,6 @@ impl ToolChildExecutionTraceHook {
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct ToolProcessEventContext {
-    process_id: ProcessId,
-    execution_write_authority: crate::ProcessExecutionWriteAuthority,
-    process_work: crate::ProcessWorkWiring,
-}
-
-/// The durable process a tool call runs inside, and the wiring the runtime
-/// appends that call's declared park announcement through. Engine process
-/// calls carry this wiring in their tool context; the tool body never sees
-/// it.
-#[derive(Clone)]
-pub struct ProcessToolCallWiring {
-    process_id: ProcessId,
-    execution_write_authority: crate::ProcessExecutionWriteAuthority,
-    process_work: crate::ProcessWorkWiring,
-}
-
-impl ProcessToolCallWiring {
-    pub fn new(
-        process_id: impl Into<ProcessId>,
-        execution_write_authority: crate::ProcessExecutionWriteAuthority,
-        process_work: crate::ProcessWorkWiring,
-    ) -> Self {
-        Self {
-            process_id: process_id.into(),
-            execution_write_authority,
-            process_work,
-        }
-    }
-}
-
 pub(crate) struct ToolContextBuilder<'run> {
     owner: crate::ExecutionOwner,
     sessions: Arc<dyn SessionStateService>,
@@ -588,7 +554,6 @@ pub(crate) struct ToolContextBuilder<'run> {
     runtime_execution_context: Option<crate::RuntimeExecutionContext<'run>>,
     cancellation_token: Option<tokio_util::sync::CancellationToken>,
     enclosing_process: Option<ProcessId>,
-    process_events: Option<ToolProcessEventContext>,
     attachment_store: Arc<crate::RuntimeAttachmentStore>,
     direct_completions: crate::DirectCompletionClient<'run>,
     prepared_payload: serde_json::Value,
@@ -617,7 +582,6 @@ impl<'run> ToolContextBuilder<'run> {
             runtime_execution_context: None,
             cancellation_token: None,
             enclosing_process: None,
-            process_events: None,
             attachment_store: Arc::clone(&dispatch.attachment_store),
             direct_completions: dispatch.direct_completions.clone(),
             prepared_payload: call.prepared_payload.clone(),
@@ -648,34 +612,9 @@ impl<'run> ToolContextBuilder<'run> {
     }
 
     /// Name the process this call executes inside. This is the one accessor
-    /// hosts write; the process-event append target set via
-    /// [`Self::process_events`] must agree with it.
+    /// hosts write.
     pub(crate) fn enclosing_process(mut self, process_id: Option<ProcessId>) -> Self {
         self.enclosing_process = process_id;
-        self
-    }
-
-    /// Makes the call run inside the durable process `wiring` names. The
-    /// event append target and the enclosing process are the same fact: when
-    /// the host already named one, they must agree.
-    pub(crate) fn inside_process(mut self, wiring: ProcessToolCallWiring) -> Self {
-        let ProcessToolCallWiring {
-            process_id,
-            execution_write_authority,
-            process_work,
-        } = wiring;
-        match &self.enclosing_process {
-            Some(enclosing) => assert_eq!(
-                enclosing, &process_id,
-                "process_events target must equal the context's enclosing process"
-            ),
-            None => self.enclosing_process = Some(process_id.clone()),
-        }
-        self.process_events = Some(ToolProcessEventContext {
-            process_id,
-            execution_write_authority,
-            process_work,
-        });
         self
     }
 
@@ -703,7 +642,6 @@ impl<'run> ToolContextBuilder<'run> {
             runtime_execution_context: self.runtime_execution_context,
             cancellation_token: self.cancellation_token,
             enclosing_process: self.enclosing_process,
-            process_events: self.process_events,
             attachment_store: self.attachment_store,
             direct_completions: self.direct_completions,
             prepared_payload: self.prepared_payload,
@@ -763,7 +701,6 @@ impl<'run> ToolContext<'run> {
             },
             cancellation_token: self.cancellation_token.clone(),
             enclosing_process: self.enclosing_process.clone(),
-            process_events: self.process_events.clone(),
             attachment_store: Arc::clone(&self.attachment_store),
             direct_completions: self.direct_completions.to_static()?,
             prepared_payload: self.prepared_payload.clone(),
@@ -807,7 +744,6 @@ impl<'run> ToolContext<'run> {
             runtime_execution_context: None,
             cancellation_token: None,
             enclosing_process: None,
-            process_events: None,
             attachment_store,
             direct_completions,
             prepared_payload: serde_json::Value::Null,
@@ -841,21 +777,6 @@ impl<'run> ToolContext<'run> {
         &self.owner
     }
 
-    /// Append `request` to the journal of the durable process this call runs
-    /// inside. Only the runtime appends on a call's behalf: a body declares
-    /// the event on its pending completion instead.
-    pub(crate) async fn append_process_event(
-        &self,
-        request: crate::ProcessEventAppendRequest,
-    ) -> Result<crate::ProcessEvent, PluginError> {
-        let Some(process) = self.process_events.as_ref() else {
-            return Err(PluginError::Session(
-                "process event emission is unavailable outside a durable process".to_string(),
-            ));
-        };
-        process.append(request).await
-    }
-
     /// Exposes cooperative cancellation to tool implementors, returning `None` when the execution
     /// boundary supplied no cancellation scope.
     pub fn cancellation_token(&self) -> Option<&tokio_util::sync::CancellationToken> {
@@ -883,36 +804,6 @@ impl<'run> ToolContext<'run> {
 
     pub(crate) fn take_completion_key(&self) -> Option<crate::PinnedKey> {
         self.completion.take()
-    }
-
-    /// Makes the call run inside the durable process `process_id` of
-    /// `registry` in a test; see `testing::ToolCallFixture::inside_process`.
-    #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn with_process_events_for_testing(
-        mut self,
-        process_id: impl Into<ProcessId>,
-        registry: Arc<dyn crate::ProcessRegistry>,
-        execution_write_authority: crate::ProcessExecutionWriteAuthority,
-    ) -> Self {
-        let process_id = process_id.into();
-        match &self.enclosing_process {
-            Some(enclosing) => assert_eq!(
-                enclosing, &process_id,
-                "process_events target must equal the context's enclosing process"
-            ),
-            None => self.enclosing_process = Some(process_id.clone()),
-        }
-        let watched = crate::facade_support::watch_process_registry(registry);
-        let port = Arc::new(crate::NoProcessWork::for_registry(Arc::clone(
-            watched.registry(),
-        )));
-        let process_work = crate::ProcessWorkWiring::new(watched, port);
-        self.process_events = Some(ToolProcessEventContext {
-            execution_write_authority,
-            process_id,
-            process_work,
-        });
-        self
     }
 
     pub(crate) fn with_attempt(mut self, attempt_number: u32, max_attempts: u32) -> Self {

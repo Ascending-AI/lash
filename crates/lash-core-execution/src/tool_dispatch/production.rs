@@ -529,30 +529,20 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         // §3.1).
         let declaring =
             super::intent_executor::declaring_identity(&dispatch, attempt.call_id, &invocation);
-        let mut builder = crate::ToolContext::from_dispatch(dispatch.clone(), &prepared.call)
+        // A dispatch a process owns runs its calls inside that process,
+        // whether or not its execution context names it.
+        let enclosing_process = self
+            .context
+            .process_id()
+            .or(dispatch.owner.process_id())
+            .cloned();
+        let mut context = crate::ToolContext::from_dispatch(dispatch.clone(), &prepared.call)
             .runtime_execution_context(
                 self.context
                     .clone()
                     .with_execution_env_spec(dispatch.execution_env_spec.clone()),
             )
-            // A dispatch a process owns runs its calls inside that process,
-            // whether or not its execution context names it.
-            .enclosing_process(
-                self.context
-                    .process_id()
-                    .or(dispatch.owner.process_id())
-                    .cloned(),
-            );
-        if let Some(process_id) = self.context.process_id()
-            && let Some(events) = self.context.process_event_context()
-        {
-            builder = builder.inside_process(crate::ProcessToolCallWiring::new(
-                process_id.clone(),
-                events.execution_write_authority.clone(),
-                events.process_work.clone(),
-            ));
-        }
-        let mut context = builder
+            .enclosing_process(enclosing_process.clone())
             .build()
             .with_attempt_dispatch(dispatch.clone(), invocation);
         context = context.with_prepared_payload(prepared.call.prepared_payload.clone());
@@ -771,13 +761,12 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                         suggested_delay_ms: None,
                     })
                 } else {
-                    let pending = match super::atomic_attempt::announce_pending_park(
-                        &completion_context,
-                        pending,
-                    )
-                    .await
-                    {
-                        Ok(pending) => pending,
+                    let mut pending = pending;
+                    let announcement = match super::atomic_attempt::stage_park_announcement(
+                        enclosing_process.as_ref(),
+                        &mut pending,
+                    ) {
+                        Ok(announcement) => announcement,
                         Err(failure) => {
                             let capture = self
                                 .capture_output(
@@ -796,7 +785,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                             });
                         }
                     };
-                    let mut store_local = Vec::new();
+                    let mut store_local: Vec<_> = announcement.into_iter().collect();
                     let launch = match &pending.resolved_by {
                         Some(crate::PendingResolver::DeclaredStart(start)) => {
                             let (receipt, effect) = self

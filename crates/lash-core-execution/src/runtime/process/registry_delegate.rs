@@ -466,6 +466,13 @@ macro_rules! delegate_process_observer_registry {
                 self.$inner.observers_for_process(process_id).await
             }
 
+            async fn wake_target(
+                &self,
+                process_id: &ProcessId,
+            ) -> Result<Option<$crate::SessionId>, $crate::PluginError> {
+                self.$inner.wake_target(process_id).await
+            }
+
             async fn retarget_subscription(
                 &self,
                 process_id: &ProcessId,

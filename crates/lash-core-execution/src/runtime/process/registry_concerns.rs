@@ -328,6 +328,12 @@ pub trait ProcessObserverRegistry: ProcessQuery {
         process_id: &ProcessId,
     ) -> Result<Vec<SessionId>, PluginError>;
 
+    /// The session `process_id`'s wake deliveries target: the one its start
+    /// recorded, or the latest [`Self::retarget_subscription`] set. `None`
+    /// when it wakes nothing. A process whose row is gone is refused as
+    /// [`ProcessQuery::get_process`] refuses it.
+    async fn wake_target(&self, process_id: &ProcessId) -> Result<Option<SessionId>, PluginError>;
+
     /// Append a subscription-retarget audit event, update the indexed target,
     /// and discard pending deliveries to the old target atomically.
     async fn retarget_subscription(
@@ -868,6 +874,9 @@ pub trait ProcessClockRebind: Send + Sync {
 ///         unimplemented!()
 ///     }
 ///     async fn observers_for_process(&self, _: &str) -> Result<Vec<SessionId>, PluginError> {
+///         unimplemented!()
+///     }
+///     async fn wake_target(&self, _: &str) -> Result<Option<SessionId>, PluginError> {
 ///         unimplemented!()
 ///     }
 ///     async fn retarget_subscription(&self, _: &str, _: Option<&str>) -> Result<(), PluginError> {

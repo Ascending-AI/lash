@@ -1590,10 +1590,24 @@ pub async fn wake_subscription_is_indexed_and_retargetable(registry: Arc<dyn Pro
         )
         .await
         .expect("append old-target wake");
+    assert_eq!(
+        registry
+            .wake_target(&process_id)
+            .await
+            .expect("read the wake target its start recorded"),
+        Some(SessionId::from("wake-old"))
+    );
     registry
         .retarget_subscription(&process_id, Some("wake-new"))
         .await
         .expect("retarget wake subscription");
+    assert_eq!(
+        registry
+            .wake_target(&process_id)
+            .await
+            .expect("read the retargeted wake target"),
+        Some(SessionId::from("wake-new"))
+    );
 
     assert!(
         registry

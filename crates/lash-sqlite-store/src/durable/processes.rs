@@ -298,16 +298,21 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWri
             event_type,
             payload_json,
             replay_key,
+            wake_suppressed,
         } => {
             let Ok(payload) = serde_json::from_str(payload_json) else {
                 return Ok(Err(super::corrupt("process event payload", payload_json)));
             };
+            let mut request =
+                lash_core_execution::ProcessEventAppendRequest::new(event_type.as_str(), payload)
+                    .with_replay_key(replay_key.as_str());
+            if *wake_suppressed {
+                request = request.without_wake();
+            }
             Ok(SqliteProcessRegistry::record_event_conn(
                 tx,
                 process,
-                event_type,
-                payload,
-                replay_key,
+                request,
                 millis(commit.now)?,
                 commit.fleet,
             )

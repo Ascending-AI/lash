@@ -95,6 +95,10 @@ pub enum ProcessWrite {
         payload_json: String,
         /// Its replay key.
         replay_key: String,
+        /// Whether the wake its type declares is withheld: a parked call's
+        /// announcement of its own wait wakes nobody, while the event is
+        /// journaled as any other append of its type is.
+        wake_suppressed: bool,
     },
     /// End the process with its terminal, encoded by its owner. A process
     /// already terminal keeps its first terminal. The cascade over its

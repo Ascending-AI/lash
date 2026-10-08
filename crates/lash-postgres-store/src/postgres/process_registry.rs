@@ -500,6 +500,20 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
             .collect()
     }
 
+    async fn wake_target(&self, process_id: &ProcessId) -> Result<Option<SessionId>, PluginError> {
+        if self.get_process(process_id).await?.is_none() {
+            return Err(registry_transitions::unknown_process(process_id));
+        }
+        sqlx::query_scalar::<_, Option<String>>(process_sql().process.select_wake_session_id.sql())
+            .bind(process_id.as_str())
+            .fetch_one(&self.pool)
+            .await
+            .map_err(plugin_sqlx_error)?
+            .map(SessionId::parse)
+            .transpose()
+            .map_err(PluginError::from)
+    }
+
     async fn retarget_subscription(
         &self,
         process_id: &ProcessId,

@@ -45,7 +45,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         effect_attempt: Option<crate::EffectAttempt>,
         stop: Option<tokio_util::sync::CancellationToken>,
     ) -> Result<crate::ToolAttemptEffectOutcome, crate::RuntimeEffectControllerError> {
-        let mut tool_context = crate::ToolContext::from_dispatch(std::sync::Arc::clone(&self.dispatch), &prepared)
+        let tool_context = crate::ToolContext::from_dispatch(std::sync::Arc::clone(&self.dispatch), &prepared)
                 .runtime_execution_context(self.clone())
                 .cancellation_token(stop)
                 // A dispatch a process owns runs its calls inside that
@@ -57,15 +57,6 @@ impl<'run> RuntimeExecutionContext<'run> {
                 )
                 .parent_invocation(Some(attempt_invocation.clone()))
                 .child_execution_trace_hook(child_execution_trace_hook);
-        if let Some(process_id) = self.process_id()
-            && let Some(process_events) = self.process_event_context()
-        {
-            tool_context = tool_context.inside_process(crate::ProcessToolCallWiring::new(
-                process_id.clone(),
-                process_events.execution_write_authority.clone(),
-                process_events.process_work.clone(),
-            ));
-        }
         Box::pin(
             crate::tool_dispatch::AtomicToolAttempt::new(
                 self.dispatch.as_ref(),

@@ -666,6 +666,9 @@ impl ProcessObserverRegistry for Integrator {
     ) -> Result<Vec<SessionId>, PluginError> {
         unreachable!("external signature witness")
     }
+    async fn wake_target(&self, process_id: &ProcessId) -> Result<Option<SessionId>, PluginError> {
+        unreachable!("external signature witness")
+    }
     async fn retarget_subscription(
         &self,
         process_id: &ProcessId,

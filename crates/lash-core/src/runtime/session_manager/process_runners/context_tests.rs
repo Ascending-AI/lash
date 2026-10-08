@@ -1,4 +1,3 @@
-use super::*;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -53,14 +52,7 @@ async fn execute_process_dispatch(
         &crate::ProcessId::fixture("process-route"),
     );
     let dispatch = services
-        .process_step_dispatch(
-            surface,
-            ProcessStepScope {
-                effect_controller: scoped,
-                process_lineage: None,
-                process_originator: None,
-            },
-        )
+        .process_step_dispatch(surface, scoped)
         .expect("process step dispatch");
     let attempt = crate::testing::ToolCallFixture::from_dispatch(Arc::clone(&dispatch))
         .attempt("process-route");

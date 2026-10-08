@@ -55,13 +55,10 @@ product_stack_probe_cases! {
         "agent.foreground_tool_call_round_trip",
     stack_policy_probe_agent_started_process_tool_call_graph_passes_at_2_mib =>
         "agent.started_process_tool_call_graph",
-    #[ignore = "FIG-5337: a durable process's tool steps run with no process execution"]
     stack_policy_probe_agent_durable_input_suspension_resolution_passes_at_2_mib =>
         "agent.durable_input_suspension_resolution",
-    #[ignore = "FIG-5337: a durable process's tool steps run with no process execution"]
     stack_policy_probe_agent_started_process_child_spawn_passes_at_2_mib =>
         "agent.started_process_child_spawn",
-    #[ignore = "FIG-5337: a durable process's tool steps run with no process execution"]
     stack_policy_probe_agent_nested_process_start_await_passes_at_2_mib =>
         "agent.nested_process_start_await",
     stack_policy_probe_agent_session_turn_process_child_passes_at_2_mib =>

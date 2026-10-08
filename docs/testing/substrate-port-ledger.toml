@@ -3186,7 +3186,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5338: covered-by:crates/lash-durable-test/tests/rlm_execution_maps.rs::production_rlm_map_is_the_compiled_inventory_for_every_loop_kind; covered-by:crates/lash-durable-test/tests/rlm_execution_maps.rs::durable_language_trace_continues_once_across_quiet_points; covered-by:crates/lash-durable-test/tests/rlm_execution_maps.rs::every_model_code_path_runs_in_a_worker. The shared production_process_map_is_the_compiled_inventory_after_a_store_round_trip law remains ignored only on FIG-5339 until fig-5337-work lands its process-body wiring."
+note = "FIG-5338: covered-by:crates/lash-durable-test/tests/rlm_execution_maps.rs::production_rlm_map_is_the_compiled_inventory_for_every_loop_kind; covered-by:crates/lash-durable-test/tests/rlm_execution_maps.rs::durable_language_trace_continues_once_across_quiet_points; covered-by:crates/lash-durable-test/tests/rlm_execution_maps.rs::every_model_code_path_runs_in_a_worker. The shared production_process_map_is_the_compiled_inventory_after_a_store_round_trip law: since FIG-5337/FIG-5339 the worker's emit and nested start run and both maps hold; it stays ignored on FIG-5338 because assert_skipped finds no node of the worker's stored artifact naming `worker-never`."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/projections_and_snapshots.rs"
@@ -17870,7 +17870,7 @@ laws = [
 disposition = "replaced-by:examples/workflow-graph-roundtrip/tests/authoring.rs::renaming_a_node_keeps_the_authored_title_through_save_and_reprojection"
 status = "deleted"
 owed = "blank workflow full authoring round trip rejects malformed then runs; and 5 more law(s) of the file, by test name"
-note = "FIG-5308: restored from 5ad9641f9e^ onto a durable SQLite core; the example's process commands now start and signal through the core's process API. blank_workflow_full_authoring_round_trip_rejects_malformed_then_runs is ignored on FIG-5339 (a process step's tools see no enclosing process, so the run fails); the other five pass."
+note = "FIG-5308: restored from 5ad9641f9e^ onto a durable SQLite core; the example's process commands now start and signal through the core's process API. All six pass; blank_workflow_full_authoring_round_trip_rejects_malformed_then_runs runs since FIG-5337/FIG-5339 gave a process step's tools their process execution."
 
 [[row]]
 path = "examples/workflow-graph-roundtrip/tests/durable_run.rs"
@@ -17885,7 +17885,7 @@ laws = [
 disposition = "replaced-by:examples/workflow-graph-roundtrip/tests/durable_run.rs::a_saved_workflow_runs_as_a_durable_process"
 status = "deleted"
 owed = "a saved workflow runs as a durable process"
-note = "FIG-5308: restored from 5ad9641f9e^ onto a durable SQLite core; the example's process commands now start and signal through the core's process API. Ignored on FIG-5339 (a process step's display tool sees no enclosing process)."
+note = "FIG-5308: restored from 5ad9641f9e^ onto a durable SQLite core; the example's process commands now start and signal through the core's process API. Since FIG-5337/FIG-5339 the run completes; ignored on FIG-5372 (no durable engine path records process.effect_outcome events, so it has no graph effects to check)."
 
 [[row]]
 path = "examples/workflow-graph-roundtrip/tests/roundtrip.rs"
@@ -17920,7 +17920,7 @@ laws = [
 disposition = "replaced-by:examples/workflow-graph-roundtrip/tests/roundtrip.rs::operation_catalog_and_fragment_validation_match_the_editor_contract"
 status = "deleted"
 owed = "operation catalog and fragment validation match the editor contract; and 20 more law(s) of the file, by test name"
-note = "FIG-5308: restored from 5ad9641f9e^ onto a durable SQLite core; the example's process commands now start and signal through the core's process API. The eleven laws that run a workflow are ignored on FIG-5339 (a process step's display tool sees no enclosing process); the ten that do not run one pass."
+note = "FIG-5308: restored from 5ad9641f9e^ onto a durable SQLite core; the example's process commands now start and signal through the core's process API. Since FIG-5337/FIG-5339 a process step's tools run with their process execution: fifteen pass; the five that wait on a signal are ignored on FIG-5372 (the host learns a wait only from process.waiting or the language-execution trace), and new_call_node_saves_reprojects_and_runs_with_canonical_correlation on FIG-5338 (call-to-node trace binding)."
 
 [[row]]
 path = "examples/workflow-graph-roundtrip/tests/type_facets.rs"
@@ -19690,7 +19690,7 @@ laws = [
 disposition = "replaced-by:crates/lash-sim/tests/stack_policy.rs"
 status = "deleted"
 owed = "every fixed Agent product contract runs to completion in a child process held to the 2 MiB product stack budget, one case per contract"
-note = "FIG-5310: restored on the durable engine, one case per fixed Agent product contract, each a lash-sim child held to 2 MiB; the started-process child spawn case replaces the subagent one (FIG-5296). The durable-input, child-spawn and nested-start cases are ignored on FIG-5337: a durable process's tool steps run with no process execution, so its starts carry no spawn provenance and its park announcement has no process event context"
+note = "FIG-5310: restored on the durable engine, one case per fixed Agent product contract, each a lash-sim child held to 2 MiB; the started-process child spawn case replaces the subagent one (FIG-5296). FIG-5337: a durable process's tool steps run with its process execution, so the durable-input, child-spawn and nested-start cases run"
 
 [[row]]
 path = "crates/lash-sim/src/runner/agent_contracts_effect_boundary_tests.rs"

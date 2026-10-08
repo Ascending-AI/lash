@@ -120,6 +120,7 @@ impl DurableProcessWorker {
                 self.runtime(process)
                     .await?
                     .step_tools(runtime.cx().clone(), process)
+                    .await
             })
             .await
     }

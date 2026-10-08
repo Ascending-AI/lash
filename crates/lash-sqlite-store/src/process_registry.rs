@@ -370,6 +370,22 @@ impl lash_core_execution::ProcessObserverRegistry for SqliteProcessRegistry {
             .map_err(process_sqlite_error)?
     }
 
+    async fn wake_target(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<Option<SessionId>, lash_core_execution::PluginError> {
+        let process_id = process_id.clone();
+        self.conn
+            .call(move |conn| {
+                Ok((|| {
+                    Self::require_process_conn(conn, &process_id)?;
+                    Self::wake_session_id_conn(conn, &process_id)
+                })())
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
     async fn retarget_subscription(
         &self,
         process_id: &ProcessId,

@@ -6,7 +6,7 @@ use serde_json::json;
 use workflow_graph_roundtrip::{RunStatus, WorkflowDocument};
 
 #[tokio::test]
-#[ignore = "FIG-5339: a process step's display tool sees no enclosing process, so the run fails"]
+#[ignore = "FIG-5372: no durable engine path records process.effect_outcome events, so the run has no graph effects to check"]
 async fn a_saved_workflow_runs_as_a_durable_process() {
     let (state, core) = runtime::state_and_core().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

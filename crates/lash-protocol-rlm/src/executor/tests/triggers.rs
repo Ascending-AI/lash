@@ -866,8 +866,11 @@ pub(super) fn bare_host_process_trigger_is_refused_before_store_mutation() {
             .build()
             .into_runtime()
             .with_process_execution(
-                lash_core::ProcessId::fixture("bare-host-process"),
-                &registration,
+                &lash_core::ProcessRecord::from_registration(
+                    registration,
+                    lash_core::ProcessId::fixture("bare-host-process"),
+                ),
+                None,
                 None,
             );
         for (operation, payload) in [

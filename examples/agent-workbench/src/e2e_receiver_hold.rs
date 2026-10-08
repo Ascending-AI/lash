@@ -306,6 +306,9 @@ impl ProcessObserverRegistry for ReceiverHoldRegistry {
     ) -> Result<Vec<SessionId>, PluginError> {
         self.inner.observers_for_process(process_id).await
     }
+    async fn wake_target(&self, process_id: &ProcessId) -> Result<Option<SessionId>, PluginError> {
+        self.inner.wake_target(process_id).await
+    }
     async fn retarget_subscription(
         &self,
         process_id: &ProcessId,

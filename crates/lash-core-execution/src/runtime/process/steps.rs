@@ -113,7 +113,7 @@ pub struct ProcessStepTools {
     /// The round tools over it, owned by the process.
     pub tools: Arc<dyn RoundTools>,
     /// The execution context a host step runs over: the round tools'
-    /// dispatch, acting as the process's recorded originator.
+    /// context, running inside the process.
     pub host: crate::RuntimeExecutionContext<'static>,
 }
 

@@ -1093,6 +1093,7 @@ impl ProcessActivation {
                     event_type: event_type.name.clone(),
                     payload_json: payload.to_string(),
                     replay_key: format!("process:{process}:emit:{state_rev}"),
+                    wake_suppressed: false,
                 }));
                 driver.immediate = Some(Immediate::Emitted);
             }

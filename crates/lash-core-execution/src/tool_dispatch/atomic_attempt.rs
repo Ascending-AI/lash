@@ -170,31 +170,35 @@ impl<'grant> AttemptAuthority<'grant> {
 /// A recorded attempt body cannot append process events — its
 /// [`crate::AttemptContext`] has no route to them — so a tool that must
 /// announce its durable wait declares the event on its
-/// [`crate::PendingCompletion`] instead. The append happens here, after the
-/// completion key is taken and before the call is handed back as pending, so
-/// the announcement cannot exist without the park it announces. A failed
-/// append fails the call rather than parking silently.
+/// [`crate::PendingCompletion`] instead. The announcement is staged here as a
+/// store-local effect of the park in `process`, the process the call runs
+/// inside: it commits in the transaction that records the park, so the
+/// announcement cannot exist without the park it announces. A call that runs
+/// inside no process has nowhere to announce, and fails rather than parking
+/// silently.
 ///
-/// The declaration is dropped from the returned policy: it has been executed,
-/// and nothing downstream may replay it out of this seam.
-pub(super) async fn announce_pending_park(
-    context: &ToolContext<'_>,
-    mut pending: crate::PendingCompletion,
-) -> Result<crate::PendingCompletion, Box<crate::ToolFailure>> {
+/// The declaration is dropped from `pending`: it has been staged, and nothing
+/// downstream may replay it out of this seam.
+pub(super) fn stage_park_announcement(
+    process: Option<&crate::ProcessId>,
+    pending: &mut crate::PendingCompletion,
+) -> Result<Option<crate::runtime::actor::round::StoreLocalEffect>, Box<crate::ToolFailure>> {
     let Some(announcement) = pending.announcement.take() else {
-        return Ok(pending);
+        return Ok(None);
     };
-    match context
-        .append_process_event(announcement.into_append_request())
-        .await
-    {
-        Ok(_) => Ok(pending),
-        Err(err) => Err(Box::new(crate::ToolFailure::runtime(
+    let Some(process) = process else {
+        return Err(Box::new(crate::ToolFailure::runtime(
             ToolFailureClass::Internal,
             "pending_tool_announcement_failed",
-            format!("declared park announcement could not be appended: {err}"),
-        ))),
-    }
+            "declared park announcement could not be appended: process event emission is \
+             unavailable outside a durable process",
+        )));
+    };
+    Ok(Some(
+        crate::runtime::actor::round::StoreLocalEffect::ParkAnnouncement(
+            announcement.into_rows(process.clone()),
+        ),
+    ))
 }
 
 /// The failure an outcome its admitted declaration does not admit answers

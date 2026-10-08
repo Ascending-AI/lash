@@ -130,12 +130,13 @@ impl ProcessRuntimeContext {
     }
 
     /// The tools `process`'s steps run under `cx`, the process actor's
-    /// claimed context.
+    /// claimed context, inside `process`.
     ///
     /// # Errors
     ///
-    /// `process` is not this runtime's, or its surface does not resolve.
-    pub fn step_tools(
+    /// `process` is not this runtime's, its surface does not resolve, or its
+    /// wake target cannot be read.
+    pub async fn step_tools(
         &self,
         cx: crate::ActorContext,
         process: &crate::ProcessRecord,
@@ -146,7 +147,7 @@ impl ProcessRuntimeContext {
                 self.process_id, process.id
             )));
         }
-        self.services.process_step_tools(cx, process)
+        self.services.process_step_tools(cx, process).await
     }
 }
 

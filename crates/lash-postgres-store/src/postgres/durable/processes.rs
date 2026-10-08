@@ -298,20 +298,19 @@ pub(super) async fn apply(
             event_type,
             payload_json,
             replay_key,
+            wake_suppressed,
         } => {
             let payload = serde_json::from_str(payload_json)
                 .map_err(|_| corrupt("process event payload", payload_json))?;
-            record_event_tx(
-                tx,
-                process,
-                event_type,
-                payload,
-                replay_key,
-                millis(commit.now)?,
-                commit.fleet,
-            )
-            .await
-            .map_err(|error| registry_failure(&error))
+            let mut request =
+                lash_core_execution::ProcessEventAppendRequest::new(event_type.as_str(), payload)
+                    .with_replay_key(replay_key.as_str());
+            if *wake_suppressed {
+                request = request.without_wake();
+            }
+            record_event_tx(tx, process, request, millis(commit.now)?, commit.fleet)
+                .await
+                .map_err(|error| registry_failure(&error))
         }
         ProcessWrite::Terminal {
             process,

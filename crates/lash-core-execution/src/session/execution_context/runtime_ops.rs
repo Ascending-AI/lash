@@ -4,7 +4,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::super::OpenerState;
 use super::{
-    ProcessId, RecordedTurnCancel, RuntimeExecutionContext, RuntimeExecutionProcessEventContext,
+    RecordedTurnCancel, RuntimeExecutionContext, RuntimeExecutionProcessEventContext,
     RuntimeExecutionTracing, RuntimeProcessExecution, ToolDispatchContext,
 };
 
@@ -46,20 +46,17 @@ pub trait RuntimeExecutionContextRuntimeOps<'run>: Sized {
     #[must_use]
     fn with_tracing(self, tracing: Option<RuntimeExecutionTracing>) -> Self;
 
+    /// Run this execution inside `process`, whose deliveries wake
+    /// `wake_session_id`: what it reads off the process it runs in (its id,
+    /// originator, captured environment and wake target) and what the
+    /// children it starts inherit come from the process's recorded facts.
     #[must_use]
     fn with_process_execution(
         self,
-        process_id: ProcessId,
-        registration: &crate::ProcessRegistration,
+        process: &crate::ProcessRecord,
+        wake_session_id: Option<crate::SessionId>,
         event_context: impl Into<Option<RuntimeExecutionProcessEventContext>>,
     ) -> Self;
-
-    /// Run this execution as a step of `process`: it acts as the process's
-    /// recorded originator, as [`Self::with_process_execution`] does for a
-    /// start's registration. The record keeps no wake target, so a
-    /// registration made here wakes nothing.
-    #[must_use]
-    fn with_process_record(self, process: &crate::ProcessRecord) -> Self;
 
     /// Starts this execution's recorded turn-cancel fact, unset: `lent` is
     /// the stop the turn lends its tool children, fired when the fact
@@ -138,28 +135,12 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
 
     fn with_process_execution(
         mut self,
-        process_id: ProcessId,
-        registration: &crate::ProcessRegistration,
+        process: &crate::ProcessRecord,
+        wake_session_id: Option<crate::SessionId>,
         event_context: impl Into<Option<RuntimeExecutionProcessEventContext>>,
     ) -> Self {
         // The lineage the process's body starts children under (FIG-3607 R1),
         // on the dispatch every start made inside this run realizes through.
-        let mut dispatch = (*self.dispatch).clone();
-        if dispatch.process_lineage.is_none() {
-            dispatch.process_lineage = Some(registration.lineage(&process_id));
-        }
-        dispatch.process_originator = Some(registration.provenance.originator.clone());
-        self.dispatch = Arc::new(dispatch);
-        self.process_execution = Some(RuntimeProcessExecution {
-            process_id,
-            originator: registration.provenance.originator.clone(),
-            env_ref: registration.env_ref.clone(),
-            wake_session_id: registration.wake_session_id.clone(),
-            event_context: event_context.into(),
-        });
-        self
-    }
-    fn with_process_record(mut self, process: &crate::ProcessRecord) -> Self {
         let mut dispatch = (*self.dispatch).clone();
         if dispatch.process_lineage.is_none() {
             dispatch.process_lineage = Some(process.lineage());
@@ -170,8 +151,8 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             process_id: process.id.clone(),
             originator: process.provenance.originator.clone(),
             env_ref: process.env_ref.clone(),
-            wake_session_id: None,
-            event_context: None,
+            wake_session_id,
+            event_context: event_context.into(),
         });
         self
     }

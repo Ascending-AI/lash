@@ -588,7 +588,7 @@ macro_rules! map_laws_on {
                 }
 
                 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-                #[ignore = "FIG-5339: a process body's emit and nested start lack process wiring"]
+                #[ignore = "FIG-5338: both processes run and their maps hold, but no node of the worker's stored artifact names `worker-never` for assert_skipped"]
                 async fn production_process_map_is_the_compiled_inventory_after_a_store_round_trip() {
                     super::production_process_map_is_the_compiled_inventory_after_a_store_round_trip(
                         super::served::Tier::$tier,

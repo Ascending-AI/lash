@@ -843,12 +843,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         self.process_execution.as_ref().map(|exec| &exec.process_id)
     }
 
-    pub(crate) fn process_event_context(&self) -> Option<&RuntimeExecutionProcessEventContext> {
-        self.process_execution
-            .as_ref()
-            .and_then(|exec| exec.event_context.as_ref())
-    }
-
     /// Engine execution that owns the enclosing process execution, when this
     /// context runs inside an attempt-bound engine process.
     pub fn engine_execution_id(&self) -> Option<&str> {

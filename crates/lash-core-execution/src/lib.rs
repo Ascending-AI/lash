@@ -896,7 +896,6 @@ pub use tool_intent::{
 };
 /// The process wiring a process host hands the runtime for a tool call
 /// running inside a durable process.
-pub use tool_provider::ProcessToolCallWiring;
 /// Tool-provider contracts, including child-process execution observation hooks.
 pub use tool_provider::{
     AttemptContext, AttemptProcessReads, AttemptSessionReads, IsolatedProcessBinding,

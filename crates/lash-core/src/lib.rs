@@ -31,7 +31,7 @@ pub use lash_core_execution::formats;
 pub use lash_core_execution::process_id_for_test;
 pub use lash_core_execution::process_id_from_handle_json;
 pub use lash_core_execution::runtime::actor::round::{
-    SignalSendRows, StagedPluginState, StoreLocalEffect, StoreLocalRows,
+    ParkAnnouncementRows, SignalSendRows, StagedPluginState, StoreLocalEffect, StoreLocalRows,
 };
 /// Durable tool-effect format versions, re-exported for the format manifest.
 pub use lash_core_execution::waits;
