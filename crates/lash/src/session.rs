@@ -846,6 +846,7 @@ impl LashSession {
         ObservableSession {
             runtime: self.runtime.clone(),
             store: self.binding.store(),
+            observation_work_limits: self.binding.observation_work_limits(),
         }
     }
 
@@ -986,6 +987,7 @@ impl LashSession {
             target: crate::send::SendTarget::Live(self.clone()),
             runtime: self.runtime.clone(),
             process_work: Arc::clone(self.binding.process().port()),
+            observation_work_limits: self.binding.observation_work_limits(),
         }
     }
 
@@ -1087,6 +1089,7 @@ impl LashSession {
 /// from this process's resident runtime, which trails a commit another
 /// process made until the resident adopts the durable head.
 pub struct ObservableSession {
+    observation_work_limits: lash_trace::ObservationWorkLimits,
     pub(crate) runtime: RuntimeHandle,
     store: lash_core::store::SessionStore,
 }
@@ -1097,7 +1100,11 @@ impl ObservableSession {
     }
 
     fn feed_source(&self) -> crate::observation_feed::FeedSource {
-        crate::observation_feed::FeedSource::new(self.runtime.clone(), self.store.clone())
+        crate::observation_feed::FeedSource::new(
+            self.runtime.clone(),
+            self.store.clone(),
+            self.observation_work_limits,
+        )
     }
 
     /// The session's durable head and the cursor bound to its revision:

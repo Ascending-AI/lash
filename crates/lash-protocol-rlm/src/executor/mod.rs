@@ -1394,10 +1394,10 @@ fn emit_step_trace(ctx: &RuntimeExecutionContext<'_>, result: Result<(), &str>) 
         let outcome = match result {
             Ok(()) => lash_trace::TraceProgramStepOutcome::Ok,
             Err(diagnostic) => lash_trace::TraceProgramStepOutcome::Failure {
-                diagnostic: lash_sansio::session_model::truncate_raw_error(
-                    diagnostic,
-                    lash_sansio::session_model::RuntimeOutputCuts::standard().raw_error_max_chars,
-                ),
+                diagnostic: tracing
+                    .trace_runtime()
+                    .limits()
+                    .diagnostic_error(diagnostic),
             },
         };
         (

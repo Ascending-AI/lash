@@ -136,7 +136,16 @@ fn omission_records_are_strict() {
         BTreeMap::from([("node".to_string(), counts)]),
         crate::FleetFormat::current(),
     );
-    omissions.occurrence_cap += 1;
+    for cap in 0..=PROCESS_EFFECT_OCCURRENCE_CAP {
+        omissions.occurrence_cap = cap;
+        let decoded = ProcessEffectOmissions::decode(
+            omissions.append_request("omissions").fact.payload(),
+            crate::FleetFormat::current(),
+        )
+        .unwrap();
+        assert_eq!(decoded.occurrence_cap, cap);
+    }
+    omissions.occurrence_cap = PROCESS_EFFECT_OCCURRENCE_CAP + 1;
     assert!(matches!(
         ProcessEffectOmissions::decode(
             omissions.append_request("omissions").fact.payload(),

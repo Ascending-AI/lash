@@ -4,9 +4,7 @@ use lash_sansio::llm::attachment_delivery::Delivery;
 use lash_trace::EmissionPermit;
 use lash_trace::telemetry::metrics::TelemetryMetrics;
 
-use super::slot_delivery::{
-    DELIVERY_FETCH_HORIZON_MS, SlotDeliveries, fill_slots, invalidate_rejected,
-};
+use super::slot_delivery::{SlotDeliveries, fill_slots, invalidate_rejected};
 
 fn replay_origin_conflict_error(conflict: ProviderReplayOriginConflict) -> LlmTransportError {
     LlmTransportError::new(conflict.to_string())
@@ -372,8 +370,10 @@ impl ProviderHandle {
             .model_call_limit(clock.timestamp_ms(), bounds.enclosing.as_ref());
         let deadline = clock.now() + limit.remaining(clock.timestamp_ms());
         // A delivered URL or file id must outlive every attempt the total
-        // allows, with a minute for the provider to fetch it (ADR 0135 §4).
-        let valid_through_ms = limit.expires_at.saturating_add(DELIVERY_FETCH_HORIZON_MS);
+        // allows, with its recorded slack for the provider to fetch it (ADR 0135 §4).
+        let valid_through_ms = limit
+            .expires_at
+            .saturating_add(template.fetch_horizon.millis);
         let remaining = |clock: &dyn crate::Clock| deadline.saturating_duration_since(clock.now());
         let mut budget = RetryBudget::default();
         loop {

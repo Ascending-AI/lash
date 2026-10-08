@@ -52,8 +52,9 @@ pub trait OtelSpanEnricher: Send + Sync {
     fn attributes(&self, _record: &TraceRecord, _out: &mut Vec<KeyValue>) {}
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct OtelOptions {
+    pub admission_limits: OtelAdmissionLimits,
     pub include_context_metadata: bool,
     pub payloads: OtelPayloadExport,
     pub enrich: Option<Arc<dyn OtelSpanEnricher>>,
@@ -68,11 +69,47 @@ pub struct OtelTelemetry {
     admissions: Arc<Mutex<Admissions>>,
 }
 
-/// The most admission identities an adapter remembers having exported.
-const EXPORTED_ADMISSIONS: usize = 4096;
-/// The most deferred candidates an adapter holds; past it, the oldest is
-/// refused.
-const DEFERRED_ADMISSIONS: usize = 256;
+/// Admission working capacities, independent of trace-carrier wire limits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OtelAdmissionLimits {
+    /// Remembered export identities; zero disables deduplication.
+    pub exported: usize,
+    /// Held deferred candidates; overflow refuses the oldest. Zero holds none.
+    pub deferred: usize,
+}
+impl OtelAdmissionLimits {
+    /// Standard preset: 4096 export identities and 256 deferred candidates.
+    /// No workload measurements justify these exact capacities.
+    pub const fn standard() -> Self {
+        Self {
+            exported: 4096,
+            deferred: 256,
+        }
+    }
+}
+impl Default for OtelAdmissionLimits {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+impl OtelOptions {
+    /// Standard preset: payloads off, metadata excluded, no enrichment and
+    /// [`OtelAdmissionLimits::standard`] working capacities. Export remains opt-in
+    /// through installing this adapter; its capacities lack workload measurements.
+    pub fn standard() -> Self {
+        Self {
+            admission_limits: OtelAdmissionLimits::standard(),
+            include_context_metadata: false,
+            payloads: OtelPayloadExport::Off,
+            enrich: None,
+        }
+    }
+}
+impl Default for OtelOptions {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
 
 /// An admission's export identity: its anchor's trace and span.
 type AdmissionIdentity = (W3cTraceId, W3cSpanId);
@@ -94,6 +131,7 @@ struct Deferred {
 /// holds deferred.
 #[derive(Default)]
 struct Admissions {
+    limits: OtelAdmissionLimits,
     exported: HashSet<AdmissionIdentity>,
     order: VecDeque<AdmissionIdentity>,
     deferred: VecDeque<Deferred>,
@@ -106,7 +144,7 @@ impl Admissions {
             return false;
         }
         self.order.push_back(identity);
-        if self.order.len() > EXPORTED_ADMISSIONS
+        if self.order.len() > self.limits.exported
             && let Some(oldest) = self.order.pop_front()
         {
             self.exported.remove(&oldest);
@@ -138,7 +176,7 @@ impl Admissions {
     /// Holds `deferred`, returning the oldest held candidate past the bound.
     fn defer(&mut self, deferred: Deferred) -> Option<Deferred> {
         self.deferred.push_back(deferred);
-        if self.deferred.len() > DEFERRED_ADMISSIONS {
+        if self.deferred.len() > self.limits.deferred {
             return self.deferred.pop_front();
         }
         None
@@ -161,8 +199,11 @@ impl OtelTelemetry {
             metrics: TelemetryMetrics::new(
                 meter_provider.meter_with_scope(instrumentation_scope()),
             ),
+            admissions: Arc::new(Mutex::new(Admissions {
+                limits: options.admission_limits,
+                ..Default::default()
+            })),
             options,
-            admissions: Arc::default(),
         }
     }
 

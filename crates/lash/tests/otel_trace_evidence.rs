@@ -34,6 +34,7 @@ where
                 max_events: 2,
             },
             enrich: Some(Arc::new(Enricher)),
+            ..OtelOptions::standard()
         },
     );
     let _: &lash::tracing::TelemetryMetrics = telemetry.metrics();

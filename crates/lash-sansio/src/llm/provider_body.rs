@@ -41,6 +41,8 @@ pub enum RequestSegment {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "TemplateParts", into = "TemplateParts")]
 pub struct RecordedRequestTemplate {
+    /// Recorded fetch slack; omission on reopen is refused, never filled from the host.
+    pub fetch_horizon: super::attachment_delivery::DeliveryFetchHorizon,
     pub route: ProviderRouteIdentity,
     pub stream: bool,
     pub generation: Option<GenerationReceipt>,
@@ -55,6 +57,7 @@ pub struct RecordedRequestTemplate {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TemplateParts {
+    fetch_horizon: super::attachment_delivery::DeliveryFetchHorizon,
     route: ProviderRouteIdentity,
     stream: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -69,6 +72,7 @@ impl TryFrom<TemplateParts> for RecordedRequestTemplate {
     fn try_from(parts: TemplateParts) -> Result<Self, TemplateError> {
         let mut template =
             Self::from_segments(parts.route, parts.stream, parts.generation, parts.segments)?;
+        template.fetch_horizon = parts.fetch_horizon;
         template.wire_features = parts.wire_features;
         Ok(template)
     }
@@ -77,6 +81,7 @@ impl TryFrom<TemplateParts> for RecordedRequestTemplate {
 impl From<RecordedRequestTemplate> for TemplateParts {
     fn from(template: RecordedRequestTemplate) -> Self {
         Self {
+            fetch_horizon: template.fetch_horizon,
             route: template.route,
             stream: template.stream,
             generation: template.generation,
@@ -293,6 +298,7 @@ impl RecordedRequestTemplate {
     ) -> Result<Self, TemplateError> {
         validate(&segments)?;
         Ok(Self {
+            fetch_horizon: super::attachment_delivery::DeliveryFetchHorizon::standard(),
             route,
             stream,
             generation,

@@ -519,6 +519,7 @@ pub const PROVIDER_BODY_CHUNK_BYTES: usize = 32 * 1024;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ChunkedRequestTemplate {
+    pub fetch_horizon: lash_sansio::llm::attachment_delivery::DeliveryFetchHorizon,
     pub route: lash_sansio::llm::types::ProviderRouteIdentity,
     pub stream: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -604,6 +605,7 @@ impl ChunkedRequestTemplate {
             .collect();
         (
             Self {
+                fetch_horizon: template.fetch_horizon,
                 route: template.route.clone(),
                 stream: template.stream,
                 generation: template.generation,
@@ -661,6 +663,7 @@ impl ChunkedRequestTemplate {
             self.generation,
             segments,
         )?;
+        template.fetch_horizon = self.fetch_horizon;
         template.wire_features = self.wire_features.clone();
         Ok(template)
     }

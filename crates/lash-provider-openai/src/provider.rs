@@ -24,6 +24,7 @@ impl OpenAiCompatibleProvider {
             base_url: base_url.into(),
             options: ProviderOptions::standard(),
             request_work: crate::RequestWorkPolicy::standard(),
+            diagnostic_limits: crate::RequestDiagnosticLimits::standard(),
             attachment_credential_scope: None,
             compat: OpenAiCompat::default(),
             wire: OpenAiWireConfig::default(),
@@ -40,6 +41,12 @@ impl OpenAiCompatibleProvider {
 
     pub fn with_request_work_policy(mut self, policy: crate::RequestWorkPolicy) -> Self {
         self.request_work = policy;
+        self
+    }
+
+    /// Configure error excerpts without changing response admission.
+    pub fn with_diagnostic_limits(mut self, limits: crate::RequestDiagnosticLimits) -> Self {
+        self.diagnostic_limits = limits;
         self
     }
 
@@ -119,6 +126,12 @@ impl OpenAiProvider {
 
     pub fn with_request_work_policy(mut self, policy: crate::RequestWorkPolicy) -> Self {
         self.inner.request_work = policy;
+        self
+    }
+
+    /// Configure error excerpts without changing response admission.
+    pub fn with_diagnostic_limits(mut self, limits: crate::RequestDiagnosticLimits) -> Self {
+        self.inner.diagnostic_limits = limits;
         self
     }
 

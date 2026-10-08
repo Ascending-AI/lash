@@ -128,7 +128,11 @@ impl RuntimeTurnDriver<'_> {
                     count.saturating_add(call.attempts.len())
                 });
             if self.failure_evidence.len() < sealed_attempt_count
-                && let Some(evidence) = crate::TurnFailureEvidence::from_llm_failure(error, record)
+                && let Some(evidence) = crate::TurnFailureEvidence::from_llm_failure(
+                    error,
+                    record,
+                    self.trace.runtime().limits().failure_partial_output_bytes,
+                )
             {
                 self.failure_evidence.push(evidence);
             }

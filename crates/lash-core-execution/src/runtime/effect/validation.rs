@@ -14,11 +14,6 @@ use serde_json::Value;
 
 use super::RuntimeEffectEnvelope;
 
-/// Matches the whole-body bound used by extended provider-request tracing.
-/// Values over this bound are omitted whole rather than prefix-truncated.
-const MAX_DIFF_VALUE_JSON_BYTES: usize = 2_048;
-const ERROR_SUMMARY_PATH_LIMIT: usize = 8;
-
 /// The exact serialized envelope bytes and the BLAKE3 verdict derived from
 /// those same bytes.
 ///
@@ -162,6 +157,7 @@ pub fn validate_replayed_effect_envelope(
     reconstructed: &CanonicalRuntimeEffectEnvelope,
     mismatch_code: crate::RuntimeErrorCode,
     trace: Option<&RuntimeEffectReplayTrace>,
+    limits: lash_trace::TraceLimits,
 ) -> Result<(), RuntimeEffectControllerError> {
     debug_assert!(
         mismatch_code.is_replay_mismatch(),
@@ -199,6 +195,7 @@ pub fn validate_replayed_effect_envelope(
         Some(&recorded_value),
         Some(&reconstructed_value),
         &mut differences,
+        limits.diff_value_json_bytes,
     );
     if differences.is_empty() {
         return Err(RuntimeEffectControllerError::new(
@@ -215,7 +212,7 @@ pub fn validate_replayed_effect_envelope(
         divergent_path_count: paths.len(),
         first_divergent_paths: paths
             .iter()
-            .take(ERROR_SUMMARY_PATH_LIMIT)
+            .take(limits.diff_summary_paths)
             .cloned()
             .collect(),
         effect_kind: reconstructed_value
@@ -259,6 +256,7 @@ fn collect_differences(
     recorded: Option<&Value>,
     reconstructed: Option<&Value>,
     differences: &mut Vec<TraceEffectEnvelopeDiffEntry>,
+    max_value_bytes: usize,
 ) {
     match (recorded, reconstructed) {
         (Some(Value::Object(recorded)), Some(Value::Object(reconstructed))) => {
@@ -272,6 +270,7 @@ fn collect_differences(
                     recorded.get(key),
                     reconstructed.get(key),
                     differences,
+                    max_value_bytes,
                 );
             }
         }
@@ -282,14 +281,15 @@ fn collect_differences(
                     recorded.get(index),
                     reconstructed.get(index),
                     differences,
+                    max_value_bytes,
                 );
             }
         }
         (Some(recorded), Some(reconstructed)) if recorded == reconstructed => {}
         (recorded, reconstructed) => differences.push(TraceEffectEnvelopeDiffEntry {
             path: path.to_string(),
-            recorded: trace_value(recorded),
-            reconstructed: trace_value(reconstructed),
+            recorded: trace_value(recorded, max_value_bytes),
+            reconstructed: trace_value(reconstructed, max_value_bytes),
         }),
     }
 }
@@ -306,12 +306,12 @@ fn field_path(parent: &str, field: &str) -> String {
     clippy::expect_used,
     reason = "a `serde_json::Value` re-encodes into an in-memory buffer"
 )]
-fn trace_value(value: Option<&Value>) -> TraceEffectEnvelopeDiffValue {
+fn trace_value(value: Option<&Value>, max_value_bytes: usize) -> TraceEffectEnvelopeDiffValue {
     let Some(value) = value else {
         return TraceEffectEnvelopeDiffValue::Missing;
     };
     let json = serde_json::to_vec(value).expect("serde_json::Value always serializes");
-    let omitted = json.len() > MAX_DIFF_VALUE_JSON_BYTES;
+    let omitted = json.len() > max_value_bytes;
     TraceEffectEnvelopeDiffValue::Present {
         json_len: json.len(),
         json_sha256: crate::stable_hash::sha256_hex(&json),
@@ -403,6 +403,7 @@ mod tests {
                 &reconstructed,
                 crate::RuntimeErrorCode::EffectReplayDivergence,
                 None,
+                lash_trace::TraceLimits::standard(),
             )
             .expect_err("a journal row this build did not write must not replay");
             assert_eq!(
@@ -420,6 +421,7 @@ mod tests {
             &canonical(reconstructed),
             crate::RuntimeErrorCode::EffectReplayDivergence,
             None,
+            lash_trace::TraceLimits::standard(),
         )
         .expect_err("mismatch");
         error.summary.expect("summary").first_divergent_paths
@@ -477,6 +479,7 @@ mod tests {
             })),
             crate::RuntimeErrorCode::EffectReplayDivergence,
             None,
+            lash_trace::TraceLimits::standard(),
         )
         .expect_err("mismatch");
         assert_eq!(
@@ -521,6 +524,10 @@ mod tests {
             &canonical(json!({"tool_results": [{"value": "b".repeat(3_000)}]})),
             crate::RuntimeErrorCode::EffectReplayDivergence,
             Some(&trace),
+            lash_trace::TraceLimits {
+                diff_value_json_bytes: 1,
+                ..Default::default()
+            },
         )
         .expect_err("mismatch");
         assert_eq!(
@@ -556,6 +563,7 @@ mod tests {
             &reconstructed,
             crate::RuntimeErrorCode::EffectReplayDivergence,
             None,
+            lash_trace::TraceLimits::standard(),
         )
         .expect_err("canonical invariant failure");
         assert_eq!(
@@ -604,6 +612,7 @@ mod tests {
             &canonical(json!({"value": 2})),
             crate::RuntimeErrorCode::EffectReplayDivergence,
             Some(&trace),
+            lash_trace::TraceLimits::standard(),
         )
         .expect_err("mismatch emits the relevant effect event");
 

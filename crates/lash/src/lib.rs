@@ -1052,8 +1052,8 @@ pub mod attachments {
     /// output's place, and a value that is one or the other.
     pub use lash_core::{OutputRetentionPolicy, OutputValue, RetainedOutput};
     pub use lash_sansio::llm::attachment_delivery::{
-        AttachmentPosition, Delivery, DeliveryContext, DeliveryForms, DeliveryLimits,
-        DeliverySecret, ProviderAccepts, ProviderFileScope,
+        AttachmentPosition, Delivery, DeliveryContext, DeliveryFetchHorizon, DeliveryForms,
+        DeliveryLimits, DeliverySecret, ProviderAccepts, ProviderFileScope,
     };
     pub use lash_sansio::{InvalidAttachmentId, InvalidMediaType};
 }
@@ -1084,6 +1084,7 @@ pub mod process {
         ProcessLiveIncompleteness, ProcessObservationCompleteness, ProcessObservationConfig,
         ProcessObservationGapReason, ProcessObservationHub, ProcessObservationItem,
         ProcessObservationProjection, ProcessObservationSnapshot, ProcessObservationSubscription,
+        ProcessObservationWorkLimits,
     };
     /// The origin of a lifecycle cancellation submitted to a registry.
     pub use lash_core::CancelOrigin;
@@ -1168,6 +1169,7 @@ pub mod durability {
         EffectRetirementGate, HostStartAdmission, ProcessLocalExecution, ProcessOutcomeObserver,
         ProcessTurnCancellation, RuntimeEffectReplayTrace, RuntimeReplay, RuntimeReplayAttribution,
         RuntimeSleepOptions, RuntimeSubject, SegmentProgress, ToolAttemptLaunch,
+        validate_replayed_effect_envelope,
     };
     /// Durable group and journal values returned by effect-host implementors.
     pub use lash_core::runtime::{JournalReplay, ProcessDriveStep, RecordedKeyRange};
@@ -1184,6 +1186,7 @@ pub mod runtime {
     pub use lash_core::engine::{ObservationSink, ObservedEvent, ReplayKey, ShiftObservation};
     pub use lash_core::facade_support::TraceBoundaryReceipt;
     pub use lash_core::runtime::{AttemptStreamRecorder, DeclaredStartPhase, StartCancelDecision};
+    pub use lash_core::{ObservationSource, work_with_observations};
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::engine::{EngineRefusal, RefusalClass};
     pub use lash_core::runtime::ProcessDefinitionLocalExecution;
@@ -1247,6 +1250,12 @@ pub mod runtime {
         ProtocolSessionExtension, ProtocolTurnOptions, SessionPolicy, SessionSnapshot,
         facade_support::SessionHandle,
     };
+}
+
+/// Structural admission of host JSON before DTO allocation. The budget is
+/// independent of fixed wire-validity limits and Serde's recursion guard.
+pub mod json_decode {
+    pub use lash_sansio::json_decode::{JsonDecodeError, JsonDecodeLimits, JsonDecodeUsage};
 }
 
 /// Trace context, events, and sink configuration.

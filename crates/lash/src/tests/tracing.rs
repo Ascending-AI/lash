@@ -963,7 +963,7 @@ async fn extended_runtime_trace_records_provider_request_and_stream_events() -> 
                     "responses",
                     serde_json::json!({
                         "model": "mock-model",
-                        "input": "x".repeat(3_000),
+                        "input": "x".repeat(40),
                     })
                     .to_string(),
                 ));
@@ -995,7 +995,12 @@ async fn extended_runtime_trace_records_provider_request_and_stream_events() -> 
         .build()
         .into_handle();
     let traced = Traced::new(provider, |builder| {
-        builder.trace_level(lash_trace::TraceLevel::Extended)
+        builder
+            .trace_level(lash_trace::TraceLevel::Extended)
+            .trace_limits(crate::tracing::TraceLimits {
+                provider_request_body_json_bytes: 32,
+                ..Default::default()
+            })
     })
     .await?;
     let session = traced.session("trace-provider-stream").await?;
@@ -1011,14 +1016,14 @@ async fn extended_runtime_trace_records_provider_request_and_stream_events() -> 
         .expect("large provider request")["event"];
     let expected_serialized = serde_json::json!({
         "model": "mock-model",
-        "input": "x".repeat(3_000),
+        "input": "x".repeat(40),
     })
     .to_string();
     assert_eq!(request_event["provider"], "mock");
     assert!(request_event.get("body_json").is_none());
     assert_eq!(request_event["body_json_omitted_reason"], "size_limit");
     assert_eq!(request_event["body_len"], expected_serialized.len());
-    assert!(request_event["body_len"].as_u64().expect("body length") > 2_048);
+    assert!(request_event["body_len"].as_u64().expect("body length") > 32);
     assert_eq!(
         request_event["body_sha256"],
         lash_trace::sha256_hex(expected_serialized.as_bytes())
@@ -1373,5 +1378,51 @@ async fn golden_tree_survives_a_kill_and_resume_on_another_node() -> Result<()> 
             "a tool or model call nests under its turn: {record:?}"
         );
     }
+    Ok(())
+}
+
+/// A host's warning threshold affects a real publication without changing refusal ceilings.
+#[tokio::test]
+async fn facade_plugin_state_warning_threshold_takes_effect() -> Result<()> {
+    let plugin = crate::plugins::StaticPluginFactory::new(
+        crate::plugins::PluginDeclaration::initial("capacity-warning"),
+        crate::plugins::PluginSpec::new().with_after_turn(
+            crate::hook_key!("state"),
+            Arc::new(|_| {
+                Box::pin(async {
+                    Ok(crate::plugins::AfterTurnContributions {
+                        state: crate::plugins::StateCommands::new()
+                            .set("key", serde_json::json!("value")),
+                        ..Default::default()
+                    })
+                })
+            }),
+        ),
+    );
+    let traced = Traced::new(
+        mock_provider(vec![text_call("done")]).into_handle(),
+        |builder| {
+            builder
+                .plugin(Arc::new(plugin))
+                .trace_limits(crate::tracing::TraceLimits {
+                    plugin_state_warn_bytes: 1,
+                    ..Default::default()
+                })
+        },
+    )
+    .await?;
+    let session = traced.session("capacity-warning").await?;
+    let (turn, capture) = lash_core::testing::trace_capture::capturing(|| async {
+        session.send(TurnInput::text("publish")).output().await
+    })
+    .await;
+    assert!(completed(&turn?));
+    assert_eq!(
+        capture
+            .exactly_one("plugin_state.session_budget_warn")
+            .field("warn"),
+        "1"
+    );
+    traced.core.shutdown().await?;
     Ok(())
 }

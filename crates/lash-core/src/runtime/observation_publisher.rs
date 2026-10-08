@@ -7,11 +7,6 @@ use std::task::{Context, Poll, Wake, Waker};
 use futures_util::task::AtomicWaker;
 use tokio::sync::mpsc;
 
-/// How many observations one task poll publishes at most before it yields, so
-/// a host sink that is always ready, fed by a publisher that never pauses,
-/// cannot keep the task from returning and the shift from being polled.
-const PUBLISH_BUDGET: usize = 32;
-
 /// Where [`work_with_observations`] takes its observations from.
 pub trait ObservationSource {
     type Item;
@@ -50,7 +45,7 @@ impl<T> ObservationSource for mpsc::UnboundedReceiver<T> {
 /// the shift inside one task poll would re-enter an already-completed
 /// combinator. A publication that is slow, stalls or wakes often never polls
 /// the shift, and the shift never waits on one. One task poll publishes at
-/// most [`PUBLISH_BUDGET`] observations, then yields.
+/// most `limits.publisher_batch` observations, then yields.
 ///
 /// When the shift completes, the source is closed: the observations already
 /// queued are published, anything a stray publisher sends later is dropped,
@@ -59,6 +54,7 @@ pub async fn work_with_observations<F, S, P, Fut>(
     future: Pin<&mut F>,
     observations: &mut S,
     publish: P,
+    limits: lash_trace::ObservationWorkLimits,
 ) -> F::Output
 where
     F: Future + ?Sized,
@@ -67,6 +63,7 @@ where
     Fut: Future<Output = ()>,
 {
     ObservedShift {
+        limits,
         shift: future,
         output: None,
         shift_wake: Arc::new(SideWake::woken()),
@@ -111,6 +108,7 @@ impl Wake for SideWake {
 }
 
 struct ObservedShift<'d, 'o, F: Future + ?Sized, S: ?Sized, P, Fut> {
+    limits: lash_trace::ObservationWorkLimits,
     shift: Pin<&'d mut F>,
     output: Option<F::Output>,
     shift_wake: Arc<SideWake>,
@@ -138,7 +136,7 @@ where
     fn poll_publication(&mut self) {
         let waker = Waker::from(Arc::clone(&self.publish_wake));
         let mut context = Context::from_waker(&waker);
-        let mut budget = PUBLISH_BUDGET;
+        let mut budget = self.limits.publisher_batch.get();
         loop {
             if let Some(publishing) = self.publishing.as_mut() {
                 if publishing.as_mut().poll(&mut context).is_pending() {
@@ -240,6 +238,7 @@ mod tests {
             executed.as_mut(),
             &mut observations,
             |_| async {},
+            lash_trace::ObservationWorkLimits::standard(),
         ));
         let waker = std::task::Waker::noop();
         let mut context = Context::from_waker(waker);
@@ -280,17 +279,22 @@ mod tests {
             observer.send(observation).expect("queue an observation");
         }
         let published = Arc::new(AtomicUsize::new(0));
-        let output = work_with_observations(executed.as_mut(), &mut observations, |_| {
-            let published = Arc::clone(&published);
-            async move {
-                // A host sink that is pending and wakes itself several times
-                // for every observation.
-                for _ in 0..3 {
-                    tokio::task::yield_now().await;
+        let output = work_with_observations(
+            executed.as_mut(),
+            &mut observations,
+            |_| {
+                let published = Arc::clone(&published);
+                async move {
+                    // A host sink that is pending and wakes itself several times
+                    // for every observation.
+                    for _ in 0..3 {
+                        tokio::task::yield_now().await;
+                    }
+                    published.fetch_add(1, Ordering::SeqCst);
                 }
-                published.fetch_add(1, Ordering::SeqCst);
-            }
-        })
+            },
+            lash_trace::ObservationWorkLimits::standard(),
+        )
         .await;
 
         assert_eq!(output, "completed");
@@ -323,15 +327,20 @@ mod tests {
             }
         });
         let mut published = Vec::new();
-        let output = work_with_observations(executed.as_mut(), &mut observations, |observation| {
-            let stall = released.take();
-            published.push(observation);
-            async move {
-                if let Some(stall) = stall {
-                    stall.await.expect("the shift releases the sink");
+        let output = work_with_observations(
+            executed.as_mut(),
+            &mut observations,
+            |observation| {
+                let stall = released.take();
+                published.push(observation);
+                async move {
+                    if let Some(stall) = stall {
+                        stall.await.expect("the shift releases the sink");
+                    }
                 }
-            }
-        })
+            },
+            lash_trace::ObservationWorkLimits::standard(),
+        )
         .await;
 
         assert_eq!(output, "completed");
@@ -350,10 +359,15 @@ mod tests {
             "completed"
         });
         let mut published = Vec::new();
-        let output = work_with_observations(executed.as_mut(), &mut observations, |observation| {
-            published.push(observation);
-            async {}
-        })
+        let output = work_with_observations(
+            executed.as_mut(),
+            &mut observations,
+            |observation| {
+                published.push(observation);
+                async {}
+            },
+            lash_trace::ObservationWorkLimits::standard(),
+        )
         .await;
 
         assert_eq!(output, "completed");
@@ -427,12 +441,16 @@ mod tests {
                 published += 1;
                 async {}
             },
+            lash_trace::ObservationWorkLimits::standard(),
         ));
 
         assert_eq!(output, "completed");
         assert_eq!(polls.load(Ordering::SeqCst), 5);
         assert!(
-            published <= 5 * super::PUBLISH_BUDGET as u64,
+            published
+                <= 5 * lash_trace::ObservationWorkLimits::standard()
+                    .publisher_batch
+                    .get() as u64,
             "each task poll publishes a bounded batch, then lets the shift run"
         );
     }

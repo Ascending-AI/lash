@@ -79,6 +79,7 @@ pub(crate) enum CodexTransport {
 pub struct CodexProvider {
     tokens: Arc<TokenGate>,
     pub options: ProviderOptions,
+    pub diagnostic_limits: crate::RequestDiagnosticLimits,
     attachment_credential_scope: Option<String>,
     pub extra_headers: lash_llm_transport::ExtraHeaders,
     pub(crate) transport: CodexTransport,
@@ -98,6 +99,7 @@ impl CodexProvider {
     pub fn new(tokens: Arc<dyn TokenSource>) -> Self {
         Self {
             attachment_credential_scope: None,
+            diagnostic_limits: crate::RequestDiagnosticLimits::standard(),
             tokens: Arc::new(TokenGate::new(tokens, "codex")),
             options: ProviderOptions {
                 reliability: Self::reliability(),
@@ -153,6 +155,12 @@ impl CodexProvider {
     pub fn with_websocket_cache_policy(mut self, policy: WebSocketCachePolicy) -> Self {
         self.websocket_cache_policy = policy;
         self.websocket_sessions = CodexWebsocketSessionCache::default();
+        self
+    }
+
+    /// Configure diagnostic excerpts for Responses parsing.
+    pub fn with_diagnostic_limits(mut self, limits: crate::RequestDiagnosticLimits) -> Self {
+        self.diagnostic_limits = limits;
         self
     }
 

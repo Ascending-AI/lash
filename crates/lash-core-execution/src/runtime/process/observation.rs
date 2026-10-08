@@ -16,6 +16,7 @@ use super::registry::ProcessRegistry;
 
 #[derive(Clone)]
 pub struct ProcessWorkObserver {
+    work_limits: lash_trace::ObservationWorkLimits,
     registry: Arc<dyn ProcessRegistry>,
     read_attempts: std::num::NonZeroUsize,
 }
@@ -196,16 +197,11 @@ impl ObservedWorkItem {
     }
 }
 
-/// Per-item event tail in session snapshots. Snapshots are polled by
-/// docks/UIs, so per-poll cost must stay bounded instead of growing with a
-/// process's full event history; detail views page through `event_page`
-/// with a cursor.
-pub const SNAPSHOT_EVENT_TAIL: usize = 32;
-
 impl ProcessWorkObserver {
     pub fn new(registry: Arc<dyn ProcessRegistry>) -> Self {
         Self {
             registry,
+            work_limits: lash_trace::ObservationWorkLimits::standard(),
             read_attempts: std::num::NonZeroUsize::MIN.saturating_add(1),
         }
     }
@@ -214,6 +210,13 @@ impl ProcessWorkObserver {
     /// attempts twice, a historical choice without workload measurements.
     pub fn with_read_attempts(mut self, attempts: std::num::NonZeroUsize) -> Self {
         self.read_attempts = attempts;
+        self
+    }
+
+    /// Configure the event tail of snapshots, independently of durable history.
+    #[must_use]
+    pub fn with_work_limits(mut self, limits: lash_trace::ObservationWorkLimits) -> Self {
+        self.work_limits = limits;
         self
     }
 
@@ -290,7 +293,7 @@ impl ProcessWorkObserver {
             let process_id = record.id.clone();
             let events: Vec<_> = self
                 .registry
-                .recent_events(&process_id, SNAPSHOT_EVENT_TAIL)
+                .recent_events(&process_id, self.work_limits.process_snapshot_event_tail)
                 .await?
                 .into_iter()
                 .map(ObservedProcessEvent::from)

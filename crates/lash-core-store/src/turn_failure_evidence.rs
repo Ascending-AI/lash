@@ -4,7 +4,9 @@
 ///
 /// The marker is included inside this budget. Billing and refusal fields are
 /// typed separately and are never traded away to make room for output text.
-pub(crate) const TURN_FAILURE_PARTIAL_OUTPUT_MAX_BYTES: usize = 64 * 1024;
+#[cfg(test)]
+const TURN_FAILURE_PARTIAL_OUTPUT_MAX_BYTES: usize =
+    lash_trace::TraceLimits::standard().failure_partial_output_bytes;
 
 /// Marker appended when failed-generation output exceeds its residency bound.
 pub(crate) const TURN_FAILURE_PARTIAL_OUTPUT_TRUNCATION_MARKER: &str = "\n[truncated]";
@@ -30,20 +32,22 @@ pub enum TurnFailurePartialOutput {
 }
 
 impl TurnFailurePartialOutput {
-    pub(crate) fn bounded(text: String) -> Self {
-        if text.len() <= TURN_FAILURE_PARTIAL_OUTPUT_MAX_BYTES {
+    pub fn bounded(text: String, max_bytes: usize) -> Self {
+        if text.len() <= max_bytes {
             return Self::Complete { text };
         }
 
-        let retained_budget = TURN_FAILURE_PARTIAL_OUTPUT_MAX_BYTES
-            .saturating_sub(TURN_FAILURE_PARTIAL_OUTPUT_TRUNCATION_MARKER.len());
+        let retained_budget =
+            max_bytes.saturating_sub(TURN_FAILURE_PARTIAL_OUTPUT_TRUNCATION_MARKER.len());
         let mut boundary = retained_budget.min(text.len());
         while boundary > 0 && !text.is_char_boundary(boundary) {
             boundary -= 1;
         }
         let original_byte_count = u64::try_from(text.len()).unwrap_or(u64::MAX);
         let mut retained = text[..boundary].to_string();
-        retained.push_str(TURN_FAILURE_PARTIAL_OUTPUT_TRUNCATION_MARKER);
+        if max_bytes >= TURN_FAILURE_PARTIAL_OUTPUT_TRUNCATION_MARKER.len() {
+            retained.push_str(TURN_FAILURE_PARTIAL_OUTPUT_TRUNCATION_MARKER);
+        }
         Self::Truncated {
             text: retained,
             original_byte_count,
@@ -106,6 +110,7 @@ impl TurnFailureEvidence {
     pub fn from_llm_failure(
         error: &crate::sansio::LlmCallError,
         call_record: &crate::LlmCallRecord,
+        max_partial_output_bytes: usize,
     ) -> Option<Self> {
         let attempt = call_record.attempts.iter().rev().find(|attempt| {
             matches!(
@@ -127,10 +132,9 @@ impl TurnFailureEvidence {
         else {
             return None;
         };
-        let partial_output = error
-            .partial_response
-            .as_deref()
-            .map(|response| TurnFailurePartialOutput::bounded(response.full_text()));
+        let partial_output = error.partial_response.as_deref().map(|response| {
+            TurnFailurePartialOutput::bounded(response.full_text(), max_partial_output_bytes)
+        });
         let billed_usage = error
             .partial_response
             .as_deref()
@@ -226,8 +230,12 @@ mod tests {
                     }]
                 }))
                 .expect("typed denied call");
-                let evidence = TurnFailureEvidence::from_llm_failure(&error, &record)
-                    .expect("denial evidence");
+                let evidence = TurnFailureEvidence::from_llm_failure(
+                    &error,
+                    &record,
+                    TURN_FAILURE_PARTIAL_OUTPUT_MAX_BYTES,
+                )
+                .expect("denial evidence");
                 let mut wire = serde_json::to_value(&evidence).expect("encoded evidence");
                 assert!(
                     wire["refusal"].get("code").is_none(),
@@ -251,12 +259,18 @@ mod tests {
     #[test]
     fn partial_output_residency_is_byte_exact_at_and_over_the_bound() {
         let at_bound = "x".repeat(TURN_FAILURE_PARTIAL_OUTPUT_MAX_BYTES);
-        let complete = TurnFailurePartialOutput::bounded(at_bound.clone());
+        let complete = TurnFailurePartialOutput::bounded(
+            at_bound.clone(),
+            TURN_FAILURE_PARTIAL_OUTPUT_MAX_BYTES,
+        );
         assert_eq!(complete.text(), at_bound);
         assert!(!complete.is_truncated());
 
         let oversized = format!("{}é", "x".repeat(TURN_FAILURE_PARTIAL_OUTPUT_MAX_BYTES));
-        let truncated = TurnFailurePartialOutput::bounded(oversized.clone());
+        let truncated = TurnFailurePartialOutput::bounded(
+            oversized.clone(),
+            TURN_FAILURE_PARTIAL_OUTPUT_MAX_BYTES,
+        );
         assert!(truncated.is_truncated());
         assert!(
             truncated

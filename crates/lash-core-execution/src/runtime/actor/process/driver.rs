@@ -15,6 +15,9 @@ use crate::{ProcessId, ToolCallId};
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Driver {
+    /// Evidence cut pinned by the run's first transition. Required on reopen;
+    /// a missing recorded value is never inferred from the current host.
+    pub(super) effect_occurrence_cap: u64,
     /// The engine's cancel grace in milliseconds, recorded with the first
     /// transition and read back from here ever after.
     pub(super) cancel_grace_ms: u64,

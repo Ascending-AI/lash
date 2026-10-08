@@ -2,7 +2,7 @@
 /// version_guard(items(LASH_OPENAI_RESPONSES_REQUEST_DOMAIN_VERSION, request_fingerprint))
 const LASH_OPENAI_RESPONSES_REQUEST_DOMAIN_VERSION: &str = "lash-openai-responses-request/v2";
 
-use crate::request_work::{body_excerpt, needs_blocking, run};
+use crate::request_work::{needs_blocking, run};
 use crate::support::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -12,6 +12,7 @@ pub enum CompletionEndpoint {
 }
 
 struct ResponseDecode {
+    diagnostic_limits: crate::RequestDiagnosticLimits,
     stream_events: Option<LlmEventSender>,
     provider_trace: Option<LlmProviderTraceSender>,
     url: String,
@@ -247,6 +248,7 @@ pub(crate) async fn lower(
         base_url: provider.base_url.clone(),
         options: provider.options.clone(),
         request_work: provider.request_work,
+        diagnostic_limits: provider.diagnostic_limits,
         attachment_credential_scope: provider.attachment_credential_scope.clone(),
         compat: provider.compat.clone(),
         wire: provider.wire.clone(),
@@ -550,13 +552,16 @@ async fn send_attempt(
         // Only a slot this attempt delivered as a provider file can be the
         // file id the API refuses.
         let file_slots = body.provider_file_slots();
+        let diagnostic_limits = provider.diagnostic_limits;
         let mut failure = run(
             crate::request_work::bytes_need_blocking(text.len(), provider.request_work),
             move || {
                 let message = format!("{} with {}", endpoint.request_failed_prefix(), status);
-                let diagnostic = body_excerpt(&text);
+                let diagnostic = diagnostic_limits.body_excerpt(&text);
                 let value = serde_json::from_str::<Value>(&text).ok();
-                let metadata = value.as_ref().and_then(crate::request_work::error_metadata);
+                let metadata = value
+                    .as_ref()
+                    .and_then(|value| diagnostic_limits.error_metadata(value));
                 // Classify the original response, even when its code lies beyond
                 // the diagnostic excerpt. Only bounded strings enter the envelope.
                 let mut failure = http_error_envelope(
@@ -565,7 +570,7 @@ async fn send_attempt(
                     headers,
                     metadata
                         .as_deref()
-                        .unwrap_or_else(|| crate::request_work::body_prefix(&text)),
+                        .unwrap_or_else(|| diagnostic_limits.body_prefix(&text)),
                     Some(request_body_for_error),
                 );
                 if let Some(value) = value {
@@ -634,6 +639,7 @@ async fn send_attempt(
     }
 
     let response_context = ResponseDecode {
+        diagnostic_limits: provider.diagnostic_limits,
         stream_events,
         provider_trace,
         url,
@@ -758,6 +764,7 @@ async fn complete_buffered_response(
     capture: &mut ResponseMetadataCapture,
 ) -> Result<LlmResponse, LlmTransportError> {
     let ResponseDecode {
+        diagnostic_limits,
         stream_events,
         provider_trace,
         url,
@@ -785,6 +792,7 @@ async fn complete_buffered_response(
             stream_termination,
             tool_argument_decoder,
             expose_thinking,
+            diagnostic_limits,
         ),
         CompletionEndpoint::ChatCompletions => complete_buffered_chat(
             text,
@@ -793,6 +801,7 @@ async fn complete_buffered_response(
             stream_termination,
             tool_argument_decoder,
             expose_thinking,
+            diagnostic_limits,
         ),
     }
 }
@@ -804,16 +813,18 @@ fn complete_buffered_responses(
     stream_termination: Option<StreamTermination>,
     tool_argument_decoder: crate::responses_shared::ToolArgumentDecoder,
     expose_thinking: bool,
+    diagnostic_limits: crate::RequestDiagnosticLimits,
 ) -> Result<LlmResponse, LlmTransportError> {
     let mut state = ResponsesStreamState::with_tool_argument_decoder(tool_argument_decoder);
     state.expose_thinking = expose_thinking;
+    state.diagnostic_limits = diagnostic_limits;
     let body_was_sse = text.trim_start().starts_with("data:") || text.contains("\ndata:");
     if body_was_sse {
         OpenAiCompatibleProvider::parse_sse_payload(&text, &mut state)?;
     } else {
         let value: Value = serde_json::from_str(&text).map_err(|e| {
             LlmTransportError::new(format!("Invalid Responses JSON: {e}"))
-                .with_raw(body_excerpt(&text))
+                .with_raw(diagnostic_limits.body_excerpt(&text))
         })?;
         state.capture_execution_evidence(&value, true)?;
         state.provider_usage = value.get("usage").cloned();
@@ -855,7 +866,7 @@ fn complete_buffered_responses(
         .map(|value| terminal_reason_from_responses_value(value, &parts))
         .unwrap_or_else(|| terminal_reason_from_parts(&parts));
     if invalid_empty_response(&parts, terminal_reason, state.completed_status_seen) {
-        return Err(empty_response_error(text));
+        return Err(empty_response_error(text, diagnostic_limits));
     }
     if let Some(tx) = &stream_events {
         tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
@@ -957,16 +968,18 @@ fn complete_buffered_chat(
     stream_termination: Option<StreamTermination>,
     tool_argument_decoder: crate::responses_shared::ToolArgumentDecoder,
     expose_thinking: bool,
+    diagnostic_limits: crate::RequestDiagnosticLimits,
 ) -> Result<LlmResponse, LlmTransportError> {
     let mut state = ChatStreamState::with_tool_argument_decoder(tool_argument_decoder);
     state.expose_thinking = expose_thinking;
+    state.diagnostic_limits = diagnostic_limits;
     let mut parsed_parts = None;
     if text.trim_start().starts_with("data:") || text.contains("\ndata:") {
         OpenAiCompatibleProvider::parse_chat_sse_payload(&text, &mut state)?;
     } else {
         let value: Value = serde_json::from_str(&text).map_err(|e| {
             LlmTransportError::new(format!("Invalid Chat Completions JSON: {e}"))
-                .with_raw(body_excerpt(&text))
+                .with_raw(diagnostic_limits.body_excerpt(&text))
         })?;
         state.capture_response_value(&value)?;
         state.provider_usage = value.get("usage").cloned();
@@ -1004,7 +1017,7 @@ fn complete_buffered_chat(
             .with_partial_response(chat_response_from_state(state, &url)));
     }
     if invalid_empty_response(&parts, state.terminal_reason, state.normal_stop_seen) {
-        return Err(empty_response_error(text));
+        return Err(empty_response_error(text, diagnostic_limits));
     }
     if let Some(tx) = &stream_events {
         tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
@@ -1133,6 +1146,7 @@ async fn drive_streaming_responses(
     capture: &mut ResponseMetadataCapture,
 ) -> Result<LlmResponse, LlmTransportError> {
     let ResponseDecode {
+        diagnostic_limits,
         stream_events,
         provider_trace,
         url: _,
@@ -1153,6 +1167,7 @@ async fn drive_streaming_responses(
         |resume| resume.state,
     );
     state.expose_thinking = expose_thinking;
+    state.diagnostic_limits = diagnostic_limits;
     let mut emitted_parts = Vec::new();
     let stream_result = drive_sse_response(
         body,
@@ -1280,8 +1295,8 @@ async fn drive_streaming_responses(
             state
                 .final_response
                 .as_ref()
-                .map(crate::request_work::json_excerpt)
-                .unwrap_or_else(|| body_excerpt("")),
+                .map(|value| diagnostic_limits.json_excerpt(value))
+                .unwrap_or_else(|| diagnostic_limits.body_excerpt("")),
         ));
     }
     Ok(LlmResponse {
@@ -1307,6 +1322,7 @@ async fn drive_streaming_chat(
     capture: &mut ResponseMetadataCapture,
 ) -> Result<LlmResponse, LlmTransportError> {
     let ResponseDecode {
+        diagnostic_limits,
         stream_events,
         provider_trace,
         url,
@@ -1318,6 +1334,7 @@ async fn drive_streaming_chat(
     } = context;
     let mut state = ChatStreamState::with_tool_argument_decoder(tool_argument_decoder);
     state.expose_thinking = expose_thinking;
+    state.diagnostic_limits = diagnostic_limits;
     let stream_result = drive_sse_response(
         body,
         chunk_timeout,
@@ -1393,6 +1410,7 @@ async fn drive_streaming_chat(
     if invalid_empty_response(&parts, state.terminal_reason, state.normal_stop_seen) {
         return Err(empty_response_error(
             state.final_response_raw.take().unwrap_or_default(),
+            diagnostic_limits,
         ));
     }
     if let Some(tx) = &stream_events {

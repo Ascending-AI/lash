@@ -14,7 +14,7 @@ use super::{OwnedAdmission, OwnedCall, OwnedPrompt};
 use crate::prompt_sections::{PromptPlan, PromptPurpose};
 use crate::testing::{TestClock, TestProvider};
 use crate::{
-    ActorContext, ExecutionBudgets, ExecutionBudgetsConfig, LlmProfiles as _,
+    ActorContext, ClockWallTime as _, ExecutionBudgets, ExecutionBudgetsConfig, LlmProfiles as _,
     RecordedRequestTemplate,
 };
 
@@ -153,6 +153,9 @@ async fn admit(world: &World) -> OwnedAdmission {
         request: world.request.clone(),
         binding: world.binding.clone(),
         attachment_store: Arc::new(crate::RuntimeAttachmentStore::unavailable()),
+        fetch_horizon: lash_sansio::llm::attachment_delivery::DeliveryFetchHorizon {
+            millis: world.clock.timestamp_ms() - START_MS + 17,
+        },
         budgets: budgets(),
     }
     .admit()
@@ -174,6 +177,7 @@ async fn an_owned_calls_resend_keeps_its_pinned_deadline_and_body() {
 
     let (first, deadline) = sent(admit(&world).await);
     assert_eq!(deadline, pinned, "the admission pins the model total");
+    assert_eq!(first.fetch_horizon.millis, 17);
 
     // A redrive later in the call's life resends the admitted bytes under
     // the deadline the admission pinned, not a fresh one.

@@ -27,6 +27,7 @@ pub use config::{
     OpenAiReasoningDialect, OpenAiWireConfig, ProviderRoutingPrefs,
 };
 pub use driver::CompletionEndpoint;
+pub use request_work::RequestDiagnosticLimits;
 pub use request_work::RequestWorkPolicy;
 // The vocabulary this crate's exported signatures name (the facade-completeness
 // rule): hosts write `extra_headers` on `OpenAiWireConfig` and `CodexProvider`.

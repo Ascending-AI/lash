@@ -86,6 +86,8 @@ pub struct PreflightOptions {
     pub mode: PreflightMode,
     /// How many items to request per page.
     pub page_size: usize,
+    /// Verbatim undecodable reasons retained in each format row.
+    pub max_undecodable_reasons: usize,
 }
 
 impl PreflightOptions {
@@ -96,6 +98,7 @@ impl PreflightOptions {
         Self {
             mode: PreflightMode::Summary,
             page_size: DEFAULT_PAGE_SIZE,
+            max_undecodable_reasons: 3,
         }
     }
 
@@ -105,7 +108,16 @@ impl PreflightOptions {
         Self {
             mode: PreflightMode::Deep,
             page_size: DEFAULT_PAGE_SIZE,
+            max_undecodable_reasons: 3,
         }
+    }
+
+    /// Configure the diagnostic cut. The standard summary/deep presets keep
+    /// three reasons per row; no workload measurements justify this value.
+    /// Zero retains counts without reason text.
+    pub fn with_max_undecodable_reasons(mut self, limit: usize) -> Self {
+        self.max_undecodable_reasons = limit;
+        self
     }
 
     /// Request a different page size.
@@ -136,7 +148,10 @@ pub async fn probe_store(
     options: PreflightOptions,
 ) -> Result<PreflightReport, StoreError> {
     let schema = handle.schema_status().await?;
-    let mut walk = Walk::default();
+    let mut walk = Walk {
+        max_undecodable_reasons: options.max_undecodable_reasons,
+        ..Walk::default()
+    };
     for surface in [
         DurableSurface::ModuleArtifact,
         DurableSurface::StartedProcess,
@@ -159,6 +174,7 @@ pub async fn probe_store(
 /// The accumulated evidence of one walk.
 #[derive(Default)]
 struct Walk {
+    max_undecodable_reasons: usize,
     #[cfg(feature = "rlm")]
     workers: lash_vm_client::service::Service,
     tallies: BTreeMap<DurableFormat, FormatTally>,
@@ -384,7 +400,10 @@ impl Walk {
                     }
                 }
                 Extraction::Undecodable { format, reason } => {
-                    self.tallies.entry(format).or_default().undecodable(reason);
+                    self.tallies
+                        .entry(format)
+                        .or_default()
+                        .undecodable(reason, self.max_undecodable_reasons);
                 }
                 #[cfg(feature = "rlm")]
                 Extraction::IdentityMismatch { format, detail } => {

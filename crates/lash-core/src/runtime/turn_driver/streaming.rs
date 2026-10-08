@@ -26,11 +26,6 @@ use host_forwarder::{ProviderDeltaClass, ProviderHostForwarder};
 use lash_sansio::session_model::{FailureCode, TurnFailureCode};
 use terminal::{observed_stream_protocol_position, synthesize_protocol_abort};
 
-/// Largest exact provider request body retained as structured JSON in a trace.
-/// Larger bodies keep their byte length and wire-byte digest without inflating
-/// each JSONL record and optional OpenTelemetry payload attribute.
-pub(crate) const MAX_PROVIDER_REQUEST_BODY_JSON_BYTES: usize = 2_048;
-
 /// Result of running stream hooks over a visible chunk. Carries both
 /// the (possibly rewritten) text and an `abort_requested` flag that the
 /// LLM runner uses to break the stream early when a plugin has decided
@@ -860,7 +855,7 @@ impl RuntimeTurnDriver<'_> {
                 if let Some(endpoint) = provider_event.request_endpoint() {
                     let body_len = provider_event.raw.len();
                     let (body_json, body_json_omitted_reason) =
-                        if body_len > MAX_PROVIDER_REQUEST_BODY_JSON_BYTES {
+                        if body_len > trace.runtime().limits().provider_request_body_json_bytes {
                             (None, Some("size_limit".to_string()))
                         } else {
                             match serde_json::from_str(&provider_event.raw) {

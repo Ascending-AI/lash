@@ -69,10 +69,9 @@ pub const PROCESS_EFFECT_OUTCOME_EVENT_TYPE: &str =
 pub const PROCESS_EFFECT_OMISSIONS_EVENT_TYPE: &str =
     super::events::ProcessEventKind::EffectOmissions.as_str();
 
-/// Occurrences of one effect node the runtime records individually. Later
-/// occurrences are counted in the node's omission record instead. Pinned by
-/// [`PROCESS_EVENT_VOCABULARY_VERSION`] so every attempt of a run applies the
-/// same bound.
+/// Fixed validated wire ceiling for individually recorded effect occurrences.
+/// The host may choose a smaller evidence cut through `TraceLimits`; the
+/// driver pins that cut in its first transition and omissions record it.
 pub const PROCESS_EFFECT_OCCURRENCE_CAP: u64 = 8;
 
 /// Terminal class of a recorded effect occurrence.
@@ -306,7 +305,7 @@ impl ProcessEffectOmissions {
     }
 
     fn check(&self) -> Result<(), ProcessEffectReportError> {
-        if self.occurrence_cap != PROCESS_EFFECT_OCCURRENCE_CAP {
+        if self.occurrence_cap > PROCESS_EFFECT_OCCURRENCE_CAP {
             return Err(ProcessEffectReportError::UnsupportedOccurrenceCap {
                 expected: PROCESS_EFFECT_OCCURRENCE_CAP,
                 actual: self.occurrence_cap,
@@ -460,7 +459,7 @@ pub enum ProcessEffectReportError {
     InvalidPayload(serde_json::Error),
     #[error("effect occurrence {occurrence} is outside the recorded cap")]
     OccurrenceOutsideCap { occurrence: u64 },
-    #[error("effect omission occurrence cap {actual} is unsupported; expected {expected}")]
+    #[error("effect omission occurrence cap {actual} exceeds the wire ceiling {expected}")]
     UnsupportedOccurrenceCap { expected: u64, actual: u64 },
     #[error("effect omission record names no omitted occurrence")]
     EmptyOmissions,
@@ -534,7 +533,7 @@ pub(super) fn effect_omissions_payload_schema() -> crate::JsonSchema {
         "required": ["vocabulary_version", "occurrence_cap", "nodes"],
         "properties": {
             "vocabulary_version": vocabulary_version_schema(),
-            "occurrence_cap": { "const": PROCESS_EFFECT_OCCURRENCE_CAP },
+            "occurrence_cap": { "type": "integer", "minimum": 0, "maximum": PROCESS_EFFECT_OCCURRENCE_CAP },
             "nodes": {
                 "type": "object",
                 "minProperties": 1,

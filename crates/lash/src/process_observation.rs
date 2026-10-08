@@ -245,11 +245,30 @@ enum PublishedNotification {
     Replaced,
 }
 
-/// The live records one accumulator update takes at most. Snapshot projection
-/// happens at capture; folding a batch updates only its occurrence indexes.
-const LIVE_FOLD_BATCH: usize = 256;
+/// Live graph working budgets, separate from observation retention.
+#[derive(Clone, Copy, Debug)]
+pub struct ProcessObservationWorkLimits {
+    pub graph_history_limit: std::num::NonZeroUsize,
+    pub fold_batch_size: std::num::NonZeroUsize,
+}
+impl ProcessObservationWorkLimits {
+    /// Standard preset: 256 occurrences per graph node and 256 records per
+    /// fold. Neither exact value has supporting workload measurements.
+    pub const fn standard() -> Self {
+        Self {
+            graph_history_limit: std::num::NonZeroUsize::MIN.saturating_add(255),
+            fold_batch_size: std::num::NonZeroUsize::MIN.saturating_add(255),
+        }
+    }
+}
+impl Default for ProcessObservationWorkLimits {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
 
 struct ProcessState {
+    work_limits: ProcessObservationWorkLimits,
     epoch: String,
     position: u64,
     base_position: u64,
@@ -258,7 +277,7 @@ struct ProcessState {
     /// The live graph through every published record but `unfolded`.
     current_graph: TraceLashlangGraphAccumulator,
     /// Published records the graph has not folded yet, at most
-    /// `LIVE_FOLD_BATCH`. Folding partitions equals folding their
+    /// the configured fold batch. Folding partitions equals folding their
     /// concatenation, so the graph a capture reads is the one a fold per
     /// record would have built.
     unfolded: Vec<TraceRecord>,
@@ -273,14 +292,17 @@ struct ProcessState {
 }
 
 impl ProcessState {
-    fn new(capacity: usize) -> Self {
+    fn new(capacity: usize, work_limits: ProcessObservationWorkLimits) -> Self {
         let (sender, _) = broadcast::channel(capacity.max(1));
         Self {
+            work_limits,
             epoch: uuid::Uuid::new_v4().simple().to_string(),
             position: 0,
             base_position: 0,
             graph_key: None,
-            current_graph: TraceLashlangGraphAccumulator::default(),
+            current_graph: TraceLashlangGraphAccumulator::new(
+                work_limits.graph_history_limit.get(),
+            ),
             unfolded: Vec::new(),
             #[cfg(test)]
             folds: 0,
@@ -318,7 +340,7 @@ impl ProcessState {
     /// Take one live record into the graph's pending batch.
     fn observe(&mut self, record: &TraceRecord) {
         self.unfolded.push(record.clone());
-        if self.unfolded.len() >= LIVE_FOLD_BATCH {
+        if self.unfolded.len() >= self.work_limits.fold_batch_size.get() {
             self.fold_unfolded();
         }
     }
@@ -380,9 +402,9 @@ impl ProcessState {
             .send(PublishedNotification::Item(position, item));
     }
 
-    fn replace(&mut self, capacity: usize) {
+    fn replace(&mut self, capacity: usize, work_limits: ProcessObservationWorkLimits) {
         let _ = self.sender.send(PublishedNotification::Replaced);
-        *self = Self::new(capacity);
+        *self = Self::new(capacity, work_limits);
     }
 }
 
@@ -405,10 +427,11 @@ struct Capture {
 ///
 /// Lock order: the `states` map lock is taken before a per-process state lock
 /// and only for lookup, insertion and release; graph folds run under the
-/// per-process lock alone, one per `LIVE_FOLD_BATCH` records or per capture.
+/// per-process lock alone, one per configured fold batch of records or per capture.
 /// A process's state is released once no subscription holds it and it has
 /// either published `ExecutionFinished` or published nothing for `ttl`.
 pub struct ProcessObservationHub {
+    work_limits: ProcessObservationWorkLimits,
     config: ProcessObservationConfig,
     states: Mutex<HashMap<ProcessId, Arc<Mutex<ProcessState>>>>,
     last_sweep: Mutex<Instant>,
@@ -425,6 +448,7 @@ impl Default for ProcessObservationHub {
 impl ProcessObservationHub {
     pub fn new(config: ProcessObservationConfig) -> Self {
         Self {
+            work_limits: ProcessObservationWorkLimits::standard(),
             config,
             states: Mutex::new(HashMap::new()),
             last_sweep: Mutex::new(Instant::now()),
@@ -433,13 +457,21 @@ impl ProcessObservationHub {
         }
     }
 
+    pub(crate) fn with_work_limits(mut self, limits: ProcessObservationWorkLimits) -> Self {
+        self.work_limits = limits;
+        self
+    }
+
     /// The state for `process_id`, created when absent.
     fn state_for(&self, process_id: &ProcessId) -> (Arc<Mutex<ProcessState>>, bool) {
         let mut states = self.states.lock_recover();
         match states.get(process_id) {
             Some(state) => (Arc::clone(state), false),
             None => {
-                let state = Arc::new(Mutex::new(ProcessState::new(self.config.capacity)));
+                let state = Arc::new(Mutex::new(ProcessState::new(
+                    self.config.capacity,
+                    self.work_limits,
+                )));
                 states.insert(process_id.clone(), Arc::clone(&state));
                 (state, true)
             }
@@ -768,7 +800,7 @@ impl TraceSink for ProcessObservationHub {
                     TraceLanguageExecutionPayload::ExecutionStarted { .. }
                 )
         }) {
-            publisher.replace(self.config.capacity);
+            publisher.replace(self.config.capacity, self.work_limits);
         }
         if publisher.graph_key.is_none() {
             publisher.joined_at_start = matches!(

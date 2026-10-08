@@ -106,6 +106,10 @@ impl RuntimeTurnDriver<'static> {
         Ok(provider
             .lower(&lowered)
             .await
+            .map(|mut template| {
+                template.fetch_horizon = self.host.core.providers.delivery_fetch_horizon;
+                template
+            })
             .map_err(crate::runtime::effect::llm_call_error_from_transport))
     }
 }

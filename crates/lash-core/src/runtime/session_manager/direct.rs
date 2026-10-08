@@ -256,6 +256,7 @@ impl DirectCompletionCapability {
             request,
             binding: binding.clone(),
             attachment_store: Arc::clone(&current.host.core.durability.attachment_store),
+            fetch_horizon: current.host.core.providers.delivery_fetch_horizon,
             budgets: current.host.core.control.execution_budgets.clone(),
         }
         .admit();

@@ -44,7 +44,9 @@ pub use lash_trace::otel::registry::{
     contract_markdown,
 };
 #[cfg(feature = "otel-trace")]
-pub use lash_trace::otel::{OtelOptions, OtelPayloadExport, OtelSpanEnricher, OtelTelemetry};
+pub use lash_trace::otel::{
+    OtelAdmissionLimits, OtelOptions, OtelPayloadExport, OtelSpanEnricher, OtelTelemetry,
+};
 /// Every type reachable from a [`TraceEvent`] payload, so a facade consumer
 /// can name — match on, take in a signature, or build in a test — what a
 /// `TurnCompleted` or tool-call variant carries. The `LanguageExecution`
@@ -59,19 +61,19 @@ pub use lash_trace::{
     TraceLanguageExecutionIdentity, TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge,
     TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
     TraceLashlangEdgeSelection, TraceLashlangEventIdentity, TraceLashlangEventTransition,
-    TraceLashlangGraph, TraceLashlangGraphChildLink, TraceLashlangGraphCompleteness,
-    TraceLashlangGraphConflict, TraceLashlangGraphConflictKind, TraceLashlangGraphEdge,
-    TraceLashlangGraphFoldError, TraceLashlangGraphHistoryEvent, TraceLashlangGraphNode,
-    TraceLashlangGraphStore, TraceLashlangNodeObservation, TraceLashlangNodeReport,
-    TraceLashlangNodeTerminalRecord, TraceLashlangNodeTerminalStatus, TraceLlmAttemptOutcome,
-    TraceLlmTerminalReason, TraceNodeAwaited, TraceNodeWaitKind, TraceNodeWaitResolution,
-    TraceNormalizedError, TraceProgramStepOutcome, TraceProviderFailureKind, TraceRetryAttempt,
-    TraceRetryAttemptDetail, TraceRetryClass, TraceRetryDecision, TraceRetryDeclineCause,
-    TraceRetryWait, TraceStoreErrorClass, TraceToolAttemptOutcome, TraceToolCallStatus,
-    TraceTurnCancellationEvidence, TraceTurnCompletionReason, TraceTurnFailureReason,
-    TraceTurnOutcome, fold_lashlang_graph,
+    TraceLashlangGraph, TraceLashlangGraphAccumulator, TraceLashlangGraphChildLink,
+    TraceLashlangGraphCompleteness, TraceLashlangGraphConflict, TraceLashlangGraphConflictKind,
+    TraceLashlangGraphEdge, TraceLashlangGraphFoldError, TraceLashlangGraphHistoryEvent,
+    TraceLashlangGraphNode, TraceLashlangGraphStore, TraceLashlangNodeObservation,
+    TraceLashlangNodeReport, TraceLashlangNodeTerminalRecord, TraceLashlangNodeTerminalStatus,
+    TraceLlmAttemptOutcome, TraceLlmTerminalReason, TraceNodeAwaited, TraceNodeWaitKind,
+    TraceNodeWaitResolution, TraceNormalizedError, TraceProgramStepOutcome,
+    TraceProviderFailureKind, TraceRetryAttempt, TraceRetryAttemptDetail, TraceRetryClass,
+    TraceRetryDecision, TraceRetryDeclineCause, TraceRetryWait, TraceStoreErrorClass,
+    TraceToolAttemptOutcome, TraceToolCallStatus, TraceTurnCancellationEvidence,
+    TraceTurnCompletionReason, TraceTurnFailureReason, TraceTurnOutcome, fold_lashlang_graph,
 };
 pub use lash_trace::{
-    StderrTraceSink, TeeTraceSink, TraceContext, TraceLevel, TraceSink, TraceToolCallOutcome,
-    TraceToolCallOutput,
+    ObservationWorkLimits, StderrTraceSink, TeeTraceSink, TraceContext, TraceLevel, TraceLimits,
+    TraceSink, TraceToolCallOutcome, TraceToolCallOutput,
 };

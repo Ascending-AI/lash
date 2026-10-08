@@ -29,14 +29,23 @@ pub struct ProviderFileCacheLimits {
     pub capacity: usize,
     pub ttl_ms: u64,
 }
-impl Default for ProviderFileCacheLimits {
-    fn default() -> Self {
+impl ProviderFileCacheLimits {
+    /// Standard derivative-cache preset: 1024 entries and 24 hours (86,400,000 ms).
+    /// These values have no supporting workload measurements. Capacity zero
+    /// disables reuse; TTL zero makes uploaded deliveries fall back to other forms.
+    pub const fn standard() -> Self {
         Self {
             capacity: 1024,
             ttl_ms: 86_400_000,
         }
     }
 }
+impl Default for ProviderFileCacheLimits {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+
 struct CacheEntry {
     reference: AttachmentId,
     media_type: MediaType,

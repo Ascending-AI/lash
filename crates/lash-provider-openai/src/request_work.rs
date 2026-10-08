@@ -26,7 +26,27 @@ impl Default for RequestWorkPolicy {
     }
 }
 
-const EXCERPT_BYTES: usize = 4096;
+/// Optional provider error excerpts, independent of response admission ceilings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RequestDiagnosticLimits {
+    /// Bytes retained before the original-length annotation. Zero keeps only the annotation.
+    pub excerpt_bytes: usize,
+}
+impl RequestDiagnosticLimits {
+    /// Standard preset: 4096 diagnostic bytes. No workload measurement supports this value.
+    pub const fn standard() -> Self {
+        Self {
+            excerpt_bytes: 4096,
+        }
+    }
+}
+impl Default for RequestDiagnosticLimits {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+#[cfg(test)]
+const EXCERPT_BYTES: usize = RequestDiagnosticLimits::standard().excerpt_bytes;
 
 pub(crate) fn attachment_data_url(media_type: &str, bytes: &[u8]) -> String {
     #[expect(
@@ -96,104 +116,108 @@ pub(crate) async fn run<T: Send + 'static>(
     }
 }
 
-/// Preserve small diagnostic JSON verbatim. Large diagnostics retain a
-/// UTF-8-safe prefix plus the original byte count, never the full body.
-pub(crate) fn body_excerpt(body: &str) -> String {
-    if body.len() <= EXCERPT_BYTES {
-        return body.to_owned();
+impl RequestDiagnosticLimits {
+    /// Preserve small diagnostic JSON verbatim. Large diagnostics retain a
+    /// UTF-8-safe prefix plus the original byte count, never the full body.
+    pub(crate) fn body_excerpt(self, body: &str) -> String {
+        if body.len() <= self.excerpt_bytes {
+            return body.to_owned();
+        }
+        format!("{}\n[body bytes: {}]", self.body_prefix(body), body.len())
     }
-    format!("{}\n[body bytes: {}]", body_prefix(body), body.len())
-}
 
-pub(crate) fn body_prefix(body: &str) -> &str {
-    let mut end = body.len().min(EXCERPT_BYTES);
-    while !body.is_char_boundary(end) {
-        end -= 1;
+    pub(crate) fn body_prefix(self, body: &str) -> &str {
+        let mut end = body.len().min(self.excerpt_bytes);
+        while !body.is_char_boundary(end) {
+            end -= 1;
+        }
+        &body[..end]
     }
-    &body[..end]
-}
 
-/// Serialize diagnostics into a bounded writer rather than materializing a
-/// full JSON String solely to truncate it on an error path.
-#[expect(
-    clippy::expect_used,
-    reason = "serializing a `serde_json::Value` into an in-memory writer cannot fail, \
+    /// Serialize diagnostics into a bounded writer rather than materializing a
+    /// full JSON String solely to truncate it on an error path.
+    #[expect(
+        clippy::expect_used,
+        reason = "serializing a `serde_json::Value` into an in-memory writer cannot fail, \
               and the UTF-8 prefix is re-split at a boundary `valid_up_to` just reported"
-)]
-pub(crate) fn json_excerpt(value: &serde_json::Value) -> String {
-    struct ExcerptWriter {
-        prefix: Vec<u8>,
-        total: usize,
-    }
-    impl Write for ExcerptWriter {
-        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-            self.total += bytes.len();
-            let keep = bytes.len().min(EXCERPT_BYTES - self.prefix.len());
-            self.prefix.extend_from_slice(&bytes[..keep]);
-            Ok(bytes.len())
+    )]
+    pub(crate) fn json_excerpt(self, value: &serde_json::Value) -> String {
+        struct ExcerptWriter {
+            prefix: Vec<u8>,
+            total: usize,
+            limit: usize,
         }
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
+        impl Write for ExcerptWriter {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.total += bytes.len();
+                let keep = bytes.len().min(self.limit - self.prefix.len());
+                self.prefix.extend_from_slice(&bytes[..keep]);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut writer = ExcerptWriter {
+            prefix: Vec::new(),
+            total: 0,
+            limit: self.excerpt_bytes,
+        };
+        // Callers supply JSON Values, whose serialization cannot fail.
+        serde_json::to_writer(&mut writer, value).expect("JSON diagnostic serialization");
+        let prefix = match std::str::from_utf8(&writer.prefix) {
+            Ok(prefix) => prefix,
+            Err(error) => {
+                std::str::from_utf8(&writer.prefix[..error.valid_up_to()]).expect("UTF-8 prefix")
+            }
+        };
+        if writer.total <= self.excerpt_bytes {
+            prefix.to_owned()
+        } else {
+            format!("{prefix}\n[body bytes: {}]", writer.total)
         }
     }
-    let mut writer = ExcerptWriter {
-        prefix: Vec::with_capacity(EXCERPT_BYTES),
-        total: 0,
-    };
-    // Callers supply JSON Values, whose serialization cannot fail.
-    serde_json::to_writer(&mut writer, value).expect("JSON diagnostic serialization");
-    let prefix = match std::str::from_utf8(&writer.prefix) {
-        Ok(prefix) => prefix,
-        Err(error) => {
-            std::str::from_utf8(&writer.prefix[..error.valid_up_to()]).expect("UTF-8 prefix")
-        }
-    };
-    if writer.total <= EXCERPT_BYTES {
-        prefix.to_owned()
-    } else {
-        format!("{prefix}\n[body bytes: {}]", writer.total)
-    }
-}
 
-pub(crate) fn diagnostic_message(message: &str) -> String {
-    if message.len() > EXCERPT_BYTES {
-        body_excerpt(message)
-    } else {
-        message.to_owned()
-    }
-}
-
-// Preserve the shared envelope's message and retry-delay classification even
-// when those fields occur after a large echoed payload. Only this small
-// projection is serialized for that classifier, never the original tree.
-pub(crate) fn error_metadata(value: &serde_json::Value) -> Option<String> {
-    use serde_json::{Value, json};
-    fn retry_delay(value: &Value) -> Option<&str> {
-        match value {
-            Value::Object(fields) => fields
-                .get("retryDelay")
-                .and_then(Value::as_str)
-                .or_else(|| fields.values().find_map(retry_delay)),
-            Value::Array(items) => items.iter().find_map(retry_delay),
-            _ => None,
+    pub(crate) fn diagnostic_message(self, message: &str) -> String {
+        if message.len() > self.excerpt_bytes {
+            self.body_excerpt(message)
+        } else {
+            message.to_owned()
         }
     }
-    let message = value
-        .get("error")
-        .and_then(|error| error.get("message"))
-        .and_then(Value::as_str);
-    let delay = retry_delay(value);
-    if message.is_none() && delay.is_none() {
-        return None;
+
+    // Preserve the shared envelope's message and retry-delay classification even
+    // when those fields occur after a large echoed payload. Only this small
+    // projection is serialized for that classifier, never the original tree.
+    pub(crate) fn error_metadata(self, value: &serde_json::Value) -> Option<String> {
+        use serde_json::{Value, json};
+        fn retry_delay(value: &Value) -> Option<&str> {
+            match value {
+                Value::Object(fields) => fields
+                    .get("retryDelay")
+                    .and_then(Value::as_str)
+                    .or_else(|| fields.values().find_map(retry_delay)),
+                Value::Array(items) => items.iter().find_map(retry_delay),
+                _ => None,
+            }
+        }
+        let message = value
+            .get("error")
+            .and_then(|error| error.get("message"))
+            .and_then(Value::as_str);
+        let delay = retry_delay(value);
+        if message.is_none() && delay.is_none() {
+            return None;
+        }
+        let mut metadata = json!({});
+        if let Some(message) = message {
+            metadata["error"] = json!({"message": self.diagnostic_message(message)});
+        }
+        if let Some(delay) = delay {
+            metadata["retryDelay"] = Value::String(delay.to_owned());
+        }
+        Some(metadata.to_string())
     }
-    let mut metadata = json!({});
-    if let Some(message) = message {
-        metadata["error"] = json!({"message": diagnostic_message(message)});
-    }
-    if let Some(delay) = delay {
-        metadata["retryDelay"] = Value::String(diagnostic_message(delay));
-    }
-    Some(metadata.to_string())
 }
 
 pub(crate) fn bytes_need_blocking(len: usize, policy: RequestWorkPolicy) -> bool {
@@ -230,18 +254,28 @@ mod tests {
 
     #[test]
     fn error_excerpt_is_bounded_and_counts_original_bytes() {
-        assert_eq!(body_excerpt("{}"), "{}");
+        assert_eq!(RequestDiagnosticLimits::standard().body_excerpt("{}"), "{}");
         assert_eq!(
-            body_excerpt(&"x".repeat(EXCERPT_BYTES)),
+            RequestDiagnosticLimits::standard().body_excerpt(&"x".repeat(EXCERPT_BYTES)),
             "x".repeat(EXCERPT_BYTES)
         );
         let body = "€".repeat(EXCERPT_BYTES);
         let error = crate::support::LlmTransportError::new("invalid response")
-            .with_raw(body_excerpt(&body));
+            .with_raw(RequestDiagnosticLimits::standard().body_excerpt(&body));
         let raw = error.raw.as_deref().unwrap();
         assert!(raw.len() <= EXCERPT_BYTES + 40);
         assert!(raw.ends_with("[body bytes: 12288]"));
         assert!(raw.starts_with('€'));
+        let value = serde_json::json!({"diagnostic": "€"});
+        let whole = RequestDiagnosticLimits {
+            excerpt_bytes: usize::MAX,
+        }
+        .json_excerpt(&value);
+        assert_eq!(whole, value.to_string());
+        assert_eq!(
+            RequestDiagnosticLimits { excerpt_bytes: 0 }.json_excerpt(&value),
+            format!("\n[body bytes: {}]", whole.len())
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -325,7 +325,8 @@ pub fn fork_checkpoint_plugin_state(
 pub const PLUGIN_STATE_SESSION_LIMIT: usize = 6 * 1024 * 1024;
 /// The encoded total past which a committed publication is reported: the
 /// warn tier of [`PLUGIN_STATE_SESSION_LIMIT`].
-pub const PLUGIN_STATE_SESSION_WARN: usize = 4 * 1024 * 1024;
+pub const PLUGIN_STATE_SESSION_WARN: usize =
+    lash_trace::TraceLimits::standard().plugin_state_warn_bytes;
 
 impl From<FormatRefusal> for crate::runtime_error::RuntimeEffectControllerError {
     fn from(refusal: FormatRefusal) -> Self {

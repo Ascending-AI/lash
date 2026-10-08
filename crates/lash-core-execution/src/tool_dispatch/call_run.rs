@@ -397,7 +397,13 @@ impl<'a> AdmittedToolCall<'a> {
                 binding: Box::new(binding.clone()),
             }));
         }
-        let recorder = AttemptStreamRecorder::start();
+        let limits = self
+            .handlers
+            .plugin_session()
+            .map_or_else(lash_trace::TraceLimits::standard, |plugins| {
+                plugins.host().trace_runtime().limits()
+            });
+        let recorder = AttemptStreamRecorder::start(limits.attempt_stream_bytes);
         let outcome = self
             .handlers
             .execute(SingletonAttempt {

@@ -51,6 +51,7 @@ use crate::support::{
 /// replay, and the open session's resident runtime when there is one.
 #[derive(Clone)]
 pub(crate) struct FeedSource {
+    work_limits: lash_trace::ObservationWorkLimits,
     session_id: SessionId,
     store: lash_core::store::SessionStore,
     live_replay: Arc<dyn LiveReplayStore>,
@@ -59,9 +60,14 @@ pub(crate) struct FeedSource {
 }
 
 impl FeedSource {
-    pub(crate) fn new(resident: RuntimeHandle, store: lash_core::store::SessionStore) -> Self {
+    pub(crate) fn new(
+        resident: RuntimeHandle,
+        store: lash_core::store::SessionStore,
+        work_limits: lash_trace::ObservationWorkLimits,
+    ) -> Self {
         let observation = resident.observe();
         Self {
+            work_limits,
             session_id: observation.session_id().clone(),
             transcript_decoders: observation.read_view.transcript_decoders().clone(),
             live_replay: Arc::clone(&resident.live_replay_store),
@@ -311,12 +317,10 @@ impl SessionObservationEventId {
     }
 }
 
-/// How many delivered identities a stream remembers.
-const MAX_APPLIED_EVENT_IDS: usize = 4096;
-
 /// The bounded window of identities a stream delivered or its host applied.
 #[derive(Default)]
 struct AppliedEventIds {
+    limits: lash_trace::ObservationWorkLimits,
     ids: BTreeSet<SessionObservationEventId>,
     order: VecDeque<SessionObservationEventId>,
 }
@@ -327,7 +331,7 @@ impl AppliedEventIds {
             return false;
         }
         self.order.push_back(id);
-        while self.order.len() > MAX_APPLIED_EVENT_IDS {
+        while self.order.len() > self.limits.session_dedup_ids {
             if let Some(expired) = self.order.pop_front() {
                 self.ids.remove(&expired);
             }
@@ -390,6 +394,7 @@ type FeedStep = BoxFuture<'static, (Box<FeedState>, Option<Result<SessionObserva
 
 impl SessionObservationStream {
     pub(crate) fn new(source: FeedSource, cursor: SessionCursor) -> Self {
+        let limits = source.work_limits;
         Self {
             cursor: cursor.clone(),
             state: Some(Box::new(FeedState {
@@ -400,8 +405,24 @@ impl SessionObservationStream {
                 live: None,
             })),
             step: None,
-            applied: AppliedEventIds::default(),
+            applied: AppliedEventIds {
+                limits,
+                ..Default::default()
+            },
         }
+    }
+
+    /// Configure deduplication for this stream. Oldest identities are dropped
+    /// when the window shrinks; zero disables deduplication. Other work limits
+    /// are resolved by the core or the replay store.
+    pub fn with_work_limits(mut self, limits: crate::tracing::ObservationWorkLimits) -> Self {
+        self.applied.limits = limits;
+        while self.applied.order.len() > limits.session_dedup_ids {
+            if let Some(id) = self.applied.order.pop_front() {
+                self.applied.ids.remove(&id);
+            }
+        }
+        self
     }
 
     /// Seed identities the host already applied, so a reconnect's

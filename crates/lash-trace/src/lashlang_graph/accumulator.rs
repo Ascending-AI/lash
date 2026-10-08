@@ -4,8 +4,8 @@ use super::*;
 
 /// Mutable canonical history. Appends touch one node's bounded occurrence index;
 /// snapshot reads pay for sorting and projecting the retained observations.
-#[derive(Default)]
 pub struct TraceLashlangGraphAccumulator {
+    history_limit: usize,
     identity: Option<LanguageIdentity>,
     execution_map: Option<LanguageExecutionMap>,
     status: Option<LanguageExecutionStatus>,
@@ -46,7 +46,25 @@ fn insert_event(
     }
 }
 
+impl Default for TraceLashlangGraphAccumulator {
+    fn default() -> Self {
+        Self::new(DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT)
+    }
+}
+
 impl TraceLashlangGraphAccumulator {
+    /// Retain at most `history_limit` occurrences per node (at least one).
+    /// The standard preset is 256; no workload measurements justify that value.
+    pub fn new(history_limit: usize) -> Self {
+        Self {
+            history_limit: history_limit.max(1),
+            identity: None,
+            execution_map: None,
+            status: None,
+            execution_history: Default::default(),
+            nodes: Default::default(),
+        }
+    }
     /// Fold a batch into one graph without cloning its retained history.
     /// Invalid graph keys refuse the whole batch before changing the accumulator.
     pub fn fold(&mut self, records: &[TraceRecord]) -> Result<(), TraceLashlangGraphFoldError> {
@@ -129,7 +147,7 @@ impl TraceLashlangGraphAccumulator {
                         event,
                     },
                 );
-                if node.occurrences.len() > DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT
+                if node.occurrences.len() > self.history_limit
                     && let Some((occurrence, dropped)) = node.occurrences.pop_first()
                 {
                     let dropped: Vec<_> = dropped.into_values().map(|entry| entry.event).collect();
@@ -189,7 +207,7 @@ impl TraceLashlangGraphAccumulator {
             self.execution_map.clone(),
             history,
             conflicts,
-            DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT,
+            self.history_limit,
             retention,
             self.status.unwrap_or(LanguageExecutionStatus::Running),
         ))

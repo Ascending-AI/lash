@@ -396,6 +396,7 @@ use slots::{
 
 #[derive(Clone, Debug, Default)]
 pub struct ResponsesStreamState {
+    pub diagnostic_limits: crate::RequestDiagnosticLimits,
     pub parts: Vec<LlmOutputPart>,
     pub usage: LlmUsage,
     pub provider_usage: Option<Value>,

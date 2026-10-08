@@ -648,7 +648,7 @@ impl OpenAiCompatibleProvider {
         }
         let event: ChatSseEvent<'_> = serde_json::from_str(raw).map_err(|e| {
             LlmTransportError::new(format!("Invalid Chat Completions SSE payload: {e}"))
-                .with_raw(crate::request_work::body_excerpt(raw))
+                .with_raw(state.diagnostic_limits.body_excerpt(raw))
                 .with_retry_verdict(TransportRetryVerdict::NotRetryable)
         })?;
         if let Some(error) = event.error.as_ref() {
@@ -657,11 +657,11 @@ impl OpenAiCompatibleProvider {
                 .get("message")
                 .and_then(Value::as_str)
                 .unwrap_or("OpenAI-compatible chat stream error");
-            return Err(
-                LlmTransportError::new(crate::request_work::diagnostic_message(message))
-                    .with_retry_verdict(retry_verdict)
-                    .with_raw(crate::request_work::body_excerpt(raw)),
-            );
+            return Err(LlmTransportError::new(
+                state.diagnostic_limits.diagnostic_message(message),
+            )
+            .with_retry_verdict(retry_verdict)
+            .with_raw(state.diagnostic_limits.body_excerpt(raw)));
         }
         let mut event_evidence = None;
         merge_execution_evidence(
@@ -835,6 +835,7 @@ fn reasoning_output_tokens(usage: &Value) -> Option<u64> {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ChatStreamState {
+    pub(crate) diagnostic_limits: crate::RequestDiagnosticLimits,
     pub(crate) full_text: String,
     pub(crate) reasoning_text: String,
     /// Block-boundary stream events minted at the provider edge, drained by

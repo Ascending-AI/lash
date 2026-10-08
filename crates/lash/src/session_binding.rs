@@ -10,6 +10,7 @@ use lash_core::ActorContext;
 #[derive(Clone)]
 pub(crate) struct BoundSession {
     pub(crate) observer_pacing: Arc<crate::ObserverPacing>,
+    observation_work_limits: lash_trace::ObservationWorkLimits,
     store: lash_core::store::SessionStore,
     effect_host: ActorContext,
     process: ProcessWorkWiring,
@@ -36,6 +37,7 @@ impl BoundSession {
             observer_pacing,
             store,
             effect_host: env.core.control.effect_host.clone(),
+            observation_work_limits: env.core.observation_work_limits,
             process,
             backend: env.core.backend().clone(),
             attachment_store: Arc::clone(&env.core.durability.attachment_store),
@@ -65,6 +67,10 @@ impl BoundSession {
 
     pub(crate) fn llm_profiles(&self) -> Arc<dyn lash_core::LlmProfiles> {
         Arc::clone(&self.models)
+    }
+
+    pub(crate) fn observation_work_limits(&self) -> lash_trace::ObservationWorkLimits {
+        self.observation_work_limits
     }
 
     pub(crate) fn trace_scopes(&self) -> Arc<dyn lash_core::TraceScopeFactory> {

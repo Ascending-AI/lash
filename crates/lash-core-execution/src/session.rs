@@ -713,11 +713,18 @@ impl Session {
                 .map(crate::trace::composition_tool_fingerprint)
                 .collect(),
         );
-        const MAX_COMPOSITION_FINGERPRINT_GENERATIONS: usize = 8;
-        if cache.len() == MAX_COMPOSITION_FINGERPRINT_GENERATIONS {
-            cache.remove(0);
+        let capacity = self
+            .plugins()
+            .host()
+            .trace_runtime()
+            .limits()
+            .composition_fingerprint_generations;
+        if capacity > 0 {
+            while cache.len() >= capacity {
+                cache.remove(0);
+            }
+            cache.push((Arc::clone(tools), Arc::clone(&fingerprints)));
         }
-        cache.push((Arc::clone(tools), Arc::clone(&fingerprints)));
         fingerprints
     }
 

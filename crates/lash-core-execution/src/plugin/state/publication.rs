@@ -815,7 +815,7 @@ fn session_budget(
     plugin: &str,
     values: &BTreeMap<String, Value>,
 ) -> Result<(), lash_core_store::tool_run::StateCommandRefusal> {
-    use lash_core_store::plugin_state::{PLUGIN_STATE_SESSION_LIMIT, PLUGIN_STATE_SESSION_WARN};
+    use lash_core_store::plugin_state::PLUGIN_STATE_SESSION_LIMIT;
     let encoded = |values: &BTreeMap<String, Value>| {
         serde_json::to_vec(values).map_or(usize::MAX, |bytes| bytes.len())
     };
@@ -865,12 +865,13 @@ fn session_budget(
             },
         );
     }
-    if bytes > PLUGIN_STATE_SESSION_WARN {
+    let warn = registry.trace_limits.plugin_state_warn_bytes;
+    if bytes > warn {
         tracing::debug!(
             event = "plugin_state.session_budget_warn",
             plugin_id = %plugin,
             bytes,
-            warn = PLUGIN_STATE_SESSION_WARN,
+            warn,
             limit = PLUGIN_STATE_SESSION_LIMIT,
             "a plugin-state publication takes the session past its warn tier"
         );

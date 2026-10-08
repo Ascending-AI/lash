@@ -111,7 +111,7 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
             let valid_through_ms = crate::SystemClock
                 .timestamp_ms()
                 .saturating_add(u64::try_from(horizon.as_millis()).unwrap_or(u64::MAX))
-                .saturating_add(super::slot_delivery::DELIVERY_FETCH_HORIZON_MS);
+                .saturating_add(template.fetch_horizon.millis);
             let (live, delivered) =
                 super::slot_delivery::fill_slots(&*self, &template, deliveries, valid_through_ms)
                     .await?;

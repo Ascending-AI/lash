@@ -19,6 +19,9 @@
 //! For the full map of reporting channels, guidance on when to consume which,
 //! and the schema-evolution policy that governs [`TRACE_SCHEMA_VERSION`], see
 //! `docs/reporting.html`; for the attach-a-sink how-to, see `docs/tracing.html`.
+mod limits;
+pub use limits::{ObservationWorkLimits, TraceLimits};
+
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
@@ -249,6 +252,13 @@ pub enum TraceLevel {
 }
 
 impl TraceLevel {
+    /// Standard detail preset: lifecycle records, with extended provider
+    /// payload records disabled. This is an export-volume choice, not a
+    /// workload-measured optimum.
+    pub const fn standard() -> Self {
+        Self::Standard
+    }
+
     pub fn is_extended(self) -> bool {
         matches!(self, Self::Extended)
     }

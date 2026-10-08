@@ -442,13 +442,16 @@ async fn a_payload_nobody_can_decode_is_undecided_and_never_panics() {
     let mut item = execution_state_item("s-1", RLM_SNAPSHOT_VERSION);
     item.payload = DurablePayload::MessagePack(vec![0xc1, 0xc1]);
     let store = FakeStore::default().with_items(DurableSurface::SessionExecutionState, vec![item]);
-    let report = probe_store(&store, PreflightOptions::deep())
-        .await
-        .expect("the probe reads the store");
+    let report = probe_store(
+        &store,
+        PreflightOptions::deep().with_max_undecodable_reasons(0),
+    )
+    .await
+    .expect("the probe reads the store");
     let envelope = component(&report, DurableFormat::RlmSnapshotEnvelope);
     assert_eq!(envelope.verdict, ComponentVerdict::Undecodable);
     assert_eq!(envelope.undecodable, 1);
-    assert_eq!(envelope.undecodable_reasons.len(), 1);
+    assert_eq!(envelope.undecodable_reasons.len(), 0);
     assert_eq!(report.outcome, PreflightOutcome::Undecided);
     assert!(report.drain.is_empty(), "nobody read a version to refuse");
 }

@@ -1164,3 +1164,29 @@ async fn durable_process_trace_with_no_attempt_reaches_the_live_graph() {
         "the host reads the call-to-node binding"
     );
 }
+
+/// A host's graph and fold budgets govern the production observation publisher.
+#[tokio::test]
+async fn facade_graph_history_and_fold_budgets_take_effect() {
+    let core = crate::tests::explicit_ephemeral_facets(crate::LashCore::standard_builder(
+        crate::tests::sqlite_memory_store_backend().await,
+    ))
+    .process_observation_work_limits(crate::process::ProcessObservationWorkLimits {
+        graph_history_limit: std::num::NonZeroUsize::MIN,
+        fold_batch_size: std::num::NonZeroUsize::MIN,
+    })
+    .build(crate::testing::runtime_lease_owner())
+    .unwrap();
+    let process = crate::ProcessId::fixture("capacity-graph");
+    for occurrence in 0..=3 {
+        core.process_observation_hub
+            .append(&record(&process, 1, occurrence))
+            .unwrap();
+    }
+    let capture = core.process_observation_hub.capture(&process, None);
+    let graph = capture.live.graph.unwrap();
+    assert_eq!(graph.history_limit, 1);
+    assert_eq!(graph.node_retention[0].truncation_watermark, 2);
+    assert_eq!(capture.state.lock_recover().folds, 4);
+    core.shutdown().await.unwrap();
+}

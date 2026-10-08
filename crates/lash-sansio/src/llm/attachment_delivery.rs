@@ -176,3 +176,24 @@ pub struct DeliveryContext {
     pub valid_through_ms: u64,
     pub live_file_scope: Option<ProviderFileScope>,
 }
+
+/// Provider fetch slack after a call's deadline, retained in its admitted template.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct DeliveryFetchHorizon {
+    /// Zero requests validity only through the call's deadline.
+    pub millis: u64,
+}
+impl DeliveryFetchHorizon {
+    /// Standard preset: 60,000 milliseconds. No workload measurements justify this slack.
+    pub const fn standard() -> Self {
+        Self { millis: 60_000 }
+    }
+}
+impl Default for DeliveryFetchHorizon {
+    fn default() -> Self {
+        Self::standard()
+    }
+}

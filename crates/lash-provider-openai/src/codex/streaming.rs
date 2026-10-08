@@ -268,6 +268,7 @@ impl CodexProvider {
         self.emit_websocket_attempt_trace(provider_trace.as_ref(), &diagnostics);
         let mut events_seen = false;
         let mut state = shared::ResponsesStreamState {
+            diagnostic_limits: self.diagnostic_limits,
             expose_thinking: call.model().metadata().request_defaults.expose_thinking,
             ..Default::default()
         };
@@ -702,6 +703,7 @@ impl CodexProvider {
             emit_provider_trace(provider_trace.as_ref(), "codex", &text);
             if Self::looks_like_sse_payload(&text) {
                 let mut state = shared::ResponsesStreamState {
+                    diagnostic_limits: self.diagnostic_limits,
                     expose_thinking: call.model().metadata().request_defaults.expose_thinking,
                     execution_evidence: provider_request_id.clone().map(|provider_request_id| {
                         ExecutionEvidence {
@@ -760,6 +762,7 @@ impl CodexProvider {
                     .with_raw(text.clone())
             })?;
             let mut evidence_state = shared::ResponsesStreamState {
+                diagnostic_limits: self.diagnostic_limits,
                 execution_evidence: provider_request_id.map(|provider_request_id| {
                     ExecutionEvidence {
                         provider_request_id: Some(provider_request_id),
@@ -868,6 +871,7 @@ impl CodexProvider {
         }
 
         let mut state = shared::ResponsesStreamState {
+            diagnostic_limits: self.diagnostic_limits,
             expose_thinking: call.model().metadata().request_defaults.expose_thinking,
             execution_evidence: provider_request_id.map(|provider_request_id| ExecutionEvidence {
                 provider_request_id: Some(provider_request_id),

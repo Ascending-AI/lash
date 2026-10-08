@@ -15,14 +15,24 @@ pub struct JsonDecodeLimits {
     pub max_estimated_allocation_bytes: usize,
 }
 
-impl Default for JsonDecodeLimits {
-    fn default() -> Self {
+impl JsonDecodeLimits {
+    /// Standard preallocation-admission preset: 32 MiB encoded bytes,
+    /// 1,000,000 nodes, depth 64 and 128 MiB estimated allocation. Independent
+    /// budgets admit structure before allocation; their exact values have no
+    /// supporting workload measurements. Serde recursion guards remain independent.
+    pub const fn standard() -> Self {
         Self {
             max_bytes: 32 * 1024 * 1024,
             max_nodes: 1_000_000,
             max_depth: 64,
             max_estimated_allocation_bytes: 128 * 1024 * 1024,
         }
+    }
+}
+
+impl Default for JsonDecodeLimits {
+    fn default() -> Self {
+        Self::standard()
     }
 }
 

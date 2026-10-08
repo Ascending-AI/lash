@@ -21,7 +21,6 @@ use crate::runtime::RuntimeSessionState;
 const SESSION_CURSOR_PREFIX: &str = "lashsc2:";
 const DEFAULT_LIVE_REPLAY_CAPACITY: usize = 2048;
 const DEFAULT_LIVE_REPLAY_TTL: Duration = Duration::from_secs(120);
-const EXPIRY_WORK_PER_CALL: usize = 64;
 
 #[path = "replay/activity_spans.rs"]
 mod activity_spans;
@@ -730,6 +729,7 @@ impl Default for InMemoryLiveReplayStoreConfig {
 
 #[derive(Debug)]
 pub struct InMemoryLiveReplayStore {
+    work_limits: lash_trace::ObservationWorkLimits,
     replay_incarnation_id: String,
     config: InMemoryLiveReplayStoreConfig,
     clock: Arc<dyn crate::Clock>,
@@ -759,6 +759,7 @@ impl InMemoryLiveReplayStore {
 
     pub fn with_clock(config: InMemoryLiveReplayStoreConfig, clock: Arc<dyn crate::Clock>) -> Self {
         Self {
+            work_limits: lash_trace::ObservationWorkLimits::standard(),
             replay_incarnation_id: uuid::Uuid::new_v4().to_string(),
             config,
             clock,
@@ -766,6 +767,13 @@ impl InMemoryLiveReplayStore {
             #[cfg(any(test, feature = "testing"))]
             before_notification_gate: None,
         }
+    }
+
+    /// Configure bounded expiry work per store operation, separately from retention.
+    #[must_use]
+    pub fn with_work_limits(mut self, limits: lash_trace::ObservationWorkLimits) -> Self {
+        self.work_limits = limits;
+        self
     }
 
     /// Release all entries idle beyond `max_age`, including their live
@@ -803,6 +811,7 @@ impl InMemoryLiveReplayStore {
         Self {
             replay_incarnation_id: self.replay_incarnation_id.clone(),
             config: self.config.clone(),
+            work_limits: self.work_limits,
             clock: Arc::clone(&self.clock),
             sessions: Arc::clone(&self.sessions),
             #[cfg(any(test, feature = "testing"))]
@@ -1027,7 +1036,11 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         }
         let now = self.clock.now();
         let mut sessions = self.sessions.lock_recover();
-        sessions.expire(&self.config, now, EXPIRY_WORK_PER_CALL);
+        sessions.expire(
+            &self.config,
+            now,
+            self.work_limits.replay_expiry_batch.get(),
+        );
         sessions.ensure_session(&self.config, session_id, now, &self.replay_incarnation_id)?;
         let (drafts, overlapping) = sessions
             .update(session_id, |buffer| {
@@ -1151,7 +1164,11 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
                 Self::trim_locked(&self.config, buffer, now)
             });
         }
-        sessions.expire(&self.config, now, EXPIRY_WORK_PER_CALL);
+        sessions.expire(
+            &self.config,
+            now,
+            self.work_limits.replay_expiry_batch.get(),
+        );
         let buffer = sessions.buffers.get(&session_id);
         if let Some(reason) = Self::incarnation_gap_for_cursor(buffer, &parsed).or_else(|| {
             buffer.and_then(|buffer| Self::gap_reason_for_cursor(buffer, parsed.live_position))
@@ -1185,7 +1202,11 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
                 Self::trim_locked(&self.config, buffer, now)
             });
         }
-        sessions.expire(&self.config, now, EXPIRY_WORK_PER_CALL);
+        sessions.expire(
+            &self.config,
+            now,
+            self.work_limits.replay_expiry_batch.get(),
+        );
         let buffer = sessions.buffers.get(&session_id);
         if let Some(reason) = Self::incarnation_gap_for_cursor(buffer, &parsed).or_else(|| {
             buffer.and_then(|buffer| Self::gap_reason_for_cursor(buffer, parsed.live_position))
@@ -1229,7 +1250,11 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         let now = self.clock.now();
         let mut sessions = self.sessions.lock_recover();
         sessions.touch(session_id, now);
-        sessions.expire(&self.config, now, EXPIRY_WORK_PER_CALL);
+        sessions.expire(
+            &self.config,
+            now,
+            self.work_limits.replay_expiry_batch.get(),
+        );
         if sessions
             .ensure_session(&self.config, session_id, now, &self.replay_incarnation_id)
             .is_err()
@@ -1262,7 +1287,11 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         let now = self.clock.now();
         let mut sessions = self.sessions.lock_recover();
         sessions.touch(session_id, now);
-        sessions.expire(&self.config, now, EXPIRY_WORK_PER_CALL);
+        sessions.expire(
+            &self.config,
+            now,
+            self.work_limits.replay_expiry_batch.get(),
+        );
         if sessions
             .ensure_session(&self.config, session_id, now, &self.replay_incarnation_id)
             .is_err()
@@ -1293,7 +1322,11 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
     async fn invalidate_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
         let mut sessions = self.sessions.lock_recover();
         sessions.remove(session_id);
-        sessions.expire(&self.config, self.clock.now(), EXPIRY_WORK_PER_CALL);
+        sessions.expire(
+            &self.config,
+            self.clock.now(),
+            self.work_limits.replay_expiry_batch.get(),
+        );
         Ok(())
     }
 
@@ -1304,7 +1337,11 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         sessions.update(session_id, |buffer| {
             Self::trim_locked(&self.config, buffer, now)
         });
-        sessions.expire(&self.config, now, EXPIRY_WORK_PER_CALL);
+        sessions.expire(
+            &self.config,
+            now,
+            self.work_limits.replay_expiry_batch.get(),
+        );
         Ok(())
     }
 }

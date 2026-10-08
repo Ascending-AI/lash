@@ -156,10 +156,6 @@ impl AttachmentDeliveryError {
     }
 }
 
-/// How long past a call's total a delivered URL or provider file must stay
-/// valid: the provider may fetch it after the last byte of the request.
-pub(super) const DELIVERY_FETCH_HORIZON_MS: u64 = 60_000;
-
 /// The one fill of an attempt, for [`ProviderHandle`](super::ProviderHandle)'s
 /// attempt loop and [`Provider::complete`] alike. Fill `template`'s slots:
 /// deliver every slot through

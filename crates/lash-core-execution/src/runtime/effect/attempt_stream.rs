@@ -24,7 +24,7 @@
 //!   whose field equals the same call's earlier recorded field keeps a
 //!   reference to that entry instead, and emission restores it.
 //! * **A byte budget caps the whole stream.** Past
-//!   [`ATTEMPT_STREAM_BYTE_BUDGET`], nothing more is recorded, and a typed
+//!   the configured cut (standard: [`ATTEMPT_STREAM_BYTE_BUDGET`]), nothing more is recorded, and a typed
 //!   [`AttemptStreamTruncation`] says how much was dropped.
 //!
 //! Order is kept within each channel. Across the two channels it is not
@@ -37,9 +37,10 @@ use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// The most payload bytes an attempt's recorded stream holds. What does not fit
+/// The standard preset for payload bytes in an attempt's recorded stream. What does not fit
 /// is dropped and counted in its [`AttemptStreamTruncation`].
-pub const ATTEMPT_STREAM_BYTE_BUDGET: usize = 256 * 1024;
+pub const ATTEMPT_STREAM_BYTE_BUDGET: usize =
+    lash_trace::TraceLimits::standard().attempt_stream_bytes;
 
 /// The fields a call's session event and activity both carry, stored
 /// once per call.
@@ -138,15 +139,30 @@ impl AttemptStream {
 }
 
 /// Builds a [`AttemptStream`] as events arrive.
-#[derive(Default)]
 pub struct AttemptStreamBuilder {
+    limit: usize,
     stream: AttemptStream,
     bytes: usize,
     /// The entry holding each call's field value: `(call_id, field)` to index.
     call_fields: BTreeMap<(String, &'static str), u32>,
 }
 
+impl Default for AttemptStreamBuilder {
+    fn default() -> Self {
+        Self::new(ATTEMPT_STREAM_BYTE_BUDGET)
+    }
+}
+
 impl AttemptStreamBuilder {
+    /// Capture at most `limit` payload bytes, with typed omission counts.
+    pub fn new(limit: usize) -> Self {
+        Self {
+            limit,
+            stream: Default::default(),
+            bytes: 0,
+            call_fields: Default::default(),
+        }
+    }
     pub fn push_session(&mut self, event: &crate::SessionStreamEvent) {
         self.push(AttemptStreamChannel::Session, serde_json::to_value(event));
     }
@@ -179,7 +195,7 @@ impl AttemptStreamBuilder {
         }
         let shared = self.share_call_fields(&mut payload);
         let bytes = payload_bytes(&payload);
-        if self.bytes + bytes > ATTEMPT_STREAM_BYTE_BUDGET {
+        if self.bytes + bytes > self.limit {
             self.stream.truncated = Some(AttemptStreamTruncation {
                 dropped_events: 1,
                 dropped_bytes: bytes as u64,
@@ -222,7 +238,7 @@ impl AttemptStreamBuilder {
         let same_block = previous.payload.get("type") == payload.get("type")
             && previous.payload.get("block") == payload.get("block")
             && previous.payload.get("correlation_id") == payload.get("correlation_id");
-        if !same_block || self.bytes + delta.len() > ATTEMPT_STREAM_BYTE_BUDGET {
+        if !same_block || self.bytes + delta.len() > self.limit {
             return false;
         }
         let Some(Value::String(text)) = previous.payload.get_mut(text_field) else {
@@ -276,13 +292,17 @@ pub struct AttemptStreamRecorder {
 
 impl AttemptStreamRecorder {
     #[must_use]
-    pub fn start() -> std::sync::Arc<Self> {
-        std::sync::Arc::default()
+    pub fn start(limit: usize) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            stream: std::sync::Mutex::new(AttemptStreamBuilder::new(limit)),
+        })
     }
 
     /// Every event the body emitted, once it has returned.
     pub fn finish(&self) -> AttemptStream {
-        std::mem::take(&mut *self.stream.lock_recover()).finish()
+        let mut stream = self.stream.lock_recover();
+        let limit = stream.limit;
+        std::mem::replace(&mut *stream, AttemptStreamBuilder::new(limit)).finish()
     }
 }
 

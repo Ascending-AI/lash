@@ -168,6 +168,7 @@ pub struct OpenAiCompatibleProvider {
     pub base_url: String,
     pub options: ProviderOptions,
     pub request_work: crate::RequestWorkPolicy,
+    pub diagnostic_limits: crate::RequestDiagnosticLimits,
     pub(crate) attachment_credential_scope: Option<String>,
     pub compat: OpenAiCompat,
     pub wire: OpenAiWireConfig,

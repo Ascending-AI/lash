@@ -625,13 +625,6 @@ pub(super) struct FormatTally {
     pub(super) refused_without_version: u64,
 }
 
-/// How many undecodable reasons a report keeps verbatim.
-///
-/// A store with a systematic decode failure has one reason repeated a million
-/// times; keeping a handful makes the count investigable without making the
-/// report the size of the corruption.
-const MAX_UNDECODABLE_REASONS: usize = 3;
-
 impl FormatTally {
     pub(super) fn record(&mut self, version: u32) {
         self.scanned += 1;
@@ -652,10 +645,10 @@ impl FormatTally {
         self.refused_without_version += 1;
     }
 
-    pub(super) fn undecodable(&mut self, reason: impl Into<String>) {
+    pub(super) fn undecodable(&mut self, reason: impl Into<String>, limit: usize) {
         self.scanned += 1;
         self.undecodable += 1;
-        if self.undecodable_reasons.len() < MAX_UNDECODABLE_REASONS {
+        if self.undecodable_reasons.len() < limit {
             self.undecodable_reasons.push(reason.into());
         }
     }
@@ -758,7 +751,7 @@ mod tests {
     fn a_refusal_outranks_an_undecodable_item_without_hiding_it() {
         let mut tally = FormatTally::default();
         tally.record(7);
-        tally.undecodable("trailing garbage");
+        tally.undecodable("trailing garbage", 3);
         let row = tally_row(tally, FormatVersion::Counter(8));
         assert_eq!(row.verdict, ComponentVerdict::Refused);
         assert_eq!(row.undecodable, 1);
@@ -773,11 +766,11 @@ mod tests {
     fn undecodable_reasons_are_capped_but_counted_in_full() {
         let mut tally = FormatTally::default();
         for index in 0..50 {
-            tally.undecodable(format!("failure {index}"));
+            tally.undecodable(format!("failure {index}"), 2);
         }
         let row = tally_row(tally, FormatVersion::Counter(8));
         assert_eq!(row.undecodable, 50);
-        assert_eq!(row.undecodable_reasons.len(), MAX_UNDECODABLE_REASONS);
+        assert_eq!(row.undecodable_reasons.len(), 2);
     }
 
     #[test]

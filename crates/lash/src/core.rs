@@ -639,6 +639,7 @@ pub struct LashCoreBuilder {
     attachment_read_policy: Option<lash_core::AttachmentReadPolicy>,
     provider_file_uploaders: Vec<Arc<dyn lash_core::attachments::ProviderFileUploader>>,
     provider_file_cache: lash_core::attachments::ProviderFileCacheLimits,
+    delivery_fetch_horizon: crate::attachments::DeliveryFetchHorizon,
     attachment_upload_expiry: Option<std::time::Duration>,
     output_retention: Option<lash_core::OutputRetentionPolicy>,
     // Core fields applied over the config the backend's ports assemble.
@@ -647,6 +648,8 @@ pub struct LashCoreBuilder {
     #[cfg(feature = "otel-trace")]
     telemetry: Option<lash_trace::otel::OtelTelemetry>,
     trace_level: Option<lash_trace::TraceLevel>,
+    trace_limits: Option<crate::tracing::TraceLimits>,
+    observation_work_limits: crate::tracing::ObservationWorkLimits,
     trace_context: Option<lash_trace::TraceContext>,
     tool_source_policy: Option<lash_core::ToolSourcePolicy>,
     execution_budgets: Option<lash_core::ExecutionBudgets>,
@@ -659,6 +662,7 @@ pub struct LashCoreBuilder {
     live_replay_store: Option<Arc<dyn LiveReplayStore>>,
     process_event_sinks: Vec<Arc<dyn facade_support::ProcessEventSink>>,
     process_observation_config: crate::process_observation::ProcessObservationConfig,
+    process_observation_work_limits: crate::process_observation::ProcessObservationWorkLimits,
     serves_sessions: bool,
     attachment_reclamation_retry: crate::persistence::AttachmentReclamationRetryPolicy,
     work_cadence: crate::WorkCadencePolicy,
@@ -705,6 +709,7 @@ impl LashCoreBuilder {
             attachment_read_policy: None,
             provider_file_uploaders: Vec::new(),
             provider_file_cache: Default::default(),
+            delivery_fetch_horizon: Default::default(),
             attachment_upload_expiry: None,
             output_retention: None,
             trace_runtime: None,
@@ -712,6 +717,8 @@ impl LashCoreBuilder {
             #[cfg(feature = "otel-trace")]
             telemetry: None,
             trace_level: None,
+            trace_limits: None,
+            observation_work_limits: Default::default(),
             trace_context: None,
             tool_source_policy: None,
             execution_budgets: None,
@@ -724,6 +731,7 @@ impl LashCoreBuilder {
             live_replay_store: None,
             process_event_sinks: Vec::new(),
             process_observation_config: Default::default(),
+            process_observation_work_limits: Default::default(),
             serves_sessions: Self::STANDARD_SERVE_SESSIONS,
             attachment_reclamation_retry:
                 crate::persistence::AttachmentReclamationRetryPolicy::standard(),
@@ -805,6 +813,16 @@ impl LashCoreBuilder {
     /// including provider encoding. Independent of put and history limits.
     pub fn attachment_read_policy(mut self, policy: lash_core::AttachmentReadPolicy) -> Self {
         self.attachment_read_policy = Some(policy);
+        self
+    }
+
+    /// Fetch slack recorded in each new call's request template. Resends use
+    /// the admitted value. Defaults to [`crate::attachments::DeliveryFetchHorizon::standard`].
+    pub fn delivery_fetch_horizon(
+        mut self,
+        horizon: crate::attachments::DeliveryFetchHorizon,
+    ) -> Self {
+        self.delivery_fetch_horizon = horizon;
         self
     }
 
@@ -920,6 +938,23 @@ impl LashCoreBuilder {
 
     pub fn trace_level(mut self, trace_level: lash_trace::TraceLevel) -> Self {
         self.trace_level = Some(trace_level);
+        self
+    }
+
+    /// Configure trace working capacities, evidence cuts and plugin-state warnings.
+    /// Defaults to [`crate::tracing::TraceLimits::standard`]. No sink is installed.
+    pub fn trace_limits(mut self, limits: crate::tracing::TraceLimits) -> Self {
+        self.trace_limits = Some(limits);
+        self
+    }
+
+    /// Configure expiry/publisher batches, process snapshot tails and session
+    /// event deduplication. Defaults to [`crate::tracing::ObservationWorkLimits::standard`].
+    pub fn observation_work_limits(
+        mut self,
+        limits: crate::tracing::ObservationWorkLimits,
+    ) -> Self {
+        self.observation_work_limits = limits;
         self
     }
 
@@ -1065,6 +1100,16 @@ impl LashCoreBuilder {
         self
     }
 
+    /// Configure live graph history and fold batching separately from retention.
+    /// Defaults to [`crate::process::ProcessObservationWorkLimits::standard`].
+    pub fn process_observation_work_limits(
+        mut self,
+        limits: crate::process::ProcessObservationWorkLimits,
+    ) -> Self {
+        self.process_observation_work_limits = limits;
+        self
+    }
+
     /// Build a core under the host's stable worker identity.
     ///
     /// The owner id is stable for the worker or process and never scoped to a
@@ -1081,10 +1126,10 @@ impl LashCoreBuilder {
         let store_factory = backend.session_store_factory();
         let core = self
             .resolve_runtime_host_config()?
-            .with_provider_file_cache(self.provider_file_cache)
             .with_provider_file_uploaders(std::mem::take(&mut self.provider_file_uploaders));
         let process_observation_hub = Arc::new(
-            crate::process_observation::ProcessObservationHub::new(self.process_observation_config),
+            crate::process_observation::ProcessObservationHub::new(self.process_observation_config)
+                .with_work_limits(self.process_observation_work_limits),
         );
         let observation_sink: Arc<dyn lash_trace::TraceSink> = process_observation_hub.clone();
         let observation_sink = match core.tracing.emitter().product_observer() {
@@ -1096,10 +1141,13 @@ impl LashCoreBuilder {
         };
         let core = core.with_process_observation_sink(observation_sink);
         let live_replay_store = self.live_replay_store.take().unwrap_or_else(|| {
-            Arc::new(InMemoryLiveReplayStore::with_clock(
-                facade_support::InMemoryLiveReplayStoreConfig::default(),
-                Arc::clone(&core.clock),
-            ))
+            Arc::new(
+                InMemoryLiveReplayStore::with_clock(
+                    facade_support::InMemoryLiveReplayStoreConfig::default(),
+                    Arc::clone(&core.clock),
+                )
+                .with_work_limits(core.observation_work_limits),
+            )
         });
         let process_work = lash_core::ProcessWorkWiring::new(
             lash_core::runtime::watch_process_registry(backend.process_registry()),
@@ -1320,3 +1368,6 @@ pub struct ForkRequest {
     pub relation: lash_core::SessionRelation,
     pub observed_processes: Vec<lash_core::ProcessId>,
 }
+
+#[cfg(all(test, feature = "otel-trace"))]
+mod capacity_laws;

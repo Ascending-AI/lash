@@ -41,6 +41,7 @@ struct TraceRuntimeParts {
     level: TraceLevel,
     base_context: TraceContext,
     metrics: TelemetryMetrics,
+    limits: lash_trace::TraceLimits,
 }
 
 impl TraceRuntime {
@@ -54,6 +55,7 @@ impl TraceRuntime {
                 level: TraceLevel::Standard,
                 base_context: TraceContext::default(),
                 metrics: TelemetryMetrics::default(),
+                limits: lash_trace::TraceLimits::standard(),
             }),
         }
     }
@@ -85,6 +87,18 @@ impl TraceRuntime {
 
     pub fn emitter(&self) -> &TraceEmitter {
         &self.parts.emitter
+    }
+
+    /// Resolved working capacities and evidence cuts.
+    pub fn limits(&self) -> lash_trace::TraceLimits {
+        self.parts.limits
+    }
+
+    /// Configure capacities and cuts without installing an observer.
+    #[must_use]
+    pub fn with_limits(mut self, limits: lash_trace::TraceLimits) -> Self {
+        Arc::make_mut(&mut self.parts).limits = limits;
+        self
     }
 
     pub fn level(&self) -> TraceLevel {
@@ -514,11 +528,6 @@ struct FrontierInner {
 /// One held shift observation: emits itself under the frontier's attempt.
 type HeldObservation = Box<dyn FnOnce(&EmissionPermit, TraceAttemptId, u64) + Send>;
 
-/// What a shift holds between two recorded steps, at most. A shift records a
-/// step within a few observations; the bound keeps one that never does from
-/// growing.
-const HELD_OBSERVATIONS_MAX: usize = 256;
-
 enum FrontierState {
     /// No step body has run in this attempt yet.
     Behind(Vec<HeldObservation>),
@@ -602,10 +611,16 @@ impl JournalFrontier {
     /// Emits `observation` now when the shift is past its journal, and holds
     /// it otherwise.
     fn observe(&self, observation: HeldObservation) {
+        let capacity = self
+            .runtime()
+            .map_or_else(lash_trace::TraceLimits::standard, |runtime| {
+                runtime.limits()
+            })
+            .held_observations;
         {
             let mut state = self.state();
             if let FrontierState::Behind(held) = &mut *state {
-                if held.len() < HELD_OBSERVATIONS_MAX {
+                if held.len() < capacity {
                     held.push(observation);
                 }
                 return;

@@ -59,7 +59,8 @@ impl Processes {
     fn make_observer(&self) -> Result<lash_core::facade_support::ProcessWorkObserver> {
         Ok(
             lash_core::facade_support::ProcessWorkObserver::new(self.registry())
-                .with_read_attempts(self.core.observer_pacing.snapshot_read_attempts),
+                .with_read_attempts(self.core.observer_pacing.snapshot_read_attempts)
+                .with_work_limits(self.core.env.core.observation_work_limits),
         )
     }
 

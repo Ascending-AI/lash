@@ -213,6 +213,7 @@ impl LashCore {
                     lash_core_worker::process_steps(&worker),
                     probe,
                 )
+                .with_trace_limits(self.env.core.tracing.limits())
                 .with_session_turns(worker)
                 .with_process_events(self.substrate_slot.setup.process.watched().clone()),
             ) as Arc<dyn Activation>

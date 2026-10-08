@@ -515,6 +515,7 @@ fn disabled_replay_and_unsampled_paths_do_not_serialize_payloads() {
                 max_events: 1,
             },
             enrich: Some(Arc::new(EnrichmentSpy(count.clone()))),
+            ..OtelOptions::standard()
         },
     );
     let scope = admit(&adapter, TraceCause::Root);
@@ -607,6 +608,7 @@ fn payload_limits_and_permit_classes_are_enforced() {
                 max_events: 1,
             },
             enrich: None,
+            ..OtelOptions::standard()
         },
     );
     let scope = admit(&adapter, TraceCause::Root);

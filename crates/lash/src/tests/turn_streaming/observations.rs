@@ -1626,7 +1626,7 @@ async fn recoverable_chat_conformance_deduplicates_redelivery_identity() -> Resu
 
     let mut redelivery = session
         .observe()
-        .subscribe_and_recover(cursor)
+        .subscribe_and_recover(cursor.clone())
         .with_applied_event_ids([first_id.clone()]);
     let next_id = match redelivery.next().await.expect("next replay event")? {
         crate::observe::SessionObservationStreamItem::Event(event) => {
@@ -1639,6 +1639,23 @@ async fn recoverable_chat_conformance_deduplicates_redelivery_identity() -> Resu
     assert_ne!(
         next_id, first_id,
         "an already-applied event identity must not be delivered twice"
+    );
+    let mut unlimited_redelivery = session
+        .observe()
+        .subscribe_and_recover(cursor)
+        .with_work_limits(crate::tracing::ObservationWorkLimits {
+            session_dedup_ids: 0,
+            ..Default::default()
+        })
+        .with_applied_event_ids([first_id.clone()]);
+    let crate::observe::SessionObservationStreamItem::Event(event) =
+        unlimited_redelivery.next().await.unwrap()?
+    else {
+        panic!("unexpected gap")
+    };
+    assert_eq!(
+        crate::observe::SessionObservationEventId::of(&event),
+        first_id
     );
     Ok(())
 }

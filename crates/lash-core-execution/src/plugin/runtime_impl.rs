@@ -422,10 +422,14 @@ impl PluginHost {
         };
         self.composition()?;
         Ok(Arc::new(PluginSession {
-            state: Arc::new(StdMutex::new(if forked {
-                PluginStateRegistry::from_fork(snapshot)
-            } else {
-                PluginStateRegistry::from_snapshot(snapshot)
+            state: Arc::new(StdMutex::new({
+                let mut registry = if forked {
+                    PluginStateRegistry::from_fork(snapshot)
+                } else {
+                    PluginStateRegistry::from_snapshot(snapshot)
+                };
+                registry.trace_limits = self.trace_runtime.limits();
+                registry
             })),
             native_view: Arc::new(StdMutex::new(None)),
             host: self.clone(),

@@ -4,6 +4,7 @@
 //! delivery forgets that delivery before the next attempt delivers again.
 
 use super::*;
+use crate::ClockWallTime as _;
 use lash_sansio::llm::attachment_delivery::{
     AttachmentPosition, Delivery, DeliveryContext, DeliverySecret, ProviderAccepts,
 };
@@ -74,6 +75,7 @@ impl Provider for RejectOnceProvider {
 struct FlakySigner {
     calls: AtomicUsize,
     invalidated: std::sync::Mutex<Vec<String>>,
+    horizons: std::sync::Mutex<Vec<u64>>,
 }
 
 #[async_trait::async_trait]
@@ -83,6 +85,7 @@ impl SlotDeliveries for FlakySigner {
         slots: &[&AttachmentSlot],
         ctx: &DeliveryContext,
     ) -> Result<Vec<Arc<Delivery>>, AttachmentDeliveryError> {
+        self.horizons.lock_recover().push(ctx.valid_through_ms);
         let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         if call == 1 {
             return Err(AttachmentDeliveryError::Unavailable {
@@ -159,22 +162,32 @@ async fn every_attempt_delivers_afresh_and_unsent_or_rejected_deliveries_are_ret
     let signer = FlakySigner::default();
     let mut request = empty_request();
     let sideband = handle.prepare_completion(&mut request);
+    let mut template = slot_template();
+    template.fetch_horizon.millis = 17;
+    let enclosing = lash_sansio::ExecutionLimit::starting_at(
+        crate::SystemClock.timestamp_ms(),
+        std::time::Duration::from_secs(30),
+        std::time::Duration::from_secs(30),
+    );
+    let expected_horizon = enclosing.expires_at.saturating_add(17);
     let completion = handle
         .complete_prepared(
             ResponseContext::of_request(&request),
-            &Arc::new(slot_template()),
+            &Arc::new(template),
             &signer,
             sideband,
             crate::ChargeSafetyPolicy::default(),
             &lash_trace::telemetry::metrics::TelemetryMetrics::default(),
             None,
-            crate::provider::handle::ModelCallBounds::unnested(
-                lash_sansio::ExecutionBudgets::recommended(),
-            ),
+            crate::provider::handle::ModelCallBounds {
+                budgets: lash_sansio::ExecutionBudgets::recommended(),
+                enclosing: Some(enclosing),
+            },
         )
         .await
         .expect("the third attempt answers");
 
+    assert_eq!(*signer.horizons.lock_recover(), vec![expected_horizon; 3]);
     let attempts = &completion.call_record.attempts;
     assert_eq!(attempts.len(), 3, "{attempts:?}");
     let unsent = attempts[0]

@@ -85,8 +85,11 @@ pub(crate) fn invalid_empty_response(
     }
 }
 
-pub(crate) fn empty_response_error(raw: String) -> lash_core::llm::transport::LlmTransportError {
-    empty_response_diagnostic(crate::request_work::body_excerpt(&raw))
+pub(crate) fn empty_response_error(
+    raw: String,
+    limits: crate::RequestDiagnosticLimits,
+) -> lash_core::llm::transport::LlmTransportError {
+    empty_response_diagnostic(limits.body_excerpt(&raw))
 }
 
 pub(crate) fn empty_response_diagnostic(

@@ -31,7 +31,9 @@
       "type": "object"
     },
     "occurrence_cap": {
-      "const": 8
+      "maximum": 8,
+      "minimum": 0,
+      "type": "integer"
     },
     "vocabulary_version": {
       "const": 1

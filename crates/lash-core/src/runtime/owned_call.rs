@@ -64,6 +64,8 @@ pub(in crate::runtime) struct OwnedCall<'a> {
     /// The session's attachment store: every attempt delivers the
     /// template's slots from it.
     pub(in crate::runtime) attachment_store: Arc<crate::RuntimeAttachmentStore>,
+    pub(in crate::runtime) fetch_horizon:
+        lash_sansio::llm::attachment_delivery::DeliveryFetchHorizon,
     pub(in crate::runtime) budgets: ExecutionBudgets,
 }
 
@@ -156,6 +158,7 @@ impl OwnedCall<'_> {
             binding,
             attachment_store,
             budgets,
+            fetch_horizon,
         } = self;
         if !request.tools.is_empty() {
             return Ok(OwnedAdmission::Unsent(refused(
@@ -186,7 +189,7 @@ impl OwnedCall<'_> {
         let mut lowered = request.clone();
         lowered.drop_foreign_replay(&provider.route_identity(lowered.model.wire_model()));
         lowered.stream_events = crate::session_model::transport_stream_events(&provider, None);
-        let template = match provider.lower(&lowered).await {
+        let mut template = match provider.lower(&lowered).await {
             Ok(template) => template,
             Err(error) => {
                 return Ok(OwnedAdmission::Unsent(
@@ -194,6 +197,7 @@ impl OwnedCall<'_> {
                 ));
             }
         };
+        template.fetch_horizon = fetch_horizon;
         // Every attachment a slot names is held under the owner before the
         // call is admitted: a ref only this call names survives a takeover
         // and is released when the owner settles.

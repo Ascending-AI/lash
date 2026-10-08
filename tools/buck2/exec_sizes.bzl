@@ -464,7 +464,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-provider-google:lash-provider-google__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-provider-google:lash-provider-google__unit_test__fv_f875c77c": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-provider-openai:lash-provider-openai__unit_test": {"cpu_count": 1, "memory_kb": 262144},
-    "//crates/lash-provider-openai:lash-provider-openai__unit_test__fv_e4f5cc5d": {"cpu_count": 1, "memory_kb": 262144},
+    "//crates/lash-provider-openai:lash-provider-openai__unit_test__fv_f9892c38": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-regress:integration__test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-regress:integration__test__fv_419bd085": {"cpu_count": 1, "memory_kb": 1048576},
     "//crates/lash-regress:integration__test__fv_7f10c809": {"cpu_count": 1, "memory_kb": 262144},

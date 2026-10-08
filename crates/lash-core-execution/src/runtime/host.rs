@@ -16,6 +16,8 @@ use super::{DeploymentStore, ProcessWorkSubstrate, ProcessWorkWiring};
 /// session-store factory and the process-definition registry — is read from the same backend. There is no in-memory default.
 #[derive(Clone)]
 pub struct RuntimeHostConfig {
+    /// Working budgets shared by this host's observation surfaces.
+    pub observation_work_limits: lash_trace::ObservationWorkLimits,
     backend: crate::Backend,
     provider_file_uploaders: Vec<Arc<dyn crate::attachments::ProviderFileUploader>>,
     provider_file_cache: crate::attachments::ProviderFileCacheLimits,
@@ -57,6 +59,7 @@ pub struct RuntimeDurabilityConfig {
 
 #[derive(Clone)]
 pub struct RuntimeProviderConfig {
+    pub delivery_fetch_horizon: lash_sansio::llm::attachment_delivery::DeliveryFetchHorizon,
     /// The host's models: the registry that mints a session's model binding
     /// and binds a recorded one to its transport.
     pub models: Arc<dyn crate::LlmProfiles>,
@@ -305,6 +308,7 @@ impl RuntimeHostConfig {
                 })
                 .with_artifact_ports(artifact_ports),
             providers: RuntimeProviderConfig {
+                delivery_fetch_horizon: Default::default(),
                 models: Arc::new(crate::EmptyLlmProfiles),
                 run_definitions: crate::RunDefinitions::default(),
             },
@@ -325,6 +329,7 @@ impl RuntimeHostConfig {
             turn_phase_probes: super::RuntimeTurnPhaseProbeSlot::default(),
             provider_file_uploaders: Vec::new(),
             provider_file_cache: Default::default(),
+            observation_work_limits: lash_trace::ObservationWorkLimits::standard(),
             clock,
         }
     }

@@ -80,6 +80,7 @@ use crate::{
 /// The activation of claimed process actors: one per node, routed by
 /// [`lash_durable::ActorDispatch`].
 pub struct ProcessActivation {
+    trace_limits: lash_trace::TraceLimits,
     pub(super) backend: Backend,
     steps: Arc<dyn ProcessSteps>,
     probe: Arc<dyn DurableProbe>,
@@ -101,11 +102,19 @@ impl ProcessActivation {
     ) -> Self {
         Self {
             backend,
+            trace_limits: lash_trace::TraceLimits::standard(),
             steps,
             probe,
             session_turns: None,
             events: None,
         }
+    }
+
+    /// Configure evidence cuts for newly started process runs.
+    #[must_use]
+    pub fn with_trace_limits(mut self, limits: lash_trace::TraceLimits) -> Self {
+        self.trace_limits = limits;
+        self
     }
 
     /// This activation running `SessionTurn` processes with `turns`.
@@ -555,6 +564,10 @@ impl ProcessActivation {
             }
         };
         if matches!(event, EngineEvent::Started { .. }) {
+            driver.effect_occurrence_cap = self
+                .trace_limits
+                .process_effect_occurrences
+                .min(crate::runtime::process::PROCESS_EFFECT_OCCURRENCE_CAP);
             driver.cancel_grace_ms =
                 u64::try_from(engine.cancel_grace().as_millis()).unwrap_or(u64::MAX);
         }
@@ -1269,7 +1282,9 @@ fn record_effect(
     let Some((class, code)) = effect_class(outcome) else {
         return;
     };
-    if !crate::runtime::process::ProcessEffectOccurrence::is_within_cap(site.occurrence) {
+    if site.occurrence > driver.effect_occurrence_cap
+        || !crate::runtime::process::ProcessEffectOccurrence::is_within_cap(site.occurrence)
+    {
         driver
             .omitted_effects
             .entry(site.node_id.clone())
@@ -1352,8 +1367,9 @@ fn record_omitted_effects(
     if driver.omitted_effects.is_empty() {
         return;
     }
-    let omissions =
+    let mut omissions =
         crate::runtime::process::ProcessEffectOmissions::new(driver.omitted_effects.clone(), fleet);
+    omissions.occurrence_cap = driver.effect_occurrence_cap;
     append_event(
         tx,
         process,

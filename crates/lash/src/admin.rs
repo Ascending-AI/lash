@@ -114,6 +114,7 @@ impl<T> AdminMutation<T> {
 #[derive(Clone)]
 /// Facade handle for session administration.
 pub struct SessionAdmin {
+    pub(crate) observation_work_limits: lash_trace::ObservationWorkLimits,
     pub(crate) target: crate::send::SendTarget,
     pub(crate) runtime: RuntimeHandle,
     pub(crate) process_work: Arc<dyn lash_core::ProcessWorkSubstrate>,
@@ -352,6 +353,7 @@ impl SessionAdmin {
             .map(|registry| {
                 lash_core::facade_support::ProcessWorkObserver::new(registry)
                     .with_read_attempts(self.target.observer_pacing().snapshot_read_attempts)
+                    .with_work_limits(self.observation_work_limits)
             })
     }
 

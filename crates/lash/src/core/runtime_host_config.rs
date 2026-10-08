@@ -32,7 +32,8 @@ impl LashCoreBuilder {
             tool_source_policy,
             execution_budgets,
             delta_coalescing,
-        );
+        )
+        .with_provider_file_cache(self.provider_file_cache);
         let core = self.apply_core_overrides(core);
         core.control.relay_policy().validate()?;
         core.control.commit_admission.validate()?;
@@ -75,6 +76,11 @@ impl LashCoreBuilder {
         if let Some(sink) = self.trace_sink.take() {
             core.tracing = core.tracing.with_trace_sink(sink);
         }
+        core.providers.delivery_fetch_horizon = self.delivery_fetch_horizon;
+        core.observation_work_limits = self.observation_work_limits;
+        if let Some(limits) = self.trace_limits.take() {
+            core.tracing = core.tracing.clone().with_limits(limits);
+        }
         if let Some(level) = self.trace_level.take() {
             core.tracing = core.tracing.clone().with_level(level);
         }
@@ -104,7 +110,7 @@ impl LashCoreBuilder {
 }
 
 #[cfg(all(test, feature = "otel-trace"))]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use lash_trace::otel::{OtelOptions, OtelTelemetry, api};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -137,7 +143,7 @@ mod tests {
             OtelOptions::default(),
         )
     }
-    struct Sink(AtomicUsize);
+    pub(in crate::core) struct Sink(pub(in crate::core) AtomicUsize);
     impl lash_trace::TraceSink for Sink {
         fn append(
             &self,
@@ -199,6 +205,88 @@ mod tests {
         );
         assert_eq!(first.0.load(Ordering::Relaxed), 0);
         assert_eq!(second.0.load(Ordering::Relaxed), 1);
+    }
+    /// FIG-5499: the facade's uploader installer respects cache capacity.
+    #[tokio::test]
+    async fn uploader_installation_honors_facade_cache_limits() {
+        use crate::attachments::AttachmentCreateMeta;
+        use crate::attachments::{
+            DeliveryLimits, DeliverySecret, ProviderAccepts, ProviderFileScope,
+        };
+        use crate::persistence::{
+            AttachmentStoreError, ProviderFileUploader, UploadedProviderFile,
+        };
+        struct Uploader {
+            scope: ProviderFileScope,
+            calls: AtomicUsize,
+        }
+        #[async_trait::async_trait]
+        impl ProviderFileUploader for Uploader {
+            fn scope(&self) -> &ProviderFileScope {
+                &self.scope
+            }
+            async fn upload(
+                &self,
+                _: &crate::attachments::AttachmentRef,
+                _: &[u8],
+            ) -> std::result::Result<UploadedProviderFile, AttachmentStoreError> {
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                Ok(UploadedProviderFile {
+                    id: DeliverySecret::new("file".into()),
+                    valid_until_ms: None,
+                })
+            }
+        }
+        let uploader = Arc::new(Uploader {
+            scope: ProviderFileScope {
+                provider: "test".into(),
+                endpoint: "test".into(),
+                credential_scope: "host".into(),
+            },
+            calls: AtomicUsize::new(0),
+        });
+        let backend = crate::tests::sqlite_memory_store_backend().await;
+        let mut builder = crate::tests::explicit_ephemeral_facets(LashCore::builder(backend))
+            .provider_file_cache(crate::persistence::ProviderFileCacheLimits {
+                capacity: 0,
+                ..Default::default()
+            });
+        let config = builder
+            .resolve_runtime_host_config()
+            .unwrap()
+            .with_provider_file_uploaders(vec![uploader.clone()]);
+        let store = &config.durability.attachment_store;
+        let reference = store
+            .put(
+                b"original".to_vec(),
+                AttachmentCreateMeta::new("text/plain".parse().unwrap(), None, None),
+            )
+            .await
+            .unwrap();
+        let accepts = ProviderAccepts {
+            provider_file: Some(uploader.scope.clone()),
+            ..Default::default()
+        };
+        for _ in 0..2 {
+            store
+                .backend()
+                .deliver(
+                    &reference,
+                    &accepts,
+                    &DeliveryLimits {
+                        max_bytes: 1024,
+                        max_upload_bytes: 1024,
+                        valid_through_ms: 0,
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            uploader.calls.load(Ordering::Relaxed),
+            2,
+            "zero capacity uploads again rather than reusing a derivative"
+        );
     }
 }
 

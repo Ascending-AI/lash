@@ -349,6 +349,7 @@ mod tests;
 /// The resident published state of one owner, and its publication slots.
 #[derive(Debug, Default)]
 pub(super) struct PluginStateRegistry {
+    pub(super) trace_limits: lash_trace::TraceLimits,
     /// Published state: every namespace's values at its applied generation.
     pub(super) data: PluginState,
     pub(super) source: Option<crate::BlobRef>,
