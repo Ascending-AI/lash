@@ -781,6 +781,70 @@ async fn retry_ladder_survives_a_later_pending_completion(tier: Tier) {
     world.shutdown().await;
 }
 
+/// A turn cancelled while its call is parked on its completion revokes the
+/// call's wait with the turn's scope (ADR 0132 §6, §11): the wait is no
+/// longer outstanding, and a host resolution afterwards answers `Revoked`
+/// and writes nothing. Found by the real-host E2E case S21 (FIG-5305): the
+/// round pinned the wait under the session's scope, so the turn's end left
+/// it pending and a late resolution answered `Resolved`.
+async fn a_cancelled_turns_parked_completion_is_revoked(tier: Tier) {
+    let Some((world, witness)) = world(tier, false).await else {
+        return;
+    };
+    let name = "cancelled-parked";
+    let session = world.session(name, served::spec(64)).await;
+    world.script(
+        name,
+        vec![probe(
+            "parked",
+            DEFERRED,
+            serde_json::json!({ "label": "cancelled", "hold": true }),
+        )],
+    );
+    let handle = session
+        .send(lash::TurnInput::text(name))
+        .await
+        .expect("the turn is accepted");
+    while witness.of("cancelled").is_empty() {
+        tokio::task::yield_now().await;
+    }
+    let key = witness
+        .only("cancelled")
+        .completion_key
+        .expect("the parked call's key");
+    handle.cancel().await.expect("the cancel is accepted");
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(60), handle.output())
+        .await
+        .expect("the cancelled turn settles");
+    assert!(
+        outcome.as_ref().is_ok_and(|output| !output.is_success()),
+        "the turn settles cancelled, not answered: {outcome:?}"
+    );
+    let outstanding = world
+        .core
+        .completions()
+        .outstanding(session.session_id())
+        .await
+        .expect("the session's outstanding completions read");
+    assert!(
+        outstanding.iter().all(|pinned| pinned.as_str() != key),
+        "the cancelled turn's wait is still outstanding"
+    );
+    let late = world
+        .core
+        .completions()
+        .resolve(&key, lash::Resolution::Ok(serde_json::json!("late")))
+        .await
+        .expect("the late resolution answers");
+    assert_eq!(
+        late,
+        lash::durable::ResolveAnswer::Revoked,
+        "a resolution after the turn's cancel answers Revoked"
+    );
+    witness.open();
+    world.shutdown().await;
+}
+
 tiered_laws!(
     repeated_provider_id_across_turns_is_distinct,
     same_scope_completion_collision,
@@ -790,6 +854,7 @@ tiered_laws!(
     fork_inherits_history_without_execution_queues_waits_or_journals,
     code_cells_keep_identity_and_distinguish_fresh_calls,
     a_retried_call_may_park_and_its_resolution_answers,
+    a_cancelled_turns_parked_completion_is_revoked,
 );
 
 /// The retry trace law runs on SQLite memory.

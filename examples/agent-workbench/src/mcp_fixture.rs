@@ -222,6 +222,14 @@ impl WorkbenchMcpServer {
             use std::io::Write as _;
             let root = std::path::PathBuf::from(root);
             std::fs::create_dir_all(&root).map_err(internal)?;
+            // Every execution of the body, for a caller counting them.
+            let mut calls = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(root.join("badge-calls"))
+                .map_err(internal)?;
+            writeln!(calls, "{}", std::process::id()).map_err(internal)?;
+            calls.sync_all().map_err(internal)?;
             match std::fs::OpenOptions::new()
                 .create_new(true)
                 .write(true)

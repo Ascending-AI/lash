@@ -481,8 +481,6 @@ UNCONSUMED_CI_PATHS: Mapping[str, str] = {
     "scripts/postgres-substrate-bench.py": "run by hand through kiln gate for the S2 SQL spike; crates/lash-perf/src/bin/postgres_substrate/README.md documents the command",
     "scripts/test_landing_gates.py": "run on the lander beside scripts/ci/landing-gates.sh; it needs `kiln` on PATH, which the repository-gates runners do not have",
     "scripts/generate-process-env-identity-golden.py": "run by hand to rewrite the process-environment identity fixture from the ignored generator's test log",
-    "scripts/e2e-workbench-operation.py": "its engine E2E caller was deleted (FIG-5190); L9h (FIG-5186) rewires it",
-    "scripts/e2e-workbench-recovery.py": "its engine E2E caller was deleted (FIG-5190); L9h (FIG-5186) rewires it",
     "scripts/e2e-workbench-weather.py": "its engine E2E caller was deleted (FIG-5190); L9h (FIG-5186) rewires it",
 }
 

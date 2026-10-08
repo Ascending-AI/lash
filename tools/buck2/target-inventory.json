@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
-  "cargo_package_count": 53,
-  "cargo_target_count": 218,
+  "cargo_package_count": 54,
+  "cargo_target_count": 220,
   "facade_production_check_targets": [
     "//crates/lash-core-effect:lash-core-effect__fv_48d34494[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_e38b9031[check]",
@@ -44034,7 +44034,7 @@
       "//crates/lashlang:lashlang__unit_test__fv_fc3b3750"
     ]
   },
-  "generated_label_count": 279,
+  "generated_label_count": 282,
   "packages": [
     {
       "declared_features": [
@@ -45310,6 +45310,59 @@
           "clippy_label": "//crates/lash-durable:lash-durable__unit_test__clippy[clippy.txt]",
           "kind": "unit-test",
           "label": "//crates/lash-durable:lash-durable__unit_test",
+          "tags": []
+        }
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
+    },
+    {
+      "declared_features": [],
+      "dependencies": [
+        "anyhow",
+        "axum",
+        "futures-util",
+        "lash-internal-postgres-store",
+        "lash-runtime",
+        "libc",
+        "reqwest",
+        "serde",
+        "serde_json",
+        "sha2",
+        "tokio"
+      ],
+      "doc": "//crates/lash-e2e:lash-e2e__doc",
+      "manifest": "crates/lash-e2e/Cargo.toml",
+      "package": "lash-e2e",
+      "resolved_features": [],
+      "targets": [
+        {
+          "build_label": "//crates/lash-e2e:lash-e2e[static]",
+          "cargo": "lash_e2e",
+          "check_label": "//crates/lash-e2e:lash-e2e[check]",
+          "clippy_label": "//crates/lash-e2e:lash-e2e__clippy[clippy.txt]",
+          "doc_label": "//crates/lash-e2e:lash-e2e[doc]",
+          "kind": "lib",
+          "label": "//crates/lash-e2e:lash-e2e"
+        },
+        {
+          "build_label": "//crates/lash-e2e:lash-e2e__unit_test",
+          "cargo": "lash_e2e",
+          "check_label": "//crates/lash-e2e:lash-e2e__unit_test[check]",
+          "clippy_label": "//crates/lash-e2e:lash-e2e__unit_test__clippy[clippy.txt]",
+          "kind": "unit-test",
+          "label": "//crates/lash-e2e:lash-e2e__unit_test",
+          "tags": []
+        },
+        {
+          "build_label": "//crates/lash-e2e:e2e__test",
+          "cargo": "e2e",
+          "check_label": "//crates/lash-e2e:e2e__test[check]",
+          "clippy_label": "//crates/lash-e2e:e2e__test__clippy[clippy.txt]",
+          "kind": "test",
+          "label": "//crates/lash-e2e:e2e__test",
           "tags": []
         }
       ],
@@ -48826,6 +48879,8 @@
     "//crates/lash-durable-test:vertical_crash_proof__test": 300,
     "//crates/lash-durable-test:worker_crashes__test": 300,
     "//crates/lash-durable:lash-durable__unit_test": 300,
+    "//crates/lash-e2e:e2e__test": 300,
+    "//crates/lash-e2e:lash-e2e__unit_test": 300,
     "//crates/lash-http-transport:lash-http-transport__unit_test": 300,
     "//crates/lash-lashlang-runtime:lash-lashlang-runtime__unit_test": 300,
     "//crates/lash-llm-tools:lash-llm-tools__unit_test": 300,
@@ -49329,6 +49384,9 @@
     "//crates/lash-durable-test:worker_crashes__test",
     "//crates/lash-durable:lash-durable[static]",
     "//crates/lash-durable:lash-durable__unit_test",
+    "//crates/lash-e2e:e2e__test",
+    "//crates/lash-e2e:lash-e2e[static]",
+    "//crates/lash-e2e:lash-e2e__unit_test",
     "//crates/lash-http-transport:lash-http-transport[static]",
     "//crates/lash-http-transport:lash-http-transport__unit_test",
     "//crates/lash-lashlang-runtime:lash-lashlang-runtime[static]",
@@ -49626,6 +49684,9 @@
     "//crates/lash-durable:lash-durable__fv_ec44b095[check]",
     "//crates/lash-durable:lash-durable__fv_fcd02979[check]",
     "//crates/lash-durable:lash-durable__unit_test[check]",
+    "//crates/lash-e2e:e2e__test[check]",
+    "//crates/lash-e2e:lash-e2e[check]",
+    "//crates/lash-e2e:lash-e2e__unit_test[check]",
     "//crates/lash-http-transport:lash-http-transport[check]",
     "//crates/lash-http-transport:lash-http-transport__fv_db75952d[check]",
     "//crates/lash-http-transport:lash-http-transport__unit_test[check]",
@@ -49939,6 +50000,9 @@
     "//crates/lash-durable-test:worker_crashes__test__clippy[clippy.txt]",
     "//crates/lash-durable:lash-durable__clippy[clippy.txt]",
     "//crates/lash-durable:lash-durable__unit_test__clippy[clippy.txt]",
+    "//crates/lash-e2e:e2e__test__clippy[clippy.txt]",
+    "//crates/lash-e2e:lash-e2e__clippy[clippy.txt]",
+    "//crates/lash-e2e:lash-e2e__unit_test__clippy[clippy.txt]",
     "//crates/lash-http-transport:lash-http-transport__clippy[clippy.txt]",
     "//crates/lash-http-transport:lash-http-transport__unit_test__clippy[clippy.txt]",
     "//crates/lash-lashlang-runtime:lash-lashlang-runtime__clippy[clippy.txt]",
@@ -50219,6 +50283,9 @@
     "//crates/lash-durable-test:worker_crashes__test",
     "//crates/lash-durable:lash-durable",
     "//crates/lash-durable:lash-durable__unit_test",
+    "//crates/lash-e2e:e2e__test",
+    "//crates/lash-e2e:lash-e2e",
+    "//crates/lash-e2e:lash-e2e__unit_test",
     "//crates/lash-http-transport:lash-http-transport",
     "//crates/lash-http-transport:lash-http-transport__unit_test",
     "//crates/lash-lashlang-runtime:lash-lashlang-runtime",
@@ -50499,6 +50566,9 @@
     "//crates/lash-durable-test:worker_crashes__test",
     "//crates/lash-durable:lash-durable",
     "//crates/lash-durable:lash-durable__unit_test",
+    "//crates/lash-e2e:e2e__test",
+    "//crates/lash-e2e:lash-e2e",
+    "//crates/lash-e2e:lash-e2e__unit_test",
     "//crates/lash-http-transport:lash-http-transport",
     "//crates/lash-http-transport:lash-http-transport__unit_test",
     "//crates/lash-lashlang-runtime:lash-lashlang-runtime",
@@ -50761,6 +50831,8 @@
     "//crates/lash-durable-test:vertical_crash_proof__test",
     "//crates/lash-durable-test:worker_crashes__test",
     "//crates/lash-durable:lash-durable__unit_test",
+    "//crates/lash-e2e:e2e__test",
+    "//crates/lash-e2e:lash-e2e__unit_test",
     "//crates/lash-http-transport:lash-http-transport__unit_test",
     "//crates/lash-lashlang-runtime:lash-lashlang-runtime__unit_test",
     "//crates/lash-llm-tools:lash-llm-tools__unit_test",
@@ -50911,6 +50983,8 @@
     "//crates/lash-durable-test:vertical_crash_proof__test",
     "//crates/lash-durable-test:worker_crashes__test",
     "//crates/lash-durable:lash-durable__unit_test",
+    "//crates/lash-e2e:e2e__test",
+    "//crates/lash-e2e:lash-e2e__unit_test",
     "//crates/lash-http-transport:lash-http-transport__unit_test",
     "//crates/lash-lashlang-runtime:lash-lashlang-runtime__unit_test",
     "//crates/lash-llm-tools:lash-llm-tools__unit_test",
@@ -51075,6 +51149,8 @@
     "//crates/lash-durable-test:vertical_crash_proof__test",
     "//crates/lash-durable-test:worker_crashes__test",
     "//crates/lash-durable:lash-durable__unit_test",
+    "//crates/lash-e2e:e2e__test",
+    "//crates/lash-e2e:lash-e2e__unit_test",
     "//crates/lash-http-transport:lash-http-transport__unit_test",
     "//crates/lash-lashlang-runtime:lash-lashlang-runtime__unit_test",
     "//crates/lash-llm-tools:lash-llm-tools__unit_test",
@@ -51196,6 +51272,7 @@
     "//crates/lash-core:lash-core__doc",
     "//crates/lash-durable-test:lash-durable-test__doc",
     "//crates/lash-durable:lash-durable__doc",
+    "//crates/lash-e2e:lash-e2e__doc",
     "//crates/lash-http-transport:lash-http-transport__doc",
     "//crates/lash-lashlang-runtime:lash-lashlang-runtime__doc",
     "//crates/lash-llm-tools:lash-llm-tools__doc",
@@ -51246,6 +51323,7 @@
     "//crates/lash-core:rust_sources",
     "//crates/lash-durable-test:rust_sources",
     "//crates/lash-durable:rust_sources",
+    "//crates/lash-e2e:rust_sources",
     "//crates/lash-http-transport:rust_sources",
     "//crates/lash-lashlang-runtime:rust_sources",
     "//crates/lash-llm-tools:rust_sources",
@@ -51448,6 +51526,8 @@
     "//crates/lash-durable-test:vertical_crash_proof__test",
     "//crates/lash-durable-test:worker_crashes__test",
     "//crates/lash-durable:lash-durable__unit_test",
+    "//crates/lash-e2e:e2e__test",
+    "//crates/lash-e2e:lash-e2e__unit_test",
     "//crates/lash-http-transport:lash-http-transport__unit_test",
     "//crates/lash-lashlang-runtime:lash-lashlang-runtime__unit_test",
     "//crates/lash-llm-tools:lash-llm-tools__unit_test",
@@ -51620,6 +51700,8 @@
     "//crates/lash-durable-test:vertical_crash_proof__test",
     "//crates/lash-durable-test:worker_crashes__test",
     "//crates/lash-durable:lash-durable__unit_test",
+    "//crates/lash-e2e:e2e__test",
+    "//crates/lash-e2e:lash-e2e__unit_test",
     "//crates/lash-http-transport:lash-http-transport__unit_test",
     "//crates/lash-lashlang-runtime:lash-lashlang-runtime__unit_test",
     "//crates/lash-llm-tools:lash-llm-tools__unit_test",

@@ -3,6 +3,8 @@
 
 This entrypoint owns selection and receipts, never service supervision. Held
 registrations are visible in plans and refuse execution and certification.
+Retired rows keep their place in the tier catalogue with a written
+disposition; plans list them and never select them.
 """
 
 from __future__ import annotations
@@ -80,10 +82,15 @@ def load_manifest(path: Path = MANIFEST) -> dict:
             tiers = case["tiers"]
             require(bool(tiers) and set(tiers) <= {"smoke", "full", "release", "live"}, f"{key}: invalid tiers")
             require("full" not in tiers or "release" in tiers, f"{key}: full row missing release")
-            require(case["state"] in {"held", "ready"}, f"{key}: invalid state")
+            require(case["state"] in {"held", "ready", "retired"}, f"{key}: invalid state")
             registration = case["registration"]
+            require((case["state"] == "retired") == ("disposition" in case), f"{key}: only a retired row has a disposition")
             if case["state"] == "held":
                 require(bool(case["hold_reason"]) and registration is None, f"{key}: held row needs reason and no registration")
+            elif case["state"] == "retired":
+                require(isinstance(case["disposition"], str) and bool(case["disposition"].strip())
+                        and not case["hold_reason"] and registration is None,
+                        f"{key}: retired row needs a disposition and no reason or registration")
             else:
                 require(not case["hold_reason"] and isinstance(registration, dict), f"{key}: ready row needs registration")
                 require(set(registration) == {"label", "test"}, f"{key}: invalid registration fields")
@@ -129,6 +136,10 @@ def plan(manifest: dict, manifest_sha: str, tier: str, scenarios: list[str], sou
         require(len(cases) == len(set(cases)), "duplicate case selector")
         require(set(cases) <= {case_key(row) for row in rows}, "case selector absent from tier/scenarios")
         rows = [row for row in rows if case_key(row) in cases]
+    # A retired row counts in the catalogue and is never run.
+    retired = [{"key": case_key(r), "disposition": r["disposition"]} for r in rows if r["state"] == "retired"]
+    rows = [r for r in rows if r["state"] != "retired"]
+    require(bool(rows), "every selected case is retired")
     excluded_held = [case_key(r) for r in rows if r["state"] == "held"] if ready else []
     if ready:
         rows = [r for r in rows if r["state"] != "held"]
@@ -136,6 +147,7 @@ def plan(manifest: dict, manifest_sha: str, tier: str, scenarios: list[str], sou
     return {"source_sha": source, "manifest_sha256": manifest_sha, "tier": tier,
             "selectors": scenarios, "selected": len(rows), "cases": rows,
             "guarded": [case_key(r) for r in rows if any(g["commit"] is None or not ancestor(g["commit"], source) or not ancestor(g["commit"], "origin/main") for g in r["arc_guards"])],
+            "retired": retired,
             "excluded_held": excluded_held, "tier_complete": not excluded_held,
             "held": [case_key(r) for r in rows if r["state"] == "held"]}
 

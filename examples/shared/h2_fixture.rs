@@ -56,6 +56,7 @@ impl Fixture {
                     | "S10"
                     | "S11"
                     | "S12"
+                    | "S18"
                     | "S23"
                     | "S31"
                     | "S32"
@@ -94,6 +95,7 @@ impl Fixture {
             "S10" => &["rank_one", "rank_two", "rank_three"],
             "S11" => &["winner", "loser", "after"],
             "S12" => &["gate", "source"],
+            "S18" => &["handle"],
             "S23" => &["winner", "source", "gate", "later"],
             "S32" => &["winner", "source", "gate"],
             "S31" => &["winner", "loser", "gate"],
@@ -110,7 +112,11 @@ impl Fixture {
                 "c" => "C",
                 value => value,
             });
-            let result = if (*label == "loser" && self.config.deferred_loser)
+            let result = if *label == "handle" {
+                BodyResult::Handle {
+                    process: self.receiver.clone(),
+                }
+            } else if (*label == "loser" && self.config.deferred_loser)
                 || matches!(*label, "source" | "later")
             {
                 BodyResult::Deferred

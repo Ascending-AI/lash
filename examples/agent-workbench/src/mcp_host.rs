@@ -21,6 +21,16 @@ pub async fn factory(
         crate::WORKBENCH_SEARCH_MCP_SERVER.into(),
         McpServerConfig::streamable_http(McpStreamableHttpTransport::new(url)),
     )]);
+    // Streamable HTTP servers the deployment attaches at boot, configured
+    // as the attach route's requests: a restarted host keeps its operator's
+    // integrations only through its configuration.
+    if let Ok(configured) = std::env::var("AGENT_WORKBENCH_MCP_SERVERS") {
+        let configured: Vec<AttachRequest> = serde_json::from_str(&configured)
+            .map_err(|error| anyhow::anyhow!("invalid AGENT_WORKBENCH_MCP_SERVERS: {error}"))?;
+        for server in configured {
+            servers.insert(server.name.clone(), http_config(&server));
+        }
+    }
     if let Ok(command) = std::env::var("AGENT_WORKBENCH_MCP_FIXTURE_BIN") {
         servers.insert(
             "workspace_stdio".into(),
@@ -74,15 +84,10 @@ async fn attach(
     State(factory): State<Arc<McpPluginFactory>>,
     Json(request): Json<AttachRequest>,
 ) -> Response {
-    let mut config = McpServerConfig::streamable_http(
-        McpStreamableHttpTransport::new(request.url).with_headers(BTreeMap::from([(
-            "Authorization",
-            format!("Bearer {}", request.token),
-        )])),
-    );
-    config.call_policy.call_timeout_ms = 5_000;
-    config.call_policy.call_max_total_timeout_ms = 10_000;
-    match factory.attach_server(request.name.clone(), config).await {
+    match factory
+        .attach_server(request.name.clone(), http_config(&request))
+        .await
+    {
         Ok(()) => Json(
             views(&factory)
                 .into_iter()
@@ -92,6 +97,18 @@ async fn attach(
         .into_response(),
         Err(error) => (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
     }
+}
+/// An operator's streamable HTTP server, behind its bearer token.
+fn http_config(request: &AttachRequest) -> McpServerConfig {
+    let mut config = McpServerConfig::streamable_http(
+        McpStreamableHttpTransport::new(request.url.clone()).with_headers(BTreeMap::from([(
+            "Authorization",
+            format!("Bearer {}", request.token),
+        )])),
+    );
+    config.call_policy.call_timeout_ms = 5_000;
+    config.call_policy.call_max_total_timeout_ms = 10_000;
+    config
 }
 async fn detach(
     State(factory): State<Arc<McpPluginFactory>>,

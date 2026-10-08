@@ -30,7 +30,18 @@ pub fn scripted_provider(
     ensure!(
         matches!(
             scenario,
-            "S01" | "S02" | "S05" | "S08" | "S09" | "S10" | "S11" | "S12" | "S23" | "S31" | "S32"
+            "S01"
+                | "S02"
+                | "S05"
+                | "S08"
+                | "S09"
+                | "S10"
+                | "S11"
+                | "S12"
+                | "S18"
+                | "S23"
+                | "S31"
+                | "S32"
         ),
         "unknown H2 scenario"
     );
@@ -239,6 +250,9 @@ fn response(
                 }
                 "S12" => {
                     "const gate = await tools.gate({}); const value = await tools.source({}); finish(gate + '|' + value);"
+                }
+                "S18" => {
+                    "const h = await tools.handle({}); const r = await processes.await({ handle: h }); finish('awaited');"
                 }
                 "S31" => {
                     "const winner = tools.winner({}); const loser = tools.loser({}); const value = await Promise.race([winner,loser]); const gate = await tools.gate({}); finish(value + '|' + gate);"

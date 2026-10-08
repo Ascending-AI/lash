@@ -1,161 +1,280 @@
-# Real-host E2E selection and receipts
+# Real-host E2E harness, selection and receipts
+
+The real-host E2E harness boots durable lash nodes as real host processes,
+drives them only through their product surfaces, faults them, and reads back
+what they committed. There is no server beside the nodes (ADR 0132 §1) and no
+test-only engine hook: every node is a lash node built through the public
+facade over the case's store.
+
+## The catalogue
 
 `scripts/lash-e2e-manifest.json` owns scenario selection. It lists S01–S37
 except S19 and S20, which exercised the OS-worker process engine lash no
-longer ships (FIG-5158): lash's cancellation is cooperative, and hard
-isolation is the host engine's own. For each scenario it lists the named
-laws/risks, owner lanes, store/leg/channel/variant permutations,
-required artifacts and landing dependencies. Every implemented case is
-registered and runs through `scripts/e2e-gate.py`; held rows keep a named
-reason and refuse execution and certification. Plans are inventory, never
-passing execution evidence. Runtime registration holds are distinct from
-`arc_guards`. Arc guards name the exact product ticket and its landing commit;
-they refuse certification until that commit is in candidate and main ancestry.
-S22 guards FIG-4896–4900, S13's final drain path guards FIG-4900, and S18's
-final wait contract guards FIG-4897; all are landed. F02/FIG-1863 was already
-landed at intake; S35/S36 have no F02 guard.
+longer ships (FIG-5158). For each scenario it lists the named laws and
+risks, owner lanes, store/leg/channel/variant permutations, required
+artifacts and landing dependencies. Every permutation row is in one state:
 
-Every case boots its own lash nodes over the row's store, with no server
-beside them (ADR 0132 §1): one SQLite file or SQLite memory store for a
-single node, or one PostgreSQL store that several nodes share. A row's
-`nodes` is how many lash nodes the case boots.
+- `ready`: the row names its registration, the runner label
+  `//crates/lash-e2e:e2e__test` and the full test path `module::test`, and
+  runs through `scripts/e2e-gate.py`.
+- `held`: the row keeps a named `hold_reason` and no registration. Plans list
+  it; `run` and `reconcile` refuse it.
+- `retired`: the row's subject left lash. It keeps a written `disposition`
+  that names the removing commit and the law that proves whatever guarantee
+  survives. A retired row counts in the tier catalogue checks, and plans list
+  it under `retired`. It is never selected, run or certified.
+
+Plans are inventory, never passing execution evidence. Registration states
+are distinct from `arc_guards`. Arc guards name the exact product ticket and
+its landing commit; they refuse certification until that commit is in
+candidate and main ancestry. S22 guards FIG-4896–4900 and S18's final wait
+contract guards FIG-4897; both are landed.
 
 Smoke selects exactly S01/S02/S17/S18/S26/S30 on the live leg. S01/S02/S17/S18/S26
 use file SQLite; S30 uses memory SQLite. Full and release select the same
-deterministic catalogue; live-provider cases S35/S36 are separate. Counts cover
-each permutation. Held rows keep their variant hold until the named owner
-lands its implementation. S14 kills one of two nodes over one PostgreSQL
-store mid-tool and S15 partitions one from the database; the survivor reaps
-it, claims its actors and finishes the work, and the fenced node's late
-commits are refused. S37 boots two workbench nodes over one PostgreSQL
-store, runs a turn on node B while node A's feeds observe it, kills B
-mid-turn and resumes the turn on A. Its variant names the live replay store
-both nodes run with: with the process-local `memory` store, B's live
-activity never reaches A and A converges through the durable head; with the
-shared `postgresql` store (FIG-5101), A's feeds carry B's live activity
-before commit and converge without a gap. S33 reuses the existing Phase A
-operator choreography; it does not introduce another operator supervisor.
+deterministic catalogue; the paid live-provider cases S35/S36 are a separate
+`live` tier.
 
-2026-10-07: every row is held. The E2E host harness went with the server
-it booted (FIG-5190), and no host can run a turn through the facade until
-L3's facade wiring (FIG-5172) lands; L9h (FIG-5186) then
-rebuilds the harness and registers the rows. Rows whose subject was removed
-machinery (S12, S13, S22, S23, S24, S31, S32) name the lane that re-scopes
-or retires them.
+On 2026-10-08 the release catalogue holds 132 rows:
+- 92 are `ready`.
+- 20 are `retired`: S10, S13, S24, S33 and S09's before-intent variant. Their
+  subjects went with the Run journal (FIG-5174) or with build generations and
+  finalize (FIG-5200).
+- 20 are `held`: L13 (FIG-5193) re-scopes S22, S23, S31 and S32, so a release
+  run refuses until it lands.
 
-Read a plan without booting services:
+## The harness
 
-```sh
+`crates/lash-e2e` is the harness. Its library owns the case, its nodes, the
+control endpoint and the receipt. Its one integration test target,
+`//crates/lash-e2e:e2e__test`, holds every case, one Rust module per
+scenario family:
+
+| Module | Scenarios |
+| --- | --- |
+| `workbench` | S01, and the helpers every workbench case shares |
+| `tools` | S02, S03, S05, S30 |
+| `state` | S04, S25 |
+| `retries` | S06, S07 |
+| `intents` | S08, S09 |
+| `handover` | S11, S12 |
+| `fleet` | S14, S15, S16 |
+| `operations` | S17 |
+| `cancel` | S18 |
+| `waits` | S21 |
+| `provider` | S26, S27 |
+| `mcp` | S28 |
+| `browser` | S29 |
+| `telemetry` | S34 |
+| `feeds` | S37 |
+
+Every case is an ignored test that refuses without its runner's
+environment, so a plain `kiln test` of the target passes nothing off as
+proof. A case runs as `Case::run(name, store, leg, budget, body)`, and that
+call writes the case receipt whether or not the body passed.
+
+### Hosts
+
+`Case::boot(host, node, options)` starts one lash node. It checks the binary
+against the digest the runner built and records it as a case artifact.
+
+- `Host::Consumer` is `examples/e2e-consumer`, a host built from the public
+  facade alone. Its fixture scripts the provider's steps and the tool bodies.
+- `Host::Workbench` is `examples/agent-workbench` with its `e2e-tools`
+  feature. The feature adds host-side fixtures and routes only:
+  - the H2 scripted provider and tool bodies;
+  - the receiver, follow, drain and cut-release routes under `/api/e2e`.
+
+  The engine and its stores are the product's.
+
+A node boots under its own name, which is its lease owner identity in the
+store's fleet. Two boots of one name are one node restarted; another name is
+another node.
+
+Each node writes a commit ledger: every durable commit labelled with its
+actor and epoch, every reap, and every commit held at one of the case's cuts.
+The ledger is how a case holds a node at an exact commit (`Case::held`), and
+how the receipt counts hidden replay (ADR 0132 §2).
+
+A case faults nodes with:
+- `kill` (SIGKILL);
+- `stop` (SIGTERM, with the clean shutdown as a cleanup receipt);
+- `freeze`/`thaw` (SIGSTOP/SIGCONT);
+- a `Proxy` between a node and PostgreSQL that it can `partition` and
+  `heal`.
+
+### The control endpoint
+
+Every case runs one HTTP control endpoint that the hosts reach:
+
+- **Tool bodies:** holds and releases bodies, and records the deliveries an
+  effect recipient accepted, so a case can count executions per identity.
+  The H2 bodies post their deliveries to it too.
+- **Recorded provider:** an OpenAI-compatible provider that the workbench's
+  production client calls. A case scripts each request's reply: streamed
+  text, tool calls and usage, a refusal status, a hold before a delta, or a
+  connection reset. It also keeps every request.
+- **OTLP collector:** keeps the spans a host exports, and can refuse exports
+  as a disconnected collector would.
+
+### Peers and browsers
+
+`Case::peer` runs a supporting process beside the nodes and kills it as a
+fault. S28 uses this for the workbench's own MCP fixture server
+(`agent-workbench mcp-fixture http`). A peer is no lash node.
+
+S29 reads the product page through headless Chromium. Its case runs
+`crates/lash-e2e/tests/e2e/timeline.py` with the runner's Playwright
+interpreter (`LASH_E2E_PYTHON`, Playwright 1.62.0, browsers under
+`PLAYWRIGHT_BROWSERS_PATH`). It then compares every drawn transcript row with
+the committed API transcript and the store.
+
+## Stores, legs and live replay
+
+Every case boots its own lash nodes over the row's store:
+
+- one SQLite file, or one SQLite memory store, for a single node at a time;
+- one PostgreSQL store that several nodes share.
+
+A row's `nodes` is how many distinct lash nodes the case boots. For a
+PostgreSQL store or live replay store, the runner supplies PostgreSQL
+through `scripts/ci/with-service.sh pg`. The case then creates a fresh
+database for itself (`LASH_POSTGRES_DATABASE_URL`).
+
+Each permutation is its own test function. Its name joins the scenario's
+test name, its variant, and `_postgresql` and `_resume` where the store and
+leg are not a single-node scenario's default. A PostgreSQL live replay
+variant's name ends `_live_replay`.
+
+A row may declare `"live_replay": "postgresql"` (variant
+`postgresql-live-replay`):
+- the planner passes `--live-replay postgresql`;
+- the runner sets `LASH_E2E_LIVE_REPLAY`;
+- every workbench of the case runs on the shared PostgreSQL live replay store
+  (FIG-5101), while its durable store stays the row's `store`.
+
+A case whose name ends `_live_replay` refuses any other selection.
+
+A `resume` leg kills a node at the scenario's cut, after the work it names
+has committed, and resumes that work on another node from committed state
+alone. Its `nodes` is at least two; on SQLite the second node opens the file
+after the first is dead. The leg oracle needs a killed node and a node that
+resumed its work in the case's node evidence. Every leg reports the labelled
+commits it observed with the replay tripwire's counts, so a body run twice,
+or an outcome looked up for re-running code, is visible in the `commits`
+artifact.
+
+## Running and certifying
+
+Read a plan without booting anything:
+
+```console
 . ./env.sh
 python3 scripts/lash-e2e.py plan --tier smoke \
   --sha "$(git rev-parse HEAD)" --artifacts target/e2e-plan
 ```
 
-An unknown scenario, a selector absent from its tier, duplicate selectors, and
-an empty selection refuse. `--scenario Snn` can narrow non-release tiers. A
-release plan always selects the whole release catalogue. Held rows appear in
-`plan.json`; `run` and `reconcile` refuse them. Missing credentials in the
-optional live tier produce `not_run`, which cannot certify a deterministic tier.
+These selectors refuse:
+- an unknown scenario;
+- a selector absent from its tier;
+- duplicate selectors;
+- a selection that is empty or entirely retired.
 
-`run` executes each selected case through the committed runner:
+`--scenario Snn` and `--case <key>` narrow non-release tiers. A release plan
+always selects the whole release catalogue. `--ready` drops held rows from a
+non-release plan and marks it `tier_complete: false`.
 
-```sh
-python3 scripts/lash-e2e.py run --tier smoke \
-  --sha "$(git rev-parse HEAD)" --artifacts target/e2e-smoke
+`run` executes each selected case through the committed runner. It requires
+a clean checkout at the exact SHA and a fresh artifact directory:
+
+```console
+python3 scripts/lash-e2e.py run --tier full --ready \
+  --sha "$(git rev-parse HEAD)" --artifacts target/e2e-full
 ```
+
+For each case the planner calls `python3 scripts/e2e-gate.py <label> <test>
+--store <store> --leg <leg> --live-replay <store> --artifacts
+<dir>/case-<i>`. That one call runs a single case on its own, too. The
+runner then does four things:
+1. enters the fork's private Kiln gate;
+2. builds the hosts, the VM worker and the harness in one `kiln build`;
+3. prepares its Playwright interpreter;
+4. runs an exact uncached `kiln test` of the registered test.
+
+Its JUnit must contain exactly the registered test. The runner then splits
+the case receipt into the role artifacts that reconcile reads.
 
 The paid live rows (S35's three RLM workspace cases, S36's workbench weather)
 take their provider from the operator's environment, which the runner
-forwards: `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `LASH_E2E_OUTPUT_TOKEN_CAP`
-and `LASH_E2E_LIVE_BUDGET`, a capped account policy (`model`, `max_calls`,
-`max_input_bytes`, `max_output_tokens`, `max_spend_usd`, per-token
-`input_usd_per_token`/`output_usd_per_token` and a relative `receipts` path).
-Each case writes its own copy of the policy and its usage receipts inside its
-case directory, so one policy serves every selected case. S35 builds the
-`//runbooks/rlm-smoke:rlm-smoke` host and needs Docker for its jailed exec;
-S36's collection still needs the runbook's judgement before it certifies.
+forwards:
+- `OPENROUTER_API_KEY` and `OPENROUTER_MODEL`;
+- `LASH_E2E_OUTPUT_TOKEN_CAP`;
+- `LASH_E2E_LIVE_BUDGET`, a capped account policy: `model`, `max_calls`,
+  `max_input_bytes`, `max_output_tokens`, `max_spend_usd`, the per-token
+  rates `input_usd_per_token` and `output_usd_per_token`, and a relative
+  `receipts` path.
 
-Every ready registration names one of the runner's labels and a full test
-path that must exist in this tree; there is no registration commit, and the
-runner's exact-one-JUnit check refuses a stale or zero selection. Execution
-requires a clean checkout at the exact SHA.
-For each case the planner calls
-`python3 scripts/e2e-gate.py <label> <test> --store <store> --leg <leg>
---artifacts <dir>/case-<i>`. The
-runner enters the fork's private Kiln gate, materializes the union of
-binaries the registered selectors need in one `kiln build`, and runs an
-exact uncached `kiln test`. Its JUnit must contain exactly the registered
-test. Stale case or test selectors refuse before boot. The case boots and
-stops its own nodes; this script owns no service process but PostgreSQL.
+Missing credentials produce `not_run`, which cannot certify a deterministic
+tier.
 
-Each row declares its store and leg, and every permutation is its own test
-function named `<test>[_postgresql][_resume]`. A row may also declare
-`"live_replay": "postgresql"` (variant `postgresql-live-replay`): the planner
-passes `--live-replay postgresql`, the runner supplies PostgreSQL as for a
-PostgreSQL store and sets `LASH_E2E_LIVE_REPLAY`, and every workbench of the
-case whose test names no live replay store runs on the shared PostgreSQL live
-replay store, in a schema of the case's namespace (FIG-5101). Its durable
-store stays the row's `store`. S01/S02/S17/S18/S26 carry such a row in full
-and release; S30's host is the external consumer, which has no live replay
-seam. For `--store postgresql` the
-runner supplies PostgreSQL through `scripts/ci/with-service.sh pg`, and the
-case creates a fresh database and applies the committed schema itself.
-
-A `resume` leg replaces the old forced-replay leg and keeps its crash
-coverage: the case kills a node at the scenario's cut, after the work it
-names has committed, and resumes that work on another node from committed
-state alone. Its `nodes` is at least two (on SQLite the second node opens
-the file after the first is dead). The leg oracle needs a killed node and
-a node that resumed its work in the case's node evidence; every leg reports
-the labelled commits it observed with the replay tripwire's counts (ADR 0132
-§2), so a body run twice or an outcome looked up for re-running code is
-visible in the `commits` artifact.
+## Receipts
 
 The producer writes `receipt.json` using
-`scripts/lash-e2e-receipt.schema.json`. It carries the source SHA, manifest
-digest, tier, exactly one receipt per selected case, aggregate counts and counts
-per store/leg. The case key joins scenario, variant, store, leg and channel in
-that order. Status is `passed`, `failed` or `not_run`; `executed` agrees with it.
-Quarantine cannot certify. The schema describes the envelope; the reconciler
-also enforces artifact contents and cross-record invariants.
+`scripts/lash-e2e-receipt.schema.json`. The receipt carries:
+- the source SHA, manifest digest and tier;
+- exactly one receipt per selected case;
+- aggregate counts, and counts per store/leg.
 
-Each case supplies digest-qualified relative paths for commits, store, host,
-trace, cleanup, JUnit and provenance artifacts. Files must exist beneath the
-receipt directory, including through symlinks, and match their digests. Scenario
-owners retain labelled commits, tripwire counts, barrier/fault and business
-evidence in these artifacts; a provider log cannot substitute for the
-commits. JUnit must contain
-exactly the registered test, with no failure/error/skip. Cleanup must be
-`{"complete":true,"errors":[],"remaining":[]}` after all owned resources close.
-Provenance carries case/source SHA, the number of lash nodes the case
-booted, which must equal the row's `nodes`, and all manifest binary roles
-with exact source SHAs and artifact descriptors.
+The case key joins scenario, variant, store, leg and channel in that order.
+Status is `passed`, `failed` or `not_run`, and `executed` agrees with it.
+Quarantine cannot certify.
+
+Each case supplies digest-qualified relative paths for its commits, store,
+host, trace, cleanup, JUnit and provenance artifacts:
+- Files must exist beneath the receipt directory, and match their digests.
+- JUnit must contain exactly the registered test, with no failure, error or
+  skip.
+- Cleanup must be `{"complete":true,"errors":[],"remaining":[]}` once every
+  node, peer, browser and the control endpoint has closed.
+- Provenance carries the case and source SHA, the number of lash nodes the
+  case booted (which must equal the row's `nodes`), and every manifest binary
+  role with its exact source SHA and artifact descriptor.
 
 Reconcile preserved artifacts independently:
 
-```sh
+```console
 python3 scripts/lash-e2e.py reconcile --tier release \
   --sha <exact-candidate-sha> --receipt target/e2e-release/receipt.json \
   --artifacts target/e2e-release
 ```
 
-A successful conclusion requires selected = executed = passed > 0 in every
-store/leg group, zero failed/not_run, no quarantine, all artifacts and complete
-cleanup. Release additionally requires F04/Z0A/Z0P/Z01/Z02/Z03/Z04/Z05 audit
-commits in both candidate and `origin/main` ancestry. Each audit's retained
-ticket gate receipt names its ticket, audit SHA and `passed` status. Phase A,
-facade and schema gate receipts must name the exact candidate SHA and passed
-status. The activation workflow must fetch sufficient Git ancestry to verify
-these claims. Another SHA's full-profile success never certifies the candidate.
+A successful conclusion requires:
+- selected = executed = passed > 0 in every store/leg group;
+- zero failed or `not_run` cases, and no quarantine;
+- every artifact, and complete cleanup.
 
-Artifact directories belong to one immutable plan. Preserve first-failure
-artifacts; `run` requires a fresh directory, and a diagnostic rerun uses a
-separate directory and cannot replace that failure. Conclusions carry receipt
-and manifest digests; consumers must compare these with the retained inputs.
-Event barriers and deadline-bound predicate probes belong in the
-case and its evidence; sleeps cannot establish readiness, completion or
-cleanup.
+Release additionally requires:
+- the F04/Z0A/Z0P/Z01/Z02/Z03/Z04/Z05 audit commits in both candidate and
+  `origin/main` ancestry, each with a retained ticket gate receipt that names
+  its ticket, audit SHA and `passed` status;
+- Phase A, facade and schema gate receipts that name the exact candidate SHA
+  and a passed status.
 
-The laws in `scripts/test_lash_e2e.py` pin R8 selection, counts, artifact,
-resume-leg and release-evidence rules using synthetic envelopes. They execute no host cases
-and provide no live-substrate, upgrade or release proof.
+Another SHA's success never certifies the candidate.
+
+Artifact directories belong to one immutable plan:
+- Preserve first-failure artifacts. A diagnostic rerun uses a separate
+  directory and cannot replace that failure.
+- Conclusions carry receipt and manifest digests; consumers must compare
+  these with the retained inputs.
+- Event barriers and deadline-bound probes establish readiness, completion
+  and cleanup. Sleeps never do.
+
+The laws in `scripts/test_lash_e2e.py` pin R8's selection rules:
+- counts and artifacts;
+- the resume leg;
+- retired rows;
+- release evidence.
+
+They use synthetic envelopes, execute no host case, and give no
+live-substrate or release proof.

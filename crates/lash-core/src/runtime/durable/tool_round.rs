@@ -176,7 +176,7 @@ pub(super) async fn run(
             }));
             let admitted: AdmittedRound = round::admit_round(
                 &mut tx,
-                &lash_core_execution::runtime::actor::waits::wait_scope(cx)?,
+                &lash_core_execution::runtime::actor::waits::execution_wait_scope(cx, &owner)?,
                 RoundDraft {
                     owner: owner.clone(),
                     run,

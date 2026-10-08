@@ -1,0 +1,34 @@
+[package]
+name = "lash-e2e"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+publish = false
+description = "The real-host E2E harness: boots durable lash host processes over a case's store, cuts, kills and partitions them, and writes the case receipt the E2E runner certifies"
+
+[lib]
+name = "lash_e2e"
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+axum = "0.8"
+futures-util = { workspace = true }
+lash = { workspace = true, features = ["sqlite", "postgres"] }
+lash-postgres-store = { workspace = true, features = ["testing"] }
+libc = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true, features = ["macros", "net", "process", "rt-multi-thread", "sync", "time", "io-util"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

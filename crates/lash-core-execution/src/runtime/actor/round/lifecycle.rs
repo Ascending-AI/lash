@@ -835,7 +835,7 @@ impl Lifecycle {
                 tx,
                 waits::WaitSpec {
                     kind: WaitKind::ProcessTerminal,
-                    scope: waits::wait_scope(&self.cx)?,
+                    scope: waits::execution_wait_scope(&self.cx, &execution.id().owner)?,
                     target_process: Some(process),
                     deadline: execution.draft().wait(),
                 },

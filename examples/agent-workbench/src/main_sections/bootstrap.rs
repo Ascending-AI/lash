@@ -320,10 +320,6 @@ pub(crate) async fn workbench_core_builder(
     }
     let shutdown_marker =
         shutdown_marker::factory_from_env("agent-workbench").map_err(anyhow::Error::msg)?;
-    // The operation's call ids derive under the default (empty) deployment
-    // namespace; the durable engine names no namespace of its own.
-    #[cfg(feature = "e2e-tools")]
-    let operation_namespace = String::new();
     Ok(builder.configure_plugins(move |plugins| {
         configure_workbench_plugins(
             plugins,
@@ -336,7 +332,6 @@ pub(crate) async fn workbench_core_builder(
         #[cfg(feature = "e2e-tools")]
         plugins.push(Arc::new(crate::e2e_operation::OperationPlugin::new(
             operation,
-            operation_namespace,
         )));
         #[cfg(feature = "e2e-tools")]
         plugins.push(Arc::new(crate::e2e_receiver::ReceiverEnginePlugin));
@@ -490,7 +485,17 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     let dev_provider_scenario = failure_provider::DevProviderScenario::from_environment()?;
     let api_key = std::env::var(OPENROUTER_API_KEY_ENV).unwrap_or_default();
     let rlm_channel = workbench_rlm_channel()?;
-    validate_provider_credentials(dev_provider_scenario, &api_key)?;
+    // A case's tool fixture brings its own scripted provider.
+    #[cfg(feature = "e2e-tools")]
+    let fixture_provider = tool_fixture.is_some();
+    #[cfg(not(feature = "e2e-tools"))]
+    let fixture_provider = false;
+    if !fixture_provider {
+        validate_provider_credentials(dev_provider_scenario, &api_key)?;
+    }
+    // The node this process runs as in the store's fleet: several workbench
+    // processes over one store each need their own name.
+    let node = std::env::var("AGENT_WORKBENCH_NODE").unwrap_or_else(|_| "agent-workbench".into());
 
     let addr: SocketAddr = std::env::var("AGENT_WORKBENCH_ADDR")
         .unwrap_or_else(|_| "127.0.0.1:3030".to_string())
@@ -580,6 +585,20 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         Some(hold) => WorkbenchStores {
             backend: stores.backend,
             stores: crate::e2e_receiver_hold::hold_stores(stores.stores, hold),
+        },
+        None => stores,
+    };
+    #[cfg(feature = "e2e-tools")]
+    let commit_ledger = crate::e2e_commit_ledger::CommitLedger::from_env(
+        "AGENT_WORKBENCH_COMMIT_LEDGER",
+        "AGENT_WORKBENCH_COMMIT_CUTS",
+        &node,
+    )?;
+    #[cfg(feature = "e2e-tools")]
+    let stores = match &commit_ledger {
+        Some(ledger) => WorkbenchStores {
+            backend: stores.backend,
+            stores: crate::e2e_commit_ledger::ledger_stores(stores.stores, ledger.clone()),
         },
         None => stores,
     };
@@ -716,7 +735,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             process_events: Some(process_event_sink),
         },
         provider.clone(),
-        lash::persistence::LeaseOwnerIdentity::opaque("agent-workbench", process_incarnation_id()),
+        lash::persistence::LeaseOwnerIdentity::opaque(node, process_incarnation_id()),
     )
     .await?;
     let shutdown_core = core.clone();
@@ -885,17 +904,27 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .route("/api/lashlang-graph/{graph_key}", get(lashlang_graph))
         .with_state(state.clone())
         .merge(crate::mcp_host::router(Arc::clone(&mcp_search)));
+        // The case's control routes; a case without a tool fixture runs the
+        // production provider and binds no fixture body to a process.
         #[cfg(feature = "e2e-tools")]
-        let app = if let Some(fixture) = &tool_fixture {
-            let (receiver, _retained_path, _event_type) = fixture.receiver_binding();
+        let app = {
+            let (receiver, retained_path, event_type) = match &tool_fixture {
+                Some(fixture) => fixture.receiver_binding(),
+                None => (
+                    Arc::new(OnceLock::new()),
+                    data_dir.join("receiver.json"),
+                    "h2_mutation".to_owned(),
+                ),
+            };
             app.merge(crate::e2e_receiver::routes(
                 crate::e2e_receiver::ReceiverState {
                     app: state.clone(),
                     receiver,
+                    retained_path,
+                    event_type,
+                    ledger: commit_ledger.clone(),
                 },
             ))
-        } else {
-            app
         };
         #[cfg(feature = "e2e-tools")]
         let app = app.merge(crate::e2e_operation::routes(

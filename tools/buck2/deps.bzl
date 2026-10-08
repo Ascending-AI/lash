@@ -74,6 +74,25 @@ PACKAGE_DEPS = {
             "lash": "//crates/lash:lash"
         }
     },
+    "lash-e2e": {
+        "build": {},
+        "dev": {
+            "tokio": "//third-party/rust:p0371"
+        },
+        "normal": {
+            "anyhow": "//third-party/rust:p0011",
+            "axum": "//third-party/rust:p0021",
+            "futures_util": "//third-party/rust:p0127",
+            "lash": "//crates/lash:lash",
+            "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
+            "libc": "//third-party/rust:p0188",
+            "reqwest": "//third-party/rust:p0277",
+            "serde": "//third-party/rust:p0307",
+            "serde_json": "//third-party/rust:p0313",
+            "sha2": "//third-party/rust:p0319",
+            "tokio": "//third-party/rust:p0371"
+        }
+    },
     "lash-internal-conformance": {
         "build": {},
         "dev": {

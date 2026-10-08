@@ -1962,6 +1962,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "lash-e2e"
+version = "0.0.0-dev"
+dependencies = [
+ "anyhow",
+ "axum",
+ "futures-util",
+ "lash-internal-postgres-store",
+ "lash-runtime",
+ "libc",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+]
+
+[[package]]
 name = "lash-internal-conformance"
 version = "0.0.0-dev"
 dependencies = [

@@ -10,7 +10,6 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::{Context, Result, anyhow, ensure};
-use lash::AwaitEventKey;
 use lash::tools::{
     CancelHint, PendingCompletion, StaticToolExecute, StaticToolProvider, ToolAttemptOutcome,
     ToolCall, ToolDeclaration, ToolDefinition, ToolDefinitionBindingExt, ToolIntent, ToolIntents,
@@ -27,7 +26,7 @@ pub struct ToolDelivery {
     pub ordinal: u32,
     pub owner: lash::tools::ExecutionOwner,
     pub logical_run: Option<lash::TurnId>,
-    pub completion: Option<AwaitEventKey>,
+    pub completion: Option<String>,
 }
 
 pub type BodyStep = Pin<Box<dyn Future<Output = Result<()>> + Send>>;
@@ -50,6 +49,10 @@ pub enum BodyResult {
         value: serde_json::Value,
         process_id: lash::ProcessId,
         event_type: String,
+    },
+    /// Answers the handle of the case's bound process.
+    Handle {
+        process: Arc<OnceLock<lash::ProcessId>>,
     },
 }
 
@@ -93,17 +96,24 @@ impl ToolBodies {
             .plan
             .iter()
             .map(|(label, result)| {
+                let output = match result {
+                    BodyResult::Handle { .. } => {
+                        serde_json::json!({"x-lash": {"kind": "process_unknown"}})
+                    }
+                    _ => serde_json::json!({}),
+                };
                 let definition = ToolDefinition::raw(
                     format!("tool:e2e.h2.{label}"),
                     label,
                     "A controlled body for the named real-host scenario.",
                     serde_json::json!({"type":"object", "properties":{}, "additionalProperties":false}),
-                    serde_json::json!({}),
+                    output,
                 )?;
                 let declaration = match result {
                     BodyResult::Inline { intents, .. } => ToolDeclaration::default()
                         .with_intents(intents.intents.iter().map(ToolIntent::kind)),
                     BodyResult::Deferred => ToolDeclaration::deferring(),
+                    BodyResult::Handle { .. } => ToolDeclaration::default(),
                     BodyResult::EmitEvent { .. } | BodyResult::EmitToReceiver { .. } => ToolDeclaration::default()
                         .with_intents([lash::tools::ToolIntentKind::EmitProcessEvent]),
                 };
@@ -125,10 +135,11 @@ impl ToolBodies {
             .get(call.name())
             .ok_or_else(|| anyhow!("unplanned tool body {}", call.name()))?;
         let completion = match result {
-            BodyResult::Deferred => Some(call.context.completion_key()?),
+            BodyResult::Deferred => Some(call.context.completion_key()?.as_str().to_owned()),
             BodyResult::Inline { .. }
             | BodyResult::EmitEvent { .. }
-            | BodyResult::EmitToReceiver { .. } => None,
+            | BodyResult::EmitToReceiver { .. }
+            | BodyResult::Handle { .. } => None,
         };
         let delivery = ToolDelivery {
             label: call.name().to_owned(),
@@ -178,6 +189,18 @@ impl ToolBodies {
                 process_id,
                 event_type,
             } => emitted(value, process_id, event_type),
+            BodyResult::Handle { process } => {
+                let process = process
+                    .get()
+                    .ok_or_else(|| anyhow!("no process was bound before submission"))?;
+                let handle = lash::process::HandleId::process(process);
+                ToolAttemptOutcome::done(
+                    ToolOutcomeDone::ok(
+                        serde_json::json!({"__handle__": "lash", "id": handle.as_str()}),
+                    ),
+                    ToolIntents::default(),
+                )
+            }
             BodyResult::EmitToReceiver {
                 value,
                 receiver,

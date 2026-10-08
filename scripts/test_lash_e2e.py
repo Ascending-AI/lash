@@ -20,29 +20,12 @@ SPEC = importlib.util.spec_from_file_location("lash_e2e", Path(__file__).with_na
 e2e = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(e2e)
 SOURCE = "a" * 40
-# Every catalogue row is held until an engine serves it again; the laws run
-# over the catalogue as if one did, under a registration label of their own.
+# The fixtures register every row under a label of their own.
 SYNTHETIC_LABEL = "//synthetic:e2e__test"
-ENGINE_HOLD = ("no E2E host harness until a facade turn runs on the durable engine: "
-               "L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it")
-
-
-def readied(manifest):
-    """The catalogue with every row held only for want of an engine registered."""
-    manifest = copy.deepcopy(manifest)
-    for scenario in manifest["scenarios"]:
-        for row in scenario["cases"]:
-            if row["hold_reason"] == ENGINE_HOLD:
-                row.update(state="ready", hold_reason=None, registration={
-                    "label": SYNTHETIC_LABEL,
-                    "test": "::".join((scenario["id"].lower(), row["variant"].replace("-", "_"),
-                                       row["store"], row["leg"], row["channel"])),
-                })
-    return manifest
 
 
 def register_synthetic_label(case):
-    patcher = patch.object(e2e.GATE, "LABELS", frozenset({SYNTHETIC_LABEL}))
+    patcher = patch.object(e2e.GATE, "LABELS", e2e.GATE.LABELS | {SYNTHETIC_LABEL})
     patcher.start()
     case.addCleanup(patcher.stop)
 
@@ -54,7 +37,7 @@ class ReceiptLaws(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
         register_synthetic_label(self)
-        self.manifest = readied(e2e.load_manifest())
+        self.manifest = e2e.load_manifest()
 
     def artifact(self, name, value):
         path = self.root / name
@@ -229,9 +212,11 @@ class ReceiptLaws(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "absent"):
             e2e.plan(self.manifest, "b" * 64, "full", ["S29"], SOURCE, [key])
 
+        registration = expected["cases"][0]["registration"]
+
         def runner_call(command, **kwargs):
-            self.assertEqual(command[2], SYNTHETIC_LABEL)
-            self.assertEqual(command[3], "s28::default::sqlite_file::live::rlm")
+            self.assertEqual(command[2], registration["label"])
+            self.assertEqual(command[3], registration["test"])
             self.assertEqual(command[command.index("--case") + 1], key)
             self.assertEqual(command[command.index("--store") + 1], "sqlite_file")
             self.assertEqual(command[command.index("--leg") + 1], "live")
@@ -267,6 +252,31 @@ class ReceiptLaws(unittest.TestCase):
              patch.object(e2e.subprocess, "call") as command:
             e2e.run_cases(held, self.root, manifest)
             command.assert_not_called()
+
+    def test_r8_retired_rows_count_in_the_catalogue_with_a_disposition_and_never_run(self):
+        retired = {e2e.case_key({"scenario": scenario["id"], **row}): row["disposition"]
+                   for scenario in self.manifest["scenarios"] for row in scenario["cases"]
+                   if row["state"] == "retired" and "release" in row["tiers"]}
+        self.assertTrue(retired)
+        planned = e2e.plan(self.manifest, "b" * 64, "release", [], SOURCE)
+        self.assertEqual({row["key"]: row["disposition"] for row in planned["retired"]}, retired)
+        self.assertFalse(set(retired) & {e2e.case_key(row) for row in planned["cases"]})
+        scenario = next(s for s in self.manifest["scenarios"]
+                        if all(row["state"] == "retired" for row in s["cases"]))
+        with self.assertRaisesRegex(ValueError, "every selected case is retired"):
+            e2e.plan(self.manifest, "b" * 64, "full", [scenario["id"]], SOURCE)
+        # A retirement without its written disposition does not load.
+        manifest = copy.deepcopy(e2e.load_manifest())
+        row = next(row for s in manifest["scenarios"] for row in s["cases"] if row["state"] == "retired")
+        row["disposition"] = " "
+        path = self.root / "manifest.json"
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(ValueError, "retired row needs a disposition"):
+            e2e.load_manifest(path)
+        del row["disposition"]
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(ValueError, "only a retired row has a disposition"):
+            e2e.load_manifest(path)
 
     def test_r8_runner_splits_a_case_receipt_into_reconcilable_role_files_and_names_missing_evidence(self):
         gate = e2e.GATE
@@ -467,7 +477,7 @@ class RunnerLaws(unittest.TestCase):
     def test_socket_path_stays_under_107_for_the_longest_registration(self):
         registrations = [
             row["registration"]
-            for scenario in readied(e2e.load_manifest())["scenarios"]
+            for scenario in e2e.load_manifest()["scenarios"]
             for row in scenario["cases"]
             if row["registration"] is not None
         ]
@@ -486,38 +496,6 @@ class RunnerLaws(unittest.TestCase):
                 scratch / ("fleet-" + "a" * 32 + ".sock"),
             ]:
                 self.assertLess(len(os.fsencode(socket_path)), 107)
-
-
-class WorkbenchReadinessLaws(unittest.TestCase):
-    def test_initial_state_waits_for_health_within_the_case_deadline(self):
-        spec = importlib.util.spec_from_file_location(
-            "workbench_provider", Path(__file__).with_name("e2e-workbench-provider.py"))
-        provider = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(provider)
-        now = 10.0
-        requests = []
-        snapshot = {"settings": {"session_id": "ready-session"}, "active_turns": []}
-
-        # A ready host's first session read can take longer than five seconds.
-        # Virtual transport latency reproduces the captured socket timeout
-        # without a wall-clock sleep or a live workbench.
-        def delayed_response(url, *, timeout):
-            nonlocal now
-            requests.append((url, timeout))
-            latency = 2.0 if url.endswith("/healthz") else 6.0
-            if timeout < latency:
-                raise TimeoutError("timed out")
-            now += latency
-            value = ({"service": "agent-workbench", "status": "ok"}
-                     if url.endswith("/healthz") else snapshot)
-            return io.StringIO(json.dumps(value))
-
-        with patch.object(provider.time, "monotonic", side_effect=lambda: now), \
-                patch.object(provider.urllib.request, "urlopen", side_effect=delayed_response):
-            actual = provider.initial_state("http://workbench", deadline=30.0)
-        self.assertEqual(actual, snapshot)
-        self.assertEqual(requests, [("http://workbench/healthz", 20.0),
-                                    ("http://workbench/api/state", 18.0)])
 
 
 if __name__ == "__main__":

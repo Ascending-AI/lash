@@ -1,4 +1,7 @@
 #[cfg(feature = "e2e-tools")]
+#[path = "../../shared/e2e_commit_ledger.rs"]
+mod e2e_commit_ledger;
+#[cfg(feature = "e2e-tools")]
 mod e2e_operation;
 #[cfg(feature = "e2e-tools")]
 mod e2e_receiver;

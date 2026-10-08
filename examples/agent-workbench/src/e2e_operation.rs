@@ -1,4 +1,5 @@
-//! S17 ("operation Run is recoverably explicit", L08/L14) runs on the agent-workbench product host.
+//! S17 ("operation Run is recoverably explicit", L08/L14) runs on the agent-workbench product host:
+//! a plugin task whose body the case holds, followed and reattached by its Run ID.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -6,19 +7,12 @@ use std::sync::{Arc, Mutex};
 use axum::extract::{Path, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use lash::durability::EffectOpener;
 use lash::plugins::{
-    AdmittedBinding, AfterCheckVerdict, AttemptStream, AttributedVerdict, BeforeCheckReply,
-    BehaviorRevision, CapacityScope, DeclaredStartObligation, FormatVersion,
-    PluginCallbackIdentity, PluginDeclaration, PluginError, PluginFactory, PluginFailureClass,
-    PluginOperation, PluginOperationOutcome, PluginRegistrar, PluginRevision, PluginSessionContext,
-    PluginTask, PluginTaskContext, RunCoordinator, SegmentOrdinal, SessionParam, SessionPlugin,
-    SingletonAttempt, SingletonBodyOutcome, SingletonCapture, SingletonPreparedRequest,
-    SingletonPresentationError, SingletonToolCall, SingletonToolHandlers, StartLaunch,
+    FormatVersion, PluginDeclaration, PluginError, PluginFactory, PluginFailureClass,
+    PluginOperation, PluginOperationOutcome, PluginRegistrar, PluginSessionContext, PluginTask,
+    PluginTaskContext, SessionParam, SessionPlugin,
 };
-use lash::runtime::{ExecutionScope, ExternalCancelPolicy, PresentationBinding};
 use lash::sync::MutexExt as _;
-use lash::tools::ToolDeclaration;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::Notify;
@@ -28,8 +22,6 @@ use crate::{AppError, AppState};
 type AppResult<T> = Result<T, AppError>;
 
 const PLUGIN: &str = "agent-workbench-e2e-operation";
-const TOOL: &str = "workbench.echo";
-const CALLBACK: &str = "tool:echo";
 
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct BodyReceipt {
@@ -83,15 +75,11 @@ impl Controls {
 /// push it so the bound deployment generation matches.
 pub(crate) struct OperationPlugin {
     controls: Arc<Controls>,
-    namespace: String,
 }
 
 impl OperationPlugin {
-    pub(crate) fn new(controls: Arc<Controls>, namespace: String) -> Self {
-        Self {
-            controls,
-            namespace,
-        }
+    pub(crate) fn new(controls: Arc<Controls>) -> Self {
+        Self { controls }
     }
 }
 
@@ -103,7 +91,6 @@ impl PluginFactory for OperationPlugin {
     fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(Self {
             controls: self.controls.clone(),
-            namespace: self.namespace.clone(),
         }))
     }
 }
@@ -120,12 +107,10 @@ impl SessionPlugin for OperationPlugin {
     }
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
         let controls = self.controls.clone();
-        let namespace = self.namespace.clone();
         reg.operations()
             .typed_task::<WorkbenchOperation, _, _>(move |ctx, output| {
                 let controls = controls.clone();
-                let namespace = namespace.clone();
-                async move { operation(ctx, controls, namespace, output).await }
+                async move { operation(ctx, controls, output).await }
             })?;
         Ok(())
     }
@@ -135,7 +120,7 @@ pub(crate) struct WorkbenchOperation;
 
 impl PluginOperation for WorkbenchOperation {
     const NAME: &'static str = "e2e.workbench.operation";
-    const DESCRIPTION: &'static str = "Workbench engine-owned operation with one native tool";
+    const DESCRIPTION: &'static str = "Workbench operation whose body the case holds";
     const SESSION_PARAM: SessionParam = SessionParam::Required;
     type Args = String;
     type Output = String;
@@ -151,137 +136,26 @@ impl PluginOperation for WorkbenchOperation {
 }
 impl PluginTask for WorkbenchOperation {}
 
+/// The task's body: it enters the host's gate under its key and returns its
+/// output once the case releases it. Nothing in it is durable until the
+/// operation's outcome commits, so a node that dies holding it leaves the
+/// operation to run again on the node that claims the session.
 async fn operation(
     ctx: PluginTaskContext,
     controls: Arc<Controls>,
-    namespace: String,
     output: String,
 ) -> Result<PluginOperationOutcome<String>, String> {
-    let ExecutionScope::SessionOperation {
-        session_id,
-        operation_id,
-    } = ctx.scoped_effect_controller.execution_scope()
-    else {
-        return Err("workbench operation task has no admitted operation owner".to_owned());
-    };
-    let revision = PluginRevision::new(PLUGIN, BehaviorRevision::ONE);
-    let callback = PluginCallbackIdentity {
-        owner: revision.clone(),
-        key: CALLBACK.into(),
-    };
-    let call = SingletonToolCall {
-        owner: EffectOpener::session_operation(session_id.clone(), operation_id.clone()),
-        segment: SegmentOrdinal(0),
-        call_id: lash::ToolCallId::derive(
-            &namespace,
-            lash::ToolCallRoot::host_submission(operation_id).map_err(|error| error.to_string())?,
-            &[],
-        ),
-        tool_name: TOOL.into(),
-        arguments: serde_json::json!(output),
-        declaration: ToolDeclaration::default(),
-        binding: AdmittedBinding {
-            executable: callback.clone(),
-            preparation: callback,
-            presentation: PresentationBinding {
-                presenter: None,
-                steps: Vec::new(),
+    controls
+        .enter(
+            BodyReceipt {
+                key: output.clone(),
+                call_id: ctx.session_id.as_ref().map(ToString::to_string),
+                attempt: None,
             },
-        },
-        available: vec![revision.clone()],
-        cancel: ExternalCancelPolicy::Ignore,
-        environment: None,
-    };
-    let token = ctx.cancellation_token.clone();
-    let handlers = Echo {
-        output: output.clone(),
-        controls,
-        token,
-    };
-    let mut run = RunCoordinator::open(
-        &ctx.scoped_effect_controller,
-        call.owner.clone(),
-        call.segment,
-        vec![revision],
-    );
-    let decided = run
-        .start_round(
-            std::slice::from_ref(&call),
-            CapacityScope::Held,
-            Arc::new(handlers),
-            Default::default(),
+            &ctx.cancellation_token,
         )
-        .await
-        .map_err(|error| error.to_string())?;
-    if decided.is_empty() {
-        while run
-            .progress()
-            .await
-            .map_err(|error| error.to_string())?
-            .is_none()
-        {}
-    }
-    run.close().await.map_err(|error| error.to_string())?;
+        .await;
     Ok(PluginOperationOutcome::new(output))
-}
-
-struct Echo {
-    output: String,
-    controls: Arc<Controls>,
-    token: lash::CancellationToken,
-}
-
-#[lash::async_trait]
-impl SingletonToolHandlers for Echo {
-    async fn prepare(&self, call: &SingletonToolCall) -> Result<Value, String> {
-        Ok(call.arguments.clone())
-    }
-    async fn before_checks(
-        &self,
-        _: &SingletonToolCall,
-        _: &SingletonPreparedRequest,
-    ) -> Result<Vec<AttributedVerdict<BeforeCheckReply>>, String> {
-        Ok(Vec::new())
-    }
-    async fn execute(&self, attempt: SingletonAttempt<'_>) -> Result<SingletonBodyOutcome, String> {
-        self.controls
-            .enter(
-                BodyReceipt {
-                    key: self.output.clone(),
-                    call_id: Some(attempt.call_id.to_string()),
-                    attempt: Some(attempt.attempt.get()),
-                },
-                &self.token,
-            )
-            .await;
-        Ok(SingletonBodyOutcome::Done {
-            output: self.output.clone(),
-            commands: Default::default(),
-            intents: Vec::new(),
-            start: None,
-        })
-    }
-    async fn after_checks(
-        &self,
-        _: &lash::ToolCallId,
-        _: &SingletonCapture,
-    ) -> Result<Vec<AttributedVerdict<AfterCheckVerdict>>, String> {
-        Ok(Vec::new())
-    }
-    async fn run_cancel_requested(&self) -> Result<bool, String> {
-        Ok(self.token.is_cancelled())
-    }
-    async fn present(
-        &self,
-        _: &lash::ToolCallId,
-        capture: &SingletonCapture,
-    ) -> Result<String, SingletonPresentationError> {
-        Ok(capture.output().unwrap_or_default().to_owned())
-    }
-    fn emit_stream(&self, _: &lash::ToolCallId, _: &AttemptStream) {}
-    async fn stage_start(&self, _: &DeclaredStartObligation) -> Result<StartLaunch, String> {
-        Err("workbench echo admits no process start".into())
-    }
 }
 
 #[derive(Clone)]
@@ -309,9 +183,7 @@ async fn start(
 ) -> AppResult<Json<Value>> {
     let session = state
         .app
-        .core
-        .session(session_id)
-        .open()
+        .create_or_open_session(&session_id, "api.e2e.operations")
         .await
         .map_err(error)?;
     let task = session

@@ -783,6 +783,29 @@ pub fn wait_scope(cx: &ActorContext) -> Result<ScopeKey, DurableError> {
     })
 }
 
+/// The scope the waits an admitted execution of `owner` pins belong to: a
+/// turn's round member's end with its turn, so the turn's commit or cancel
+/// revokes them (ADR 0132 §6, §11); a process step's with its process; a
+/// code cell's are its context's ([`wait_scope`]). A turn's round runs on
+/// its session actor's context, whose own scope is the session's, so the
+/// member's owner, not the context, names its turn.
+///
+/// # Errors
+///
+/// A corrupt actor identity, for a cell's.
+pub fn execution_wait_scope(
+    cx: &ActorContext,
+    owner: &lash_durable::domain::OwnerKey,
+) -> Result<ScopeKey, DurableError> {
+    Ok(match owner {
+        lash_durable::domain::OwnerKey::Turn(session, run) => {
+            ScopeKey::Turn(session.clone(), run.clone())
+        }
+        lash_durable::domain::OwnerKey::Process(process) => ScopeKey::Process(process.clone()),
+        lash_durable::domain::OwnerKey::Cell(..) => wait_scope(cx)?,
+    })
+}
+
 fn actor_scope(actor: &lash_durable::ActorKey) -> Result<ScopeKey, DurableError> {
     // ActorKey validates framing; decode the raw id according to its kind.
     // It has not been escaped as a stored ScopeKey's path component.

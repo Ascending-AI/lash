@@ -38,9 +38,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "workbench::s01_singleton_returns_through_one_owner"
+          }
         },
         {
           "variant": "default",
@@ -65,9 +68,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "workbench::s01_singleton_returns_through_one_owner_resume"
+          }
         },
         {
           "variant": "postgresql-live-replay",
@@ -92,9 +98,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null,
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "workbench::s01_singleton_returns_through_one_owner_live_replay"
+          },
           "live_replay": "postgresql"
         }
       ],
@@ -140,9 +149,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "tools::s02_durable_x_survives_host_sigkill"
+          }
         },
         {
           "variant": "default",
@@ -167,9 +179,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "tools::s02_durable_x_survives_host_sigkill_resume"
+          }
         },
         {
           "variant": "default",
@@ -194,9 +209,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "tools::s02_durable_x_survives_host_sigkill_postgresql"
+          }
         },
         {
           "variant": "default",
@@ -221,9 +239,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "tools::s02_durable_x_survives_host_sigkill_postgresql_resume"
+          }
         },
         {
           "variant": "postgresql-live-replay",
@@ -248,9 +269,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null,
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "tools::s02_durable_x_survives_host_sigkill_live_replay"
+          },
           "live_replay": "postgresql"
         }
       ],
@@ -295,9 +319,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "tools::s03_ambiguous_side_effect_dedups_externally"
+          }
         },
         {
           "variant": "default",
@@ -322,9 +349,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "tools::s03_ambiguous_side_effect_dedups_externally_resume"
+          }
         }
       ],
       "setup": "Tool sends a keyed write to persistent HTTP effect fixture.",
@@ -369,9 +399,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "state::s04_proposal_is_not_durable_publication"
+          }
         },
         {
           "variant": "default",
@@ -396,9 +429,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "state::s04_proposal_is_not_durable_publication_resume"
+          }
         },
         {
           "variant": "default",
@@ -423,9 +459,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "state::s04_proposal_is_not_durable_publication_postgresql"
+          }
         },
         {
           "variant": "default",
@@ -450,9 +489,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "state::s04_proposal_is_not_durable_publication_postgresql_resume"
+          }
         }
       ],
       "setup": "Plugin-command result held after X/D proposal, before applicable ACK.",
@@ -497,9 +539,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "tools::s05_opposite_order_parallel_results_replay"
+          }
         },
         {
           "variant": "default",
@@ -524,9 +569,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "tools::s05_opposite_order_parallel_results_replay_resume"
+          }
         },
         {
           "variant": "default",
@@ -551,9 +599,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "tools::s05_opposite_order_parallel_results_replay_postgresql"
+          }
         },
         {
           "variant": "default",
@@ -578,9 +629,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "tools::s05_opposite_order_parallel_results_replay_postgresql_resume"
+          }
         }
       ],
       "setup": "Standard batch A/B/C; each body reaches barrier.",
@@ -623,9 +677,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "retries::s06_reported_retries_retain_schedule"
+          }
         },
         {
           "variant": "default",
@@ -650,9 +707,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "retries::s06_reported_retries_retain_schedule_resume"
+          }
         }
       ],
       "setup": "A/B each fail once with typed retryable result; controllable real backoff.",
@@ -697,9 +757,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "retries::s07_cancellation_during_backoff_starts_nothing_new"
+          }
         },
         {
           "variant": "default",
@@ -724,9 +787,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "retries::s07_cancellation_during_backoff_starts_nothing_new_resume"
+          }
         }
       ],
       "setup": "Same reported retry fixture.",
@@ -770,9 +836,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "intents::s08_pre_final_cancel_prevents_declarations"
+          }
         },
         {
           "variant": "default",
@@ -797,9 +866,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "intents::s08_pre_final_cancel_prevents_declarations_resume"
+          }
         },
         {
           "variant": "default",
@@ -824,9 +896,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "intents::s08_pre_final_cancel_prevents_declarations_postgresql"
+          }
         },
         {
           "variant": "default",
@@ -851,9 +926,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "intents::s08_pre_final_cancel_prevents_declarations_postgresql_resume"
+          }
         }
       ],
       "setup": "Tool held before D; declared keyed external intent.",
@@ -896,9 +974,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: the decision-to-intent cut lived in the Run journal that c1a00eb8dd (FIG-5174) deleted. A call's decision and its intent realization now commit with the call's outcome (ADR 0132 §5), so there is no durable point between them to cancel or kill at. The after-intent variant remains registered."
         },
         {
           "variant": "after-intent",
@@ -923,9 +1002,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "intents::s09_post_final_cancel_drains_protected_work_after_intent"
+          }
         },
         {
           "variant": "before-intent",
@@ -950,9 +1032,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: the decision-to-intent cut lived in the Run journal that c1a00eb8dd (FIG-5174) deleted. A call's decision and its intent realization now commit with the call's outcome (ADR 0132 §5), so there is no durable point between them to cancel or kill at. The after-intent variant remains registered."
         },
         {
           "variant": "after-intent",
@@ -977,9 +1060,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "intents::s09_post_final_cancel_drains_protected_work_after_intent_resume"
+          }
         },
         {
           "variant": "before-intent",
@@ -1004,9 +1090,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: the decision-to-intent cut lived in the Run journal that c1a00eb8dd (FIG-5174) deleted. A call's decision and its intent realization now commit with the call's outcome (ADR 0132 §5), so there is no durable point between them to cancel or kill at. The after-intent variant remains registered."
         },
         {
           "variant": "after-intent",
@@ -1031,9 +1118,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "intents::s09_post_final_cancel_drains_protected_work_after_intent_postgresql"
+          }
         },
         {
           "variant": "before-intent",
@@ -1058,9 +1148,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: the decision-to-intent cut lived in the Run journal that c1a00eb8dd (FIG-5174) deleted. A call's decision and its intent realization now commit with the call's outcome (ADR 0132 §5), so there is no durable point between them to cancel or kill at. The after-intent variant remains registered."
         },
         {
           "variant": "after-intent",
@@ -1085,9 +1176,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "intents::s09_post_final_cancel_drains_protected_work_after_intent_postgresql_resume"
+          }
         }
       ],
       "setup": "D final durable; declaration blocked, then presentation.",
@@ -1131,9 +1225,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: the rank-ordered protected drain of declarations lived in the journal RunCoordinator, its Run records and the realization invocation were deleted by c1a00eb8dd (FIG-5174). A call's decision, realization and presentation now run in memory between its x_start and x_outcome (ADR 0132 §5), so there are no rank seats or declaration drain to bypass. That committed work survives a cancel is proved by S08 and S09 after-intent."
         },
         {
           "variant": "default",
@@ -1158,9 +1253,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: the rank-ordered protected drain of declarations lived in the journal RunCoordinator, its Run records and the realization invocation were deleted by c1a00eb8dd (FIG-5174). A call's decision, realization and presentation now run in memory between its x_start and x_outcome (ADR 0132 §5), so there are no rank seats or declaration drain to bypass. That committed work survives a cancel is proved by S08 and S09 after-intent."
         },
         {
           "variant": "default",
@@ -1185,9 +1281,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: the rank-ordered protected drain of declarations lived in the journal RunCoordinator, its Run records and the realization invocation were deleted by c1a00eb8dd (FIG-5174). A call's decision, realization and presentation now run in memory between its x_start and x_outcome (ADR 0132 §5), so there are no rank seats or declaration drain to bypass. That committed work survives a cancel is proved by S08 and S09 after-intent."
         },
         {
           "variant": "default",
@@ -1212,9 +1309,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: the rank-ordered protected drain of declarations lived in the journal RunCoordinator, its Run records and the realization invocation were deleted by c1a00eb8dd (FIG-5174). A call's decision, realization and presentation now run in memory between its x_start and x_outcome (ADR 0132 §5), so there are no rank seats or declaration drain to bypass. That committed work survives a cancel is proved by S08 and S09 after-intent."
         }
       ],
       "setup": "Rank1 blocked intent, rank2 intent-free, rank3 intent; unrelated program effect.",
@@ -1258,9 +1356,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "handover::s11_winner_progresses_while_loser_stays_live_inline"
+          }
         },
         {
           "variant": "deferred",
@@ -1285,9 +1386,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "handover::s11_winner_progresses_while_loser_stays_live_deferred"
+          }
         },
         {
           "variant": "inline",
@@ -1312,9 +1416,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "handover::s11_winner_progresses_while_loser_stays_live_inline_resume"
+          }
         },
         {
           "variant": "deferred",
@@ -1339,9 +1446,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "handover::s11_winner_progresses_while_loser_stays_live_deferred_resume"
+          }
         },
         {
           "variant": "inline",
@@ -1366,9 +1476,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "handover::s11_winner_progresses_while_loser_stays_live_inline_postgresql"
+          }
         },
         {
           "variant": "deferred",
@@ -1393,9 +1506,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "handover::s11_winner_progresses_while_loser_stays_live_deferred_postgresql"
+          }
         },
         {
           "variant": "inline",
@@ -1420,9 +1536,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "handover::s11_winner_progresses_while_loser_stays_live_inline_postgresql_resume"
+          }
         },
         {
           "variant": "deferred",
@@ -1447,9 +1566,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "handover::s11_winner_progresses_while_loser_stays_live_deferred_postgresql_resume"
+          }
         }
       ],
       "setup": "RLM race winner + held inline loser; effect after race.",
@@ -1495,9 +1617,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, retiring deployment N under a generation drain, went with L10g (FIG-5200); L11 (FIG-5187) re-scopes it to planned:D1 (a build drains by releasing its actors)",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "handover::s12_deferred_survives_removal_of_n"
+          }
         },
         {
           "variant": "default",
@@ -1522,9 +1647,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, retiring deployment N under a generation drain, went with L10g (FIG-5200); L11 (FIG-5187) re-scopes it to planned:D1 (a build drains by releasing its actors)",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "handover::s12_deferred_survives_removal_of_n_resume"
+          }
         },
         {
           "variant": "default",
@@ -1549,9 +1677,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, retiring deployment N under a generation drain, went with L10g (FIG-5200); L11 (FIG-5187) re-scopes it to planned:D1 (a build drains by releasing its actors)",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "handover::s12_deferred_survives_removal_of_n_postgresql"
+          }
         },
         {
           "variant": "default",
@@ -1576,9 +1707,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, retiring deployment N under a generation drain, went with L10g (FIG-5200); L11 (FIG-5187) re-scopes it to planned:D1 (a build drains by releasing its actors)",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "handover::s12_deferred_survives_removal_of_n_postgresql_resume"
+          }
         }
       ],
       "setup": "Pending source in turn and process, N+1 adopts transfer.",
@@ -1627,9 +1761,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, a drain's refusal to finalize, went with L10g (FIG-5200); L11 (FIG-5187) re-scopes it to planned:D1 (a build drains by releasing its actors)",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: build generations, generation pinning, retirement, finalize and the deployment registry were deleted by 9156ec1b32 (FIG-5200), and ADR 0132 has no generation lane. A removed node's work finishing on another node is proved by S12 and S14."
         },
         {
           "variant": "default",
@@ -1658,9 +1793,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, a drain's refusal to finalize, went with L10g (FIG-5200); L11 (FIG-5187) re-scopes it to planned:D1 (a build drains by releasing its actors)",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: build generations, generation pinning, retirement, finalize and the deployment registry were deleted by 9156ec1b32 (FIG-5200), and ADR 0132 has no generation lane. A removed node's work finishing on another node is proved by S12 and S14."
         },
         {
           "variant": "default",
@@ -1689,9 +1825,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, a drain's refusal to finalize, went with L10g (FIG-5200); L11 (FIG-5187) re-scopes it to planned:D1 (a build drains by releasing its actors)",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: build generations, generation pinning, retirement, finalize and the deployment registry were deleted by 9156ec1b32 (FIG-5200), and ADR 0132 has no generation lane. A removed node's work finishing on another node is proved by S12 and S14."
         },
         {
           "variant": "default",
@@ -1720,9 +1857,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, a drain's refusal to finalize, went with L10g (FIG-5200); L11 (FIG-5187) re-scopes it to planned:D1 (a build drains by releasing its actors)",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: build generations, generation pinning, retirement, finalize and the deployment registry were deleted by 9156ec1b32 (FIG-5200), and ADR 0132 has no generation lane. A removed node's work finishing on another node is proved by S12 and S14."
         }
       ],
       "setup": "Real invocation remains pinned to N; N+1 present.",
@@ -1772,9 +1910,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "fleet::s14_lost_node_work_finishes_on_another_node_postgresql"
+          }
         }
       ],
       "setup": "Two lash nodes over one PostgreSQL store; acknowledged input plus an unfinished tool on node A.",
@@ -1819,9 +1960,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "fleet::s15_partitioned_node_cannot_create_second_winner_postgresql"
+          }
         }
       ],
       "setup": "Two lash nodes over one PostgreSQL store; the same Run visible to clients.",
@@ -1866,9 +2010,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "fleet::s16_stale_postgresql_host_cannot_publish_terminal_publication_postgresql"
+          }
         },
         {
           "variant": "sigkill-redrive",
@@ -1893,9 +2040,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "fleet::s16_stale_postgresql_host_cannot_publish_sigkill_redrive_postgresql"
+          }
         },
         {
           "variant": "terminal-publication",
@@ -1920,9 +2070,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "fleet::s16_stale_postgresql_host_cannot_publish_terminal_publication_postgresql_resume"
+          }
         },
         {
           "variant": "sigkill-redrive",
@@ -1947,9 +2100,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "fleet::s16_stale_postgresql_host_cannot_publish_sigkill_redrive_postgresql_resume"
+          }
         }
       ],
       "setup": "Two hosts share session/store; old execution held at publication.",
@@ -1994,9 +2150,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "operations::s17_operation_run_is_recoverably_explicit"
+          }
         },
         {
           "variant": "default",
@@ -2021,9 +2180,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "operations::s17_operation_run_is_recoverably_explicit_resume"
+          }
         },
         {
           "variant": "default",
@@ -2048,9 +2210,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "operations::s17_operation_run_is_recoverably_explicit_postgresql"
+          }
         },
         {
           "variant": "default",
@@ -2075,9 +2240,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "operations::s17_operation_run_is_recoverably_explicit_postgresql_resume"
+          }
         },
         {
           "variant": "postgresql-live-replay",
@@ -2102,9 +2270,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null,
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "operations::s17_operation_run_is_recoverably_explicit_live_replay"
+          },
           "live_replay": "postgresql"
         }
       ],
@@ -2152,9 +2323,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "cancel::s18_cancel_wakes_suspended_process_await_process_await_cancel"
+          }
         },
         {
           "variant": "postgresql-live-replay",
@@ -2179,9 +2353,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null,
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "cancel::s18_cancel_wakes_suspended_process_await_live_replay"
+          },
           "live_replay": "postgresql"
         }
       ],
@@ -2222,11 +2399,7 @@
           "nodes": 1,
           "binaries": [
             "host",
-            "vm_worker",
-            "synthetic_next_host",
-            "operator",
-            "synthetic_next_operator",
-            "synthetic_next_vm_worker"
+            "vm_worker"
           ],
           "artifacts": [
             "commits",
@@ -2237,9 +2410,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "waits::s21_source_resolution_is_immutable"
+          }
         },
         {
           "variant": "default",
@@ -2253,11 +2429,7 @@
           "nodes": 2,
           "binaries": [
             "host",
-            "vm_worker",
-            "synthetic_next_host",
-            "operator",
-            "synthetic_next_operator",
-            "synthetic_next_vm_worker"
+            "vm_worker"
           ],
           "artifacts": [
             "commits",
@@ -2268,9 +2440,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "waits::s21_source_resolution_is_immutable_resume"
+          }
         },
         {
           "variant": "default",
@@ -2284,11 +2459,7 @@
           "nodes": 1,
           "binaries": [
             "host",
-            "vm_worker",
-            "synthetic_next_host",
-            "operator",
-            "synthetic_next_operator",
-            "synthetic_next_vm_worker"
+            "vm_worker"
           ],
           "artifacts": [
             "commits",
@@ -2299,9 +2470,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "waits::s21_source_resolution_is_immutable_postgresql"
+          }
         },
         {
           "variant": "default",
@@ -2315,11 +2489,7 @@
           "nodes": 2,
           "binaries": [
             "host",
-            "vm_worker",
-            "synthetic_next_host",
-            "operator",
-            "synthetic_next_operator",
-            "synthetic_next_vm_worker"
+            "vm_worker"
           ],
           "artifacts": [
             "commits",
@@ -2330,9 +2500,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "waits::s21_source_resolution_is_immutable_postgresql_resume"
+          }
         }
       ],
       "setup": "Resolve before subscribe; second variant resolves during transfer.",
@@ -2780,9 +2953,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "upgrade between builds is L11's (FIG-5187): it re-scopes the scenario to planned:D1 and planned:FMT1",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: binary upgrade lanes, generation-pinned plugin revisions and rollback before finalize were deleted by 9156ec1b32 (FIG-5200). Pre-1.0 stored formats change in place (ADR 0132 Scope; ADR 0106 applies after the 1.0 cut). Plugin state surviving a cold reopen is proved by S04 and S25."
         },
         {
           "variant": "default",
@@ -2811,9 +2985,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "upgrade between builds is L11's (FIG-5187): it re-scopes the scenario to planned:D1 and planned:FMT1",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: binary upgrade lanes, generation-pinned plugin revisions and rollback before finalize were deleted by 9156ec1b32 (FIG-5200). Pre-1.0 stored formats change in place (ADR 0132 Scope; ADR 0106 applies after the 1.0 cut). Plugin state surviving a cold reopen is proved by S04 and S25."
         },
         {
           "variant": "default",
@@ -2842,9 +3017,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "upgrade between builds is L11's (FIG-5187): it re-scopes the scenario to planned:D1 and planned:FMT1",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: binary upgrade lanes, generation-pinned plugin revisions and rollback before finalize were deleted by 9156ec1b32 (FIG-5200). Pre-1.0 stored formats change in place (ADR 0132 Scope; ADR 0106 applies after the 1.0 cut). Plugin state surviving a cold reopen is proved by S04 and S25."
         },
         {
           "variant": "default",
@@ -2873,9 +3049,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "upgrade between builds is L11's (FIG-5187): it re-scopes the scenario to planned:D1 and planned:FMT1",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: binary upgrade lanes, generation-pinned plugin revisions and rollback before finalize were deleted by 9156ec1b32 (FIG-5200). Pre-1.0 stored formats change in place (ADR 0132 Scope; ADR 0106 applies after the 1.0 cut). Plugin state surviving a cold reopen is proved by S04 and S25."
         }
       ],
       "setup": "N writes state/config; N+1 compatible registration; pending tool uses admitted revision.",
@@ -2908,11 +3085,7 @@
           "nodes": 1,
           "binaries": [
             "host",
-            "vm_worker",
-            "synthetic_next_host",
-            "synthetic_next_vm_worker",
-            "operator",
-            "synthetic_next_operator"
+            "vm_worker"
           ],
           "artifacts": [
             "commits",
@@ -2923,9 +3096,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "state::s25_concurrent_state_survives_cold_reopen_same_key"
+          }
         },
         {
           "variant": "disjoint-keys",
@@ -2939,11 +3115,7 @@
           "nodes": 1,
           "binaries": [
             "host",
-            "vm_worker",
-            "synthetic_next_host",
-            "synthetic_next_vm_worker",
-            "operator",
-            "synthetic_next_operator"
+            "vm_worker"
           ],
           "artifacts": [
             "commits",
@@ -2954,9 +3126,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "state::s25_concurrent_state_survives_cold_reopen_disjoint_keys"
+          }
         },
         {
           "variant": "namespaces",
@@ -2970,11 +3145,7 @@
           "nodes": 1,
           "binaries": [
             "host",
-            "vm_worker",
-            "synthetic_next_host",
-            "synthetic_next_vm_worker",
-            "operator",
-            "synthetic_next_operator"
+            "vm_worker"
           ],
           "artifacts": [
             "commits",
@@ -2985,9 +3156,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "state::s25_concurrent_state_survives_cold_reopen_namespaces"
+          }
         },
         {
           "variant": "same-key",
@@ -3001,11 +3175,7 @@
           "nodes": 2,
           "binaries": [
             "host",
-            "vm_worker",
-            "synthetic_next_host",
-            "synthetic_next_vm_worker",
-            "operator",
-            "synthetic_next_operator"
+            "vm_worker"
           ],
           "artifacts": [
             "commits",
@@ -3016,9 +3186,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "state::s25_concurrent_state_survives_cold_reopen_same_key_resume"
+          }
         },
         {
           "variant": "disjoint-keys",
@@ -3032,11 +3205,7 @@
           "nodes": 2,
           "binaries": [
             "host",
-            "vm_worker",
-            "synthetic_next_host",
-            "synthetic_next_vm_worker",
-            "operator",
-            "synthetic_next_operator"
+            "vm_worker"
           ],
           "artifacts": [
             "commits",
@@ -3047,9 +3216,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "state::s25_concurrent_state_survives_cold_reopen_disjoint_keys_resume"
+          }
         },
         {
           "variant": "namespaces",
@@ -3063,11 +3235,7 @@
           "nodes": 2,
           "binaries": [
             "host",
-            "vm_worker",
-            "synthetic_next_host",
-            "synthetic_next_vm_worker",
-            "operator",
-            "synthetic_next_operator"
+            "vm_worker"
           ],
           "artifacts": [
             "commits",
@@ -3078,9 +3246,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "state::s25_concurrent_state_survives_cold_reopen_namespaces_resume"
+          }
         },
         {
           "variant": "same-key",
@@ -3094,11 +3265,7 @@
           "nodes": 1,
           "binaries": [
             "host",
-            "vm_worker",
-            "synthetic_next_host",
-            "synthetic_next_vm_worker",
-            "operator",
-            "synthetic_next_operator"
+            "vm_worker"
           ],
           "artifacts": [
             "commits",
@@ -3109,9 +3276,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "state::s25_concurrent_state_survives_cold_reopen_same_key_postgresql"
+          }
         },
         {
           "variant": "disjoint-keys",
@@ -3125,11 +3295,7 @@
           "nodes": 1,
           "binaries": [
             "host",
-            "vm_worker",
-            "synthetic_next_host",
-            "synthetic_next_vm_worker",
-            "operator",
-            "synthetic_next_operator"
+            "vm_worker"
           ],
           "artifacts": [
             "commits",
@@ -3140,9 +3306,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "state::s25_concurrent_state_survives_cold_reopen_disjoint_keys_postgresql"
+          }
         },
         {
           "variant": "namespaces",
@@ -3156,11 +3325,7 @@
           "nodes": 1,
           "binaries": [
             "host",
-            "vm_worker",
-            "synthetic_next_host",
-            "synthetic_next_vm_worker",
-            "operator",
-            "synthetic_next_operator"
+            "vm_worker"
           ],
           "artifacts": [
             "commits",
@@ -3171,9 +3336,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "state::s25_concurrent_state_survives_cold_reopen_namespaces_postgresql"
+          }
         },
         {
           "variant": "same-key",
@@ -3187,11 +3355,7 @@
           "nodes": 2,
           "binaries": [
             "host",
-            "vm_worker",
-            "synthetic_next_host",
-            "synthetic_next_vm_worker",
-            "operator",
-            "synthetic_next_operator"
+            "vm_worker"
           ],
           "artifacts": [
             "commits",
@@ -3202,9 +3366,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "state::s25_concurrent_state_survives_cold_reopen_same_key_postgresql_resume"
+          }
         },
         {
           "variant": "disjoint-keys",
@@ -3218,11 +3385,7 @@
           "nodes": 2,
           "binaries": [
             "host",
-            "vm_worker",
-            "synthetic_next_host",
-            "synthetic_next_vm_worker",
-            "operator",
-            "synthetic_next_operator"
+            "vm_worker"
           ],
           "artifacts": [
             "commits",
@@ -3233,9 +3396,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "state::s25_concurrent_state_survives_cold_reopen_disjoint_keys_postgresql_resume"
+          }
         },
         {
           "variant": "namespaces",
@@ -3249,11 +3415,7 @@
           "nodes": 2,
           "binaries": [
             "host",
-            "vm_worker",
-            "synthetic_next_host",
-            "synthetic_next_vm_worker",
-            "operator",
-            "synthetic_next_operator"
+            "vm_worker"
           ],
           "artifacts": [
             "commits",
@@ -3264,9 +3426,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "state::s25_concurrent_state_survives_cold_reopen_namespaces_postgresql_resume"
+          }
         }
       ],
       "setup": "A unrecorded candidate held, B durable; same-key, disjoint-key and namespace variants.",
@@ -3312,9 +3477,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "provider::s26_streaming_retries_produce_one_logical_answer_recorded_429_retry"
+          }
         },
         {
           "variant": "recorded-429-retry",
@@ -3339,9 +3507,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "provider::s26_streaming_retries_produce_one_logical_answer_recorded_429_retry_resume"
+          }
         },
         {
           "variant": "partial-stream-reset",
@@ -3366,9 +3537,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "provider::s26_streaming_retries_produce_one_logical_answer_partial_stream_reset"
+          }
         },
         {
           "variant": "partial-stream-reset",
@@ -3393,9 +3567,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "provider::s26_streaming_retries_produce_one_logical_answer_partial_stream_reset_resume"
+          }
         },
         {
           "variant": "observer-reconnect",
@@ -3420,9 +3597,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "provider::s26_streaming_retries_produce_one_logical_answer_observer_reconnect"
+          }
         },
         {
           "variant": "observer-reconnect",
@@ -3447,9 +3627,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "provider::s26_streaming_retries_produce_one_logical_answer_observer_reconnect_resume"
+          }
         },
         {
           "variant": "postgresql-live-replay",
@@ -3474,9 +3657,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null,
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "provider::s26_streaming_retries_produce_one_logical_answer_live_replay"
+          },
           "live_replay": "postgresql"
         }
       ],
@@ -3520,9 +3706,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "provider::s27_provider_authentication_failure_permits_next_run"
+          }
         },
         {
           "variant": "default",
@@ -3547,9 +3736,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "provider::s27_provider_authentication_failure_permits_next_run_resume"
+          }
         }
       ],
       "setup": "Same production HTTP provider fixture.",
@@ -3595,9 +3787,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null,
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "mcp::s28_mcp_attach_detach_and_attachments_survive_reconnect"
+          },
           "host": "workbench"
         },
         {
@@ -3623,9 +3818,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null,
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "mcp::s28_mcp_attach_detach_and_attachments_survive_reconnect_resume"
+          },
           "host": "workbench"
         },
         {
@@ -3651,9 +3849,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null,
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "mcp::s28_mcp_attach_detach_and_attachments_survive_reconnect_postgresql"
+          },
           "host": "workbench"
         },
         {
@@ -3679,9 +3880,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null,
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "mcp::s28_mcp_attach_detach_and_attachments_survive_reconnect_postgresql_resume"
+          },
           "host": "workbench"
         }
       ],
@@ -3726,9 +3930,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "browser::s29_browser_api_and_store_agree_after_a_host_kill"
+          }
         },
         {
           "variant": "default",
@@ -3753,9 +3960,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "browser::s29_browser_api_and_store_agree_after_a_host_kill_postgresql"
+          }
         }
       ],
       "setup": "Workbench deterministic transcript and known tool output.",
@@ -3802,13 +4012,16 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "tools::s30_external_consumer_contract"
+          }
         },
         {
           "variant": "default",
-          "store": "sqlite_memory",
+          "store": "sqlite_file",
           "leg": "resume",
           "channel": "standard",
           "tiers": [
@@ -3829,9 +4042,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "tools::s30_external_consumer_contract_resume"
+          }
         }
       ],
       "setup": "Small consumer with only public `lash`; real host transport, one task/tool.",
@@ -4138,9 +4354,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Certified through the Phase A release gate (release_gates.phase_a), not this runner; companion selector phase_a negotiated_wire_both_directions::s33_negotiated_wire_both_directions_sqlite runs under the Phase A gate.",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: Phase A rollback and finalize were deleted by 9156ec1b32 (FIG-5200). The wire floor that remains, refusing a remote protocol generation outside the supported range, is covered by crates/lash-remote-protocol/src/tests/version_refusal.rs::retired_and_unlanded_remote_protocol_generations_are_refused."
         },
         {
           "variant": "default",
@@ -4169,9 +4386,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Certified through the Phase A release gate (release_gates.phase_a), not this runner; companion selector phase_a negotiated_wire_both_directions::s33_negotiated_wire_both_directions_sqlite runs under the Phase A gate.",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: Phase A rollback and finalize were deleted by 9156ec1b32 (FIG-5200). The wire floor that remains, refusing a remote protocol generation outside the supported range, is covered by crates/lash-remote-protocol/src/tests/version_refusal.rs::retired_and_unlanded_remote_protocol_generations_are_refused."
         },
         {
           "variant": "default",
@@ -4200,9 +4418,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Certified through the Phase A release gate (release_gates.phase_a), not this runner; companion selector phase_a negotiated_wire_both_directions::s33_negotiated_wire_both_directions_sqlite runs under the Phase A gate.",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: Phase A rollback and finalize were deleted by 9156ec1b32 (FIG-5200). The wire floor that remains, refusing a remote protocol generation outside the supported range, is covered by crates/lash-remote-protocol/src/tests/version_refusal.rs::retired_and_unlanded_remote_protocol_generations_are_refused."
         },
         {
           "variant": "default",
@@ -4231,9 +4450,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Certified through the Phase A release gate (release_gates.phase_a), not this runner; companion selector phase_a negotiated_wire_both_directions::s33_negotiated_wire_both_directions_sqlite runs under the Phase A gate.",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: Phase A rollback and finalize were deleted by 9156ec1b32 (FIG-5200). The wire floor that remains, refusing a remote protocol generation outside the supported range, is covered by crates/lash-remote-protocol/src/tests/version_refusal.rs::retired_and_unlanded_remote_protocol_generations_are_refused."
         }
       ],
       "setup": "Existing Phase A choreography plus external remote client.",
@@ -4276,9 +4496,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "telemetry::s34_otel_delivery_describes_logical_calls_and_actual_attempts"
+          }
         },
         {
           "variant": "default",
@@ -4303,9 +4526,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "telemetry::s34_otel_delivery_describes_logical_calls_and_actual_attempts_resume"
+          }
         }
       ],
       "setup": "Real host installs adapter and OTLP exporter; local receiver plus JSONL trace.",
@@ -4350,7 +4576,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
+          "hold_reason": "Paid live row with no harness registration yet: its three RLM workspace cases run the //runbooks/rlm-smoke:rlm-smoke host against an operator-supplied provider and need Docker for its jailed exec, and no crates/lash-e2e case drives that host",
           "registration": null,
           "note": "Paid, live-only row: runs only with OPENROUTER_API_KEY, OPENROUTER_MODEL, LASH_E2E_LIVE_BUDGET and LASH_E2E_OUTPUT_TOKEN_CAP, and fails without them; passed with z-ai/glm-5.3-flash (FIG-5150)."
         },
@@ -4377,7 +4603,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
+          "hold_reason": "Paid live row with no harness registration yet: its three RLM workspace cases run the //runbooks/rlm-smoke:rlm-smoke host against an operator-supplied provider and need Docker for its jailed exec, and no crates/lash-e2e case drives that host",
           "registration": null,
           "note": "Paid, live-only row: runs only with OPENROUTER_API_KEY, OPENROUTER_MODEL, LASH_E2E_LIVE_BUDGET and LASH_E2E_OUTPUT_TOKEN_CAP, and fails without them; passed with z-ai/glm-5.3-flash (FIG-5150)."
         },
@@ -4404,7 +4630,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
+          "hold_reason": "Paid live row with no harness registration yet: its three RLM workspace cases run the //runbooks/rlm-smoke:rlm-smoke host against an operator-supplied provider and need Docker for its jailed exec, and no crates/lash-e2e case drives that host",
           "registration": null,
           "note": "Paid, live-only row: runs only with OPENROUTER_API_KEY, OPENROUTER_MODEL, LASH_E2E_LIVE_BUDGET and LASH_E2E_OUTPUT_TOKEN_CAP, and fails without them; passed with z-ai/glm-5.3-flash (FIG-5150)."
         }
@@ -4494,9 +4720,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "feeds::s37_a_turn_on_one_node_reaches_another_nodes_feed_memory_replay"
+          }
         },
         {
           "variant": "postgresql-live-replay",
@@ -4521,15 +4750,18 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
-          "registration": null,
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "feeds::s37_a_turn_on_one_node_reaches_another_nodes_feed_live_replay"
+          },
           "live_replay": "postgresql"
         }
       ],
       "setup": "Two workbench nodes over one PostgreSQL store; B owns the session actor, so the turn A accepts executes on B. Observers follow the session feed on A (before and mid-turn) and on B.",
       "fault": "Hold the provider stream mid-turn and SIGKILL B under it; A reaps B and resumes the turn.",
-      "observable": "The turn runs on B, then resumes on A from committed state alone (the replay tripwire counts no hidden replay); both nodes' snapshots are one durable head; every A feed converges on the durable rows once and in order. With the process-local memory live replay store, B's live activity reaches B's feed and never A's, and A converges through the durable head (replay gap and snapshot). With the shared PostgreSQL live replay store (FIG-5101), A's feeds carry B's live activity before commit and converge without a gap.",
+      "observable": "The turn runs on B, then resumes on A from committed state alone (the replay tripwire counts no hidden replay); both nodes' snapshots are one durable head; every A feed converges on the durable rows once and in order. With the process-local memory live replay store, B's live activity reaches B's feed and never A's, and A converges through the durable head, reporting the span it never held once as an unavailable replay gap (FIG-5399). With the shared PostgreSQL live replay store (FIG-5101), A's feeds carry B's live activity before commit, one attempt reset retracts B's abandoned attempt before A's own streams, and no replay gap is reported (FIG-5366).",
       "arc_guards": [],
       "host": "workbench"
     }

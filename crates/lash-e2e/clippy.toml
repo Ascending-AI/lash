@@ -1,0 +1,11 @@
+# Crate-local clippy configuration. Clippy stops at the first `clippy.toml`
+# it finds walking up from the manifest directory, so this file shadows the
+# workspace one entirely.
+#
+# lash-e2e is the real-host E2E harness: it boots host processes, writes
+# their case directories and reads the runner's environment (FIG-2971). The
+# workspace `disallowed-methods` ambient fs/env/process ban therefore does not
+# apply here; the test exemptions below are repeated to match the workspace
+# file.
+allow-expect-in-tests = true
+allow-unwrap-in-tests = true

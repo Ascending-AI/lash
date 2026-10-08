@@ -139,7 +139,7 @@ impl Scenario {
         Arc::new(TelemetryPlugin(self.0.clone()))
     }
 
-    pub fn router(&self, stores: Arc<lash::sqlite::SqliteStoreSet>) -> Router {
+    pub fn router(&self, stores: Arc<dyn lash::StoreSet>) -> Router {
         let controls = self.0.clone();
         let releases = self.0.clone();
         let receipts = self.0.clone();

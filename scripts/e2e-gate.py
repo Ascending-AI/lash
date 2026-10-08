@@ -25,10 +25,9 @@ import xml.etree.ElementTree as ET
 
 
 ROOT = Path(__file__).resolve().parents[1]
-# No registration runs until a facade turn runs on the durable engine (L3's
-# facade wiring, FIG-5172) and L9h (FIG-5186) rebuilds the E2E host harness
-# on it.
-LABELS: frozenset[str] = frozenset()
+# The real-host harness (crates/lash-e2e): every registered case is one test
+# function of its one integration target.
+LABELS: frozenset[str] = frozenset({"//crates/lash-e2e:e2e__test"})
 WORKBENCH = "//examples/agent-workbench:agent-workbench"
 WORKER = "//crates/lash-vm-worker:lash-vm-worker__bin"
 LASHCTL = "//crates/lashctl:lashctl"
@@ -326,6 +325,7 @@ def run(label: str, name: str, artifacts: Path, case: str | None,
             "LASH_E2E_WORKBENCH_BIN": workbench,
             "LASH_E2E_WORKBENCH_SHA256": hashlib.sha256(Path(workbench).read_bytes()).hexdigest(),
             "LASH_WORKBENCH_E2E_BIN": str(outputs["workbench_e2e"]),
+            "LASH_WORKBENCH_E2E_SHA256": hashlib.sha256(outputs["workbench_e2e"].read_bytes()).hexdigest(),
             "LASH_UPGRADE_LASHCTL_N": str(outputs["lashctl_n"]),
             "LASH_UPGRADE_LASHCTL_NEXT": str(outputs["lashctl_next"]),
             "LASH_E2E_CONSUMER_BIN": str(outputs["consumer"]),
@@ -345,7 +345,7 @@ def run(label: str, name: str, artifacts: Path, case: str | None,
         # Kiln actions receive only explicitly forwarded runtime variables.
         keys = [key for key in env if key.startswith("LASH_E2E_")]
         keys += ["KILN_GATE_ID", "LASH_VM_WORKER",
-                 "LASH_WORKBENCH_E2E_BIN",
+                 "LASH_WORKBENCH_E2E_BIN", "LASH_WORKBENCH_E2E_SHA256",
                  "LASH_UPGRADE_LASHCTL_N", "LASH_UPGRADE_LASHCTL_NEXT",
                  "LASH_PHASE_A_ARTIFACT_DIR", "PLAYWRIGHT_BROWSERS_PATH", "TMPDIR"]
         # The paid live rows' provider credential and model reach the case only
