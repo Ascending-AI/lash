@@ -251,6 +251,7 @@ pub(super) async fn apply(
                 event_type.as_str(),
                 payload,
                 replay_key.as_str(),
+                commit.fleet,
             )
             .map_err(|error| registry_failure(&error))?;
             record_event_tx(tx, process, request, millis(commit.now)?, commit.fleet)

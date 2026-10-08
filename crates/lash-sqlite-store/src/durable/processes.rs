@@ -249,6 +249,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWri
                 event_type.as_str(),
                 payload,
                 replay_key.as_str(),
+                commit.fleet,
             ) {
                 Ok(request) => request,
                 Err(error) => return Ok(Err(registry_failure(&error))),

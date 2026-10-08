@@ -127,7 +127,13 @@ impl TryFrom<ObservedProcessEventRecord> for ObservedProcessEvent {
     fn try_from(record: ObservedProcessEventRecord) -> Result<Self, Self::Error> {
         Ok(Self {
             sequence: record.sequence,
-            fact: super::ProcessLifecycleFact::decode(&record.event_type, record.payload)?,
+            // The wire carries what this release's reader already lifted, so
+            // it is read in the newest fleet's window: no stored `F` applies.
+            fact: super::ProcessLifecycleFact::decode(
+                &record.event_type,
+                record.payload,
+                crate::FleetFormat::current(),
+            )?,
             occurred_at_ms: record.occurred_at_ms,
         })
     }

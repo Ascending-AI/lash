@@ -59,8 +59,7 @@ pub(super) async fn release_process_events(
         }
         for row in rows {
             let sequence: i64 = row.get(0);
-            let event: ProcessEvent =
-                serde_json::from_str(&row.get::<String, _>(1)).map_err(process_decode_error)?;
+            let event = ProcessEvent::decode(&row.get::<String, _>(1), registry.fence.fleet())?;
             if let Some(digest) =
                 lash_core_execution::runtime::release_process_event_payload(&event)
             {

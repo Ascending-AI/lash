@@ -24,10 +24,6 @@ use super::events::ProcessEventAppendRequest;
 ///         ),
 ///     ),
 ///     items(path = "crates/lash-core-execution/src/runtime/process/events.rs", ProcessLifecycleFact),
-///     items(
-///         path = "crates/lash-core-execution/src/runtime/process/validation.rs",
-///         validate_generic_process_event_append,
-///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
@@ -62,14 +58,16 @@ pub const PROCESS_EVENT_VOCABULARY_VERSION: u32 = 2;
 /// incorporation failure: the run aborts for redrive and the program never
 /// observes it. Nothing here promises exactly-once external I/O before the
 /// journal settles.
-pub const PROCESS_EFFECT_OUTCOME_EVENT_TYPE: &str = "process.effect_outcome";
+pub const PROCESS_EFFECT_OUTCOME_EVENT_TYPE: &str =
+    super::events::ProcessEventKind::EffectOutcome.as_str();
 
 /// Runtime-owned event counting, per node and outcome class, the occurrences
 /// beyond [`PROCESS_EFFECT_OCCURRENCE_CAP`] that were not recorded one by one.
 /// Committed once, as the penultimate event of the run's terminal batch (after
 /// its pending occurrences, before its terminal event), under the same
 /// recovery contract as [`PROCESS_EFFECT_OUTCOME_EVENT_TYPE`].
-pub const PROCESS_EFFECT_OMISSIONS_EVENT_TYPE: &str = "process.effect_omissions";
+pub const PROCESS_EFFECT_OMISSIONS_EVENT_TYPE: &str =
+    super::events::ProcessEventKind::EffectOmissions.as_str();
 
 /// Occurrences of one effect node the runtime records individually. Later
 /// occurrences are counted in the node's omission record instead. Pinned by
@@ -113,12 +111,14 @@ struct ProcessEffectOccurrenceFields {
     replay_key: String,
 }
 
+const CODE_ON_A_NON_FAILURE: &str = "only a failed effect occurrence may carry a failure code";
+
 impl TryFrom<ProcessEffectOccurrenceFields> for ProcessEffectOccurrence {
     type Error = &'static str;
 
     fn try_from(fields: ProcessEffectOccurrenceFields) -> Result<Self, Self::Error> {
         if fields.outcome_class != ProcessEffectOutcomeClass::Failure && fields.code.is_some() {
-            return Err("only a failed effect occurrence may carry a failure code");
+            return Err(CODE_ON_A_NON_FAILURE);
         }
         Ok(Self {
             vocabulary_version: fields.vocabulary_version,
@@ -188,12 +188,30 @@ impl ProcessEffectOccurrence {
         }
         let outcome: Self =
             serde_json::from_value(payload).map_err(ProcessEffectReportError::InvalidPayload)?;
-        if !Self::is_within_cap(outcome.occurrence) {
+        outcome.check()?;
+        Ok(outcome)
+    }
+
+    /// Admit an occurrence this build holds typed, as [`Self::decode`]
+    /// admits a stored one: its vocabulary version is in `fleet_format`'s
+    /// read window and it is one the runtime records.
+    pub fn admit(&self, fleet_format: crate::FleetFormat) -> Result<(), ProcessEffectReportError> {
+        admit_vocabulary_version(self.vocabulary_version, fleet_format)?;
+        self.check()
+    }
+
+    fn check(&self) -> Result<(), ProcessEffectReportError> {
+        if self.outcome_class != ProcessEffectOutcomeClass::Failure && self.code.is_some() {
+            return Err(ProcessEffectReportError::InvalidPayload(
+                <serde_json::Error as serde::de::Error>::custom(CODE_ON_A_NON_FAILURE),
+            ));
+        }
+        if !Self::is_within_cap(self.occurrence) {
             return Err(ProcessEffectReportError::OccurrenceOutsideCap {
-                occurrence: outcome.occurrence,
+                occurrence: self.occurrence,
             });
         }
-        Ok(outcome)
+        Ok(())
     }
 
     /// The runtime append for this occurrence, keyed by the effect's replay
@@ -277,17 +295,27 @@ impl ProcessEffectOmissions {
         }
         let omissions: Self =
             serde_json::from_value(payload).map_err(ProcessEffectReportError::InvalidPayload)?;
-        if omissions.occurrence_cap != PROCESS_EFFECT_OCCURRENCE_CAP {
+        omissions.check()?;
+        Ok(omissions)
+    }
+
+    /// The counterpart of [`ProcessEffectOccurrence::admit`].
+    pub fn admit(&self, fleet_format: crate::FleetFormat) -> Result<(), ProcessEffectReportError> {
+        admit_vocabulary_version(self.vocabulary_version, fleet_format)?;
+        self.check()
+    }
+
+    fn check(&self) -> Result<(), ProcessEffectReportError> {
+        if self.occurrence_cap != PROCESS_EFFECT_OCCURRENCE_CAP {
             return Err(ProcessEffectReportError::UnsupportedOccurrenceCap {
                 expected: PROCESS_EFFECT_OCCURRENCE_CAP,
-                actual: omissions.occurrence_cap,
+                actual: self.occurrence_cap,
             });
         }
-        if omissions.nodes.is_empty() || omissions.nodes.values().any(|counts| counts.total() == 0)
-        {
+        if self.nodes.is_empty() || self.nodes.values().any(|counts| counts.total() == 0) {
             return Err(ProcessEffectReportError::EmptyOmissions);
         }
-        Ok(omissions)
+        Ok(())
     }
 
     /// The runtime append for this record, keyed by `replay_key`: one key per
@@ -319,6 +347,22 @@ fn require_vocabulary_version(
         });
     }
     Ok(version)
+}
+
+fn admit_vocabulary_version(
+    version: u32,
+    fleet_format: crate::FleetFormat,
+) -> Result<(), ProcessEffectReportError> {
+    let window = fleet_format.read_window(lash_core_store::surface_format!(
+        PROCESS_EVENT_VOCABULARY_VERSION
+    ));
+    if !window.admits(version) {
+        return Err(ProcessEffectReportError::UnsupportedVocabularyVersion {
+            expected: window.newest(),
+            actual: u64::from(version),
+        });
+    }
+    Ok(())
 }
 
 /// The code a recorded tool failure carries. A failure the runtime, a policy
@@ -369,25 +413,25 @@ impl ProcessEffectReport {
     /// Folds one fact of the process's log, as a page of
     /// `Processes::events` or the registry returns it. Facts of other kinds
     /// are ignored. `fleet_format` is the `F` the bound store recorded: the
-    /// payload's read window comes from it (FIG-3796).
+    /// fact's read window comes from it (FIG-3796).
     pub fn fold_event(
         &mut self,
         fact: &super::ProcessLifecycleFact,
         fleet_format: crate::FleetFormat,
     ) -> Result<(), ProcessEffectReportError> {
         match fact {
-            super::ProcessLifecycleFact::EffectOutcome(_) => {
-                let outcome = ProcessEffectOccurrence::decode(fact.payload(), fleet_format)?;
+            super::ProcessLifecycleFact::EffectOutcome(outcome) => {
+                outcome.admit(fleet_format)?;
                 let node = self.node_entry(&outcome.node_id);
                 let position = node
                     .occurrences
                     .partition_point(|existing| existing.occurrence < outcome.occurrence);
-                node.occurrences.insert(position, outcome);
+                node.occurrences.insert(position, outcome.clone());
             }
-            super::ProcessLifecycleFact::EffectOmissions(_) => {
-                let omissions = ProcessEffectOmissions::decode(fact.payload(), fleet_format)?;
-                for (node_id, counts) in omissions.nodes {
-                    self.node_entry(&node_id).omitted = counts;
+            super::ProcessLifecycleFact::EffectOmissions(omissions) => {
+                omissions.admit(fleet_format)?;
+                for (node_id, counts) in &omissions.nodes {
+                    self.node_entry(node_id).omitted = *counts;
                 }
             }
             _ => {}

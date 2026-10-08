@@ -11,18 +11,93 @@ use super::model::{
     WaitState,
 };
 
-/// Refuse what only the runtime appends on the unfenced host path: the effect
-/// summary, so a host cannot pre-empt the runtime's replay key, and observer
-/// membership, which has its own registry operations.
-pub fn validate_generic_process_event_append(
-    request: &ProcessEventAppendRequest,
-) -> Result<(), PluginError> {
-    if request.kind().is_runtime_owned() {
-        return Err(PluginError::ReservedProcessEvent {
-            event_type: request.kind().as_str().to_string(),
-        });
+/// A lifecycle append as its process's log stores it: the one fact a replay
+/// lookup, a replay comparison, a released-payload digest and the inserted
+/// event all see.
+///
+/// Built only by [`ProcessEventAppendRequest::canonical`], which every store
+/// runs first on every append.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CanonicalProcessEventAppend {
+    request: ProcessEventAppendRequest,
+    replay_key: String,
+}
+
+impl CanonicalProcessEventAppend {
+    /// The fact the append stores.
+    pub fn fact(&self) -> &ProcessLifecycleFact {
+        &self.request.fact
     }
-    Ok(())
+
+    /// The append's replay key: the key a store looks the event up under.
+    pub fn replay_key(&self) -> &str {
+        &self.replay_key
+    }
+}
+
+impl ProcessEventAppendRequest {
+    /// Prepare this append against `record` as it stands, before anything
+    /// reads or compares it.
+    ///
+    /// A terminal takes the standing cancel request's origin
+    /// ([`ProcessTerminal::with_cancel_origin`]), so the request that wrote
+    /// a cancelled terminal is the same fact when it is presented again.
+    /// `fleet_format` is the `F` the bound store recorded: an effect summary
+    /// fact must be one this fleet writes (FIG-3796).
+    ///
+    /// # Errors
+    ///
+    /// A request without a replay key, or an effect summary fact its
+    /// vocabulary refuses.
+    pub fn canonical(
+        mut self,
+        record: &ProcessRecord,
+        fleet_format: crate::FleetFormat,
+    ) -> Result<CanonicalProcessEventAppend, PluginError> {
+        let replay_key = self
+            .replay
+            .as_ref()
+            .map(|replay| replay.key.clone())
+            .filter(|key| !key.is_empty())
+            .ok_or_else(|| {
+                PluginError::Session(format!(
+                    "process `{}` event `{}` requires a deterministic replay key",
+                    record.id,
+                    self.kind()
+                ))
+            })?;
+        match &mut self.fact {
+            ProcessLifecycleFact::EffectOutcome(occurrence) => {
+                occurrence
+                    .admit(fleet_format)
+                    .map_err(|error| PluginError::Session(error.to_string()))?;
+                if replay_key != occurrence.replay_key {
+                    return Err(PluginError::Session(
+                        "effect outcome payload replay_key must equal the append replay key"
+                            .to_string(),
+                    ));
+                }
+            }
+            ProcessLifecycleFact::EffectOmissions(omissions) => {
+                omissions
+                    .admit(fleet_format)
+                    .map_err(|error| PluginError::Session(error.to_string()))?;
+            }
+            ProcessLifecycleFact::Terminal { outcome, .. } => {
+                *outcome = outcome.clone().with_cancel_origin(
+                    record
+                        .cancel_request
+                        .as_deref()
+                        .map(|request| request.origin),
+                );
+            }
+            _ => {}
+        }
+        Ok(CanonicalProcessEventAppend {
+            request: self,
+            replay_key,
+        })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -399,55 +474,23 @@ fn repair_lifecycle_projection(
 
 /// Plan one lifecycle append against `record` as it stands.
 ///
-/// `replay_lookup` is the event the store found under the request's replay
+/// `replay_lookup` is the event the store found under the append's replay
 /// key, if any: the same fact answers it (repairing the record's fold when it
 /// is the process's last event), and any other fact is a durable-identity
-/// conflict. `fleet_format` is the `F` the bound store recorded: an effect
-/// summary payload must be one this fleet writes (FIG-3796).
+/// conflict.
 pub fn prepare_process_event_append(
     record: &ProcessRecord,
-    request: ProcessEventAppendRequest,
+    append: CanonicalProcessEventAppend,
     sequence: u64,
     last_event_sequence: Option<u64>,
     replay_lookup: Option<ProcessEvent>,
     occurred_at_ms: u64,
-    fleet_format: crate::FleetFormat,
 ) -> Result<ProcessEventAppendPlan, PluginError> {
     let process_id = &record.id;
-    let replay_key = request
-        .replay
-        .as_ref()
-        .map(|replay| replay.key.clone())
-        .filter(|key| !key.is_empty())
-        .ok_or_else(|| {
-            PluginError::Session(format!(
-                "process `{process_id}` event `{}` requires a deterministic replay key",
-                request.kind()
-            ))
-        })?;
-    match &request.fact {
-        ProcessLifecycleFact::EffectOutcome(occurrence) => {
-            super::effect_summary::ProcessEffectOccurrence::decode(
-                request.fact.payload(),
-                fleet_format,
-            )
-            .map_err(|error| PluginError::Session(error.to_string()))?;
-            if replay_key != occurrence.replay_key {
-                return Err(PluginError::Session(
-                    "effect outcome payload replay_key must equal the append replay key"
-                        .to_string(),
-                ));
-            }
-        }
-        ProcessLifecycleFact::EffectOmissions(_) => {
-            super::effect_summary::ProcessEffectOmissions::decode(
-                request.fact.payload(),
-                fleet_format,
-            )
-            .map_err(|error| PluginError::Session(error.to_string()))?;
-        }
-        _ => {}
-    }
+    let CanonicalProcessEventAppend {
+        request,
+        replay_key,
+    } = append;
     if let Some(existing) = replay_lookup {
         if existing.fact.same_fact(&request.fact) {
             let repair_record = if last_event_sequence == Some(existing.sequence) {
@@ -464,20 +507,12 @@ pub fn prepare_process_event_append(
             "process `{process_id}` event replay key `{replay_key}` conflicts with an existing event"
         )));
     }
-    let mut fact = request.fact;
-    if let ProcessLifecycleFact::Terminal { outcome, .. } = &mut fact {
-        if record.is_terminal() {
-            return Err(PluginError::ProcessAlreadyTerminal {
-                process_id: process_id.clone(),
-                status: record.status(),
-            });
-        }
-        *outcome = outcome.clone().with_cancel_origin(
-            record
-                .cancel_request
-                .as_deref()
-                .map(|request| request.origin),
-        );
+    let fact = request.fact;
+    if matches!(fact, ProcessLifecycleFact::Terminal { .. }) && record.is_terminal() {
+        return Err(PluginError::ProcessAlreadyTerminal {
+            process_id: process_id.clone(),
+            status: record.status(),
+        });
     }
     let kind = fact.kind();
     let event = ProcessEvent {

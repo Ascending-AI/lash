@@ -515,29 +515,6 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
 
 #[async_trait::async_trait]
 impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
-    async fn append_event(
-        &self,
-        process_id: &ProcessId,
-        request: ProcessEventAppendRequest,
-    ) -> Result<ProcessEventAppendReceipt, PluginError> {
-        facade_support::validate_generic_process_event_append(&request)?;
-        let mut tx = begin_guarded(&self.pool, &self.fence)
-            .await
-            .map_err(plugin_store_error)?;
-        let mut record = require_process_tx(&mut tx, process_id).await?;
-        let occurred_at_ms = self.clock.timestamp_ms();
-        let result = append_process_event_tx(
-            &mut tx,
-            &mut record,
-            request,
-            occurred_at_ms,
-            self.fence.fleet(),
-        )
-        .await?;
-        tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(result)
-    }
-
     async fn append_events(
         &self,
         process_id: &ProcessId,
@@ -625,11 +602,10 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
                     .fetch_all(&mut *tx)
                     .await
                     .map_err(plugin_sqlx_error)?;
+                let fleet_format = self.fence.fleet();
                 let events = rows
                     .into_iter()
-                    .map(|row| {
-                        serde_json::from_str(&row.get::<String, _>(0)).map_err(process_decode_error)
-                    })
+                    .map(|row| ProcessEvent::decode(&row.get::<String, _>(0), fleet_format))
                     .collect::<Result<Vec<_>, _>>()?;
                 lash_core_execution::ProcessEventPage::from_full_rows(events, limit)
             }
@@ -680,10 +656,11 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
             .fetch_all(&self.pool)
             .await
             .map_err(plugin_sqlx_error)?;
+        let fleet_format = self.fence.fleet();
         let mut events = Vec::new();
         for row in rows {
             let json: String = row.get(0);
-            events.push(serde_json::from_str(&json).map_err(process_decode_error)?);
+            events.push(ProcessEvent::decode(&json, fleet_format)?);
         }
         events.reverse();
         Ok(events)

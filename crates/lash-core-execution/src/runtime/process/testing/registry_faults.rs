@@ -206,8 +206,8 @@ impl ProcessRegistryFaults {
         self.faults.lock_recover().cancel_request_write_error = Some(error);
     }
 
-    /// The next plain event append fails with `error`, once, without reaching
-    /// the wrapped registry.
+    /// The next event append fails with `error`, once, without reaching the
+    /// wrapped registry.
     pub fn fail_next_event_append(&self, error: crate::PluginError) {
         self.faults.lock_recover().event_append_error = Some(error);
     }
@@ -479,24 +479,16 @@ delegate_process_observer_registry!(ProcessRegistryFaults, inner, delete_session
 
 #[async_trait::async_trait]
 impl super::super::registry_concerns::ProcessEventLog for ProcessRegistryFaults {
-    async fn append_event(
-        &self,
-        process_id: &ProcessId,
-        request: crate::ProcessEventAppendRequest,
-    ) -> Result<crate::ProcessEventAppendReceipt, crate::PluginError> {
-        let injected = self.faults.lock_recover().event_append_error.take();
-        if let Some(error) = injected {
-            return Err(error);
-        }
-        self.inner.append_event(process_id, request).await
-    }
-
     async fn append_event_with_authority(
         &self,
         process_id: &ProcessId,
         request: crate::ProcessEventAppendRequest,
         authority: &crate::ProcessExecutionWriteAuthority,
     ) -> Result<crate::ProcessEventAppendReceipt, crate::PluginError> {
+        let injected = self.faults.lock_recover().event_append_error.take();
+        if let Some(error) = injected {
+            return Err(error);
+        }
         self.inner
             .append_event_with_authority(process_id, request, authority)
             .await
@@ -508,6 +500,10 @@ impl super::super::registry_concerns::ProcessEventLog for ProcessRegistryFaults 
         requests: Vec<crate::ProcessEventAppendRequest>,
         authority: &crate::ProcessExecutionWriteAuthority,
     ) -> Result<Vec<crate::ProcessEventAppendReceipt>, crate::PluginError> {
+        let injected = self.faults.lock_recover().event_append_error.take();
+        if let Some(error) = injected {
+            return Err(error);
+        }
         self.inner
             .append_events(process_id, requests, authority)
             .await

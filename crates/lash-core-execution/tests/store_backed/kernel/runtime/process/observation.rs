@@ -9,11 +9,10 @@ mod tests {
         ObservedWorkItemState, ProcessAwaitOutput, ProcessListFilter, ProcessRegistryFaults,
         ProcessWorkObserver,
     };
-    use crate::{
-        ProcessEventAppendRequest, ProcessObserverBy, ProcessProvenance, ProcessRegistration,
-        SessionScope, ToolFailureClass,
-    };
     use crate::{ProcessId, ProcessRegistry, SessionId};
+    use crate::{
+        ProcessObserverBy, ProcessProvenance, ProcessRegistration, SessionScope, ToolFailureClass,
+    };
 
     async fn memory_registry() -> Arc<dyn ProcessRegistry> {
         crate::support::sqlite_memory_process_store_set()
@@ -184,19 +183,11 @@ mod tests {
         let newer_id = register_visible(&registry, &scope, external_registration("Newer")).await;
         tokio::time::sleep(Duration::from_millis(2)).await;
         registry
-            .append_event(
+            .request_process_cancel(
                 &older_id,
-                ProcessEventAppendRequest::cancel_requested(
-                    &registry
-                        .require_process_id(&older_id)
-                        .await
-                        .expect("retained observed target"),
-                    &crate::CancelRequest::new(
-                        crate::CancelOrigin::OperatorRequested,
-                        "actor:observation-test",
-                        11,
-                    ),
-                ),
+                crate::CancelOrigin::OperatorRequested,
+                "actor:observation-test".to_string(),
+                None,
             )
             .await
             .expect("update older process");

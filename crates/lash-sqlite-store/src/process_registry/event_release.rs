@@ -33,6 +33,7 @@ impl SqliteProcessRegistry {
                     tx,
                     &process_id,
                     through,
+                    tx.fleet(),
                 )))
             })
             .await
@@ -46,6 +47,7 @@ impl SqliteProcessRegistry {
         conn: &crate::conn::FencedTx<'_>,
         process_id: &ProcessId,
         through: u64,
+        fleet_format: lash_core_execution::FleetFormat,
     ) -> Result<lash_core_execution::ProcessEventRelease, lash_core_execution::PluginError> {
         let record = Self::require_process_conn(conn, process_id)?;
         let previous = Self::released_through_conn(conn, process_id)?;
@@ -82,8 +84,7 @@ impl SqliteProcessRegistry {
                 break;
             }
             for (sequence, json) in rows {
-                let event: ProcessEvent =
-                    serde_json::from_str(&json).map_err(process_decode_error)?;
+                let event = ProcessEvent::decode(&json, fleet_format)?;
                 if let Some(digest) =
                     lash_core_execution::runtime::release_process_event_payload(&event)
                 {

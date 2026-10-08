@@ -309,6 +309,35 @@ pub(crate) fn started_detached(
     registration
 }
 
+/// Start `process_id`'s first execution attempt, and answer the authority
+/// its runner appends under: the only authority a lifecycle append takes.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub(crate) async fn start_runner<R>(
+    registry: &R,
+    process_id: &crate::ProcessId,
+) -> crate::ProcessExecutionWriteAuthority
+where
+    R: crate::ProcessLifecycle + ?Sized,
+{
+    let authority =
+        crate::ProcessExecutionWriteAuthority::invocation(process_id.clone(), "law-runner:1")
+            .bind_attempt(1);
+    registry
+        .record_first_started_with_authority(
+            process_id,
+            authority
+                .invocation_started()
+                .expect("a bound invocation names its execution"),
+            &authority,
+        )
+        .await
+        .expect("record the runner's execution start");
+    authority
+}
+
 /// A lifecycle wait fact with stable replay identity for store laws.
 pub(crate) fn call_wait_event(
     process: &crate::ProcessId,

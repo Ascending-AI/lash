@@ -38,8 +38,6 @@ fn processes_area_witnesses() {
     let _ = lash::durability::DurableProcessWorker::config;
     // W0018: lash::durability::DurableProcessWorker::new [function]
     let _ = lash::durability::DurableProcessWorker::new;
-    // W0019: lash::durability::DurableProcessWorker::request_process_cancel [function]
-    let _ = lash::durability::DurableProcessWorker::request_process_cancel;
     // W0021: lash::durability::DurableProcessWorkerConfig [struct]
     type_witness::<lash::durability::DurableProcessWorkerConfig>();
     // W0022: lash::durability::DurableProcessWorkerConfig::from_plugin_factories [function]
@@ -194,11 +192,11 @@ fn processes_area_witnesses() {
             let _ = outcome_status;
         }
     });
-    // W0133: lash::plugins::PluginError::ReservedProcessEvent [variant]
+    // W0133: lash::plugins::PluginError::UnknownProcessEventKind [variant]
     variant_witness(|value: &lash::plugins::PluginError| {
         matches!(
             value,
-            lash::plugins::PluginError::ReservedProcessEvent { .. }
+            lash::plugins::PluginError::UnknownProcessEventKind { .. }
         )
     });
     // W0135: lash::plugins::PluginHost::install_process_engine_contributions [function]

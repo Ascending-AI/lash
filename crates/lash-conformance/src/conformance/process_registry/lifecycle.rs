@@ -258,9 +258,10 @@ pub(super) async fn a_resume_event_cannot_return_an_ended_process_to_running(
         },
     };
     let error = registry
-        .append_event(
+        .append_event_with_authority(
             &process_id,
             ProcessEventAppendRequest::wait_cleared(&process_id, &wait),
+            &authority,
         )
         .await
         .expect_err("a resume cannot take an outcome back");

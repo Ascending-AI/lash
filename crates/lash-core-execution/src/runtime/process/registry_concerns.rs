@@ -340,23 +340,14 @@ pub trait ProcessObserverRegistry: ProcessQuery {
 
 /// The per-process append-only event log.
 ///
-/// Host-owned and authority-fenced appends plus sequence-cursor reads.
+/// Authority-fenced appends plus sequence-cursor reads. Process engines
+/// append no event themselves: lash appends every lifecycle fact an
+/// activation commits, and a cancel request goes through
+/// [`ProcessLifecycle::request_process_cancel`].
 /// Requires [`ProcessQuery`]: reads resolve a process's retention through
 /// point reads.
 #[async_trait::async_trait]
 pub trait ProcessEventLog: ProcessQuery {
-    /// This unfenced path is reserved for host cancel coordination. Process
-    /// engines append no event themselves: lash appends every lifecycle fact
-    /// an activation commits. A runtime-owned fact (an effect outcome or
-    /// omission, an observer change) is refused with
-    /// [`PluginError::ReservedProcessEvent`], even if it carries a replay key.
-    /// This rule also applies to batches.
-    async fn append_event(
-        &self,
-        process_id: &ProcessId,
-        request: ProcessEventAppendRequest,
-    ) -> Result<ProcessEventAppendReceipt, PluginError>;
-
     /// Append one execution-owned event: a batch of one
     /// ([`Self::append_events`]).
     async fn append_event_with_authority(

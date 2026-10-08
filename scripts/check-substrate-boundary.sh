@@ -387,7 +387,7 @@ fi
 # deleted, and none of their names may come back. `ArtifactCleanup` keeps its outbox and its relay (ADR 0113). A
 # comment line is history, not a path, so it is not a hit.
 obligation_kinds='Ingress|ControlIntent|ScopeClose|ParentEnd|SessionDelete|ProcessTerminal|TriggerDelivery|ProcessStart'
-obligation_names='ProcessWakeOutbox|RecordedJournal[A-Za-z]*|ScopeCloseSink|NoScopeClose|RegistryScopeClose|ReconcileCursor|RelayNeed|ObligationRelayUnavailable|SessionDeleteLedger|SessionDeleteObligation|SessionCleanup|ProcessTerminalPublication|TransientTerminalPublication|settle_terminal_publication|list_parent_end_children|settle_parent_end_plan|get_parent_end_plan_by_key|list_unrecorded_opener_parents|apply_parent_end_plan|session_delete_ledger|relay_kind|consumer_settles|deliver_claimed|law_tick_lanes'
+obligation_names='RecordedJournal[A-Za-z]*|ScopeCloseSink|NoScopeClose|RegistryScopeClose|ReconcileCursor|RelayNeed|ObligationRelayUnavailable|SessionDeleteLedger|SessionDeleteObligation|SessionCleanup|ProcessTerminalPublication|TransientTerminalPublication|settle_terminal_publication|list_parent_end_children|settle_parent_end_plan|get_parent_end_plan_by_key|list_unrecorded_opener_parents|apply_parent_end_plan|session_delete_ledger|relay_kind|consumer_settles|deliver_claimed|law_tick_lanes'
 obligation_forbidden="(^|[^[:alnum:]_])(Obligation(Kind|Key)::(${obligation_kinds})|${obligation_names})([^[:alnum:]_]|$)"
 capture_search "deleted obligation relay" "$obligation_forbidden" "$tmp_dir/rule7e.raw" "${rule4_runs[@]}"
 : >"$tmp_dir/rule7e.hits"

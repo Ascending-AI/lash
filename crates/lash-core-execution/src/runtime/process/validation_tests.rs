@@ -4,7 +4,7 @@ use super::{
 };
 use crate::runtime::process::{
     ProcessEffectOccurrence, ProcessEffectOmissions, ProcessEffectOmittedCounts,
-    ProcessEffectOutcomeClass, validate_generic_process_event_append,
+    ProcessEffectOutcomeClass,
 };
 use crate::{
     ProcessEventAppendRequest, ProcessExternalRef, ProcessProvenance, ProcessRecord,
@@ -16,6 +16,25 @@ fn fixture_registration(_label: &str) -> ProcessRegistration {
         serde_json::Value::Null,
         ProcessProvenance::host(),
         crate::Lifetime::Detached,
+    )
+}
+
+/// Plan `request` as a store does: the canonical preparation, then the plan.
+fn plan_append(
+    record: &ProcessRecord,
+    request: ProcessEventAppendRequest,
+    sequence: u64,
+    last_event_sequence: Option<u64>,
+    replay_lookup: Option<crate::ProcessEvent>,
+    occurred_at_ms: u64,
+) -> Result<ProcessEventAppendPlan, crate::PluginError> {
+    prepare_process_event_append(
+        record,
+        request.canonical(record, crate::FleetFormat::current())?,
+        sequence,
+        last_event_sequence,
+        replay_lookup,
+        occurred_at_ms,
     )
 }
 
@@ -40,11 +59,12 @@ fn effect_summary_refuses_unknown_runtime_kind() {
         "process.effect_future",
         serde_json::json!({}),
         "future-effect",
+        crate::FleetFormat::current(),
     )
     .expect_err("an unknown runtime-owned effect kind must be refused");
     assert!(matches!(
         error,
-        crate::PluginError::ReservedProcessEvent { .. }
+        crate::PluginError::UnknownProcessEventKind { .. }
     ));
 }
 
@@ -61,16 +81,8 @@ fn effect_summary_refuses_payload_and_append_identity_drift() {
         .expect("effect event has a replay key")
         .key = "different-effect".to_string();
 
-    let error = prepare_process_event_append(
-        &record,
-        request,
-        1,
-        None,
-        None,
-        42,
-        crate::FleetFormat::current(),
-    )
-    .expect_err("the payload may not claim a different effect");
+    let error = plan_append(&record, request, 1, None, None, 42)
+        .expect_err("the payload may not claim a different effect");
     assert!(
         error
             .to_string()
@@ -79,28 +91,63 @@ fn effect_summary_refuses_payload_and_append_identity_drift() {
     );
 }
 
+/// A stored effect fact is read through its versioned reader: a payload
+/// outside the fleet's read window is refused when the event is read, not
+/// admitted as whatever its fields happen to parse to (FIG-5509).
 #[test]
-fn the_generic_append_refuses_runtime_owned_effect_summary_kinds() {
+fn a_stored_effect_fact_is_read_inside_the_fleet_read_window() {
+    let fleet = crate::FleetFormat::current();
     let mut counts = ProcessEffectOmittedCounts::default();
     counts.record(ProcessEffectOutcomeClass::Success);
     for request in [
         effect_summary_request(),
         ProcessEffectOmissions::new(
             std::collections::BTreeMap::from([("node".to_string(), counts)]),
-            crate::FleetFormat::current(),
+            fleet,
         )
         .append_request("omissions"),
     ] {
-        let event_type = request.kind().as_str().to_string();
+        let event_type = request.fact.event_type();
+        let stored = request.fact.payload();
+        assert_eq!(
+            crate::ProcessLifecycleFact::decode(event_type, stored.clone(), fleet)
+                .expect("a payload this fleet writes is read back"),
+            request.fact
+        );
+        let mut future = stored;
+        future["vocabulary_version"] = serde_json::json!(u32::MAX);
+        let error = crate::ProcessLifecycleFact::decode(event_type, future, fleet)
+            .expect_err("a payload outside the read window is refused");
         assert!(
-            matches!(
-                validate_generic_process_event_append(&request),
-                Err(crate::PluginError::ReservedProcessEvent { event_type: refused })
-                    if refused == event_type
-            ),
-            "a host append of `{event_type}` must be refused"
+            error.to_string().contains("vocabulary version"),
+            "`{event_type}`: {error}"
         );
     }
+}
+
+/// The effect vocabulary's version stamp names an encoding, not the fact: the
+/// occurrence a newer reader lifted is the one the older writer appended, and
+/// any other difference is another fact (FIG-5509).
+#[test]
+fn an_effect_fact_replays_across_its_vocabulary_stamp() {
+    let request = effect_summary_request();
+    let crate::ProcessLifecycleFact::EffectOutcome(written) = &request.fact else {
+        panic!("the fixture appends an effect outcome");
+    };
+    let mut lifted = written.clone();
+    lifted.vocabulary_version += 1;
+    assert!(
+        request
+            .fact
+            .same_fact(&crate::ProcessLifecycleFact::EffectOutcome(lifted))
+    );
+    let mut changed = written.clone();
+    changed.code = Some(crate::FailureCode::from_foreign_wire("fixture:changed"));
+    assert!(
+        !request
+            .fact
+            .same_fact(&crate::ProcessLifecycleFact::EffectOutcome(changed))
+    );
 }
 
 /// A record holds one lifecycle state, on the stored row and the wire alike:
@@ -301,14 +348,13 @@ fn a_persisted_record_accepts_every_runtime_lifecycle_fact() {
     ];
     for (index, request) in requests.into_iter().enumerate() {
         let sequence = index as u64 + 1;
-        let plan = prepare_process_event_append(
+        let plan = plan_append(
             &record,
             request,
             sequence,
             (sequence > 1).then_some(sequence - 1),
             None,
             sequence + 10,
-            crate::FleetFormat::current(),
         )
         .expect("runtime-owned lifecycle append must validate");
         let ProcessEventAppendPlan::Insert {

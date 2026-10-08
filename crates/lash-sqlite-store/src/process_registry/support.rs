@@ -93,6 +93,7 @@ pub(super) async fn recent_events(
     limit: usize,
 ) -> Result<Vec<ProcessEvent>, lash_core_execution::PluginError> {
     let process_id = process_id.clone();
+    let fleet_format = registry.conn.fleet();
     registry
         .conn
         .call(move |conn| {
@@ -108,8 +109,7 @@ pub(super) async fn recent_events(
                     .map_err(process_sqlite_error)?;
                 let mut events = rows
                     .map(|row| {
-                        serde_json::from_str(&row.map_err(process_sqlite_error)?)
-                            .map_err(process_decode_error)
+                        ProcessEvent::decode(&row.map_err(process_sqlite_error)?, fleet_format)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 events.reverse();
@@ -349,19 +349,19 @@ impl SqliteProcessRegistry {
         .map_err(process_sqlite_error)
     }
 
-    /// The event `request`'s replay key already recorded, if any. A released
-    /// event comes back with `request`'s payload when it carries the released
+    /// The event `append`'s replay key already recorded, if any. A released
+    /// event comes back with `append`'s fact when it carries the released
     /// digest, and refuses as a conflict when it does not.
     pub(crate) fn load_event_by_key_conn(
         conn: &Connection,
         process_id: &ProcessId,
-        replay_key: &str,
-        request: &ProcessEventAppendRequest,
+        append: &lash_core_execution::facade_support::CanonicalProcessEventAppend,
+        fleet_format: lash_core_execution::FleetFormat,
     ) -> Result<Option<ProcessEvent>, lash_core_execution::PluginError> {
         let row: Option<(String, Option<String>)> = conn
             .query_row(
                 process_sql().event.select_by_replay_key.sql(),
-                params![process_id.as_str(), replay_key],
+                params![process_id.as_str(), append.replay_key()],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()
@@ -373,9 +373,9 @@ impl SqliteProcessRegistry {
             Some(digest) => lash_core_execution::runtime::restore_released_process_event(
                 serde_json::from_str(&json).map_err(process_decode_error)?,
                 &digest,
-                request,
+                append,
             )?,
-            None => serde_json::from_str(&json).map_err(process_decode_error)?,
+            None => ProcessEvent::decode(&json, fleet_format)?,
         };
         Ok(Some(event))
     }
@@ -428,8 +428,8 @@ impl SqliteProcessRegistry {
     /// The one process-event append sequence for the SQLite store, short of
     /// the process save.
     ///
-    /// Every entry point runs these steps, in this order: replay-key lookup,
-    /// next sequence number, prepare, the replay-or-insert decision, the
+    /// Every entry point runs these steps, in this order: the canonical
+    /// preparation, replay-key lookup, next sequence number, prepare, the replay-or-insert decision, the
     /// event insert, the projection update and parent-end retention.
     /// The caller saves the process once the projection
     /// has moved ([`ProcessEventAppendArm::record_changed`]): after this one
@@ -447,21 +447,16 @@ impl SqliteProcessRegistry {
     ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), lash_core_execution::PluginError>
     {
         let process_id = record.id.clone();
-        let replay_lookup =
-            if let Some(replay_key) = request.replay.as_ref().map(|replay| replay.key.as_str()) {
-                Self::load_event_by_key_conn(conn, &process_id, replay_key, &request)?
-            } else {
-                None
-            };
+        let append = request.canonical(record, fleet_format)?;
+        let replay_lookup = Self::load_event_by_key_conn(conn, &process_id, &append, fleet_format)?;
         let (last_sequence, sequence) = Self::next_event_sequence_conn(conn, &process_id)?;
         let prepared = prepare_process_event_append(
             record,
-            request,
+            append,
             sequence,
             last_sequence,
             replay_lookup,
             occurred_at_ms,
-            fleet_format,
         )?;
         match prepared {
             lash_core_execution::facade_support::ProcessEventAppendPlan::Replay {

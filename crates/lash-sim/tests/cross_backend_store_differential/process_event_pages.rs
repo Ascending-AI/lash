@@ -14,6 +14,35 @@ fn page_wait(id: &lash_sansio::ProcessId, label: &str) -> lash_core::ProcessEven
 use super::*;
 use lash_core::ProcessEventLogTestSupport as _;
 
+/// Start `process_id`'s first execution attempt, and answer the authority
+/// its runner appends under.
+#[expect(
+    clippy::expect_used,
+    reason = "differential fixture: setup and oracle failures stop the comparison"
+)]
+async fn start_runner<R>(
+    registry: &R,
+    process_id: &lash_sansio::ProcessId,
+) -> lash_core::ProcessExecutionWriteAuthority
+where
+    R: lash_core::ProcessLifecycle + ?Sized,
+{
+    let authority =
+        lash_core::ProcessExecutionWriteAuthority::invocation(process_id.clone(), "page-runner:1")
+            .bind_attempt(1);
+    registry
+        .record_first_started_with_authority(
+            process_id,
+            authority
+                .invocation_started()
+                .expect("a bound invocation names its execution"),
+            &authority,
+        )
+        .await
+        .expect("record the runner's execution start");
+    authority
+}
+
 #[expect(
     clippy::expect_used,
     reason = "differential fixture: setup and oracle failures stop the comparison"
@@ -30,6 +59,8 @@ async fn release_observations(
         .await
         .expect("register release process")
         .id;
+    // The runner's start is event 1; the compared events follow it.
+    let runner = start_runner(registry, &process_id).await;
     let request = |ordinal: u64| {
         page_wait(
             &process_id,
@@ -40,12 +71,12 @@ async fn release_observations(
     for ordinal in 1..=3 {
         assert_eq!(
             registry
-                .append_event(&process_id, request(ordinal))
+                .append_event_with_authority(&process_id, request(ordinal), &runner)
                 .await
                 .expect("append release event")
                 .event
                 .sequence,
-            ordinal
+            ordinal + 1
         );
     }
     let mut releases = Vec::new();
@@ -69,26 +100,26 @@ async fn release_observations(
                 .expect("read released prefix"),
             lash_core::ProcessEventReadOutcome::NoLongerRetained(
                 lash_core::ProcessEventHistoryRetention::Released {
-                    released_through: 3,
+                    released_through: 4,
                 }
             )
         );
     }
     let replay = registry
-        .append_event(&process_id, request(1))
+        .append_event_with_authority(&process_id, request(1), &runner)
         .await
         .expect("replay released event");
-    assert_eq!(replay.event.sequence, 1);
+    assert_eq!(replay.event.sequence, 2);
     assert_eq!(replay.event.fact.payload(), request(1).fact.payload());
     assert_eq!(replay.realization, lash_core::StoreRealization::Coalesced);
     assert_eq!(
         registry
-            .append_event(&process_id, request(4))
+            .append_event_with_authority(&process_id, request(4), &runner)
             .await
             .expect("append retained suffix")
             .event
             .sequence,
-        4
+        5
     );
     (process_id, releases)
 }
@@ -119,8 +150,8 @@ async fn event_release_differential_on_sqlite_memory_and_file() {
                 released_events: 0,
             },
             lash_core::ProcessEventRelease {
-                released_through: 3,
-                released_events: 1,
+                released_through: 4,
+                released_events: 2,
             },
         ]
     );
@@ -166,7 +197,13 @@ where
         };
         for (sequence, event_type) in metadata {
             assert_eq!(sequence, expected_sequence);
-            assert_eq!(event_type, "process.waiting");
+            // The runner's start precedes the seeded waits.
+            let expected_type = if sequence == 1 {
+                "process.first_started"
+            } else {
+                "process.waiting"
+            };
+            assert_eq!(event_type, expected_type);
             expected_sequence += 1;
         }
         after_sequence = match page.more {
@@ -224,15 +261,18 @@ pub(super) async fn compare_bounded_process_event_pages(
         page_wait(&process_id, "payload excluded by lite projection")
             .with_replay_key("page-event-1")
     };
+    let sqlite_runner = start_runner(&sqlite, &process_id).await;
+    let postgres_runner = start_runner(&postgres_registry, &process_id).await;
     let first = sqlite
-        .append_event(&process_id, request())
+        .append_event_with_authority(&process_id, request(), &sqlite_runner)
         .await
         .expect("append SQLite seed event")
         .event;
     postgres_registry
-        .append_event(&process_id, request())
+        .append_event_with_authority(&process_id, request(), &postgres_runner)
         .await
         .expect("append PostgreSQL seed event");
+    let seeded_from = first.sequence + 1;
 
     {
         let mut connection = rusqlite::Connection::open(&sqlite_path)
@@ -247,7 +287,7 @@ pub(super) async fn compare_bounded_process_event_pages(
                  VALUES (?1, ?2, ?3, NULL, ?4)",
             )
             .expect("prepare SQLite page seed");
-        for sequence in 2..=EVENT_COUNT {
+        for sequence in seeded_from..=EVENT_COUNT {
             let mut event = first.clone();
             event.sequence = sequence;
             insert
@@ -267,12 +307,13 @@ pub(super) async fn compare_bounded_process_event_pages(
          (process_id, sequence, event_type, idempotency_key, event_json)
          SELECT $1, sequence, $2, NULL,
                 jsonb_set($3::jsonb, '{sequence}', to_jsonb(sequence))::text
-           FROM generate_series(2, $4) AS sequence",
+           FROM generate_series($5, $4) AS sequence",
     )
     .bind(process_id.as_str())
     .bind("process.waiting")
     .bind(serde_json::to_string(&first).expect("encode PostgreSQL seed event"))
     .bind(EVENT_COUNT as i64)
+    .bind(seeded_from as i64)
     .execute(postgres.pool())
     .await
     .expect("seed PostgreSQL process events");

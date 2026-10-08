@@ -78,8 +78,8 @@ fn finished_record(process_id: &ProcessId) -> TraceRecord {
     finished
 }
 
-/// One host-owned lifecycle append: the `n`th tick enters a wait on the
-/// `n`th call, so every tick is a new event at the next sequence.
+/// One lifecycle append: the `n`th tick enters a wait on the `n`th call, so
+/// every tick is a new event at the next sequence.
 fn tick(process_id: &ProcessId, n: u64) -> lash_core::ProcessEventAppendRequest {
     let wait = lash_core::WaitState {
         since_ms: n,
@@ -91,8 +91,8 @@ fn tick(process_id: &ProcessId, n: u64) -> lash_core::ProcessEventAppendRequest 
     lash_core::ProcessEventAppendRequest::wait_entered(process_id, &wait)
 }
 
-/// An engine process that writes runtime-owned summary events, or an external
-/// process used to exercise host-owned event paths.
+/// An engine process that writes runtime-owned summary events, or a held
+/// process whose runner appends its lifecycle facts.
 fn registration(label: &str, engine_owned: bool) -> lash_core::ProcessRegistration {
     let input = if engine_owned {
         lash_core::ProcessInput::Engine {
@@ -125,12 +125,34 @@ fn registration(label: &str, engine_owned: bool) -> lash_core::ProcessRegistrati
     }
 }
 
+/// Start `process_id`'s first execution attempt, and answer the authority
+/// its runner appends under.
+async fn start_runner(
+    registry: &dyn ProcessRegistry,
+    process_id: &ProcessId,
+) -> lash_core::ProcessExecutionWriteAuthority {
+    let authority =
+        lash_core::ProcessExecutionWriteAuthority::invocation(process_id.clone(), "l8-invocation")
+            .bind_attempt(1);
+    registry
+        .record_first_started_with_authority(
+            process_id,
+            authority
+                .invocation_started()
+                .expect("the authority is bound to attempt one"),
+            &authority,
+        )
+        .await
+        .expect("record the L8 execution start");
+    authority
+}
+
 struct Fixture {
     _dir: Option<tempfile::TempDir>,
     registry: Arc<dyn ProcessRegistry>,
     hub: Arc<ProcessObservationHub>,
     process_id: ProcessId,
-    execution_authority: Option<lash_core::ProcessExecutionWriteAuthority>,
+    execution_authority: lash_core::ProcessExecutionWriteAuthority,
     ticks: std::sync::atomic::AtomicU64,
 }
 
@@ -165,26 +187,7 @@ impl Fixture {
             .await
             .expect("register L8 process")
             .id;
-        let execution_authority = if engine_owned {
-            let authority = lash_core::ProcessExecutionWriteAuthority::invocation(
-                process_id.clone(),
-                "l8-invocation",
-            )
-            .bind_attempt(1);
-            registry
-                .record_first_started_with_authority(
-                    &process_id,
-                    authority
-                        .invocation_started()
-                        .expect("the authority is bound to attempt one"),
-                    &authority,
-                )
-                .await
-                .expect("record the L8 execution start");
-            Some(authority)
-        } else {
-            None
-        };
+        let execution_authority = start_runner(registry.as_ref(), &process_id).await;
         Self {
             _dir: dir,
             registry,
@@ -199,13 +202,14 @@ impl Fixture {
     async fn commit(&self, publish: bool) -> ProcessEvent {
         let event = self
             .registry
-            .append_event(
+            .append_event_with_authority(
                 &self.process_id,
                 tick(
                     &self.process_id,
                     self.ticks
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
                 ),
+                &self.execution_authority,
             )
             .await
             .expect("commit a tick")
@@ -236,9 +240,7 @@ impl Fixture {
             .append_event_with_authority(
                 &self.process_id,
                 outcome.append_request(),
-                self.execution_authority
-                    .as_ref()
-                    .expect("an engine-owned fixture"),
+                &self.execution_authority,
             )
             .await
             .expect("commit an effect outcome")
@@ -1006,6 +1008,7 @@ async fn the_facade_routes_commits_to_the_hub_and_pages_by_cursor() {
         .await
         .expect("register")
         .id;
+    let runner = start_runner(watched.as_ref(), &process_id).await;
 
     let read = core
         .processes()
@@ -1025,7 +1028,7 @@ async fn the_facade_routes_commits_to_the_hub_and_pages_by_cursor() {
     quiet(&mut subscription).await;
 
     let committed = watched
-        .append_event(&process_id, tick(&process_id, 0))
+        .append_event_with_authority(&process_id, tick(&process_id, 0), &runner)
         .await
         .expect("commit through the watched registry")
         .event;

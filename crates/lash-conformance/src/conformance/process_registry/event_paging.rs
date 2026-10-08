@@ -10,9 +10,10 @@ pub(super) async fn assert_out_of_range_sequences_are_rejected(registry: Arc<dyn
         .await
         .expect("register cursor-range process")
         .id;
+    let runner = start_runner(registry.as_ref(), &process_id).await;
     for index in 0..2 {
         registry
-            .append_event(
+            .append_event_with_authority(
                 &process_id,
                 call_wait_event(
                     &process_id,
@@ -20,6 +21,7 @@ pub(super) async fn assert_out_of_range_sequences_are_rejected(registry: Arc<dyn
                     &index.to_string(),
                     serde_json::json!({ "index": index }),
                 ),
+                &runner,
             )
             .await
             .expect("append cursor-range event");

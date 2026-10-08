@@ -12,7 +12,7 @@ use pretty_assertions::assert_eq;
 /// it persists nothing, so nothing a later read sees may move.
 ///
 /// Each backend spells the sequence once and reaches it from two entry points
-/// — the unfenced host append and workflow-key completion. Both are exercised
+/// — a runner's authority-fenced append and workflow-key completion. Both are exercised
 /// here. The completion path settles its repeat call on the already-terminal
 /// row rather than the replay arm proper; the observable contract is the same
 /// either way, and asserting it per entry point is what catches an event row
@@ -24,13 +24,14 @@ use pretty_assertions::assert_eq;
 pub async fn process_event_append_arms_are_ordered(
     registry: Arc<dyn crate::ConformanceProcessRegistry>,
 ) {
-    // Entry point 1: the unfenced host append, which reaches the replay arm
-    // proper through a repeated replay key.
+    // Entry point 1: a runner's append, which reaches the replay arm proper
+    // through a repeated replay key.
     let host_id = registry
         .register_process(registration("append-arm-host"))
         .await
         .expect("register host-append arm process")
         .id;
+    let runner = start_runner(registry.as_ref(), &host_id).await;
     let host_request = || {
         call_wait_event(
             &host_id,
@@ -41,11 +42,11 @@ pub async fn process_event_append_arms_are_ordered(
         .with_replay_key("append-arm-host:wait:1")
     };
     let baseline = append_arm_footprint(&registry, &host_id).await;
-    assert_eq!(baseline, 0, "a registered process has no events yet");
+    assert_eq!(baseline, 1, "a started process holds its start event");
     let inserted = registry
-        .append_event(&host_id, host_request())
+        .append_event_with_authority(&host_id, host_request(), &runner)
         .await
-        .expect("host append takes the insert arm");
+        .expect("the runner's append takes the insert arm");
     assert_eq!(inserted.last_event_sequence, inserted.event.sequence);
     assert_eq!(
         registry
@@ -59,11 +60,11 @@ pub async fn process_event_append_arms_are_ordered(
     );
     assert_eq!(
         append_arm_footprint(&registry, &host_id).await,
-        1,
+        baseline + 1,
         "the insert arm writes one event row"
     );
     let later = registry
-        .append_event(
+        .append_event_with_authority(
             &host_id,
             call_wait_event(
                 &host_id,
@@ -72,13 +73,14 @@ pub async fn process_event_append_arms_are_ordered(
                 serde_json::json!({"call_label": "later append"}),
             )
             .with_replay_key("append-arm-host:wait:2"),
+            &runner,
         )
         .await
-        .expect("a later host append takes the insert arm");
+        .expect("a later append takes the insert arm");
     let replayed = registry
-        .append_event(&host_id, host_request())
+        .append_event_with_authority(&host_id, host_request(), &runner)
         .await
-        .expect("host append takes the replay arm");
+        .expect("the runner's append takes the replay arm");
     assert_eq!(replayed.event.sequence, inserted.event.sequence);
     assert_eq!(
         replayed.last_event_sequence, later.event.sequence,
@@ -86,7 +88,7 @@ pub async fn process_event_append_arms_are_ordered(
     );
     assert_eq!(
         append_arm_footprint(&registry, &host_id).await,
-        2,
+        baseline + 2,
         "the replay arm writes no event row"
     );
 
@@ -151,8 +153,8 @@ async fn append_arm_footprint(
         .len()
 }
 
-/// The runtime's effect-summary appends go through execution authority only.
-/// A host append of the kind is refused; a lost acknowledgement recovers the
+/// The runtime's effect-summary appends go through execution authority.
+/// A lost acknowledgement recovers the
 /// original event; a changed payload under the same effect key is refused;
 /// and a redrive that reaches the append after the run terminalised the
 /// process recovers it too.
@@ -193,16 +195,6 @@ async fn durable_effect_outcome_event_crash_windows(
         )),
         "lashlang:recorded-effect:1",
         lash_core::FleetFormat::current(),
-    );
-
-    assert!(
-        matches!(
-            registry
-                .append_event(&process_id, recorded.append_request())
-                .await,
-            Err(crate::PluginError::ReservedProcessEvent { .. })
-        ),
-        "a host append of the runtime-owned kind is refused"
     );
 
     let inserted = registry

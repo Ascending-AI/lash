@@ -102,10 +102,26 @@ async fn the_backend_process_registry_stamps_from_the_backend_clock() {
             tool_id: lash_core::ToolId::from("builder-clock-tool"),
         },
     };
+    let runner = lash_core::ProcessExecutionWriteAuthority::invocation(
+        builder_clock_process_id.clone(),
+        "builder-clock-runner",
+    )
+    .bind_attempt(1);
+    registry
+        .record_first_started_with_authority(
+            &builder_clock_process_id,
+            runner
+                .invocation_started()
+                .expect("a bound invocation names its execution"),
+            &runner,
+        )
+        .await
+        .expect("record the clock-wiring execution start");
     let appended = registry
-        .append_event(
+        .append_event_with_authority(
             &builder_clock_process_id,
             lash_core::ProcessEventAppendRequest::wait_entered(&builder_clock_process_id, &wait),
+            &runner,
         )
         .await
         .expect("append clock-wiring lifecycle event");

@@ -56,7 +56,7 @@ OBLIGATION_NAMES = (
     "ObligationKind::ScopeClose", "ObligationKind::ParentEnd", "ObligationKind::SessionDelete",
     "ObligationKind::ProcessTerminal", "ObligationKind::Ingress", "ObligationKey::ControlIntent",
     "ObligationKind::TriggerDelivery", "ObligationKey::ProcessStart",
-    "ProcessWakeOutbox", "RecordedJournal", "RecordedJournalReadUnsupported", "ScopeCloseSink",
+    "RecordedJournal", "RecordedJournalReadUnsupported", "ScopeCloseSink",
     "RegistryScopeClose", "ReconcileCursor", "RelayNeed", "ObligationRelayUnavailable",
     "SessionDeleteLedger", "SessionDeleteObligation", "ProcessTerminalPublication",
     "settle_parent_end_plan", "get_parent_end_plan_by_key", "relay_kind",

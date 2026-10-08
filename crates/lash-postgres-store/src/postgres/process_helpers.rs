@@ -151,18 +151,18 @@ pub(crate) async fn save_process_tx(
     Ok(())
 }
 
-/// The event `request`'s replay key already recorded, if any. A released
-/// event comes back with `request`'s payload when it carries the released
+/// The event `append`'s replay key already recorded, if any. A released
+/// event comes back with `append`'s fact when it carries the released
 /// digest, and refuses as a conflict when it does not.
 pub(crate) async fn load_event_by_key_tx(
     tx: &mut sqlx::PgConnection,
     process_id: &ProcessId,
-    replay_key: &str,
-    request: &ProcessEventAppendRequest,
+    append: &lash_core_execution::facade_support::CanonicalProcessEventAppend,
+    fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<Option<ProcessEvent>, PluginError> {
     let Some(row) = sqlx::query(process_sql().event.select_by_replay_key.sql())
         .bind(process_id.as_str())
-        .bind(replay_key)
+        .bind(append.replay_key())
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(plugin_sqlx_error)?
@@ -175,9 +175,9 @@ pub(crate) async fn load_event_by_key_tx(
         Some(digest) => lash_core_execution::runtime::restore_released_process_event(
             serde_json::from_str(&json).map_err(process_decode_error)?,
             &digest,
-            request,
+            append,
         )?,
-        None => serde_json::from_str(&json).map_err(process_decode_error)?,
+        None => ProcessEvent::decode(&json, fleet_format)?,
     };
     Ok(Some(event))
 }
@@ -329,21 +329,16 @@ async fn stage_process_event_append_tx(
     fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm, bool), PluginError> {
     let process_id = record.id.clone();
-    let replay_lookup =
-        if let Some(replay_key) = request.replay.as_ref().map(|replay| replay.key.as_str()) {
-            load_event_by_key_tx(tx, &process_id, replay_key, &request).await?
-        } else {
-            None
-        };
+    let append = request.canonical(record, fleet_format)?;
+    let replay_lookup = load_event_by_key_tx(tx, &process_id, &append, fleet_format).await?;
     let (last_sequence, sequence) = next_process_event_sequence_tx(tx, &process_id).await?;
     let prepared = lash_core_execution::runtime::prepare_process_event_append(
         record,
-        request,
+        append,
         sequence,
         last_sequence,
         replay_lookup,
         occurred_at_ms,
-        fleet_format,
     )?;
     match prepared {
         lash_core_execution::facade_support::ProcessEventAppendPlan::Replay {
@@ -490,17 +485,11 @@ pub(crate) async fn record_terminal_tx(
     if record.is_terminal() {
         return Ok(false);
     }
-    let output = output.clone().with_cancel_origin(
-        record
-            .cancel_request
-            .as_deref()
-            .map(|request| request.origin),
-    );
     let authority = lash_core_execution::ProcessCompletionAuthority::ActorEpoch { epoch };
     let mut batch = ProcessEventBatch::for_fleet(fleet_format);
     let request = lash_core_execution::facade_support::terminal_append_request(
         process_id,
-        &output,
+        output,
         Some(&authority),
     );
     batch.stage(tx, &mut record, request, now_ms).await?;

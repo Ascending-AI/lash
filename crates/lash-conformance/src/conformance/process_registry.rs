@@ -83,6 +83,10 @@ pub async fn long_cancellation_requester_replay_is_backend_safe(
     event_replay::long_cancellation_requester_replay_is_backend_safe(registry).await;
 }
 
+pub async fn an_unstamped_cancelled_terminal_replay_coalesces(registry: Arc<dyn ProcessRegistry>) {
+    event_replay::an_unstamped_cancelled_terminal_replay_coalesces(registry).await;
+}
+
 /// Prove that terminal replay repairs a stale record projection from
 /// the persisted tail event on the backend under test.
 #[expect(
@@ -1016,12 +1020,12 @@ async fn refolded_process_record_matches_stored_projection(
         serde_json::json!({"call": "ready"}),
     );
     let first_wait = writer
-        .append_event(process_id, entered_wait.clone())
+        .append_event_with_authority(process_id, entered_wait.clone(), &authority)
         .await
         .expect("append refold wait");
     assert_refold_matches_stored_projection(&reader, &base, process_id, "wait appended").await;
     let replayed_wait = writer
-        .append_event(process_id, entered_wait)
+        .append_event_with_authority(process_id, entered_wait, &authority)
         .await
         .expect("replay refold wait");
     assert_eq!(
@@ -1120,9 +1124,10 @@ async fn refolded_process_record_matches_stored_projection(
     assert!(
         watched
             .registry()
-            .append_event(
+            .append_event_with_authority(
                 process_id,
-                call_wait_event(process_id, "ready", "failed", serde_json::json!("failed"))
+                call_wait_event(process_id, "ready", "failed", serde_json::json!("failed")),
+                &authority
             )
             .await
             .is_err()
@@ -1144,7 +1149,7 @@ async fn refolded_process_record_matches_stored_projection(
     assert_refold_matches_stored_projection(&reader, &base, process_id, "failed append").await;
     watched
         .registry()
-        .append_event(
+        .append_event_with_authority(
             process_id,
             call_wait_event(
                 process_id,
@@ -1152,6 +1157,7 @@ async fn refolded_process_record_matches_stored_projection(
                 "committed",
                 serde_json::json!("committed"),
             ),
+            &authority,
         )
         .await
         .expect("positive publication control");
@@ -1199,41 +1205,6 @@ async fn assert_refold_matches_stored_projection(
     assert_eq!(
         refolded, stored,
         "folding the event log after {transition} from the registration base must reproduce the stored record field-for-field"
-    );
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn generic_append_rejects_reserved_edge_audit_events(registry: Arc<dyn ProcessRegistry>) {
-    let process_id = registry
-        .register_process(registration("reserved-edge-audit"))
-        .await
-        .expect("register reserved-audit process")
-        .id;
-    let by = crate::ProcessObserverBy::host("generic-append");
-    let requests = [
-        ProcessEventAppendRequest::observer_added(&process_id, &SessionId::from("observer"), &by),
-        ProcessEventAppendRequest::observer_removed(&process_id, &SessionId::from("observer"), &by),
-    ];
-    for request in requests {
-        let event_type = request.fact.event_type().to_owned();
-        assert!(
-            matches!(
-                registry.append_event(&process_id, request).await,
-                Err(crate::PluginError::ReservedProcessEvent {
-                    event_type: rejected
-                }) if rejected == event_type
-            ),
-            "generic append must reject reserved edge audit event `{event_type}`"
-        );
-    }
-    assert!(
-        !registry
-            .is_observer(&SessionId::from("observer"), &process_id)
-            .await
-            .expect("observer query remains available")
     );
 }
 
@@ -1562,9 +1533,14 @@ pub async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn 
     event_paging::assert_pruned_history(&registry, &process_id, pruned_at_ms).await;
     assert!(matches!(
         registry
-            .append_event(
+            .append_event_with_authority(
                 &process_id,
                 call_wait_event(&process_id, "after-prune", "1", serde_json::Value::Null),
+                &crate::ProcessExecutionWriteAuthority::invocation(
+                    process_id.clone(),
+                    "after-prune",
+                )
+                .bind_attempt(1),
             )
             .await,
         Err(crate::PluginError::ProcessNoLongerRetained { .. })

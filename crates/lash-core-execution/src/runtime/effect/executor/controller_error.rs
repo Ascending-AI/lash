@@ -166,7 +166,7 @@ impl From<PluginError> for RuntimeEffectControllerError {
             | PluginError::ProcessEventsReleased { .. }
             | PluginError::ProcessHandedOver { .. }
             | PluginError::ProcessTerminalOutcomeMismatch { .. }
-            | PluginError::ReservedProcessEvent { .. }
+            | PluginError::UnknownProcessEventKind { .. }
             | PluginError::ProcessRegistryCursorBackendMismatch { .. }) => {
                 Self::new(RuntimeErrorCode::Plugin, err.to_string())
             }

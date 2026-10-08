@@ -194,17 +194,6 @@ macro_rules! delegate_process_event_log {
     ) => {
         #[async_trait::async_trait]
         impl $crate::runtime::process::registry_concerns::ProcessEventLog for $wrapper {
-            async fn append_event(
-                &self,
-                process_id: &$crate::ProcessId,
-                request: $crate::ProcessEventAppendRequest,
-            ) -> Result<$crate::ProcessEventAppendReceipt, $crate::PluginError> {
-                let $event_process_id = process_id;
-                let $event_self = self;
-                let $event_call = self.$inner.append_event(process_id, request);
-                $event_hook
-            }
-
             async fn append_event_with_authority(
                 &self,
                 process_id: &$crate::ProcessId,

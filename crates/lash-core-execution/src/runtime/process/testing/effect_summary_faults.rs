@@ -150,14 +150,6 @@ delegate_process_observer_registry!(EffectSummaryAppendFaults, inner);
 
 #[async_trait::async_trait]
 impl ProcessEventLog for EffectSummaryAppendFaults {
-    async fn append_event(
-        &self,
-        process_id: &ProcessId,
-        request: ProcessEventAppendRequest,
-    ) -> Result<crate::ProcessEventAppendReceipt, PluginError> {
-        self.inner.append_event(process_id, request).await
-    }
-
     async fn append_event_with_authority(
         &self,
         process_id: &ProcessId,

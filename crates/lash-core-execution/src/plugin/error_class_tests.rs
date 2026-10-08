@@ -213,7 +213,7 @@ plugin_error_samples! {
         declared_status: crate::ProcessStatus::Completed,
         outcome_status: None,
     },
-    ReservedProcessEvent { .. } => PluginError::ReservedProcessEvent {
+    UnknownProcessEventKind { .. } => PluginError::UnknownProcessEventKind {
         event_type: "sampled".to_string(),
     },
     ProcessRegistryCursorBackendMismatch { .. } => {

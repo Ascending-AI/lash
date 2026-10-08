@@ -144,6 +144,8 @@ pub async fn process_change_feed_never_misses_concurrent_terminal_writers(
                 .expect("concurrent writer register")
                 .id;
 
+            let runner = start_runner(writer_registry.as_ref(), &process_id).await;
+
             if writer_index % 3 == 0 {
                 tokio::time::sleep(Duration::from_millis(1)).await;
             } else {
@@ -151,7 +153,7 @@ pub async fn process_change_feed_never_misses_concurrent_terminal_writers(
             }
 
             writer_registry
-                .append_event(
+                .append_event_with_authority(
                     &process_id,
                     call_wait_event(
                         &process_id,
@@ -159,6 +161,7 @@ pub async fn process_change_feed_never_misses_concurrent_terminal_writers(
                         &writer_index.to_string(),
                         serde_json::json!({ "writer": writer_index }),
                     ),
+                    &runner,
                 )
                 .await
                 .expect("concurrent writer mutate");

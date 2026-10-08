@@ -128,11 +128,11 @@ pub use steps::{
 #[cfg(any(test, feature = "testing"))]
 pub use testing::*;
 pub use validation::{
-    ProcessEventAppendPlan, ProcessRegistrationRefusal, ProcessStartPlan, ProcessTransition,
-    ProcessTransitionPlan, abandoned_consumer_refusal, allocate_process_event_sequence,
-    apply_process_event_projection, check_retained_start, fold_process_record,
-    prepare_process_event_append, prepare_process_registration, prepare_process_start,
-    prepare_process_transition, validate_generic_process_event_append,
+    CanonicalProcessEventAppend, ProcessEventAppendPlan, ProcessRegistrationRefusal,
+    ProcessStartPlan, ProcessTransition, ProcessTransitionPlan, abandoned_consumer_refusal,
+    allocate_process_event_sequence, apply_process_event_projection, check_retained_start,
+    fold_process_record, prepare_process_event_append, prepare_process_registration,
+    prepare_process_start, prepare_process_transition,
 };
 
 pub fn current_epoch_ms() -> u64 {

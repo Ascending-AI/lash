@@ -485,8 +485,8 @@ runtime_error_codes! {
         EngineAwaitEventCancel = "engine_await_event_cancel" => Retryable,
         // engine interaction failed; the engine redrives the invocation.
         EngineAwaitEventPeek = "engine_await_event_peek" => Retryable,
-        // engine interaction failed; the engine redrives the invocation.
-        EngineAwaitEventResolve = "engine_await_event_resolve" => Retryable,
+        // a host's resolve of a parked tool completion failed; the host retries it.
+        ToolCompletionResolve = "tool_completion_resolve" => Retryable,
         // engine interaction failed; the engine redrives the invocation.
         EngineAwaitEventRevocationRead = "engine_await_event_revocation_read" => Retryable,
         // engine interaction failed; the engine redrives the invocation.

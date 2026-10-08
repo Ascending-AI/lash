@@ -264,11 +264,11 @@ pub use process::ProcessChangeSubscription;
 pub use process::registry_transitions;
 pub use process::{
     AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry, ArgsMismatch, ArgsMode,
-    DeclaredProcessIdentity, DefinitionAcquisition, EngineAction, EngineEvent, EngineState,
-    EngineStateFormat, EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps, HandleId,
-    InvalidProcessDefinitionId, InvalidStartKey, KeyName, Lifetime, LifetimeDecision,
-    LifetimePolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NonTerminalProcessPage, ObservedProcess,
-    ObservedProcessEvent, ObservedProcessEventLite, ObservedProcessEventPage,
+    CanonicalProcessEventAppend, DeclaredProcessIdentity, DefinitionAcquisition, EngineAction,
+    EngineEvent, EngineState, EngineStateFormat, EngineStepKind, EngineStepRefusal, EngineStepRun,
+    EngineSteps, HandleId, InvalidProcessDefinitionId, InvalidStartKey, KeyName, Lifetime,
+    LifetimeDecision, LifetimePolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NonTerminalProcessPage,
+    ObservedProcess, ObservedProcessEvent, ObservedProcessEventLite, ObservedProcessEventPage,
     ObservedProcessEventReadOutcome, ObservedWorkItem, ObservedWorkItemState,
     PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
     PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION, ParentEndPlan,
@@ -312,7 +312,7 @@ pub use process::{
     prepare_process_registration, prepare_process_start, prepare_process_transition,
     process_child_session_id, process_session_turn_id, publish_process_execution_env,
     reconcile_session_process_observer_intents, terminal_append_request, tool_failure_code,
-    validate_generic_process_event_append, watch_process_registry,
+    watch_process_registry,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use process::{

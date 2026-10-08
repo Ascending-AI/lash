@@ -10,9 +10,9 @@ mod tests {
     use crate::runtime::work::*;
 
     use crate::{
-        ProcessEventAppendRequest, ProcessEventSink, ProcessExternalRef, ProcessInput,
-        ProcessProvenance, ProcessRegistration, ProcessStarted, TestProcessRegistryWriteExt,
-        WaitState, WatchedRegistry, watch_process_registry,
+        ProcessEventSink, ProcessExternalRef, ProcessInput, ProcessProvenance, ProcessRegistration,
+        ProcessStarted, TestProcessRegistryWriteExt, WaitState, WatchedRegistry,
+        watch_process_registry,
     };
 
     async fn memory_registry() -> Arc<dyn ProcessRegistry> {
@@ -148,19 +148,11 @@ mod tests {
             .await
             .expect("register");
         let appended = registry
-            .append_event(
+            .request_process_cancel(
                 &proc_record.id,
-                ProcessEventAppendRequest::cancel_requested(
-                    &registry
-                        .require_process_id(&proc_record.id)
-                        .await
-                        .expect("retained cancellation target"),
-                    &crate::CancelRequest::new(
-                        crate::CancelOrigin::OperatorRequested,
-                        "actor:fixture:await_event_returns_historical_event_immediately",
-                        11,
-                    ),
-                ),
+                crate::CancelOrigin::OperatorRequested,
+                "actor:fixture:await_event_returns_historical_event_immediately".to_string(),
+                None,
             )
             .await
             .expect("append");
@@ -169,7 +161,7 @@ mod tests {
             .await_event(&proc_record.id, crate::ProcessEventKind::CancelRequested, 0)
             .await
             .expect("await event");
-        assert_eq!(event.sequence, appended.event.sequence);
+        assert_eq!(event.sequence, appended.last_event_sequence);
     }
 
     #[tokio::test]
@@ -295,21 +287,16 @@ mod tests {
         .await
         .expect("event wait subscribes");
         let appended = registry
-            .append_event(
+            .request_process_cancel(
                 &record.id,
-                ProcessEventAppendRequest::cancel_requested(
-                    &record.id,
-                    &crate::CancelRequest::new(
-                        crate::CancelOrigin::OperatorRequested,
-                        "actor:fixture:watched_event_wait_releases_registration_on_delivery",
-                        11,
-                    ),
-                ),
+                crate::CancelOrigin::OperatorRequested,
+                "actor:fixture:watched_event_wait_releases_registration_on_delivery".to_string(),
+                None,
             )
             .await
             .expect("append");
         let event = waiting.await.expect("await event");
-        assert_eq!(event.sequence, appended.event.sequence);
+        assert_eq!(event.sequence, appended.last_event_sequence);
         assert_eq!(hub.tracked_processes(), 0);
     }
 

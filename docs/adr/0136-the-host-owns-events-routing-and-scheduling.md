@@ -71,7 +71,7 @@ definition.
 The process log records typed lifecycle facts: started, waiting with
 `call_id` and `tool_id`, resumed, effect outcome, effect omissions, cancel
 requested, observer added, observer removed, external reference set, and the
-four terminals: succeeded, failed, cancelled and abandoned. Terminals carry
+four terminals: completed, failed, cancelled and abandoned. Terminals carry
 typed engine outcomes. The log has no producer-defined event types, schema
 selectors or product payload interpretation. A process's registry projection
 and lifecycle event commit together

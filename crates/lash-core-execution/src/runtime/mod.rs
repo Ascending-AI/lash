@@ -78,10 +78,10 @@ pub use process::ProcessChangeSubscription;
 pub use process::registry_transitions;
 pub use process::{
     AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry, ArgsMismatch, ArgsMode,
-    DeclaredProcessIdentity, DefinitionAcquisition, EngineAction, EngineEvent, EngineState,
-    EngineStateFormat, EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps, HandleId,
-    InvalidProcessDefinitionId, InvalidStartKey, KeyName, Lifetime, LifetimeDecision,
-    LifetimePolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, Material, NamesMaterial,
+    CanonicalProcessEventAppend, DeclaredProcessIdentity, DefinitionAcquisition, EngineAction,
+    EngineEvent, EngineState, EngineStateFormat, EngineStepKind, EngineStepRefusal, EngineStepRun,
+    EngineSteps, HandleId, InvalidProcessDefinitionId, InvalidStartKey, KeyName, Lifetime,
+    LifetimeDecision, LifetimePolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, Material, NamesMaterial,
     NonTerminalProcessPage, ObservedProcess, ObservedProcessEvent, ObservedProcessEventLite,
     ObservedProcessEventPage, ObservedProcessEventReadOutcome, ObservedWorkItem,
     ObservedWorkItemState, ParentEndPlan, PreparedProcessRegistration, ProcessAwaitOutput,
@@ -123,7 +123,7 @@ pub use process::{
     prepare_process_transition, process_child_session_id, process_session_turn_id,
     publish_process_execution_env, reconcile_session_process_observer_intents,
     release_process_event_payload, restore_released_process_event, terminal_append_request,
-    validate_generic_process_event_append, watch_process_registry,
+    watch_process_registry,
 };
 pub use process::{
     ArtifactReferrerPorts, HostStartAdmission, PreparedProcessStart, ProcessStartStores,

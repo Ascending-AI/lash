@@ -559,13 +559,6 @@ impl ProcessObserverRegistry for Integrator {
 
 #[lash::async_trait]
 impl ProcessEventLog for Integrator {
-    async fn append_event(
-        &self,
-        process_id: &ProcessId,
-        request: ProcessEventAppendRequest,
-    ) -> Result<ProcessEventAppendReceipt, PluginError> {
-        unreachable!("external signature witness")
-    }
     async fn append_event_with_authority(
         &self,
         process_id: &ProcessId,

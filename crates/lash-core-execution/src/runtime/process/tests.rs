@@ -8,13 +8,32 @@ fn registration(_id: &str) -> ProcessRegistration {
     )
 }
 
+/// Plan `request` as a store does: the canonical preparation, then the plan.
+fn plan_append(
+    record: &ProcessRecord,
+    request: ProcessEventAppendRequest,
+    sequence: u64,
+    last_event_sequence: Option<u64>,
+    replay_lookup: Option<ProcessEvent>,
+    occurred_at_ms: u64,
+) -> Result<ProcessEventAppendPlan, crate::PluginError> {
+    prepare_process_event_append(
+        record,
+        request.canonical(record, crate::FleetFormat::current())?,
+        sequence,
+        last_event_sequence,
+        replay_lookup,
+        occurred_at_ms,
+    )
+}
+
 #[test]
 fn process_event_old_system_time_json_is_rejected() {
     let record = ProcessRecord::from_registration(
         registration("process-old-time-shape"),
         crate::process_id_for_test("process-old-time-shape"),
     );
-    let plan = prepare_process_event_append(
+    let plan = plan_append(
         &record,
         ProcessEventAppendRequest::observer_added(
             &record.id,
@@ -25,7 +44,6 @@ fn process_event_old_system_time_json_is_rejected() {
         None,
         None,
         1_700_000_000_000,
-        crate::FleetFormat::current(),
     )
     .expect("prepare process event");
     let ProcessEventAppendPlan::Insert { event, .. } = plan else {
@@ -38,7 +56,7 @@ fn process_event_old_system_time_json_is_rejected() {
     });
 
     assert!(
-        serde_json::from_value::<ProcessEvent>(json).is_err(),
+        ProcessEvent::decode(&json.to_string(), crate::FleetFormat::current()).is_err(),
         "the pre-cutover SystemTime shape must not decode as an epoch-ms process event"
     );
 }
@@ -60,16 +78,8 @@ fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
         &crate::process_id_for_test("process-repair-waiting"),
         &wait,
     );
-    let waiting = prepare_process_event_append(
-        &record,
-        waiting_request.clone(),
-        1,
-        None,
-        None,
-        42,
-        crate::FleetFormat::current(),
-    )
-    .expect("prepare waiting event");
+    let waiting = plan_append(&record, waiting_request.clone(), 1, None, None, 42)
+        .expect("prepare waiting event");
     let ProcessEventAppendPlan::Insert {
         event: waiting_event,
         projected_record: waiting_record,
@@ -79,7 +89,7 @@ fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
         panic!("waiting event should insert");
     };
 
-    let terminal = prepare_process_event_append(
+    let terminal = plan_append(
         &waiting_record,
         terminal_append_request(
             &waiting_record.id,
@@ -92,7 +102,6 @@ fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
         Some(1),
         None,
         43,
-        crate::FleetFormat::current(),
     )
     .expect("prepare terminal event");
     let ProcessEventAppendPlan::Insert {
@@ -103,14 +112,13 @@ fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
         panic!("terminal event should insert");
     };
 
-    let replay = prepare_process_event_append(
+    let replay = plan_append(
         &terminal_record,
         waiting_request,
         99,
         Some(2),
         Some(waiting_event),
         100,
-        crate::FleetFormat::current(),
     )
     .expect("stale waiting event should replay without repair");
     let ProcessEventAppendPlan::Replay {
@@ -145,28 +153,19 @@ fn replayed_generic_tail_repairs_projection_across_sender_floor_gap() {
     );
     stale_record.updated_at_ms = 0;
     let request = observed(&stale_record.id, "progress");
-    let first = prepare_process_event_append(
-        &stale_record,
-        request.clone(),
-        7,
-        None,
-        None,
-        42,
-        crate::FleetFormat::current(),
-    )
-    .expect("prepare generic event at a sender-floor boundary");
+    let first = plan_append(&stale_record, request.clone(), 7, None, None, 42)
+        .expect("prepare generic event at a sender-floor boundary");
     let ProcessEventAppendPlan::Insert { event, .. } = first else {
         panic!("first generic event should insert")
     };
 
-    let replay = prepare_process_event_append(
+    let replay = plan_append(
         &stale_record,
         request,
         100,
         Some(event.sequence),
         Some(event),
         100,
-        crate::FleetFormat::current(),
     )
     .expect("replay generic tail across a sender-floor gap");
     let ProcessEventAppendPlan::Replay { repair_record, .. } = replay else {
@@ -187,16 +186,8 @@ fn replayed_generic_non_tail_does_not_rewind_projection_timestamp() {
         crate::process_id_for_test("process"),
     );
     let first_request = observed(&record.id, "first");
-    let first = prepare_process_event_append(
-        &record,
-        first_request.clone(),
-        1,
-        None,
-        None,
-        42,
-        crate::FleetFormat::current(),
-    )
-    .expect("prepare first generic event");
+    let first = plan_append(&record, first_request.clone(), 1, None, None, 42)
+        .expect("prepare first generic event");
     let ProcessEventAppendPlan::Insert {
         event: first_event,
         projected_record: first_record,
@@ -206,14 +197,13 @@ fn replayed_generic_non_tail_does_not_rewind_projection_timestamp() {
         panic!("first generic event should insert")
     };
 
-    let second = prepare_process_event_append(
+    let second = plan_append(
         &first_record,
         observed(&record.id, "second"),
         2,
         Some(1),
         None,
         100,
-        crate::FleetFormat::current(),
     )
     .expect("prepare second generic event");
     let ProcessEventAppendPlan::Insert {
@@ -225,14 +215,13 @@ fn replayed_generic_non_tail_does_not_rewind_projection_timestamp() {
     };
     assert_eq!(current_record.updated_at_ms, 100);
 
-    let replay = prepare_process_event_append(
+    let replay = plan_append(
         &current_record,
         first_request,
         3,
         Some(2),
         Some(first_event),
         200,
-        crate::FleetFormat::current(),
     )
     .expect("stale generic event should replay without repair");
     let ProcessEventAppendPlan::Replay { repair_record, .. } = replay else {

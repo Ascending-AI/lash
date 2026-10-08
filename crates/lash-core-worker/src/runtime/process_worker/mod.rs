@@ -177,21 +177,6 @@ impl DurableProcessWorker {
         runtime.adopt_plugin_admission(plugins);
         Ok(runtime)
     }
-
-    pub async fn request_process_cancel(
-        &self,
-        process_id: &crate::ProcessId,
-        request: &crate::CancelRequest,
-    ) -> Result<(), PluginError> {
-        self.config
-            .process_registry()
-            .append_event(
-                process_id,
-                crate::ProcessEventAppendRequest::cancel_requested(process_id, request),
-            )
-            .await
-            .map(|_| ())
-    }
 }
 
 #[lash_core::async_trait]

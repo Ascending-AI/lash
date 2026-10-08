@@ -257,6 +257,7 @@ pub mod facade_support {
     pub use crate::provider::ProviderOptions;
     pub use crate::runtime::AgentFrameRun;
     pub use crate::runtime::AssembledTurn;
+    pub use crate::runtime::CanonicalProcessEventAppend;
     pub use crate::runtime::CanonicalRuntimeEffectEnvelope;
     pub use crate::runtime::DirectCompletionClient;
     pub use crate::runtime::EmbeddedRuntimeHost;
@@ -336,7 +337,6 @@ pub mod facade_support {
     pub use crate::runtime::process_child_session_id;
     pub use crate::runtime::registry_transitions;
     pub use crate::runtime::terminal_append_request;
-    pub use crate::runtime::validate_generic_process_event_append;
     pub use crate::runtime::validate_replayed_effect_envelope;
     pub use crate::runtime::watch_process_registry;
     pub use crate::runtime::{ParkRefused, ParkedSession};

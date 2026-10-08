@@ -1,6 +1,5 @@
 use super::*;
 use lash_core_execution::ProcessQuery as _;
-use lash_core_execution::facade_support;
 use lash_sansio::ProcessId;
 pub(crate) mod actor;
 mod event_release;
@@ -403,28 +402,6 @@ impl lash_core_execution::ProcessObserverRegistry for SqliteProcessRegistry {
 
 #[async_trait::async_trait]
 impl lash_core_execution::ProcessEventLog for SqliteProcessRegistry {
-    async fn append_event(
-        &self,
-        process_id: &ProcessId,
-        request: ProcessEventAppendRequest,
-    ) -> Result<ProcessEventAppendReceipt, lash_core_execution::PluginError> {
-        facade_support::validate_generic_process_event_append(&request)?;
-        let process_id = process_id.clone();
-        let occurred_at_ms = self.clock.timestamp_ms();
-        let (result, _appended) = self
-            .conn
-            .write_flow(move |tx| {
-                let fleet_format = tx.fleet();
-                Ok(tx_outcome((|| {
-                    let mut record = Self::require_process_conn(tx, &process_id)?;
-                    Self::append_event_conn(tx, &mut record, request, occurred_at_ms, fleet_format)
-                })()))
-            })
-            .await
-            .map_err(process_sqlite_error)??;
-        Ok(result)
-    }
-
     async fn append_events(
         &self,
         process_id: &ProcessId,
@@ -469,6 +446,7 @@ impl lash_core_execution::ProcessEventLog for SqliteProcessRegistry {
         let process_id = process_id.clone();
         #[cfg(feature = "testing")]
         let read_pause = self.conn.pauses();
+        let fleet_format = self.conn.fleet();
         self.conn
             .read(move |conn| {
                 Ok((|| {
@@ -530,10 +508,10 @@ impl lash_core_execution::ProcessEventLog for SqliteProcessRegistry {
                                 .map_err(process_sqlite_error)?;
                             let mut events = Vec::new();
                             for row in rows {
-                                events.push(
-                                    serde_json::from_str(&row.map_err(process_sqlite_error)?)
-                                        .map_err(process_decode_error)?,
-                                );
+                                events.push(ProcessEvent::decode(
+                                    &row.map_err(process_sqlite_error)?,
+                                    fleet_format,
+                                )?);
                             }
                             lash_core_execution::ProcessEventPage::from_full_rows(events, limit)
                         }

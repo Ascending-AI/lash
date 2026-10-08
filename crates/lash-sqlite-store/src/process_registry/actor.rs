@@ -63,17 +63,11 @@ impl SqliteProcessRegistry {
         if record.is_terminal() {
             return Ok(false);
         }
-        let output = output.clone().with_cancel_origin(
-            record
-                .cancel_request
-                .as_deref()
-                .map(|request| request.origin),
-        );
         let authority = lash_core_execution::ProcessCompletionAuthority::ActorEpoch { epoch };
         let mut batch = ProcessEventBatch::for_fleet(fleet_format);
         let request = lash_core_execution::facade_support::terminal_append_request(
             process_id,
-            &output,
+            output,
             Some(&authority),
         );
         batch.stage(conn, &mut record, request, now_ms)?;

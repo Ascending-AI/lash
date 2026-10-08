@@ -32,7 +32,6 @@ async fn read(
 
 #[expect(
     clippy::expect_used,
-    clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn contract(
@@ -64,19 +63,22 @@ pub(super) async fn contract(
         second_append.fact.payload(),
         "the two proposed facts must remain distinct"
     );
-    let receipt = writer
-        .append_event(&process_id, first_append)
+    writer
+        .request_process_cancel(&process_id, first.origin, first.requester.clone(), None)
         .await
         .expect("accept first cancel");
     let accepted = read(&reader, &process_id).await;
-    assert_eq!(accepted.cancel_request.as_deref(), Some(&first));
-    assert_eq!(
-        accepted.cancel_request.as_ref().unwrap().requested_at_ms,
-        11
-    );
+    let standing = accepted
+        .cancel_request
+        .as_deref()
+        .cloned()
+        .expect("the first request stands");
+    assert!(standing.same_cancellation_as(&first));
     assert!(
         matches!(
-            writer.append_event(&process_id, second_append).await,
+            writer
+                .request_process_cancel(&process_id, second.origin, second.requester.clone(), None)
+                .await,
             Err(PluginError::ProcessCancelConflict { existing, requested, .. })
                 if existing.origin == CancelOrigin::OperatorRequested && requested.origin == CancelOrigin::ModelRequested
         ),
@@ -84,30 +86,17 @@ pub(super) async fn contract(
     );
     assert_eq!(
         read(&reader, &process_id).await.cancel_request.as_deref(),
-        Some(&first)
+        Some(&standing)
     );
-    let retry = CancelRequest {
-        requested_at_ms: 99,
-        ..first.clone()
-    };
-    assert_ne!(retry.requested_at_ms, first.requested_at_ms);
-    let replay = writer
-        .append_event(
-            &process_id,
-            ProcessEventAppendRequest::cancel_requested(&process_id, &retry),
-        )
-        .await
-        .expect("fresh-clock retry replays the first fact");
-    assert_eq!(replay.event.sequence, receipt.event.sequence);
-    assert_eq!(replay.event.fact.payload(), serde_json::json!(first));
     let unchanged = writer
         .request_process_cancel(&process_id, first.origin, first.requester.clone(), None)
         .await
         .expect("registry cancellation retry returns the first record");
     assert_eq!(unchanged.last_event_sequence, accepted.last_event_sequence);
     assert_eq!(
-        unchanged.cancel_request.as_ref().unwrap().requested_at_ms,
-        11
+        unchanged.cancel_request.as_deref(),
+        Some(&standing),
+        "a retry returns the first accepted fact, with its original timestamp"
     );
     assert!(matches!(
         writer
@@ -233,28 +222,6 @@ pub(super) async fn contract(
         "the failed start is recorded as its own cancel: {:?}",
         events[0].fact
     );
-    let standing = failed
-        .cancel_request
-        .as_deref()
-        .expect("standing StartFailed request");
-    let retry = CancelRequest {
-        requested_at_ms: standing
-            .requested_at_ms
-            .checked_add(1)
-            .expect("clock range"),
-        ..standing.clone()
-    };
-    assert_ne!(retry.requested_at_ms, standing.requested_at_ms);
-    let replay = writer
-        .append_event(
-            &unrun_ref,
-            ProcessEventAppendRequest::cancel_requested(&unrun_ref, &retry),
-        )
-        .await
-        .expect("stored terminal StartFailed event remains replayable");
-    assert_eq!(replay.event.sequence, events[0].sequence);
-    assert_eq!(read(&reader, &unrun_ref).await, failed);
-
     let started = writer
         .register_process(owned_registration("cancel-started-start-failed"))
         .await

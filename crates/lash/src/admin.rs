@@ -71,7 +71,7 @@ impl Completions {
 
 fn durable_error(message: String) -> EmbedError {
     EmbedError::Runtime(lash_core::RuntimeError::new(
-        lash_core::RuntimeErrorCode::EngineAwaitEventResolve,
+        lash_core::RuntimeErrorCode::ToolCompletionResolve,
         message,
     ))
 }

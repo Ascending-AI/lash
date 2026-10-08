@@ -740,13 +740,13 @@ define_plugin_errors! {
         => Self::ProcessTerminalOutcomeMismatch { .. }
         => "process_terminal_outcome_mismatch"
         => crate::ToolFailureClass::InvalidRequest;
-#[error("process event type `{event_type}` is reserved for its dedicated registry mutation")]
-    ReservedProcessEvent { event_type: String }
-        => PluginError::ReservedProcessEvent { event_type }
+#[error("process event type `{event_type}` names no lifecycle kind")]
+    UnknownProcessEventKind { event_type: String }
+        => PluginError::UnknownProcessEventKind { event_type }
         => { event_type: String }
-        => Self::ReservedProcessEvent { event_type: event_type.clone() }
-        => Self::ReservedProcessEvent { .. }
-        => "reserved_process_event"
+        => Self::UnknownProcessEventKind { event_type: event_type.clone() }
+        => Self::UnknownProcessEventKind { .. }
+        => "unknown_process_event_kind"
         => crate::ToolFailureClass::InvalidRequest;
 /// A process-registry continuation was passed to a backend other than the
     /// backend that issued it.
@@ -974,7 +974,7 @@ impl PluginError {
             | Self::ProcessHandedOver { .. }
             | Self::ProcessAlreadyTerminal { .. }
             | Self::ProcessTerminalOutcomeMismatch { .. }
-            | Self::ReservedProcessEvent { .. }
+            | Self::UnknownProcessEventKind { .. }
             | Self::ProcessRegistryCursorBackendMismatch { .. } => Terminal,
         }
     }

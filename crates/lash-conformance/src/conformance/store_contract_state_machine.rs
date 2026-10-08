@@ -9,7 +9,7 @@ use crate::ProcessEventLogTestSupport as _;
 use crate::{
     ProcessCompletionOutcome, ProcessExecutionWriteAuthority, ProcessExternalRef,
     ProcessObserverBy, ProcessRecord, ProcessStartOutcome, ProjectionWatermark,
-    apply_process_event_projection, fold_process_record,
+    fold_process_record,
 };
 use generated_prefix::generated_prefix;
 use lash_sansio::{ProcessId, SessionId};
@@ -609,25 +609,22 @@ async fn apply_operation(
         StoreContractOp::CancelRequest { process, requester } => {
             let id = model.slot_id(*process);
             if let Ok(process_id) = handles.registry.require_process_id(&id).await
-                && let Ok(appended) = handles
+                && let Ok(requested) = handles
                     .registry
-                    .append_event(
+                    .request_process_cancel(
                         &process_id,
-                        ProcessEventAppendRequest::cancel_requested(
-                            &process_id,
-                            &lash_core::CancelRequest::new(
-                                lash_core::CancelOrigin::OperatorRequested,
-                                format!("actor:state-machine:{requester}"),
-                                11,
-                            ),
-                        ),
+                        lash_core::CancelOrigin::OperatorRequested,
+                        format!("actor:state-machine:{requester}"),
+                        None,
                     )
                     .await
                 && let Some(expected) = model.process_mut(&id).expected_mut()
+                && expected.cancel_request.is_none()
             {
-                apply_process_event_projection(expected, &appended.event)
-                    .map_err(|error| error.to_string())?;
-                expected.last_event_sequence = appended.last_event_sequence;
+                // The registry stamps the first accepted request with its
+                // own clock, so the model takes the stamped fact.
+                event_sequences.advance(expected);
+                expected.cancel_request = requested.cancel_request;
             }
         }
         StoreContractOp::Terminal {
@@ -903,6 +900,7 @@ async fn assert_replay_key_idempotency(
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .id;
+    let runner = start_runner(registry.as_ref(), &id).await;
     let request = call_wait_event(
         &id,
         "store-contract",
@@ -911,11 +909,11 @@ async fn assert_replay_key_idempotency(
     )
     .with_replay_key("law-replay-key:stable");
     let first = registry
-        .append_event(&id, request.clone())
+        .append_event_with_authority(&id, request.clone(), &runner)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let replay = registry
-        .append_event(&id, request)
+        .append_event_with_authority(&id, request, &runner)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     prop_assert_eq!(
@@ -931,10 +929,10 @@ async fn assert_replay_key_idempotency(
             .await
             .map_err(|error| TestCaseError::fail(error.to_string()))?
             .len(),
-        1
+        2
     );
     let conflict = registry
-        .append_event(
+        .append_event_with_authority(
             &id,
             call_wait_event(
                 &id,
@@ -943,6 +941,7 @@ async fn assert_replay_key_idempotency(
                 serde_json::json!({"value": 2}),
             )
             .with_replay_key("law-replay-key:stable"),
+            &runner,
         )
         .await;
     prop_assert!(
@@ -955,7 +954,7 @@ async fn assert_replay_key_idempotency(
             .await
             .map_err(|error| TestCaseError::fail(error.to_string()))?
             .len(),
-        1
+        2
     );
     Ok(())
 }
@@ -1212,8 +1211,9 @@ async fn assert_prune_reregister_registry_state_is_fresh(
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .id;
+    let runner = start_runner(registry.as_ref(), &id).await;
     registry
-        .append_event(
+        .append_event_with_authority(
             &id,
             call_wait_event(
                 &id,
@@ -1222,6 +1222,7 @@ async fn assert_prune_reregister_registry_state_is_fresh(
                 serde_json::json!({"identity": "old"}),
             )
             .with_replay_key("law:prune-reregister:old"),
+            &runner,
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
