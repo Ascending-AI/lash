@@ -10055,6 +10055,18 @@
         {
           "properties": {
             "type": {
+              "const": "agent_frame_switch_limit",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
               "const": "submitted_error",
               "type": "string"
             },

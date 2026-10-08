@@ -80,6 +80,22 @@ runs, as at any run's end (§4). A closing or deleted session takes no mail,
 so its close settles the switch's work with the rest of its own. A host
 cancels the follow-on as it cancels any queued input or running turn.
 
+A chain is bounded by the deployment's
+`ExecutionBudgetsConfig::agent_frame_switch_limit` (nonzero, default 16).
+Fresh host input and process wakes start at depth zero. The switch's mailed
+`TurnInput::agent_frame_switches` is its admitted depth plus one, persisted
+with the task and included in its submission digest. A claimed or resumed
+turn reads that immutable depth from its recorded admission. The follow-on
+at the configured bound commits `TurnStop::AgentFrameSwitchLimit` and emits
+`TurnFailureCode::AgentFrameSwitchLimit`, without calling the model or mailing
+another follow-on. Its ordinary turn commit settles the input and closes the
+run's scope. A chain below the bound completes normally, and later host input
+starts a fresh chain regardless of the session's frame history.
+
+A frame-task input runs alone: it neither takes later host input into its run
+nor joins an earlier input's batch. Thus the chain's depth and terminal do
+not apply to unrelated input. Its ingress position still obeys ordinary FIFO.
+
 The `send()` of the switching input answers with the switch
 (`TurnStatus::Answered`). The follow-on's run answers under its own id,
 which a host attaches to by that id.

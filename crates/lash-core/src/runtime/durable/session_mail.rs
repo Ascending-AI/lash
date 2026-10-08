@@ -277,7 +277,8 @@ fn admission(mailbox: &SessionMailbox) -> Result<Option<Head>, SessionMailError>
             let inputs = inputs
                 .into_iter()
                 .take_while(|input| {
-                    input.run_spec_hash == head.run_spec_hash
+                    (input.input == head.input || (!is_frame_task(head) && !is_frame_task(input)))
+                        && input.run_spec_hash == head.run_spec_hash
                         && stop.is_none_or(|stop| input.enqueue_seq < stop)
                 })
                 .cloned()
@@ -287,6 +288,13 @@ fn admission(mailbox: &SessionMailbox) -> Result<Option<Head>, SessionMailError>
         (None, Some(batch)) => Head::Run(turn_batch(batch)?),
         (None, None) => return Ok(None),
     }))
+}
+
+fn is_frame_task(input: &MailInput) -> bool {
+    input
+        .source_key
+        .as_deref()
+        .is_some_and(|key| key.starts_with("frame-task:"))
 }
 
 fn run_of(id: &str) -> Result<TurnId, SessionMailError> {
@@ -307,7 +315,8 @@ pub fn frame_task_run(frame_key: &crate::FrameKey) -> TurnId {
 /// frame switch's task, as the session's next-turn input under its
 /// follow-on's run ([`frame_task_run`]), so the switch, its new frame and
 /// its follow-on commit together (ADR 0101 §3). Any other outcome mails
-/// nothing.
+/// nothing. `agent_frame_switches` is the switching run's admitted depth;
+/// the mailed input retains its successor depth through owner changes.
 ///
 /// # Errors
 ///
@@ -315,6 +324,7 @@ pub fn frame_task_run(frame_key: &crate::FrameKey) -> TurnId {
 pub fn follow_on_mail(
     session: &SessionId,
     outcome: &crate::TurnOutcome,
+    agent_frame_switches: u32,
 ) -> Result<Option<SessionMailWrite>, SessionMailError> {
     let crate::TurnOutcome::AgentFrameSwitch {
         frame_key, task, ..
@@ -323,10 +333,12 @@ pub fn follow_on_mail(
         return Ok(None);
     };
     let run = frame_task_run(frame_key);
+    let mut input = crate::TurnInput::text(task.clone());
+    input.agent_frame_switches = agent_frame_switches.saturating_add(1);
     let draft = crate::PendingTurnInputDraft::new(
         session.clone(),
         crate::TurnInputIngress::next_turn(),
-        crate::TurnInput::text(task.clone()).durable_projection(),
+        input.durable_projection(),
     )
     .with_input_id(crate::PendingTurnInputDraft::keyed_input_id(
         session,
@@ -343,4 +355,29 @@ pub fn follow_on_mail(
         session: session.clone(),
         draft_json,
     }))
+}
+
+/// Read the chain depth from the immutable inputs this run admitted. A wake
+/// has no input and starts a new chain. Checkpoint steering never changes the
+/// chain the run started, and an owner change reads the same persisted depth.
+pub(super) async fn agent_frame_switches(
+    cx: &ActorContext,
+    row: &super::session::TurnRow,
+) -> Result<u32, super::session::TurnError> {
+    let store = cx.backend().session_store_factory();
+    let mut switches = 0;
+    for id in row.admission.input_ids() {
+        let read = store
+            .pending_turn_input(&row.session, id)
+            .await
+            .map_err(|error| super::session::TurnError::Runtime(error.runtime_error()))?
+            .ok_or_else(|| {
+                super::session::TurnError::Exec(format!(
+                    "run {} took input {id}, which is no longer pending",
+                    row.run
+                ))
+            })?;
+        switches = switches.max(read.input.input.agent_frame_switches);
+    }
+    Ok(switches)
 }

@@ -205,6 +205,9 @@ pub struct ExecutionBudgetsConfig {
     /// The longest deferred or external wait: 24 h.
     pub wait_ceiling: Duration,
     pub provider: ProviderAttemptLimits,
+    /// Bound on a chain of agent frame switches: 16. The follow-on at this
+    /// depth stops with `AgentFrameSwitchLimit` before calling the model.
+    pub agent_frame_switch_limit: NonZeroU32,
 }
 
 impl Default for ExecutionBudgetsConfig {
@@ -218,6 +221,7 @@ impl Default for ExecutionBudgetsConfig {
             wait_default: Duration::from_secs(60 * 60),
             wait_ceiling: Duration::from_secs(24 * 60 * 60),
             provider: ProviderAttemptLimits::default(),
+            agent_frame_switch_limit: NonZeroU32::MIN.saturating_add(15),
         }
     }
 }
@@ -245,6 +249,7 @@ impl ExecutionBudgets {
             wait_default,
             wait_ceiling,
             provider,
+            agent_frame_switch_limit: _,
         } = config;
         bounded("tool_default", tool_default)?;
         bounded("tool_ceiling", tool_ceiling)?;

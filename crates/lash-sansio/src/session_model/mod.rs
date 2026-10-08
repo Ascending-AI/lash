@@ -777,6 +777,9 @@ pub enum TurnStop {
     ContextOverflow,
     PluginAbort,
     RuntimeError,
+    /// The durable follow-on reached its chain's configured frame-switch
+    /// bound. No model call ran for this input.
+    AgentFrameSwitchLimit,
     SubmittedError {
         value: serde_json::Value,
     },

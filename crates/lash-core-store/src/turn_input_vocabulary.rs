@@ -1123,10 +1123,20 @@ impl InputItem {
         Self::Attachment { source }
     }
 }
+fn no_agent_frame_switches(switches: &u32) -> bool {
+    *switches == 0
+}
+
 /// Host-provided per-turn input.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct TurnInput {
     pub items: Vec<InputItem>,
+    /// Number of agent frame switches leading to this input (ADR 0101 §3).
+    /// The durable engine increments it when mailing a frame task. Fresh
+    /// host input starts at zero; the value survives durable projection and
+    /// participates in the submission digest, so recovery cannot reset it.
+    #[serde(default, skip_serializing_if = "no_agent_frame_switches")]
+    pub agent_frame_switches: u32,
     /// Internal protocol transport carrier for the facade builder's turn ID.
     ///
     /// All non-advanced facade paths overwrite this field.
@@ -1149,6 +1159,7 @@ impl TurnInput {
     pub fn items(items: impl IntoIterator<Item = InputItem>) -> Self {
         Self {
             items: items.into_iter().collect(),
+            agent_frame_switches: 0,
             trace_turn_id: None,
             turn_context: TurnContext::default(),
         }
@@ -1323,6 +1334,7 @@ impl TurnInput {
     pub fn durable_projection(&self) -> Self {
         Self {
             items: self.items.clone(),
+            agent_frame_switches: self.agent_frame_switches,
             trace_turn_id: None,
             turn_context: crate::TurnContext::default(),
         }

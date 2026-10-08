@@ -32,6 +32,7 @@ fn every_non_cancelled_child_stop_is_distinguishable_to_the_parent() {
         crate::TurnStop::ContextOverflow,
         crate::TurnStop::PluginAbort,
         crate::TurnStop::RuntimeError,
+        crate::TurnStop::AgentFrameSwitchLimit,
         crate::TurnStop::SubmittedError {
             value: serde_json::json!({ "reason": "missing shard amber" }),
         },
@@ -59,7 +60,7 @@ fn every_non_cancelled_child_stop_is_distinguishable_to_the_parent() {
         );
         assert_eq!(failure.source, crate::ToolFailureSource::Tool);
     }
-    assert_eq!(seen.len(), 10);
+    assert_eq!(seen.len(), 11);
 }
 
 /// The child's own terminal words reach the parent verbatim: a parent

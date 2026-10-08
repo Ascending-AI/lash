@@ -166,6 +166,9 @@ impl From<lash_core::facade_support::TurnStop> for RemoteTurnStop {
             lash_core::facade_support::TurnStop::ContextOverflow => Self::ContextOverflow,
             lash_core::facade_support::TurnStop::PluginAbort => Self::PluginAbort,
             lash_core::facade_support::TurnStop::RuntimeError => Self::RuntimeError,
+            lash_core::facade_support::TurnStop::AgentFrameSwitchLimit => {
+                Self::AgentFrameSwitchLimit
+            }
             lash_core::facade_support::TurnStop::SubmittedError { value } => {
                 Self::SubmittedError { value }
             }

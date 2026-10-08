@@ -335,6 +335,11 @@ fn process_turn_stop_classification(
             "process_session_turn_plugin_abort",
             "background session turn was aborted by a plugin",
         ),
+        crate::TurnStop::AgentFrameSwitchLimit => (
+            Class::ResourceLimit,
+            "process_session_turn_agent_frame_switch_limit",
+            "background session turn reached its agent frame switch limit",
+        ),
         crate::TurnStop::RuntimeError => (
             Class::Internal,
             "process_session_turn_runtime_error",

@@ -303,7 +303,8 @@ fn render_outcome_for_output(outcome: &TurnOutcome) -> Option<String> {
             | TurnStop::ProviderError
             | TurnStop::ContextOverflow
             | TurnStop::PluginAbort
-            | TurnStop::RuntimeError,
+            | TurnStop::RuntimeError
+            | TurnStop::AgentFrameSwitchLimit,
         ) => None,
     }
 }

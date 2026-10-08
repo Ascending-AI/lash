@@ -550,16 +550,39 @@ async fn admissions_settle_for_finish_cancel_and_error() {
     ));
 }
 
-/// A chain of agent frame switches stops at its bound: every model call
-/// switches to the next frame, each switch's follow-on runs as its own run
-/// (ADR 0101 §3), and the follow-on past the bound stops instead of running,
-/// leaving no queued input or work.
+/// FIG-5356, ADR 0101 §3: the default frame-switch bound stops typed,
+/// before the next model call, and settles every admitted input.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-5356: a chain of agent frame switches runs unbounded on the durable engine"]
 async fn a_frame_switch_chain_stops_at_its_bound() {
-    const SWITCH_BOUND: usize = 16;
+    let limit = lash::ExecutionBudgets::default()
+        .config()
+        .agent_frame_switch_limit
+        .get();
+    assert_eq!(limit, 16);
+    assert_switch_chain(limit as usize, limit as usize, false).await;
+}
+
+/// The host's configured bound governs the durable chain, rather than a
+/// constant or an in-memory count tied to one turn.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_frame_switch_chain_stops_at_the_configured_bound() {
+    assert_switch_chain(3, 3, false).await;
+}
+
+/// A chain below the configured bound completes without a bound failure.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_frame_switch_chain_under_the_bound_completes() {
+    assert_switch_chain(3, 2, true).await;
+}
+
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "test support: a refused fixture or unreadable terminal fails the chain law"
+)]
+async fn assert_switch_chain(limit: usize, switches: usize, finishes: bool) {
     let call_index = Arc::new(AtomicUsize::new(0));
-    let bound_provider = lash_core::testing::TestProvider::builder()
+    let provider = lash_core::testing::TestProvider::builder()
         .kind("logical-turn-bound")
         .complete({
             let call_index = Arc::clone(&call_index);
@@ -567,6 +590,11 @@ async fn a_frame_switch_chain_stops_at_its_bound() {
                 let call_index = Arc::clone(&call_index);
                 async move {
                     let index = call_index.fetch_add(1, Ordering::SeqCst);
+                    // The mutant runs one more switch at the bound, so its
+                    // failure is immediate rather than an unknown-tool loop.
+                    if (finishes && index >= switches) || index > limit {
+                        return Ok(text_response("the chain completed"));
+                    }
                     Ok(LlmResponse {
                         parts: vec![LlmOutputPart::ToolCall {
                             call_id: format!("switch-{index}"),
@@ -574,7 +602,6 @@ async fn a_frame_switch_chain_stops_at_its_bound() {
                             input_json: "{}".to_string(),
                             replay: None,
                         }],
-                        response_metadata: Default::default(),
                         ..LlmResponse::default()
                     })
                 }
@@ -582,62 +609,138 @@ async fn a_frame_switch_chain_stops_at_its_bound() {
         })
         .build()
         .into_handle();
-    let (bound_core, bound_engine) = standard_core(
-        bound_provider,
-        Arc::new(BoundedSwitchTools {
-            switch_count: SWITCH_BOUND,
-        }),
-        Arc::new(RecordingTraceSink::default()),
-    )
-    .await;
-    let bound_session = created_session(&bound_core, "logical-turn-bound")
+    let engine = sim_engine().await;
+    let core = lash::LashCore::standard_builder(engine.backend())
+        .serve_test_llm_profile(provider, model())
+        .tools(Arc::new(BoundedSwitchTools {
+            switch_count: limit + 1,
+        }))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .execution_budgets(
+            lash::ExecutionBudgets::new(lash_core::ExecutionBudgetsConfig {
+                agent_frame_switch_limit: std::num::NonZeroU32::new(limit as u32).unwrap(),
+                ..lash_core::ExecutionBudgetsConfig::default()
+            })
+            .expect("valid execution budgets"),
+        )
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "logical-turn-chain",
+            "chain-boot",
+        ))
+        .expect("build chain core");
+    let session = created_session(&core, "logical-turn-bound")
         .await
         .durable()
         .await
         .expect("open bound session");
-    bound_session
-        .send(TurnInput::text("run beyond the frame switch bound"))
+    let mut output = session
+        .send(TurnInput::text("run the frame switch chain"))
         .output()
         .await
         .expect("the first switch answers its send");
-    let last =
-        lash_core::FrameKey::from_caller_material(&format!("bounded-frame-{}", SWITCH_BOUND - 1))
-            .expect("non-empty caller material");
-    let bounded = tokio::time::timeout(
-        std::time::Duration::from_secs(60),
-        bound_session
+    for _ in 0..switches {
+        let lash_core::facade_support::TurnOutcome::AgentFrameSwitch { frame_key, .. } =
+            &output.result.outcome
+        else {
+            panic!(
+                "the chain must switch until its final follow-on: {:?}",
+                output.result.outcome
+            );
+        };
+        // A switch's answer proves that its follow-on mail committed. Attach
+        // only after that answer, so an unaccepted future id cannot end the law.
+        output = tokio::time::timeout(
+            std::time::Duration::from_secs(60),
+            session
+                .attach_id(lash_core::runtime::durable::session_mail::frame_task_run(
+                    frame_key,
+                ))
+                .output(),
+        )
+        .await
+        .expect("the chain reaches its final follow-on")
+        .expect("the follow-on terminalizes");
+    }
+    if finishes {
+        assert_eq!(output.assistant_message(), Some("the chain completed"));
+        assert_eq!(call_index.load(Ordering::SeqCst), switches + 1);
+    } else {
+        assert!(
+            matches!(
+                output.result.outcome,
+                lash_core::facade_support::TurnOutcome::Stopped(TurnStop::AgentFrameSwitchLimit)
+            ),
+            "the follow-on at the bound stops typed: {:?}",
+            output.result.outcome
+        );
+        assert_eq!(call_index.load(Ordering::SeqCst), limit);
+        let bounded_run = lash_core::TurnId::parse(
+            output
+                .result
+                .acceptance
+                .as_ref()
+                .unwrap()
+                .source_key
+                .as_ref()
+                .unwrap(),
+        )
+        .unwrap();
+        let remote =
+            output
+                .result
+                .to_remote(&SessionId::from("logical-turn-bound"), &bounded_run, &[]);
+        assert_eq!(
+            serde_json::to_value(remote).unwrap()["outcome"]["stop"]["type"],
+            json!("agent_frame_switch_limit"),
+            "the remote host receives the typed bound"
+        );
+        // The terminal is durable: attaching again requires no live error
+        // event to distinguish the chain bound from another runtime failure.
+        let resumed = session
+            .attach_id(bounded_run)
+            .output()
+            .await
+            .expect("reattach bounded run");
+        assert!(matches!(
+            resumed.result.outcome,
+            lash_core::facade_support::TurnOutcome::Stopped(TurnStop::AgentFrameSwitchLimit)
+        ));
+        // The bound belongs to this chain, not to the session's frame history.
+        let fresh = session
+            .send(TurnInput::text("start a fresh chain"))
+            .output()
+            .await
+            .expect("fresh host input runs");
+        let lash_core::facade_support::TurnOutcome::AgentFrameSwitch { frame_key, .. } =
+            &fresh.result.outcome
+        else {
+            panic!("fresh input must switch once");
+        };
+        let fresh = session
             .attach_id(lash_core::runtime::durable::session_mail::frame_task_run(
-                &last,
+                frame_key,
             ))
-            .output(),
-    )
-    .await
-    .expect("the chain reaches its bound")
-    .expect("the bounded follow-on terminalizes");
+            .output()
+            .await
+            .expect("fresh follow-on completes");
+        assert_eq!(fresh.assistant_message(), Some("the chain completed"));
+    }
     assert!(
-        matches!(
-            bounded.result.outcome,
-            lash_core::facade_support::TurnOutcome::Stopped(TurnStop::RuntimeError)
-        ),
-        "the follow-on past the bound stops: {:?}",
-        bounded.result.outcome
-    );
-    assert_eq!(call_index.load(Ordering::SeqCst), SWITCH_BOUND);
-    assert!(
-        bound_session
+        session
             .queued_work()
             .await
-            .expect("bounded queue")
+            .expect("settled queue")
             .is_empty()
     );
     assert!(
-        bound_session
+        session
             .pending_turn_inputs()
             .await
-            .expect("bounded inputs")
+            .expect("settled inputs")
             .is_empty()
     );
-    assert_global_invariants(&bound_engine, "admissions-settle-bound").await;
+    assert_global_invariants(&engine, "frame-switch-chain").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

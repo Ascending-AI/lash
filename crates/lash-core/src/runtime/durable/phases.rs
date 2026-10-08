@@ -42,7 +42,7 @@ use super::session::{
     CellExit, CodeCell, ComposedCall, OpenTurn, PhaseCheckpoint, PhaseExit, PreparedCall, TurnDone,
     TurnDrive, TurnError, TurnRow, TurnServices, UnfinishedPhase,
 };
-use super::session_mail::follow_on_mail;
+use super::session_mail::{agent_frame_switches, follow_on_mail};
 use super::tool_round::{self, RoundExit};
 use super::turn_scope::end_turn_scope;
 use super::{model_call, turn_cancel};
@@ -143,6 +143,33 @@ pub async fn run_phases(
     } = turn;
     let session = row.session.clone();
     let run = row.run.clone();
+    let switches = agent_frame_switches(cx, &row).await?;
+    let limit = services
+        .execution_budgets(&session)
+        .config()
+        .agent_frame_switch_limit
+        .get();
+    if switches >= limit {
+        tracing::warn!(session = %session, run = %run, switches, limit,
+            "the agent frame switch chain reached its bound");
+        pending = None;
+        drive
+            .machine()
+            .finish_with_outcome(crate::TurnOutcome::Stopped(
+                crate::TurnStop::AgentFrameSwitchLimit,
+            ));
+        drive
+            .local(
+                cx,
+                Effect::Emit(lash_sansio::session_model::make_error_event(
+                    crate::TurnFailureKind::Runtime,
+                    Some(crate::TurnFailureCode::AgentFrameSwitchLimit.into()),
+                    format!("logical turn reached the limit of {limit} agent frame switches"),
+                    None,
+                )),
+            )
+            .await?;
+    }
     // The model call in flight as the rows left it, and the effect the
     // restored machine re-delivers it as: that call is resent as its next
     // attempt, under its recorded deadline, and never composed again.
@@ -412,7 +439,7 @@ pub async fn run_phases(
                 let kind = cause.kind();
                 // A frame switch mails its follow-on with its commit.
                 let follow_on = match &done.outcome {
-                    Some(outcome) => follow_on_mail(&session, outcome)?,
+                    Some(outcome) => follow_on_mail(&session, outcome, switches)?,
                     None => None,
                 };
                 let commit = drive

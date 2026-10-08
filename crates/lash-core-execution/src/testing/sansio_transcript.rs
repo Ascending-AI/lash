@@ -216,6 +216,7 @@ fn stop_reason(stop: &TurnStop) -> &'static str {
         TurnStop::ContextOverflow => "context_overflow",
         TurnStop::PluginAbort => "plugin_abort",
         TurnStop::RuntimeError => "runtime_error",
+        TurnStop::AgentFrameSwitchLimit => "agent_frame_switch_limit",
         TurnStop::SubmittedError { .. } => "submitted_error",
         TurnStop::ToolError { .. } => "tool_error",
     }

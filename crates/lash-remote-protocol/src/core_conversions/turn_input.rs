@@ -157,6 +157,7 @@ impl TryFrom<lash_core::TurnInput> for RemoteTurnInput {
             items,
             trace_turn_id,
             turn_context: _,
+            agent_frame_switches: _,
         } = value;
         Ok(Self {
             items: items

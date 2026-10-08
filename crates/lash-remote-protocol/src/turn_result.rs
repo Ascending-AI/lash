@@ -583,6 +583,7 @@ pub enum RemoteTurnStop {
     ContextOverflow,
     PluginAbort,
     RuntimeError,
+    AgentFrameSwitchLimit,
     SubmittedError {
         value: serde_json::Value,
     },

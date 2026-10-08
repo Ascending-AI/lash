@@ -309,6 +309,7 @@ pub enum TurnCommitFailureCause {
     ContextOverflow,
     PluginAbort,
     RuntimeError,
+    AgentFrameSwitchLimit,
     SubmittedError,
     ToolError,
 }
@@ -330,6 +331,9 @@ impl TurnCommitOutcome {
                 TurnStop::ContextOverflow => Self::Failed(TurnCommitFailureCause::ContextOverflow),
                 TurnStop::PluginAbort => Self::Failed(TurnCommitFailureCause::PluginAbort),
                 TurnStop::RuntimeError => Self::Failed(TurnCommitFailureCause::RuntimeError),
+                TurnStop::AgentFrameSwitchLimit => {
+                    Self::Failed(TurnCommitFailureCause::AgentFrameSwitchLimit)
+                }
                 TurnStop::SubmittedError { .. } => {
                     Self::Failed(TurnCommitFailureCause::SubmittedError)
                 }
@@ -352,6 +356,9 @@ impl TurnCommitOutcome {
             Self::Failed(TurnCommitFailureCause::ContextOverflow) => "failed_context_overflow",
             Self::Failed(TurnCommitFailureCause::PluginAbort) => "failed_plugin_abort",
             Self::Failed(TurnCommitFailureCause::RuntimeError) => "failed_runtime_error",
+            Self::Failed(TurnCommitFailureCause::AgentFrameSwitchLimit) => {
+                "failed_agent_frame_switch_limit"
+            }
             Self::Failed(TurnCommitFailureCause::SubmittedError) => "failed_submitted_error",
             Self::Failed(TurnCommitFailureCause::ToolError) => "failed_tool_error",
         }
