@@ -715,9 +715,8 @@ impl Provider for TestProvider {
     async fn send(
         &mut self,
         body: &lash_sansio::llm::types::LiveRequestBody,
-        mut context: lash_sansio::llm::types::ResponseContext,
+        context: lash_sansio::llm::types::ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
-        crate::provider::delivery_redaction::protect_callbacks(&mut context, body);
         let answered = match &self.answer {
             Some(answer) => answer(context, body.wire()).await,
             None => match crate::provider::canonical_request(body, context) {
@@ -725,7 +724,7 @@ impl Provider for TestProvider {
                 Err(error) => Err(error),
             },
         };
-        let mut response = crate::provider::delivery_redaction::protect_result(answered, body)?;
+        let mut response = answered?;
         // A scripted answer that carries counters is one its provider
         // reported, and a real provider reports them beside its own raw usage
         // record: without one the attempt is unreported by the provider

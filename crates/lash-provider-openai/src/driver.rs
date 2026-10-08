@@ -321,45 +321,31 @@ pub(crate) async fn complete(
 pub(crate) async fn send(
     provider: &mut OpenAiCompatibleProvider,
     body: &LiveRequestBody,
-    mut context: ResponseContext,
+    context: ResponseContext,
     endpoint: CompletionEndpoint,
 ) -> Result<LlmResponse, LlmTransportError> {
-    let has_slots = body.template().slots().next().is_some();
-    if has_slots {
-        provider.responses_resume = None;
-    }
-    protect_callbacks(&mut context, body);
-    let result = async {
-        let route = ProviderRouteIdentity::for_endpoint(
-            endpoint.provider_kind(),
-            &provider.base_url,
-            context.model().wire_model().to_string(),
-        );
-        let tokens = std::sync::Arc::clone(&provider.tokens);
-        let mut lease = tokens.current(&route).await?;
-        match send_attempt(provider, &context, body, endpoint, &lease.token).await {
-            Err(error) if rejected_before_output(&error) => {
-                match tokens
-                    .replace(&route, &lease, TokenRequestReason::Rejected)
-                    .await?
-                {
-                    Some(fresh) => {
-                        lease = fresh;
-                        send_attempt(provider, &context, body, endpoint, &lease.token).await
-                    }
-                    None => Err(error),
+    let route = ProviderRouteIdentity::for_endpoint(
+        endpoint.provider_kind(),
+        &provider.base_url,
+        context.model().wire_model().to_string(),
+    );
+    let tokens = std::sync::Arc::clone(&provider.tokens);
+    let mut lease = tokens.current(&route).await?;
+    match send_attempt(provider, &context, body, endpoint, &lease.token).await {
+        Err(error) if rejected_before_output(&error) => {
+            match tokens
+                .replace(&route, &lease, TokenRequestReason::Rejected)
+                .await?
+            {
+                Some(fresh) => {
+                    lease = fresh;
+                    send_attempt(provider, &context, body, endpoint, &lease.token).await
                 }
+                None => Err(error),
             }
-            other => other,
         }
+        other => other,
     }
-    .await;
-    // A checkpoint can contain echoed operands from the previous attempt;
-    // its redaction patterns must never outlive this live body.
-    if has_slots {
-        provider.responses_resume = None;
-    }
-    protect_result(result, body)
 }
 
 /// One attempt of [`send`], authenticated by `token`.
@@ -497,7 +483,6 @@ async fn send_attempt(
         url: url.clone(),
         headers,
         body: wire_body,
-        delivery_redactor: Some(body.redactor()),
         body_for_error: responses_resume
             .is_none()
             .then_some(request_body_for_error.clone()),

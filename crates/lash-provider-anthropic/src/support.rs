@@ -47,7 +47,6 @@ pub(crate) use crate::policy::*;
 pub(crate) use lash_core::provider::attachment_wire::{
     attachment_operand, check_slot, lower_attachment_json, template_error,
 };
-pub(crate) use lash_core::provider::delivery_redaction::{protect_callbacks, protect_result};
 pub(crate) use lash_sansio::AttachmentRef;
 pub(crate) use lash_sansio::llm::attachment_delivery::{
     AttachmentPosition, Delivery, ProviderAccepts, ProviderFileScope,

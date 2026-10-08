@@ -893,13 +893,33 @@ async fn codex_scripted_websocket_cached_follow_up_omits_previous_assistant_outp
 
     provider
         .complete(
-            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
-            &lash_core::provider::NoSlotDeliveries,
+            request(vec![LlmMessage::new(
+                LlmRole::User,
+                vec![
+                    lash_core::llm::types::LlmContentBlock::Text {
+                        text: "hello".into(),
+                        response_meta: None,
+                        cache_breakpoint: false,
+                    },
+                    crate::tests::attachment_tests::url_attachment(),
+                ],
+            )]),
+            &crate::tests::attachment_tests::UrlDelivery,
         )
         .await
         .expect("first response");
     let second = request(vec![
-        LlmMessage::text(LlmRole::User, "hello"),
+        LlmMessage::new(
+            LlmRole::User,
+            vec![
+                lash_core::llm::types::LlmContentBlock::Text {
+                    text: "hello".into(),
+                    response_meta: None,
+                    cache_breakpoint: false,
+                },
+                crate::tests::attachment_tests::url_attachment(),
+            ],
+        ),
         LlmMessage::new(
             LlmRole::Assistant,
             vec![lash_core::llm::types::LlmContentBlock::Text {
@@ -917,7 +937,7 @@ async fn codex_scripted_websocket_cached_follow_up_omits_previous_assistant_outp
         LlmMessage::text(LlmRole::User, "next"),
     ]);
     let response = provider
-        .complete(second, &lash_core::provider::NoSlotDeliveries)
+        .complete(second, &crate::tests::attachment_tests::UrlDelivery)
         .await
         .expect("second response");
 

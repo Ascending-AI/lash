@@ -100,7 +100,6 @@ impl GoogleOAuthProvider {
             )
             .with_header("Content-Type", "application/json")
             .with_body_for_error(request_body.clone().unwrap_or_default())
-            .with_delivery_redactor(admitted.redactor())
             .with_response_start_timeout_message("Cloud Code response start timed out");
         merge_extra_headers(&mut http_request.headers, &self.extra_headers, false)?;
         let timeouts = self.options.llm_timeouts();
@@ -643,44 +642,39 @@ impl Provider for GoogleOAuthProvider {
     async fn send(
         &mut self,
         body: &LiveRequestBody,
-        mut context: ResponseContext,
+        context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
-        protect_callbacks(&mut context, body);
-        let result = async {
-            self.route_identity_for_model(context.model().wire_model())
-                .validate_endpoint()
-                .map_err(|error| {
-                    LlmTransportError::new(error.to_string())
-                        .with_kind(ProviderFailureKind::Validation)
-                        .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
-                })?;
-            validate_extra_headers(
-                &self.extra_headers,
-                &["authorization", "content-type"],
-                false,
-            )?;
-            let route = self.route_identity_for_model(context.model().wire_model());
-            let tokens = Arc::clone(&self.tokens);
-            let mut lease = tokens.current(&route).await?;
-            match self.send_with_token(&context, body, &lease).await {
-                Err(error) if rejected_before_output(&error) => {
-                    match tokens
-                        .replace(&route, &lease, TokenRequestReason::Rejected)
-                        .await?
-                    {
-                        // Resend the admitted body once with the fresh token.
-                        Some(fresh) => {
-                            lease = fresh;
-                            self.send_with_token(&context, body, &lease).await
-                        }
-                        None => Err(error),
+        self.route_identity_for_model(context.model().wire_model())
+            .validate_endpoint()
+            .map_err(|error| {
+                LlmTransportError::new(error.to_string())
+                    .with_kind(ProviderFailureKind::Validation)
+                    .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
+            })?;
+        validate_extra_headers(
+            &self.extra_headers,
+            &["authorization", "content-type"],
+            false,
+        )?;
+        let route = self.route_identity_for_model(context.model().wire_model());
+        let tokens = Arc::clone(&self.tokens);
+        let mut lease = tokens.current(&route).await?;
+        match self.send_with_token(&context, body, &lease).await {
+            Err(error) if rejected_before_output(&error) => {
+                match tokens
+                    .replace(&route, &lease, TokenRequestReason::Rejected)
+                    .await?
+                {
+                    // Resend the admitted body once with the fresh token.
+                    Some(fresh) => {
+                        lease = fresh;
+                        self.send_with_token(&context, body, &lease).await
                     }
+                    None => Err(error),
                 }
-                other => other,
             }
+            other => other,
         }
-        .await;
-        protect_result(result, body)
     }
 
     fn clone_boxed(&self) -> Box<dyn Provider> {

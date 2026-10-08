@@ -300,7 +300,8 @@ The law the attempts keep is WIRE-SLOTS:
 > length, and a URL or provider file serves that content unchanged. A call
 > with no slot sends exactly its admitted bytes. A completed call is
 > replayed with zero deliveries and zero uploads, and no delivered value is
-> recorded, traced or carried in failure evidence.
+> journaled or recorded in an admission record. Request-body evidence uses
+> the template; provider text may echo delivered values (ADR 0135 §4).
 
 No renderer, projector or provider builder runs for a resend, so a builder
 or renderer changed since sends nothing different outside the slots.

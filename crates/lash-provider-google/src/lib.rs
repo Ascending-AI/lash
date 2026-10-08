@@ -24,7 +24,6 @@ pub use upload::GoogleFileUploader;
 
 #[cfg(test)]
 mod tests {
-    mod delivery_secret;
     mod request_support;
     use request_support::{request, request_with_capability};
     mod epilogue;

@@ -1021,6 +1021,8 @@ pub mod messages {
 /// before sending an [`InputItem::attachment`](crate::InputItem::attachment).
 /// The durable ref also names attachments in direct model calls and tool results;
 /// the host store chooses a delivery form for each provider attempt.
+/// Admission and journal records hold request templates, never delivered values.
+/// Provider text can echo a URL or file id; hosts should keep signed URL lifetimes short.
 ///
 /// Where the bytes live is a persistence concern:
 /// [`persistence`] carries the store trait, its errors, and reclamation.
@@ -1351,7 +1353,7 @@ pub mod provider {
     /// The admitted request template and the transient body filled for one attempt
     /// (ADR 0133 §6). Only literals, refs, acceptance and codecs are recorded.
     pub use lash_sansio::llm::types::{
-        AttachmentSlot, DeliveryRedactor, LiveRequestBody, RecordedRequestTemplate, RequestSegment,
+        AttachmentSlot, LiveRequestBody, RecordedRequestTemplate, RequestSegment,
         RequestTemplateBuilder, SlotCodec, TemplateError, TransientJson,
     };
     pub use lash_sansio::llm::types::{

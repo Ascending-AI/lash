@@ -1,18 +1,14 @@
-//! DELIVERY-SECRET, the core's half (ADR 0135 §4, FIG-5445).
-//!
-//! A host store double delivers every attachment as a URL carrying a
-//! recognizable signature. The provider receives that URL on the live wire
-//! and nowhere else: after a turn whose call succeeds and a turn whose call
-//! fails with a provider error that echoes the wire (scrubbed by the
-//! provider, as every adapter must), the signature is in no durable row of
-//! the store file (admission chunks, journals, history, observations), in
-//! no trace record, and in neither turn's output or errors.
+//! DELIVERY-SECRET (ADR 0135 §4): admissions and journals hold templates,
+//! never deliveries. A URL and a provider file are filled live on every
+//! attempt, including after the node dies before recording its answer.
 
 // Test code.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 
 #[path = "support/served.rs"]
 mod served;
+#[path = "support/sim.rs"]
+mod sim;
 
 use std::sync::{Arc, Mutex};
 
@@ -22,22 +18,28 @@ use lash_core::{
     AttachmentStorePersistence, LlmResponse, StoredAttachment, StoredBlobRef,
 };
 use lash_core_execution::StoreSet;
+use lash_durable_test::{Matrix, Script, SimClock, SimNodes, SimNodesConfig, Tripwire};
 use lash_sansio::llm::attachment_delivery::{
     AttachmentPosition, Delivery, DeliveryForms, DeliveryLimits, DeliverySecret, ProviderAccepts,
+    ProviderFileScope,
 };
 use lash_sansio::llm::capability::{
     AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
 };
-use lash_sansio::llm::types::{LiveRequestBody, ProviderRouteIdentity, ResponseContext};
+use lash_sansio::llm::types::{
+    LiveRequestBody, ProviderRouteIdentity, RecordedRequestTemplate, RequestSegment,
+    ResponseContext,
+};
 use lash_sansio::sync::MutexExt as _;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// What every signature this law's store mints starts with.
 const SIGNATURE: &str = "lash-delivery-secret-signature";
 /// The provider kind the host catalogue accepts images for.
-const PROVIDER: &str = "secret-echo";
+const PROVIDER: &str = "delivery-recorder";
 
-/// The host's backend, delivering every attachment as a URL signed for
-/// that one delivery; every other method is the SQLite store's.
+/// The host's backend, minting a URL or provider-file id for each delivery;
+/// every other method is the SQLite store's.
 struct SigningStore {
     inner: Arc<dyn AttachmentStore>,
     signed: Mutex<u64>,
@@ -83,7 +85,7 @@ impl AttachmentStore for SigningStore {
         accepts: &ProviderAccepts,
         limits: &DeliveryLimits,
     ) -> Result<Delivery, AttachmentStoreError> {
-        if !accepts.url {
+        if !accepts.url && accepts.provider_file.is_none() {
             return self.inner.deliver(reference, accepts, limits).await;
         }
         let signed = {
@@ -91,6 +93,14 @@ impl AttachmentStore for SigningStore {
             *signed += 1;
             *signed
         };
+        if reference.label.as_deref() == Some("file.png") {
+            let scope = accepts.provider_file.clone().expect("a file slot");
+            return Ok(Delivery::ProviderFile {
+                scope,
+                id: DeliverySecret::new(format!("file-{SIGNATURE}-{signed}")),
+                valid_until_ms: Some(limits.valid_through_ms),
+            });
+        }
         Ok(Delivery::Url {
             url: DeliverySecret::new(format!(
                 "https://bucket.store.test/{}?X-Signature={SIGNATURE}-{signed}",
@@ -101,71 +111,96 @@ impl AttachmentStore for SigningStore {
     }
 }
 
-/// The scenario's provider: it records every live wire it is sent, answers
-/// the first call, and fails every later one with an upstream error that
-/// echoes the wire, scrubbed as an adapter scrubs provider text.
+fn scope() -> ProviderFileScope {
+    ProviderFileScope {
+        provider: PROVIDER.into(),
+        endpoint: "https://delivery-recorder.test/v1".into(),
+        credential_scope: "law-account".into(),
+    }
+}
+
+/// Records only live wires in the host double. Its first attempt can stay
+/// pending until the simulated node is killed; the next owner answers it.
 #[derive(Clone, Debug, Default)]
-struct SecretEcho {
+struct WireRecorder {
     options: ProviderOptions,
-    wires: Arc<Mutex<Vec<String>>>,
+    wires: Arc<Mutex<Vec<(String, RecordedRequestTemplate)>>>,
+    lowered: Arc<AtomicUsize>,
+    crash: bool,
 }
 
 #[async_trait::async_trait]
-impl Provider for SecretEcho {
+impl Provider for WireRecorder {
     fn kind(&self) -> &'static str {
         PROVIDER
     }
-
     fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
-        ProviderRouteIdentity::new(PROVIDER, "https://secret-echo.test/v1", model)
+        ProviderRouteIdentity::new(PROVIDER, "https://delivery-recorder.test/v1", model)
     }
-
     fn options(&self) -> ProviderOptions {
         self.options.clone()
     }
-
     fn set_options(&mut self, options: ProviderOptions) {
         self.options = options;
     }
-
     fn serialize_config(&self) -> serde_json::Value {
         serde_json::json!({})
     }
-
+    fn attachment_file_scope(&self) -> Option<ProviderFileScope> {
+        Some(scope())
+    }
+    async fn lower(
+        &mut self,
+        request: &lash_core::LlmRequest,
+    ) -> Result<RecordedRequestTemplate, lash_core::llm::transport::LlmTransportError> {
+        self.lowered.fetch_add(1, Ordering::SeqCst);
+        let mut template = RecordedRequestTemplate::of_request(
+            self.route_identity(request.model.wire_model()),
+            request,
+        )
+        .map_err(lash_core::provider::attachment_wire::template_error)?;
+        for segment in &mut template.segments {
+            if let RequestSegment::Attachment { slot } = segment
+                && slot.reference.label.as_deref() == Some("file.png")
+            {
+                slot.accepts = ProviderAccepts {
+                    bytes: false,
+                    url: false,
+                    provider_file: Some(scope()),
+                };
+            }
+        }
+        Ok(template)
+    }
     async fn send(
         &mut self,
         body: &LiveRequestBody,
         _context: ResponseContext,
     ) -> Result<LlmResponse, lash_core::llm::transport::LlmTransportError> {
-        let wire = body.wire();
         let first = {
             let mut wires = self.wires.lock_recover();
-            wires.push(wire.clone());
+            wires.push((body.wire(), body.template().clone()));
             wires.len() == 1
         };
-        if first {
-            return Ok(LlmResponse {
-                parts: vec![lash_core::LlmOutputPart::Text {
-                    text: "seen".to_owned(),
-                    response_meta: None,
-                }],
-                ..LlmResponse::default()
-            });
+        if self.crash && first {
+            std::future::pending::<()>().await;
         }
-        let echoed = body.scrub(&format!("upstream rejected the request {wire}"));
-        Err(lash_core::llm::transport::LlmTransportError::new(echoed)
-            .with_kind(lash_core::ProviderFailureKind::Validation)
-            .with_retry_verdict(lash_core::llm::transport::TransportRetryVerdict::Forbidden)
-            .with_request_body(body.redacted()))
+        Ok(LlmResponse {
+            parts: vec![lash_core::LlmOutputPart::Text {
+                text: "seen".into(),
+                response_meta: None,
+            }],
+            request_body: Some(body.redacted()),
+            ..LlmResponse::default()
+        })
     }
-
     fn clone_boxed(&self) -> Box<dyn Provider> {
         Box::new(self.clone())
     }
 }
 
-/// The host catalogue: the provider takes PNG images in messages by URL only.
-fn url_only_images() -> AttachmentCapabilitySnapshot {
+/// The host permits URL and provider-file deliveries for PNG images.
+fn catalogue() -> AttachmentCapabilitySnapshot {
     AttachmentCapabilitySnapshot {
         revision: "delivery-secret".to_owned(),
         acceptors: vec![AttachmentAcceptor {
@@ -177,7 +212,7 @@ fn url_only_images() -> AttachmentCapabilitySnapshot {
                 forms: DeliveryForms {
                     bytes: false,
                     url: true,
-                    provider_file: false,
+                    provider_file: true,
                 },
             }],
         }],
@@ -205,115 +240,155 @@ fn holds(bytes: &[u8], needle: &str) -> bool {
         .any(|window| window == needle.as_bytes())
 }
 
-/// A delivered URL reaches the provider's live wire and no record, trace,
-/// error or output, after a successful call and after a failing one whose
-/// provider error echoed it.
+/// DELIVERY-SECRET: only templates are durable, before and after a send;
+/// a takeover fills both slots afresh without lowering the admitted call.
 #[tokio::test]
-async fn a_delivered_url_reaches_only_the_live_wire() {
-    let dir = tempfile::tempdir().expect("a temporary directory");
-    let sqlite = lash_sqlite_store::SqliteStoreSet::open(dir.path().join("lash.db"))
-        .await
-        .expect("a file store set opens");
-    let stores: Arc<dyn StoreSet> = Arc::new(sqlite);
-    let backend =
-        lash_core::testing::runtime_helpers::LayeredBackend::over(served::backend(stores))
-            .map_attachment_store(|inner| {
-                Arc::new(SigningStore {
-                    inner,
-                    signed: Mutex::new(0),
-                }) as Arc<dyn AttachmentStore>
-            })
-            .into_backend();
-    let provider = SecretEcho::default();
-    let wires = Arc::clone(&provider.wires);
-    let trace_path = dir.path().join("trace.jsonl");
-    let core = lash::LashCore::standard_builder(backend.clone())
-        .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
-        .trace_jsonl_path(trace_path.clone())
-        .serve_test_llm_profile(
-            ProviderHandle::new(ProviderComponents::new(Box::new(provider))),
-            served::metadata(),
-        )
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "delivery-secret-deployment",
-            "delivery-secret-boot",
-        ))
-        .expect("the core builds");
-    let session_id = lash::SessionId::try_from("delivery-secret".to_owned()).expect("an id");
-    let session = core
-        .session(session_id.clone())
-        .create(lash::SessionCreation::root(
-            served::spec(4).attachment_acceptance(Arc::new(url_only_images())),
-        ))
-        .await
-        .expect("the session is created");
-    // The host puts before it sends, under the session's upload holder.
-    let uploads = lash_core::facade_support::RuntimeAttachmentStore::new(
-        backend.attachment_store(),
-        backend.attachment_referrers(),
-        lash_core::RuntimeOwner::Session(session_id),
-    );
-    let image = uploads
-        .put(
-            b"a picture worth a signature".to_vec(),
-            AttachmentCreateMeta::new(
-                lash_core::MediaType::parse("image/png").expect("a media type"),
-                None,
-                Some("signed.png".to_owned()),
-            ),
-        )
-        .await
-        .expect("the host puts the image");
-
-    let mut outputs = Vec::new();
-    for text in ["look at the picture", "look again"] {
-        let output = tokio::time::timeout(
-            served::WATCHDOG,
-            session
-                .send(lash::TurnInput::text(text).with_attachment(image.clone()))
-                .output(),
-        )
-        .await
-        .expect("deadlock watchdog: the turn settles")
-        .expect("the turn answers");
-        outputs.push(format!("{output:?}"));
-    }
-    core.shutdown().await.expect("the core shuts down");
-
-    let wires = wires.lock_recover().clone();
-    assert_eq!(wires.len(), 2, "both turns sent their call: {wires:?}");
-    for wire in &wires {
-        assert!(
-            wire.contains(SIGNATURE),
-            "the live wire carries the delivered URL: {wire}"
+async fn delivered_values_stay_out_of_records_across_crash_and_resend() {
+    for crash in [false, true] {
+        let dir = tempfile::tempdir().expect("a store directory");
+        let clock = SimClock::new();
+        let sqlite = sim::file(dir.path().join("lash.db"), Arc::clone(&clock)).await;
+        let database = Arc::new(sqlite.durable_store());
+        let stores: Arc<dyn StoreSet> = Arc::new(sqlite);
+        let backend =
+            lash_core::testing::runtime_helpers::LayeredBackend::over(sim::backend(stores))
+                .map_attachment_store(|inner| {
+                    Arc::new(SigningStore {
+                        inner,
+                        signed: Mutex::new(0),
+                    }) as Arc<dyn AttachmentStore>
+                })
+                .into_backend();
+        let provider = WireRecorder {
+            crash,
+            ..Default::default()
+        };
+        let wires = Arc::clone(&provider.wires);
+        let lowered = Arc::clone(&provider.lowered);
+        let core = lash::LashCore::standard_builder(backend.clone())
+            .serve_sessions(false)
+            .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+            .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+            .serve_test_llm_profile(
+                ProviderHandle::new(ProviderComponents::new(Box::new(provider))),
+                served::metadata(),
+            )
+            .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                "delivery-secret-deployment",
+                "delivery-secret-boot",
+            ))
+            .expect("the core builds");
+        let nodes = SimNodes::new(
+            database,
+            Arc::clone(&clock),
+            Script::new(),
+            SimNodesConfig {
+                lease: Matrix::test_lease(),
+                decodes: backend.formats().decodes(),
+                max_active: 4,
+            },
+            lash::testing::node_activation(&core, Arc::new(Tripwire::default()))
+                .expect("the core activation")
+                .1,
         );
-    }
-    assert!(
-        outputs[1].contains("upstream rejected the request"),
-        "the second turn failed with the provider's error: {}",
-        outputs[1]
-    );
-    for (turn, output) in outputs.iter().enumerate() {
-        assert!(
-            !output.contains(SIGNATURE),
-            "turn {turn}'s output or errors carry the delivered URL: {output}"
+        let session_id = lash::SessionId::try_from("delivery-secret".to_owned()).expect("an id");
+        let session = core
+            .session(session_id.clone())
+            .create(lash::SessionCreation::root(
+                served::spec(4).attachment_acceptance(Arc::new(catalogue())),
+            ))
+            .await
+            .expect("the session is created");
+        let uploads = lash_core::facade_support::RuntimeAttachmentStore::new(
+            backend.attachment_store(),
+            backend.attachment_referrers(),
+            lash_core::RuntimeOwner::Session(session_id),
         );
-    }
-    let traced = std::fs::read(&trace_path).unwrap_or_default();
-    assert!(!traced.is_empty(), "the turns were traced");
-    assert!(
-        !holds(&traced, SIGNATURE),
-        "a trace record carries the delivered URL"
-    );
-    for (file, bytes) in stored_bytes(dir.path()) {
-        if file.ends_with("trace.jsonl") {
-            continue;
+        let mut input = lash::TurnInput::text("look at both pictures");
+        for (label, bytes) in [
+            ("signed.png", b"a signed picture".to_vec()),
+            ("file.png", b"an uploaded picture".to_vec()),
+        ] {
+            let reference = uploads
+                .put(
+                    bytes,
+                    AttachmentCreateMeta::new(
+                        "image/png".parse().expect("a media type"),
+                        None,
+                        Some(label.into()),
+                    ),
+                )
+                .await
+                .expect("host put");
+            input = input.with_attachment(reference);
         }
+        // send() admits mail; only the production engine activation drives it.
+        let handle = session.send(input).await.expect("input accepted");
+        nodes.start("a");
+        while wires.lock_recover().is_empty() {
+            assert!(clock.logical_ms() < 120_000, "the first attempt never sent");
+            nodes.step().await;
+        }
+        // Admission, chunk blobs and phase rows are already durable here.
+        assert_no_delivery_in_store(dir.path());
+        if crash {
+            nodes.kill("a");
+            nodes.start("b");
+        }
+        let actor = lash_durable::ActorKey::session("delivery-secret").expect("an actor");
+        loop {
+            nodes.quiesce().await;
+            if matches!(nodes.database().actor(&actor).await, Ok(Some(row)) if row.state == lash_durable::ActorState::Idle)
+            {
+                break;
+            }
+            assert!(clock.logical_ms() < 240_000, "the turn never settled");
+            nodes.step().await;
+        }
+        let output = handle.output().await.expect("the settled output");
+        assert!(output.is_success(), "the turn: {output:?}");
+        let wires = wires.lock_recover().clone();
+        assert_eq!(wires.len(), if crash { 2 } else { 1 });
+        assert_eq!(
+            lowered.load(Ordering::SeqCst),
+            1,
+            "takeover reads the admission"
+        );
+        for (wire, template) in &wires {
+            assert!(
+                wire.contains(&format!("file-{SIGNATURE}")),
+                "the file reaches the live wire"
+            );
+            assert!(
+                wire.contains(&format!("X-Signature={SIGNATURE}")),
+                "the URL reaches the live wire"
+            );
+            assert_eq!(template.slots().count(), 2);
+            assert!(!serde_json::to_string(template).unwrap().contains(SIGNATURE));
+        }
+        if crash {
+            assert_eq!(
+                wires[0].1, wires[1].1,
+                "the admission pins literals and slots"
+            );
+            assert_ne!(wires[0].0, wires[1].0, "the resend fills fresh values");
+            for first in [format!("{SIGNATURE}-1"), format!("{SIGNATURE}-2")] {
+                assert!(!wires[1].0.contains(&first), "the resend reused {first}");
+            }
+        }
+        assert_no_delivery_in_store(dir.path());
+        nodes.kill("a");
+        nodes.kill("b");
+        core.shutdown().await.expect("the core shuts down");
+    }
+}
+
+fn assert_no_delivery_in_store(dir: &std::path::Path) {
+    for (file, bytes) in stored_bytes(dir) {
         assert!(
             !holds(&bytes, SIGNATURE),
-            "the store file {file} holds the delivered URL"
+            "the store file {file} holds a delivered value"
         );
     }
 }

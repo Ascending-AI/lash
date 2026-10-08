@@ -105,43 +105,38 @@ impl Provider for AnthropicProvider {
         admitted: &LiveRequestBody,
         mut context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
-        protect_callbacks(&mut context, admitted);
-        let result = async {
-            let minting_route = self.validate_route_and_headers(context.model().wire_model())?;
-            if let Some(downstream) = context.stream_events.take() {
-                let stream_route = minting_route.clone();
-                context.stream_events = Some(LlmEventSender::new(move |mut event| {
-                    if let LlmStreamEvent::Part(part) = &mut event {
-                        let _ = part.stamp_replay_origin(&stream_route);
-                    }
-                    downstream.send(event);
-                }));
-            }
-            let tokens = Arc::clone(&self.tokens);
-            let mut lease = tokens.current(&minting_route).await?;
-            match self
-                .send_attempt(&context, admitted, &minting_route, &lease.token)
-                .await
-            {
-                Err(error) if rejected_before_output(&error) => {
-                    match tokens
-                        .replace(&minting_route, &lease, TokenRequestReason::Rejected)
-                        .await?
-                    {
-                        // Resend the admitted body once with the fresh token.
-                        Some(fresh) => {
-                            lease = fresh;
-                            self.send_attempt(&context, admitted, &minting_route, &lease.token)
-                                .await
-                        }
-                        None => Err(error),
-                    }
+        let minting_route = self.validate_route_and_headers(context.model().wire_model())?;
+        if let Some(downstream) = context.stream_events.take() {
+            let stream_route = minting_route.clone();
+            context.stream_events = Some(LlmEventSender::new(move |mut event| {
+                if let LlmStreamEvent::Part(part) = &mut event {
+                    let _ = part.stamp_replay_origin(&stream_route);
                 }
-                other => other,
-            }
+                downstream.send(event);
+            }));
         }
-        .await;
-        protect_result(result, admitted)
+        let tokens = Arc::clone(&self.tokens);
+        let mut lease = tokens.current(&minting_route).await?;
+        match self
+            .send_attempt(&context, admitted, &minting_route, &lease.token)
+            .await
+        {
+            Err(error) if rejected_before_output(&error) => {
+                match tokens
+                    .replace(&minting_route, &lease, TokenRequestReason::Rejected)
+                    .await?
+                {
+                    // Resend the admitted body once with the fresh token.
+                    Some(fresh) => {
+                        lease = fresh;
+                        self.send_attempt(&context, admitted, &minting_route, &lease.token)
+                            .await
+                    }
+                    None => Err(error),
+                }
+            }
+            other => other,
+        }
     }
 
     fn clone_boxed(&self) -> Box<dyn Provider> {
@@ -209,7 +204,6 @@ impl AnthropicProvider {
             .with_header("Content-Type", "application/json")
             .with_header("Accept", "text/event-stream")
             .with_body_for_error(request_body.clone().unwrap_or_default())
-            .with_delivery_redactor(admitted.redactor())
             .with_response_start_timeout_message("Anthropic response start timed out");
         let (name, value) = match self.auth_scheme {
             crate::AnthropicAuthScheme::ApiKey => {

@@ -134,7 +134,6 @@ pub struct HttpRequest {
     pub body: Bytes,
     /// Only template/ref text; the live body is solely for transport writes.
     pub body_for_error: Option<String>,
-    pub delivery_redactor: Option<lash_sansio::llm::provider_body::DeliveryRedactor>,
     pub response_start_timeout_message: Option<String>,
 }
 
@@ -157,7 +156,6 @@ impl HttpRequest {
             headers: Vec::new(),
             body: body.into(),
             body_for_error: None,
-            delivery_redactor: None,
             response_start_timeout_message: None,
         }
     }
@@ -186,14 +184,6 @@ impl HttpRequest {
                 .into_iter()
                 .map(|(name, value)| (name.into(), value.into())),
         );
-        self
-    }
-
-    pub fn with_delivery_redactor(
-        mut self,
-        redactor: lash_sansio::llm::provider_body::DeliveryRedactor,
-    ) -> Self {
-        self.delivery_redactor = Some(redactor);
         self
     }
 

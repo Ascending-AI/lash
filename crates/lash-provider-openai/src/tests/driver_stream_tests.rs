@@ -564,7 +564,17 @@ async fn responses_handle_resumes_after_the_last_sequence_without_duplicate_outp
         .push(("api-version".to_string(), "preview".to_string()));
     let mut handle = ProviderHandle::new(provider.into_components());
 
-    let mut request = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    let mut request = request(vec![LlmMessage::new(
+        LlmRole::User,
+        vec![
+            LlmContentBlock::Text {
+                text: "hello".into(),
+                response_meta: None,
+                cache_breakpoint: false,
+            },
+            super::attachment_tests::url_attachment(),
+        ],
+    )]);
     request.stream_events = Some(LlmEventSender::new({
         let events = Arc::clone(&events);
         let evidence_errors = Arc::clone(&evidence_errors);
@@ -580,13 +590,14 @@ async fn responses_handle_resumes_after_the_last_sequence_without_duplicate_outp
     }));
 
     let completion = handle
-        .complete(request, &lash_core::provider::NoSlotDeliveries)
+        .complete(request, &super::attachment_tests::UrlDelivery)
         .await
         .expect("the interrupted Responses generation resumes");
 
     let requests = transport.requests();
     assert_eq!(requests.len(), 2, "one creation and one reattachment");
     assert_eq!(requests[0].method, LlmHttpMethod::Post);
+    assert!(String::from_utf8_lossy(&requests[0].body).contains("signature=live"));
     assert_eq!(requests[1].method, LlmHttpMethod::Get);
     assert_eq!(
         requests[1].url,

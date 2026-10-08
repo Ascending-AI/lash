@@ -17,7 +17,6 @@ pub use config::{AnthropicAuthScheme, AnthropicProvider, DEFAULT_BASE_URL};
 
 #[cfg(test)]
 mod tests {
-    mod delivery_secret;
     mod request_support;
     use request_support::request;
     mod block_identity_tests;

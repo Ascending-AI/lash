@@ -157,8 +157,7 @@ impl CodexProvider {
             (request, chunk) => request.or(chunk),
         };
         let mut retry_state = CodexWebsocketRetryState::default();
-        let mut allow_cached_context =
-            self.websocket_continuation_enabled() && admitted.template().slots().next().is_none();
+        let mut allow_cached_context = self.websocket_continuation_enabled();
         loop {
             let websocket = self
                 .acquire_websocket(&call, connect_timeout, lease)
@@ -192,7 +191,7 @@ impl CodexProvider {
                     allow_cached_context = false;
                     tracing::debug!(
                         target: "lash_core::llm::codex_oauth",
-                        error = %admitted.scrub(&err.error.message),
+                        error = %err.error.message,
                         "Codex WebSocket cached continuation was stale; retrying once with full context"
                     );
                 }
@@ -205,7 +204,7 @@ impl CodexProvider {
                     allow_cached_context = false;
                     tracing::debug!(
                         target: "lash_core::llm::codex_oauth",
-                        error = %admitted.scrub(&err.error.message),
+                        error = %err.error.message,
                         "Codex WebSocket cached connection failed before stream start; reconnecting once with full context"
                     );
                 }
@@ -480,7 +479,7 @@ impl CodexProvider {
 
         let final_response = state.final_response.clone();
         let continuation = final_response.as_ref().and_then(|response| {
-            (self.websocket_continuation_enabled() && admitted.template().slots().next().is_none())
+            self.websocket_continuation_enabled()
                 .then(|| Self::continuation_from_response(full_body, response))
                 .flatten()
         });
@@ -549,7 +548,7 @@ impl CodexProvider {
                         self.record_websocket_fallback(call, &err.error);
                         tracing::debug!(
                             target: "lash_core::llm::codex_oauth",
-                            error = %admitted.scrub(&err.error.message),
+                            error = %err.error.message,
                             "Codex WebSocket failed before stream start; falling back to SSE"
                         );
                     }
@@ -614,7 +613,6 @@ impl CodexProvider {
             url: self.responses_url.clone(),
             headers,
             body: bytes::Bytes::from(body_bytes),
-            delivery_redactor: Some(admitted.redactor()),
             body_for_error: request_body.clone(),
             response_start_timeout_message: Some("Codex response start timed out".to_string()),
         };
@@ -1203,64 +1201,59 @@ impl Provider for CodexProvider {
         body: &LiveRequestBody,
         mut call: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
-        protect_callbacks(&mut call, body);
-        let result = async {
-            let route = self.route_identity(call.model().wire_model());
-            route.validate_endpoint().map_err(|error| {
-                LlmTransportError::new(error.to_string())
+        let route = self.route_identity(call.model().wire_model());
+        route.validate_endpoint().map_err(|error| {
+            LlmTransportError::new(error.to_string())
+                .with_kind(ProviderFailureKind::Validation)
+                .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
+        })?;
+        let built = BuiltRequest {
+            body: serde_json::from_str(&body.wire()).map_err(|e| {
+                LlmTransportError::new(format!("The Codex request body does not decode: {e}"))
                     .with_kind(ProviderFailureKind::Validation)
-                    .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
-            })?;
-            let built = BuiltRequest {
-                body: serde_json::from_str(&body.wire()).map_err(|e| {
-                    LlmTransportError::new(format!("The Codex request body does not decode: {e}"))
-                        .with_kind(ProviderFailureKind::Validation)
-                        .with_lash_code(TurnFailureCode::AdmittedRequestUnavailable)
-                        .with_retry_verdict(TransportRetryVerdict::Forbidden)
-                })?,
-                receipt: body.generation().unwrap_or_default(),
-            };
-            if let Some(downstream) = call.stream_events.take() {
-                let stream_route = route.clone();
-                call.stream_events = Some(lash_core::llm::types::LlmEventSender::new(
-                    move |mut event| {
-                        if let LlmStreamEvent::Part(part) = &mut event {
-                            let _ = part.stamp_replay_origin(&stream_route);
-                        }
-                        downstream.send(event);
-                    },
-                ));
-            }
-            let tokens = Arc::clone(&self.tokens);
-            let mut lease = tokens.current(&route).await?;
-            let mut replaced = false;
-            loop {
-                match self.send_once(&call, &built, body, &lease).await {
-                    Ok(mut response) => {
-                        response
-                            .stamp_replay_origin(&route)
-                            .map_err(|conflict| codex_replay_origin_conflict(conflict, None))?;
-                        return Ok(response);
+                    .with_lash_code(TurnFailureCode::AdmittedRequestUnavailable)
+                    .with_retry_verdict(TransportRetryVerdict::Forbidden)
+            })?,
+            receipt: body.generation().unwrap_or_default(),
+        };
+        if let Some(downstream) = call.stream_events.take() {
+            let stream_route = route.clone();
+            call.stream_events = Some(lash_core::llm::types::LlmEventSender::new(
+                move |mut event| {
+                    if let LlmStreamEvent::Part(part) = &mut event {
+                        let _ = part.stamp_replay_origin(&stream_route);
                     }
-                    Err(error) if rejected_before_output(&error) && !replaced => {
-                        match tokens
-                            .replace(&route, &lease, TokenRequestReason::Rejected)
-                            .await?
-                        {
-                            // Resend the admitted body once with the fresh token.
-                            Some(fresh) => {
-                                lease = fresh;
-                                replaced = true;
-                            }
-                            None => return Err(stamped_codex_failure(error, &route)),
-                        }
-                    }
-                    Err(error) => return Err(stamped_codex_failure(error, &route)),
+                    downstream.send(event);
+                },
+            ));
+        }
+        let tokens = Arc::clone(&self.tokens);
+        let mut lease = tokens.current(&route).await?;
+        let mut replaced = false;
+        loop {
+            match self.send_once(&call, &built, body, &lease).await {
+                Ok(mut response) => {
+                    response
+                        .stamp_replay_origin(&route)
+                        .map_err(|conflict| codex_replay_origin_conflict(conflict, None))?;
+                    return Ok(response);
                 }
+                Err(error) if rejected_before_output(&error) && !replaced => {
+                    match tokens
+                        .replace(&route, &lease, TokenRequestReason::Rejected)
+                        .await?
+                    {
+                        // Resend the admitted body once with the fresh token.
+                        Some(fresh) => {
+                            lease = fresh;
+                            replaced = true;
+                        }
+                        None => return Err(stamped_codex_failure(error, &route)),
+                    }
+                }
+                Err(error) => return Err(stamped_codex_failure(error, &route)),
             }
         }
-        .await;
-        protect_result(result, body)
     }
 
     async fn close(&self) -> Result<(), LlmTransportError> {
@@ -1278,5 +1271,4 @@ impl Provider for CodexProvider {
 
 use crate::support::{
     AttachmentPosition, Delivery, ProviderAccepts, ProviderFileScope, lower_attachment_json,
-    protect_callbacks, protect_result,
 };

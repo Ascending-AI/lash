@@ -1,5 +1,4 @@
-mod attachment_tests;
-mod delivery_secret;
+pub(crate) mod attachment_tests;
 mod request_support;
 mod request_work_tests;
 use request_support::request;

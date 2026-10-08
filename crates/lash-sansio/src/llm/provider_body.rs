@@ -339,25 +339,14 @@ fn write_json(
     Ok(())
 }
 
-/// A JSON value for the live wire, retaining only its scrub patterns privately.
+/// One encoded JSON value for the live wire, with no serialized form.
 pub struct TransientJson {
     value: String,
-    secrets: Vec<String>,
 }
 impl TransientJson {
-    pub fn new(value: &serde_json::Value, delivery: &Delivery) -> Self {
-        let mut secrets = Vec::new();
-        if let Some(secret) = delivery.secret() {
-            let raw = secret.expose();
-            if !raw.is_empty() {
-                secrets.push(raw.to_owned());
-                let escaped = serde_json::Value::String(raw.to_owned()).to_string();
-                secrets.push(escaped[1..escaped.len() - 1].to_owned());
-            }
-        }
+    pub fn new(value: &serde_json::Value, _delivery: &Delivery) -> Self {
         Self {
             value: value.to_string(),
-            secrets,
         }
     }
 }
@@ -424,28 +413,6 @@ impl LiveRequestBody {
     pub fn redacted(&self) -> String {
         self.template.redacted()
     }
-    pub fn redactor(&self) -> DeliveryRedactor {
-        let mut secrets: Vec<String> = self
-            .values
-            .iter()
-            .flat_map(|value| value.secrets.iter().cloned())
-            .collect();
-        secrets.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
-        secrets.dedup();
-        DeliveryRedactor {
-            secrets: Arc::new(secrets),
-        }
-    }
-    pub fn scrubber(&self) -> Arc<dyn Fn(&str) -> String + Send + Sync> {
-        let redactor = self.redactor();
-        Arc::new(move |text| redactor.scrub(text))
-    }
-    pub fn scrub(&self, text: &str) -> String {
-        self.redactor().scrub(text)
-    }
-    pub fn has_secrets(&self) -> bool {
-        self.values.iter().any(|value| !value.secrets.is_empty())
-    }
 }
 impl std::fmt::Debug for LiveRequestBody {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -467,23 +434,4 @@ pub enum TemplateError {
     EmptyAcceptance,
     #[error("the body is not a canonical request: {reason}")]
     NotCanonical { reason: String },
-}
-
-/// A transport may scrub captured provider text without access to secret values.
-/// It has no serialized form and its Debug omits its patterns.
-#[derive(Clone, PartialEq, Eq)]
-pub struct DeliveryRedactor {
-    secrets: Arc<Vec<String>>,
-}
-impl DeliveryRedactor {
-    pub fn scrub(&self, text: &str) -> String {
-        self.secrets.iter().fold(text.to_owned(), |text, secret| {
-            text.replace(secret, "[redacted attachment delivery]")
-        })
-    }
-}
-impl std::fmt::Debug for DeliveryRedactor {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("DeliveryRedactor(<redacted>)")
-    }
 }

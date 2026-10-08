@@ -14,7 +14,6 @@ pub mod attachment_wire;
 #[cfg(test)]
 mod charge_safety_tests;
 mod credential;
-pub mod delivery_redaction;
 pub(crate) mod handle;
 mod models;
 mod options;

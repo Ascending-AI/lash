@@ -187,7 +187,7 @@ impl Provider for LoggedProvider {
         let http_json = http_body
             .as_deref()
             .and_then(|b| std::str::from_utf8(b).ok())
-            .and_then(|text| serde_json::from_str::<Value>(&body.scrub(text)).ok());
+            .and_then(|text| serde_json::from_str::<Value>(text).ok());
         row["http_response_json"] = http_json.clone().unwrap_or(Value::Null);
         let raw_usage = response
             .and_then(|r| r.provider_usage.clone())

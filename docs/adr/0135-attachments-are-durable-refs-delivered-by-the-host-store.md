@@ -96,11 +96,15 @@ original, and duplicate uploads after a crash are tolerated.
 A delivery happens inside one attempt of an admitted call, under that call's
 pinned deadline and cancellation, and outside every recorded effect. A
 `Delivery`, its URL or file id, an encoded slot value and the filled live
-body have no serialized form and print redacted. None of them reaches an
-admission record, a journal, a trace, an error, failure evidence, an
-observation or a log; provider text that may echo them is scrubbed before it
-leaves the attempt. Traces describe an attachment by id, MIME, length,
-position and delivery form only.
+body have no serialized form and print redacted. No delivered value is
+journaled or recorded in an admission record: the recorded request is a
+template, and its slots are filled live from fresh deliveries per attempt.
+Request-body evidence and request traces use the template's ref summary.
+
+Provider text in errors, failure evidence, stream deltas and trace events
+is handled as for every other call, without scrubbing. Attachment calls
+stream and resume under the same rules as calls without slots. Hosts should
+sign URLs with short lifetimes, since a provider may echo one into an error.
 
 A delivery fault is an unsent attempt failure with a typed cause: a
 transient store fault is retryable within the call's deadline and settles as
@@ -152,7 +156,8 @@ through the host ([ADR 0136](0136-hosts-own-their-wire-contracts.md)).
 - Core has one attachment concept, and its identity is content.
 - Hosts choose how bytes reach providers without changing history, identity
   or replay.
-- Signed URLs and provider file ids never become durable or traced.
+- Delivered values stay out of admissions and journals by construction;
+  provider text can echo them.
 - Hosts put before they send, and a remote host exposes a put operation.
 - Providers declare their encodable forms and keep a codec revision per
   slot shape.

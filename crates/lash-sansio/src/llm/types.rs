@@ -201,7 +201,7 @@ pub struct ProviderRouteIdentity {
 }
 
 pub use super::provider_body::{
-    AttachmentSlot, DeliveryRedactor, LiveRequestBody, RecordedRequestTemplate, RequestSegment,
+    AttachmentSlot, LiveRequestBody, RecordedRequestTemplate, RequestSegment,
     RequestTemplateBuilder, SlotCodec, TemplateError, TransientJson,
 };
 pub use super::provider_route::ProviderEndpointError;

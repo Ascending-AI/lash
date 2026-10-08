@@ -344,9 +344,6 @@ impl Provider for OpenAiProvider {
         context: &ResponseContext,
         body: &RecordedRequestTemplate,
     ) -> GenerationRetryGuarantee {
-        if body.slots().next().is_some() {
-            return GenerationRetryGuarantee::None;
-        }
         self.inner
             .responses_resume
             .as_ref()
