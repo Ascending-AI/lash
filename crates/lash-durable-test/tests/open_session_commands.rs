@@ -17,7 +17,6 @@ mod served;
 
 use std::sync::Arc;
 
-use lash_core::SessionCommitStore as _;
 use served::{Tier, World};
 
 /// Generation options that state only `seed`.

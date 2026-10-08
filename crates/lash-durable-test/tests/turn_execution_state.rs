@@ -28,7 +28,7 @@ use std::time::Duration;
 
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{LlmRequest, LlmResponse};
-use lash_core::{LlmOutputPart, ToolControl, ToolOutcome};
+use lash_core::{ToolControl, ToolOutcome};
 use served::{Tier, WATCHDOG, World};
 
 /// The state a fresh frame's executor starts from.

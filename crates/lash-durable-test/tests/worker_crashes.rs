@@ -84,6 +84,10 @@ impl Killer {
 
     /// Called as each worker call begins: kills the sole idle worker once
     /// the cell has had `before_request` of its requests checked out.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the law kills a real worker process, so its next request meets a closed transport"
+    )]
     fn on_call(&self) {
         if !self.armed.load(Ordering::SeqCst) {
             return;
