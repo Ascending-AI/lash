@@ -416,6 +416,7 @@ mod direct_completion;
 #[cfg(feature = "rlm")]
 mod discovery_execution;
 mod durable_session;
+mod direct_completion_lanes;
 mod facade_construction;
 mod facade_turn;
 mod generation_policy;
@@ -452,6 +453,7 @@ mod plugin_reopen;
 mod provider_attempts;
 mod replay_origin;
 mod plugin_stack;
+mod protocol_effects;
 mod recorded_execution_controls;
 mod recorded_protocol_prompt;
 mod recorded_request_defaults;
