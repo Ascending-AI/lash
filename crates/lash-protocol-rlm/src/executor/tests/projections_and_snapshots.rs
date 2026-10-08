@@ -1184,10 +1184,9 @@ pub(super) fn a_projected_scalar_read_reaches_a_tool_as_its_plain_value() {
         .await;
         assert_eq!(response.error, None);
         let record = response
-            .calls
+            .tool_calls
             .into_iter()
             .next()
-            .and_then(|call| call.host_record)
             .expect("one continue_as host record");
         assert_eq!(record.args["task"], serde_json::json!("q3"));
         assert_eq!(

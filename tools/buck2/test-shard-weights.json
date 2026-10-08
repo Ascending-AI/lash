@@ -730,7 +730,7 @@
     "protocol::driver::classification_tests::non_cell_reply_classification_table_is_byte_identical": 1,
     "protocol::driver::tests::bounded_output_recurses_through_failure_and_cancellation_raw_values": 1,
     "protocol::driver::tests::bounded_output_replaces_oversized_scalars_without_losing_structure_or_attachments": 1,
-    "protocol::driver::tests::executed_call_ledger_elides_arguments_and_keeps_the_diagnostic_tail": 1,
+    "protocol::driver::tests::executed_calls_keep_the_diagnostic_tail_and_count_the_rest": 1,
     "protocol::driver::tests::extraction_counts_record_opaque_reasoning_replay_presence": 1,
     "protocol::driver::tests::protocol_message_ids_include_turn_identity": 1,
     "protocol::driver::tests::response_projection_preserves_reasoning_replay_byte_faithfully": 1,

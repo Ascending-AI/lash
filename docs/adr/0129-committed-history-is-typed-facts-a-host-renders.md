@@ -20,7 +20,10 @@ timestamp, its typed turn/input provenance, and a `TranscriptItem`:
   results with their typed blocks, and code, output and error parts);
 - `Cell`: a code cell a protocol executed, with its code, its prints (or
   their retained archive), its typed `CellResult` (completed, failed with its
-  `CellFailure`, or finished with its `TerminalValue`), its executed calls,
+  `CellFailure`, or finished with its `TerminalValue`), its executed calls
+  (each an `ExecutedCall`: the operation, its outcome and the `call_id` of
+  the host tool call's `ToolCallRecord`, absent only for a dispatch lash
+  handled itself; [ADR 0117](0117-lash-names-every-tool-call.md) §7),
   `calls_omitted` (the calls beyond the recorded bound) and its images;
 - `Suppressed`: a named `SuppressionReason`.
 

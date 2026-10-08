@@ -1,5 +1,5 @@
 use crate::dialect::SessionDialect;
-use crate::tool_records::{bounded_exec_tool_call_records, executed_call_ledger};
+use crate::tool_records::{bounded_exec_tool_call_records, bounded_executed_calls};
 use lash_sansio::TurnId;
 use std::sync::Arc;
 
@@ -429,12 +429,13 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                     )]));
                 }
                 let terminal_outcome = response
-                    .calls
+                    .tool_calls
                     .iter()
-                    .filter_map(|call| call.host_record.as_ref())
                     .find_map(terminal_outcome_from_tool_result);
-                let (host_records, omitted) =
-                    bounded_exec_tool_call_records(&response.calls, &self.dialect.presentation());
+                let (host_records, omitted) = bounded_exec_tool_call_records(
+                    &response.tool_calls,
+                    &self.dialect.presentation(),
+                );
                 actions.extend(
                     host_records
                         .into_iter()
@@ -447,7 +448,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                     }));
                 }
                 (state.calls, state.calls_omitted) =
-                    executed_call_ledger(&response.calls, &self.dialect.presentation());
+                    bounded_executed_calls(response.calls, &self.dialect.presentation());
                 state.images.extend(response.printed_images);
                 state.output_archive = response.output_archive;
                 for observation in response.observations {

@@ -374,6 +374,7 @@ pub(crate) fn exec_response(
             })
             .collect(),
         calls: Vec::new(),
+        tool_calls: Vec::new(),
         printed_images: Vec::new(),
         error: error.map(|message| {
             lash_sansio::CellFailure::new(lash_sansio::CellFailureKind::Program, message)

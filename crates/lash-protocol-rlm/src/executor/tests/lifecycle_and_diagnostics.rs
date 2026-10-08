@@ -829,10 +829,9 @@ pub(super) async fn execute_continue_as_with_trace_sink(
     assert_eq!(response.error, None);
     assert_eq!(response.calls.len(), 1);
     response
-        .calls
+        .tool_calls
         .into_iter()
         .next()
-        .and_then(|call| call.host_record)
         .expect("one continue_as host record")
 }
 

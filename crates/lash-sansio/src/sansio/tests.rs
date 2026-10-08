@@ -252,6 +252,7 @@ fn empty_exec_response() -> crate::ExecResponse {
         output_archive: None,
         observations: Vec::new(),
         calls: Vec::new(),
+        tool_calls: Vec::new(),
         printed_images: Vec::new(),
         error: None,
         degraded_bindings: Vec::new(),

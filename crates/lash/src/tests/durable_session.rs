@@ -1586,3 +1586,99 @@ async fn transcript_totally_projects_a_really_committed_rlm_trajectory() {
     );
     core.shutdown().await.expect("shutdown");
 }
+
+/// One record per tool call under every protocol (FIG-5521): an RLM cell
+/// that calls two host tools reports two tool calls, each under its own
+/// `call_id`, and the cell's executed calls, read back from the durable
+/// transcript after a reopen, name those records by that `call_id`.
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_rlm_cells_executed_calls_name_the_turns_tool_call_records_after_a_reopen() -> Result<()>
+{
+    fn core(backend: lash_core::Backend) -> Result<LashCore> {
+        explicit_ephemeral_facets(rlm_core_builder_over(backend))
+            .serve_test_llm_profile(
+                text_provider(
+                    "cell-call-records",
+                    typescript_block(
+                        "const first = await tools.app_lookup({});\n\
+                         const second = await tools.app_lookup({});\n\
+                         finish(\"looked up twice\");",
+                    ),
+                ),
+                mock_llm_profile_spec(),
+            )
+            .tools(Arc::new(AppTools))
+            .build(crate::testing::runtime_lease_owner())
+    }
+    let backend = sqlite_memory_store_backend().await;
+    let session_id = id("cell-call-records");
+    let running = core(backend.clone())?;
+    let session = running
+        .session(session_id.clone())
+        .created()
+        .await
+        .open()
+        .await?;
+    let events = RecordingEvents::default();
+    session
+        .send(crate::TurnInput::text("look up twice"))
+        .output_into(&events)
+        .await?;
+    // The turn reports each call once it completes, with the record's own
+    // fields: its id, tool, arguments and output.
+    let mut record_ids = Vec::new();
+    for activity in events.snapshot().await {
+        if let crate::TurnEvent::ToolCallCompleted {
+            call_id,
+            name,
+            args,
+            output,
+            ..
+        } = activity.event
+        {
+            assert_eq!(name, "app_lookup");
+            assert_eq!(args, serde_json::json!({}));
+            assert!(output.is_success());
+            if !record_ids.contains(&Some(call_id.clone())) {
+                record_ids.push(Some(call_id));
+            }
+        }
+    }
+    assert_eq!(record_ids.len(), 2, "one record per host tool call");
+    drop(session);
+    running.shutdown().await?;
+
+    let reopened = core(backend)?;
+    let transcript = reopened
+        .session(session_id)
+        .open()
+        .await?
+        .read_view()
+        .transcript()
+        .expect("valid committed history");
+    let cells = transcript
+        .visible()
+        .filter_map(|entry| match &entry.item {
+            crate::transcript::TranscriptItem::Cell(cell) => Some(cell),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(cells.len(), 1, "the turn ran one cell");
+    assert_eq!(cells[0].calls_omitted, 0);
+    assert_eq!(
+        cells[0]
+            .calls
+            .iter()
+            .map(|call| call.call_id.clone())
+            .collect::<Vec<_>>(),
+        record_ids,
+        "each executed call names its tool call record"
+    );
+    for call in &cells[0].calls {
+        assert_eq!(call.operation, "tools.app_lookup");
+        assert_eq!(call.outcome, crate::persistence::ExecutedCallOutcome::Ok);
+    }
+    reopened.shutdown().await?;
+    Ok(())
+}

@@ -211,13 +211,15 @@ fn failed_observation_lists_executed_calls_and_frames_retry() {
             output: Vec::new(),
             images: Vec::new(),
             calls: vec![
-                lash_rlm_types::RlmExecutedCall {
+                lash_core::ExecutedCall {
                     operation: "module.ok".to_string(),
-                    outcome: lash_rlm_types::RlmExecutedCallOutcome::Ok,
+                    outcome: lash_core::ExecutedCallOutcome::Ok,
+                    call_id: None,
                 },
-                lash_rlm_types::RlmExecutedCall {
+                lash_core::ExecutedCall {
                     operation: "module.fail".to_string(),
-                    outcome: lash_rlm_types::RlmExecutedCallOutcome::Err,
+                    outcome: lash_core::ExecutedCallOutcome::Err,
+                    call_id: None,
                 },
             ],
             calls_omitted: 0,
@@ -260,9 +262,10 @@ fn successful_observation_keeps_calls_and_exact_earlier_omission_marker() {
             code: "value = module.ok()".to_string(),
             output: Vec::new(),
             images: Vec::new(),
-            calls: vec![lash_rlm_types::RlmExecutedCall {
+            calls: vec![lash_core::ExecutedCall {
                 operation: "module.ok".to_string(),
-                outcome: lash_rlm_types::RlmExecutedCallOutcome::Ok,
+                outcome: lash_core::ExecutedCallOutcome::Ok,
+                call_id: None,
             }],
             calls_omitted: 3,
             outcome: lash_rlm_types::CellOutcome::Running,

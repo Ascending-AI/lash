@@ -838,6 +838,7 @@ fn rlm_exec_response(
             })
             .collect(),
         calls: Vec::new(),
+        tool_calls: Vec::new(),
         printed_images: Vec::new(),
         error: error.map(|message| {
             lash_core::CellFailure::new(lash_core::CellFailureKind::Program, message)
@@ -856,15 +857,15 @@ fn rlm_exec_response_with_tool_calls(
     tool_calls: Vec<lash_core::ToolCallRecord>,
 ) -> lash_core::ExecResponse {
     let calls = tool_calls
-        .into_iter()
-        .map(|host_record| lash_core::ExecutedCall {
-            operation: format!("tools.{}", host_record.tool),
-            outcome: if host_record.output.is_success() {
+        .iter()
+        .map(|record| lash_core::ExecutedCall {
+            operation: format!("tools.{}", record.tool),
+            outcome: if record.output.is_success() {
                 lash_core::ExecutedCallOutcome::Ok
             } else {
                 lash_core::ExecutedCallOutcome::Err
             },
-            host_record: Some(host_record),
+            call_id: Some(record.call_id.clone()),
         })
         .collect();
     lash_core::ExecResponse {
@@ -878,6 +879,7 @@ fn rlm_exec_response_with_tool_calls(
             })
             .collect(),
         calls,
+        tool_calls,
         printed_images: Vec::new(),
         error: error.map(|message| {
             lash_core::CellFailure::new(lash_core::CellFailureKind::Program, message)

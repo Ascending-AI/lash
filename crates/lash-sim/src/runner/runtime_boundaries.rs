@@ -283,6 +283,7 @@ impl RuntimeBoundaryHarness {
                 projection: Default::default(),
             }],
             calls: Vec::new(),
+            tool_calls: Vec::new(),
             printed_images: Vec::new(),
             error: (exit_code != 0).then(|| {
                 lash_core::CellFailure::new(

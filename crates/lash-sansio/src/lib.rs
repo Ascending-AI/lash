@@ -164,8 +164,8 @@ pub use schema_contract::{
 };
 pub use session::{
     CellFailure, CellFailureKind, DegradedBinding, ExecCodeFailure, ExecCodeFailureReason,
-    ExecResponse, ExecutedCall, ExecutedCallOutcome, ExecutedCallRecord, Observation,
-    OmittedToolCalls, TextProjectionMetadata,
+    ExecResponse, ExecutedCall, ExecutedCallOutcome, Observation, OmittedToolCalls,
+    TextProjectionMetadata,
 };
 pub use session_model::message::{MessageOrigin, TurnOutputSource, TurnReply, same_message};
 pub use session_model::{

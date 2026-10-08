@@ -40,7 +40,10 @@ through `EngineSteps::execution` or `EngineHostSteps::execution`.
 
 `AttemptContext::call_id()` names one logical call across redelivery and
 retry ([ADR 0117](0117-lash-names-every-tool-call.md)). Hosts key their records
-and external effects on that id. Caller context provides `owner`,
+and external effects on that id. Lash reports the call as one `ToolCallRecord`
+under the same id whatever protocol issued it, and a code cell's executed
+calls name it by `call_id` (ADR 0117 §7), so a host ledger joins to the turn
+and to the cell on that one key. Caller context provides `owner`,
 `enclosing_process`, `logical_run` and `process_spawn_provenance`; provenance
 is context, not authorization or an instruction to notify a parent.
 

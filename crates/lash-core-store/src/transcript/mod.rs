@@ -9,7 +9,7 @@ use crate::{
     SessionHistoryRecord, SessionNodePayload, SessionNodeRecord, TurnId,
 };
 use lash_sansio::tool_output::ModelToolReturnPart;
-use lash_sansio::{CellFailure, ExecutedCallRecord, OutputValue, RetainedOutput, ToolCallId};
+use lash_sansio::{CellFailure, ExecutedCall, OutputValue, RetainedOutput, ToolCallId};
 use std::sync::Arc;
 
 /// Opaque entry identity. Equality and transport do not expose its spelling.
@@ -115,7 +115,10 @@ pub struct TranscriptCell {
     /// One archive of every print, when they exceeded the inline limit.
     pub prints_retained: Option<RetainedOutput>,
     pub result: CellResult,
-    pub calls: Vec<ExecutedCallRecord>,
+    /// The dispatches the cell executed. An entry's `call_id` is the id of
+    /// the host tool call's own record; `None` for a dispatch lash handled
+    /// with no host tool call.
+    pub calls: Vec<ExecutedCall>,
     /// Calls the cell made beyond the recorded `calls`.
     pub calls_omitted: usize,
     pub images: Vec<AttachmentRef>,

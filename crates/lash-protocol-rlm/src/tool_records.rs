@@ -3,19 +3,14 @@ use lash_core::{
     OmittedToolCalls, ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolControl, ToolFailure,
     ToolValue,
 };
-use lash_rlm_types::RlmExecutedCall;
 use std::collections::BTreeMap;
 
 pub(crate) fn bounded_exec_tool_call_records(
-    calls: &[lash_core::ExecutedCall],
+    records: &[ToolCallRecord],
     config: &crate::RlmPresentationConfig,
 ) -> (Vec<ToolCallRecord>, Option<OmittedToolCalls>) {
     // HostBridge supplies execution-index order, so concurrent dispatch keeps a
     // deterministic host-record order and configured retention boundary.
-    let records = calls
-        .iter()
-        .filter_map(|call| call.host_record.as_ref())
-        .collect::<Vec<_>>();
     let retained_count = records.len().min(config.max_tool_call_records);
     let bounded = records[..retained_count]
         .iter()
@@ -36,19 +31,14 @@ pub(crate) fn bounded_exec_tool_call_records(
     (bounded, summary)
 }
 
-pub(crate) fn executed_call_ledger(
-    records: &[lash_core::ExecutedCall],
+/// The cell entry's executed calls: the diagnostic tail of what the cell
+/// ran, and how many earlier calls it leaves out.
+pub(crate) fn bounded_executed_calls(
+    mut calls: Vec<lash_core::ExecutedCall>,
     config: &crate::RlmPresentationConfig,
-) -> (Vec<RlmExecutedCall>, usize) {
-    let omitted = records.len().saturating_sub(config.max_tool_call_records);
-    let calls = records
-        .iter()
-        .skip(omitted)
-        .map(|call| lash_core::ExecutedCallRecord {
-            operation: call.operation.clone(),
-            outcome: call.outcome,
-        })
-        .collect();
+) -> (Vec<lash_core::ExecutedCall>, usize) {
+    let omitted = calls.len().saturating_sub(config.max_tool_call_records);
+    calls.drain(..omitted);
     (calls, omitted)
 }
 

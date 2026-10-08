@@ -337,6 +337,7 @@ fn response(finish: Option<serde_json::Value>) -> lash_core::ExecResponse {
         output_archive: None,
         observations: Vec::new(),
         calls: Vec::new(),
+        tool_calls: Vec::new(),
         printed_images: Vec::new(),
         error: None,
         degraded_bindings: Vec::new(),
@@ -1674,17 +1675,18 @@ fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints(
         exec.calls.push(lash_core::ExecutedCall {
             operation: "tools.app_lookup".into(),
             outcome: lash_core::ExecutedCallOutcome::Ok,
-            host_record: Some(lash_core::ToolCallRecord {
-                call_id: lash_core::ToolCallId::fixture("terminal-call"),
-                provider_call_id: None,
-                tool: "app_lookup".into(),
-                args: serde_json::json!({}),
-                output: lash_core::ToolCallOutput::success(payload.clone()).with_control(
-                    lash_core::ToolControl::Finish {
-                        value: lash_core::ToolValue::untrusted_json(payload.clone()),
-                    },
-                ),
-            }),
+            call_id: Some(lash_core::ToolCallId::fixture("terminal-call")),
+        });
+        exec.tool_calls.push(lash_core::ToolCallRecord {
+            call_id: lash_core::ToolCallId::fixture("terminal-call"),
+            provider_call_id: None,
+            tool: "app_lookup".into(),
+            args: serde_json::json!({}),
+            output: lash_core::ToolCallOutput::success(payload.clone()).with_control(
+                lash_core::ToolControl::Finish {
+                    value: lash_core::ToolValue::untrusted_json(payload.clone()),
+                },
+            ),
         });
         machine.handle_response(Response::ExecResult {
             id: exec_id,

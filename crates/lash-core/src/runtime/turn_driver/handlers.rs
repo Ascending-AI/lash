@@ -500,9 +500,8 @@ impl RuntimeTurnDriver<'_> {
                             error: output.error.clone(),
                             duration_ms: cell_duration_ms,
                             tool_call_ids: output
-                                .calls
+                                .tool_calls
                                 .iter()
-                                .filter_map(|call| call.host_record.as_ref())
                                 .map(|record| record.call_id.clone())
                                 .collect(),
                             graph_key: graph_key.clone(),
@@ -539,9 +538,8 @@ impl RuntimeTurnDriver<'_> {
                     .map(|observation| observation.projection.clone())
                     .collect::<Vec<_>>();
                 let tool_calls = output
-                    .calls
+                    .tool_calls
                     .iter()
-                    .filter_map(|call| call.host_record.as_ref())
                     .map(|record| lash_trace::TraceExecToolCall {
                         call_id: record.call_id.clone(),
                         name: record.tool.clone(),
@@ -589,11 +587,10 @@ impl RuntimeTurnDriver<'_> {
         // request. The protocol then reads the cancelled record off the call
         // ledger and finishes the turn cancelled itself.
         let tool_call_cancelled = result.as_ref().ok().is_some_and(|output| {
-            output.calls.iter().any(|call| {
-                call.host_record.as_ref().is_some_and(|record| {
-                    record.output.status() == lash_sansio::ToolCallStatus::Cancelled
-                })
-            })
+            output
+                .tool_calls
+                .iter()
+                .any(|record| record.output.status() == lash_sansio::ToolCallStatus::Cancelled)
         });
         if let Some(code_executor) = self.session.plugins().code_executor() {
             code_executor

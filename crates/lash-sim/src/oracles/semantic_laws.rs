@@ -689,14 +689,9 @@ pub(super) fn exec_outcome_has_no_tool_call_replay(events: &[DeliveredBoundary])
             return false;
         }
         outcome
-            .pointer("/result/Ok/calls")
+            .pointer("/result/Ok/tool_calls")
             .and_then(Value::as_array)
-            .is_some_and(|calls| {
-                calls.iter().all(|call| {
-                    call.get("host_record")
-                        .is_none_or(serde_json::Value::is_null)
-                })
-            })
+            .is_some_and(Vec::is_empty)
     })
 }
 

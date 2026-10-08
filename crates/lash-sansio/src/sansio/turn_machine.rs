@@ -1071,13 +1071,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
         result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
     ) {
         self.run_abort = result.as_ref().ok().and_then(|response| {
-            RunAbort::first_in(
-                response
-                    .calls
-                    .iter()
-                    .filter_map(|call| call.host_record.as_ref())
-                    .map(|record| &record.output),
-            )
+            RunAbort::first_in(response.tool_calls.iter().map(|record| &record.output))
         });
         self.shift(|driver, ctx| driver.handle_exec_result(ctx, driver_state, result));
         self.finish_pending_run_abort();

@@ -711,9 +711,8 @@ fn identical_aggregates_in_one_cell_mint_distinct_leaf_identities() {
         );
 
         let call_ids = response
-            .calls
+            .tool_calls
             .iter()
-            .filter_map(|call| call.host_record.as_ref())
             .map(|record| record.call_id.clone())
             .collect::<Vec<_>>();
         assert_eq!(call_ids.len(), 4, "four leaves ran: {call_ids:?}");

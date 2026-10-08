@@ -637,22 +637,27 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
             calls: vec![lash_core::ExecutedCall {
                 operation: "tools.attachment_tool".to_string(),
                 outcome: lash_core::ExecutedCallOutcome::Ok,
-                host_record: Some(lash_core::ToolCallRecord {
-                    call_id: lash_core::ToolCallId::fixture("replayed-call"),
-                    provider_call_id: None,
-                    tool: "attachment_tool".to_string(),
-                    args: serde_json::json!({}),
-                    output: lash_core::ToolCallOutput::success_tool_value(
-                        lash_core::ToolValue::Attachment(lash_core::facade_support::AttachmentRef::new(
-                                lash_core::AttachmentId::parse("989a4570e404f95f1be77179059eada1572e0646bc7d82863027d7af976b9053")
-                                    .expect("valid attachment id"),
-                                lash_core::MediaType::parse("image/png").unwrap(),
-                                3,
-                                Some(lash_core::AttachmentTypeMetadata::image(Some(1), Some(1))),
-                                Some("replayed".to_string()),
-                            )),
+                call_id: Some(lash_core::ToolCallId::fixture("replayed-call")),
+            }],
+            tool_calls: vec![lash_core::ToolCallRecord {
+                call_id: lash_core::ToolCallId::fixture("replayed-call"),
+                provider_call_id: None,
+                tool: "attachment_tool".to_string(),
+                args: serde_json::json!({}),
+                output: lash_core::ToolCallOutput::success_tool_value(
+                    lash_core::ToolValue::Attachment(
+                        lash_core::facade_support::AttachmentRef::new(
+                            lash_core::AttachmentId::parse(
+                                "989a4570e404f95f1be77179059eada1572e0646bc7d82863027d7af976b9053",
+                            )
+                            .expect("valid attachment id"),
+                            lash_core::MediaType::parse("image/png").unwrap(),
+                            3,
+                            Some(lash_core::AttachmentTypeMetadata::image(Some(1), Some(1))),
+                            Some("replayed".to_string()),
+                        ),
                     ),
-                }),
+                ),
             }],
             printed_images: Vec::new(),
             error: None,
@@ -991,41 +996,46 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
                 lash_core::ExecutedCall {
                     operation: "module.ok".to_string(),
                     outcome: lash_core::ExecutedCallOutcome::Ok,
-                    host_record: Some(lash_core::ToolCallRecord {
-                        call_id: lash_core::ToolCallId::fixture("fanout-ok"),
-                        provider_call_id: None,
-                        tool: "ok".to_string(),
-                        args: serde_json::json!({}),
-                        output: lash_core::ToolCallOutput::success(serde_json::json!("ok")),
-                    }),
+                    call_id: Some(lash_core::ToolCallId::fixture("fanout-ok")),
                 },
                 lash_core::ExecutedCall {
                     operation: "module.fail".to_string(),
                     outcome: lash_core::ExecutedCallOutcome::Err,
-                    host_record: Some(lash_core::ToolCallRecord {
-                        call_id: lash_core::ToolCallId::fixture("fanout-fail"),
-                        provider_call_id: None,
-                        tool: "fail".to_string(),
-                        args: serde_json::json!({}),
-                        output: lash_core::ToolCallOutput::failure(lash_core::ToolFailure::tool(
-                            lash_core::ToolFailureClass::Execution,
-                            "tool_failed",
-                            "failed but captured",
-                        )),
-                    }),
+                    call_id: Some(lash_core::ToolCallId::fixture("fanout-fail")),
                 },
                 lash_core::ExecutedCall {
                     operation: "module.stop".to_string(),
                     outcome: lash_core::ExecutedCallOutcome::Err,
-                    host_record: Some(lash_core::ToolCallRecord {
-                        call_id: lash_core::ToolCallId::fixture("fanout-cancel"),
-                        provider_call_id: None,
-                        tool: "stop".to_string(),
-                        args: serde_json::json!({}),
-                        output: lash_core::ToolCallOutput::cancelled(
-                            lash_core::ToolCancellation::runtime("cancelled sibling"),
-                        ),
-                    }),
+                    call_id: Some(lash_core::ToolCallId::fixture("fanout-cancel")),
+                },
+            ],
+            tool_calls: vec![
+                lash_core::ToolCallRecord {
+                    call_id: lash_core::ToolCallId::fixture("fanout-ok"),
+                    provider_call_id: None,
+                    tool: "ok".to_string(),
+                    args: serde_json::json!({}),
+                    output: lash_core::ToolCallOutput::success(serde_json::json!("ok")),
+                },
+                lash_core::ToolCallRecord {
+                    call_id: lash_core::ToolCallId::fixture("fanout-fail"),
+                    provider_call_id: None,
+                    tool: "fail".to_string(),
+                    args: serde_json::json!({}),
+                    output: lash_core::ToolCallOutput::failure(lash_core::ToolFailure::tool(
+                        lash_core::ToolFailureClass::Execution,
+                        "tool_failed",
+                        "failed but captured",
+                    )),
+                },
+                lash_core::ToolCallRecord {
+                    call_id: lash_core::ToolCallId::fixture("fanout-cancel"),
+                    provider_call_id: None,
+                    tool: "stop".to_string(),
+                    args: serde_json::json!({}),
+                    output: lash_core::ToolCallOutput::cancelled(
+                        lash_core::ToolCancellation::runtime("cancelled sibling"),
+                    ),
                 },
             ],
             printed_images: Vec::new(),
@@ -1086,17 +1096,20 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
     assert_eq!(
         entry.calls,
         vec![
-            lash_rlm_types::RlmExecutedCall {
+            lash_core::ExecutedCall {
                 operation: "module.ok".to_string(),
-                outcome: lash_rlm_types::RlmExecutedCallOutcome::Ok,
+                outcome: lash_core::ExecutedCallOutcome::Ok,
+                call_id: Some(lash_core::ToolCallId::fixture("fanout-ok")),
             },
-            lash_rlm_types::RlmExecutedCall {
+            lash_core::ExecutedCall {
                 operation: "module.fail".to_string(),
-                outcome: lash_rlm_types::RlmExecutedCallOutcome::Err,
+                outcome: lash_core::ExecutedCallOutcome::Err,
+                call_id: Some(lash_core::ToolCallId::fixture("fanout-fail")),
             },
-            lash_rlm_types::RlmExecutedCall {
+            lash_core::ExecutedCall {
                 operation: "module.stop".to_string(),
-                outcome: lash_rlm_types::RlmExecutedCallOutcome::Err,
+                outcome: lash_core::ExecutedCallOutcome::Err,
+                call_id: Some(lash_core::ToolCallId::fixture("fanout-cancel")),
             },
         ]
     );

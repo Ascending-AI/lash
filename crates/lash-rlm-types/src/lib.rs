@@ -1,6 +1,6 @@
 use lash_sansio::{
-    AttachmentRef, CellFailure, CellFailureKind, OutputValue, RetainedOutput, SchemaShape,
-    ShapeKind, TurnProtocol,
+    AttachmentRef, CellFailure, CellFailureKind, ExecutedCall, ExecutedCallOutcome, OutputValue,
+    RetainedOutput, SchemaShape, ShapeKind, TurnProtocol,
 };
 
 /// Read-only legacy protocol-owned assistant context paired with an RLM
@@ -194,8 +194,11 @@ pub struct RlmTrajectoryEntry {
     pub output_archive: Option<Box<RetainedOutput>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<AttachmentRef>,
+    /// The dispatches the cell executed. An entry's `call_id` is the id of
+    /// the host tool call's own [`lash_sansio::ToolCallRecord`]; the model
+    /// reads them as [`HistoryExecutedCall`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub calls: Vec<RlmExecutedCall>,
+    pub calls: Vec<ExecutedCall>,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub calls_omitted: usize,
     /// What the cell resolved to. Serialized flat as the `error` /
@@ -205,8 +208,6 @@ pub struct RlmTrajectoryEntry {
     #[serde(flatten, with = "history_outcome")]
     pub outcome: HistoryCellOutcome,
 }
-
-pub type RlmExecutedCall = lash_sansio::ExecutedCallRecord;
 
 /// One inline print. Oversized steps retain the complete array in one archive.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -224,7 +225,24 @@ impl From<String> for RlmPrint {
         }
     }
 }
-pub type RlmExecutedCallOutcome = lash_sansio::ExecutedCallOutcome;
+
+/// One executed call as a cell's `history` shows it: the operation and how
+/// it settled, with no arguments and no host identity. A view derived from
+/// the cell entry's [`ExecutedCall`], never a stored shape.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
+pub struct HistoryExecutedCall {
+    pub operation: String,
+    pub outcome: ExecutedCallOutcome,
+}
+
+impl From<&ExecutedCall> for HistoryExecutedCall {
+    fn from(call: &ExecutedCall) -> Self {
+        Self {
+            operation: call.operation.clone(),
+            outcome: call.outcome,
+        }
+    }
+}
 
 fn is_zero(value: &usize) -> bool {
     *value == 0
@@ -422,7 +440,7 @@ pub enum RlmHistoryItem {
         #[serde(skip_serializing_if = "Vec::is_empty")]
         images: Vec<RlmImageRef>,
         #[serde(skip_serializing_if = "Vec::is_empty")]
-        calls: Vec<RlmExecutedCall>,
+        calls: Vec<HistoryExecutedCall>,
         #[serde(skip_serializing_if = "is_zero")]
         calls_omitted: usize,
         /// What the cell resolved to: `error` for a failed cell,
@@ -456,7 +474,7 @@ impl RlmHistoryItem {
                 .iter()
                 .map(RlmImageRef::from_attachment)
                 .collect(),
-            calls: entry.calls.clone(),
+            calls: entry.calls.iter().map(HistoryExecutedCall::from).collect(),
             calls_omitted: entry.calls_omitted,
             outcome: match &entry.outcome {
                 CellOutcome::Running => CellOutcome::Running,
@@ -514,9 +532,10 @@ mod rlm_step_serde_tests {
                 )),
                 label: Some("plot".to_string()),
             }],
-            calls: vec![lash_sansio::ExecutedCallRecord {
+            calls: vec![lash_sansio::ExecutedCall {
                 operation: "math.add".to_string(),
                 outcome: lash_sansio::ExecutedCallOutcome::Ok,
+                call_id: Some(lash_sansio::ToolCallId::fixture("math-add")),
             }],
             calls_omitted: 2,
             outcome: CellOutcome::Finished(serde_json::json!({"answer": 42}).into()),

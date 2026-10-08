@@ -801,6 +801,7 @@ fn checkpoint_pending_exec(
                 projection: Default::default(),
             }],
             calls: Vec::new(),
+            tool_calls: Vec::new(),
             printed_images: Vec::new(),
             error: None,
             degraded_bindings: Vec::new(),

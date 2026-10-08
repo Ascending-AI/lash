@@ -1,29 +1,19 @@
-use crate::{AttachmentRef, ToolCallRecord};
+use crate::{AttachmentRef, ToolCallId, ToolCallRecord};
 
-/// One source-level dispatch, optionally joined to the host tool record it produced.
+/// One source-level dispatch a code cell executed.
 ///
-/// `operation` and `outcome` are the model-safe execution ledger. Host records
-/// are attached only when the source dispatch resolved to a host tool call;
-/// host-internal dispatches therefore carry `None`.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct ExecutedCall {
-    pub operation: String,
-    pub outcome: ExecutedCallOutcome,
-    pub host_record: Option<ToolCallRecord>,
-}
-
-/// Compact source-level record of an effect the embedded executor actually ran.
-///
-/// Unlike [`ToolCallRecord`], this deliberately carries neither arguments nor
-/// host-operation details. Protocols can safely replay it to a model as an
-/// execution ledger without exposing inputs or confusing a source module call
-/// with the host tool it resolved to.
+/// `operation` and `outcome` are what the cell ran and how it settled.
+/// `call_id` names the [`ToolCallRecord`] of the host tool call the dispatch
+/// resolved to: that record, keyed by the same id, carries the tool, its
+/// arguments and its output. `None` only for a dispatch lash handled itself,
+/// with no host tool call.
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
-pub struct ExecutedCallRecord {
+pub struct ExecutedCall {
     pub operation: String,
     pub outcome: ExecutedCallOutcome,
+    pub call_id: Option<ToolCallId>,
 }
 
 /// Typed accounting for host tool records omitted from a bounded turn view.
@@ -231,7 +221,11 @@ pub struct ExecResponse {
     /// history limit. Inline observations are empty whenever this is present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_archive: Option<crate::RetainedOutput>,
+    /// Every source-level dispatch the cell executed, in execution order.
     pub calls: Vec<ExecutedCall>,
+    /// The record of each host tool call the cell made, in execution order.
+    /// A `calls` entry references its record by `call_id`.
+    pub tool_calls: Vec<ToolCallRecord>,
     pub printed_images: Vec<AttachmentRef>,
     pub error: Option<CellFailure>,
     /// Bindings that could not be restored to a live host reference during
@@ -299,6 +293,7 @@ mod tests {
                 }
             }],
             "calls": [],
+            "tool_calls": [],
             "images": [
                 {
                     "mime": "image/png",
@@ -322,6 +317,7 @@ mod tests {
         let mut paired_json = serde_json::json!({
             "observations": ["step output"],
             "calls": [],
+            "tool_calls": [],
             "printed_images": [],
             "error": null,
             "duration_ms": 42,

@@ -143,6 +143,34 @@ ADR 0137 owns that delivery contract.
 Commit records retain both lash identity and provider correlation.
 Run operand slots govern ordering independently of identity.
 
+### 7. One record per call
+
+A host tool call has one record under every protocol:
+`ToolCallRecord { call_id, provider_call_id, tool, args, output }`, keyed by
+its `call_id`. A protocol never keeps a parallel record of the call. What a
+protocol knows beyond the record is an extra field on it or an extra record
+that names it by `call_id`.
+
+A code cell's executed calls are such records. Each `ExecutedCall` carries the
+source `operation` the cell ran, its `outcome`, and `call_id:
+Option<ToolCallId>`, the id of the host tool call the dispatch resolved to. It
+is `None` only for a dispatch lash handled itself, with no host tool call. The
+cell's result (`ExecResponse`), the committed RLM trajectory entry and the
+transcript's `TranscriptCell` all hold that one type, so a host joins its own
+ledger, keyed on `AttemptContext::call_id()`, to the cell that made the call.
+The model's view of a cell's calls (operation and outcome, no arguments and no
+identity) is derived from those entries and is not stored.
+
+A turn bounds the records it reports (`OmittedToolCalls` accounts for the
+rest) and a cell entry keeps the tail of its calls (`calls_omitted` counts the
+earlier ones), so an entry in a cell with more calls than either bound can
+name a record the bounded view left out.
+
+Sources: `crates/lash-sansio/src/session.rs` and
+`crates/lash-core-store/src/transcript/mod.rs`. Law:
+`an_rlm_cells_executed_calls_name_the_turns_tool_call_records_after_a_reopen`
+(`crates/lash/src/tests/durable_session.rs`).
+
 Sources: `crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs`,
 `crates/lash-core-execution/src/tool_intent.rs`,
 `crates/lash-core-store/src/await_event_identity.rs`, and

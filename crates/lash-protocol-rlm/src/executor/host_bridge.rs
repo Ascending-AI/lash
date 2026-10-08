@@ -32,7 +32,7 @@ pub(super) struct HostBridge<'run> {
     cell: Arc<Result<CellRun, LashlangCellOpener>>,
     prints: Arc<Mutex<Vec<FlowValue>>>,
     printed_images: Mutex<Vec<AttachmentRef>>,
-    calls: Mutex<Vec<(usize, lash_core::ExecutedCall)>>,
+    calls: Mutex<Vec<LedgerCall>>,
     next_tool_index: Mutex<usize>,
     lashlang_execution_trace: Option<LashlangExecutionTrace>,
     host_environment: lashlang::LashlangHostEnvironment,
@@ -56,13 +56,22 @@ pub(super) struct HostBridge<'run> {
     tool_calls: Mutex<usize>,
 }
 
+/// One dispatch the cell executed: where it ran in execution order, its
+/// entry, and the host tool call's record when the dispatch made one.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub(super) struct LedgerCall {
+    index: usize,
+    call: lash_core::ExecutedCall,
+    record: Option<lash_core::ToolCallRecord>,
+}
+
 /// The host-side ledgers of a cell that a segment boundary inside it hands
 /// to the segment that resumes it (FIG-4739). The prints live beside them,
 /// in the list the executor shares with the bridge.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub(super) struct CellHostLedgers {
     pub printed_images: Vec<AttachmentRef>,
-    pub calls: Vec<(usize, lash_core::ExecutedCall)>,
+    pub calls: Vec<LedgerCall>,
     pub next_tool_index: usize,
     /// The tool calls the cell's quiet points admitted: what it counts
     /// against `max_tool_calls`.
@@ -170,19 +179,20 @@ impl<'run> HostBridge<'run> {
         index: usize,
         operation: String,
         outcome: lash_core::ExecutedCallOutcome,
-        host_record: Option<lash_core::ToolCallRecord>,
+        record: Option<lash_core::ToolCallRecord>,
     ) -> Result<(), ExecutionHostError> {
         // This ledger records dispatches only. Resolution, argument, and other
         // pre-dispatch failures deliberately produce no `Calls:` entry because
         // the source operation did not execute.
-        self.calls.lock_recover().push((
+        self.calls.lock_recover().push(LedgerCall {
             index,
-            lash_core::ExecutedCall {
+            call: lash_core::ExecutedCall {
                 operation,
                 outcome,
-                host_record,
+                call_id: record.as_ref().map(|record| record.call_id.clone()),
             },
-        ));
+            record,
+        });
         Ok(())
     }
 
@@ -206,12 +216,21 @@ impl<'run> HostBridge<'run> {
     }
 
     pub(super) fn into_collected(self) -> CollectedExecutionOutput {
-        let mut calls = self.calls.into_inner().recover();
-        calls.sort_by_key(|(index, _)| *index);
+        // Execution-index order, so concurrent dispatch keeps one
+        // deterministic order for the entries and for their records.
+        let mut ledger = self.calls.into_inner().recover();
+        ledger.sort_by_key(|entry| entry.index);
+        let mut calls = Vec::with_capacity(ledger.len());
+        let mut tool_calls = Vec::new();
+        for entry in ledger {
+            calls.push(entry.call);
+            tool_calls.extend(entry.record);
+        }
         CollectedExecutionOutput {
             observations: Vec::new(),
             printed_images: self.printed_images.into_inner().recover(),
-            calls: calls.into_iter().map(|(_, call)| call).collect(),
+            calls,
+            tool_calls,
         }
     }
 
@@ -558,7 +577,7 @@ impl HostBridge<'_> {
             .calls
             .lock_recover()
             .iter()
-            .filter_map(|(_, call)| call.host_record.as_ref())
+            .filter_map(|entry| entry.record.as_ref())
             .flat_map(|record| record.output.attachments())
             .collect::<Vec<_>>();
         for entry in self.ctx.chronological_projection().entries() {
@@ -980,6 +999,7 @@ pub(super) struct CollectedExecutionOutput {
     pub(super) observations: Vec<Observation>,
     pub(super) printed_images: Vec<AttachmentRef>,
     pub(super) calls: Vec<lash_core::ExecutedCall>,
+    pub(super) tool_calls: Vec<lash_core::ToolCallRecord>,
 }
 
 async fn collect_printed_images(

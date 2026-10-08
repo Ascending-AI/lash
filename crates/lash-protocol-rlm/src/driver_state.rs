@@ -1,7 +1,5 @@
 use lash_core::AttachmentRef;
 
-use lash_rlm_types::RlmExecutedCall;
-
 use lash_rlm_types::CellOutcome;
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -17,7 +15,7 @@ pub(crate) struct RlmDriverState {
     pub(crate) assistant_parts: Vec<lash_core::Part>,
     pub(crate) images: Vec<AttachmentRef>,
     #[serde(default)]
-    pub(crate) calls: Vec<RlmExecutedCall>,
+    pub(crate) calls: Vec<lash_core::ExecutedCall>,
     #[serde(default)]
     pub(crate) calls_omitted: usize,
     /// One entry per `print` from the executed lashlang block (plus any
