@@ -70,15 +70,6 @@ pub struct KeyName(pub String);
 )]
 pub struct StepName(pub String);
 
-/// What kind of host-resolvable wait an engine pins.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub enum HostWaitKind {
-    /// A tool's completion, resolved by the host with its key.
-    ToolCompletion,
-    /// A host-defined wait, resolved by the host with its key.
-    Custom,
-}
-
 /// One step an engine asks lash to run. Its identity is
 /// `(process, step, ordinal)`, and its `ToolCallId` derives from it.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -283,8 +274,6 @@ pub enum EngineAction {
     PinKey {
         /// The wait's name.
         name: KeyName,
-        /// The wait's kind.
-        kind: HostWaitKind,
         /// How long the wait may stay open: the engine's own bound, with no
         /// lash default or ceiling.
         bound: crate::ParkBound,

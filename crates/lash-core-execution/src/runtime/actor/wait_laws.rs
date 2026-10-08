@@ -20,7 +20,7 @@ use tokio_util::sync::CancellationToken;
 use super::ActorContext;
 use super::waits::{
     self, PinnedKey, ProcessWaitOutcome, RaceWinner, ResolveAnswer, WaitDeadline, WaitId, WaitKind,
-    WaitRef, WaitSpec,
+    WaitPurpose, WaitRef, WaitSpec,
 };
 use crate::{AdmittedScope, Backend, DurableSettings, ProcessId, Resolution};
 
@@ -151,20 +151,38 @@ async fn pin(
 ) -> Result<(WaitRef, Option<PinnedKey>), LawBroken> {
     let now = cx.backend().durable().now().await?;
     let mut tx = cx.begin().await?;
+    let deadline = deadline
+        .map(|after| now.after_millis(i64::try_from(after.as_millis()).unwrap_or(i64::MAX)));
+    let purpose = match (kind, target) {
+        (WaitKind::ToolCompletion, None) => WaitPurpose::ToolCompletion {
+            call: crate::ToolCallId::fixture("wait-law"),
+            tool: crate::ToolId::new("wait_law"),
+            deadline,
+        },
+        (WaitKind::EngineKey, None) => WaitPurpose::EngineKey {
+            name: "wait-law".to_owned(),
+            deadline,
+        },
+        (WaitKind::ProcessTerminal, Some(process)) => {
+            WaitPurpose::ProcessTerminal { process, deadline }
+        }
+        (WaitKind::ChildSession, Some(process)) => WaitPurpose::ChildSession { process, deadline },
+        (WaitKind::Timer, None) => WaitPurpose::Timer {
+            deadline: deadline.ok_or_else(|| LawBroken("a timer law needs a deadline".into()))?,
+        },
+        (kind, target) => {
+            return Err(LawBroken(format!(
+                "a {kind:?} wait law names target {target:?}"
+            )));
+        }
+    };
     let pinned = waits::pin(
         &mut tx,
         WaitSpec {
-            kind,
             scope: waits::wait_scope(cx)?,
-            target_process: target,
-            deadline: deadline.map(|after| {
-                WaitDeadline::at_instant(
-                    now.after_millis(i64::try_from(after.as_millis()).unwrap_or(i64::MAX)),
-                )
-            }),
+            purpose,
         },
-    )
-    .map_err(|refusal| LawBroken(refusal.to_string()))?;
+    );
     cx.commit(tx, CommitLabel::WAIT_MINT).await?;
     Ok(pinned)
 }
@@ -356,7 +374,7 @@ pub async fn the_first_resolution_wins(backend: &Backend) -> LawResult {
     );
 
     // During the await.
-    let (during, key) = pin(&cx, WaitKind::Custom, None, Some(LONG)).await?;
+    let (during, key) = pin(&cx, WaitKind::EngineKey, None, Some(LONG)).await?;
     let key = key_of(key)?;
     let racing = crate::task::spawn({
         let cx = cx.clone();
@@ -621,7 +639,7 @@ pub async fn a_completion_before_the_await_is_already_resolved(backend: &Backend
         turn_scope("early"),
     )
     .await?;
-    let (wait, key) = pin(&cx, WaitKind::Custom, None, Some(LONG)).await?;
+    let (wait, key) = pin(&cx, WaitKind::EngineKey, None, Some(LONG)).await?;
     let resolved = waits::resolve_host(backend, &key_of(key)?, answer("early")).await?;
     ensure!(resolved == ResolveAnswer::Resolved, "resolve: {resolved:?}");
     let won = waits::await_external(&cx, &wait).await?;
@@ -726,7 +744,7 @@ pub async fn a_timeout_racing_a_completion_has_one_winner(backend: &Backend) -> 
     )
     .await?;
     for round in 0..8_u64 {
-        let (wait, key) = pin(&cx, WaitKind::Custom, None, Some(SHORT)).await?;
+        let (wait, key) = pin(&cx, WaitKind::EngineKey, None, Some(SHORT)).await?;
         let key = key_of(key)?;
         let racing = crate::task::spawn({
             let cx = cx.clone();
@@ -749,6 +767,47 @@ pub async fn a_timeout_racing_a_completion_has_one_winner(backend: &Backend) -> 
             "round {round}: the race saw {won:?} but the resolve answered {resolved:?}"
         );
     }
+    Ok(())
+}
+
+/// A parked call is listed from its wait row alone: the row names its call,
+/// tool and deadline, so the listing reads no run record, and what it costs
+/// does not grow with the runs its owner retains. Here the wait is pinned
+/// with no admission, so its owner has no run record at all. A key an engine
+/// pinned is a wait of the same owner but no
+/// call, and is not listed as one.
+///
+/// # Errors
+///
+/// The first rule broken.
+pub async fn a_parked_call_is_listed_from_its_wait_row_alone(backend: &Backend) -> LawResult {
+    use crate::runtime::actor::round::{CallOwner, parked};
+    let actor = session_actor("listed")?;
+    let lease = node(backend, "listed", TTL_MILLIS).await?;
+    let cx = own(backend, &lease, &actor, turn_scope("listed")).await?;
+    let (wait, key) = pin(&cx, WaitKind::ToolCompletion, None, Some(LONG)).await?;
+    let key = key_of(key)?;
+    pin(&cx, WaitKind::EngineKey, None, None).await?;
+    let session =
+        crate::SessionId::parse("listed").map_err(|error| LawBroken(error.to_string()))?;
+    let listed = parked(backend, CallOwner::Session(session.clone())).await?;
+    let [call] = listed.as_slice() else {
+        return Err(LawBroken(format!(
+            "the owner lists {} parked calls, not one",
+            listed.len()
+        )));
+    };
+    ensure!(
+        call.key.as_str() == key
+            && call.owner == CallOwner::Session(session)
+            && call.call_id == crate::ToolCallId::fixture("wait-law")
+            && call.tool_id == crate::ToolId::new("wait_law")
+            && call.deadline == row(backend, &wait).await?.purpose.deadline(),
+        "the listed call is {} of tool {} due {:?}, not the pinned one",
+        call.call_id,
+        call.tool_id,
+        call.deadline
+    );
     Ok(())
 }
 

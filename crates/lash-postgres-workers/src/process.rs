@@ -13,9 +13,9 @@ use std::time::Duration;
 use lash_core_execution::runtime::actor::round::{Material, SettledOutput};
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
-    EngineAction, EngineEvent, EngineState, EngineStateFormat, HostWaitKind, KeyName,
-    ProcessEngine, ProcessInfraError, ProcessOutcome, ProcessRecord, StepName, StepRequest,
-    ToolCallOutput, ToolCancellation,
+    EngineAction, EngineEvent, EngineState, EngineStateFormat, KeyName, ProcessEngine,
+    ProcessInfraError, ProcessOutcome, ProcessRecord, StepName, StepRequest, ToolCallOutput,
+    ToolCancellation,
 };
 use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
 use lash_sansio::{ExecutionLimit, ExecutionPolicy, ToolId};
@@ -125,7 +125,6 @@ impl ProcessEngine for WorkerEngine {
                 "pin",
                 EngineAction::PinKey {
                     name: KeyName(WAIT.to_owned()),
-                    kind: HostWaitKind::Custom,
                     bound: lash_core::ParkBound::Within(Duration::from_millis(
                         script["wait_ms"].as_u64().unwrap_or(1_000),
                     )),

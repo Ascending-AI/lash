@@ -46,11 +46,13 @@ is context, not authorization or an instruction to notify a parent.
 
 `Completions::parked(owner)` accepts `CallOwner::Session` or
 `CallOwner::Process` and returns pending `ParkedCall` records with `key`,
-`owner`, `call_id`, `tool_id` and `deadline`. It is a snapshot read derived
-from pending waits and admitted calls, useful for reconciliation after a
-restart. A key can settle or be revoked immediately after that read.
+`owner`, `call_id`, `tool_id` and `deadline`. It is a snapshot read of the
+owner's pending waits, which record their call and tool, useful for
+reconciliation after a restart. A key can settle or be revoked immediately
+after that read. `Completions::pinned_keys(process)` is the same read for the
+keys a process's engine pinned with `PinKey`, by the engine's name for each.
 Lifecycle waiting and resumed facts carry `WaitKind::Call { call_id, tool_id }`
-in their wait descriptor, never the key.
+or `WaitKind::Key { name }` in their wait descriptor, never the key.
 
 `session.send(input).id(TurnId)` admits idempotent turn input. The engine
 owns its drive and continuation; hosts send and observe its handle.

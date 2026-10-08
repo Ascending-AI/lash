@@ -183,7 +183,7 @@ The execution record splits into a start and an outcome.
   lash keeps no completion secret: who may finish a pending wait is
   authorization, which the host owns (its API authentication, its webhook
   signatures), so it hands a key only to callers it has authorized
-  (FIG-5217). The key carries no scope or kind. Hosts resolve only the `tool_completion` and `custom` kinds; a
+  (FIG-5217). The key carries no scope or kind. Hosts resolve only the `tool_completion` and `engine_key` kinds; a
   host resolution of any other kind answers `ReservedKind` and writes nothing.
   Turn cancellation and process terminals have their own admission paths.
   Host events settle deferring calls through completion keys under ADR 0136.
@@ -271,7 +271,7 @@ fn advance(&self, state: EngineState, event: EngineEvent)
 
 enum EngineAction {
     Steps(Vec<StepRequest>),                         // admitted executions of catalog tools
-    PinKey { name: KeyName, kind: HostWaitKind, bound: ParkBound },
+    PinKey { name: KeyName, bound: ParkBound },
     AwaitExternal { name: KeyName },                 // a key pinned earlier
     AwaitProcess { process: ProcessId, bound: ParkBound },
     Sleep { until: DurableInstant },

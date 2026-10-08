@@ -25,6 +25,9 @@ pub enum WaitKind {
         call_id: crate::ToolCallId,
         tool_id: crate::ToolId,
     },
+    /// A key the process's engine pinned and awaits, identified by the name
+    /// the engine gave it, without its bearer key.
+    Key { name: crate::KeyName },
 }
 
 impl WaitState {
@@ -33,6 +36,7 @@ impl WaitState {
     pub fn key(&self) -> &str {
         match &self.kind {
             WaitKind::Call { call_id, .. } => call_id.as_str(),
+            WaitKind::Key { name } => name.0.as_str(),
         }
     }
 }

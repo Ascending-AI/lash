@@ -1457,12 +1457,14 @@ mod constraint_tests {
             .execute(crate::observed_sql::executor(&mut conn))
             .await
             .expect("create constraint fixture");
-        sqlx::query("INSERT INTO lash_waits (wait_id, owner_actor, owner_scope, kind, host_resolvable, state, created_epoch) VALUES ('wait', 's/session', 's/session', 'custom', true, 'pending', 1)").execute(crate::observed_sql::executor(&mut conn)).await.expect("pending custom wait");
+        sqlx::query("INSERT INTO lash_waits (wait_id, owner_actor, owner_scope, kind, host_resolvable, state, created_epoch, key_name) VALUES ('wait', 's/session', 's/session', 'engine_key', true, 'pending', 1, 'key')").execute(crate::observed_sql::executor(&mut conn)).await.expect("pending engine key wait");
         for (assignment, constraint) in [
             (
-                "kind = 'timer', host_resolvable = false",
+                "kind = 'timer', host_resolvable = false, key_name = NULL",
                 "ck_waits_timer_deadline",
             ),
+            ("key_name = NULL", "ck_waits_key_name"),
+            ("call_id = 'call', tool_id = 'tool'", "ck_waits_call"),
             ("resolved_at_ms = 1", "ck_waits_settled_at"),
             ("state = 'revoked'", "ck_waits_settled_at"),
             (
@@ -1482,7 +1484,7 @@ mod constraint_tests {
                 Some(constraint)
             );
         }
-        sqlx::query("UPDATE lash_waits SET kind = 'timer', host_resolvable = false, deadline_ms = 1, state = 'resolved', resolution_digest = 'timer', resolved_at_ms = 1").execute(crate::observed_sql::executor(&mut conn)).await.expect("resolved timer without value");
+        sqlx::query("UPDATE lash_waits SET kind = 'timer', host_resolvable = false, key_name = NULL, deadline_ms = 1, state = 'resolved', resolution_digest = 'timer', resolved_at_ms = 1").execute(crate::observed_sql::executor(&mut conn)).await.expect("resolved timer without value");
         let error = sqlx::query("UPDATE lash_waits SET resolution_ref = 'payload'")
             .execute(crate::observed_sql::executor(&mut conn))
             .await

@@ -30,7 +30,7 @@ no wait answers `Unknown`, distinct from runtime failures. A deadline that passe
 A host-resolvable key is its wait's id, 128 random bits: a bearer capability
 that carries no scope or kind. Lash keeps no completion secret; the host
 authorizes who may resolve and hands keys only to those callers. Hosts resolve only the
-`tool_completion` and `custom` kinds; turn cancellation and process
+`tool_completion` and `engine_key` kinds; turn cancellation and process
 terminals have their own admission paths. Host events resolve deferring calls
 under ADR 0136. Waiting is a facet on a running process, mirrored
 by wait and resume events, rather than a lifecycle status.

@@ -359,7 +359,7 @@ action runs.
   | Action | Lash does | `advance` next receives |
   | --- | --- | --- |
   | `Steps(Vec<StepRequest>)` | Admits every step (started rows) in the transaction, then runs them. Non-empty. | One `StepSettled { step, outcome }` per step |
-  | `PinKey { name, kind, bound }` | Mints a host-resolvable wait (`HostWaitKind::ToolCompletion` or `Custom`) and its key. | `KeyPinned { name, key }` at once |
+  | `PinKey { name, bound }` | Mints a host-resolvable wait named `name` and its key. | `KeyPinned { name, key }` at once |
   | `AwaitExternal { name }` | Waits on a key pinned earlier. | `ExternalResolved { name, resolution }` or `ExternalTimedOut { name }` |
   | `AwaitProcess { process, bound }` | Waits on another process's terminal. | `ProcessEnded { process, outcome }` or `ProcessWaitTimedOut { process }` |
   | `Sleep { until }` | Sets a durable due time. | `Woke` |
@@ -438,7 +438,7 @@ the key.
 
 ```text
 TURN    run_full_suite admitted -> its body starts process P (kind "ci") -> durable wait on P
-P       Started            -> PinKey { name: "done", kind: Custom, bound: Within(45 min) }
+P       Started            -> PinKey { name: "done", bound: Within(45 min) }
         KeyPinned { key }  -> Steps([Tool { step: "submit", tool: "ci.submit",
                                             input: { suite, key } }])     ci.submit is Once
         StepSettled(Completed) -> AwaitExternal { name: "done" }           P releases as waiting
@@ -447,11 +447,16 @@ P       ExternalResolved   -> Terminal(success: report)
 TURN    the wait on P resolves -> model -> commit
 ```
 
+While P awaits `done` it reads as waiting: its lifecycle log records
+`process.waiting` with `WaitKind::Key { name }`, without the bearer key, and
+`process.resumed` when the wait ends. A host that lost the key, or restarted
+before CI called back, reads it again with `Completions::pinned_keys(P)`.
+
 ```rust,ignore
 use lash::tools::ParkBound;
 use std::time::Duration;
 use lash::plugins::{
-    EngineAction, EngineEvent, EngineState, EngineStateFormat, HostWaitKind, KeyName,
+    EngineAction, EngineEvent, EngineState, EngineStateFormat, KeyName,
     ProcessEngine, ProcessInfraError, StepName, StepRequest,
 };
 use lash::process::ProcessOutcome;
@@ -503,7 +508,6 @@ impl ProcessEngine for CiEngine {
                 // Pin first: the key exists before any step hands it out.
                 EngineAction::PinKey {
                     name: done(),
-                    kind: HostWaitKind::Custom,
                     bound: ParkBound::Within(Duration::from_secs(45 * 60)),
                 },
             ),
@@ -596,8 +600,15 @@ keep keys out of logs and URLs others can read.
 - `parked(owner)` lists a session's or process's pending admitted tool calls.
   `lash::admin::CallOwner` is `Session(SessionId)` or `Process(ProcessId)`;
   each `ParkedCall` carries `key`, `owner`, `call_id`, `tool_id` and `deadline`.
-  The listing joins existing wait and admission rows and is a snapshot, so a
-  concurrent resolver may settle a returned key before the host uses it.
+  The listing reads the owner's pending wait rows, which record the call and
+  tool when the wait is pinned, so its cost follows what is parked and not
+  the runs the owner retains. It is a snapshot, so a concurrent resolver may
+  settle a returned key before the host uses it.
+- `pinned_keys(process)` lists the pending keys a process's engine pinned
+  with `PinKey`. Each `lash::admin::PinnedEngineKey` carries `key`, `process`,
+  the `name` the engine pinned it under and `deadline`. It reads the same
+  wait rows, so a host finds a key on any node and after a restart or a
+  handover; it never needs the `KeyPinned` event, which the engine sees once.
 - `resolve(key, resolution)` resolves the key's wait, first writer wins, and
   answers `lash::durable::ResolveAnswer`:
 
@@ -610,7 +621,7 @@ keep keys out of logs and URLs others can read.
 | `Unknown` | No wait has this key. Nothing was written. |
 | `Revoked` | The key's wait was revoked, or timed out, first. Nothing was written. |
 
-Hosts resolve only the `tool_completion` and `custom` kinds. Turn
+Hosts resolve only the `tool_completion` and `engine_key` kinds. Turn
 cancellation, process terminals, timers and child-session ends have their own
 admission paths, and a host resolution of them answers `ReservedKind`. Lash
 applies no authorization of its own: authenticate and authorize the caller

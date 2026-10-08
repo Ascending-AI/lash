@@ -6,7 +6,7 @@
 //! - A wait's deadline is written once, at minting, and never refreshed.
 //! - The first resolution wins; a repeat with the same digest answers
 //!   `AlreadyResolved`, with another `Conflict`.
-//! - A host resolve refuses every kind but `tool_completion` and `custom`
+//! - A host resolve refuses every kind but `tool_completion` and `engine_key`
 //!   with `ReservedKind` and writes nothing.
 //! - A resolution's lock order is the wait row, then the actor row. An owner
 //!   commit fences its own actor row first, so on PostgreSQL a resolve and
@@ -28,8 +28,8 @@
 use std::time::Duration;
 
 use lash_durable::domain::{
-    CANCEL_MAIL, DomainWrite, MailAnswer, MailDomainWrite, ScopeKey, WaitLifecycle, WaitPurpose,
-    WaitResolution, WaitRow, WaitState, WaitWrite,
+    CANCEL_MAIL, DomainWrite, MailAnswer, MailDomainWrite, ScopeKey, WaitLifecycle, WaitResolution,
+    WaitRow, WaitState, WaitWrite,
 };
 use lash_durable::{
     ActorKind, ActorTx, CommitLabel, DueSource, DurableError, DurableInstant, Fenced, MailTx,
@@ -41,7 +41,7 @@ use super::ActorContext;
 use crate::{Backend, ExecutionScope, ProcessId, ProcessOutcome};
 
 pub use lash_core_effect::Resolution;
-pub use lash_durable::domain::{ResolveAnswer, WaitId, WaitKind};
+pub use lash_durable::domain::{ResolveAnswer, WaitId, WaitKind, WaitPurpose};
 
 pub use super::wait_effects::{race_timer, sleep_until_timer, timer};
 
@@ -149,15 +149,10 @@ impl ParkDeadline {
 /// What to pin.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WaitSpec {
-    /// What it waits for.
-    pub kind: WaitKind,
     /// The scope that revokes it.
     pub scope: ScopeKey,
-    /// For a process-terminal wait, the process; for a child-session wait,
-    /// the process whose child turn it waits for.
-    pub target_process: Option<ProcessId>,
-    /// Its deadline.
-    pub deadline: Option<WaitDeadline>,
+    /// What it waits for, with its deadline: written once, with the row.
+    pub purpose: WaitPurpose,
 }
 
 /// A pinned wait, as its owner holds it.
@@ -185,18 +180,6 @@ impl WaitRef {
     pub fn kind(&self) -> WaitKind {
         self.kind
     }
-}
-
-/// A refused pin; nothing was recorded.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum PinRefusal {
-    /// A process-terminal or child-session wait names no process, or
-    /// another kind names one.
-    #[error("a {0:?} wait's target process does not match its kind")]
-    TargetMismatch(WaitKind),
-    /// A timer has no deadline: a timer is its due time.
-    #[error("a timer wait needs a deadline")]
-    TimerWithoutDeadline,
 }
 
 /// Which of a race's waits won.
@@ -268,34 +251,16 @@ pub fn settled(row: &WaitRow) -> Result<Option<WaitSettled>, DurableError> {
 /// Mint a wait on `tx`: insert its row pending under a fresh random id, and
 /// for a host-resolvable kind hand back its key, the id. The key names a
 /// wait only once `tx` commits, before any step that submits it.
-///
-/// # Errors
-///
-/// [`PinRefusal`]; nothing is recorded.
-pub fn pin(tx: &mut ActorTx, spec: WaitSpec) -> Result<(WaitRef, Option<PinnedKey>), PinRefusal> {
-    let targeted = matches!(
-        spec.kind,
-        WaitKind::ProcessTerminal | WaitKind::ChildSession
-    );
-    if spec.target_process.is_some() != targeted {
-        return Err(PinRefusal::TargetMismatch(spec.kind));
-    }
-    if spec.kind == WaitKind::Timer && spec.deadline.is_none() {
-        return Err(PinRefusal::TimerWithoutDeadline);
-    }
+pub fn pin(tx: &mut ActorTx, spec: WaitSpec) -> (WaitRef, Option<PinnedKey>) {
     let id = fresh_wait_id();
-    let key = spec.kind.host_resolvable().then(|| PinnedKey::of(&id));
+    let kind = spec.purpose.kind();
+    let key = kind.host_resolvable().then(|| PinnedKey::of(&id));
     tx.write(DomainWrite::Wait(WaitWrite::Pin {
         id,
         scope: spec.scope,
-        purpose: WaitPurpose::decode(
-            spec.kind,
-            spec.target_process,
-            spec.deadline.map(WaitDeadline::at),
-        )
-        .ok_or(PinRefusal::TargetMismatch(spec.kind))?,
+        purpose: spec.purpose,
     }));
-    Ok((WaitRef::new(id, spec.kind), key))
+    (WaitRef::new(id, kind), key)
 }
 
 /// A host's resolve of `key`: resolve the wait it names from `pending` and
@@ -624,13 +589,13 @@ pub async fn pin_process_terminal(
     let (wait, _) = pin(
         &mut tx,
         WaitSpec {
-            kind: WaitKind::ProcessTerminal,
             scope,
-            target_process: Some(process.clone()),
-            deadline,
+            purpose: WaitPurpose::ProcessTerminal {
+                process: process.clone(),
+                deadline: deadline.map(WaitDeadline::at),
+            },
         },
-    )
-    .map_err(|refusal| corrupt(&refusal.to_string()))?;
+    );
     cx.commit(tx, CommitLabel::WAIT_MINT).await?;
     resolve_ended_terminal(cx.backend(), &wait).await?;
     Ok(wait)
@@ -760,6 +725,48 @@ pub async fn outstanding_keys(
         .into_iter()
         .filter(|row| row.purpose.kind().host_resolvable())
         .map(|row| PinnedKey::of(&row.id))
+        .collect())
+}
+
+/// A pending key a process engine pinned. Its key is a bearer capability; the host
+/// authorizes discovery.
+#[derive(Clone, PartialEq, Eq)]
+pub struct PinnedEngineKey {
+    pub key: PinnedKey,
+    pub process: ProcessId,
+    /// The name the engine pinned it under.
+    pub name: crate::KeyName,
+    /// The deadline recorded when the key was pinned.
+    pub deadline: Option<DurableInstant>,
+}
+
+/// The pending keys `process`'s engine pinned, read from its wait rows without
+/// running its actor: any node lists them, before and after a restart or a
+/// handover.
+///
+/// # Errors
+///
+/// A store failure.
+pub async fn pinned_keys(
+    backend: &Backend,
+    process: &ProcessId,
+) -> Result<Vec<PinnedEngineKey>, DurableError> {
+    let owner = lash_durable::ActorKey::process(process.as_str())
+        .map_err(|error| corrupt(&error.to_string()))?;
+    Ok(backend
+        .durable()
+        .pending_waits(&owner)
+        .await?
+        .into_iter()
+        .filter_map(|row| match row.purpose {
+            WaitPurpose::EngineKey { name, deadline } => Some(PinnedEngineKey {
+                key: PinnedKey::of(&row.id),
+                process: process.clone(),
+                name: crate::KeyName(name),
+                deadline,
+            }),
+            _ => None,
+        })
         .collect())
 }
 

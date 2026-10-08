@@ -522,9 +522,11 @@ table lash_turn_phases
   column written_epoch bigint not-null
   primary-key (session_id, run)
 table lash_waits
+  column call_id text nullable
   column created_epoch bigint not-null
   column deadline_ms bigint nullable
   column host_resolvable boolean not-null
+  column key_name text nullable
   column kind text not-null
   column owner_actor text not-null
   column owner_scope text not-null
@@ -533,5 +535,6 @@ table lash_waits
   column resolved_at_ms bigint nullable
   column state text not-null
   column target_process text nullable
+  column tool_id text nullable
   column wait_id text not-null
   primary-key (wait_id)

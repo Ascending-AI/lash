@@ -95,13 +95,6 @@ impl DurableReads for TestDatabase {
         self.inner.run_records(owner).await
     }
 
-    async fn run_record_owners(
-        &self,
-        actor: &lash_durable::ActorKey,
-    ) -> Result<Vec<lash_durable::domain::OwnerKey>, DurableError> {
-        self.inner.run_record_owners(actor).await
-    }
-
     async fn snapshot(&self, exec: &ExecKey) -> Result<Option<SnapshotRow>, DurableError> {
         self.inner.snapshot(exec).await
     }

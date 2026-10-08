@@ -67,10 +67,10 @@ use crate::runtime::actor::round::{
     self, AdmittedExecution, ExecutionDraft, Material, MemberBodies, MemberBody, PolicyView,
     RoundDraft, RoundError, RunFold, SettledOutput,
 };
-use crate::runtime::actor::waits::{self, ParkDeadline, Resolution, WaitKind, WaitSpec};
-use crate::runtime::process::engine_state::{
-    EngineAction, EngineEvent, EngineState, HostWaitKind, StepRequest,
+use crate::runtime::actor::waits::{
+    self, ParkDeadline, Resolution, WaitDeadline, WaitKind, WaitPurpose, WaitSpec,
 };
+use crate::runtime::process::engine_state::{EngineAction, EngineEvent, EngineState, StepRequest};
 use crate::runtime::process::steps::{ProcessSteps, StepRefusal, StepRuntime};
 use crate::{
     ActorContext, AdmittedScope, Backend, CancelOrigin, ProcessEngine, ProcessId, ProcessInput,
@@ -595,9 +595,7 @@ impl ProcessActivation {
             )
             .await?;
         if let Some(outcome) = applied {
-            if let Some(wait) = record.wait()
-                && matches!(wait.kind, crate::WaitKind::Call { .. })
-            {
+            if let Some(wait) = record.wait() {
                 append_event(
                     &mut tx,
                     process,
@@ -1114,21 +1112,17 @@ impl ProcessActivation {
                 fresh.extend(admitted.members().iter().cloned());
                 driver.blocked = wake.map(|until| Blocked::Sleep { until: until.0 });
             }
-            EngineAction::PinKey { name, kind, bound } => {
-                let kind = match kind {
-                    HostWaitKind::ToolCompletion => WaitKind::ToolCompletion,
-                    HostWaitKind::Custom => WaitKind::Custom,
-                };
+            EngineAction::PinKey { name, bound } => {
                 let (wait, key) = waits::pin(
                     tx,
                     WaitSpec {
-                        kind,
                         scope: ScopeKey::Process(process.clone()),
-                        target_process: None,
-                        deadline: deadline(bound),
+                        purpose: WaitPurpose::EngineKey {
+                            name: name.0.clone(),
+                            deadline: deadline(bound).map(WaitDeadline::at),
+                        },
                     },
-                )
-                .map_err(|refusal| corrupt("a pinned key", refusal))?;
+                );
                 let key = key.ok_or_else(|| corrupt("a pinned key", "no key was minted"))?;
                 driver.keys.insert(
                     name.clone(),
@@ -1155,13 +1149,13 @@ impl ProcessActivation {
                 let (wait, _) = waits::pin(
                     tx,
                     WaitSpec {
-                        kind: WaitKind::ProcessTerminal,
                         scope: ScopeKey::Process(process.clone()),
-                        target_process: Some(target.clone()),
-                        deadline: deadline(bound),
+                        purpose: WaitPurpose::ProcessTerminal {
+                            process: target.clone(),
+                            deadline: deadline(bound).map(WaitDeadline::at),
+                        },
                     },
-                )
-                .map_err(|refusal| corrupt("a process wait", refusal))?;
+                );
                 driver.blocked = Some(Blocked::Process {
                     process: target,
                     wait: StoredWaitId(wait.id()),
@@ -1173,13 +1167,19 @@ impl ProcessActivation {
             EngineAction::Idle => driver.blocked = Some(Blocked::Idle),
             EngineAction::Terminal(outcome) => return Ok(Some(outcome)),
         }
-        // A call stays waiting while its own step remains in flight; any
-        // other transition ends the wait the record shows.
+        // A call stays waiting while its own step remains in flight, and a
+        // key while the engine still awaits it; any other transition ends
+        // the wait the record shows.
         if let Some(wait) = record.wait()
-            && !driver
-                .steps
-                .values()
-                .any(|step| step.call.as_str() == wait.key())
+            && !match &wait.kind {
+                crate::WaitKind::Call { call_id, .. } => {
+                    driver.steps.values().any(|step| step.call == *call_id)
+                }
+                crate::WaitKind::Key { name } => matches!(
+                    &driver.blocked,
+                    Some(Blocked::External { name: awaited, .. }) if awaited == name
+                ),
+            }
         {
             append_event(
                 tx,

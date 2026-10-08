@@ -175,20 +175,6 @@ pub(super) fn read(tx: &Connection, owner: &OwnerKey) -> Answer<Vec<RunRecordRow
     Ok(Ok(records))
 }
 
-pub(super) fn owners(tx: &Connection, actor: &lash_durable::ActorKey) -> Answer<Vec<OwnerKey>> {
-    let ranges = lash_durable::domain::actor_record_ranges(actor);
-    let keys = tx
-        .prepare_cached(SQL.owners.sql())?
-        .query_map(rusqlite::params_from_iter(ranges.iter()), |row| {
-            row.get::<_, String>(0)
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(keys
-        .into_iter()
-        .map(|key| OwnerKey::parse(&key).map_err(|_| corrupt("run record owner", &key)))
-        .collect())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -992,7 +992,7 @@ CREATE TABLE IF NOT EXISTS lash_waits (
     owner_actor TEXT COLLATE "C" NOT NULL,
     owner_scope TEXT COLLATE "C" NOT NULL,
     kind TEXT NOT NULL CONSTRAINT ck_waits_kind CHECK (kind IN
-        ('tool_completion', 'custom', 'process_terminal', 'timer', 'child_session')),
+        ('tool_completion', 'engine_key', 'process_terminal', 'timer', 'child_session')),
     host_resolvable BOOLEAN NOT NULL,
     target_process TEXT COLLATE "C",
     state TEXT NOT NULL CONSTRAINT ck_waits_state
@@ -1002,14 +1002,20 @@ CREATE TABLE IF NOT EXISTS lash_waits (
     resolution_ref TEXT,
     resolved_at_ms BIGINT,
     created_epoch BIGINT NOT NULL,
-    CONSTRAINT ck_waits_host CHECK (host_resolvable = (kind IN ('tool_completion', 'custom'))),
+    call_id TEXT COLLATE "C",
+    tool_id TEXT COLLATE "C",
+    key_name TEXT COLLATE "C",
+    CONSTRAINT ck_waits_host CHECK (host_resolvable = (kind IN ('tool_completion', 'engine_key'))),
     CONSTRAINT ck_waits_target
         CHECK ((target_process IS NOT NULL) = (kind IN ('process_terminal', 'child_session'))),
     CONSTRAINT ck_waits_resolved CHECK ((state = 'resolved') = (resolution_digest IS NOT NULL)),
     CONSTRAINT ck_waits_timer_deadline CHECK (kind <> 'timer' OR deadline_ms IS NOT NULL),
     CONSTRAINT ck_waits_settled_at CHECK ((state <> 'pending') = (resolved_at_ms IS NOT NULL)),
     CONSTRAINT ck_waits_resolution_ref
-        CHECK ((state = 'resolved' AND kind <> 'timer') = (resolution_ref IS NOT NULL))
+        CHECK ((state = 'resolved' AND kind <> 'timer') = (resolution_ref IS NOT NULL)),
+    CONSTRAINT ck_waits_call CHECK ((call_id IS NOT NULL) = (kind = 'tool_completion')
+        AND (tool_id IS NOT NULL) = (kind = 'tool_completion')),
+    CONSTRAINT ck_waits_key_name CHECK ((key_name IS NOT NULL) = (kind = 'engine_key'))
 );
 
 CREATE INDEX IF NOT EXISTS ix_lash_waits_owner ON lash_waits (owner_actor)

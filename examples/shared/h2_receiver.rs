@@ -1,8 +1,7 @@
 //! H2's host engine processes: a receiver that runs until it is cancelled, a
 //! source that awaits its own pinned key, and a sleeper. The caller lends an
 //! admitted handler scope.
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::Arc;
 
 use anyhow::Result;
 use lash::plugins::{
@@ -13,7 +12,6 @@ use lash::plugins::{
 use lash::process::{
     ProcessAwaitOutput, ProcessInput, ProcessOriginator, ProcessStartReceipt, ProcessStartRequest,
 };
-use lash::sync::MutexExt as _;
 
 /// The kind of [`ReceiverEngine`].
 pub const RECEIVER_ENGINE_KIND: &str = "h2-receiver";
@@ -133,17 +131,12 @@ impl ProcessEngine for ReceiverEngine {
 /// The kind of [`SourceEngine`].
 pub const SOURCE_ENGINE_KIND: &str = "h2-source";
 
-/// The keys source processes pinned on this node, by their start payload:
-/// the source engine is host code, so it hands its key to its host directly
-/// rather than through the process's lifecycle log.
-fn pinned_sources() -> &'static Mutex<HashMap<String, String>> {
-    static PINNED: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
-    PINNED.get_or_init(Mutex::default)
-}
+/// The name a source process pins its key under.
+const SOURCE_KEY_NAME: &str = "source";
 
-/// A source process: it pins one host-resolvable key, hands the key to its
-/// host, awaits its resolution and ends with the resolved value. Its state
-/// is its start payload, which names it to the host.
+/// A source process: it pins one host-resolvable key, awaits its resolution
+/// and ends with the resolved value. Its host finds the key among the
+/// process's pending waits ([`source_key`]).
 pub struct SourceEngine;
 
 #[lash::async_trait]
@@ -196,29 +189,16 @@ impl ProcessEngine for SourceEngine {
         (lash::plugins::EngineState, lash::plugins::EngineAction),
         ProcessInfraError,
     > {
-        use lash::plugins::{EngineAction, EngineEvent, HostWaitKind, KeyName};
-        let name = || KeyName("source".to_owned());
+        use lash::plugins::{EngineAction, EngineEvent, KeyName};
+        let name = || KeyName(SOURCE_KEY_NAME.to_owned());
         let output = |output| EngineAction::Terminal(ProcessAwaitOutput::from_tool_output(output));
-        let mut state = state;
         let action = match event {
-            EngineEvent::Started { payload } => {
-                state.bytes = serde_json::to_vec(&payload).map_err(|error| {
-                    ProcessInfraError::new(PluginError::Session(error.to_string()))
-                })?;
-                EngineAction::PinKey {
-                    name: name(),
-                    kind: HostWaitKind::Custom,
-                    // The receiver waits for its source as long as it lives.
-                    bound: lash::tools::ParkBound::UntilScopeEnd,
-                }
-            }
-            EngineEvent::KeyPinned { key, .. } => {
-                pinned_sources().lock_recover().insert(
-                    String::from_utf8_lossy(&state.bytes).into_owned(),
-                    key.as_str().to_owned(),
-                );
-                EngineAction::AwaitExternal { name: name() }
-            }
+            EngineEvent::Started { .. } => EngineAction::PinKey {
+                name: name(),
+                // The receiver waits for its source as long as it lives.
+                bound: lash::tools::ParkBound::UntilScopeEnd,
+            },
+            EngineEvent::KeyPinned { name, .. } => EngineAction::AwaitExternal { name },
             EngineEvent::ExternalResolved { resolution, .. } => match resolution {
                 lash::Resolution::Ok(value) => output(lash::tools::ToolCallOutput::success(value)),
                 other => output(lash::tools::ToolCallOutput::cancelled(
@@ -544,22 +524,17 @@ fn source_payload(session: &lash::SessionId, key: &str) -> serde_json::Value {
     serde_json::json!({"fixture": "h2-source", "session": session, "source": key})
 }
 
-/// The key source process `process` pinned on this node, once it pinned it.
+/// The key source process `process` pinned, once it pinned it: read from the
+/// process's pending waits, so any node answers, also after a restart.
 pub async fn source_key(
     core: &lash::LashCore,
     process: &lash::ProcessId,
 ) -> Result<Option<String>> {
-    let record = core
-        .process_registry()
-        .get_process(process)
+    Ok(core
+        .completions()
+        .pinned_keys(process)
         .await?
-        .ok_or_else(|| anyhow::anyhow!("no source process {process}"))?;
-    let ProcessInput::Engine { payload, .. } = record.input.as_ref() else {
-        anyhow::bail!("{process} is not a source process");
-    };
-    let state = serde_json::to_vec(payload)?;
-    Ok(pinned_sources()
-        .lock_recover()
-        .get(String::from_utf8_lossy(&state).as_ref())
-        .cloned())
+        .into_iter()
+        .find(|pinned| pinned.name.0 == SOURCE_KEY_NAME)
+        .map(|pinned| pinned.key.as_str().to_owned()))
 }

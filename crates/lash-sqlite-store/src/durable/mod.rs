@@ -1260,11 +1260,6 @@ impl DurableReads for SqliteDurableStore {
         self.read(move |tx| run_records::read(tx, &owner)).await
     }
 
-    async fn run_record_owners(&self, actor: &ActorKey) -> Result<Vec<OwnerKey>, DurableError> {
-        let actor = actor.clone();
-        self.read(move |tx| run_records::owners(tx, &actor)).await
-    }
-
     async fn snapshot(&self, exec: &ExecKey) -> Result<Option<SnapshotRow>, DurableError> {
         let exec = exec.clone();
         self.read(move |tx| snapshots::read(tx, &exec)).await
@@ -1391,12 +1386,14 @@ mod constraint_tests {
         let conn = Connection::open_in_memory().expect("open wait fixture");
         conn.execute_batch(crate::durable::WAITS_TABLES)
             .expect("create schema");
-        conn.execute_batch("INSERT INTO waits (wait_id, owner_actor, owner_scope, kind, host_resolvable, state, created_epoch) VALUES ('wait', 's/session', 's/session', 'custom', 1, 'pending', 1)").expect("valid pending custom wait");
+        conn.execute_batch("INSERT INTO waits (wait_id, owner_actor, owner_scope, kind, host_resolvable, state, created_epoch, key_name) VALUES ('wait', 's/session', 's/session', 'engine_key', 1, 'pending', 1, 'key')").expect("valid pending engine key wait");
         for (assignment, constraint) in [
             (
-                "kind = 'timer', host_resolvable = 0",
+                "kind = 'timer', host_resolvable = 0, key_name = NULL",
                 "ck_waits_timer_deadline",
             ),
+            ("key_name = NULL", "ck_waits_key_name"),
+            ("call_id = 'call', tool_id = 'tool'", "ck_waits_call"),
             ("resolved_at_ms = 1", "ck_waits_settled_at"),
             ("state = 'revoked'", "ck_waits_settled_at"),
             (
@@ -1407,7 +1404,7 @@ mod constraint_tests {
         ] {
             assert_check_rejects(&conn, &format!("UPDATE waits SET {assignment}"), constraint);
         }
-        conn.execute_batch("UPDATE waits SET kind = 'timer', host_resolvable = 0, deadline_ms = 1, state = 'resolved', resolution_digest = 'timer', resolved_at_ms = 1").expect("resolved timer needs no payload");
+        conn.execute_batch("UPDATE waits SET kind = 'timer', host_resolvable = 0, key_name = NULL, deadline_ms = 1, state = 'resolved', resolution_digest = 'timer', resolved_at_ms = 1").expect("resolved timer needs no payload");
         assert_check_rejects(
             &conn,
             "UPDATE waits SET resolution_ref = 'payload'",

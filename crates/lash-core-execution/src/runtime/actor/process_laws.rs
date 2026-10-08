@@ -30,8 +30,8 @@ use crate::runtime::actor::waits::{self, ParkDeadline, Resolution, WaitDeadline}
 use crate::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use crate::{
     Ancestry, Backend, BackendParts, CancelOrigin, DurableSettings, EngineAction, EngineEvent,
-    EngineState, EngineStateFormat, HostWaitKind, KeyName, LifetimeDecision, ProcessEngine,
-    ProcessId, ProcessInfraError, ProcessInput, ProcessOutcome, ProcessProvenance, ProcessRecord,
+    EngineState, EngineStateFormat, KeyName, LifetimeDecision, ProcessEngine, ProcessId,
+    ProcessInfraError, ProcessInput, ProcessOutcome, ProcessProvenance, ProcessRecord,
     ProcessRegistration, ScopeGrant, ScopeId, StepName, StepRequest, ToolCallId, ToolCallOutput,
     ToolCancellation,
 };
@@ -46,6 +46,13 @@ macro_rules! ensure {
         }
     };
 }
+
+mod engine_keys;
+
+pub use engine_keys::{
+    a_pinned_engine_key_is_listed_from_its_wait_after_a_restart_and_a_handover,
+    an_awaited_engine_key_records_a_waiting_fact,
+};
 
 /// The kind every law process runs.
 pub const LAW_ENGINE_KIND: &str = "law-process";
@@ -176,6 +183,8 @@ fn origin_name(origin: CancelOrigin) -> String {
 ///   with what it saw;
 /// - `await_key`: pins a host key and waits for its resolution, which names
 ///   the process to await, then behaves as `await`;
+/// - `key`: pins a host key, waits for its resolution and ends with the
+///   resolved value;
 /// - `retry`: runs one `law_flaky` step, whose first attempt fails with a
 ///   known failure its `Repeatable` contract retries, and ends with how
 ///   the step settled;
@@ -312,9 +321,8 @@ impl ProcessEngine for LawEngine {
                     wake: None,
                 },
                 "await" => await_action(&script)?,
-                "await_key" => EngineAction::PinKey {
+                "await_key" | "key" => EngineAction::PinKey {
                     name: KeyName(PEER_KEY.to_owned()),
-                    kind: HostWaitKind::Custom,
                     bound: crate::ParkBound::UntilScopeEnd,
                 },
                 "complete" => ended(json!({"real_terminal": true})),
@@ -328,9 +336,13 @@ impl ProcessEngine for LawEngine {
                     "payload": outcome.payload(),
                 }))
             }
-            EngineEvent::KeyPinned { name, .. } if act == "await_key" => {
+            EngineEvent::KeyPinned { name, .. } if act == "await_key" || act == "key" => {
                 EngineAction::AwaitExternal { name }
             }
+            EngineEvent::ExternalResolved {
+                resolution: Resolution::Ok(value),
+                ..
+            } if act == "key" => ended(json!({ "resolved": value })),
             EngineEvent::ExternalResolved {
                 resolution: Resolution::Ok(peer),
                 ..
@@ -564,8 +576,13 @@ struct Serving {
 }
 
 fn serve(backend: &Backend) -> Serving {
+    serve_as(backend, NODE)
+}
+
+/// Serve `backend` as node `node`.
+fn serve_as(backend: &Backend, node: &str) -> Serving {
     let config = RunnerConfig::new(
-        NodeId::new(NODE),
+        NodeId::new(node),
         backend.formats().decodes(),
         backend.config(),
     );
@@ -1079,7 +1096,7 @@ async fn tell_peer(backend: &Backend, process: &ProcessId, peer: Value) -> LawRe
             .pending_waits(&actor)
             .await?
             .into_iter()
-            .find(|row| matches!(row.purpose, WaitPurpose::Custom { .. }))
+            .find(|row| matches!(row.purpose, WaitPurpose::EngineKey { .. }))
         {
             break row.id;
         }

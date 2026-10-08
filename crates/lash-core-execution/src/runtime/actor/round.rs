@@ -380,9 +380,6 @@ pub enum AdmissionRefusal {
     /// One call appears twice.
     #[error("call {0} is admitted twice")]
     DuplicateCall(ToolCallId),
-    /// A member's completion wait could not be pinned.
-    #[error(transparent)]
-    Wait(#[from] super::waits::PinRefusal),
 }
 
 /// Why a settle was refused; nothing was recorded.

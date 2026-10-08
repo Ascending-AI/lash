@@ -1,6 +1,7 @@
-//! Project a process's committed deferred call when its actor releases.
+//! Project what a process waits on when its actor releases: its committed
+//! deferred call, or the key its engine awaits.
 use super::activation::append_event as append;
-use super::driver::Driver;
+use super::driver::{Blocked, Driver};
 use crate::runtime::actor::round::{MemberState, RunFold};
 use crate::{ProcessId, ProcessRecord, StepRequest, WaitKind, WaitState};
 use lash_durable::ActorTx;
@@ -33,12 +34,13 @@ pub(super) fn project(
                 .is_some_and(|wait| wait.key() == member.call().as_str())
         })
         .or_else(|| parked.first());
-    let Some(member) = member else {
-        return;
-    };
-    let kind = WaitKind::Call {
-        call_id: member.call().clone(),
-        tool_id: member.draft().tool().clone(),
+    let kind = match (member, &driver.blocked) {
+        (Some(member), _) => WaitKind::Call {
+            call_id: member.call().clone(),
+            tool_id: member.draft().tool().clone(),
+        },
+        (None, Some(Blocked::External { name, .. })) => WaitKind::Key { name: name.clone() },
+        (None, _) => return,
     };
     if record.wait().is_some_and(|wait| wait.kind == kind) {
         return;

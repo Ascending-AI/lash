@@ -62,7 +62,7 @@ pub use engine::{
 };
 pub use engine_state::{
     EngineAction, EngineEvent, EngineState, EngineStateFormat, EngineStepKind, EngineStepRefusal,
-    EngineStepRun, EngineSteps, HostWaitKind, KeyName, StepEffectSite, StepName, StepRequest,
+    EngineStepRun, EngineSteps, KeyName, StepEffectSite, StepName, StepRequest,
 };
 pub use events::{
     AbandonEvidence, AbandonWriter, ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent,

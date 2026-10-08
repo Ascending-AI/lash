@@ -12,6 +12,7 @@ use lash_sansio::TurnId;
 // below, but their home is `crate::plugins`: authoring surface a plugin
 // implements, not a name a host writes to invoke one (ADR 0051, FIG-1921).
 pub use lash_core::facade_support::AcceptedInjectedTurnInput;
+pub use lash_core::waits::PinnedEngineKey;
 pub use lash_core::{CallOwner, ParkedCall};
 
 #[derive(Clone)]
@@ -31,6 +32,18 @@ impl Completions {
             .map_err(EmbedError::from)
     }
 
+    /// Snapshot the pending keys `process`'s engine pinned, with the name it pinned each under
+    /// and its deadline.
+    ///
+    /// The keys are read from the process's durable waits, so any node answers, before and
+    /// after a restart or a handover. They are bearer capabilities under the same rules as
+    /// [`parked`](Self::parked).
+    pub async fn pinned_keys(&self, process: &ProcessId) -> Result<Vec<PinnedEngineKey>> {
+        lash_core::waits::pinned_keys(self.core.env.core.control.effect_host.backend(), process)
+            .await
+            .map_err(EmbedError::from)
+    }
+
     /// Resolve the wait `key` names, first writer wins.
     ///
     /// A completion key is its wait's random 128-bit id, and a bearer
@@ -42,7 +55,7 @@ impl Completions {
     ///
     /// A key that names no wait answers `Unknown`; a wait that was revoked or
     /// timed out answers `Revoked`; a key of a kind a host may not resolve
-    /// (anything but `tool_completion` and `custom`) answers `ReservedKind`.
+    /// (anything but `tool_completion` and `engine_key`) answers `ReservedKind`.
     /// None of them writes anything.
     pub async fn resolve(
         &self,

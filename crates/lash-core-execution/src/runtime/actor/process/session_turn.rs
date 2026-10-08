@@ -31,7 +31,7 @@ use super::ProcessActivation;
 use super::activation::{Live, Pass, corrupt, registry_failure};
 use super::driver::StoredWaitId;
 use super::terminal::{ProcessParkReason, record_terminal};
-use crate::runtime::actor::waits::{self, WaitKind, WaitSpec};
+use crate::runtime::actor::waits::{self, WaitPurpose, WaitSpec};
 use crate::{CancelOrigin, PluginError, ProcessId, ProcessOutcome, ProcessRecord};
 
 /// The session work a node runs `SessionTurn` processes with: the child
@@ -155,13 +155,13 @@ impl ProcessActivation {
             let (wait, _) = waits::pin(
                 &mut tx,
                 WaitSpec {
-                    kind: WaitKind::ChildSession,
                     scope: ScopeKey::Process(process.clone()),
-                    target_process: Some(process.clone()),
-                    deadline: None,
+                    purpose: WaitPurpose::ChildSession {
+                        process: process.clone(),
+                        deadline: None,
+                    },
                 },
-            )
-            .map_err(|refusal| corrupt("a child-session wait", refusal))?;
+            );
             ChildTurnDriver {
                 wait: StoredWaitId(wait.id()),
                 mailed: false,

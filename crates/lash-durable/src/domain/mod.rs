@@ -37,9 +37,7 @@ pub mod snapshots;
 pub mod turns;
 pub mod waits;
 
-pub use keys::{
-    CellId, ExecKey, Ordinal, OwnerKey, RunSeq, ScopeKey, StoredKeyError, actor_record_ranges,
-};
+pub use keys::{CellId, ExecKey, Ordinal, OwnerKey, RunSeq, ScopeKey, StoredKeyError};
 pub use park_events::{ParkEventKind, ParkEventRow, ParkEventSeq, ParkEventWrite};
 pub use processes::{
     CancelAnswer, CancelRequest, ProcessActorRow, ProcessStartRows, ProcessWrite, RedriveAnswer,
@@ -59,7 +57,7 @@ pub use turns::{
 };
 pub use waits::{
     CANCEL_MAIL, ResolveAnswer, TIMER_DIGEST, WAIT_ROW_FORMAT_VERSION, WaitId, WaitKind,
-    WaitLifecycle, WaitPurpose, WaitResolution, WaitRow, WaitState, WaitWrite,
+    WaitLifecycle, WaitPurpose, WaitPurposeColumns, WaitResolution, WaitRow, WaitState, WaitWrite,
 };
 
 use crate::error::DurableError;
@@ -433,9 +431,6 @@ pub trait DurableReads: Send + Sync {
 
     /// V0, then L4: every run record of `owner`, ordered by run and ordinal.
     async fn run_records(&self, owner: &OwnerKey) -> Result<Vec<RunRecordRow>, DurableError>;
-
-    /// The run-record owners belonging to this actor, including its code cells.
-    async fn run_record_owners(&self, actor: &ActorKey) -> Result<Vec<OwnerKey>, DurableError>;
 
     /// V0, then L7: the latest snapshot of `exec`.
     async fn snapshot(&self, exec: &ExecKey) -> Result<Option<SnapshotRow>, DurableError>;

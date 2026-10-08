@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 
 use lash_durable::domain::{
     ResolveAnswer, ScopeKey, TIMER_DIGEST, WaitId, WaitKind, WaitLifecycle, WaitPurpose,
-    WaitResolution, WaitRow, WaitState, WaitWrite,
+    WaitPurposeColumns, WaitResolution, WaitRow, WaitState, WaitWrite,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, MailRefusal, Woken};
 use lash_store_sql::Dialect;
@@ -27,7 +27,7 @@ lash_store_sql::statements! {
         /// Wait `?1`, locked for the rest of the transaction.
         lock = "SELECT wait_id, owner_actor, owner_scope, kind, target_process, state,
                     deadline_ms, resolution_digest, resolution_ref, resolved_at_ms,
-                    created_epoch
+                    created_epoch, call_id, tool_id, key_name
              FROM waits WHERE wait_id = ?1
              FOR UPDATE";
     }
@@ -50,20 +50,19 @@ pub(super) async fn apply(
 ) -> Result<(), DurableError> {
     match write {
         WaitWrite::Pin { id, scope, purpose } => {
+            let columns = purpose.columns();
             sqlx::query(SQL.waits.pin.sql())
                 .bind(id.to_hex())
                 .bind(commit.actor.as_str())
                 .bind(scope.stored())
                 .bind(purpose.kind().as_str())
                 .bind(purpose.kind().host_resolvable())
-                .bind(
-                    purpose
-                        .target_process()
-                        .as_ref()
-                        .map(|process| process.as_str().to_owned()),
-                )
-                .bind(purpose.deadline().map(|deadline| deadline.0))
+                .bind(columns.target.map(|process| process.as_str().to_owned()))
+                .bind(columns.deadline.map(|deadline| deadline.0))
                 .bind(commit.epoch.0)
+                .bind(columns.call.map(|call| call.as_str().to_owned()))
+                .bind(columns.tool.map(|tool| tool.as_str().to_owned()))
+                .bind(columns.key_name)
                 .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
@@ -239,15 +238,25 @@ fn decode(row: &PgRow) -> Result<WaitRow, DurableError> {
     let target: Option<String> = get(row, 4)?;
     let state: String = get(row, 5)?;
     let state = WaitState::parse(&state).ok_or_else(|| corrupt("wait state", &state))?;
+    let call: Option<String> = get(row, 11)?;
     let purpose = WaitPurpose::decode(
         kind,
-        target
-            .map(|process| {
-                lash_sansio::ProcessId::parse(&process)
-                    .map_err(|_| corrupt("wait target process", &process))
-            })
-            .transpose()?,
-        get::<Option<i64>>(row, 6)?.map(DurableInstant),
+        WaitPurposeColumns {
+            target: target
+                .map(|process| {
+                    lash_sansio::ProcessId::parse(&process)
+                        .map_err(|_| corrupt("wait target process", &process))
+                })
+                .transpose()?,
+            call: call
+                .map(|call| {
+                    lash_sansio::ToolCallId::parse(&call).map_err(|_| corrupt("wait call", &call))
+                })
+                .transpose()?,
+            tool: get::<Option<String>>(row, 12)?.map(lash_sansio::ToolId::new),
+            key_name: get(row, 13)?,
+            deadline: get::<Option<i64>>(row, 6)?.map(DurableInstant),
+        },
     )
     .ok_or_else(|| corrupt("wait purpose", &id))?;
     let lifecycle = WaitLifecycle::decode(

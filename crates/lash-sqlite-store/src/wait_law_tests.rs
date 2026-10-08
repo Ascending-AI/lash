@@ -53,6 +53,7 @@ macro_rules! laws {
             a_wait_survives_its_owners_death_with_the_same_key_and_deadline,
             a_key_that_never_resolves_times_out,
             await_process_is_bounded_and_cancellable,
+            a_parked_call_is_listed_from_its_wait_row_alone,
         );
     };
 }

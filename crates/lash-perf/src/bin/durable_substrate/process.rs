@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 use lash_core_execution::runtime::actor::waits::PinnedKey;
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
-    EngineAction, EngineEvent, EngineState, EngineStateFormat, HostWaitKind, KeyName,
-    ProcessEngine, ProcessInfraError, ProcessOutcome, ProcessRecord, StepRequest, ToolCallOutput,
+    EngineAction, EngineEvent, EngineState, EngineStateFormat, KeyName, ProcessEngine,
+    ProcessInfraError, ProcessOutcome, ProcessRecord, StepRequest, ToolCallOutput,
     ToolCancellation,
 };
 use lash_sansio::sync::MutexExt as _;
@@ -84,7 +84,6 @@ impl std::fmt::Debug for BenchEngine {
 fn pin(index: u64) -> EngineAction {
     EngineAction::PinKey {
         name: KeyName(format!("w{index}")),
-        kind: HostWaitKind::Custom,
         bound: lash_core::ParkBound::Within(Duration::from_secs(3_600)),
     }
 }

@@ -18,9 +18,9 @@ use std::time::Duration;
 use lash_core_execution::runtime::actor::round::{Material, SettledOutput};
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
-    EngineAction, EngineEvent, EngineState, EngineStateFormat, HostWaitKind, KeyName,
-    ProcessEngine, ProcessId, ProcessInfraError, ProcessOutcome, ProcessRecord, StepName,
-    StepRequest, ToolCallOutput, ToolCancellation,
+    EngineAction, EngineEvent, EngineState, EngineStateFormat, KeyName, ProcessEngine, ProcessId,
+    ProcessInfraError, ProcessOutcome, ProcessRecord, StepName, StepRequest, ToolCallOutput,
+    ToolCancellation,
 };
 use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
 use lash_durable::domain::OwnerKey;
@@ -162,7 +162,6 @@ impl ProcessEngine for SimProcessEngine {
                 if settled == 2 {
                     EngineAction::PinKey {
                         name: KeyName(KEY.to_owned()),
-                        kind: HostWaitKind::Custom,
                         bound: lash_core_execution::ParkBound::Within(Duration::from_millis(
                             KEY_MS,
                         )),

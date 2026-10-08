@@ -5,7 +5,7 @@
 //! Lock order is the wait row, then the actor row.
 
 use crate::ids::{ActorKey, DurableInstant, Epoch};
-use lash_sansio::ProcessId;
+use lash_sansio::{ProcessId, ToolCallId, ToolId};
 
 use super::keys::ScopeKey;
 
@@ -72,8 +72,8 @@ impl std::fmt::Display for WaitId {
 pub enum WaitKind {
     /// A tool's completion, resolved by the host with its key.
     ToolCompletion,
-    /// A host-defined wait, resolved by the host with its key.
-    Custom,
+    /// A key a process engine pinned, resolved by the host with its key.
+    EngineKey,
     /// A process's terminal.
     ProcessTerminal,
     /// A durable sleep.
@@ -85,10 +85,10 @@ pub enum WaitKind {
 }
 
 impl WaitKind {
-    /// Whether a host may resolve it: only `ToolCompletion` and `Custom`.
+    /// Whether a host may resolve it: only `ToolCompletion` and `EngineKey`.
     #[must_use]
     pub const fn host_resolvable(self) -> bool {
-        matches!(self, Self::ToolCompletion | Self::Custom)
+        matches!(self, Self::ToolCompletion | Self::EngineKey)
     }
 
     /// The stored spelling.
@@ -96,7 +96,7 @@ impl WaitKind {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::ToolCompletion => "tool_completion",
-            Self::Custom => "custom",
+            Self::EngineKey => "engine_key",
             Self::ProcessTerminal => "process_terminal",
             Self::Timer => "timer",
             Self::ChildSession => "child_session",
@@ -108,7 +108,7 @@ impl WaitKind {
     pub fn parse(stored: &str) -> Option<Self> {
         [
             Self::ToolCompletion,
-            Self::Custom,
+            Self::EngineKey,
             Self::ProcessTerminal,
             Self::Timer,
             Self::ChildSession,
@@ -158,13 +158,19 @@ pub const TIMER_DIGEST: &str = "timer";
 /// A wait's purpose carries exactly the data that kind requires.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WaitPurpose {
-    /// A tool's host-resolvable completion key.
+    /// An admitted tool call's host-resolvable completion key.
     ToolCompletion {
+        /// The call that parks on it.
+        call: ToolCallId,
+        /// The tool that call runs.
+        tool: ToolId,
         /// Its optional deadline, fixed at minting.
         deadline: Option<DurableInstant>,
     },
-    /// A host-defined completion key.
-    Custom {
+    /// A host-resolvable key a process engine pinned.
+    EngineKey {
+        /// The name the engine gave it, unique within its process.
+        name: String,
         /// Its optional deadline, fixed at minting.
         deadline: Option<DurableInstant>,
     },
@@ -195,7 +201,7 @@ impl WaitPurpose {
     pub const fn kind(&self) -> WaitKind {
         match self {
             Self::ToolCompletion { .. } => WaitKind::ToolCompletion,
-            Self::Custom { .. } => WaitKind::Custom,
+            Self::EngineKey { .. } => WaitKind::EngineKey,
             Self::ProcessTerminal { .. } => WaitKind::ProcessTerminal,
             Self::ChildSession { .. } => WaitKind::ChildSession,
             Self::Timer { .. } => WaitKind::Timer,
@@ -208,7 +214,7 @@ impl WaitPurpose {
         match self {
             Self::Timer { deadline } => Some(*deadline),
             Self::ToolCompletion { deadline, .. }
-            | Self::Custom { deadline, .. }
+            | Self::EngineKey { deadline, .. }
             | Self::ProcessTerminal { deadline, .. }
             | Self::ChildSession { deadline, .. } => *deadline,
         }
@@ -227,24 +233,73 @@ impl WaitPurpose {
 
     /// Decode SQL columns together; reject any inconsistent purpose.
     #[must_use]
-    pub fn decode(
-        kind: WaitKind,
-        target: Option<ProcessId>,
-        deadline: Option<DurableInstant>,
-    ) -> Option<Self> {
-        match (kind, target, deadline) {
-            (WaitKind::ToolCompletion, None, deadline) => Some(Self::ToolCompletion { deadline }),
-            (WaitKind::Custom, None, deadline) => Some(Self::Custom { deadline }),
-            (WaitKind::ProcessTerminal, Some(process), deadline) => {
+    pub fn decode(kind: WaitKind, columns: WaitPurposeColumns) -> Option<Self> {
+        let WaitPurposeColumns {
+            target,
+            call,
+            tool,
+            key_name,
+            deadline,
+        } = columns;
+        match (kind, target, call, tool, key_name, deadline) {
+            (WaitKind::ToolCompletion, None, Some(call), Some(tool), None, deadline) => {
+                Some(Self::ToolCompletion {
+                    call,
+                    tool,
+                    deadline,
+                })
+            }
+            (WaitKind::EngineKey, None, None, None, Some(name), deadline) => {
+                Some(Self::EngineKey { name, deadline })
+            }
+            (WaitKind::ProcessTerminal, Some(process), None, None, None, deadline) => {
                 Some(Self::ProcessTerminal { process, deadline })
             }
-            (WaitKind::ChildSession, Some(process), deadline) => {
+            (WaitKind::ChildSession, Some(process), None, None, None, deadline) => {
                 Some(Self::ChildSession { process, deadline })
             }
-            (WaitKind::Timer, None, Some(deadline)) => Some(Self::Timer { deadline }),
+            (WaitKind::Timer, None, None, None, None, Some(deadline)) => {
+                Some(Self::Timer { deadline })
+            }
             _ => None,
         }
     }
+
+    /// The SQL columns a purpose is stored in, beside its kind.
+    #[must_use]
+    pub fn columns(&self) -> WaitPurposeColumns {
+        let mut columns = WaitPurposeColumns {
+            deadline: self.deadline(),
+            ..WaitPurposeColumns::default()
+        };
+        match self {
+            Self::ToolCompletion { call, tool, .. } => {
+                columns.call = Some(call.clone());
+                columns.tool = Some(tool.clone());
+            }
+            Self::EngineKey { name, .. } => columns.key_name = Some(name.clone()),
+            Self::ProcessTerminal { process, .. } | Self::ChildSession { process, .. } => {
+                columns.target = Some(process.clone());
+            }
+            Self::Timer { .. } => {}
+        }
+        columns
+    }
+}
+
+/// A wait purpose's SQL columns: each is set for exactly the kinds that carry it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WaitPurposeColumns {
+    /// `target_process`: the followed process of a process-targeting wait.
+    pub target: Option<ProcessId>,
+    /// `call_id`: a tool completion's call.
+    pub call: Option<ToolCallId>,
+    /// `tool_id`: a tool completion's tool.
+    pub tool: Option<ToolId>,
+    /// `key_name`: an engine key's name.
+    pub key_name: Option<String>,
+    /// `deadline_ms`.
+    pub deadline: Option<DurableInstant>,
 }
 
 /// A lifecycle carries its settlement time and, for a resolution, its value.

@@ -13,7 +13,7 @@ use super::{
     AdmissionRefusal, AdmittedExecution, AdmittedRound, PinnedWait, Presentation, RoundDraft,
     RunFold, SettleRefusal, SettledOutput, admit, check_drafts,
 };
-use crate::runtime::actor::waits::{self, WaitKind, WaitSpec};
+use crate::runtime::actor::waits::{self, WaitDeadline, WaitPurpose, WaitSpec};
 
 /// Admit a tool round inside the `model.done` transaction: its membership,
 /// pinned policies, limits and wait deadlines, and an `x_start` for every
@@ -39,12 +39,14 @@ pub fn admit_round(
                 let (wait, _) = waits::pin(
                     tx,
                     WaitSpec {
-                        kind: WaitKind::ToolCompletion,
                         scope: scope.clone(),
-                        target_process: None,
-                        deadline: park.deadline(),
+                        purpose: WaitPurpose::ToolCompletion {
+                            call: draft.call().clone(),
+                            tool: draft.tool().clone(),
+                            deadline: park.deadline().map(WaitDeadline::at),
+                        },
                     },
-                )?;
+                );
                 Some(PinnedWait { id: wait.id() })
             }
             None => None,

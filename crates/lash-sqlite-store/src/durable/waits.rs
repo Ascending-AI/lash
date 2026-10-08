@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 
 use lash_durable::domain::{
     ResolveAnswer, ScopeKey, TIMER_DIGEST, WaitId, WaitKind, WaitLifecycle, WaitPurpose,
-    WaitResolution, WaitRow, WaitState, WaitWrite,
+    WaitPurposeColumns, WaitResolution, WaitRow, WaitState, WaitWrite,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, MailRefusal, Woken};
 use lash_store_sql::durable::waits::WaitStatements;
@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS waits (
     owner_actor TEXT NOT NULL,
     owner_scope TEXT NOT NULL,
     kind TEXT NOT NULL CONSTRAINT ck_waits_kind CHECK (kind IN
-        ('tool_completion', 'custom', 'process_terminal', 'timer', 'child_session')),
+        ('tool_completion', 'engine_key', 'process_terminal', 'timer', 'child_session')),
     host_resolvable INTEGER NOT NULL,
     target_process TEXT,
     state TEXT NOT NULL CONSTRAINT ck_waits_state
@@ -37,14 +37,20 @@ CREATE TABLE IF NOT EXISTS waits (
     resolution_ref TEXT,
     resolved_at_ms INTEGER,
     created_epoch INTEGER NOT NULL,
-    CONSTRAINT ck_waits_host CHECK (host_resolvable = (kind IN ('tool_completion', 'custom'))),
+    call_id TEXT,
+    tool_id TEXT,
+    key_name TEXT,
+    CONSTRAINT ck_waits_host CHECK (host_resolvable = (kind IN ('tool_completion', 'engine_key'))),
     CONSTRAINT ck_waits_target
         CHECK ((target_process IS NOT NULL) = (kind IN ('process_terminal', 'child_session'))),
     CONSTRAINT ck_waits_resolved CHECK ((state = 'resolved') = (resolution_digest IS NOT NULL)),
     CONSTRAINT ck_waits_timer_deadline CHECK (kind <> 'timer' OR deadline_ms IS NOT NULL),
     CONSTRAINT ck_waits_settled_at CHECK ((state <> 'pending') = (resolved_at_ms IS NOT NULL)),
     CONSTRAINT ck_waits_resolution_ref
-        CHECK ((state = 'resolved' AND kind <> 'timer') = (resolution_ref IS NOT NULL))
+        CHECK ((state = 'resolved' AND kind <> 'timer') = (resolution_ref IS NOT NULL)),
+    CONSTRAINT ck_waits_call CHECK ((call_id IS NOT NULL) = (kind = 'tool_completion')
+        AND (tool_id IS NOT NULL) = (kind = 'tool_completion')),
+    CONSTRAINT ck_waits_key_name CHECK ((key_name IS NOT NULL) = (kind = 'engine_key'))
 );
 CREATE INDEX IF NOT EXISTS ix_waits_owner ON waits (owner_actor) WHERE state = 'pending';
 CREATE INDEX IF NOT EXISTS ix_waits_scope ON waits (owner_scope);
@@ -60,6 +66,7 @@ static SQL: LazyLock<WaitStatements> =
 pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &WaitWrite) -> Answer<()> {
     match write {
         WaitWrite::Pin { id, scope, purpose } => {
+            let columns = purpose.columns();
             cached_execute(
                 tx,
                 SQL.pin.sql(),
@@ -69,12 +76,12 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &WaitWrite)
                     scope.stored(),
                     purpose.kind().as_str(),
                     purpose.kind().host_resolvable(),
-                    purpose
-                        .target_process()
-                        .as_ref()
-                        .map(|process| process.as_str().to_owned()),
-                    purpose.deadline().map(|deadline| deadline.0),
-                    commit.epoch.0
+                    columns.target.as_ref().map(lash_sansio::ProcessId::as_str),
+                    columns.deadline.map(|deadline| deadline.0),
+                    commit.epoch.0,
+                    columns.call.as_ref().map(lash_sansio::ToolCallId::as_str),
+                    columns.tool.as_ref().map(lash_sansio::ToolId::as_str),
+                    columns.key_name
                 ],
             )?;
             Ok(Ok(()))
@@ -266,6 +273,9 @@ struct Stored {
     resolution_ref: Option<String>,
     resolved_at: Option<i64>,
     created_epoch: i64,
+    call: Option<String>,
+    tool: Option<String>,
+    key_name: Option<String>,
 }
 
 fn stored_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stored> {
@@ -281,6 +291,9 @@ fn stored_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stored> {
         resolution_ref: row.get(8)?,
         resolved_at: row.get(9)?,
         created_epoch: row.get(10)?,
+        call: row.get(11)?,
+        tool: row.get(12)?,
+        key_name: row.get(13)?,
     })
 }
 
@@ -290,14 +303,24 @@ fn decode(stored: Stored) -> Result<WaitRow, DurableError> {
         WaitState::parse(&stored.state).ok_or_else(|| corrupt("wait state", &stored.state))?;
     let purpose = WaitPurpose::decode(
         kind,
-        stored
-            .target
-            .map(|process| {
-                lash_sansio::ProcessId::parse(&process)
-                    .map_err(|_| corrupt("wait target process", &process))
-            })
-            .transpose()?,
-        stored.deadline.map(DurableInstant),
+        WaitPurposeColumns {
+            target: stored
+                .target
+                .map(|process| {
+                    lash_sansio::ProcessId::parse(&process)
+                        .map_err(|_| corrupt("wait target process", &process))
+                })
+                .transpose()?,
+            call: stored
+                .call
+                .map(|call| {
+                    lash_sansio::ToolCallId::parse(&call).map_err(|_| corrupt("wait call", &call))
+                })
+                .transpose()?,
+            tool: stored.tool.map(lash_sansio::ToolId::new),
+            key_name: stored.key_name,
+            deadline: stored.deadline.map(DurableInstant),
+        },
     )
     .ok_or_else(|| corrupt("wait purpose", &stored.id))?;
     let lifecycle = WaitLifecycle::decode(

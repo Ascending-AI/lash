@@ -50,13 +50,6 @@ impl DurableReads for PostgresDurableStore {
         .await
     }
 
-    async fn run_record_owners(&self, actor: &ActorKey) -> Result<Vec<OwnerKey>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            run_records::owners(&mut *self.reader().await?, actor).await
-        })
-        .await
-    }
-
     async fn snapshot(&self, exec: &ExecKey) -> Result<Option<SnapshotRow>, DurableError> {
         self.within(CommitCapacity::Work, async {
             snapshots::read(&mut *self.reader().await?, exec).await

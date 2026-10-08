@@ -9,12 +9,18 @@ and starts, and lifecycle cursors.
 `LashCore::completions().parked(owner)` lists a session's or process's pending
 admitted tool calls. `lash::admin::CallOwner` selects `Session(SessionId)` or
 `Process(ProcessId)`. Each `ParkedCall` carries its completion `key`, `owner`,
-stable `call_id`, `tool_id` and `deadline`, read from existing wait and admission
+stable `call_id`, `tool_id` and `deadline`, read from the owner's pending wait
 rows. This is a snapshot: a returned key may be settled concurrently.
 
+`LashCore::completions().pinned_keys(process)` lists the pending keys a
+process's engine pinned with `PinKey`: each `PinnedEngineKey` carries its `key`,
+`process`, the engine's `name` for it and `deadline`. It reads the same wait
+rows, so any node answers, before and after a restart or a handover.
+
 A deferred process call records `process.waiting` with
-`WaitKind::Call { call_id, tool_id }`, without the bearer key; settling the call
-records `process.resumed`.
+`WaitKind::Call { call_id, tool_id }`, and a process awaiting a key its engine
+pinned records it with `WaitKind::Key { name }`. Neither carries the bearer
+key; the end of the wait records `process.resumed`.
 
 `resolve(key, resolution)` settles a wait, first writer wins.
 A second resolution answers `AlreadyResolved` (same

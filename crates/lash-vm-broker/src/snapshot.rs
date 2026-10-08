@@ -460,7 +460,7 @@ impl SnapshotStore for DurableSnapshotStore {
         }
         let mut pinned = Vec::with_capacity(specs.len());
         for spec in specs {
-            let (wait, key) = waits::pin(&mut tx, spec).map_err(refused)?;
+            let (wait, key) = waits::pin(&mut tx, spec);
             if let Some(pending) = checkpoint.ledger.pending.as_mut() {
                 pending.waits.push(wait.id().0);
             }

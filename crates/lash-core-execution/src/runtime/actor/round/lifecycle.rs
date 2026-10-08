@@ -851,18 +851,17 @@ impl Lifecycle {
             let (wait, _) = waits::pin(
                 tx,
                 waits::WaitSpec {
-                    kind: WaitKind::ProcessTerminal,
                     scope: waits::execution_wait_scope(&self.cx, &execution.id().owner)?,
-                    target_process: Some(process),
-                    deadline: execution.draft().park().and_then(ParkDeadline::deadline),
+                    purpose: waits::WaitPurpose::ProcessTerminal {
+                        process,
+                        deadline: execution
+                            .draft()
+                            .park()
+                            .and_then(ParkDeadline::deadline)
+                            .map(waits::WaitDeadline::at),
+                    },
                 },
-            )
-            .map_err(|refusal| {
-                RoundError::Durable(DurableError::Store(lash_durable::StoreFailure {
-                    kind: lash_durable::StoreFailureKind::Corrupt,
-                    message: refusal.to_string(),
-                }))
-            })?;
+            );
             source.await_terminal(wait.id().to_hex());
         }
         if let Some(due) = self.retry_due(execution, &output, now) {

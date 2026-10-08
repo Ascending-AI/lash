@@ -365,13 +365,6 @@ impl DurableReads for CountingStore {
         self.inner.run_records(owner).await
     }
 
-    async fn run_record_owners(
-        &self,
-        actor: &ActorKey,
-    ) -> Result<Vec<domain::OwnerKey>, DurableError> {
-        self.inner.run_record_owners(actor).await
-    }
-
     async fn snapshot(
         &self,
         exec: &domain::ExecKey,

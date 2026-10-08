@@ -1,11 +1,8 @@
 //! Snapshot discovery of admitted calls through their pending completion waits.
 
-use std::collections::BTreeMap;
-
-use lash_durable::domain::RunRecordKind;
+use lash_durable::domain::WaitPurpose;
 use lash_durable::{ActorKey, DurableError, DurableInstant, StoreFailure, StoreFailureKind};
 
-use super::records::AdmitBody;
 use crate::runtime::actor::waits::PinnedKey;
 use crate::{Backend, ProcessId, SessionId, ToolCallId, ToolId};
 
@@ -27,56 +24,38 @@ pub struct ParkedCall {
     pub deadline: Option<DurableInstant>,
 }
 
-/// Join the owner's pending waits with admission records without running an actor.
+/// List the owner's pending completion waits without running an actor. Each
+/// wait row names its call and tool, so the read costs what is parked, never
+/// the owner's retained runs.
 ///
 /// # Errors
-/// A failed store read or an undecodable admission.
+/// A failed store read.
 pub async fn parked(backend: &Backend, owner: CallOwner) -> Result<Vec<ParkedCall>, DurableError> {
     let actor = match &owner {
         CallOwner::Session(id) => ActorKey::session(id.as_str()),
         CallOwner::Process(id) => ActorKey::process(id.as_str()),
     }
     .map_err(|error| corrupt(error.to_string()))?;
-    let reads = backend.durable();
-    let pending: BTreeMap<_, _> = reads
+    Ok(backend
+        .durable()
         .pending_waits(&actor)
         .await?
         .into_iter()
-        .filter(|wait| wait.purpose.kind() == lash_durable::domain::WaitKind::ToolCompletion)
-        .map(|wait| (wait.id, wait))
-        .collect();
-    if pending.is_empty() {
-        return Ok(Vec::new());
-    }
-    let owners = reads.run_record_owners(&actor).await?;
-    let mut calls = BTreeMap::new();
-    for run_owner in owners {
-        for row in reads.run_records(&run_owner).await? {
-            if row.kind != RunRecordKind::Admit {
-                continue;
-            }
-            let admission: AdmitBody = serde_json::from_str(&row.record_json)
-                .map_err(|error| corrupt(error.to_string()))?;
-            for member in admission.members {
-                let draft = member.draft().map_err(|error| corrupt(error.to_owned()))?;
-                if let Some(pinned) = draft.pinned_wait()
-                    && let Some(wait) = pending.get(&pinned.id)
-                {
-                    calls.insert(
-                        pinned.id,
-                        ParkedCall {
-                            key: PinnedKey::new(pinned.id.to_hex()),
-                            owner: owner.clone(),
-                            call_id: draft.call().clone(),
-                            tool_id: draft.tool().clone(),
-                            deadline: wait.purpose.deadline(),
-                        },
-                    );
-                }
-            }
-        }
-    }
-    Ok(calls.into_values().collect())
+        .filter_map(|wait| match wait.purpose {
+            WaitPurpose::ToolCompletion {
+                call,
+                tool,
+                deadline,
+            } => Some(ParkedCall {
+                key: PinnedKey::of(&wait.id),
+                owner: owner.clone(),
+                call_id: call,
+                tool_id: tool,
+                deadline,
+            }),
+            _ => None,
+        })
+        .collect())
 }
 
 fn corrupt(message: String) -> DurableError {

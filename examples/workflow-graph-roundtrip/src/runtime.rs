@@ -343,8 +343,9 @@ impl Overlay {
                     DisplayDelta::default(),
                     None,
                 );
-                let WaitKind::Call { call_id, .. } = &wait.kind;
-                event.approval_key = self.host.approval_key(&self.process, call_id.as_str());
+                if let WaitKind::Call { call_id, .. } = &wait.kind {
+                    event.approval_key = self.host.approval_key(&self.process, call_id.as_str());
+                }
                 events.push(event);
             }
             ProcessLifecycleFact::Terminal { outcome, .. } => {

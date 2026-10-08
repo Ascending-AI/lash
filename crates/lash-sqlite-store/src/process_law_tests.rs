@@ -46,4 +46,6 @@ law!(
     a_cascade_wider_than_its_batch_ends_a_tree_three_levels_deep,
     a_repeatable_step_that_fails_retryably_once_succeeds_on_its_second_ordinal,
     a_step_parked_on_its_wait_settles_when_the_wait_resolves,
+    an_awaited_engine_key_records_a_waiting_fact,
+    a_pinned_engine_key_is_listed_from_its_wait_after_a_restart_and_a_handover,
 );

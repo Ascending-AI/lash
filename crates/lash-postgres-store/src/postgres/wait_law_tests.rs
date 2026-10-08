@@ -48,6 +48,7 @@ law!(
     k1_a_key_that_is_not_an_issued_wait_id_is_refused_and_writes_nothing,
     the_first_resolution_wins,
     a_waiting_actor_past_its_deadline_times_out_within_the_claim_poll,
+    a_parked_call_is_listed_from_its_wait_row_alone,
 );
 
 /// A process releases its pending wait durably, then resumes only when the
@@ -74,7 +75,10 @@ impl lash_durable::runner::Activation for ParkOnWait {
             tx.write(DomainWrite::Wait(WaitWrite::Pin {
                 id: self.wait,
                 scope: ScopeKey::Process(lash_core_execution::ProcessId::fixture("resolved-wait")),
-                purpose: WaitPurpose::Custom { deadline: None },
+                purpose: WaitPurpose::EngineKey {
+                    name: "law".to_owned(),
+                    deadline: None,
+                },
             }));
             tx.give_up(Release::Waiting { next_due: None });
             owned

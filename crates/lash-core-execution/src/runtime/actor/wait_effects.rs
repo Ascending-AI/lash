@@ -3,10 +3,10 @@
 //! scope in an owner transaction of the actor that owns them.
 
 use lash_durable::CommitLabel;
-use lash_durable::domain::{ScopeKey, WaitKind};
+use lash_durable::domain::ScopeKey;
 
 use super::ActorContext;
-use super::waits::{self, RaceWinner, WaitDeadline, WaitRef, WaitSpec};
+use super::waits::{self, RaceWinner, WaitRef, WaitSpec};
 use crate::{RuntimeErrorCode, SleepSpec};
 
 impl ActorContext {
@@ -38,12 +38,7 @@ impl ActorContext {
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let spec = timer(self, spec).await?;
         let mut tx = self.begin().await.map_err(durable_refusal)?;
-        let (timer, _) = waits::pin(&mut tx, spec).map_err(|refusal| {
-            crate::RuntimeEffectControllerError::new(
-                RuntimeErrorCode::InvalidAwaitEventWaitIdentity,
-                refusal.to_string(),
-            )
-        })?;
+        let (timer, _) = waits::pin(&mut tx, spec);
         self.commit(tx, CommitLabel::WAIT_MINT)
             .await
             .map_err(durable_refusal)?;
@@ -148,10 +143,8 @@ pub async fn timer(
         }
     };
     Ok(WaitSpec {
-        kind: WaitKind::Timer,
         scope: waits::wait_scope(cx).map_err(durable_refusal)?,
-        target_process: None,
-        deadline: Some(WaitDeadline::at_instant(until)),
+        purpose: waits::WaitPurpose::Timer { deadline: until },
     })
 }
 
