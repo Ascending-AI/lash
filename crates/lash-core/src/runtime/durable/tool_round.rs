@@ -232,6 +232,66 @@ pub(super) async fn run(
     Ok(RoundExit::Answered(carry))
 }
 
+/// Record calls the protocol already refused, in the transaction that
+/// checkpoints past their report. The ordinary settled-round fold retains
+/// their requests and typed answers; no catalog pin, wait or body runs.
+pub(super) fn record_refused(
+    cx: &ActorContext,
+    tx: &mut lash_durable::ActorTx,
+    row: &TurnRow,
+    id: EffectId,
+    completed: &[round::CompletedCall],
+) -> Result<(), TurnError> {
+    let opener = EffectOpener::turn(row.session.clone(), row.run.clone());
+    let members = completed
+        .iter()
+        .map(|answer| {
+            let call = PendingToolCall {
+                call_id: answer.call_id.clone(),
+                provider_call_id: answer.provider_call_id.clone(),
+                tool_name: answer.tool_name.clone(),
+                args: answer.args.clone(),
+                replay: answer.replay.clone(),
+            };
+            round::call_draft(
+                &opener,
+                &call,
+                round::MemberPin {
+                    tool: crate::ToolId::new(answer.tool_name.clone()),
+                    policy: crate::ExecutionPolicy::Once,
+                    limit: crate::ExecutionLimit {
+                        expires_at: u64::try_from(tx.opened_at().0).unwrap_or(0),
+                        max_slice: std::time::Duration::ZERO,
+                    },
+                    wait: None,
+                },
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(exec)?;
+    let admitted = round::admit_round(
+        tx,
+        &lash_core_execution::runtime::actor::waits::wait_scope(cx)?,
+        RoundDraft {
+            owner: OwnerKey::Turn(row.session.clone(), row.run.clone()),
+            run: RunSeq(id.0),
+            members,
+        },
+    )
+    .map_err(exec)?;
+    for (member, answer) in admitted.members().iter().zip(completed) {
+        let output = round::completed_material(&opener, answer).map_err(exec)?;
+        round::settle(
+            tx,
+            member,
+            round::SettledOutput::Completed(output),
+            Vec::new(),
+        )
+        .map_err(exec)?;
+    }
+    Ok(())
+}
+
 fn missing_round(run: RunSeq) -> lash_durable::StoreFailure {
     lash_durable::StoreFailure {
         kind: lash_durable::StoreFailureKind::Corrupt,

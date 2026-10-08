@@ -306,7 +306,15 @@ fn checkpoint_roundtrips_report_tool_calls_before_accounting() {
         )],
     }]);
 
-    let checkpoint = roundtrip_checkpoint(machine.checkpoint());
+    let checkpoint = machine.checkpoint();
+    let Effect::ReportToolCalls {
+        id: recorded_id, ..
+    } = &checkpoint.checkpoint.pending_effects[0]
+    else {
+        panic!("the checkpoint retains the report's round identity");
+    };
+    let recorded_id = *recorded_id;
+    let checkpoint = roundtrip_checkpoint(checkpoint);
     assert_eq!(
         checkpoint.checkpoint.schema_version(),
         TURN_CHECKPOINT_SCHEMA_VERSION
@@ -316,9 +324,13 @@ fn checkpoint_roundtrips_report_tool_calls_before_accounting() {
             .expect("supported checkpoint");
     let effects = drain_effects(&mut restored);
 
-    let Effect::ReportToolCalls { completed } = &effects[0] else {
+    let Effect::ReportToolCalls { id, completed } = &effects[0] else {
         panic!("reporting must precede accounting: {effects:?}");
     };
+    assert_eq!(
+        *id, recorded_id,
+        "resume keeps the refusal's durable identity"
+    );
     assert_eq!(completed.len(), 1);
     assert_eq!(
         completed[0].call_id,

@@ -285,7 +285,7 @@ impl TurnDrive for RuntimeDrive {
                     .await
                     .map_err(runtime)
             }
-            Effect::ReportToolCalls { completed } => {
+            Effect::ReportToolCalls { completed, .. } => {
                 Box::pin(driver.report_undispatched_turn_tool_calls(
                     completed,
                     machine.protocol_iteration(),

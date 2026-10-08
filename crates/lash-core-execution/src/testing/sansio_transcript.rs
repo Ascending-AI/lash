@@ -62,7 +62,7 @@ fn record_effect<M: TurnProtocol>(transcript: &mut Transcript, actor: &str, effe
                 );
             }
         }
-        Effect::ReportToolCalls { completed } => {
+        Effect::ReportToolCalls { completed, .. } => {
             for call in completed {
                 transcript.record(
                     Entry::new(Kind::Tool, session(), "tool.report")

@@ -290,10 +290,13 @@ pub enum Effect<M: TurnProtocol = UnitTurnProtocol> {
     },
     /// Report completed tool calls that the protocol refused before dispatch.
     ///
-    /// The host emits the shared tool lifecycle pair for these calls. Turn
-    /// accounting is emitted separately by the machine immediately after this
-    /// effect, preserving `Started` before the accounting completion record.
+    /// The host records these as a settled round before continuation and
+    /// emits the shared tool lifecycle pair. Turn accounting is emitted
+    /// separately by the machine immediately after this effect, preserving
+    /// `Started` before the accounting completion record.
     ReportToolCalls {
+        /// The durable round identity of these already completed calls.
+        id: EffectId,
         completed: Vec<CompletedToolCall<M::IntentOutcome>>,
     },
 }
@@ -319,7 +322,8 @@ impl<M: TurnProtocol> Clone for Effect<M> {
                 id: *id,
                 state: state.clone(),
             },
-            Self::ReportToolCalls { completed } => Self::ReportToolCalls {
+            Self::ReportToolCalls { id, completed } => Self::ReportToolCalls {
+                id: *id,
                 completed: completed.clone(),
             },
             Self::ExecCode { id, language, code } => Self::ExecCode {

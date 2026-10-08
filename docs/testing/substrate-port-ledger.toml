@@ -13174,10 +13174,10 @@ lane = "L9c"
 laws = [
   "all_discovery_refusals_are_reported_and_accounted_before_continuing",
 ]
-disposition = "replaced-by:crates/lash/src/tests/standard_protocol_turns.rs::all_discovery_refusals_are_reported_and_accounted_before_continuing"
+disposition = "covered-by:crates/lash/src/tests/standard_protocol_turns.rs::all_discovery_refusals_are_reported_and_accounted_before_continuing"
 status = "deleted"
 owed = "all discovery refusals are reported and accounted before continuing"
-note = "FIG-5308: written on a facade turn and ignored on FIG-5314 (a refused call is missing from the durable report's tool_calls and has no tool lifecycle trace)."
+note = "FIG-5314: the unignored facade-turn law proves durable refusal accounting and exactly one ordered activity and trace lifecycle per refused or admitted call."
 
 [[row]]
 path = "crates/lash-protocol-standard/src/discovery_tests.rs"
@@ -13189,10 +13189,10 @@ lane = "L9c"
 laws = [
   "mixed_discovery_refusals_and_admitted_calls_are_each_reported_once",
 ]
-disposition = "replaced-by:crates/lash/src/tests/standard_protocol_turns.rs::mixed_discovery_refusals_and_admitted_calls_are_each_reported_once"
+disposition = "covered-by:crates/lash/src/tests/standard_protocol_turns.rs::mixed_discovery_refusals_and_admitted_calls_are_each_reported_once"
 status = "deleted"
 owed = "mixed discovery refusals and admitted calls are each reported once"
-note = "FIG-5308: written on a facade turn and ignored on FIG-5314 (a refused call is missing from the durable report's tool_calls and has no tool lifecycle trace)."
+note = "FIG-5314: the unignored facade-turn law proves durable refusal accounting and exactly one ordered activity and trace lifecycle per refused or admitted call."
 
 [[row]]
 path = "crates/lash-protocol-standard/src/provider_part_persistence_tests.rs"

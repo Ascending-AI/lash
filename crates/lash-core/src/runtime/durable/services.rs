@@ -64,7 +64,8 @@ impl RuntimeTurnServices {
     }
 
     /// Rebuild a turn's retained tool-call records from its durable rounds,
-    /// in admission order. This reads every step under the turn's owner, so
+    /// including protocol-refused calls settled before dispatch, in admission
+    /// order. This reads every step under the turn's owner, so
     /// an owner change or a gap in live activity cannot drop earlier calls.
     /// Cell host operations are not catalog tool calls. Calls that settled
     /// without material have no retained request/output record and remain

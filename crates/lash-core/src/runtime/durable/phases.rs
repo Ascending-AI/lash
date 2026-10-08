@@ -348,6 +348,42 @@ pub async fn run_phases(
                     RoundExit::Suspended { due } => return Ok(PhaseExit::Suspended { due }),
                 }
             }
+            Effect::ReportToolCalls { id, completed } => {
+                if completed.is_empty() {
+                    continue;
+                }
+                // A protocol refusal is a settled round too. Commit its
+                // records with the checkpoint past this report before the
+                // machine continues: resume neither loses the refusal nor
+                // reports it twice, and no tool body is admitted to run.
+                model = None;
+                let mut tx = cx.begin().await?;
+                if turn_cancel::immediate_in(&tx) {
+                    return Ok(PhaseExit::CancelRequested);
+                }
+                tool_round::record_refused(cx, &mut tx, &row, id, &completed)?;
+                if let Some(present) = carry.take() {
+                    tx.write(present);
+                }
+                if let Some(bind) = bind_delivered(drive.as_ref(), &session, &run) {
+                    tx.write(bind);
+                }
+                let written = write_run_changes(drive.as_ref(), &mut tx, &session, &run);
+                tx.write(DomainWrite::Turn(TurnWrite::Advance {
+                    session: session.clone(),
+                    run: run.clone(),
+                    phase: UnfinishedPhase::Tools {
+                        run: RunSeq(id.0),
+                        checkpoint: encode_checkpoint(drive.as_mut())?,
+                    },
+                    iteration: iteration(drive.machine()),
+                }));
+                cx.commit(tx, CommitLabel::MODEL_DONE).await?;
+                drive.run_changes_committed(&written);
+                drive
+                    .local(cx, Effect::ReportToolCalls { id, completed })
+                    .await?;
+            }
             Effect::AwaitToolResults { .. } => {
                 return Err(TurnError::Exec(
                     "a durable turn's checkpoint keeps its round's calls; no dispatch state settles them"

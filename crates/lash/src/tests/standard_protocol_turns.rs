@@ -497,13 +497,11 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "FIG-5314: a durable turn's report omits a protocol-refused call and its trace has no tool lifecycle records"]
 async fn all_discovery_refusals_are_reported_and_accounted_before_continuing() {
     assert_discovery_refusal_is_reported_and_accounted(false).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "FIG-5314: a durable turn's report omits a protocol-refused call and its trace has no tool lifecycle records"]
 async fn mixed_discovery_refusals_and_admitted_calls_are_each_reported_once() {
     assert_discovery_refusal_is_reported_and_accounted(true).await;
 }

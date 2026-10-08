@@ -626,8 +626,9 @@ impl<M: TurnProtocol> TurnMachine<M> {
                             output: outcome.output.clone(),
                         })
                         .collect::<Vec<_>>();
+                    let id = self.next_id();
                     self.side_effect_outbox
-                        .push_back(Effect::ReportToolCalls { completed });
+                        .push_back(Effect::ReportToolCalls { id, completed });
                     for event in accounting {
                         self.emit(event);
                     }
