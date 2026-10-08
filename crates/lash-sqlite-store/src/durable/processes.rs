@@ -293,6 +293,14 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWri
                 },
             )))
         }
+        ProcessWrite::Published { process, through } => {
+            cached_execute(
+                tx,
+                SQL.process.publish.sql(),
+                rusqlite::params![process.as_str(), integer::<i64>(*through)?],
+            )?;
+            Ok(Ok(()))
+        }
         ProcessWrite::Emit {
             process,
             event_type,
@@ -429,12 +437,13 @@ pub(super) fn process(tx: &Connection, process: &ProcessId) -> Answer<Option<Pro
                 row.get::<_, String>(3)?,
                 row.get::<_, Option<String>>(4)?,
                 row.get::<_, Option<i64>>(5)?,
+                row.get::<_, i64>(6)?,
             ))
         })
         .optional()?;
     Ok(Ok(row
         .map(
-            |(state_rev, driver_json, cancel, status, cascade_cursor, written_epoch)| {
+            |(state_rev, driver_json, cancel, status, cascade_cursor, written_epoch, published)| {
                 Ok::<_, rusqlite::Error>(ProcessActorRow {
                     process: process.clone(),
                     state_rev: integer::<u64>(state_rev)?,
@@ -443,6 +452,7 @@ pub(super) fn process(tx: &Connection, process: &ProcessId) -> Answer<Option<Pro
                     terminal: !matches!(status.as_str(), "running" | "waiting"),
                     cascade_cursor,
                     written_epoch: written_epoch.map(Epoch),
+                    published_event_sequence: integer::<u64>(published)?,
                 })
             },
         )

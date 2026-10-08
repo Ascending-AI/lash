@@ -540,6 +540,7 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     driver_json TEXT,
     cascade_cursor TEXT,
     written_epoch BIGINT,
+    published_event_sequence BIGINT NOT NULL DEFAULT 0,
     record_json TEXT NOT NULL,
     consumer_hold_key TEXT,
     consumer_hold_scope_kind TEXT,

@@ -27,10 +27,24 @@ struct WatchedProcessRegistry {
     inner: Arc<dyn ProcessRegistry>,
     hub: ProcessChangeHub,
     sinks: Arc<Mutex<Vec<Arc<dyn ProcessEventSink>>>>,
+    publication: Arc<Publication>,
+}
+
+/// What every path that emits a process's events on this node shares.
+#[derive(Default)]
+struct Publication {
+    /// One lock per process: its emissions run one at a time, in sequence
+    /// order.
     event_paths: Mutex<HashMap<ProcessId, Weak<tokio::sync::Mutex<()>>>>,
-    /// The last sequence emitted to the sinks per live process, shared by
-    /// every path that emits, so no event reaches a sink twice.
+    /// The last sequence emitted to the sinks per process, which only moves
+    /// forward: no event reaches a sink twice. A mark outlives its
+    /// process's terminal and is dropped only once the durable mark covers
+    /// it ([`WatchedRegistry::forget_published`]).
     emitted: Mutex<HashMap<ProcessId, u64>>,
+    /// The durable marks a process activation records from this node's
+    /// marks, once one does: where a path with no mark here starts, so a
+    /// mark is always contiguous with what the durable one covers.
+    durable: std::sync::OnceLock<Arc<dyn lash_durable::DurableReads>>,
 }
 
 /// A process registry paired with the change hub published by its decorator.
@@ -69,8 +83,7 @@ impl WatchedRegistry {
             inner: Arc::clone(&inner),
             hub: hub.clone(),
             sinks: Arc::clone(&sinks),
-            event_paths: Mutex::new(HashMap::new()),
-            emitted: Mutex::new(HashMap::new()),
+            publication: Arc::default(),
         });
         let registry: Arc<dyn ProcessRegistry> = watched.clone();
         Self {
@@ -109,19 +122,49 @@ impl WatchedRegistry {
 
     /// Publish what durable commits appended to `process_id`'s log, which
     /// reach the store without passing this registry: a change tick, and to
-    /// the sinks, in sequence order, every event no path emitted on this
-    /// node yet. `first_after` is where the first emission for the process
-    /// starts, once this node emitted nothing of it. Answers the last
-    /// sequence read, where the caller's next `first_after` stands, or
-    /// `first_after` when nothing was read.
-    pub async fn publish_committed(&self, process_id: &ProcessId, first_after: u64) -> u64 {
+    /// the sinks, in sequence order, every event after `published` (the
+    /// process's durable publication mark) that no path emitted on this
+    /// node yet. Answers the last sequence emitted on this node, or
+    /// `published` when nothing was read.
+    pub async fn publish_committed(&self, process_id: &ProcessId, published: u64) -> u64 {
         let event_path = self.watched.event_path(process_id);
         let _guard = event_path.lock().await;
         self.hub.notify(process_id);
         self.watched
-            .emit_event_pages_since(process_id, Some(first_after))
+            .emit_event_pages_since(process_id, Some(published), published)
             .await
-            .unwrap_or(first_after)
+            .unwrap_or(published)
+    }
+
+    /// The last sequence of `process_id` emitted on this node: what its
+    /// owner records as the durable publication mark.
+    #[must_use]
+    pub(crate) fn published_mark(&self, process_id: &ProcessId) -> Option<u64> {
+        self.watched
+            .publication
+            .emitted
+            .lock_recover()
+            .get(process_id)
+            .copied()
+    }
+
+    /// Drop this node's mark of `process_id` once the durable mark,
+    /// `published`, covers it: a later path here starts from the durable
+    /// mark, which only moves forward, so it emits nothing again.
+    pub(crate) async fn forget_published(&self, process_id: &ProcessId, published: u64) {
+        let event_path = self.watched.event_path(process_id);
+        let _guard = event_path.lock().await;
+        let mut marks = self.watched.publication.emitted.lock_recover();
+        if marks.get(process_id).is_some_and(|mark| *mark <= published) {
+            marks.remove(process_id);
+        }
+    }
+
+    /// Read the durable marks a process activation records from this
+    /// registry's marks from `reads`: a path with no mark for a process
+    /// starts from its durable mark, never past it.
+    pub(crate) fn read_durable_marks(&self, reads: Arc<dyn lash_durable::DurableReads>) {
+        let _ = self.watched.publication.durable.set(reads);
     }
 }
 
@@ -162,7 +205,7 @@ delegate_process_registrar!(
         let record = forwarded.await?;
         watched.hub.notify(process_id);
         watched
-            .emit_event_pages_since(process_id, sink_cursor)
+            .emit_event_pages_since(process_id, sink_cursor, 0)
             .await;
         Ok(record)
     }
@@ -182,7 +225,7 @@ delegate_process_event_log!(
         let result = forwarded.await?;
         watched.hub.notify(process_id);
         watched
-            .emit_event_pages_since(process_id, sink_cursor)
+            .emit_event_pages_since(process_id, sink_cursor, 0)
             .await;
         Ok(result)
     }
@@ -200,7 +243,7 @@ delegate_process_lifecycle!(
         let result = forwarded.await?;
         watched.hub.notify(process_id);
         watched
-            .emit_event_pages_since(process_id, sink_cursor)
+            .emit_event_pages_since(process_id, sink_cursor, 0)
             .await;
         Ok(result)
     }
@@ -220,8 +263,7 @@ impl super::registry::ProcessClockRebind for WatchedProcessRegistry {
                 inner,
                 hub: self.hub.clone(),
                 sinks: Arc::clone(&self.sinks),
-                event_paths: Mutex::new(HashMap::new()),
-                emitted: Mutex::new(HashMap::new()),
+                publication: Arc::clone(&self.publication),
             }) as Arc<dyn ProcessRegistry>
         })
     }

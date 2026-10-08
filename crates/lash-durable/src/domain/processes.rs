@@ -37,6 +37,9 @@ pub struct ProcessActorRow {
     pub cascade_cursor: Option<String>,
     /// The epoch of the commit that last wrote it.
     pub written_epoch: Option<Epoch>,
+    /// The last event of its log its owners handed to their hosts' sinks:
+    /// where publication resumes after a takeover. Zero before the first.
+    pub published_event_sequence: u64,
 }
 
 /// The rows a process start writes: its registry row, its observers and
@@ -83,6 +86,15 @@ pub enum ProcessWrite {
         expected_rev: u64,
         /// The driver state after the transition.
         driver_json: String,
+    },
+    /// Record that the owner's host sinks were handed `process`'s log
+    /// through sequence `through`. The mark only moves forward: an older
+    /// one leaves it as it is.
+    Published {
+        /// The process.
+        process: ProcessId,
+        /// The last event handed to the sinks.
+        through: u64,
     },
     /// Append one process event, encoded by its owner, exactly once: the
     /// replay key makes a repeat of the same commit a no-op.

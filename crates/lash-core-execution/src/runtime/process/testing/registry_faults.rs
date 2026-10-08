@@ -51,6 +51,7 @@ struct ReadFaultPlan {
     non_terminal_page_reads: Vec<NonTerminalPageRead>,
     non_terminal_page_errors: Option<(usize, std::collections::VecDeque<crate::PluginError>)>,
     non_terminal_page_pause: Option<NonTerminalPagePause>,
+    event_page_pause: Option<NonTerminalPagePause>,
     registration_hold: Option<RegistrationHold>,
     registration_pause: Option<NonTerminalPagePause>,
     consumer_release_pause: Option<NonTerminalPagePause>,
@@ -280,6 +281,14 @@ impl ProcessRegistryFaults {
     pub fn pause_next_non_terminal_page(&self) -> NonTerminalPagePause {
         let pause = NonTerminalPagePause::new();
         self.faults.lock_recover().non_terminal_page_pause = Some(pause.clone());
+        pause
+    }
+
+    /// Hold the next event-page read (`event_page_after`, and the reads
+    /// built on it) until the returned handle resumes it.
+    pub fn pause_next_event_page(&self) -> NonTerminalPagePause {
+        let pause = NonTerminalPagePause::new();
+        self.faults.lock_recover().event_page_pause = Some(pause.clone());
         pause
     }
 
@@ -514,6 +523,10 @@ impl super::super::registry_concerns::ProcessEventLog for ProcessRegistryFaults 
         mode: crate::ProcessEventQueryMode,
     ) -> Result<crate::ProcessEventReadOutcome<crate::ProcessEventPage>, crate::PluginError> {
         self.take_events_read_fault()?;
+        let pause = self.faults.lock_recover().event_page_pause.take();
+        if let Some(pause) = pause {
+            pause.hold().await;
+        }
         self.inner
             .event_page_after(process_id, after_sequence, limit, mode)
             .await

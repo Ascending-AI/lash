@@ -6,15 +6,16 @@
 //! (`scripts/check-durable-sql.py`).
 //!
 //! The process actor's columns live on the registry's `processes` row: the
-//! state revision, the driver's state, the cascade cursor and the epoch that
-//! last wrote them. A live process is `running` or `waiting`.
+//! state revision, the driver's state, the cascade cursor, the epoch that
+//! last wrote them and the publication mark. A live process is `running` or
+//! `waiting`.
 
 crate::statements! {
     /// The process actor's statements both backends issue verbatim.
     pub struct ProcessActorStatements @ "durable_process" {
         /// Process `?1`'s actor columns, cancel request and status.
         row = "SELECT state_rev, driver_json, cancel_requested_at_ms, status, cascade_cursor,
-                    written_epoch
+                    written_epoch, published_event_sequence
              FROM processes WHERE process_id = ?1";
 
         /// Move live process `?1` from state revision `?2` to the next with
@@ -24,6 +25,11 @@ crate::statements! {
              SET state_rev = state_rev + 1, driver_json = ?3, written_epoch = ?4
              WHERE process_id = ?1 AND state_rev = ?2 AND status IN ('running', 'waiting')
              RETURNING state_rev";
+
+        /// Move process `?1`'s publication mark forward to `?2`; an older
+        /// mark leaves it as it is.
+        publish = "UPDATE processes SET published_event_sequence = ?2
+             WHERE process_id = ?1 AND published_event_sequence < ?2";
 
         /// Set process `?1`'s cascade cursor to `?2` (`NULL` once done),
         /// written at epoch `?3`.

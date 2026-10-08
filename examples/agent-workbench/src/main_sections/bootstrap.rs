@@ -596,10 +596,11 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             .context("open workbench deferred-tool grants")?;
     let approvals = approvals::WorkbenchApprovals::open(data_dir.join("approvals.db"))
         .context("open workbench approval ledger")?;
-    // Best-effort freshness feed for appended process events (ADR 0017). The
-    // sink is a freshness overlay on the durable event log, never truth: no
-    // delivery guarantee, and a consumer needing completeness reconciles from
-    // paged event reads. Terminal observation still rides `await_terminal`.
+    // Freshness feed for appended process events (ADR 0017). The sink is a
+    // freshness overlay on the durable event log, never truth: each event
+    // arrives at least once, identified by its (process, sequence), and a
+    // consumer needing completeness reconciles from paged event reads.
+    // Terminal observation still rides `await_terminal`.
     // `emit` must be fast, so it only hands each event to this channel; the
     // consumer task does the projection off the append path.
     let (host_shutdown, _) = tokio::sync::watch::channel(false);

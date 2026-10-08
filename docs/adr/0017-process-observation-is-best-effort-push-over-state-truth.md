@@ -6,9 +6,13 @@ accepted
 
 ## Decision
 
-The retained durable process event log, read through `ProcessRegistry::event_page`, is ordered state truth. `ProcessEventSink` is optional best-effort freshness. `WatchedProcessRegistry` emits events after successful writes, including lifecycle and terminal events, in per-process append order. Batch events reach sinks in their committed order.
+The retained durable process event log, read through `ProcessRegistry::event_page`, is ordered state truth. `ProcessEventSink` is optional freshness, delivered at least once from a publication mark (below). `WatchedProcessRegistry` emits events after successful writes, including lifecycle and terminal events, in per-process append order. Batch events reach sinks in their committed order.
 
-The decorator supplies no durable buffer or retry guarantee. Pod failure can leave a committed event undelivered, so consumers requiring completeness reconcile event pages or the record change feed under ADR 0020. Terminal waiting uses the work-driver contract under ADR 0016.
+The decorator supplies no durable buffer or retry of a sink call. Consumers requiring completeness reconcile event pages or the record change feed under ADR 0020. Terminal waiting uses the work-driver contract under ADR 0016.
+
+## Publication mark (FIG-5396)
+
+A durable process's events reach host sinks at least once. The process row carries a publication mark, the last sequence its owners' nodes handed to their sinks; each transition an owner commits, and its end, moves it to what its node emitted, and a node that takes the process over publishes from it, not from the log's end, so events an owner committed and died before publishing are delivered by its successor. On one node every path that emits a process's events (a registry append and the owner's publication) shares one forward-only mark, which a terminal does not drop, so no sink of that node hears an event twice. A takeover can hand again what its predecessor published and did not record yet, and an append through another node's registry also reaches that node's sinks; each event's `(process_id, sequence)` is its stable identity, and a consumer that must act once per event dedupes on it.
 
 ## Durable-before-push law
 

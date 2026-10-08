@@ -963,9 +963,12 @@ impl LashCoreBuilder {
     /// Add a host sink for process events. Every event appended to a
     /// process's durable log, through the registry or by a commit of a
     /// process this core's node runs, reaches it after the commit: once
-    /// each, in sequence order per process. It is a freshness feed, never
-    /// truth: [`crate::process::Processes::events`] pages the log, which
-    /// keeps whatever a sink misses.
+    /// each on this node, in sequence order per process. A node that takes
+    /// a process over publishes from its durable publication mark, so an
+    /// event may arrive again after a crash, under the same
+    /// `(process_id, sequence)` (see [`facade_support::ProcessEventSink`]).
+    /// It is a freshness feed, never truth:
+    /// [`crate::process::Processes::events`] pages the log.
     pub fn process_event_sink(mut self, sink: Arc<dyn facade_support::ProcessEventSink>) -> Self {
         self.process_event_sinks.push(sink);
         self

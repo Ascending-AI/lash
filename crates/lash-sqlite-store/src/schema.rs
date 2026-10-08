@@ -529,6 +529,7 @@ CREATE TABLE IF NOT EXISTS processes (
     driver_json           TEXT,
     cascade_cursor        TEXT,
     written_epoch         INTEGER,
+    published_event_sequence INTEGER NOT NULL DEFAULT 0,
     record_json           TEXT NOT NULL,
     consumer_hold_key     TEXT,
     consumer_hold_scope_kind TEXT,

@@ -12,11 +12,18 @@
 //!   one `process.effect_outcome` event; one past the per-node cap is
 //!   counted in the `process.effect_omissions` record its terminal carries.
 //! - **publication:** the host's sink hears every event the log holds, each
-//!   once, in sequence order, and a core that takes a process over publishes
-//!   nothing its predecessor did.
+//!   once, in sequence order.
+//! - **publication across commits and cuts** (FIG-5396), on simulated nodes
+//!   and virtual time: a host append held across the actor's terminal
+//!   commit publishes each event once; a successor of an owner that died
+//!   between a commit and its publication delivers what it committed, and
+//!   enters no second wait.
 
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
+
+#[path = "support/sim.rs"]
+mod sim;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -633,7 +640,7 @@ async fn each_committed_effect_is_one_effect_outcome_event(tier: Tier) {
 
 on_every_tier!(each_committed_effect_is_one_effect_outcome_event);
 
-// --- takeover ---------------------------------------------------------------------
+// --- publication across commits and cuts -------------------------------------------
 
 /// Waits on `go` and ends on it.
 fn takeover_advance(
@@ -651,57 +658,362 @@ fn takeover_advance(
     }
 }
 
-/// A core that takes over a waiting process from a stopped one records no
-/// second wait, and its host's sink hears only what came after its
-/// predecessor's: no event reaches the two sinks twice.
-async fn a_core_that_takes_a_process_over_publishes_nothing_twice(tier: Tier) {
-    let (stores, _keep) = stores(tier).await;
-    let world = Arc::new(World::default());
-    let first_heard = Heard::default();
-    let (backend, first) = core(&stores, takeover_advance, &world, &first_heard, "first");
-    let process = start(&first).await;
-    waiting(&first, &backend, &process, 1).await;
-    let first_sequences = first_heard.sequences(&process);
-    first.shutdown().await.expect("the first core stops");
+/// The host's half of a step: these laws' processes ask for none.
+struct NoSteps;
 
-    let second_heard = Heard::default();
-    let (backend, second) = core(&stores, takeover_advance, &world, &second_heard, "second");
-    signal(&second, &process, "go", "go-1").await;
-    ended(&second, &process).await;
+#[async_trait::async_trait]
+impl lash_core_execution::runtime::process::steps::ProcessSteps for NoSteps {
+    async fn admit(
+        &self,
+        _process: &lash_core::ProcessRecord,
+        step: &lash_core::StepRequest,
+        _now_ms: u64,
+    ) -> Result<
+        lash_core_execution::runtime::process::steps::StepAdmission,
+        lash_core_execution::runtime::process::steps::StepRefusal,
+    > {
+        Err(
+            lash_core_execution::runtime::process::steps::StepRefusal::UnknownTool {
+                step: step.step().0.clone(),
+                tool: step.admitted_tool(KIND).as_str().to_owned(),
+            },
+        )
+    }
 
-    let events = log(&backend, &process).await;
-    let terminal = events.last().expect("the log ends").sequence;
-    tokio::time::timeout(Duration::from_secs(60), async {
-        while !second_heard.sequences(&process).contains(&terminal) {
-            tokio::time::sleep(Duration::from_millis(10)).await;
+    /// Never asked: no step of these parks.
+    fn resolved(
+        &self,
+        _process: &lash_core::ProcessRecord,
+        _step: &lash_core::StepRequest,
+        _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
+        _parked: &lash_core_execution::runtime::actor::round::Material<
+            lash_core_store::tool_run::CompletionSource,
+        >,
+        _resolution: lash_core_execution::runtime::actor::waits::Resolution,
+    ) -> lash_core_execution::runtime::actor::round::SettledOutput {
+        lash_core_execution::runtime::actor::round::SettledOutput::Interrupted
+    }
+
+    fn body(
+        &self,
+        _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
+        _process: &lash_core::ProcessRecord,
+        step: &lash_core::StepRequest,
+        _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
+    ) -> lash_core_execution::runtime::actor::round::MemberBody {
+        unreachable!("no step of `{}` is ever admitted", step.step().0)
+    }
+}
+
+/// How many virtual-time steps a fleet law drives before it gives up.
+const STEPS: usize = 400;
+
+/// A simulated deployment: the production process activation over a SQLite
+/// memory store set on virtual time, each node publishing to its own
+/// host's sinks. A host outside the deployment writes through its node's
+/// watched registry; the nodes' own writes go through the fault script.
+struct Fleet {
+    clock: Arc<lash_durable_test::SimClock>,
+    backend: lash_core_execution::Backend,
+    nodes: lash_durable_test::SimNodes,
+}
+
+impl Fleet {
+    async fn new(script: lash_durable_test::Script) -> Self {
+        let clock = lash_durable_test::SimClock::new();
+        let stores = sim::memory(Arc::clone(&clock)).await;
+        let database: Arc<dyn lash_durable::DurableStore> = Arc::new(stores.durable_store());
+        let backend = lash_core_execution::Backend::assemble(lash_core_execution::BackendParts {
+            stores: Arc::new(stores),
+            settings: lash_core_execution::DurableSettings::default(),
+            engines: vec![Arc::new(ScriptEngine {
+                advance: takeover_advance,
+            })],
+            providers: Arc::new(lash_core_execution::NoProjectionProviders),
+            formats: Vec::new(),
+        })
+        .expect("the fleet's backend assembles");
+        let nodes = lash_durable_test::SimNodes::new(
+            database,
+            Arc::clone(&clock),
+            script,
+            lash_durable_test::SimNodesConfig {
+                lease: lash_durable::LeaseConfig::default(),
+                decodes: backend.formats().decodes(),
+                max_active: 8,
+            },
+            Self::activation(&backend, None),
+        );
+        Self {
+            clock,
+            backend,
+            nodes,
         }
-    })
-    .await
-    .expect("the second sink hears the terminal within a minute");
-    let second_sequences = second_heard.sequences(&process);
+    }
+
+    fn activation(
+        backend: &lash_core_execution::Backend,
+        watched: Option<&lash_core_execution::WatchedRegistry>,
+    ) -> Arc<dyn lash_durable::runner::Activation> {
+        let activation = lash_core_execution::runtime::actor::process::ProcessActivation::new(
+            backend.clone(),
+            Arc::new(NoSteps),
+            Arc::new(lash_durable_test::Tripwire::default()),
+        );
+        Arc::new(match watched {
+            Some(watched) => activation.with_process_events(watched.clone()),
+            None => activation,
+        })
+    }
+
+    /// A host on `node`: a watched registry over `inner` whose sink is
+    /// `heard`, which `node`'s activation publishes to.
+    fn host(
+        &self,
+        node: &str,
+        inner: Arc<dyn lash_core::ProcessRegistry>,
+        heard: &Heard,
+    ) -> (
+        lash_core_execution::WatchedRegistry,
+        lash_core_execution::runtime::ProcessEventSinkRegistration,
+    ) {
+        let watched = lash_core_execution::runtime::watch_process_registry(inner);
+        let registration = watched.add_event_sink(Arc::new(heard.clone()));
+        self.nodes
+            .activate_on(node, Self::activation(&self.backend, Some(&watched)));
+        (watched, registration)
+    }
+
+    /// Register a detached process of the scripted engine, taking the
+    /// signal `go`.
+    async fn register(&self) -> lash_core::ProcessId {
+        let registration = lash_core::ProcessRegistration::new(
+            lash_core::ProcessInput::Engine {
+                kind: KIND.to_owned(),
+                payload: serde_json::Value::Null,
+            },
+            lash_core::ProcessProvenance::host(),
+            lash_core::LifetimeDecision::Detached,
+        )
+        .with_execution_env_ref(Some(
+            lash_core_execution::testing::process_execution_env_fixture_ref(),
+        ))
+        .with_extra_event_types([signal_type("go")]);
+        self.backend
+            .process_registry()
+            .register_process(registration)
+            .await
+            .expect("the process registers")
+            .id
+    }
+
+    async fn events(&self, process: &lash_core::ProcessId) -> Vec<lash::process::ProcessEvent> {
+        self.backend
+            .process_registry()
+            .full_event_window(process, 0)
+            .await
+            .expect("the log is read")
+    }
+
+    async fn log(&self, process: &lash_core::ProcessId) -> Vec<u64> {
+        self.events(process)
+            .await
+            .iter()
+            .map(|event| event.sequence)
+            .collect()
+    }
+
+    async fn types(&self, process: &lash_core::ProcessId) -> Vec<String> {
+        self.events(process)
+            .await
+            .into_iter()
+            .map(|event| event.event_type)
+            .collect()
+    }
+
+    async fn ended(&self, process: &lash_core::ProcessId) -> bool {
+        self.backend
+            .process_registry()
+            .get_process(process)
+            .await
+            .expect("the record is read")
+            .is_some_and(|record| record.is_terminal())
+    }
+
+    async fn actor_state(
+        &self,
+        process: &lash_core::ProcessId,
+    ) -> Option<lash_durable::ActorState> {
+        self.nodes
+            .database()
+            .actor(&lash_durable::ActorKey::process(process.as_str()).expect("an actor key"))
+            .await
+            .expect("the actor is read")
+            .map(|snapshot| snapshot.state)
+    }
+
+    /// Step virtual time until `done` holds, at most [`STEPS`] times.
+    async fn until<F, Fut>(&self, what: &str, mut done: F)
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = bool>,
+    {
+        for _ in 0..STEPS {
+            self.nodes.quiesce().await;
+            if done().await {
+                return;
+            }
+            if self.nodes.step().await.is_none() {
+                self.clock.advance_by(1_000).await;
+            }
+        }
+        panic!(
+            "{what} never happened\n{}",
+            self.nodes.script().rendered_trace()
+        );
+    }
+}
+
+/// `go` from a host, through its node's `registry`.
+async fn go(registry: &Arc<dyn lash_core::ProcessRegistry>, process: &lash_core::ProcessId) {
+    let identity =
+        lash_core::ProcessSignalIdentity::new(process.clone(), "go", "go-1").expect("an identity");
+    registry
+        .append_event(
+            process,
+            lash_core::ProcessSignal::new(identity, serde_json::json!({})).append_request(),
+        )
+        .await
+        .expect("the signal is admitted");
+}
+
+/// A host's signal append holds its node's publication from before its
+/// append until after the woken actor committed the terminal the signal
+/// ends the process with; the actor's own publication waits behind it.
+/// The host's sink hears each logged event once, in sequence order: the
+/// two publishers share one mark, which the terminal does not drop
+/// (FIG-5396).
+async fn a_host_append_held_across_the_terminal_commit_publishes_each_event_once() {
+    let fleet = Fleet::new(lash_durable_test::Script::new()).await;
+    let faults =
+        lash_core_execution::runtime::ProcessRegistryFaults::new(fleet.backend.process_registry());
+    let heard = Heard::default();
+    let (watched, _sink) = fleet.host("a", Arc::new(faults.clone()), &heard);
+    let process = fleet.register().await;
+    fleet.nodes.start("a");
+    fleet
+        .until("the waiting process published and released", || async {
+            fleet.actor_state(&process).await == Some(lash_durable::ActorState::Waiting)
+                && heard.sequences(&process) == fleet.log(&process).await
+        })
+        .await;
+
+    let held = faults.pause_next_event_page();
+    let signalled = tokio::spawn({
+        let registry = Arc::clone(watched.registry());
+        let process = process.clone();
+        async move { go(&registry, &process).await }
+    });
+    held.wait_until_validated().await;
+    fleet
+        .until("the woken actor commits the terminal", || async {
+            fleet.ended(&process).await
+        })
+        .await;
+    held.resume();
+    signalled.await.expect("the host's signal task");
+    fleet
+        .until("the ended process released", || async {
+            fleet.actor_state(&process).await == Some(lash_durable::ActorState::Terminal)
+        })
+        .await;
+
     assert_eq!(
-        of_type(&events, "process.waiting").len(),
-        1,
-        "the takeover entered no second wait: {events:#?}"
+        fleet.types(&process).await,
+        ["process.waiting", "signal.go", "process.completed"]
     );
-    assert!(
-        events
-            .iter()
-            .any(|event| event.event_type == "process.waiting"
-                && first_sequences.contains(&event.sequence)),
-        "the first core's host heard the wait"
-    );
-    let first_last = first_sequences.iter().max().copied().unwrap_or_default();
-    assert!(
-        second_sequences
-            .iter()
-            .all(|sequence| *sequence > first_last),
-        "the second core published nothing the first did: {first_sequences:?} {second_sequences:?}"
-    );
-    assert!(
-        second_sequences.windows(2).all(|pair| pair[0] < pair[1]),
-        "the second core published each event once, in order: {second_sequences:?}"
+    let logged = fleet.log(&process).await;
+    assert_eq!(
+        heard.sequences(&process),
+        logged,
+        "the sink heard every logged event once, in order"
     );
 }
 
-on_every_tier!(a_core_that_takes_a_process_over_publishes_nothing_twice);
+#[tokio::test]
+async fn a_host_append_held_across_the_terminal_commit_publishes_each_event_once_on_sqlite_memory()
+{
+    a_host_append_held_across_the_terminal_commit_publishes_each_event_once().await;
+}
+
+/// A's first transition commits its wait, appending `process.waiting`,
+/// and A dies before it publishes anything. B takes the process over and
+/// publishes from the durable publication mark, not the log's end: B's host
+/// hears the wait A committed, then the rest, each
+/// once, in order, and each by the `(process, sequence)` the log holds it
+/// under (FIG-5396).
+async fn a_takeover_after_a_cut_between_commit_and_publish_delivers_the_dead_owners_events() {
+    let script = lash_durable_test::Script::new();
+    script.cut_on(
+        "a",
+        lash_durable::CommitLabel::PROCESS_ADVANCE,
+        1,
+        lash_durable_test::Fault::CommitThenAbort,
+    );
+    let fleet = Fleet::new(script).await;
+    let (a_heard, b_heard) = (Heard::default(), Heard::default());
+    let (_a, _a_sink) = fleet.host("a", fleet.backend.process_registry(), &a_heard);
+    let (b, _b_sink) = fleet.host("b", fleet.backend.process_registry(), &b_heard);
+    let process = fleet.register().await;
+    fleet.nodes.start("a");
+    fleet
+        .until("A commits its wait and dies", || async {
+            !fleet.nodes.script().cuts().is_empty()
+        })
+        .await;
+    assert!(
+        a_heard.sequences(&process).is_empty(),
+        "A died before it published"
+    );
+    assert_eq!(fleet.types(&process).await, ["process.waiting"], "A's wait");
+    let committed = fleet.log(&process).await;
+
+    fleet.nodes.start("b");
+    fleet
+        .until("B publishes what A committed", || async {
+            b_heard.sequences(&process).starts_with(&committed)
+        })
+        .await;
+    go(b.registry(), &process).await;
+    fleet
+        .until("the ended process released", || async {
+            fleet.actor_state(&process).await == Some(lash_durable::ActorState::Terminal)
+        })
+        .await;
+
+    assert_eq!(
+        fleet.types(&process).await,
+        ["process.waiting", "signal.go", "process.completed"]
+    );
+    let logged = fleet.log(&process).await;
+    assert_eq!(
+        b_heard.sequences(&process),
+        logged,
+        "B's sink heard every logged event once, in order"
+    );
+    let log = fleet.events(&process).await;
+    let heard = b_heard.0.lock().unwrap().clone();
+    for (event, logged) in heard.iter().zip(&log) {
+        assert_eq!(
+            (&event.process_id, event.sequence, &event.event_type),
+            (&logged.process_id, logged.sequence, &logged.event_type),
+            "a heard event is the logged event of its (process, sequence)"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_takeover_after_a_cut_between_commit_and_publish_delivers_the_dead_owners_events_on_sqlite_memory()
+ {
+    a_takeover_after_a_cut_between_commit_and_publish_delivers_the_dead_owners_events().await;
+}

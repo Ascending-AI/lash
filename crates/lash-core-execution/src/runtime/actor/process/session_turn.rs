@@ -168,6 +168,7 @@ impl ProcessActivation {
                 cancel_requested: false,
             }
             .advance(&mut tx, process, row.state_rev);
+            self.record_published(&mut tx, process, row);
             owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
             return Ok(Pass::Again);
         };
@@ -202,6 +203,7 @@ impl ProcessActivation {
                 SessionTurnCancel::Requested | SessionTurnCancel::Ended => {
                     driver.cancel_requested = true;
                     driver.advance(&mut tx, process, row.state_rev);
+                    self.record_published(&mut tx, process, row);
                     tx.ack_seen().give_up(Release::Waiting { next_due: None });
                     owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
                     return Ok(Pass::Released);
@@ -217,6 +219,7 @@ impl ProcessActivation {
                 SessionTurnMail::Mailed => {
                     driver.mailed = true;
                     driver.advance(&mut tx, process, row.state_rev);
+                    self.record_published(&mut tx, process, row);
                     owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
                     return Ok(Pass::Again);
                 }

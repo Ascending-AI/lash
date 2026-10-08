@@ -117,9 +117,14 @@ impl ProcessActivation {
 
     /// This activation publishing every process event its commits append
     /// to `watched`'s sinks and change hub, after the commit: the host's
-    /// view of a durable process's lifecycle and effects.
+    /// view of a durable process's lifecycle and effects. Publication
+    /// resumes from the process's durable publication mark, which each
+    /// transition's commit, and the ended process's cascade, move to what
+    /// `watched` emitted, so a takeover delivers what a dead owner
+    /// committed and never published.
     #[must_use]
     pub fn with_process_events(mut self, watched: crate::WatchedRegistry) -> Self {
+        watched.read_durable_marks(Arc::clone(self.backend.durable()) as _);
         self.events = Some(watched);
         self
     }
@@ -165,9 +170,10 @@ pub(super) struct Live {
     first_pass: bool,
     /// Whether this activation ended the process for a corrupt refusal.
     ended_refused: bool,
-    /// Where publication starts when this node published nothing of the
-    /// process yet, once known.
-    publish_from: Option<u64>,
+    /// The process's durable publication mark as the last pass read it:
+    /// where publication starts past this node's own mark. `None` until a
+    /// pass read the row.
+    published: Option<u64>,
 }
 
 pub(super) fn corrupt(what: &str, error: impl std::fmt::Display) -> DurableError {
@@ -194,6 +200,14 @@ impl Activation for ProcessActivation {
         let Ok(process) = ProcessId::parse(owned.actor().id()) else {
             return Exit::Abandoned;
         };
+        let exit = self.run(&owned, &process).await;
+        self.forget_published(&owned, &process).await;
+        exit
+    }
+}
+
+impl ProcessActivation {
+    async fn run(&self, owned: &Owned, process: &ProcessId) -> Exit {
         // A failed read leaves the claim as it was: read again at the
         // activation's retry pace while this node holds the actor. A
         // draining node hands it back instead.
@@ -208,7 +222,7 @@ impl Activation for ProcessActivation {
                 }
             }
         };
-        let steps_cx = self.steps_context(&owned, &process);
+        let steps_cx = self.steps_context(owned, process);
         let bodies = Arc::new(StepBodies {
             steps: Arc::clone(&self.steps),
             runtime: Arc::new(StepRuntime::new(steps_cx.clone())),
@@ -226,15 +240,14 @@ impl Activation for ProcessActivation {
             failed_activations,
             first_pass: true,
             ended_refused: false,
-            publish_from: None,
+            published: None,
         };
-        live.publish_from = self.publish_from(&owned, &process).await;
         loop {
-            let passed = self.pass(&owned, &process, &mut live).await;
-            self.publish(&process, &mut live).await;
+            let passed = self.pass(owned, process, &mut live).await;
+            self.publish(process, &live).await;
             match passed {
                 Ok(Pass::Again) => {}
-                Ok(Pass::Wait(idle, due)) => match self.wait(&owned, &mut live, &idle, due).await {
+                Ok(Pass::Wait(idle, due)) => match self.wait(owned, &mut live, &idle, due).await {
                     Err(DurableError::OwnershipLost(_)) => return Exit::Released,
                     Ok(Waited::Stopping) => return Exit::Abandoned,
                     Ok(Waited::Woke) | Err(_) => {}
@@ -248,7 +261,7 @@ impl Activation for ProcessActivation {
                     message,
                 })) => {
                     live.lifecycle.abandon();
-                    match self.end_refused(&owned, &process, &mut live, message).await {
+                    match self.end_refused(owned, process, &mut live, message).await {
                         Ok(Pass::Again) => {}
                         Ok(_) | Err(DurableError::OwnershipLost(_)) => return Exit::Released,
                         // Neither its terminal nor its park committed: the
@@ -269,42 +282,59 @@ impl Activation for ProcessActivation {
 }
 
 impl ProcessActivation {
-    /// Where publication starts when this node published nothing of the
-    /// process yet: the start of the log for a process no transition has
-    /// advanced, so its registration reaches the host too; otherwise the log
-    /// as it stands, since the owner that committed the rest published it.
-    /// `None` when nothing publishes, or the rows could not be read: the
-    /// first publication reads the log's end.
-    async fn publish_from(&self, owned: &Owned, process: &ProcessId) -> Option<u64> {
-        self.events.as_ref()?;
-        let row = owned.store().process(process).await.ok()??;
-        if row.state_rev == 0 && !row.terminal {
-            return Some(0);
-        }
-        self.backend
-            .process_registry()
-            .get_process(process)
-            .await
-            .ok()?
-            .map(|record| record.last_event_sequence)
+    /// Hand the host every event appended to `process`'s log past its
+    /// durable publication mark that this node has not published: only
+    /// what committed, each once on this node, in sequence order. Nothing
+    /// is published until a pass read the mark.
+    async fn publish(&self, process: &ProcessId, live: &Live) {
+        let (Some(watched), Some(published)) = (&self.events, live.published) else {
+            return;
+        };
+        watched.publish_committed(process, published).await;
     }
 
-    /// Hand the host every event appended to `process`'s log that this node
-    /// has not published: only what committed, each once, in sequence
-    /// order. It is a freshness feed: a node that dies before publishing
-    /// loses nothing the log does not keep.
-    async fn publish(&self, process: &ProcessId, live: &mut Live) {
+    /// Record in `tx` what this node published of `process` past `row`'s
+    /// durable mark, which a later owner resumes publication from. Only a
+    /// commit that writes the process's row already (a transition) or that
+    /// of an ended process (its cascade) carries it: on PostgreSQL an owner
+    /// commit locks its actor row before the process row, and a host's
+    /// signal append the other way round, so a commit that did not lock the
+    /// process row, as a release to `waiting`, must not start to.
+    pub(super) fn record_published(
+        &self,
+        tx: &mut ActorTx,
+        process: &ProcessId,
+        row: &ProcessActorRow,
+    ) {
         let Some(watched) = &self.events else {
             return;
         };
-        let from = match live.publish_from {
-            Some(from) => from,
-            None => match self.backend.process_registry().get_process(process).await {
-                Ok(Some(record)) => *live.publish_from.insert(record.last_event_sequence),
-                Ok(None) | Err(_) => return,
-            },
+        if let Some(mark) = watched.published_mark(process)
+            && mark > row.published_event_sequence
+        {
+            tx.write(DomainWrite::Process(ProcessWrite::Published {
+                process: process.clone(),
+                through: mark,
+            }));
+        }
+    }
+
+    /// Once the activation ends, drop this node's mark of `process` if the
+    /// durable mark covers it; a mark past it stays for the next owner on
+    /// this node, or until the next commit records it.
+    async fn forget_published(&self, owned: &Owned, process: &ProcessId) {
+        let Some(watched) = &self.events else {
+            return;
         };
-        live.publish_from = Some(watched.publish_committed(process, from).await);
+        match owned.store().process(process).await {
+            Ok(Some(row)) => {
+                watched
+                    .forget_published(process, row.published_event_sequence)
+                    .await;
+            }
+            Ok(None) => watched.forget_published(process, u64::MAX).await,
+            Err(_) => {}
+        }
     }
 
     /// The context the steps' lifecycle commits and runs bodies under. Its
@@ -371,7 +401,11 @@ impl ProcessActivation {
             owned.commit(tx, CommitLabel::PROCESS_TERMINAL).await?;
             return Ok(Pass::Released);
         };
+        if self.events.is_some() {
+            live.published = Some(row.published_event_sequence);
+        }
         if row.terminal {
+            self.record_published(&mut tx, process, &row);
             return self.cascade(owned, reads, tx, process, &row).await;
         }
         if owned.purpose() == lash_durable::ClaimPurpose::CancelOnly {
@@ -572,6 +606,7 @@ impl ProcessActivation {
             expected_rev: row.state_rev,
             driver_json: driver.encode(),
         }));
+        self.record_published(&mut tx, process, &row);
         if row.state_rev == 0
             && let Some(formats) = self.backend.formats().process(kind)
         {

@@ -293,6 +293,15 @@ pub(super) async fn apply(
                 found,
             }))
         }
+        ProcessWrite::Published { process, through } => {
+            sqlx::query(SQL.process.publish.sql())
+                .bind(process.as_str())
+                .bind(integer::<i64>(*through)?)
+                .execute(crate::observed_sql::executor(&mut ***tx))
+                .await
+                .map_err(sqlx_failure)?;
+            Ok(())
+        }
         ProcessWrite::Emit {
             process,
             event_type,
@@ -435,6 +444,7 @@ pub(super) async fn process(
         terminal: !matches!(status.as_str(), "running" | "waiting"),
         cascade_cursor: get(&row, 4)?,
         written_epoch: get::<Option<i64>>(&row, 5)?.map(Epoch),
+        published_event_sequence: integer::<u64>(get::<i64>(&row, 6)?)?,
     }))
 }
 
