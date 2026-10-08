@@ -166,6 +166,7 @@ The generated region below is checked against the live filenames and headings.
 | 0132 | [Durability is state-first over the lash store: actors, epoch fences, no replay](0132-durability-is-state-first-over-the-lash-store.md) |
 | 0133 | [Prompt sections are keyed, trusted, and placed by the host](0133-prompt-sections-are-keyed-trusted-and-placed-by-the-host.md) |
 | 0134 | [Creating a session is explicit; only a fork clones](0134-creating-a-session-is-explicit-only-a-fork-clones.md) |
+| 0135 | [Attachments are durable refs delivered by the host store](0135-attachments-are-durable-refs-delivered-by-the-host-store.md) |
 <!-- adr-index:end -->
 
 ## Replaced and retired decisions

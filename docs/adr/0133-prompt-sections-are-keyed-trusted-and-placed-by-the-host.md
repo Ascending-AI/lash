@@ -22,7 +22,9 @@ other prompt route is deleted (§9, FIG-5260): only the runtime builds a
 call's cut and composes it, through `lash_core_execution::core_internal`
 (`prompt_cut`, `compose_prompt`); the facade exports neither, and a test
 composes through `lash::testing::prompt`. A resumed turn serves its recorded
-before-turn decisions (§6).
+before-turn decisions (§6). The request template with live attachment slots
+(§6, WIRE-SLOTS) is open work under ADR 0135 (FIG-5445): main records and
+resends each call's exact body, attachments resolved.
 
 ## Context
 
@@ -213,11 +215,13 @@ recorded call loses its text.
 A root is keyed by the call's owner-scoped identity (`ModelCallId`): a turn's
 call is its run and ordinal, and an owned call (§8) is its owner's execution
 scope and its stable key there, with no turn required. The root also holds
-the call's exact provider body (§6), in content-addressed chunks of at most
-32 KiB beside its section texts, and an owned call's pinned deadline: one
-`AdmittedModelCall` record. `load_admitted_call` reads a root back with every
-text and chunk verified against its address, assembles the body byte for
-byte, and calls no renderer or provider builder.
+the call's request template (§6): its literal text in content-addressed
+chunks of at most 32 KiB beside its section texts, each literal chunked on
+its own, and its attachment slots in order; and an owned call's pinned
+deadline: one `AdmittedModelCall` record. A slot records its ref, position,
+acceptance and codec, never a delivered value. `load_admitted_call` reads a
+root back with every text and chunk verified against its address, assembles
+the template byte for byte, and calls no renderer or provider builder.
 
 ### 6. When composition runs
 
@@ -235,21 +239,48 @@ transaction:
 - the request, with the composed text lowered into it: the
   `InitialInstructions` text after the request's own instructions, the
   `CurrentContext` text as one system message after the conversation;
-- the call's exact provider body, in its snapshot root.
+- the call's request template, in its snapshot root.
 
 Before admission the call is prepared once: its prompt is composed, the
-protocol's before-call hook runs, its attachments are normalized, and the
-provider of its route lowers the request, attachments resolved, to the exact
-bytes it sends (`Provider::lower`, a `ProviderRequestBody`). Every attempt of
-the call sends those bytes (`Provider::send`), and so does a resend on any
-owner: no renderer, projector, attachment resolver or provider builder runs
-for it again, so a builder or renderer changed since sends nothing different.
-Authentication and transport are not part of the body: each attempt binds
-them fresh, and a transport's framing of the body (a WebSocket's response
-continuation, say) is derived from the stored bytes. A resend whose body
-cannot be read back as admitted is never sent and never rebuilt: it settles
-unsent with `TurnFailureCode::AdmittedRequestUnavailable`. A request that
-cannot be lowered settles unsent and admits nothing.
+protocol's before-call hook runs, and the provider of its route lowers the
+request to a `RecordedRequestTemplate` (`Provider::lower`): the exact literal
+JSON text it sends, with one `AttachmentSlot` wherever an attachment value
+goes. A slot pins the attachment's ref, its position, the delivery forms the
+route accepts for it (ADR 0135 §2) and the codec, by name and revision, that
+encodes a delivery into the slot. Every slot's ref is acquired under the
+call's owner before the admission commits (ADR 0135 §7).
+
+Each attempt fills the slots and sends. The host store delivers each slot's
+ref in an accepted form (ADR 0135 §3), the provider encodes each delivery
+through the slot's pinned codec (`Provider::encode_slot`), and the provider
+sends the literals with the encoded values in place (`Provider::send`). The
+deliveries live only in that attempt (ADR 0135 §4). The law the attempts
+keep is WIRE-SLOTS:
+
+> Every attempt of an admitted call, on any owner, sends the template its
+> admission recorded. Its literal text, route, stream flag, generation
+> receipt and its ordered slots (reference, position, acceptance, codec) are
+> read back from the admission and are byte-for-byte the admitted ones, so a
+> resend on an owner whose renderer or provider builder would produce other
+> bytes sends the admitted literals. Each slot is filled, per attempt, by
+> exactly one JSON value that the slot's pinned codec produced from a
+> delivery of the slot's reference in a form the slot's acceptance allows
+> (narrowed only by the serving provider's live file scope). Every delivery
+> names the slot's content: bytes hash to the reference's id and have its
+> length, and a URL or provider file serves that content unchanged. A call
+> with no slot sends exactly its admitted bytes. A completed call is
+> replayed with zero deliveries and zero uploads, and no delivered value is
+> recorded, traced or carried in failure evidence.
+
+No renderer, projector or provider builder runs for a resend, so a builder
+or renderer changed since sends nothing different outside the slots.
+Authentication and transport are not part of the template: each attempt
+binds them fresh, and a transport's framing of the body (a WebSocket's
+response continuation, say) is derived from the filled bytes. A resend whose
+template cannot be read back as admitted, or whose slot names a codec the
+serving provider does not implement, is never sent and never rebuilt: it
+settles unsent with `TurnFailureCode::AdmittedRequestUnavailable`. A request
+that cannot be lowered settles unsent and admits nothing.
 
 The call is the turn's one composition point. The execution-environment
 sync builds the iteration's tool surface and composes nothing; the call's
@@ -260,8 +291,8 @@ There is no separate prepare phase. A crash before admission composes again,
 and the callbacks before it run again, which is safe because nothing was
 sent: renderers, wrappers and checkpoint callbacks must be repeat-safe until
 the call is admitted. After admission, a resend is the same call: it sends
-the admitted body, records nothing, and calls no renderer, wrapper,
-projector or hook, and a resume reinstalls the plugin state the admission
+the admitted template with fresh slot deliveries, records nothing, and calls
+no renderer, wrapper, projector or hook, and a resume reinstalls the plugin state the admission
 committed before the turn continues. The turn's before-turn callback
 decisions commit with every phase's checkpoint, and a resumed turn is
 prepared from them: no before-turn callback runs once a phase has committed. A composition that fails settles the
@@ -321,10 +352,10 @@ Each call is admitted under the execution that owns it: a compaction under
 its session command's run, a direct call under its tool attempt or process
 step. `completion.start` commits, under the owner's fence and before the
 first byte is sent, the call's admission record (§5): its snapshot, its
-exact body and its model-total deadline. Its identity is the owner's
+request template and its model-total deadline. Its identity is the owner's
 execution scope and the call's stable key there (`ModelCallId::Owned`). A
 redrive of the owner makes the same call again: it finds the record, sends
-the stored body under the pinned deadline, and composes, lowers and records
+the stored template with fresh slot deliveries under the pinned deadline, and composes, lowers and records
 nothing; past that deadline it settles unsent with
 `TurnFailureCode::ModelTotalExceeded`. The call's response is durable only
 through the owner's own commit (the compaction's `session.command`, the

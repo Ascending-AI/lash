@@ -88,10 +88,10 @@ scratch buffers; S3 consumes chunks and checks before copying them into retained
 storage. Buffer growth is geometric and capped by the read limit. Neither relies on reported object size. SQLite returns the actual
 length and conditionally projects the BLOB only when it fits, within one query.
 
-Before provider dispatch, resolution charges each unique retained blob buffer capacity once
-and every attachment occurrence for encoding. Inline and pre-resolved bytes
-are subject to the same budget. Each occurrence reserves four base64-sized
-copies plus JSON envelope and escaped MIME/label bytes. URL and provider-file
+Before an attempt is sent, its slot delivery (ADR 0135 §5) charges each unique
+retained blob buffer capacity once and every attachment occurrence for
+encoding. Each occurrence reserves four base64-sized copies plus JSON
+envelope and escaped MIME/label bytes. Delivered URL and provider-file
 strings also reserve escaped copies. Repeated IDs share retained bytes while
 each provider occurrence still has its encoding charge. The remaining budget,
 including expansion, determines the limit passed into each backend read.

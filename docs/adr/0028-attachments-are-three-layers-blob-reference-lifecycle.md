@@ -6,7 +6,7 @@ Attachments have three owners. Hosts supply flat blob storage, Lash tracks durab
 
 ## Blob storage
 
-`AttachmentStore` exposes `put`, `get`, `delete`, `head`, `list` and a persistence descriptor. It has no session namespace or session ownership. Identical bytes share one digest and physical blob. File and S3 stores use `blake3/<prefix>/<digest>`. Missing reads return typed `NotFound`; list and head support reclamation.
+`AttachmentStore` exposes `put`, `get`, `delete`, `head`, `list` and a persistence descriptor. Delivering a ref to a provider request (`deliver`, `invalidate_delivery`) is ADR 0135 §3. It has no session namespace or session ownership. Identical bytes share one digest and physical blob. File and S3 stores use `blake3/<prefix>/<digest>`. Missing reads return typed `NotFound`; list and head support reclamation.
 
 The file store stages to a unique pid/counter sibling, syncs bytes, renames it and syncs the parent directory. Unsupported directory syncing is tolerated; other I/O failures fail the write. Puts refresh blob modification time even on deduplication, so delete-time freshness checks observe recent writes.
 
