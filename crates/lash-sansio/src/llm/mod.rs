@@ -1,3 +1,4 @@
+pub mod attachment_delivery;
 pub mod capability;
 mod estimate;
 mod provider_body;

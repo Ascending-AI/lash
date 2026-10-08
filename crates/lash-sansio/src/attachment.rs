@@ -1,11 +1,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-/// An attachment identifier failed validation.
-///
-/// [`AttachmentId::parse`] returns this error when the input is empty, exceeds
-/// the length bound, contains non-printable ASCII or path syntax, or cannot
-/// serve as a single namespace component.
+/// An attachment identifier is not a 64-character lowercase content digest.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InvalidAttachmentId {
     value: String,
@@ -15,8 +11,7 @@ impl fmt::Display for InvalidAttachmentId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "invalid attachment id `{}`: expected 1..={MAX_ATTACHMENT_ID_LEN} printable ASCII \
-             characters forming a single namespace component",
+            "invalid attachment id `{}`: expected 64 lowercase hexadecimal characters",
             self.value.escape_debug()
         )
     }
@@ -24,23 +19,7 @@ impl fmt::Display for InvalidAttachmentId {
 
 impl std::error::Error for InvalidAttachmentId {}
 
-/// Content ids minted by Lash are 64-byte lowercase BLAKE3 hex strings. The
-/// larger bound leaves room for compatible caller-defined ids while keeping
-/// file names comfortably below common per-component limits after a staging
-/// suffix is appended.
-const MAX_ATTACHMENT_ID_LEN: usize = 128;
-
-/// An attachment id, validated at construction.
-///
-/// Every attachment backend maps this id into a namespace it does not fully
-/// control — a filesystem path component, an object-store key segment, a SQL
-/// identifier column. An id therefore has to be a *single* namespace component:
-/// non-empty, bounded, printable ASCII, free of path separators, not a relative
-/// directory reference, and not a shift-qualified path. Ids arrive from places
-/// Lash does not control (host HTTP routes, model
-/// output), so the check lives at construction: there is no way to obtain an
-/// `AttachmentId` that a backend would have to defend itself against, and no
-/// silent acceptance of a malformed id that only misbehaves later at the store.
+/// The domain-separated BLAKE3 digest of attachment bytes, as lowercase hex.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct AttachmentId(String);
 
@@ -48,16 +27,10 @@ impl AttachmentId {
     pub fn parse(id: impl AsRef<str>) -> Result<Self, InvalidAttachmentId> {
         let value = id.as_ref();
         let bytes = value.as_bytes();
-        let has_windows_drive_prefix =
-            bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
-        let malformed = value.is_empty()
-            || value.len() > MAX_ATTACHMENT_ID_LEN
+        let malformed = bytes.len() != 64
             || !bytes
                 .iter()
-                .all(|byte| byte.is_ascii_graphic() || *byte == b' ')
-            || value.contains(['/', '\\'])
-            || matches!(value, "." | "..")
-            || has_windows_drive_prefix;
+                .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'));
 
         if malformed {
             return Err(InvalidAttachmentId {
@@ -125,7 +98,9 @@ impl schemars::JsonSchema for AttachmentId {
     }
 
     fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        <String as schemars::JsonSchema>::json_schema(generator)
+        let mut schema = <String as schemars::JsonSchema>::json_schema(generator);
+        schema.insert("pattern".into(), serde_json::json!("^[0-9a-f]{64}$"));
+        schema
     }
 }
 
@@ -348,47 +323,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn attachment_id_rejects_ids_that_are_not_a_single_namespace_component() {
+    fn attachment_identity_requires_a_content_digest() {
         for invalid in [
-            "",
-            ".",
-            "..",
-            "../outside",
-            "..\\outside",
-            "/etc/passwd",
-            "nested/id",
-            "C:\\windows",
-            "line\nbreak",
-            "null\0byte",
-            "tab\there",
-            "../x",
-            "/abs",
-            "é",
-            "e\u{301}",
-            "\u{ff0e}\u{ff0e}\u{ff0f}x",
-            &"a".repeat(MAX_ATTACHMENT_ID_LEN + 1),
+            "caller-defined",
+            "abc123",
+            &"a".repeat(63),
+            &"a".repeat(65),
+            &"A".repeat(64),
+            &"g".repeat(64),
         ] {
             assert!(
                 AttachmentId::parse(invalid).is_err(),
                 "accepted {invalid:?}"
             );
+            assert!(serde_json::from_value::<AttachmentId>(serde_json::json!(invalid)).is_err());
         }
-    }
-
-    #[test]
-    fn serde_cannot_bypass_attachment_id_validation() {
-        // Before validation moved to construction this deserialized happily
-        // into a well-formed-looking id that only escaped the store root later.
-        let error = serde_json::from_str::<AttachmentId>(r#""../../etc/passwd""#)
-            .expect_err("traversal id must not deserialize");
-        assert!(
-            error.to_string().contains("invalid attachment id"),
-            "unexpected error: {error}"
-        );
-        assert_eq!(
-            serde_json::from_str::<AttachmentId>(r#""abc123""#).unwrap(),
-            AttachmentId::parse("abc123").unwrap()
-        );
+        assert!(AttachmentId::parse("0123456789abcdef".repeat(4)).is_ok());
     }
 
     #[test]
