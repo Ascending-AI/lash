@@ -30,8 +30,8 @@ impl Provider for Scripted {
     }
     async fn send(
         &mut self,
-        _: LlmRequest,
         _body: &lash::provider::LiveRequestBody,
+        _: lash::provider::ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
         self.replies.pop_front().expect("unexpected provider retry")
     }

@@ -7,7 +7,8 @@
 //!
 //! - **Re-send.** A turn restored in its `Model` phase re-delivers the same
 //!   call, and sends the request template its admission stored, its
-//!   attachment slots filled afresh (WIRE-SLOTS). It is sent again
+//!   attachment slots filled afresh (WIRE-SLOTS), reading the response
+//!   under the response context that admission recorded. It is sent again
 //!   as the next attempt only when its request has the pinned reference: the checkpoint the pin committed with re-yields it, and
 //!   anything else is a broken pin, never a new call. The reference is the
 //!   request as the checkpoint names it (FIG-5207), so pinning and checking
@@ -180,7 +181,7 @@ pub(super) async fn send(
     drive: &mut dyn TurnDrive,
     id: EffectId,
     request: std::sync::Arc<LlmRequest>,
-    template: &std::sync::Arc<lash_sansio::llm::types::RecordedRequestTemplate>,
+    admitted: &lash_sansio::llm::types::AdmittedSend,
     start: &ModelStart,
 ) -> Result<bool, TurnError> {
     let (pin, limit, resent) = match start {
@@ -202,7 +203,7 @@ pub(super) async fn send(
             cx,
             id,
             request,
-            template,
+            admitted,
             super::session::ModelCallAttempt {
                 ordinal: pin.attempt,
                 limit,

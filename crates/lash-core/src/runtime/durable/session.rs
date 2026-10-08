@@ -211,9 +211,11 @@ pub trait TurnDrive: Send {
     ///
     /// [`TurnError`] when the call aborts the turn rather than answering it.
     ///
-    /// `template` is the call's request template as `model.start` admitted
-    /// it: every attempt, and a resend on any owner, sends its literals with
-    /// its attachment slots filled afresh (WIRE-SLOTS).
+    /// `admitted` is the call as `model.start` admitted it: every attempt,
+    /// and a resend on any owner, sends its template's literals with its
+    /// attachment slots filled afresh (WIRE-SLOTS), and reads the response
+    /// under its recorded response context. `request` attributes and traces
+    /// the call; it never reaches the provider.
     /// When `attempt.cancel` fires, settle the call with its already-sealed attempts
     /// before returning. Its cancellation does not authorize another send.
     async fn model_call(
@@ -221,7 +223,7 @@ pub trait TurnDrive: Send {
         cx: &ActorContext,
         id: EffectId,
         request: Arc<LlmRequest>,
-        template: &Arc<RecordedRequestTemplate>,
+        admitted: &lash_sansio::llm::types::AdmittedSend,
         attempt: ModelCallAttempt,
     ) -> Result<(), TurnError>;
 

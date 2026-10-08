@@ -10,8 +10,8 @@
 //! render that outlasts the plan's budget composes nothing, and no earlier
 //! text stands in. A late render's result is dropped.
 //!
-//! A call's admission ([`admission_record`]) records its [`ComposedPrompt`]
-//! and its request template as one root whose texts and literal chunks are
+//! A call's admission ([`admission_record`]) records its [`ComposedPrompt`],
+//! its request template and its response context as one root whose texts and literal chunks are
 //! stored by content address, so a section that did not change between
 //! calls, or a literal prefix two calls share, is stored once. The template's
 //! attachment slots record refs, never a delivered value (ADR 0135 §6).
@@ -27,7 +27,9 @@ use std::sync::{Arc, Barrier, Mutex, OnceLock};
 
 use lash_durable::domain::{PromptCallKey, PromptText, PromptWrite};
 use lash_durable::{DomainWrite, DurableError, DurableInstant, DurableReads};
-use lash_sansio::llm::types::RecordedRequestTemplate;
+use lash_sansio::llm::types::{
+    LlmRequestScope, RecordedRequestTemplate, ResponseContext, ResponseContract,
+};
 use lash_sansio::sync::MutexExt;
 
 use super::{
@@ -35,7 +37,9 @@ use super::{
     PromptSnapshot, PromptSnapshotVersion, PromptTextRef, RecordedSectionText,
     ResolvedPromptComposition,
 };
-use crate::prompt_sections::{AdmittedModelCall, ChunkedRequestTemplate, ProviderBodyError};
+use crate::prompt_sections::{
+    AdmittedModelCall, ChunkedRequestTemplate, ProviderBodyError, RecordedResponseContext,
+};
 use crate::store::BlobRef;
 
 /// What separates two sections' text within one placement.
@@ -181,10 +185,12 @@ pub struct ComposedPrompt {
 
 /// The owner-commit write that admits `call` (ADR 0133 §6): one root holding
 /// its record, an [`AdmittedModelCall`] of `prompt`'s snapshot (none when the
-/// session registers no sections), the request `template` and, for a call no
-/// turn row pins, its `deadline`, over every section text and literal chunk
-/// stored by content. It belongs in the commit that admits the call, once per new
-/// call: a second record of one call is refused.
+/// session registers no sections), the request `template`, the scope and
+/// contract of `response` (what every send of the call reads its response
+/// under; its senders are live and not recorded) and, for a call no turn row
+/// pins, its `deadline`, over every section text, literal chunk and the
+/// contract stored by content. It belongs in the commit that admits the
+/// call, once per new call: a second record of one call is refused.
 ///
 /// # Errors
 ///
@@ -193,10 +199,20 @@ pub fn admission_record(
     call: PromptCallKey,
     prompt: Option<&ComposedPrompt>,
     template: &RecordedRequestTemplate,
+    response: &ResponseContext,
     deadline: Option<DurableInstant>,
 ) -> Result<DomainWrite, serde_json::Error> {
     let (recorded_body, chunks) = ChunkedRequestTemplate::chunk(template);
     let mut texts: BTreeMap<BlobRef, String> = chunks.into_iter().collect();
+    let (recorded_response, contract) = RecordedResponseContext::chunk(
+        LlmRequestScope {
+            // The attempt is each send's own.
+            attempt: None,
+            ..response.scope.clone()
+        },
+        &serde_json::to_string(response.contract.as_ref())?,
+    );
+    texts.extend(contract);
     if let Some(prompt) = prompt {
         texts.extend(
             prompt
@@ -209,6 +225,7 @@ pub fn admission_record(
         version: PromptSnapshotVersion,
         prompt: prompt.map(|prompt| prompt.snapshot.clone()),
         body: recorded_body,
+        response: recorded_response,
         deadline_ms: deadline.map(|deadline| deadline.0),
     };
     Ok(DomainWrite::Prompt(PromptWrite::Record {
@@ -390,13 +407,24 @@ impl LoadedPromptSnapshot {
 }
 
 /// An admitted call, read back: its prompt snapshot, the request template
-/// every send of it fills and sends, and an owned call's pinned deadline.
+/// every send of it fills and sends, the scope and contract every send
+/// reads its response under, and an owned call's pinned deadline.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LoadedAdmittedCall {
     /// `None` when the session registered no sections.
     pub prompt: Option<LoadedPromptSnapshot>,
     pub template: Arc<RecordedRequestTemplate>,
+    pub scope: LlmRequestScope,
+    pub contract: Arc<ResponseContract>,
     pub deadline: Option<DurableInstant>,
+}
+
+impl LoadedAdmittedCall {
+    /// The call's response context as its admission recorded it, with no
+    /// senders: a send adds its own.
+    pub fn response(&self) -> ResponseContext {
+        ResponseContext::recorded(self.scope.clone(), Arc::clone(&self.contract))
+    }
 }
 
 /// Read `call`'s admission back from `reads`: its record, every section text
@@ -407,8 +435,8 @@ pub struct LoadedAdmittedCall {
 /// # Errors
 ///
 /// [`AdmittedCallLoadError`] when the store fails, the record does not
-/// decode, a text is missing or does not match its address, or the
-/// template does not assemble as recorded.
+/// decode, a text is missing or does not match its address, the template
+/// does not assemble as recorded, or the response contract does not decode.
 pub async fn load_admitted_call(
     reads: &dyn DurableReads,
     call: &PromptCallKey,
@@ -429,6 +457,10 @@ pub async fn load_admitted_call(
             .body
             .assemble(|blob| texts.get(blob).map(String::as_str))?,
     );
+    let contract = admitted
+        .response
+        .assemble(|blob| texts.get(blob).map(String::as_str))?;
+    let contract: Arc<ResponseContract> = Arc::new(serde_json::from_str(&contract)?);
     let prompt = match admitted.prompt {
         Some(snapshot) => {
             let referenced = snapshot.sections.iter().flat_map(|section| {
@@ -458,6 +490,8 @@ pub async fn load_admitted_call(
     Ok(Some(LoadedAdmittedCall {
         prompt,
         template,
+        scope: admitted.response.scope,
+        contract,
         deadline: admitted.deadline_ms.map(DurableInstant),
     }))
 }

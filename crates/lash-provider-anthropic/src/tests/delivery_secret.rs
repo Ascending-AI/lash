@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use lash_core::facade_support::LlmTransportError;
 use lash_core::llm::types::{
     LiveRequestBody, LlmContentBlock, LlmEventSender, LlmMessage, LlmOutputPart,
-    LlmProviderTraceSender, LlmResponse, LlmRole,
+    LlmProviderTraceSender, LlmResponse, LlmRole, ResponseContext,
 };
 use lash_core::provider::Provider;
 use lash_llm_transport::{LlmHttpBody, LlmHttpRequest, LlmHttpResponse, LlmHttpTransport};
@@ -123,7 +123,9 @@ async fn delivered_secrets_never_leave_send() {
                 .encode_slot(template.slots().next().unwrap(), &delivery)
                 .unwrap();
             let live = LiveRequestBody::fill(template, vec![encoded]).unwrap();
-            let result = provider.send(request, &live).await;
+            let result = provider
+                .send(&live, ResponseContext::of_request(&request))
+                .await;
             assert_eq!(*transport.seen.lock().unwrap(), 1);
             if mode == 0 {
                 assert!(result.is_ok(), "{result:?}");

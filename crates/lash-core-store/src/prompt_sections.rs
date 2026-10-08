@@ -551,6 +551,26 @@ pub enum ProviderBodyError {
     Template(#[from] lash_sansio::llm::types::TemplateError),
 }
 
+/// Split `text` into chunks of at most [`PROVIDER_BODY_CHUNK_BYTES`], each
+/// on a character boundary, pushing every chunk's text by its content
+/// address onto `texts`. The references are in order.
+fn chunk_text(text: &str, texts: &mut Vec<(BlobRef, String)>) -> Vec<PromptTextRef> {
+    let mut rest = text;
+    let mut chunks = Vec::new();
+    while !rest.is_empty() {
+        let mut end = rest.len().min(PROVIDER_BODY_CHUNK_BYTES);
+        while !rest.is_char_boundary(end) {
+            end -= 1;
+        }
+        let (chunk, tail) = rest.split_at(end);
+        let reference = PromptTextRef::of(chunk);
+        texts.push((reference.blob.clone(), chunk.to_owned()));
+        chunks.push(reference);
+        rest = tail;
+    }
+    chunks
+}
+
 impl ChunkedRequestTemplate {
     /// Record `template` as chunks: the record and each literal chunk's text
     /// by its content address.
@@ -563,25 +583,10 @@ impl ChunkedRequestTemplate {
             .segments
             .iter()
             .map(|segment| match segment {
-                RequestSegment::Literal { text } => {
-                    let mut rest = &**text;
-                    let mut chunks = Vec::new();
-                    while !rest.is_empty() {
-                        let mut end = rest.len().min(PROVIDER_BODY_CHUNK_BYTES);
-                        while !rest.is_char_boundary(end) {
-                            end -= 1;
-                        }
-                        let (chunk, tail) = rest.split_at(end);
-                        let reference = PromptTextRef::of(chunk);
-                        texts.push((reference.blob.clone(), chunk.to_owned()));
-                        chunks.push(reference);
-                        rest = tail;
-                    }
-                    ChunkedSegment::Literal {
-                        bytes: u64::try_from(text.len()).unwrap_or(u64::MAX),
-                        chunks,
-                    }
-                }
+                RequestSegment::Literal { text } => ChunkedSegment::Literal {
+                    bytes: u64::try_from(text.len()).unwrap_or(u64::MAX),
+                    chunks: chunk_text(text, &mut texts),
+                },
                 RequestSegment::Attachment { slot } => ChunkedSegment::Attachment {
                     slot: AttachmentSlot::clone(slot),
                 },
@@ -650,10 +655,59 @@ impl ChunkedRequestTemplate {
     }
 }
 
+/// What reading an admitted call's response needs, as its admission records
+/// it: the call's scope, and its response contract (the pinned route's
+/// model, the output it asked for and its tools' input schemas) stored by
+/// content beside the section texts and chunked as a template's literals
+/// are, so calls that share a contract store it once.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecordedResponseContext {
+    pub scope: lash_sansio::llm::types::LlmRequestScope,
+    /// The JSON of the call's `ResponseContract`, in order.
+    pub contract: Vec<PromptTextRef>,
+}
+
+impl RecordedResponseContext {
+    /// Record `scope` and `contract`, the JSON of the call's response
+    /// contract: the record, and each chunk's text by its content address.
+    pub fn chunk(
+        scope: lash_sansio::llm::types::LlmRequestScope,
+        contract: &str,
+    ) -> (Self, Vec<(BlobRef, String)>) {
+        let mut texts = Vec::new();
+        let contract = chunk_text(contract, &mut texts);
+        (Self { scope, contract }, texts)
+    }
+
+    /// The contract's JSON, each chunk read from `text` by its address.
+    ///
+    /// # Errors
+    ///
+    /// [`ProviderBodyError::MissingChunk`] when a chunk is missing; the
+    /// caller verified every text against its address.
+    pub fn assemble<'a>(
+        &self,
+        text: impl Fn(&BlobRef) -> Option<&'a str>,
+    ) -> Result<String, ProviderBodyError> {
+        let mut contract = String::new();
+        for chunk in &self.contract {
+            contract.push_str(text(&chunk.blob).ok_or_else(|| {
+                ProviderBodyError::MissingChunk {
+                    hash: chunk.blob.as_str().to_owned(),
+                }
+            })?);
+        }
+        Ok(contract)
+    }
+}
+
 /// What one admitted model call commits (ADR 0133 §6), version 1: its
-/// prompt snapshot, its request template and, for a call no turn row pins,
-/// its deadline. A resend reads it back and sends the template with its
-/// slots filled afresh; nothing recomposes or lowers the call again.
+/// prompt snapshot, its request template, what reading its response needs
+/// and, for a call no turn row pins, its deadline. A resend reads it back
+/// and sends the template with its slots filled afresh, reading the
+/// response under the recorded context; nothing recomposes or lowers the
+/// call again.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdmittedModelCall {
@@ -662,6 +716,7 @@ pub struct AdmittedModelCall {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<PromptSnapshot>,
     pub body: ChunkedRequestTemplate,
+    pub response: RecordedResponseContext,
     /// The model-total deadline, in milliseconds on the store's clock, that
     /// every send of a compaction's or direct call keeps. A turn's call pins
     /// its deadline in the turn row instead.

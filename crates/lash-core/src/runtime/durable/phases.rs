@@ -49,7 +49,7 @@ use super::turn_scope::end_turn_scope;
 use super::{model_call, turn_cancel};
 use crate::plugin::prompt::{admission_record, load_admitted_call};
 use crate::{ActorContext, Effect, HostTurnProtocol, SessionStreamEvent, TurnMachine};
-use lash_sansio::llm::types::RecordedRequestTemplate;
+use lash_sansio::llm::types::AdmittedSend;
 use lash_sansio::{SavedTurn, SessionId, TurnId};
 use std::sync::Arc;
 
@@ -204,13 +204,15 @@ pub async fn run_phases(
                 let current = iteration(drive.machine());
                 // `model` is spent: only the call the restored machine
                 // re-delivers is the pinned one; every other call is new.
-                let (pinned, request, template, admission) = match model.take() {
+                let (pinned, request, admitted, admission) = match model.take() {
                     Some((redelivered, pin)) if redelivered == id => {
                         // A resend sends the template its admission stored,
-                        // read back byte for byte; nothing prepares it again.
+                        // read back byte for byte, and reads the response
+                        // under the context stored with it; nothing prepares
+                        // it again.
                         let key = call_key(&session, &run, pin.call);
-                        match admitted_template(cx, &key).await? {
-                            Ok(template) => (Some(pin), request, template, None),
+                        match admitted_send(cx, &key).await? {
+                            Ok(admitted) => (Some(pin), request, admitted, None),
                             Err(unavailable) => {
                                 settle_unsent(drive.as_mut(), id, unavailable);
                                 continue;
@@ -253,10 +255,13 @@ pub async fn run_phases(
                                         "the turn machine does not wait on model call {id:?}"
                                     )));
                                 }
+                                let admitted =
+                                    AdmittedSend::of_request(&request, Arc::new(template));
                                 let record = admission_record(
                                     call_key(&session, &run, call),
                                     prompt.as_ref(),
-                                    &template,
+                                    &admitted.template,
+                                    &admitted.response,
                                     None,
                                 )
                                 .map_err(|error| {
@@ -264,7 +269,7 @@ pub async fn run_phases(
                                         "the model call's admission does not encode: {error}"
                                     ))
                                 })?;
-                                (None, request, Arc::new(template), Some(record))
+                                (None, request, admitted, Some(record))
                             }
                             PreparedCall::Unsent(refused) => {
                                 settle_unsent(drive.as_mut(), id, refused);
@@ -321,7 +326,7 @@ pub async fn run_phases(
                         calls = pin.call;
                     }
                 }
-                if !model_call::send(cx, drive.as_mut(), id, request, &template, &start).await? {
+                if !model_call::send(cx, drive.as_mut(), id, request, &admitted, &start).await? {
                     return Ok(PhaseExit::CancelRequested);
                 }
             }
@@ -570,10 +575,10 @@ fn call_key(session: &crate::SessionId, run: &crate::TurnId, call: u32) -> Promp
 /// # Errors
 ///
 /// [`TurnError::Durable`] when the store cannot be read.
-async fn admitted_template(
+async fn admitted_send(
     cx: &ActorContext,
     key: &PromptCallKey,
-) -> Result<Result<Arc<RecordedRequestTemplate>, crate::LlmCallError>, TurnError> {
+) -> Result<Result<AdmittedSend, crate::LlmCallError>, TurnError> {
     let unavailable = |message: String| crate::LlmCallError {
         message,
         retryable: false,
@@ -587,7 +592,10 @@ async fn admitted_template(
         partial_response: None,
     };
     match load_admitted_call(cx.durable_reads()?, key).await {
-        Ok(Some(admitted)) => Ok(Ok(admitted.template)),
+        Ok(Some(admitted)) => Ok(Ok(AdmittedSend {
+            response: admitted.response(),
+            template: admitted.template,
+        })),
         Ok(None) => Ok(Err(unavailable(format!(
             "{} has no admitted request template to send",
             key.call

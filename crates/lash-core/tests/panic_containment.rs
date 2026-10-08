@@ -38,8 +38,8 @@ impl Provider for PanicProvider {
 
     async fn send(
         &mut self,
-        _request: LlmRequest,
         _body: &lash_sansio::llm::types::LiveRequestBody,
+        _context: lash_sansio::llm::types::ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
         panic!("provider payload only")
     }
@@ -74,8 +74,8 @@ impl Provider for ClassifierKeywordPanicProvider {
 
     async fn send(
         &mut self,
-        _request: LlmRequest,
         _body: &lash_sansio::llm::types::LiveRequestBody,
+        _context: lash_sansio::llm::types::ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
         panic!("safety context length does not exist")
     }
@@ -188,8 +188,8 @@ impl Provider for AuxiliaryPanicProvider {
     }
     async fn send(
         &mut self,
-        _: LlmRequest,
         _: &lash_sansio::llm::types::LiveRequestBody,
+        _: lash_sansio::llm::types::ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
         let auxiliary = ProviderHandle::new(ProviderComponents::new(Box::new(self.clone())));
         auxiliary.close().await?;
@@ -314,8 +314,8 @@ impl Provider for DesugaredPanicProvider {
     }
     fn send<'life0, 'life1, 'async_trait>(
         &'life0 mut self,
-        _: LlmRequest,
         _: &'life1 lash_sansio::llm::types::LiveRequestBody,
+        _: lash_sansio::llm::types::ResponseContext,
     ) -> std::pin::Pin<
         Box<
             dyn std::future::Future<Output = Result<LlmResponse, LlmTransportError>>

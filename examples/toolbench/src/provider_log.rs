@@ -119,10 +119,10 @@ impl Provider for LoggedProvider {
     }
     fn generation_retry_guarantee(
         &self,
-        request: &LlmRequest,
+        context: &lash::provider::ResponseContext,
         body: &RecordedRequestTemplate,
     ) -> GenerationRetryGuarantee {
-        self.inner.generation_retry_guarantee(request, body)
+        self.inner.generation_retry_guarantee(context, body)
     }
     async fn close(&self) -> Result<(), LlmTransportError> {
         self.inner.close().await
@@ -142,21 +142,23 @@ impl Provider for LoggedProvider {
     }
     #[expect(
         clippy::expect_used,
-        reason = "LlmRequest, LlmResponse and accounting::Usage are serde structs that \
-                  serialize by construction, and the capture mutex guards only non-panicking \
-                  pushes so it cannot be poisoned"
+        reason = "LlmResponse and accounting::Usage are serde structs that serialize by \
+                  construction, and the capture mutex guards only non-panicking pushes so it \
+                  cannot be poisoned"
     )]
     async fn send(
         &mut self,
-        request: LlmRequest,
         body: &lash::provider::LiveRequestBody,
+        context: lash::provider::ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
-        let request_id = request.scope.request_id.clone();
+        let request_id = context.scope.request_id.clone();
+        // What the call asks is what it sends: the body, its slots redacted.
+        let request: Value = serde_json::from_str(&body.redacted()).unwrap_or(Value::Null);
         let attempt_index = self.capture.rows().len() + 1;
-        tracing::debug!(target: "toolbench", parent: &self.capture.span(), attempt_index, request_id, request = %redact(serde_json::to_value(&request).expect("request serializes"), &self.secret), "provider request");
+        tracing::debug!(target: "toolbench", parent: &self.capture.span(), attempt_index, request_id, request = %redact(request, &self.secret), "provider request");
         self.capture.entries.lock().unwrap_or_else(|e| e.into_inner()).push(json!({"request_id":request_id, "partial":true, "request_ms":null, "cost":null, "response":null, "error":null}));
         let started = std::time::Instant::now();
-        let result = self.inner.send(request, body).await;
+        let result = self.inner.send(body, context).await;
         let (error, response) = match &result {
             Ok(response) => (Value::Null, Some(response)),
             Err(error) => (

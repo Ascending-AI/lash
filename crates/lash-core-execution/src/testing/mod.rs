@@ -482,6 +482,8 @@ pub fn stage_execution_state_components(
 type CompletionFuture =
     Pin<Box<dyn Future<Output = Result<LlmResponse, LlmTransportError>> + Send>>;
 type CompletionFn = dyn Fn(LlmRequest, String) -> CompletionFuture + Send + Sync;
+type AnswerFn =
+    dyn Fn(lash_sansio::llm::types::ResponseContext, String) -> CompletionFuture + Send + Sync;
 type TemplateFn =
     dyn Fn(&LlmRequest) -> lash_sansio::llm::types::RecordedRequestTemplate + Send + Sync;
 type SerializeConfigFn = dyn Fn() -> serde_json::Value + Send + Sync;
@@ -502,6 +504,9 @@ pub struct TestProvider {
     /// Optional template builder for admission laws; otherwise canonical refs.
     template: Option<Arc<TemplateFn>>,
     complete: Arc<CompletionFn>,
+    /// Set by [`TestProviderBuilder::answer`]: it answers instead of
+    /// `complete`, from the wire and no decoded request.
+    answer: Option<Arc<AnswerFn>>,
 }
 
 impl std::fmt::Debug for TestProvider {
@@ -544,6 +549,7 @@ impl TestProviderBuilder {
                 options: ProviderOptions::default(),
                 serialize_config: Arc::new(empty_provider_config),
                 template: None,
+                answer: None,
                 complete: Arc::new(|_request, _body| {
                     Box::pin(async {
                         Err(LlmTransportError::new(
@@ -587,6 +593,10 @@ impl TestProviderBuilder {
         self
     }
 
+    /// Answer each send from the request its body says: the canonical
+    /// body read back ([`crate::provider::canonical_request`]), never a request held beside
+    /// it. A provider whose [`template`](Self::template) is not canonical
+    /// answers through [`answer`](Self::answer) instead.
     pub fn complete<F, Fut>(mut self, complete: F) -> Self
     where
         F: Fn(LlmRequest) -> Fut + Send + Sync + 'static,
@@ -596,13 +606,28 @@ impl TestProviderBuilder {
         self
     }
 
-    /// Answer each send from the request and the exact body it sends.
-    pub fn send<F, Fut>(mut self, send: F) -> Self
+    /// Answer each send from the request its body says and the exact wire
+    /// it sends.
+    pub fn complete_with_wire<F, Fut>(mut self, send: F) -> Self
     where
         F: Fn(LlmRequest, String) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<LlmResponse, LlmTransportError>> + Send + 'static,
     {
         self.provider.complete = Arc::new(move |request, body| Box::pin(send(request, body)));
+        self
+    }
+
+    /// Answer each send from its response context and the exact wire it
+    /// sends, decoding nothing: for a provider whose
+    /// [`template`](Self::template) lowers to a body of its own.
+    pub fn answer<F, Fut>(mut self, answer: F) -> Self
+    where
+        F: Fn(lash_sansio::llm::types::ResponseContext, String) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<LlmResponse, LlmTransportError>> + Send + 'static,
+    {
+        self.provider.answer = Some(Arc::new(move |context, body| {
+            Box::pin(answer(context, body))
+        }));
         self
     }
 
@@ -689,14 +714,18 @@ impl Provider for TestProvider {
 
     async fn send(
         &mut self,
-        mut request: LlmRequest,
         body: &lash_sansio::llm::types::LiveRequestBody,
+        mut context: lash_sansio::llm::types::ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
-        crate::provider::delivery_redaction::protect_callbacks(&mut request, body);
-        let mut response = crate::provider::delivery_redaction::protect_result(
-            (self.complete)(request, body.wire()).await,
-            body,
-        )?;
+        crate::provider::delivery_redaction::protect_callbacks(&mut context, body);
+        let answered = match &self.answer {
+            Some(answer) => answer(context, body.wire()).await,
+            None => match crate::provider::canonical_request(body, context) {
+                Ok(request) => (self.complete)(request, body.wire()).await,
+                Err(error) => Err(error),
+            },
+        };
+        let mut response = crate::provider::delivery_redaction::protect_result(answered, body)?;
         // A scripted answer that carries counters is one its provider
         // reported, and a real provider reports them beside its own raw usage
         // record: without one the attempt is unreported by the provider
@@ -711,7 +740,7 @@ impl Provider for TestProvider {
 
     fn generation_retry_guarantee(
         &self,
-        _request: &LlmRequest,
+        _context: &lash_sansio::llm::types::ResponseContext,
         _template: &lash_sansio::llm::types::RecordedRequestTemplate,
     ) -> crate::provider::GenerationRetryGuarantee {
         self.generation_retry_guarantee

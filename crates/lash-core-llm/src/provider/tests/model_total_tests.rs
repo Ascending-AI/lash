@@ -80,8 +80,8 @@ impl Provider for StallingProvider {
 
     async fn send(
         &mut self,
-        _request: LlmRequest,
         _body: &LiveRequestBody,
+        _context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
         self.attempts.fetch_add(1, Ordering::SeqCst);
         tokio::time::sleep(self.stall).await;
@@ -143,7 +143,7 @@ async fn complete_under(
     let template = Arc::new(handle.lower(&request).await.expect("the request lowers"));
     let error = handle
         .complete_prepared(
-            request,
+            ResponseContext::of_request(&request),
             &template,
             &NoSlotDeliveries,
             sideband,
@@ -278,8 +278,8 @@ impl Provider for RecordingProvider {
 
     async fn send(
         &mut self,
-        _request: LlmRequest,
         _body: &LiveRequestBody,
+        _context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
         self.sent.lock_recover().push(self.options.llm_timeouts());
         Err(LlmTransportError::new("temporarily unavailable")
@@ -321,7 +321,7 @@ async fn complete_route(
     let template = Arc::new(handle.lower(&request).await.expect("the request lowers"));
     let error = handle
         .complete_prepared(
-            request,
+            ResponseContext::of_request(&request),
             &template,
             &NoSlotDeliveries,
             sideband,

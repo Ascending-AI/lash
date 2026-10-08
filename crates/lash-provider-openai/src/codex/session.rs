@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use lash_core::llm::transport::{
     LlmTransportError, ProviderFailureKind, TransportRetryVerdict, TurnFailureCode,
 };
-use lash_core::llm::types::LlmRequest;
+use lash_core::llm::types::ResponseContext;
 use lash_llm_transport::TokenLease;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue};
@@ -280,8 +280,8 @@ impl CodexProvider {
         }
     }
 
-    pub(super) fn clear_continuation(&self, req: &LlmRequest) {
-        let scope_key = req.continuation_key();
+    pub(super) fn clear_continuation(&self, call: &ResponseContext) {
+        let scope_key = call.continuation_key();
         let mut sessions = self.websocket_sessions.inner.lock_recover();
         if let Some(CodexWebsocketSessionEntry::Idle { continuation, .. }) =
             sessions.by_scope.get_mut(&scope_key)
@@ -290,8 +290,8 @@ impl CodexProvider {
         }
     }
 
-    pub(super) fn websocket_fallback_reason(&self, req: &LlmRequest) -> Option<String> {
-        let scope_key = req.continuation_key();
+    pub(super) fn websocket_fallback_reason(&self, call: &ResponseContext) -> Option<String> {
+        let scope_key = call.continuation_key();
         let mut sessions = self.websocket_sessions.inner.lock_recover();
         Self::prune_expired_websocket_fallbacks(&mut sessions, Instant::now());
         sessions
@@ -300,8 +300,12 @@ impl CodexProvider {
             .map(|fallback| fallback.reason.clone())
     }
 
-    pub(super) fn record_websocket_fallback(&self, req: &LlmRequest, error: &LlmTransportError) {
-        let scope_key = req.continuation_key();
+    pub(super) fn record_websocket_fallback(
+        &self,
+        call: &ResponseContext,
+        error: &LlmTransportError,
+    ) {
+        let scope_key = call.continuation_key();
         let mut sessions = self.websocket_sessions.inner.lock_recover();
         let now = Instant::now();
         Self::prune_expired_websocket_fallbacks(&mut sessions, now);
@@ -319,8 +323,8 @@ impl CodexProvider {
         );
     }
 
-    pub(super) fn clear_websocket_fallback(&self, req: &LlmRequest) {
-        let scope_key = req.continuation_key();
+    pub(super) fn clear_websocket_fallback(&self, call: &ResponseContext) {
+        let scope_key = call.continuation_key();
         let mut sessions = self.websocket_sessions.inner.lock_recover();
         sessions.fallback_by_scope.remove(&scope_key);
     }
@@ -331,7 +335,7 @@ impl CodexProvider {
     )]
     async fn connect_websocket(
         &self,
-        req: &LlmRequest,
+        call: &ResponseContext,
         connect_timeout: Option<Duration>,
         lease: &TokenLease,
     ) -> Result<CodexWsStream, CodexWebSocketAttemptError> {
@@ -370,13 +374,13 @@ impl CodexProvider {
                 )))
             })?,
         );
-        let session_value = HeaderValue::from_str(&req.scope.provider_session_affinity_key())
+        let session_value = HeaderValue::from_str(&call.scope.provider_session_affinity_key())
             .map_err(|error| {
                 CodexWebSocketAttemptError::before_send(LlmTransportError::new(format!(
                     "Invalid Codex WebSocket session header: {error}"
                 )))
             })?;
-        let request_value = HeaderValue::from_str(&req.scope.request_id).map_err(|error| {
+        let request_value = HeaderValue::from_str(&call.scope.request_id).map_err(|error| {
             CodexWebSocketAttemptError::before_send(LlmTransportError::new(format!(
                 "Invalid Codex WebSocket request header: {error}"
             )))
@@ -444,11 +448,11 @@ impl CodexProvider {
     )]
     pub(super) async fn acquire_websocket(
         &self,
-        req: &LlmRequest,
+        call: &ResponseContext,
         connect_timeout: Option<Duration>,
         lease: &TokenLease,
     ) -> Result<CodexWebsocketLease, CodexWebSocketAttemptError> {
-        let scope_key = req.continuation_key();
+        let scope_key = call.continuation_key();
         let token_epoch = lease.epoch;
 
         enum AcquireDecision {
@@ -510,7 +514,7 @@ impl CodexProvider {
         match decision {
             AcquireDecision::Reuse(lease) => Ok(*lease),
             AcquireDecision::ConnectEphemeral => {
-                let websocket = self.connect_websocket(req, connect_timeout, lease).await?;
+                let websocket = self.connect_websocket(call, connect_timeout, lease).await?;
                 Ok(CodexWebsocketLease {
                     websocket,
                     scope_key: None,
@@ -521,7 +525,7 @@ impl CodexProvider {
                 })
             }
             AcquireDecision::ConnectReusable(scope_key) => {
-                let websocket = match self.connect_websocket(req, connect_timeout, lease).await {
+                let websocket = match self.connect_websocket(call, connect_timeout, lease).await {
                     Ok(websocket) => websocket,
                     Err(error) => {
                         self.remove_websocket_scope(&scope_key, token_epoch);

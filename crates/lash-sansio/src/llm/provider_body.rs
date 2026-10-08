@@ -13,6 +13,9 @@ pub struct SlotCodec {
     pub revision: u32,
 }
 
+/// The codec of the canonical body: a request's own JSON.
+const CANONICAL_CODEC: &str = "lash.canonical";
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AttachmentSlot {
@@ -119,7 +122,7 @@ impl RecordedRequestTemplate {
                     position,
                     accepts,
                     codec: SlotCodec {
-                        name: "lash.canonical".into(),
+                        name: CANONICAL_CODEC.into(),
                         revision: 1,
                     },
                 },
@@ -150,6 +153,45 @@ impl RecordedRequestTemplate {
             }
         }
         Self::from_json(route, request.stream_events.is_some(), None, &value, &slots)
+    }
+
+    /// The request a canonical template ([`Self::of_request`]) was lowered
+    /// from, read back from its literals with each slot's ref restored where
+    /// the request named it. It is the typed view an in-process model
+    /// decides from: what the body says, never a request held beside it. The
+    /// request carries no senders.
+    ///
+    /// # Errors
+    ///
+    /// [`TemplateError::NotCanonical`] when a slot is another codec's or the
+    /// literals are not a request.
+    pub fn canonical_request(&self) -> Result<LlmRequest, TemplateError> {
+        let not_canonical = |reason: String| TemplateError::NotCanonical { reason };
+        let mut text = String::new();
+        for segment in &self.segments {
+            match segment {
+                RequestSegment::Literal { text: span } => text.push_str(span),
+                RequestSegment::Attachment { slot } => {
+                    if slot.codec.name.as_ref() != CANONICAL_CODEC {
+                        return Err(not_canonical(format!(
+                            "a slot is encoded by `{}`",
+                            slot.codec.name
+                        )));
+                    }
+                    let named = match slot.position {
+                        AttachmentPosition::Message => {
+                            serde_json::json!({ "reference": slot.reference })
+                        }
+                        AttachmentPosition::ToolResult => serde_json::to_value(
+                            crate::ModelToolReturnPart::Attachment(slot.reference.clone()),
+                        )
+                        .map_err(|error| not_canonical(error.to_string()))?,
+                    };
+                    text.push_str(&named.to_string());
+                }
+            }
+        }
+        serde_json::from_str(&text).map_err(|error| not_canonical(error.to_string()))
     }
 
     pub fn validate(&self) -> Result<(), TemplateError> {
@@ -347,6 +389,14 @@ impl LiveRequestBody {
     pub fn template(&self) -> &RecordedRequestTemplate {
         &self.template
     }
+    /// See [`RecordedRequestTemplate::canonical_request`].
+    ///
+    /// # Errors
+    ///
+    /// [`TemplateError::NotCanonical`] when the body is not canonical.
+    pub fn canonical_request(&self) -> Result<LlmRequest, TemplateError> {
+        self.template.canonical_request()
+    }
     pub fn route(&self) -> &ProviderRouteIdentity {
         &self.template.route
     }
@@ -415,6 +465,8 @@ pub enum TemplateError {
     SlotCount { expected: usize, actual: usize },
     #[error("an attachment slot has empty acceptance")]
     EmptyAcceptance,
+    #[error("the body is not a canonical request: {reason}")]
+    NotCanonical { reason: String },
 }
 
 /// A transport may scrub captured provider text without access to secret values.

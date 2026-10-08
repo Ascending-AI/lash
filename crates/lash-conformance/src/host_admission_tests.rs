@@ -30,8 +30,8 @@ impl Provider for PendingTransport {
     }
     async fn send(
         &mut self,
-        _: LlmRequest,
         _body: &lash_sansio::llm::types::LiveRequestBody,
+        _: lash_sansio::llm::types::ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
         self.entered.notify_one();
         std::future::pending().await
@@ -82,15 +82,15 @@ impl Provider for HostAdmission {
     }
     async fn send(
         &mut self,
-        request: LlmRequest,
         body: &lash_sansio::llm::types::LiveRequestBody,
+        context: lash_sansio::llm::types::ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
         let _permit = self
             .permits
             .acquire()
             .await
             .expect("fixture keeps admission open");
-        self.inner.send(request, body).await
+        self.inner.send(body, context).await
     }
 }
 

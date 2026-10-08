@@ -299,7 +299,7 @@ impl DirectLlmClient {
         };
         match lash_core_llm::core_internal::complete_prepared(
             &mut self.provider,
-            llm_request,
+            lash_sansio::llm::types::ResponseContext::of_request(&llm_request),
             &template,
             self.deliveries.as_ref(),
             sideband,

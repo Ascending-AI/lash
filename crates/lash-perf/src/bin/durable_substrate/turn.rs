@@ -526,7 +526,7 @@ impl TurnDrive for BenchDrive {
         _cx: &ActorContext,
         id: EffectId,
         request: Arc<LlmRequest>,
-        _template: &Arc<RecordedRequestTemplate>,
+        _admitted: &lash_sansio::llm::types::AdmittedSend,
         attempt: ModelCallAttempt,
     ) -> Result<(), TurnError> {
         let ModelCallAttempt {

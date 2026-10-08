@@ -98,10 +98,10 @@ impl ProviderRateLimiter {
     pub async fn admit(
         &self,
         provider: &dyn Provider,
-        request: &LlmRequest,
+        template: &RecordedRequestTemplate,
     ) -> ProviderRateLimitPermit {
         let concurrency = self.acquire_concurrency(provider).await;
-        self.wait_for_buckets(provider, 1, request.estimated_tokens())
+        self.wait_for_buckets(provider, 1, template.estimated_tokens())
             .await;
         ProviderRateLimitPermit {
             _concurrency: concurrency,
@@ -126,11 +126,11 @@ impl ProviderRateLimiter {
     pub(super) async fn admit_within(
         &self,
         provider: &dyn Provider,
-        request: &LlmRequest,
+        template: &RecordedRequestTemplate,
         deadline: std::time::Instant,
     ) -> Option<ProviderRateLimitPermit> {
         let concurrency = self.acquire_concurrency(provider).await;
-        self.wait_for_buckets_within(provider, 1, request.estimated_tokens(), Some(deadline))
+        self.wait_for_buckets_within(provider, 1, template.estimated_tokens(), Some(deadline))
             .await
             .then_some(ProviderRateLimitPermit {
                 _concurrency: concurrency,
@@ -378,7 +378,11 @@ mod admission_tests {
                 if tokens_block { 2 } else { 0 },
             )
             .await;
-        let request = super::super::tests::empty_request();
+        let template = RecordedRequestTemplate::of_request(
+            components.provider.route_identity("model"),
+            &super::super::tests::empty_request(),
+        )
+        .expect("the request lowers canonically");
         let assert_usage = |request_used, token_used| {
             let state = limiter.state.lock_recover();
             assert_eq!(state.request_bucket.used, request_used);
@@ -386,7 +390,7 @@ mod admission_tests {
         };
         let blocked_usage = if tokens_block { (0, 2) } else { (2, 0) };
         {
-            let admission = limiter.admit(components.provider.as_ref(), &request);
+            let admission = limiter.admit(components.provider.as_ref(), &template);
             tokio::pin!(admission);
             assert!(admission.as_mut().now_or_never().is_none());
             assert_usage(blocked_usage.0, blocked_usage.1);
@@ -414,7 +418,7 @@ mod admission_tests {
             "cancelling a blocked admission releases its concurrency permit"
         );
         clock.advance_to(100);
-        let admission = limiter.admit(components.provider.as_ref(), &request);
+        let admission = limiter.admit(components.provider.as_ref(), &template);
         tokio::pin!(admission);
         assert!(admission.as_mut().now_or_never().is_none());
         assert_usage(blocked_usage.0, blocked_usage.1);
@@ -429,7 +433,7 @@ mod admission_tests {
         }
         clock.advance_to(300);
         let permit = admission.await;
-        assert_usage(1, request.estimated_tokens().min(2));
+        assert_usage(1, template.estimated_tokens().min(2));
         let state = limiter.state.lock_recover();
         assert_eq!(
             state.request_bucket.reset_at,
@@ -529,8 +533,8 @@ mod admission_tests {
         }
         async fn send(
             &mut self,
-            _request: LlmRequest,
             _body: &lash_sansio::llm::types::LiveRequestBody,
+            _context: lash_sansio::llm::types::ResponseContext,
         ) -> Result<LlmResponse, LlmTransportError> {
             self.0.reliability.rate_limits.requests_per_window = Some(1);
             if std::mem::take(&mut self.1) {

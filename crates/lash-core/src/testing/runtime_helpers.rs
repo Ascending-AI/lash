@@ -227,10 +227,10 @@ fn mock_provider_with_kind(kind: &'static str, calls: Vec<MockCall>) -> TestProv
         .build()
 }
 
-/// Send `template`, an admitted call's request template lowered for
-/// `request`, on `handle` as the runtime sends an admitted call: every
-/// attempt fills its slots through `deliveries`, under the default budgets
-/// and charge safety. A test that stands in for the runtime's model call
+/// Send `admitted`, the call `request` was admitted as, on `handle` as the
+/// runtime sends an admitted call: every attempt fills its template's slots
+/// through `deliveries` and reads its response under the admitted context
+/// with `request`'s senders, under the default budgets and charge safety. A test that stands in for the runtime's model call
 /// uses it to exercise the real attempt loop (WIRE-SLOTS).
 ///
 /// # Errors
@@ -243,14 +243,17 @@ fn mock_provider_with_kind(kind: &'static str, calls: Vec<MockCall>) -> TestProv
 pub async fn send_admitted(
     handle: &mut crate::ProviderHandle,
     mut request: LlmRequest,
-    template: &Arc<lash_sansio::llm::types::RecordedRequestTemplate>,
+    admitted: &lash_sansio::llm::types::AdmittedSend,
     deliveries: &dyn crate::provider::SlotDeliveries,
 ) -> Result<crate::provider::ProviderCompletion, crate::provider::ProviderCompletionError> {
     let sideband = crate::provider::prepare_completion(handle, &mut request);
     crate::provider::complete_prepared(
         handle,
-        request,
-        template,
+        admitted
+            .response
+            .clone()
+            .with_senders(request.stream_events.take(), request.provider_trace.take()),
+        &admitted.template,
         deliveries,
         sideband,
         crate::ChargeSafetyPolicy::default(),

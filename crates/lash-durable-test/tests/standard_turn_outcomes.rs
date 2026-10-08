@@ -676,7 +676,7 @@ fn attachment_model(asked: Arc<Asked>) -> lash_core::facade_support::ProviderHan
     lash_core::testing::TestProvider::builder()
         .kind("mock")
         .requires_streaming(true)
-        .send(move |request: LlmRequest, wire: String| {
+        .complete_with_wire(move |request: LlmRequest, wire: String| {
             let asked = Arc::clone(&asked);
             let calls = Arc::clone(&calls);
             async move {

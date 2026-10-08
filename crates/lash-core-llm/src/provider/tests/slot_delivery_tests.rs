@@ -46,8 +46,8 @@ impl Provider for RejectOnceProvider {
 
     async fn send(
         &mut self,
-        _request: LlmRequest,
         body: &LiveRequestBody,
+        _context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
         let first = {
             let mut wires = self.wires.lock_recover();
@@ -161,7 +161,7 @@ async fn every_attempt_delivers_afresh_and_unsent_or_rejected_deliveries_are_ret
     let sideband = handle.prepare_completion(&mut request);
     let completion = handle
         .complete_prepared(
-            request,
+            ResponseContext::of_request(&request),
             &Arc::new(slot_template()),
             &signer,
             sideband,

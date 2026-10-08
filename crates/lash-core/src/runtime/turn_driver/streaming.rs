@@ -200,9 +200,10 @@ impl RuntimeTurnDriver<'_> {
     }
 
     /// Runs one unjournaled attempt of an admitted model call on the
-    /// transport its template bound, sending `template`, the call's request
-    /// template, as it was admitted, its attachment slots delivered afresh
-    /// by the session's attachment store.
+    /// transport its template bound, sending `admitted`'s request template
+    /// as it was admitted, its attachment slots delivered afresh by the
+    /// session's attachment store, and reading the response under the
+    /// admitted response context with this attempt's senders.
     #[allow(
         clippy::too_many_arguments,
         reason = "the admitted call's request and template with the send's invocation, observer, cancel and transport"
@@ -210,7 +211,7 @@ impl RuntimeTurnDriver<'_> {
     pub(in crate::runtime) async fn run_llm_call(
         &mut self,
         request: Arc<LlmRequest>,
-        template: &Arc<lash_sansio::llm::types::RecordedRequestTemplate>,
+        admitted: &lash_sansio::llm::types::AdmittedSend,
         protocol_iteration: usize,
         invocation: crate::RuntimeInvocation,
         event_tx: &TurnObserver,
@@ -237,9 +238,9 @@ impl RuntimeTurnDriver<'_> {
         let mut debug = LlmStreamDebugState::new(self.host.core.clock.now());
         let provider_trace =
             self.provider_trace_sender(protocol_iteration, llm_call_id.clone(), &debug);
-        // The admitted request carries its correlation scope; only the
-        // attempt's live senders are added here, and the template is sent as
-        // it was admitted.
+        // The request attributes and traces the call and carries this
+        // attempt's live senders into its sideband; what is sent is the
+        // admitted template, read under the admitted response context.
         let mut llm_request = LlmRequest {
             stream_events: transport_stream_events(&provider, Some(llm_stream_tx)),
             provider_trace,
@@ -267,13 +268,17 @@ impl RuntimeTurnDriver<'_> {
         // the call and seals it with whatever record this body settles on,
         // the synthetic one of a cancellation included.
         let trace = self.trace.clone();
-        let template = Arc::clone(template);
+        let template = Arc::clone(&admitted.template);
+        let context = admitted.response.clone().with_senders(
+            llm_request.stream_events.take(),
+            llm_request.provider_trace.take(),
+        );
         let deliveries: Arc<dyn crate::provider::SlotDeliveries> =
             self.host.core.durability.attachment_store.clone();
         let mut llm_task = crate::task::spawn(async move {
             crate::provider::complete_prepared(
                 &mut call_provider,
-                llm_request,
+                context,
                 &template,
                 deliveries.as_ref(),
                 task_sideband,

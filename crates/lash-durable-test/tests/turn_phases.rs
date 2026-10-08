@@ -603,7 +603,7 @@ impl TurnDrive for L3Drive {
         cx: &ActorContext,
         id: EffectId,
         request: Arc<LlmRequest>,
-        template: &Arc<RecordedRequestTemplate>,
+        send: &lash_sansio::llm::types::AdmittedSend,
         attempt: ModelCallAttempt,
     ) -> Result<(), TurnError> {
         let ModelCallAttempt {
@@ -663,7 +663,7 @@ impl TurnDrive for L3Drive {
         }
         // The attempt goes through the runtime's own attempt loop, which
         // fills the template's slots and hands the provider the wire.
-        let sent = slots::send(&self.services, &request, template).await?;
+        let sent = slots::send_attempt(&self.services, &request, send).await?;
         let first_streaming_call = {
             let mut seen = self.services.seen.lock_recover();
             let after_cancel = seen.cancel_requested;

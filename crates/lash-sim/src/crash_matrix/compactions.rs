@@ -13,17 +13,17 @@
 //! The model's builder lowers every request to a body of its own
 //! generation, so a summary body lowered twice is told apart from one
 //! lowered once. Each summary lowering and send is noted in the world. The
-//! model answers a send from the body it is sent: the summary instruction is
-//! a prompt section (FIG-5432), composed into the request once at admission,
-//! so a resend's request is the caller's own and only its admitted body
-//! says it is the summary.
+//! body states everything the model answers from, and a send is handed the
+//! body and its response context, never a request (FIG-5479).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use lash_core::LlmTerminalReason;
 use lash_core::facade_support::ProviderHandle;
-use lash_core::llm::types::{LlmContentBlock, LlmOutputPart, LlmRequest, LlmResponse};
+use lash_core::llm::types::{
+    LlmContentBlock, LlmOutputPart, LlmRequest, LlmResponse, ResponseContext,
+};
 use lash_sansio::{SessionId, TurnId};
 
 use super::services::TurnScript;
@@ -154,9 +154,16 @@ fn model(world: Weak<World>) -> ProviderHandle {
         .kind(KIND)
         .template(move |request: &LlmRequest| {
             let generation = generations.fetch_add(1, Ordering::SeqCst) + 1;
+            let rendered = serde_json::to_string(&request.messages).unwrap_or_default();
+            // Everything the model answers from is in the body: whether the
+            // call is the summary, and for a pressure turn whether it
+            // carries the second input, the summary and the first input.
             let body = serde_json::json!({
                 "builder": generation,
                 "summary": summarizes(request),
+                "next": rendered.contains(NEXT),
+                "seeded": rendered.contains(SUMMARY),
+                "ask": rendered.contains(ASK),
             })
             .to_string();
             if summarizes(request)
@@ -177,20 +184,18 @@ fn model(world: Weak<World>) -> ProviderHandle {
                 body,
             )
         })
-        .send(move |request: LlmRequest, body| {
+        .answer(move |context: ResponseContext, body: String| {
             let world = world.clone();
             async move {
-                let summary = serde_json::from_str::<serde_json::Value>(&body)
-                    .is_ok_and(|body| body["summary"] == true);
+                let sent = serde_json::from_str::<serde_json::Value>(&body).unwrap_or_default();
+                let session = context.scope.session_id().cloned();
+                let named = session
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_default();
+                let summary = sent["summary"] == true;
                 if summary && let Some(world) = world.upgrade() {
-                    world.note(format!(
-                        "{SENT} {} :: {}",
-                        request
-                            .session_id()
-                            .map(ToString::to_string)
-                            .unwrap_or_default(),
-                        body
-                    ));
+                    world.note(format!("{SENT} {named} :: {body}"));
                 }
                 let answer = |text: &str| LlmResponse {
                     parts: vec![LlmOutputPart::Text {
@@ -200,14 +205,13 @@ fn model(world: Weak<World>) -> ProviderHandle {
                     ..LlmResponse::default()
                 };
                 if summary
-                    || request.session_id().and_then(TurnScript::of) != Some(TurnScript::Pressure)
+                    || session.as_ref().and_then(TurnScript::of) != Some(TurnScript::Pressure)
                 {
                     return Ok(answer(SUMMARY));
                 }
                 // A pressure session's turn: the second input's is answered,
                 // the first's overflows.
-                let rendered = serde_json::to_string(&request.messages).unwrap_or_default();
-                if !rendered.contains(NEXT) {
+                if sent["next"] != true {
                     return Ok(LlmResponse {
                         terminal_reason: LlmTerminalReason::ContextOverflow,
                         terminal_diagnostic: Some("context window exceeded".to_owned()),
@@ -216,13 +220,9 @@ fn model(world: Weak<World>) -> ProviderHandle {
                 }
                 if let Some(world) = world.upgrade() {
                     world.note(format!(
-                        "{RECOVERED} {} :: summary={} ask={}",
-                        request
-                            .session_id()
-                            .map(ToString::to_string)
-                            .unwrap_or_default(),
-                        rendered.contains(SUMMARY),
-                        rendered.contains(ASK)
+                        "{RECOVERED} {named} :: summary={} ask={}",
+                        sent["seeded"] == true,
+                        sent["ask"] == true
                     ));
                 }
                 Ok(answer(FINAL))

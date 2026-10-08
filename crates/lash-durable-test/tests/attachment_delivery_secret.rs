@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 use lash_core::provider::{Provider, ProviderComponents, ProviderHandle, ProviderOptions};
 use lash_core::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentStore, AttachmentStoreError,
-    AttachmentStorePersistence, LlmRequest, LlmResponse, StoredAttachment, StoredBlobRef,
+    AttachmentStorePersistence, LlmResponse, StoredAttachment, StoredBlobRef,
 };
 use lash_core_execution::StoreSet;
 use lash_sansio::llm::attachment_delivery::{
@@ -28,7 +28,7 @@ use lash_sansio::llm::attachment_delivery::{
 use lash_sansio::llm::capability::{
     AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
 };
-use lash_sansio::llm::types::{LiveRequestBody, ProviderRouteIdentity};
+use lash_sansio::llm::types::{LiveRequestBody, ProviderRouteIdentity, ResponseContext};
 use lash_sansio::sync::MutexExt as _;
 
 /// What every signature this law's store mints starts with.
@@ -134,8 +134,8 @@ impl Provider for SecretEcho {
 
     async fn send(
         &mut self,
-        _request: LlmRequest,
         body: &LiveRequestBody,
+        _context: ResponseContext,
     ) -> Result<LlmResponse, lash_core::llm::transport::LlmTransportError> {
         let wire = body.wire();
         let first = {

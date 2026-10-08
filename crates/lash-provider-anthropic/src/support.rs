@@ -15,7 +15,7 @@ pub(crate) use lash_core::llm::types::{
     LlmResponse, LlmRole, LlmStreamEvent, LlmStreamEvidence, LlmTerminalReason, LlmToolChoice,
     LlmUsage, ProviderReasoningReplay, ProviderReasoningRetentionSupport, ProviderRouteIdentity,
     ReasoningRetentionSelection, ReasoningRetentionValidationError, RecordedRequestTemplate,
-    StreamBlockIdentity, TransientJson, tool_call_input_replay_value,
+    ResponseContext, StreamBlockIdentity, TransientJson, tool_call_input_replay_value,
 };
 pub(crate) use lash_core::provider::{
     CacheRetention, GenerationEmission, GenerationWire, OutputCapWire, Provider,

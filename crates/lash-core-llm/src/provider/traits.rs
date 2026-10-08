@@ -75,14 +75,27 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
     ) -> Result<TransientJson, LlmTransportError> {
         super::attachment_wire::canonical_slot(slot, delivery)
     }
+    /// Send `body` byte for byte and read its response under `context`.
+    ///
+    /// The body is the only statement of what the call asks: a first send
+    /// and a resend after a crash are handed the same recorded body, and no
+    /// request travels beside it to disagree with it. `context` holds what
+    /// reading the response needs and the body does not carry: the call's
+    /// scope, the recorded contract (the pinned route's model, the output
+    /// the call asked for, its tools' input schemas) and this send's live
+    /// stream and trace senders. An implementation that must decide from
+    /// what the call asks decodes the body; an in-process model that lowers
+    /// canonically reads it back with
+    /// [`LiveRequestBody::canonical_request`].
     async fn send(
         &mut self,
-        request: LlmRequest,
         body: &LiveRequestBody,
+        context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError>;
 
-    /// One live call outside admission. Lowering and delivery are bounded by
-    /// the request timeout; `send` applies the route's own timeouts.
+    /// One live call outside admission: lower `request`, build its response
+    /// context, send. Lowering and delivery are bounded by the request
+    /// timeout; `send` applies the route's own timeouts.
     async fn complete(
         &mut self,
         request: LlmRequest,
@@ -137,7 +150,9 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
                     .with_lash_code(lash_sansio::session_model::TurnFailureCode::Timeout)
             })?,
         }?;
-        let result = self.send(request, &live).await;
+        let result = self
+            .send(&live, ResponseContext::of_request(&request))
+            .await;
         if let Err(error) = &result {
             for &index in error.rejected_slots() {
                 if let (Some(slot), Some(value)) = (slots.get(index), delivered.get(index)) {
@@ -152,7 +167,7 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
     }
     fn generation_retry_guarantee(
         &self,
-        _request: &LlmRequest,
+        _context: &ResponseContext,
         _template: &RecordedRequestTemplate,
     ) -> GenerationRetryGuarantee {
         GenerationRetryGuarantee::None
@@ -177,6 +192,30 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
     }
 
     fn clone_boxed(&self) -> Box<dyn Provider>;
+}
+
+/// The request an in-process model decides from: the one `body` says. It is
+/// the canonical body ([`Provider::lower`]'s default) read back, under
+/// `context`'s scope, which names this attempt, and reporting through
+/// `context`'s senders. Every model that answers from what a call asks
+/// decodes it here, so a resend, which is handed the admitted body and no
+/// request, is answered as its first attempt was.
+///
+/// # Errors
+///
+/// A body that is not canonical: its provider lowers to a body of its own
+/// and decodes that itself.
+pub fn canonical_request(
+    body: &LiveRequestBody,
+    context: ResponseContext,
+) -> Result<LlmRequest, LlmTransportError> {
+    let mut request = body
+        .canonical_request()
+        .map_err(super::attachment_wire::template_error)?;
+    request.scope = context.scope;
+    request.stream_events = context.stream_events;
+    request.provider_trace = context.provider_trace;
+    Ok(request)
 }
 
 pub trait ProviderFailureClassifier: Send + Sync + std::fmt::Debug {

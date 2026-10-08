@@ -21,7 +21,7 @@ use lash_core::llm::transport::{
 use lash_core::llm::types::{
     AttachmentSlot, ExecutionEvidence, LiveRequestBody, LlmRequest, LlmResponse, LlmStreamEvent,
     LlmStreamEvidence, LlmTerminalReason, LlmUsage, ProviderRouteIdentity, RecordedRequestTemplate,
-    TransientJson,
+    ResponseContext, TransientJson,
 };
 use lash_core::provider::{Provider, ProviderOptions, StreamTermination, TokenRequestReason};
 use lash_llm_transport::streaming::{SseStreamBounds, drive_sse_response, emit_stream_progress};
@@ -144,7 +144,7 @@ impl CodexProvider {
     )]
     async fn complete_websocket(
         &self,
-        req: LlmRequest,
+        call: ResponseContext,
         built_request: &BuiltRequest,
         admitted: &LiveRequestBody,
         lease: &TokenLease,
@@ -160,7 +160,9 @@ impl CodexProvider {
         let mut allow_cached_context =
             self.websocket_continuation_enabled() && admitted.template().slots().next().is_none();
         loop {
-            let websocket = self.acquire_websocket(&req, connect_timeout, lease).await?;
+            let websocket = self
+                .acquire_websocket(&call, connect_timeout, lease)
+                .await?;
             let reused_connection = websocket.reused;
             let plan = self.websocket_request_plan(
                 &built_request.body,
@@ -168,7 +170,14 @@ impl CodexProvider {
                 allow_cached_context && websocket.reusable,
             );
             match self
-                .run_websocket_attempt(&req, built_request, admitted, websocket, &plan, retry_state)
+                .run_websocket_attempt(
+                    &call,
+                    built_request,
+                    admitted,
+                    websocket,
+                    &plan,
+                    retry_state,
+                )
                 .await
             {
                 Ok(response) => return Ok(response),
@@ -178,7 +187,7 @@ impl CodexProvider {
                         && err.progress() < CodexAttemptProgress::OutputStarted
                         && !retry_state.after_stale_previous_response =>
                 {
-                    self.clear_continuation(&req);
+                    self.clear_continuation(&call);
                     retry_state.after_stale_previous_response = true;
                     allow_cached_context = false;
                     tracing::debug!(
@@ -211,7 +220,7 @@ impl CodexProvider {
     )]
     async fn run_websocket_attempt(
         &self,
-        req: &LlmRequest,
+        call: &ResponseContext,
         built_request: &BuiltRequest,
         admitted: &LiveRequestBody,
         lease: CodexWebsocketLease,
@@ -224,10 +233,10 @@ impl CodexProvider {
             receipt,
         } = built_request;
         let mut attempt = CodexWebsocketAttemptGuard::new(self, lease);
-        let stream_events = req.stream_events.clone();
-        let provider_trace = req.provider_trace.clone();
-        let stream_termination = req
-            .model
+        let stream_events = call.stream_events.clone();
+        let provider_trace = call.provider_trace.clone();
+        let stream_termination = call
+            .model()
             .metadata()
             .capability
             .stream_termination
@@ -260,7 +269,7 @@ impl CodexProvider {
         self.emit_websocket_attempt_trace(provider_trace.as_ref(), &diagnostics);
         let mut events_seen = false;
         let mut state = shared::ResponsesStreamState {
-            expose_thinking: req.model.metadata().request_defaults.expose_thinking,
+            expose_thinking: call.model().metadata().request_defaults.expose_thinking,
             ..Default::default()
         };
         if let Err(error) = attempt
@@ -279,7 +288,7 @@ impl CodexProvider {
             ));
         }
 
-        let expose_thinking = req.model.metadata().request_defaults.expose_thinking;
+        let expose_thinking = call.model().metadata().request_defaults.expose_thinking;
         let response_start_deadline = response_start_timeout(
             timeouts.request_timeout,
             timeouts.response_start_timeout,
@@ -490,24 +499,24 @@ impl CodexProvider {
     /// `lease`'s token bound to the request headers.
     async fn send_once(
         &self,
-        req: &LlmRequest,
+        call: &ResponseContext,
         built: &BuiltRequest,
         admitted: &LiveRequestBody,
         lease: &TokenLease,
     ) -> Result<LlmResponse, LlmTransportError> {
-        let stream_termination = req
-            .model
+        let stream_termination = call
+            .model()
             .metadata()
             .capability
             .stream_termination
             .unwrap_or_default();
         if !matches!(self.transport, CodexTransport::Sse) {
             let fallback_reason = matches!(self.transport, CodexTransport::Auto)
-                .then(|| self.websocket_fallback_reason(req))
+                .then(|| self.websocket_fallback_reason(call))
                 .flatten();
             if let Some(reason) = fallback_reason {
                 emit_provider_trace(
-                    req.provider_trace.as_ref(),
+                    call.provider_trace.as_ref(),
                     "codex",
                     &json!({
                         "type": "lash.codex.websocket_fallback_skip",
@@ -523,11 +532,11 @@ impl CodexProvider {
                 );
             } else {
                 match self
-                    .complete_websocket(req.clone(), built, admitted, lease)
+                    .complete_websocket(call.clone(), built, admitted, lease)
                     .await
                 {
                     Ok(response) => {
-                        self.clear_websocket_fallback(req);
+                        self.clear_websocket_fallback(call);
                         return Ok(response);
                     }
                     // A rejected handshake goes to the token gate, not to an
@@ -537,7 +546,7 @@ impl CodexProvider {
                             && err.progress() == CodexAttemptProgress::BeforeSend
                             && err.error.http_status != Some(401) =>
                     {
-                        self.record_websocket_fallback(req, &err.error);
+                        self.record_websocket_fallback(call, &err.error);
                         tracing::debug!(
                             target: "lash_core::llm::codex_oauth",
                             error = %admitted.scrub(&err.error.message),
@@ -545,15 +554,15 @@ impl CodexProvider {
                         );
                     }
                     Err(err) => {
-                        self.clear_continuation(req);
+                        self.clear_continuation(call);
                         let output_started = err.progress() == CodexAttemptProgress::OutputStarted;
                         return Err(err.error.with_output_started(output_started));
                     }
                 }
             }
         }
-        let stream_events = req.stream_events.clone();
-        let provider_trace = req.provider_trace.clone();
+        let stream_events = call.stream_events.clone();
+        let provider_trace = call.provider_trace.clone();
         let timeouts = self.options.llm_timeouts();
 
         let generation_disposition = Some(built.receipt);
@@ -586,11 +595,11 @@ impl CodexProvider {
             ("User-Agent".to_string(), Self::codex_user_agent().into()),
             (
                 "session-id".to_string(),
-                req.scope.provider_session_affinity_key().into(),
+                call.scope.provider_session_affinity_key().into(),
             ),
             (
                 "x-client-request-id".to_string(),
-                req.scope.request_id.clone().into(),
+                call.scope.request_id.clone().into(),
             ),
         ];
         if let Some(id) = lease.token.account() {
@@ -659,7 +668,7 @@ impl CodexProvider {
             ));
         }
         let mut response_metadata = ResponseMetadataCapture::from_response(
-            &req.model.metadata().request_defaults,
+            &call.model().metadata().request_defaults,
             &response_headers,
         );
         if let Some(tx) = &stream_events {
@@ -695,7 +704,7 @@ impl CodexProvider {
             emit_provider_trace(provider_trace.as_ref(), "codex", &text);
             if Self::looks_like_sse_payload(&text) {
                 let mut state = shared::ResponsesStreamState {
-                    expose_thinking: req.model.metadata().request_defaults.expose_thinking,
+                    expose_thinking: call.model().metadata().request_defaults.expose_thinking,
                     execution_evidence: provider_request_id.clone().map(|provider_request_id| {
                         ExecutionEvidence {
                             provider_request_id: Some(provider_request_id),
@@ -725,7 +734,7 @@ impl CodexProvider {
                     // The body was itself an SSE payload: the block events
                     // were already minted while folding it.
                     for event in block_events {
-                        if !req.model.metadata().request_defaults.expose_thinking
+                        if !call.model().metadata().request_defaults.expose_thinking
                             && crate::support::is_reasoning_block_event(&event)
                         {
                             continue;
@@ -738,7 +747,7 @@ impl CodexProvider {
                                 tx.send(LlmStreamEvent::Part(part.clone()));
                             }
                             lash_core::llm::types::LlmOutputPart::Reasoning { .. }
-                                if req.model.metadata().request_defaults.expose_thinking =>
+                                if call.model().metadata().request_defaults.expose_thinking =>
                             {
                                 tx.send(LlmStreamEvent::Part(part.clone()));
                             }
@@ -783,7 +792,7 @@ impl CodexProvider {
                     tx.send(LlmStreamEvent::Usage(usage.clone()));
                 }
                 let mut next_ordinal = 0u64;
-                if req.model.metadata().request_defaults.expose_thinking {
+                if call.model().metadata().request_defaults.expose_thinking {
                     for part in parts.iter().filter(|part| {
                         matches!(part, lash_core::llm::types::LlmOutputPart::Reasoning { .. })
                     }) {
@@ -847,7 +856,7 @@ impl CodexProvider {
                 execution_evidence,
                 generation_disposition,
                 response_metadata: response_metadata.into_metadata(),
-                expose_thinking: Some(req.model.metadata().request_defaults.expose_thinking),
+                expose_thinking: Some(call.model().metadata().request_defaults.expose_thinking),
             });
         }
 
@@ -861,14 +870,14 @@ impl CodexProvider {
         }
 
         let mut state = shared::ResponsesStreamState {
-            expose_thinking: req.model.metadata().request_defaults.expose_thinking,
+            expose_thinking: call.model().metadata().request_defaults.expose_thinking,
             execution_evidence: provider_request_id.map(|provider_request_id| ExecutionEvidence {
                 provider_request_id: Some(provider_request_id),
                 ..Default::default()
             }),
             ..Default::default()
         };
-        let expose_thinking = req.model.metadata().request_defaults.expose_thinking;
+        let expose_thinking = call.model().metadata().request_defaults.expose_thinking;
         let stream_result = drive_sse_response(
             body,
             timeouts.chunk_timeout,
@@ -1191,12 +1200,12 @@ impl Provider for CodexProvider {
 
     async fn send(
         &mut self,
-        mut req: LlmRequest,
         body: &LiveRequestBody,
+        mut call: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
-        protect_callbacks(&mut req, body);
+        protect_callbacks(&mut call, body);
         let result = async {
-            let route = self.route_identity(req.model.wire_model());
+            let route = self.route_identity(call.model().wire_model());
             route.validate_endpoint().map_err(|error| {
                 LlmTransportError::new(error.to_string())
                     .with_kind(ProviderFailureKind::Validation)
@@ -1211,9 +1220,9 @@ impl Provider for CodexProvider {
                 })?,
                 receipt: body.generation().unwrap_or_default(),
             };
-            if let Some(downstream) = req.stream_events.take() {
+            if let Some(downstream) = call.stream_events.take() {
                 let stream_route = route.clone();
-                req.stream_events = Some(lash_core::llm::types::LlmEventSender::new(
+                call.stream_events = Some(lash_core::llm::types::LlmEventSender::new(
                     move |mut event| {
                         if let LlmStreamEvent::Part(part) = &mut event {
                             let _ = part.stamp_replay_origin(&stream_route);
@@ -1226,7 +1235,7 @@ impl Provider for CodexProvider {
             let mut lease = tokens.current(&route).await?;
             let mut replaced = false;
             loop {
-                match self.send_once(&req, &built, body, &lease).await {
+                match self.send_once(&call, &built, body, &lease).await {
                     Ok(mut response) => {
                         response
                             .stamp_replay_origin(&route)

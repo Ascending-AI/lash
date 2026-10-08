@@ -87,7 +87,7 @@ async fn attachment_usage_gate() {
     // The workbench catalogue names its serving provider exactly.
     let provider = lash::testing::TestProvider::builder()
         .kind("openai-compatible")
-        .send({
+        .complete_with_wire({
             let lowered_attachments = Arc::clone(&lowered_attachments);
             let provider_requests = Arc::clone(&provider_requests);
             move |request, _wire| {

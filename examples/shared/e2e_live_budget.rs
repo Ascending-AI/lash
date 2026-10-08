@@ -115,10 +115,10 @@ impl Provider for Capped {
     }
     fn generation_retry_guarantee(
         &self,
-        request: &LlmRequest,
+        context: &lash::provider::ResponseContext,
         body: &RecordedRequestTemplate,
     ) -> GenerationRetryGuarantee {
-        self.inner.generation_retry_guarantee(request, body)
+        self.inner.generation_retry_guarantee(context, body)
     }
     fn requires_streaming(&self) -> bool {
         self.inner.requires_streaming()
@@ -127,29 +127,42 @@ impl Provider for Capped {
         &mut self,
         request: &LlmRequest,
     ) -> Result<RecordedRequestTemplate, LlmTransportError> {
-        self.inner.lower(request).await
-    }
-    async fn send(
-        &mut self,
-        request: LlmRequest,
-        body: &lash::provider::LiveRequestBody,
-    ) -> std::result::Result<LlmResponse, LlmTransportError> {
-        let bytes = serde_json::to_vec(&request).map_err(|error| refusal(error.to_string()))?;
+        // What only the request says is refused here, before anything is
+        // admitted: a send has the body and no request.
         let output = request
             .generation
             .output_token_cap_u64()
             .ok_or_else(|| refusal("live request has no output cap"))?;
         if request.model.wire_model() != self.budget.model
-            || bytes.len() > self.budget.max_input_bytes
             || output > self.budget.max_output_tokens as u64
             || request.attachments().next().is_some()
         {
             return Err(refusal(
-                "live request exceeds model/input/output/attachment bounds",
+                "live request exceeds model/output/attachment bounds",
             ));
         }
-        let reservation = bytes.len() as f64 * self.budget.input_usd_per_token
-            + output as f64 * self.budget.output_usd_per_token;
+        self.inner.lower(request).await
+    }
+    async fn send(
+        &mut self,
+        body: &lash::provider::LiveRequestBody,
+        context: lash::provider::ResponseContext,
+    ) -> std::result::Result<LlmResponse, LlmTransportError> {
+        // The budget is decided from what is sent: the exact body's bytes.
+        // Its output is reserved at the cap `lower` holds every request to.
+        let bytes = body.wire().len();
+        if context.model().wire_model() != self.budget.model
+            || bytes > self.budget.max_input_bytes
+            || body.template().slots().next().is_some()
+        {
+            return Err(refusal(
+                "live request exceeds model/input/attachment bounds",
+            ));
+        }
+        let sent: Value =
+            serde_json::from_str(&body.redacted()).map_err(|error| refusal(error.to_string()))?;
+        let reservation = bytes as f64 * self.budget.input_usd_per_token
+            + self.budget.max_output_tokens as f64 * self.budget.output_usd_per_token;
         let ordinal = {
             let mut state = self
                 .state
@@ -162,11 +175,11 @@ impl Provider for Capped {
             }
             state.reserved_usd += reservation;
             let ordinal = state.calls.len();
-            state.calls.push(json!({"ordinal":ordinal+1,"request":request,"reservation_usd":reservation,"outcome":"entered"}));
+            state.calls.push(json!({"ordinal":ordinal+1,"request":sent,"reservation_usd":reservation,"outcome":"entered"}));
             self.persist(&state)?;
             ordinal
         };
-        let response = self.inner.send(request, body).await;
+        let response = self.inner.send(body, context).await;
         let mut state = self
             .state
             .lock()

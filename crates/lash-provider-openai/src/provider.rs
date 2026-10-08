@@ -221,10 +221,10 @@ impl Provider for OpenAiCompatibleProvider {
 
     async fn send(
         &mut self,
-        req: LlmRequest,
         body: &LiveRequestBody,
+        context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
-        send(self, req, body, CompletionEndpoint::ChatCompletions).await
+        send(self, body, context, CompletionEndpoint::ChatCompletions).await
     }
 
     fn clone_boxed(&self) -> Box<dyn Provider> {
@@ -300,15 +300,21 @@ impl Provider for OpenAiProvider {
 
     async fn send(
         &mut self,
-        req: LlmRequest,
         body: &LiveRequestBody,
+        context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
-        send(&mut self.inner, req, body, CompletionEndpoint::Responses).await
+        send(
+            &mut self.inner,
+            body,
+            context,
+            CompletionEndpoint::Responses,
+        )
+        .await
     }
 
     fn generation_retry_guarantee(
         &self,
-        request: &LlmRequest,
+        context: &ResponseContext,
         body: &RecordedRequestTemplate,
     ) -> GenerationRetryGuarantee {
         if body.slots().next().is_some() {
@@ -318,7 +324,7 @@ impl Provider for OpenAiProvider {
             .responses_resume
             .as_ref()
             .filter(|resume| {
-                resume.request_key.request_id == request.scope.request_id
+                resume.request_key.request_id == context.scope.request_id
                     && responses_request_fingerprint(body) == resume.request_key.fingerprint
             })
             .map_or(GenerationRetryGuarantee::None, |_| {

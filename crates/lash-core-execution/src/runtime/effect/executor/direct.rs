@@ -129,15 +129,22 @@ impl LocalDirectEffectRunner {
             String,
         )>,
     ) -> RuntimeDirectLlmOutcome {
+        // The request is the effect's own input: it attributes the call and
+        // carries this send's senders. What is sent is the admitted
+        // template, and its response is read under the admitted context.
         let mut request = request;
         let sideband = lash_core_llm::core_internal::prepare_completion(&provider, &mut request);
+        let context = self
+            .response
+            .clone()
+            .with_senders(request.stream_events.take(), request.provider_trace.take());
         let sideband = traced.map_or_else(
             || sideband.clone(),
             |(standing, context, _)| standing.provider_attempts(sideband.clone(), context.clone()),
         );
         match lash_core_llm::core_internal::complete_prepared(
             &mut provider,
-            request,
+            context,
             &self.template,
             self.deliveries.as_ref(),
             sideband,

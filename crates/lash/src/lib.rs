@@ -1344,6 +1344,9 @@ pub mod provider {
     pub use lash_llm_transport::ExtraHeaders;
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::llm::transport::HttpFailureContext;
+    /// Read the request a canonical body says, for an in-process model that
+    /// decides from what a call asks.
+    pub use lash_core::provider::canonical_request;
     pub use lash_core::provider::{AttachmentDeliveryError, NoSlotDeliveries, SlotDeliveries};
     /// The admitted request template and the transient body filled for one attempt
     /// (ADR 0133 §6). Only literals, refs, acceptance and codecs are recorded.
@@ -1354,6 +1357,9 @@ pub mod provider {
     pub use lash_sansio::llm::types::{
         LlmProviderTraceEvent, LlmProviderTraceSender, ProviderReasoningRetentionSupport,
     };
+    /// What a provider's `send` reads its response under, beside the body:
+    /// the call's scope, its recorded contract and the send's live senders.
+    pub use lash_sansio::llm::types::{ResponseContext, ResponseContract, ToolCallContract};
 
     /// Typed provider-failure classification surfaced on
     /// [`TurnIssue`](crate::turn::TurnIssue) and session error envelopes.

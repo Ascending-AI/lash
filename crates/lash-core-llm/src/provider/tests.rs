@@ -105,8 +105,8 @@ impl Provider for ContradictoryReplayProvider {
 
     async fn send(
         &mut self,
-        _request: LlmRequest,
         _body: &LiveRequestBody,
+        _context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
         Ok(LlmResponse {
             parts: vec![LlmOutputPart::Reasoning {
@@ -152,8 +152,8 @@ impl Provider for ContradictoryPartialFailureProvider {
 
     async fn send(
         &mut self,
-        _request: LlmRequest,
         _body: &LiveRequestBody,
+        _context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
         Err(LlmTransportError::new("original partial provider failure")
             .with_kind(ProviderFailureKind::Stream)
@@ -212,9 +212,12 @@ impl Provider for GatewayReplayCaptureProvider {
 
     async fn send(
         &mut self,
-        request: LlmRequest,
-        _body: &LiveRequestBody,
+        body: &LiveRequestBody,
+        _context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
+        let request = body
+            .canonical_request()
+            .expect("the canonical body reads back");
         assert!(matches!(
             request.messages[0].blocks[0],
             LlmContentBlock::Text { ref text, .. } if text.as_ref() == "portable summary"
@@ -249,9 +252,12 @@ impl Provider for ReplayCaptureProvider {
 
     async fn send(
         &mut self,
-        request: LlmRequest,
-        _body: &LiveRequestBody,
+        body: &LiveRequestBody,
+        _context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
+        let request = body
+            .canonical_request()
+            .expect("the canonical body reads back");
         assert!(matches!(
             request.messages[0].blocks[0],
             LlmContentBlock::Text { ref text, .. } if text.as_ref() == "neutral summary"
@@ -298,8 +304,8 @@ impl Provider for PartialStreamFailureProvider {
 
     async fn send(
         &mut self,
-        _request: LlmRequest,
         _body: &LiveRequestBody,
+        _context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
         Err(LlmTransportError::new("stream truncated")
             .with_kind(ProviderFailureKind::Stream)
@@ -358,8 +364,8 @@ impl Provider for CountedPartialStreamFailureProvider {
 
     async fn send(
         &mut self,
-        _request: LlmRequest,
         _body: &LiveRequestBody,
+        _context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
         self.attempts.fetch_add(1, Ordering::SeqCst);
         Err(LlmTransportError::new("stream truncated")
@@ -404,8 +410,8 @@ impl Provider for PaidPartialThenSuccessProvider {
 
     async fn send(
         &mut self,
-        _request: LlmRequest,
         _body: &LiveRequestBody,
+        _context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
         let attempt = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
         if attempt <= self.fail_until {
@@ -469,8 +475,8 @@ impl Provider for TerminalProvider {
 
     async fn send(
         &mut self,
-        _request: LlmRequest,
         _body: &LiveRequestBody,
+        _context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
         Ok(LlmResponse {
             parts: vec![LlmOutputPart::Text {
@@ -524,8 +530,8 @@ impl Provider for MutatingProvider {
 
     async fn send(
         &mut self,
-        _request: LlmRequest,
         _body: &LiveRequestBody,
+        _context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
         self.options.response_body_bytes = Some(MUTATED_RESPONSE_BODY_BYTES);
         Ok(bare_ok_response())
@@ -560,8 +566,8 @@ impl Provider for FailingProvider {
 
     async fn send(
         &mut self,
-        _request: LlmRequest,
         _body: &LiveRequestBody,
+        _context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
         let attempt = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
         if attempt <= self.fail_until {
@@ -630,8 +636,8 @@ impl Provider for StatusFailingProvider {
 
     async fn send(
         &mut self,
-        _request: LlmRequest,
         _body: &LiveRequestBody,
+        _context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
         let attempt = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
         if attempt <= self.fail_until {
@@ -1459,7 +1465,7 @@ async fn provider_handle_retries_retryable_failures_in_shared_executor() {
     ));
     let completion = handle
         .complete_prepared(
-            request,
+            ResponseContext::of_request(&request),
             &template,
             &NoSlotDeliveries,
             sideband,
@@ -1527,8 +1533,8 @@ impl Provider for ReportingProvider {
 
     async fn send(
         &mut self,
-        _request: LlmRequest,
         _body: &LiveRequestBody,
+        _context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
         Ok(LlmResponse {
             parts: vec![LlmOutputPart::Text {
@@ -1720,7 +1726,7 @@ async fn provider_handle_throttle_with_retry_after_does_not_consume_attempts() {
     ));
     let completion = handle
         .complete_prepared(
-            request,
+            ResponseContext::of_request(&request),
             &template,
             &NoSlotDeliveries,
             sideband,
@@ -2032,7 +2038,8 @@ async fn provider_handle_attachment_413_remains_plain_non_retryable_validation()
 #[derive(Debug)]
 struct AdmissionRecorder {
     inner: Box<dyn Provider>,
-    requests: Arc<std::sync::Mutex<Vec<LlmRequest>>>,
+    /// Each send's scope, and the request its body says.
+    requests: Arc<std::sync::Mutex<Vec<(crate::LlmRequestScope, LlmRequest)>>>,
 }
 
 #[async_trait::async_trait]
@@ -2076,11 +2083,16 @@ impl Provider for AdmissionRecorder {
     }
     async fn send(
         &mut self,
-        request: LlmRequest,
         body: &LiveRequestBody,
+        context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
-        self.requests.lock_recover().push(request.clone());
-        self.inner.send(request, body).await
+        let request = body
+            .canonical_request()
+            .expect("the canonical body reads back");
+        self.requests
+            .lock_recover()
+            .push((context.scope.clone(), request));
+        self.inner.send(body, context).await
     }
 }
 
@@ -2131,9 +2143,9 @@ async fn admission_decorator_observes_all_retry_requests_with_session_identity()
     );
     // FIG-5219: each attempt keeps the call's identity and names its own
     // ordinal, the one its sealed attempt record carries.
-    for (retry, record) in observed.iter().zip(&completion.call_record.attempts) {
+    for ((scope, retry), record) in observed.iter().zip(&completion.call_record.attempts) {
         assert_eq!(
-            retry.scope,
+            *scope,
             crate::LlmRequestScope {
                 attempt: Some(record.ordinal),
                 ..request.scope.clone()

@@ -611,9 +611,12 @@ fn strict_decoder_leaves_override_and_ref_backed_ambiguous_union_nulls_untouched
             .expect("valid declared schema"),
     }]);
     let capabilities = lash_sansio::ProviderSchemaCapabilities::openai(true);
-    let override_decoder =
-        crate::responses_shared::ToolArgumentDecoder::for_request("test", &req, &capabilities)
-            .unwrap();
+    let override_decoder = crate::responses_shared::ToolArgumentDecoder::for_contract(
+        "test",
+        &lash_core::llm::types::ResponseContract::of_request(&req),
+        &capabilities,
+    )
+    .unwrap();
     assert_eq!(
         override_decoder.decode("override_probe", r#"{"value":null}"#.to_string()),
         r#"{"value":null}"#
@@ -658,9 +661,12 @@ fn strict_decoder_leaves_override_and_ref_backed_ambiguous_union_nulls_untouched
         output_schema: lash_sansio::SchemaContract::admit(json!({}))
             .expect("valid declared schema"),
     }]);
-    let union_decoder =
-        crate::responses_shared::ToolArgumentDecoder::for_request("test", &req, &capabilities)
-            .unwrap();
+    let union_decoder = crate::responses_shared::ToolArgumentDecoder::for_contract(
+        "test",
+        &lash_core::llm::types::ResponseContract::of_request(&req),
+        &capabilities,
+    )
+    .unwrap();
     let arguments = r#"{"choice":{"kind":"left","value":null}}"#;
     assert_eq!(
         union_decoder.decode("union_probe", arguments.to_string()),
@@ -713,9 +719,9 @@ fn strict_decoder_preserves_nested_ref_union_omission_null() {
         output_schema: lash_sansio::SchemaContract::admit(json!({}))
             .expect("valid declared schema"),
     }]);
-    let decoder = crate::responses_shared::ToolArgumentDecoder::for_request(
+    let decoder = crate::responses_shared::ToolArgumentDecoder::for_contract(
         "test",
-        &req,
+        &lash_core::llm::types::ResponseContract::of_request(&req),
         &lash_sansio::ProviderSchemaCapabilities::openai(true),
     )
     .unwrap();
@@ -746,9 +752,9 @@ fn strict_decoder_strips_single_branch_all_of_omission_null() {
         output_schema: lash_sansio::SchemaContract::admit(json!({}))
             .expect("valid declared schema"),
     }]);
-    let decoder = crate::responses_shared::ToolArgumentDecoder::for_request(
+    let decoder = crate::responses_shared::ToolArgumentDecoder::for_contract(
         "test",
-        &req,
+        &lash_core::llm::types::ResponseContract::of_request(&req),
         &lash_sansio::ProviderSchemaCapabilities::openai(true),
     )
     .unwrap();
@@ -776,9 +782,12 @@ fn resolved_tool_dialect_owns_wire_strictness_and_omission_decoder() {
     let responses = provider.build_responses_request_body(&req, false).unwrap();
     assert_eq!(chat["tools"][0]["function"]["strict"], true);
     assert_eq!(responses["tools"][0]["strict"], true);
-    let decoder =
-        crate::responses_shared::ToolArgumentDecoder::for_request("openai", &req, &capabilities)
-            .unwrap();
+    let decoder = crate::responses_shared::ToolArgumentDecoder::for_contract(
+        "openai",
+        &lash_core::llm::types::ResponseContract::of_request(&req),
+        &capabilities,
+    )
+    .unwrap();
     let decoded: Value = serde_json::from_str(&decoder.decode(
         TOOL_NAME,
         json!({"limit": null, "nullable_note": null}).to_string(),

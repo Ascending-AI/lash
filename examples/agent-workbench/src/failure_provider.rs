@@ -296,7 +296,7 @@ impl Provider for DevFailureProvider {
 
     fn generation_retry_guarantee(
         &self,
-        _request: &LlmRequest,
+        _context: &lash::provider::ResponseContext,
         _body: &RecordedRequestTemplate,
     ) -> GenerationRetryGuarantee {
         if self.scenario == DevProviderScenario::RetryResetPartial {
@@ -308,9 +308,11 @@ impl Provider for DevFailureProvider {
 
     async fn send(
         &mut self,
-        request: LlmRequest,
-        _body: &lash::provider::LiveRequestBody,
+        body: &lash::provider::LiveRequestBody,
+        context: lash::provider::ResponseContext,
     ) -> std::result::Result<LlmResponse, LlmTransportError> {
+        // The request the call's body says, reporting through this send.
+        let request = lash::provider::canonical_request(body, context)?;
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
         match self.scenario {
             DevProviderScenario::McpFixture => Ok(mcp_fixture_response(&request)),

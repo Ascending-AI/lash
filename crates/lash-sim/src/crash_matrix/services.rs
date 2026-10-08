@@ -633,7 +633,7 @@ impl TurnDrive for SimDrive {
         _cx: &ActorContext,
         id: EffectId,
         request: Arc<LlmRequest>,
-        _template: &Arc<RecordedRequestTemplate>,
+        _admitted: &lash_sansio::llm::types::AdmittedSend,
         _attempt: ModelCallAttempt,
     ) -> Result<(), TurnError> {
         let rendered =

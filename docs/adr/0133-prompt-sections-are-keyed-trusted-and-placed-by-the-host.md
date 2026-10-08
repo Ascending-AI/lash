@@ -222,11 +222,13 @@ call is its run and ordinal, and an owned call (§8) is its owner's execution
 scope and its stable key there, with no turn required. The root also holds
 the call's request template (§6): its literal text in content-addressed
 chunks of at most 32 KiB beside its section texts, each literal chunked on
-its own, and its attachment slots in order; and an owned call's pinned
-deadline: one `AdmittedModelCall` record. A slot records its ref, position,
+its own, and its attachment slots in order; the call's response context
+(§6): its scope, and its response contract stored by content beside the
+texts; and an owned call's pinned deadline: one `AdmittedModelCall` record. A slot records its ref, position,
 acceptance and codec, never a delivered value. `load_admitted_call` reads a
 root back with every text and chunk verified against its address, assembles
-the template byte for byte, and calls no renderer or provider builder.
+the template byte for byte, decodes the response contract, and calls no
+renderer or provider builder.
 
 ### 6. When composition runs
 
@@ -244,7 +246,7 @@ transaction:
 - the request, with the composed text lowered into it: the
   `InitialInstructions` text after the request's own instructions, the
   `CurrentContext` text as one system message after the conversation;
-- the call's request template, in its snapshot root.
+- the call's request template and response context, in its snapshot root.
 
 Before admission the call is prepared once: its prompt is composed, the
 protocol's before-call hook runs, and the provider of its route lowers the
@@ -259,8 +261,31 @@ Each attempt fills the slots and sends. The host store delivers each slot's
 ref in an accepted form (ADR 0135 §3), the provider encodes each delivery
 through the slot's pinned codec (`Provider::encode_slot`), and the provider
 sends the literals with the encoded values in place (`Provider::send`). The
-deliveries live only in that attempt (ADR 0135 §4). The law the attempts
-keep is WIRE-SLOTS:
+deliveries live only in that attempt (ADR 0135 §4).
+
+`Provider::send` takes the filled body and a `ResponseContext`, and no
+request (FIG-5479). The body is the only statement of what the call asks. A
+request beside it would be a second one, and on a resend the two disagree:
+the caller of an owned call (§8) holds its request before its sections were
+composed, while the body carries them. The context holds only what reading
+the response needs and the body does not carry:
+
+- the call's scope, with the attempt this send is;
+- the call's response contract, fixed when the call is lowered: the model of
+  the pinned route with its metadata, the output the call asked for, and
+  each offered tool's name and input schema;
+- this send's stream and trace senders.
+
+The scope and contract are fixed at admission and recorded with it. A first
+send takes them as admitted and a resend reads them back, and each adds its
+own senders, so a resend is read exactly as its first attempt was. A provider
+that must decide from what the call asks decodes the body; an in-process
+model that lowers canonically reads its request back from it
+(`canonical_request`). `Provider::complete`, the one call outside
+admission, lowers, builds the context from the request it lowered, and
+sends.
+
+The law the attempts keep is WIRE-SLOTS:
 
 > Every attempt of an admitted call, on any owner, sends the template its
 > admission recorded. Its literal text, route, stream flag, generation

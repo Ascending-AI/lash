@@ -18,7 +18,9 @@ use lash_core::provider::{
 use lash_sansio::llm::attachment_delivery::{
     AttachmentPosition, Delivery, DeliveryContext, DeliverySecret, ProviderAccepts,
 };
-use lash_sansio::llm::types::{AttachmentSlot, LiveRequestBody, RequestSegment, SlotCodec};
+use lash_sansio::llm::types::{
+    AttachmentSlot, LiveRequestBody, RequestSegment, ResponseContext, SlotCodec,
+};
 
 /// The bytes of the image only the slot modes' model calls name.
 const IMAGE: &[u8] = b"l3-slot-image";
@@ -130,8 +132,8 @@ impl Provider for WireRecorder {
 
     async fn send(
         &mut self,
-        _request: LlmRequest,
         body: &LiveRequestBody,
+        _context: ResponseContext,
     ) -> Result<LlmResponse, lash_core::llm::transport::LlmTransportError> {
         self.sent
             .lock_recover()
@@ -194,13 +196,13 @@ impl SlotDeliveries for SlotStore {
     }
 }
 
-/// Send one attempt of `template`, lowered for `request`, through the
-/// runtime's attempt loop. Under [`Mode::SlotHold`] the image's upload ends
+/// Send one attempt of `admitted`, the call `request` was admitted as,
+/// through the runtime's attempt loop. Under [`Mode::SlotHold`] the image's upload ends
 /// and the store is swept first, so only the call's own hold keeps it.
-pub(super) async fn send(
+pub(super) async fn send_attempt(
     services: &L3Services,
     request: &LlmRequest,
-    template: &Arc<RecordedRequestTemplate>,
+    admitted: &lash_sansio::llm::types::AdmittedSend,
 ) -> Result<Sent, TurnError> {
     let backend = services.backend();
     if services.mode == Mode::SlotHold {
@@ -221,7 +223,7 @@ pub(super) async fn send(
     let _answer = lash_core::testing::runtime_helpers::send_admitted(
         &mut handle,
         request.clone(),
-        template,
+        admitted,
         &store,
     )
     .await;

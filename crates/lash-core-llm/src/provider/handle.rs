@@ -202,10 +202,10 @@ impl ProviderHandle {
         let sideband = self.prepare_completion(&mut request);
         let template = match self.lower(&request).await {
             Ok(template) => Arc::new(template),
-            Err(error) => return Err(unsent(&request, &sideband, error)),
+            Err(error) => return Err(unsent(&request.scope, &sideband, error)),
         };
         self.complete_prepared(
-            request,
+            ResponseContext::of_request(&request),
             &template,
             deliveries,
             sideband,
@@ -317,7 +317,7 @@ impl ProviderHandle {
     )]
     pub(crate) async fn complete_prepared(
         &mut self,
-        mut request: LlmRequest,
+        mut context: ResponseContext,
         template: &Arc<RecordedRequestTemplate>,
         deliveries: &dyn SlotDeliveries,
         sideband: ProviderCompletionSideband,
@@ -332,22 +332,22 @@ impl ProviderHandle {
                 .with_kind(ProviderFailureKind::Validation)
                 .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
                 .with_retry_verdict(TransportRetryVerdict::Forbidden);
-            return Err(unsent(&request, &sideband, error));
+            return Err(unsent(&context.scope, &sideband, error));
         }
         // The template is sent as it was lowered, and only by its own route.
         if let Err(error) = check_body_route(template, &serving_route) {
-            return Err(unsent(&request, &sideband, error));
+            return Err(unsent(&context.scope, &sideband, error));
         }
         // The template decides whether the response streams: a streamed
         // body is read through a sender even when the caller asked for none.
-        match (template.stream, request.stream_events.is_some()) {
+        match (template.stream, context.stream_events.is_some()) {
             (true, false) => {
-                request.stream_events = Some(crate::llm::types::LlmEventSender::new(|_| {}));
+                context.stream_events = Some(crate::llm::types::LlmEventSender::new(|_| {}));
             }
-            (false, true) => request.stream_events = None,
+            (false, true) => context.stream_events = None,
             _ => {}
         }
-        let call_id = call_id_for_scope(&request.scope);
+        let call_id = call_id_for_scope(&context.scope);
         // Every bound the route leaves unset is the runtime's; one it sets
         // above the runtime's is refused, never clipped.
         let provider_limits = bounds.budgets.provider();
@@ -359,7 +359,7 @@ impl ProviderHandle {
                     .with_kind(ProviderFailureKind::Validation)
                     .with_lash_code(TurnFailureCode::ProviderRouteAboveBudget)
                     .with_retry_verdict(TransportRetryVerdict::Forbidden);
-                return Err(unsent(&request, &sideband, error));
+                return Err(unsent(&context.scope, &sideband, error));
             }
         };
         let attempts = reliability
@@ -395,7 +395,7 @@ impl ProviderHandle {
             let Some(_permit) = self
                 .components
                 .rate_limiter
-                .admit_within(self.components.provider.as_ref(), &request, deadline)
+                .admit_within(self.components.provider.as_ref(), template, deadline)
                 .await
             else {
                 return Err(model_total_exceeded(
@@ -421,18 +421,18 @@ impl ProviderHandle {
             let attempt = {
                 // The call is built inside the caught future: a provider
                 // that panics while constructing its future is contained.
-                // Each attempt's copy names its ordinal in its scope. Its
+                // Each attempt's context names its ordinal in its scope. Its
                 // slots are delivered and encoded afresh inside the same
                 // envelope, under the call's deadline and cancellation.
                 let attempt = std::panic::AssertUnwindSafe(async {
-                    let mut attempt_request = request.clone();
-                    attempt_request.scope.attempt = Some(attempt_ordinal);
+                    let mut attempt_context = context.clone();
+                    attempt_context.scope.attempt = Some(attempt_ordinal);
                     let provider = &mut self.components.provider;
                     match fill_slots(provider.as_ref(), template, deliveries, valid_through_ms)
                         .await
                     {
                         Ok((live, delivered)) => AttemptSend::Sent {
-                            result: Box::new(provider.send(attempt_request, &live).await),
+                            result: Box::new(provider.send(&live, attempt_context).await),
                             delivered,
                         },
                         Err(error) => AttemptSend::Unsent(error),
@@ -530,7 +530,7 @@ impl ProviderHandle {
                 observer(lash_trace::TraceLlmAttempt {
                     ordinal: attempt_ordinal,
                     provider: Some(self.kind().to_string()),
-                    request_model: request.model.wire_model().to_string(),
+                    request_model: context.model().wire_model().to_string(),
                     response_model: response
                         .and_then(|response| response.execution_evidence.as_ref())
                         .and_then(|evidence| evidence.served_model.clone()),
@@ -578,7 +578,7 @@ impl ProviderHandle {
                     let retry_guarantee = self
                         .components
                         .provider
-                        .generation_retry_guarantee(&request, template);
+                        .generation_retry_guarantee(&context, template);
                     let (verdict, charge_safety_decision) = retry_verdict(
                         &failure,
                         protocol_position,
@@ -727,7 +727,7 @@ impl ProviderHandle {
                                 "provider throttled with retry-after; waiting without consuming a retry attempt"
                             );
                             announce_retry(
-                                &request,
+                                &context,
                                 class,
                                 wait,
                                 budget.attempt,
@@ -752,7 +752,7 @@ impl ProviderHandle {
                                 "provider call failed with retryable failure; sleeping before retry"
                             );
                             announce_retry(
-                                &request,
+                                &context,
                                 class,
                                 delay,
                                 budget.attempt,
@@ -975,14 +975,14 @@ fn retry_verdict(
 }
 
 fn announce_retry(
-    request: &LlmRequest,
+    context: &ResponseContext,
     class: RetryClass,
     delay: Duration,
     attempt: u32,
     attempts: u32,
     failure: &LlmTransportError,
 ) {
-    if let Some(events) = request.stream_events.as_ref() {
+    if let Some(events) = context.stream_events.as_ref() {
         if resets_stream(class) {
             events.send(crate::llm::types::LlmStreamEvent::AttemptReset);
         }
@@ -1384,8 +1384,8 @@ impl Provider for UnconfiguredProvider {
 
     async fn send(
         &mut self,
-        _request: LlmRequest,
         _body: &LiveRequestBody,
+        _context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
         Err(LlmTransportError::new(
             "no provider configured: host must set SessionPolicy.provider before running a turn",
@@ -1407,9 +1407,11 @@ pub fn prepare_completion(
     handle.prepare_completion(request)
 }
 
-/// Sends `template`, the request template lowered for a request
-/// [`prepare_completion`] prepared, under its sideband: every attempt sends
-/// its literals with its slots filled afresh through `deliveries`.
+/// Sends `template`, an admitted call's request template, under the
+/// sideband [`prepare_completion`] made for it: every attempt sends its
+/// literals with its slots filled afresh through `deliveries`, and reads
+/// its response under `context`, the call's recorded response context with
+/// this send's live senders. No request reaches the provider.
 #[allow(
     clippy::result_large_err,
     reason = "ProviderCompletionError carries the sealed call record for observability; boxing it would push the cost onto every caller"
@@ -1420,7 +1422,7 @@ pub fn prepare_completion(
 )]
 pub async fn complete_prepared(
     handle: &mut ProviderHandle,
-    request: LlmRequest,
+    context: ResponseContext,
     template: &Arc<RecordedRequestTemplate>,
     deliveries: &dyn SlotDeliveries,
     sideband: ProviderCompletionSideband,
@@ -1431,7 +1433,7 @@ pub async fn complete_prepared(
 ) -> Result<ProviderCompletion, ProviderCompletionError> {
     handle
         .complete_prepared(
-            request,
+            context,
             template,
             deliveries,
             sideband,
@@ -1568,13 +1570,13 @@ async fn invalidate_rejected(
 
 /// The failure of a call refused before its first attempt: nothing was sent.
 fn unsent(
-    request: &LlmRequest,
+    scope: &LlmRequestScope,
     sideband: &ProviderCompletionSideband,
     error: LlmTransportError,
 ) -> ProviderCompletionError {
     ProviderCompletionError {
         call_record: Box::new(synthetic_terminal_call_record(
-            call_id_for_scope(&request.scope),
+            call_id_for_scope(scope),
             AttemptOutcome::Failed,
             &error,
             false,

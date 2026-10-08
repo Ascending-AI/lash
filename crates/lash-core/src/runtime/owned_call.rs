@@ -5,14 +5,18 @@
 //! and lowers them into its request, the provider of its route lowers the
 //! request to its request template, every attachment the template's slots
 //! name is held under the owner (ADR 0135 §7), and `completion.start`
-//! commits the call's record (its prompt snapshot, template and model-total
-//! deadline) under the owner's fence before the first byte is sent. The
+//! commits the call's record (its prompt snapshot, template, response
+//! context and model-total deadline) under the owner's fence before the
+//! first byte is sent. The
 //! call's identity is its owner's execution scope and its stable key there,
 //! with no turn required.
 //!
 //! A redrive of the owner makes the same call again: it finds the record,
 //! sends the stored template under the pinned deadline, its slots filled
-//! afresh, and composes, lowers and records nothing. A record whose template
+//! afresh, reads the response under the stored response context, and
+//! composes, lowers and records nothing. The provider is handed the body
+//! and that context on both paths and never a request, so a resend cannot
+//! be answered differently from its first attempt (FIG-5479). A record whose template
 //! cannot be read back as admitted, or a deadline that has passed, settles
 //! the call unsent. The call's response
 //! is durable only through its owner's own commit, as a turn's is through
@@ -67,8 +71,10 @@ pub(in crate::runtime) struct OwnedCall<'a> {
 pub(in crate::runtime) enum OwnedAdmission {
     /// Send the admitted template.
     Send {
-        /// The request that reads the response: the one the template was
-        /// lowered from, or on a resend the caller's own, with no prompt composed.
+        /// The request the call's effect is issued and traced with: the one
+        /// the template was lowered from, or on a resend the caller's own,
+        /// with no prompt composed. It never reaches the provider: a send
+        /// takes `admitted`'s template and recorded response context.
         request: Box<LlmRequest>,
         admitted: AdmittedDirectSend,
     },
@@ -120,6 +126,7 @@ impl OwnedCall<'_> {
                 Ok(OwnedAdmission::Send {
                     request: Box::new(self.request),
                     admitted: AdmittedDirectSend {
+                        response: admitted.response(),
                         template: admitted.template,
                         deliveries: self.attachment_store,
                         limit: ExecutionLimit::starting_at(
@@ -199,9 +206,14 @@ impl OwnedCall<'_> {
         let limit = budgets.model_call_limit(now_ms, None);
         let deadline =
             lash_durable::DurableInstant(i64::try_from(limit.expires_at).unwrap_or(i64::MAX));
-        let record = admission_record(key, composed.as_ref(), &template, Some(deadline)).map_err(
-            |error| PluginError::Session(format!("the call's admission does not encode: {error}")),
-        )?;
+        // What every send reads the response under is fixed here, from the
+        // request the template was lowered from, and recorded with it.
+        let response =
+            lash_sansio::llm::types::ResponseContext::of_request(&lowered).with_senders(None, None);
+        let record = admission_record(key, composed.as_ref(), &template, &response, Some(deadline))
+            .map_err(|error| {
+                PluginError::Session(format!("the call's admission does not encode: {error}"))
+            })?;
         let mut tx = cx.begin().await.map_err(live)?;
         tx.write(record);
         cx.commit(tx, CommitLabel::COMPLETION_START)
@@ -211,6 +223,7 @@ impl OwnedCall<'_> {
             request: Box::new(request),
             admitted: AdmittedDirectSend {
                 template: Arc::new(template),
+                response,
                 deliveries: attachment_store,
                 limit,
             },

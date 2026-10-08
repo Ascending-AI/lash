@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::llm::types::ResponseContext;
 
 #[tokio::test]
 async fn codex_auto_skips_websocket_while_session_fallback_is_active() {
@@ -24,7 +25,9 @@ async fn codex_auto_skips_websocket_while_session_fallback_is_active() {
     assert_eq!(first.full_text(), "fallback-one");
     assert!(
         provider
-            .websocket_fallback_reason(&request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+            .websocket_fallback_reason(&ResponseContext::of_request(&request(vec![
+                LlmMessage::text(LlmRole::User, "hello")
+            ])))
             .is_some()
     );
 

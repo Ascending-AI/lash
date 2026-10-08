@@ -11,7 +11,7 @@ pub enum CompletionEndpoint {
     ChatCompletions,
 }
 
-struct ResponseContext {
+struct ResponseDecode {
     stream_events: Option<LlmEventSender>,
     provider_trace: Option<LlmProviderTraceSender>,
     url: String,
@@ -309,32 +309,33 @@ pub(crate) async fn complete(
     let template = lower(provider, &req, endpoint).await?;
     let body =
         LiveRequestBody::fill(std::sync::Arc::new(template), Vec::new()).map_err(template_error)?;
-    send(provider, req, &body, endpoint).await
+    send(provider, &body, ResponseContext::of_request(&req), endpoint).await
 }
 
-/// Send `body`, which [`lower`] produced for `req`, to `endpoint`: one
-/// attempt with the host's current token, and one resend of the same body
-/// with a replaced token after a 401 that arrived before any output.
+/// Send `body`, which [`lower`] produced, to `endpoint` and read its
+/// response under `context`: one attempt with the host's current token, and
+/// one resend of the same body with a replaced token after a 401 that
+/// arrived before any output.
 pub(crate) async fn send(
     provider: &mut OpenAiCompatibleProvider,
-    mut req: LlmRequest,
     body: &LiveRequestBody,
+    mut context: ResponseContext,
     endpoint: CompletionEndpoint,
 ) -> Result<LlmResponse, LlmTransportError> {
     let has_slots = body.template().slots().next().is_some();
     if has_slots {
         provider.responses_resume = None;
     }
-    protect_callbacks(&mut req, body);
+    protect_callbacks(&mut context, body);
     let result = async {
         let route = ProviderRouteIdentity::for_endpoint(
             endpoint.provider_kind(),
             &provider.base_url,
-            req.model.wire_model().to_string(),
+            context.model().wire_model().to_string(),
         );
         let tokens = std::sync::Arc::clone(&provider.tokens);
         let mut lease = tokens.current(&route).await?;
-        match send_attempt(provider, &req, body, endpoint, &lease.token).await {
+        match send_attempt(provider, &context, body, endpoint, &lease.token).await {
             Err(error) if rejected_before_output(&error) => {
                 match tokens
                     .replace(&route, &lease, TokenRequestReason::Rejected)
@@ -342,7 +343,7 @@ pub(crate) async fn send(
                 {
                     Some(fresh) => {
                         lease = fresh;
-                        send_attempt(provider, &req, body, endpoint, &lease.token).await
+                        send_attempt(provider, &context, body, endpoint, &lease.token).await
                     }
                     None => Err(error),
                 }
@@ -362,12 +363,12 @@ pub(crate) async fn send(
 /// One attempt of [`send`], authenticated by `token`.
 async fn send_attempt(
     provider: &mut OpenAiCompatibleProvider,
-    req: &LlmRequest,
+    context: &ResponseContext,
     body: &LiveRequestBody,
     endpoint: CompletionEndpoint,
     token: &ProviderToken,
 ) -> Result<LlmResponse, LlmTransportError> {
-    let origin_model = req.model.wire_model().to_string();
+    let origin_model = context.model().wire_model().to_string();
     let origin_route = ProviderRouteIdentity::for_endpoint(
         endpoint.provider_kind(),
         &provider.base_url,
@@ -378,7 +379,7 @@ async fn send_attempt(
             .with_kind(ProviderFailureKind::Validation)
             .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
     })?;
-    let stream_events = req.stream_events.clone().map(|downstream| {
+    let stream_events = context.stream_events.clone().map(|downstream| {
         let origin_route = origin_route.clone();
         LlmEventSender::new(move |mut event| {
             if let LlmStreamEvent::Part(part) = &mut event {
@@ -387,19 +388,19 @@ async fn send_attempt(
             downstream.send(event);
         })
     });
-    let provider_trace = req.provider_trace.clone();
-    let expose_thinking = req.model.metadata().request_defaults.expose_thinking;
-    let request_defaults = req.model.metadata().request_defaults.clone();
+    let provider_trace = context.provider_trace.clone();
+    let expose_thinking = context.model().metadata().request_defaults.expose_thinking;
+    let request_defaults = context.model().metadata().request_defaults.clone();
     let timeouts = provider.options.llm_timeouts();
     let stream = body.stream();
     let compat = provider.resolved_compat(endpoint);
-    let stream_termination = req
-        .model
+    let stream_termination = context
+        .model()
         .metadata()
         .capability
         .stream_termination
         .unwrap_or(compat.stream_termination);
-    let request_id = req.scope.request_id.clone();
+    let request_id = context.scope.request_id.clone();
     let wire = body.wire();
     let blocking = crate::request_work::bytes_need_blocking(wire.len());
     let body_bytes = wire.as_bytes();
@@ -407,14 +408,14 @@ async fn send_attempt(
     let fingerprint = responses_request_fingerprint(body.template());
     let request_body_for_error = body.redacted();
     emit_provider_request_trace(
-        req.provider_trace.as_ref(),
+        context.provider_trace.as_ref(),
         "openai_compatible",
         endpoint.request_trace_name(),
         body.redacted().as_bytes(),
     );
-    let tool_argument_decoder = crate::responses_shared::ToolArgumentDecoder::for_request(
+    let tool_argument_decoder = crate::responses_shared::ToolArgumentDecoder::for_contract(
         endpoint.provider_kind(),
-        req,
+        &context.contract,
         &compat.schema_capabilities,
     )?;
     let request_key = ResponsesRequestKey {
@@ -641,7 +642,7 @@ async fn send_attempt(
         ));
     }
 
-    let response_context = ResponseContext {
+    let response_context = ResponseDecode {
         stream_events,
         provider_trace,
         url,
@@ -762,10 +763,10 @@ async fn complete_buffered_response(
     endpoint: CompletionEndpoint,
     body: LlmHttpBody,
     timeout: Option<std::time::Duration>,
-    context: ResponseContext,
+    context: ResponseDecode,
     capture: &mut ResponseMetadataCapture,
 ) -> Result<LlmResponse, LlmTransportError> {
-    let ResponseContext {
+    let ResponseDecode {
         stream_events,
         provider_trace,
         url,
@@ -1111,7 +1112,7 @@ async fn drive_streaming_response(
     body: LlmHttpBody,
     chunk_timeout: Option<std::time::Duration>,
     stream_bounds: SseStreamBounds,
-    context: ResponseContext,
+    context: ResponseDecode,
     capture: &mut ResponseMetadataCapture,
 ) -> Result<LlmResponse, LlmTransportError> {
     match endpoint {
@@ -1137,10 +1138,10 @@ async fn drive_streaming_responses(
     body: LlmHttpBody,
     chunk_timeout: Option<std::time::Duration>,
     stream_bounds: SseStreamBounds,
-    context: ResponseContext,
+    context: ResponseDecode,
     capture: &mut ResponseMetadataCapture,
 ) -> Result<LlmResponse, LlmTransportError> {
-    let ResponseContext {
+    let ResponseDecode {
         stream_events,
         provider_trace,
         url: _,
@@ -1311,10 +1312,10 @@ async fn drive_streaming_chat(
     body: LlmHttpBody,
     chunk_timeout: Option<std::time::Duration>,
     stream_bounds: SseStreamBounds,
-    context: ResponseContext,
+    context: ResponseDecode,
     capture: &mut ResponseMetadataCapture,
 ) -> Result<LlmResponse, LlmTransportError> {
-    let ResponseContext {
+    let ResponseDecode {
         stream_events,
         provider_trace,
         url,

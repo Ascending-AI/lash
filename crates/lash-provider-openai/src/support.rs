@@ -22,6 +22,7 @@ pub(crate) use lash_core::{
 // input builder), so gate the re-export to test builds to keep the non-test
 // lib free of unused-import warnings.
 pub(crate) use crate::schema::{classify_openai_error, responses_error_retry_verdict};
+pub(crate) use lash_core::llm::types::ResponseContext;
 #[cfg(test)]
 pub(crate) use lash_core::llm::types::{LlmRequestScope, ResponsePhase, ResponseTextMeta};
 pub(crate) use lash_core::provider::{

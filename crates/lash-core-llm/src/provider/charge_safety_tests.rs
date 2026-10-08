@@ -118,7 +118,7 @@ async fn provider_handle_enforces_the_supplied_retry_limit_without_a_second_ceil
 
     let failure = handle
         .complete_prepared(
-            request,
+            ResponseContext::of_request(&request),
             &Arc::new(body),
             &crate::provider::NoSlotDeliveries,
             sideband,

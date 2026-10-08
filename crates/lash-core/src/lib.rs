@@ -453,7 +453,8 @@ pub use lash_sansio::llm::types::{
     LlmResponse, LlmStreamEvidence, LlmTerminalReason, LlmTurnScope, NonNegativeFiniteF64,
     NormalizedError, ProtocolPosition, ProviderEndpointError, ProviderReplayDrop,
     ProviderReplayDropReason, ProviderReplayKind, ProviderRouteIdentity, RecordedRequestTemplate,
-    RetryClass, RetryDecision, RetryDeclineCause, RetryWait,
+    ResponseContext, ResponseContract, RetryClass, RetryDecision, RetryDeclineCause, RetryWait,
+    ToolCallContract,
 };
 pub use lash_sansio::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, Backoff, BatchId,

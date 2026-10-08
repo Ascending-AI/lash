@@ -130,6 +130,36 @@ fn call_key(call: u32) -> PromptCallKey {
 
 /// The request template call `call` admits with its prompt: the first a
 /// lone literal, the second an image slot between two literals.
+/// The response context call `call` is admitted with: its own scope, as a
+/// send names its attempt, over the model, the output it asks for and the
+/// one tool it offers.
+fn response(call: u32) -> lash_sansio::llm::types::ResponseContext {
+    use lash_sansio::llm::types::{
+        LlmOutputSpec, LlmRequestScope, ResponseContext, ResponseContract, ToolCallContract,
+    };
+    ResponseContext::recorded(
+        LlmRequestScope {
+            attempt: Some(call),
+            ..LlmRequestScope::new(SESSION, "frame", format!("{SESSION}:call:{call}"))
+        },
+        Arc::new(ResponseContract {
+            model: crate::testing::test_llm_profile_config(
+                "model",
+                crate::testing::test_llm_profile_metadata("model"),
+            ),
+            output_spec: Some(LlmOutputSpec::JsonObject),
+            tools: vec![ToolCallContract {
+                name: "lookup".to_owned(),
+                input_schema: crate::SchemaContract::admit(serde_json::json!({
+                    "type": "object",
+                    "properties": { "query": { "type": "string" } },
+                }))
+                .expect("a valid tool input schema"),
+            }],
+        }),
+    )
+}
+
 fn template(call: u32) -> lash_sansio::llm::types::RecordedRequestTemplate {
     use lash_sansio::llm::attachment_delivery::{AttachmentPosition, ProviderAccepts};
     use lash_sansio::llm::types::{AttachmentSlot, RecordedRequestTemplate, SlotCodec};
@@ -213,8 +243,14 @@ async fn an_admitted_calls_snapshot_reads_back_byte_for_byte_without_any_rendere
         .expect("begin the admission");
     for (call, prompt) in (1..).zip(&composed) {
         tx.write(
-            admission_record(call_key(call), Some(prompt), &template(call), None)
-                .expect("the admission encodes"),
+            admission_record(
+                call_key(call),
+                Some(prompt),
+                &template(call),
+                &response(call),
+                None,
+            )
+            .expect("the admission encodes"),
         );
     }
     lash_durable::DurableStore::commit(&durable, tx, CommitLabel::new("model.start"))
@@ -233,6 +269,17 @@ async fn an_admitted_calls_snapshot_reads_back_byte_for_byte_without_any_rendere
             template(call),
             "the template, its literals and slots, reads back byte for byte"
         );
+        // The response context reads back as admitted: the call's scope
+        // with no attempt (each send names its own), and its contract.
+        let recorded = response(call);
+        assert_eq!(
+            admitted.scope,
+            lash_sansio::llm::types::LlmRequestScope {
+                attempt: None,
+                ..recorded.scope
+            }
+        );
+        assert_eq!(admitted.contract, recorded.contract);
         let loaded = admitted.prompt.expect("the admitted call has a snapshot");
         assert_eq!(loaded.snapshot, prompt.snapshot);
         assert_eq!(loaded.texts, prompt.texts);

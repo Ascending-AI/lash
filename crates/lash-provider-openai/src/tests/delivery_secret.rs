@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use lash_core::facade_support::LlmTransportError;
 use lash_core::llm::types::{
     LiveRequestBody, LlmContentBlock, LlmEventSender, LlmMessage, LlmOutputPart,
-    LlmProviderTraceSender, LlmResponse, LlmRole,
+    LlmProviderTraceSender, LlmResponse, LlmRole, ResponseContext,
 };
 use lash_core::provider::{Provider, ProviderToken};
 use lash_llm_transport::{LlmHttpBody, LlmHttpRequest, LlmHttpResponse, LlmHttpTransport};
@@ -152,12 +152,14 @@ async fn delivered_secrets_never_leave_send() {
                 .encode_slot(template.slots().next().unwrap(), &delivery)
                 .unwrap();
             let live = LiveRequestBody::fill(Arc::clone(&template), vec![encoded]).unwrap();
-            let guarantee_request = request.clone();
-            let result = provider.send(request, &live).await;
+            let guarantee_context = ResponseContext::of_request(&request);
+            let result = provider
+                .send(&live, ResponseContext::of_request(&request))
+                .await;
             if mode == 3 {
                 assert!(result.is_err());
                 assert_eq!(
-                    provider.generation_retry_guarantee(&guarantee_request, &template),
+                    provider.generation_retry_guarantee(&guarantee_context, &template),
                     lash_core::provider::GenerationRetryGuarantee::None,
                     "a checkpoint must not retain the previous delivery"
                 );

@@ -488,20 +488,20 @@ impl GoogleOAuthProvider {
     /// caller, which invalidates the host-store derivatives before retry.
     async fn send_with_token(
         &self,
-        req: &LlmRequest,
+        context: &ResponseContext,
         admitted: &LiveRequestBody,
         lease: &TokenLease,
     ) -> Result<LlmResponse, LlmTransportError> {
-        let stream_events = req.stream_events.clone();
-        let provider_trace = req.provider_trace.clone();
+        let stream_events = context.stream_events.clone();
+        let provider_trace = context.provider_trace.clone();
         let reading = ResponseReading {
-            stream_termination: req
-                .model
+            stream_termination: context
+                .model()
                 .metadata()
                 .capability
                 .stream_termination
                 .unwrap_or(self.stream_termination),
-            defaults: req.model.metadata().request_defaults.clone(),
+            defaults: context.model().metadata().request_defaults.clone(),
         };
         match self
             .execute_body(
@@ -642,12 +642,12 @@ impl Provider for GoogleOAuthProvider {
 
     async fn send(
         &mut self,
-        mut req: LlmRequest,
         body: &LiveRequestBody,
+        mut context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
-        protect_callbacks(&mut req, body);
+        protect_callbacks(&mut context, body);
         let result = async {
-            self.route_identity_for_model(req.model.wire_model())
+            self.route_identity_for_model(context.model().wire_model())
                 .validate_endpoint()
                 .map_err(|error| {
                     LlmTransportError::new(error.to_string())
@@ -659,10 +659,10 @@ impl Provider for GoogleOAuthProvider {
                 &["authorization", "content-type"],
                 false,
             )?;
-            let route = self.route_identity_for_model(req.model.wire_model());
+            let route = self.route_identity_for_model(context.model().wire_model());
             let tokens = Arc::clone(&self.tokens);
             let mut lease = tokens.current(&route).await?;
-            match self.send_with_token(&req, body, &lease).await {
+            match self.send_with_token(&context, body, &lease).await {
                 Err(error) if rejected_before_output(&error) => {
                     match tokens
                         .replace(&route, &lease, TokenRequestReason::Rejected)
@@ -671,7 +671,7 @@ impl Provider for GoogleOAuthProvider {
                         // Resend the admitted body once with the fresh token.
                         Some(fresh) => {
                             lease = fresh;
-                            self.send_with_token(&req, body, &lease).await
+                            self.send_with_token(&context, body, &lease).await
                         }
                         None => Err(error),
                     }

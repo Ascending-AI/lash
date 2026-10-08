@@ -22,7 +22,10 @@
 //!   call of it saw the first frame's input;
 //! - two turns were admitted and two committed, nothing is open, bound or
 //!   mailed;
-//! - a zombie's writes after its reap are refused.
+//! - a zombie's writes after its reap are refused;
+//! - every send of the summary, the first and each resend after a cut past
+//!   `completion.start`, carried one body and was read as one request, the
+//!   one admitted with the summary instruction (FIG-5479).
 //!
 //! The pressure hook reads what the session's last turn committed as its
 //! prompt usage. A second matrix (FIG-5352) cuts an RLM turn whose one model
@@ -97,7 +100,7 @@ const NEXT: &str = "now answer briefly";
 const SUMMARY: &str = "the user asked to read the repository";
 /// What the second turn answers.
 const FINAL: &str = "a brief answer";
-/// What marks the compaction summarizer's body.
+/// What marks the compaction summarizer's request.
 const SUMMARIZER: &str = "Provide a detailed summary of the conversation above";
 /// A prompt usage over the 200 000-token window's compaction threshold.
 const OVER_THRESHOLD: i64 = 190_000;
@@ -199,28 +202,99 @@ fn cell(code: &str) -> String {
     format!("<typescript>\n{code}\n</typescript>")
 }
 
-/// The scripted model: the summarizer's body gets the summary, and every
-/// turn request `script`'s answer. Every turn request it saw is rendered
-/// into `seen`. The summary instruction is a prompt section (FIG-5432),
-/// composed into the request once at admission: a resend's request is the
-/// caller's own, and only the admitted body it sends carries the instruction.
-fn model(script: Script, seen: Arc<Mutex<Vec<String>>>) -> ProviderHandle {
+/// One send of the summary as the model received it: the exact body, and
+/// what the request it was handed asks (its instructions and messages).
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SummarySend {
+    body: String,
+    asked: String,
+}
+
+/// What `request` asks: its instructions and messages, rendered.
+fn asked(request: &LlmRequest) -> String {
+    serde_json::to_string(&(&request.instructions, &request.messages)).expect("a request encodes")
+}
+
+/// The scripted model: the summarizer's request gets the summary, and every
+/// turn request `script`'s answer. It decides from the request it is handed,
+/// as an in-process model does. Every turn request it saw is rendered into
+/// `seen`, and every send of the summary into `summaries`.
+fn model(
+    script: Script,
+    seen: Arc<Mutex<Vec<String>>>,
+    summaries: Arc<Mutex<Vec<SummarySend>>>,
+) -> ProviderHandle {
     lash_core::testing::TestProvider::builder()
         .kind("pressure-frame-scripted")
         .requires_streaming(true)
-        .send(move |request: LlmRequest, body| {
+        .complete_with_wire(move |request: LlmRequest, body| {
             let seen = Arc::clone(&seen);
+            let summaries = Arc::clone(&summaries);
             async move {
+                let rendered = serde_json::to_string(&request.messages).expect("a request encodes");
+                // A send of the summary is told by the body it carries, so
+                // it is recorded however the model then reads its request.
                 if body.contains(SUMMARIZER) {
+                    summaries.lock_recover().push(SummarySend {
+                        body,
+                        asked: asked(&request),
+                    });
+                }
+                if rendered.contains(SUMMARIZER) {
                     return Ok(text(&request, SUMMARY));
                 }
-                let rendered = serde_json::to_string(&request.messages).expect("a request encodes");
                 seen.lock_recover().push(rendered.clone());
                 Ok(script.answer(&request, &rendered))
             }
         })
         .build()
         .into_handle()
+}
+
+/// RESEND (FIG-5479): every send of the summary carried the admitted body
+/// and was read as the request admitted with the summary instruction. A
+/// resend after a cut past `completion.start` is handed the recorded body
+/// and no request beside it, so it cannot be read differently from the
+/// first attempt. `first` is the uncut run's send, which every cell's sends
+/// equal in what they ask.
+fn summary_laws(sends: &[SummarySend], first: Option<&SummarySend>) -> Vec<String> {
+    let mut violations = Vec::new();
+    let Some(admitted) = sends.first() else {
+        return vec!["the summary was never sent".to_owned()];
+    };
+    if !admitted.asked.contains(SUMMARIZER) {
+        violations.push(format!(
+            "the summary was read without its instruction: {}",
+            admitted.asked
+        ));
+    }
+    for (index, send) in sends.iter().enumerate().skip(1) {
+        if send.body != admitted.body {
+            violations.push(format!(
+                "send {} of the summary carried another body than the first: {} vs {}",
+                index + 1,
+                send.body,
+                admitted.body
+            ));
+        }
+        if send.asked != admitted.asked {
+            violations.push(format!(
+                "send {} of the summary was read as another request than the first: {} vs {}",
+                index + 1,
+                send.asked,
+                admitted.asked
+            ));
+        }
+    }
+    if let Some(first) = first
+        && first.asked != admitted.asked
+    {
+        violations.push(format!(
+            "the summary was read as another request than the uncut run's first attempt: {} vs {}",
+            admitted.asked, first.asked
+        ));
+    }
+    violations
 }
 
 fn metadata() -> lash_core::LlmProfileMetadata {
@@ -236,6 +310,11 @@ struct PressureFrame {
     dialect: Dialect,
     postgres_url: Option<String>,
     seen: Arc<Mutex<Vec<String>>>,
+    /// Every send of the summary the model received.
+    summaries: Arc<Mutex<Vec<SummarySend>>>,
+    /// The uncut run's send of the summary, when the proof compares its
+    /// cells with it: the uncut run sets it and every cut cell reads it.
+    first_summary: Option<Arc<std::sync::OnceLock<SummarySend>>>,
     tripwire: Arc<Tripwire>,
     backend: Mutex<Option<Backend>>,
     /// The virtual clock the database was built on, which an RLM core's VM
@@ -252,12 +331,20 @@ impl PressureFrame {
             dialect,
             postgres_url,
             seen: Arc::default(),
+            summaries: Arc::default(),
+            first_summary: None,
             tripwire: Arc::default(),
             backend: Mutex::default(),
             clock: Mutex::default(),
             core: Mutex::default(),
             keep: Mutex::default(),
         }
+    }
+
+    /// This scenario comparing its summary sends with the uncut run's.
+    fn against(mut self, first: &Arc<std::sync::OnceLock<SummarySend>>) -> Self {
+        self.first_summary = Some(Arc::clone(first));
+        self
     }
 
     fn backend(&self) -> Backend {
@@ -303,7 +390,14 @@ impl PressureFrame {
                     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
                     .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
-                    .serve_test_llm_profile(model(self.script, Arc::clone(&self.seen)), metadata())
+                    .serve_test_llm_profile(
+                        model(
+                            self.script,
+                            Arc::clone(&self.seen),
+                            Arc::clone(&self.summaries),
+                        ),
+                        metadata(),
+                    )
                     .plugin(Arc::new(
                         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
                     ))
@@ -494,6 +588,18 @@ impl Scenario for PressureFrame {
             violations.push(format!(
                 "{opened} pressure.frame commits landed, not {frames}"
             ));
+        }
+        if frames > 0 {
+            let summaries = std::mem::take(&mut *self.summaries.lock_recover());
+            let first = self.first_summary.as_ref().and_then(|first| {
+                if cut.is_none()
+                    && let Some(send) = summaries.first()
+                {
+                    let _ = first.set(send.clone());
+                }
+                first.get()
+            });
+            violations.extend(summary_laws(&summaries, first));
         }
         violations.extend(self.settled(database).await);
         if let Some(cut) = cut {
@@ -726,6 +832,59 @@ async fn prove(script: Script, dialect: Dialect, postgres_url: Option<String>) {
             "the matrix never cut {label}"
         );
     }
+}
+
+/// RESEND (FIG-5479): the summary's owned call cut at `completion.start`
+/// under every fault on `dialect`. Its redrive resends the admitted body,
+/// and the model reads it as the uncut run's first attempt was read.
+async fn prove_resend(dialect: Dialect, postgres_url: Option<String>) {
+    let first = Arc::new(std::sync::OnceLock::new());
+    let report = Matrix::new()
+        .faults(&[
+            Fault::FailBefore,
+            Fault::AckHidden,
+            Fault::Zombie,
+            Fault::Abort,
+            Fault::CommitThenAbort,
+        ])
+        .labels(&[CommitLabel::COMPLETION_START])
+        .horizon(Duration::from_secs(600))
+        .run_test(|| {
+            PressureFrame::of(Script::Overflow, dialect, postgres_url.clone()).against(&first)
+        })
+        .await;
+    report.assert_held();
+    assert!(
+        first.get().is_some(),
+        "the uncut run sent the summary the cells are compared with"
+    );
+    assert!(
+        report.labels().contains(&CommitLabel::COMPLETION_START) && !report.cells.is_empty(),
+        "the matrix never cut completion.start"
+    );
+}
+
+/// On SQLite in memory: a summary resent after `completion.start` sends the
+/// admitted body and is read as its first attempt.
+#[tokio::test]
+async fn a_summary_resent_after_completion_start_is_read_as_its_first_attempt_on_sqlite_memory() {
+    prove_resend(Dialect::SqliteMemory, None).await;
+}
+
+/// On a SQLite file.
+#[tokio::test]
+async fn a_summary_resent_after_completion_start_is_read_as_its_first_attempt_on_sqlite_file() {
+    prove_resend(Dialect::SqliteFile, None).await;
+}
+
+/// On PostgreSQL.
+#[tokio::test]
+async fn a_summary_resent_after_completion_start_is_read_as_its_first_attempt_on_postgres() {
+    let Some(url) = dialect::postgres_url() else {
+        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
+        return;
+    };
+    prove_resend(Dialect::Postgres, Some(url)).await;
 }
 
 /// The uncut run: the overflowing turn commits its pending recovery, and

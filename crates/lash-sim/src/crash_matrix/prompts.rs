@@ -170,7 +170,7 @@ fn body_digest(body: &str) -> u64 {
 fn model(world: Weak<World>) -> ProviderHandle {
     lash_core::testing::TestProvider::builder()
         .kind("lash-sim-prompt")
-        .send(move |request: LlmRequest, body| {
+        .complete_with_wire(move |request: LlmRequest, body| {
             let world = world.clone();
             async move {
                 let call = call_of(&request);

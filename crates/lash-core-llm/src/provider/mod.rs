@@ -55,5 +55,5 @@ pub use rate_limit::{ProviderRateLimitPermit, ProviderRateLimiter};
 pub use slot_delivery::{AttachmentDeliveryError, NoSlotDeliveries, SlotDeliveries};
 pub use traits::{
     DefaultProviderFailureClassifier, GenerationRetryGuarantee, Provider,
-    ProviderFailureClassifier, is_context_overflow_text,
+    ProviderFailureClassifier, canonical_request, is_context_overflow_text,
 };

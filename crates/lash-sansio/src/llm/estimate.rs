@@ -1,6 +1,6 @@
 //! The request's size before any provider reports it.
 
-use super::types::{LlmContentBlock, LlmRequest};
+use super::types::{LlmContentBlock, LlmRequest, RecordedRequestTemplate, RequestSegment};
 
 impl LlmRequest {
     /// A rough count of the tokens this request's messages and attachments
@@ -35,6 +35,26 @@ impl LlmRequest {
                 .map(|reference| usize::try_from(reference.byte_len / 4).unwrap_or(usize::MAX))
                 .fold(0usize, usize::saturating_add),
         );
+        ((chars / 4).max(1)).try_into().unwrap_or(u32::MAX)
+    }
+}
+
+impl RecordedRequestTemplate {
+    /// A rough count of the tokens this body takes, at four bytes a token,
+    /// never below 1: its literals, and each slot as a request's estimate
+    /// counts its attachment. It is what a rate limit debits for a send,
+    /// which has the body and no request.
+    pub fn estimated_tokens(&self) -> u32 {
+        let chars = self
+            .segments
+            .iter()
+            .map(|segment| match segment {
+                RequestSegment::Literal { text } => text.len(),
+                RequestSegment::Attachment { slot } => 256usize.saturating_add(
+                    usize::try_from(slot.reference.byte_len / 4).unwrap_or(usize::MAX),
+                ),
+            })
+            .fold(0usize, usize::saturating_add);
         ((chars / 4).max(1)).try_into().unwrap_or(u32::MAX)
     }
 }

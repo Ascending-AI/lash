@@ -84,7 +84,7 @@ impl Provider for AnthropicProvider {
         &mut self,
         req: &LlmRequest,
     ) -> Result<RecordedRequestTemplate, LlmTransportError> {
-        self.validate_route_and_headers(req)?;
+        self.validate_route_and_headers(req.model.wire_model())?;
         let (body, receipt) = self.build_request(req)?;
         lower_attachment_json(
             |mime, position| self.attachment_accepts(req.model.wire_model(), mime, position),
@@ -102,15 +102,15 @@ impl Provider for AnthropicProvider {
 
     async fn send(
         &mut self,
-        mut req: LlmRequest,
         admitted: &LiveRequestBody,
+        mut context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
-        protect_callbacks(&mut req, admitted);
+        protect_callbacks(&mut context, admitted);
         let result = async {
-            let minting_route = self.validate_route_and_headers(&req)?;
-            if let Some(downstream) = req.stream_events.take() {
+            let minting_route = self.validate_route_and_headers(context.model().wire_model())?;
+            if let Some(downstream) = context.stream_events.take() {
                 let stream_route = minting_route.clone();
-                req.stream_events = Some(LlmEventSender::new(move |mut event| {
+                context.stream_events = Some(LlmEventSender::new(move |mut event| {
                     if let LlmStreamEvent::Part(part) = &mut event {
                         let _ = part.stamp_replay_origin(&stream_route);
                     }
@@ -120,7 +120,7 @@ impl Provider for AnthropicProvider {
             let tokens = Arc::clone(&self.tokens);
             let mut lease = tokens.current(&minting_route).await?;
             match self
-                .send_attempt(&req, admitted, &minting_route, &lease.token)
+                .send_attempt(&context, admitted, &minting_route, &lease.token)
                 .await
             {
                 Err(error) if rejected_before_output(&error) => {
@@ -131,7 +131,7 @@ impl Provider for AnthropicProvider {
                         // Resend the admitted body once with the fresh token.
                         Some(fresh) => {
                             lease = fresh;
-                            self.send_attempt(&req, admitted, &minting_route, &lease.token)
+                            self.send_attempt(&context, admitted, &minting_route, &lease.token)
                                 .await
                         }
                         None => Err(error),
@@ -153,13 +153,13 @@ impl AnthropicProvider {
     /// One attempt of `send`, authenticated by `token`.
     async fn send_attempt(
         &self,
-        req: &LlmRequest,
+        context: &ResponseContext,
         admitted: &LiveRequestBody,
         minting_route: &ProviderRouteIdentity,
         token: &ProviderToken,
     ) -> Result<LlmResponse, LlmTransportError> {
-        let stream_events = req.stream_events.clone();
-        let provider_trace = req.provider_trace.clone();
+        let stream_events = context.stream_events.clone();
+        let provider_trace = context.provider_trace.clone();
         let timeouts = self.options.llm_timeouts();
         let base_url = self
             .base_url
@@ -264,7 +264,7 @@ impl AnthropicProvider {
             .or_else(|| first_header_value(&resp.headers, "x-request-id"))
             .map(str::to_string);
         let mut response_metadata = ResponseMetadataCapture::from_response(
-            &req.model.metadata().request_defaults,
+            &context.model().metadata().request_defaults,
             &resp.headers,
         );
         if let Some(tx) = &stream_events {
@@ -291,10 +291,10 @@ impl AnthropicProvider {
                 provider_request_id: Some(provider_request_id),
                 ..Default::default()
             }),
-            expose_thinking: req.model.metadata().request_defaults.expose_thinking,
+            expose_thinking: context.model().metadata().request_defaults.expose_thinking,
             ..StreamState::default()
         };
-        let expose_thinking = req.model.metadata().request_defaults.expose_thinking;
+        let expose_thinking = context.model().metadata().request_defaults.expose_thinking;
         let stream_result = drive_sse_response(
             resp.body,
             timeouts.chunk_timeout,
@@ -309,8 +309,8 @@ impl AnthropicProvider {
         )
         .await;
 
-        let stream_termination = req
-            .model
+        let stream_termination = context
+            .model()
             .metadata()
             .capability
             .stream_termination
@@ -321,7 +321,7 @@ impl AnthropicProvider {
                 request_body.clone(),
                 &url,
                 generation_disposition,
-                req.model.wire_model(),
+                context.model().wire_model(),
             );
             partial.response_metadata = response_metadata.into_metadata();
             partial
@@ -341,7 +341,7 @@ impl AnthropicProvider {
                 request_body,
                 &url,
                 generation_disposition,
-                req.model.wire_model(),
+                context.model().wire_model(),
             );
             partial.response_metadata = response_metadata.into_metadata();
             partial
@@ -359,7 +359,7 @@ impl AnthropicProvider {
         let provider_usage = state.provider_usage.take();
         let execution_evidence = state.execution_evidence.clone();
         let expose_thinking = state.expose_thinking;
-        let (parts, usage, terminal_reason) = Self::finalize(state, req.model.wire_model());
+        let (parts, usage, terminal_reason) = Self::finalize(state, context.model().wire_model());
         let mut response = LlmResponse {
             parts,
             usage,
@@ -390,11 +390,11 @@ fn replay_origin_conflict_error(
 }
 
 impl AnthropicProvider {
-    /// The route serving `req`, once its endpoint and the host's extra
+    /// The route serving `model`, once its endpoint and the host's extra
     /// headers are valid.
     fn validate_route_and_headers(
         &self,
-        req: &LlmRequest,
+        model: &str,
     ) -> Result<ProviderRouteIdentity, LlmTransportError> {
         validate_extra_headers(
             &self.extra_headers,
@@ -408,7 +408,7 @@ impl AnthropicProvider {
             ],
             true,
         )?;
-        let route = self.route_identity(req.model.wire_model());
+        let route = self.route_identity(model);
         route.validate_endpoint().map_err(|error| {
             LlmTransportError::new(error.to_string())
                 .with_kind(ProviderFailureKind::Validation)

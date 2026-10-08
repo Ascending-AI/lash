@@ -107,12 +107,16 @@ pub struct ProcessDefinitionLocalExecution {
     pub(crate) claim: crate::ReferrerClaim,
 }
 
-/// An admitted direct call, ready to send: its request template, the store
-/// that delivers its attachment slots on every attempt, and the live limit
-/// its pinned deadline leaves.
+/// An admitted direct call, ready to send: its request template, the
+/// response context its admission recorded, the store that delivers its
+/// attachment slots on every attempt, and the live limit its pinned deadline
+/// leaves.
 #[derive(Clone)]
 pub struct AdmittedDirectSend {
     pub template: Arc<lash_sansio::llm::types::RecordedRequestTemplate>,
+    /// What every send reads its response under, as admitted: a first send
+    /// and a resend are handed the same one, and add their own senders.
+    pub response: lash_sansio::llm::types::ResponseContext,
     pub deliveries: Arc<dyn crate::provider::SlotDeliveries>,
     pub limit: crate::ExecutionLimit,
 }
@@ -137,6 +141,8 @@ pub(super) struct LocalDirectEffectRunner {
     /// attempt fills its slots from `deliveries` and sends it, and nothing
     /// lowers the call again.
     template: Arc<lash_sansio::llm::types::RecordedRequestTemplate>,
+    /// The call's response context, as its admission recorded it.
+    response: lash_sansio::llm::types::ResponseContext,
     deliveries: Arc<dyn crate::provider::SlotDeliveries>,
     /// Who the call spends for (ADR 0127).
     owner: crate::RuntimeOwner,
@@ -695,6 +701,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                         enclosing: Some(admitted.limit),
                     },
                     template: admitted.template,
+                    response: admitted.response,
                     deliveries: admitted.deliveries,
                     owner,
                     tracing,

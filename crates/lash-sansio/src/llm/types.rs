@@ -205,6 +205,9 @@ pub use super::provider_body::{
     RequestTemplateBuilder, SlotCodec, TemplateError, TransientJson,
 };
 pub use super::provider_route::ProviderEndpointError;
+pub use super::response_context::{
+    AdmittedSend, ResponseContext, ResponseContract, ToolCallContract,
+};
 pub use super::stream_senders::{LlmEventSender, LlmProviderTraceEvent, LlmProviderTraceSender};
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

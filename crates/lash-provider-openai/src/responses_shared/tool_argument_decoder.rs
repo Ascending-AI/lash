@@ -4,7 +4,7 @@ use lash_core::facade_support::{
     ProviderSchemaCapabilities, SchemaPurpose, SchemaResolutionRequest, resolve_schema,
 };
 use lash_core::llm::transport::LlmTransportError;
-use lash_core::llm::types::LlmRequest;
+use lash_core::llm::types::ResponseContract;
 use lash_sansio::{OmissionNullPath, OmissionNullPathSegment};
 use serde_json::Value;
 
@@ -16,13 +16,15 @@ pub struct ToolArgumentDecoder {
 }
 
 impl ToolArgumentDecoder {
-    pub fn for_request(
+    /// The decoder of the tool calls a response under `contract` may carry:
+    /// each offered tool's input schema, as the call's admission recorded it.
+    pub fn for_contract(
         provider: &str,
-        req: &LlmRequest,
+        contract: &ResponseContract,
         capabilities: &ProviderSchemaCapabilities,
     ) -> Result<Self, LlmTransportError> {
         let mut omission_paths_by_tool = HashMap::new();
-        for tool in req.tools.iter() {
+        for tool in contract.tools.iter() {
             let resolved = resolve_schema(
                 &tool.input_schema,
                 SchemaResolutionRequest {

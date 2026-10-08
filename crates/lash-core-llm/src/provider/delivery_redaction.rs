@@ -1,8 +1,8 @@
 //! The provider's outward callback and result boundary for transient deliveries.
 use crate::llm::transport::{HttpFailureContext, LlmTransportError};
 use lash_sansio::llm::types::{
-    LiveRequestBody, LlmEventSender, LlmProviderTraceSender, LlmRequest, LlmResponse,
-    LlmStreamEvent,
+    LiveRequestBody, LlmEventSender, LlmProviderTraceSender, LlmResponse, LlmStreamEvent,
+    ResponseContext,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
@@ -34,15 +34,15 @@ fn scrub_typed<T: Serialize + DeserializeOwned>(
     Ok(())
 }
 
-pub fn protect_callbacks(request: &mut LlmRequest, body: &LiveRequestBody) {
+pub fn protect_callbacks(context: &mut ResponseContext, body: &LiveRequestBody) {
     if !body.has_secrets() {
         return;
     }
     let scrub = body.scrubber();
-    if let Some(downstream) = request.provider_trace.take() {
+    if let Some(downstream) = context.provider_trace.take() {
         let scrub = scrub.clone();
         let redacted = body.redacted();
-        request.provider_trace = Some(LlmProviderTraceSender::new(move |mut event| {
+        context.provider_trace = Some(LlmProviderTraceSender::new(move |mut event| {
             // Raw stream fragments may split a secret across events. Keep the
             // request summary and suppress raw response fragments in this case.
             if event.request_endpoint().is_none() {
@@ -53,9 +53,9 @@ pub fn protect_callbacks(request: &mut LlmRequest, body: &LiveRequestBody) {
             downstream.send(event);
         }));
     }
-    if let Some(downstream) = request.stream_events.take() {
+    if let Some(downstream) = context.stream_events.take() {
         let redacted = body.redacted();
-        request.stream_events = Some(LlmEventSender::new(move |mut event| {
+        context.stream_events = Some(LlmEventSender::new(move |mut event| {
             match &mut event {
                 // Authoritative block-end and Part events carry the complete
                 // text, allowing secret matching across network chunk splits.
