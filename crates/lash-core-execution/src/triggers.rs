@@ -12,6 +12,7 @@ mod mutation;
 mod report;
 mod revision_referrer;
 mod router;
+mod schedule;
 mod start;
 mod store_support;
 mod subscription_changes;
@@ -29,12 +30,14 @@ pub use revision_referrer::RevisionReferrerTriggerStore;
 use router::default_enabled;
 pub use router::*;
 use router::{project_trigger_actor, project_trigger_draft, project_trigger_owner};
+pub use schedule::{TriggerSchedule, TriggerScheduleError, TriggerSchedules};
 pub use start::{TriggerDeliveryStartRows, TriggerStartRows, TriggerSubscriptionFence};
 pub use store_support::{
     PreparedTriggerCommand, TriggerMutationPreparation, decode_trigger_delivery,
     decode_trigger_delivery_outcome, decode_trigger_mutation_receipt_json,
     decode_trigger_occurrence_json, decode_trigger_subscription_json, encode_trigger_row,
     prepare_trigger_command, stored_trigger_receipt, trigger_mutation_records,
+    trigger_mutation_sessions,
 };
 pub use subscription_changes::{TriggerSubscriptionChange, TriggerSubscriptionChangeCursor};
 

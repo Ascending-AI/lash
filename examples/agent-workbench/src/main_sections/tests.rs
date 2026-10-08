@@ -172,9 +172,11 @@ fn empty_model_variant_request_clears_selected_variant() {
 #[path = "tests/attachments_usage.rs"]
 mod attachments_usage_tests;
 #[cfg(test)]
-#[cfg(test)]
 #[path = "tests/concurrent_send.rs"]
 mod concurrent_send_tests;
+#[cfg(test)]
+#[path = "tests/cron_schedule.rs"]
+mod cron_schedule_tests;
 #[cfg(test)]
 #[path = "tests/no_progress_budget.rs"]
 mod no_progress_budget_tests;

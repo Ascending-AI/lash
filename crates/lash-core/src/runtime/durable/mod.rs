@@ -13,6 +13,8 @@
 //!   time (L6b).
 //! - `session_command`: a session command's head commit, on the session's
 //!   fenced transaction under `session.command` (FIG-5230).
+//! - [`schedules`]: the ticks of the scheduled trigger sources a session
+//!   subscribes to, fired at the session's due time (FIG-5348).
 //! - [`turn_scope`]: a turn's scope ending with its commit or cancel, the
 //!   cascade's cursor work and the bounded wait for its children (L6b).
 
@@ -21,6 +23,7 @@ pub mod head;
 mod model_call;
 pub mod node;
 pub mod phases;
+pub mod schedules;
 pub mod services;
 pub mod session;
 pub mod session_close;

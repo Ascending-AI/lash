@@ -559,7 +559,13 @@ finish(
 </typescript>
 ```
 
-No timer fires a registered `cron.Schedule` in this build.
+The workbench registers the schedule `cron.Schedule` means on its core
+(`LashCoreBuilder::trigger_schedule`, `src/cron.rs`), and lash fires each tick
+from the session that owns the registration: the session actor keeps the next
+tick as its durable due time and emits the tick's `cron.Tick { fired_at }`
+occurrence once, even across a crash or a failover. A disable, re-enable or
+delete takes effect at the next tick, and a re-enabled schedule keeps its
+subscription.
 
 Host wiring has two pieces: source constructors such as `cron.Schedule` and
 `mail.received` are declared through the plugin's `lashlang_resources()` hook,

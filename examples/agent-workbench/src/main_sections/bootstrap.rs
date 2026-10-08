@@ -314,7 +314,10 @@ pub(crate) async fn workbench_core_builder(
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
     .live_replay_store(live_replay)
-    .delta_coalescing(delta_coalescing_from_environment()?);
+    .delta_coalescing(delta_coalescing_from_environment()?)
+    // `cron.Schedule`, which the prompt offers the model, ticks on the
+    // durable substrate (FIG-5348).
+    .trigger_schedule(CRON_SCHEDULE_SOURCE_TYPE, Arc::new(crate::cron::CronSchedule));
     if let Some(tool_provider) = tool_provider {
         builder = builder.tools(tool_provider);
     }

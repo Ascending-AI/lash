@@ -2,9 +2,9 @@
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
 # 1726 rows over 873 files, 4088 laws.
-# By class: mechanical 213, semantic 154, delete 888, replace 471.
+# By class: mechanical 213, semantic 156, delete 886, replace 471.
 # By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 97, L9c 364, L9d 122, L9e 140, L9f 125, L9g 98, L9h 123, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
-# By status: todo 146, ported 175, deleted 1405.
+# By status: todo 146, ported 177, deleted 1403.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -392,6 +392,7 @@ path = "crates/lash-durable-test/tests/process_actor_laws.rs::an_emit_the_regist
 [planned."CRON1"]
 owner = "FIG-5348"
 law = "a cron.Schedule registered from a turn fires one occurrence, one wake delivery and one completed turn per tick; a disabled schedule stays silent at its next boundary, re-enabling resumes ticks without a second subscription, and a deleted one stays silent"
+path = "examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_registered_cron_schedule_fires_one_turn_per_tick_and_obeys_disable_enable_and_delete"
 
 [planned."SIMGEN"]
 owner = "FIG-5359"
@@ -11071,28 +11072,28 @@ path = "examples/agent-workbench/src/main_sections/tests.rs"
 test = "live_restate_cron_zombie_cancel_path_end_to_end"
 area = "workbench"
 needs = ["turn", "process", "cell"]
-class = "delete"
+class = "semantic"
 lane = "L9h"
 laws = [
   "live_restate_cron_zombie_cancel_path_end_to_end",
 ]
-disposition = "subject-deleted"
-status = "deleted"
-note = "The workbench's Restate cron jobs, their tick workflow and the zombie-cancel backstop were removed in 5ad9641f9e (FIG-5190); only the cron.Schedule source declaration remains"
+disposition = "port"
+status = "ported"
+note = "FIG-5348 ported the property onto the in-process workbench harness as examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_deleted_sessions_cron_schedule_never_fires: the session actor fires its schedule's ticks (lash's durable cron driver), so a deleted session's close ends them and no tick fires after its tombstone; there is no separate job left to cancel"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests.rs"
 test = "live_restate_cron_queued_turn_sync_cancel_path_end_to_end"
 area = "workbench"
 needs = ["turn", "process", "cell"]
-class = "delete"
+class = "semantic"
 lane = "L9h"
 laws = [
   "live_restate_cron_queued_turn_sync_cancel_path_end_to_end",
 ]
-disposition = "subject-deleted"
-status = "deleted"
-note = "The workbench's Restate cron jobs, their tick workflow and the queued-turn sync cancel were removed in 5ad9641f9e (FIG-5190); only the cron.Schedule source declaration remains"
+disposition = "port"
+status = "ported"
+note = "FIG-5348 ported the property onto the in-process workbench harness as examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_cron_schedule_disabled_while_its_tick_turn_runs_never_fires_again: a disable made while a tick's wake turn still runs commits with a wake of the owning session, so no later boundary fires"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs"
@@ -11270,7 +11271,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "The reset's Restate cron-job cancellation was removed in 5ad9641f9e (FIG-5190)"
+note = "The reset's Restate cron-job cancellation was removed in 5ad9641f9e (FIG-5190). The durable cron driver (FIG-5348) keeps no host-side job for a reset to cancel: the deleted session's close ends its ticks (examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_deleted_sessions_cron_schedule_never_fires)"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs"
@@ -11284,7 +11285,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "The reset's Restate cron-job cancellation and its close were removed in 5ad9641f9e (FIG-5190)"
+note = "The reset's Restate cron-job cancellation and its close were removed in 5ad9641f9e (FIG-5190). The durable cron driver (FIG-5348) keeps no host-side job for a reset to cancel: the deleted session's close ends its ticks (examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_deleted_sessions_cron_schedule_never_fires)"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs"
@@ -11406,7 +11407,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "cron-trigger helpers over the live Restate cron workflow; the workflow is gone, and the cron laws the workbench owes are the runbook's replace row (runbooks/workbench-cron-schedule/runbook.md)."
+note = "cron-trigger helpers over the live Restate cron workflow; the workflow is gone. The workbench's cron laws run on the durable cron driver (FIG-5348) in examples/agent-workbench/src/main_sections/tests/cron_schedule.rs, over a frozen store clock"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/session_delete_workflow.rs"
@@ -11534,9 +11535,9 @@ laws = [
   "handler_cancels_a_disabled_registration_without_rearming_or_emitting",
   "non_live_session_cancels_without_reading_a_failing_registration_store",
 ]
-disposition = "subject-deleted"
+disposition = "covered-by:examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_registered_cron_schedule_fires_one_turn_per_tick_and_obeys_disable_enable_and_delete"
 status = "deleted"
-note = "the workbench's Restate cron object (arming, cancel, tick decisions, its registration-state reads and the occurrence emitter) went with 5ad9641f9e (FIG-5190); no timer fires a registered cron.Schedule in this build (examples/agent-workbench/README.md)"
+note = "The Restate cron handler these laws drove went with FIG-5190. On the durable cron driver (FIG-5348) a disabled or deleted registration is not among the enabled subscriptions the session reads at its next boundary, so it emits nothing and arms no next tick (CRON1); a deleted session's actor ends with its close and reads nothing (examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_deleted_sessions_cron_schedule_never_fires)"
 
 [[row]]
 path = "examples/agent-workbench/src/restate/tests/cron_replay.rs"
@@ -11612,7 +11613,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "the workbench's Restate cron object (arming, cancel, tick decisions, its registration-state reads and the occurrence emitter) went with 5ad9641f9e (FIG-5190); no timer fires a registered cron.Schedule in this build (examples/agent-workbench/README.md)"
+note = "Laws of the Restate cron job (its route-synchronous arm and cancel, ingress calls, journaled tick basis and terminal codes, and the registration-state aggregate it decided on), which went with FIG-5190. The durable cron driver (FIG-5348) keeps no job to arm or cancel: a subscription mutation wakes its owning session in its own transaction, and the session fires its enabled subscriptions' due ticks. The properties that remain are laws of the driver: a disable, re-enable or delete takes effect at the next boundary (CRON1, examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_registered_cron_schedule_fires_one_turn_per_tick_and_obeys_disable_enable_and_delete), a deleted session fires nothing (examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_deleted_sessions_cron_schedule_never_fires, whose schedule names no time zone and still starts its delivery), and a tick fires once across a crash at it (crates/lash-durable-test/tests/schedule_tick_crash_proof.rs)"
 
 [[row]]
 path = "examples/agent-workbench/src/restate/tests/cron_tests.rs"
@@ -20115,7 +20116,7 @@ laws = [
 disposition = "replaced-by:planned:CRON1"
 status = "deleted"
 owed = "a recurring schedule registered from a Workbench chat turn fires one turn per tick; disable, re-enable and delete take effect at the next boundary (judged runbook)"
-note = "FIG-5190 follow-up (5a64db23e0) deleted the runbook: every phase read the Restate cron object and its trace spans. Nothing fires a cron.Schedule on the durable substrate: the Restate cron workflow was the only driver, and the workbench still declares the source and prompts the model to register it. FIG-5348 owns the driver and the planned law CRON1"
+note = "FIG-5190 follow-up (5a64db23e0) deleted the runbook: every phase read the Restate cron object and its trace spans. FIG-5348 built the durable cron driver (the session actor fires its scheduled sources' ticks at its due time) and landed the planned law CRON1 on the in-process workbench harness"
 
 [[row]]
 path = "runbooks/process-operations/runbook.md"

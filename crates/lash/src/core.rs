@@ -650,6 +650,7 @@ pub struct LashCoreBuilder {
     live_replay_store: Option<Arc<dyn LiveReplayStore>>,
     process_observation_config: crate::process_observation::ProcessObservationConfig,
     trigger_route_restorer: Option<Arc<dyn lash_core::TriggerRouteRestorer>>,
+    trigger_schedules: lash_core::TriggerSchedules,
     serves_sessions: bool,
 }
 
@@ -684,6 +685,7 @@ impl LashCoreBuilder {
             live_replay_store: None,
             process_observation_config: Default::default(),
             trigger_route_restorer: None,
+            trigger_schedules: lash_core::TriggerSchedules::default(),
             serves_sessions: true,
         }
     }
@@ -710,6 +712,20 @@ impl LashCoreBuilder {
         restorer: Arc<dyn lash_core::TriggerRouteRestorer>,
     ) -> Self {
         self.trigger_route_restorer = Some(restorer);
+        self
+    }
+
+    /// Schedule the occurrences of the trigger source type `source_type` by
+    /// `schedule`: a session that owns an enabled subscription to the source
+    /// fires each of its ticks on the durable substrate, once, as an
+    /// occurrence whose payload the schedule builds (FIG-5348). A disable,
+    /// re-enable or delete of the subscription takes effect at its next tick.
+    pub fn trigger_schedule(
+        mut self,
+        source_type: impl Into<String>,
+        schedule: Arc<dyn lash_core::TriggerSchedule>,
+    ) -> Self {
+        self.trigger_schedules.register(source_type, schedule);
         self
     }
 

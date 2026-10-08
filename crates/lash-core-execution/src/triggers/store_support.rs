@@ -135,6 +135,21 @@ pub fn trigger_mutation_records(result: &TriggerEffectResult) -> Vec<&TriggerSub
     }
 }
 
+/// The sessions whose own subscriptions a mutation result wrote, once each:
+/// a backend wakes each in the mutation's transaction, so the session reads
+/// its scheduled sources again at its next pass (FIG-5348).
+pub fn trigger_mutation_sessions(result: &TriggerEffectResult) -> Vec<crate::SessionId> {
+    let mut sessions = Vec::new();
+    for record in trigger_mutation_records(result) {
+        if let TriggerOwnerScope::Session { session_id } = &record.owner_scope
+            && !sessions.contains(session_id)
+        {
+            sessions.push(session_id.clone());
+        }
+    }
+    sessions
+}
+
 /// The `record_json` column of `trigger_subscriptions`.
 pub fn decode_trigger_subscription_json(
     json: &str,

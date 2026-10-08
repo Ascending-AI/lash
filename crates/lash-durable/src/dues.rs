@@ -23,6 +23,9 @@ pub enum DueSource {
     ProcessSleep,
     /// L6: a cascade cursor's next batch.
     CascadeCursor,
+    /// FIG-5348: the next tick of a scheduled trigger source a session
+    /// subscribes to.
+    ScheduleTick,
 }
 
 /// The due times an owner noted, the earliest per source.

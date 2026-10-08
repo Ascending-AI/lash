@@ -25,6 +25,7 @@ use lash_core::durable_port::runner::{Activation, Drain, Stopped};
 use lash_core::facade_support::LashRuntime;
 use lash_core::runtime::durable::ProcessActivation;
 use lash_core::runtime::durable::node::{NodeServe, serve};
+use lash_core::runtime::durable::schedules::ScheduledTriggers;
 use lash_core::runtime::durable::services::{RuntimeTurnServices, SessionRuntimes};
 use lash_core::runtime::durable::session::{SessionActivation, TurnError, TurnServices};
 use lash_core::{ExecutionBudgets, LiveReplayStore, SessionId};
@@ -196,11 +197,14 @@ impl LashCore {
         let backend = self
             .backend
             .with_process_engines(self.host_process_engines.engines().cloned());
-        let sessions = Arc::new(SessionActivation::new(
-            backend.clone(),
-            self.turn_services(),
-            Arc::clone(&probe),
-        ));
+        let sessions = Arc::new(
+            SessionActivation::new(backend.clone(), self.turn_services(), Arc::clone(&probe))
+                .with_schedules(ScheduledTriggers::new(
+                    self.env.core.trigger_store(),
+                    self.trigger_router(),
+                    self.env.core.control.trigger_schedules.clone(),
+                )),
+        );
         let processes = self.process_worker().map(|worker| {
             let worker = Arc::new(worker);
             Arc::new(
@@ -216,6 +220,24 @@ impl LashCore {
             backend,
             sessions,
             processes,
+        }
+    }
+
+    /// The router this core emits trigger occurrences through: over its
+    /// trigger store and process work, admitting targets against its engines
+    /// and restoring captured routes with its restorer.
+    pub(crate) fn trigger_router(&self) -> lash_core::facade_support::TriggerRouter {
+        let router = lash_core::facade_support::TriggerRouter::new(
+            self.env.core.trigger_store(),
+            self.substrate_slot.setup.process.clone(),
+        )
+        .with_process_artifacts(
+            Arc::clone(&self.env.core.durability.process_env_store),
+            self.host_process_engines.clone(),
+        );
+        match &self.env.core.control.trigger_route_restorer {
+            Some(restorer) => router.with_route_restorer(Arc::clone(restorer)),
+            None => router,
         }
     }
 

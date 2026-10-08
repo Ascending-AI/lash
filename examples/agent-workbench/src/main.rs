@@ -14,6 +14,7 @@ use ndjson::ndjson_response;
 mod approvals;
 #[path = "../../shared/attachment_acceptance.rs"]
 mod attachment_acceptance;
+mod cron;
 mod deferred_tools;
 #[path = "../../shared/e2e_live_budget.rs"]
 mod e2e_live_budget;

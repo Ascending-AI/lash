@@ -190,6 +190,9 @@ pub struct RuntimeControlConfig {
     /// Live restoration of captured provider routes for new trigger starts,
     /// shared by immediate delivery and recovery. Never journaled as wiring.
     pub trigger_route_restorer: Option<Arc<dyn crate::TriggerRouteRestorer>>,
+    /// The scheduled trigger source types, whose ticks the sessions that
+    /// subscribe to them fire (FIG-5348).
+    pub trigger_schedules: crate::TriggerSchedules,
     /// The termination policy a run records on its first execution. Terminal
     /// assembly reads the run's record, never this field (FIG-4389).
     pub termination: TerminationPolicy,
@@ -296,6 +299,7 @@ impl RuntimeHostConfig {
                 delta_coalescing: DeltaCoalescing::default(),
                 effect_host,
                 trigger_route_restorer: None,
+                trigger_schedules: crate::TriggerSchedules::default(),
                 process_tool_visibility_filter: None,
                 tool_source_policy: crate::ToolSourcePolicy::default(),
                 recovery_pass: crate::engine::RecoveryPassBudget::default(),
