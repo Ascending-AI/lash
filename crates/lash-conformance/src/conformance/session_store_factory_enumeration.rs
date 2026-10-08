@@ -131,7 +131,7 @@ pub(super) async fn session_store_factory_enumeration_is_read_only_and_keeps_tom
 
     let mut state = crate::RuntimeSessionState {
         session_id: root_request.session_id.clone(),
-        ..crate::RuntimeSessionState::new(root_request.config.session_policy())
+        ..crate::RuntimeSessionState::ambient_fixture(root_request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     root.commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state))

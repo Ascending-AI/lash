@@ -191,7 +191,7 @@ async fn fork_distinguishes_collected_revision_from_unknown_and_deleted_sources(
     let mut source_state = lash_core::RuntimeSessionState {
         session_id: source_request.session_id.clone(),
         policy: source_policy,
-        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+        ..lash_core::RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
@@ -348,7 +348,7 @@ async fn fork_observer_selection_is_recoverable_and_selective() -> Result<()> {
     let mut source_state = lash_core::RuntimeSessionState {
         session_id: SessionId::from("fork-observer-source"),
         policy,
-        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+        ..lash_core::RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
@@ -553,7 +553,7 @@ async fn fork_observer_selection_is_recoverable_and_selective() -> Result<()> {
         .await
         .open_with_state(lash_core::RuntimeSessionState {
             session_id: SessionId::from("fork-observer-branch"),
-            ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy {
+            ..lash_core::RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy {
                 model: branch_read.config.model.clone(),
                 ..lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
@@ -745,7 +745,7 @@ async fn duplicate_only_fork_intents_are_canonical(
     let mut source_state = lash_core::RuntimeSessionState {
         session_id: source_session_id.clone(),
         policy,
-        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+        ..lash_core::RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
@@ -1129,7 +1129,7 @@ async fn a_fork_runs_under_its_branch_points_generation_not_what_the_host_passes
     let mut source_state = lash_core::RuntimeSessionState {
         session_id: SessionId::from("generation-fork-source"),
         policy: source_policy,
-        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+        ..lash_core::RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),

@@ -72,6 +72,7 @@ async fn codex_non_sse_body_read_failure_preserves_observed_response_evidence() 
     let failure = handle
         .complete(
             request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
         .await

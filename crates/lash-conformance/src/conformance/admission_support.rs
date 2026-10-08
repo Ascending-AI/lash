@@ -32,7 +32,7 @@ pub(crate) async fn head_commit(
     let state = crate::RuntimeSessionState {
         session_id: session_id.clone(),
         head_revision: revision,
-        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),

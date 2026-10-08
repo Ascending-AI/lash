@@ -138,10 +138,10 @@ pub(super) async fn plugin_format_boundary(
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let mut factories = crate::testing::test_standard_protocol_factories();
     factories.push(Arc::new(FormatPlugin(calls.clone())));
-    let host = crate::PluginHost::new(factories);
+    let host = crate::PluginHost::new(factories, lash_core::ExecutionBudgets::recommended());
     let mut state = RuntimeSessionState {
         session_id: crate::SessionId::fixture(session_id),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -151,7 +151,7 @@ pub(super) async fn plugin_format_boundary(
     let seed = host
         .build_session(PluginSessionRequest::creation(
             "format-seed",
-            Default::default(),
+            lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
         ))
         .unwrap();
     let mut snapshot = seed.export_state();
@@ -240,7 +240,7 @@ pub(super) async fn plugin_format_boundary(
         &original,
         SessionAuthorityContext {
             plugin_config: durable.admitted_plugin_config(),
-            ..Default::default()
+            ..lash_core::plugin::SessionAuthorityContext::ambient_fixture()
         },
     );
     let decoded = host

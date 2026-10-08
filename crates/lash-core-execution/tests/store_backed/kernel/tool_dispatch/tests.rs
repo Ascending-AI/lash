@@ -182,7 +182,11 @@ async fn dispatch_rejects_non_catalog_tool_before_provider_resolution() {
         contract_available: true,
         observed_execution_bindings: None,
     });
-    let context = refusing_dispatch_context(provider_plugins(provider, Default::default())).await;
+    let context = refusing_dispatch_context(provider_plugins(
+        provider,
+        crate::plugin::SessionAuthorityContext::ambient_fixture(),
+    ))
+    .await;
     let outcome =
         dispatch_tool_call(&context, "host_only".to_string(), json!({ "value": "ok" })).await;
 
@@ -212,7 +216,7 @@ async fn dispatch_rejects_hidden_tool_before_contract_resolution() {
         provider,
         crate::plugin::SessionAuthorityContext {
             tool_access,
-            ..Default::default()
+            ..crate::plugin::SessionAuthorityContext::ambient_fixture()
         },
     );
     assert!(
@@ -251,7 +255,11 @@ async fn explicit_execution_grant_runs_non_catalog_tool_with_binding() {
         contract_available: false,
         observed_execution_bindings: Some(Arc::clone(&observed_execution_bindings)),
     });
-    let context = refusing_dispatch_context(provider_plugins(provider, Default::default())).await;
+    let context = refusing_dispatch_context(provider_plugins(
+        provider,
+        crate::plugin::SessionAuthorityContext::ambient_fixture(),
+    ))
+    .await;
     let grant = crate::ToolExecutionGrant::from_definition(
         crate::plugin::PluginRevision::new("mock", crate::plugin::BehaviorRevision::ONE),
         named_beta_tool("host_only"),
@@ -351,7 +359,7 @@ async fn dispatch_allows_unknown_mcp_args_when_schema_does_not_forbid_them() {
         Arc::new(StrictMcpTools {
             executed: Arc::clone(&executed),
         }),
-        Default::default(),
+        crate::plugin::SessionAuthorityContext::ambient_fixture(),
     ))
     .await;
     let outcome = dispatch_tool_call(
@@ -424,7 +432,10 @@ async fn before_tool_hook_receives_resolved_argument_projection_policy() {
             .with_tool_provider(Arc::new(ProjectionPolicyTools))
             .with_tool_args_transform(lash_core_execution::hook_key!("capture"), hook),
     ))])
-    .build_session(PluginSessionRequest::creation("root", Default::default()))
+    .build_session(PluginSessionRequest::creation(
+        "root",
+        crate::plugin::SessionAuthorityContext::ambient_fixture(),
+    ))
     .expect("plugin session");
     let outcome = dispatch_tool_call(
         &refusing_dispatch_context(plugins).await,

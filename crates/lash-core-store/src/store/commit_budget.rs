@@ -304,11 +304,14 @@ impl RuntimeCommit {
     ) -> Result<Self, StoreError> {
         let mut state = crate::RuntimeSessionState {
             session_id: session_id.clone(),
-            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
-                config.turn_budget,
-                config.max_tool_calls,
-                crate::NoProgressBudget::bounded(12),
-            ))
+            ..crate::RuntimeSessionState::new(
+                crate::SessionPolicy::new(
+                    config.turn_budget,
+                    config.max_tool_calls,
+                    crate::NoProgressBudget::bounded(12),
+                ),
+                crate::session_state::RuntimeSessionAuthority::of_config(&config),
+            )
         };
         crate::session_state::adopt_session_config(&mut state, &config);
         // Every node timestamp occupies exactly 30 bytes; use a deterministic
@@ -449,7 +452,7 @@ mod tests {
     fn adopted_intent_rows_count_against_the_node_budget() {
         let state = crate::RuntimeSessionState {
             session_id: SessionId::from("budget-adoption-rows"),
-            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
@@ -481,7 +484,7 @@ mod tests {
     fn keyed_budget_counts_root_and_changed_bodies_but_excludes_unchanged_refs() {
         let state = crate::RuntimeSessionState {
             session_id: SessionId::from("budget-bytes"),
-            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
@@ -598,7 +601,7 @@ mod tests {
     fn a_failed_settlement_measures_as_its_bare_commit() {
         let state = crate::RuntimeSessionState {
             session_id: SessionId::from("budget-failed-settlement"),
-            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),

@@ -210,7 +210,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
         }
         let mut runtime_state = RuntimeSessionState {
             session_id,
-            ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),

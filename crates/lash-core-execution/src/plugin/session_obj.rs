@@ -1460,7 +1460,7 @@ mod attachment_notice_order_tests {
         let session = host
             .build_session(PluginSessionRequest::creation(
                 "notice-order-session",
-                Default::default(),
+                crate::plugin::SessionAuthorityContext::ambient_fixture(),
             ))
             .expect("plugin session");
         let reference = crate::AttachmentRef::new(
@@ -1562,7 +1562,7 @@ mod presentation_plan_tests {
         )
         .build_session(PluginSessionRequest::creation(
             "presentation-plan",
-            Default::default(),
+            crate::plugin::SessionAuthorityContext::ambient_fixture(),
         ))
         .unwrap()
     }

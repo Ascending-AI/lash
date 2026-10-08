@@ -34,7 +34,10 @@ async fn compile(
     let factory = Arc::new(factory);
     factory
         .compile_lashlang_module(
-            &PluginHost::new(vec![factory.clone()]),
+            &PluginHost::new(
+                vec![factory.clone()],
+                lash_core::ExecutionBudgets::recommended(),
+            ),
             LashlangModuleCompileRequest::new(
                 "worker-policy",
                 "const answer = 42;",
@@ -229,7 +232,7 @@ async fn facade_vm_segment_policy_reaches_engine_step_admission() {
     );
 
     let factory = Arc::new(factory(&backend, WorkerService::default()).with_segment_policy(policy));
-    let host = PluginHost::new(vec![factory]);
+    let host = PluginHost::new(vec![factory], lash_core::ExecutionBudgets::recommended());
     let runtime = host
         .install_process_engine_contributions(
             crate::durability::RuntimeHostConfig::new(

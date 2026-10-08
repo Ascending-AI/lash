@@ -925,12 +925,12 @@ mod tool_catalog_cache_tests {
             crate::plugin::PluginDeclaration::initial("admission_probe"),
             crate::PluginSpec::new().with_tool_provider(provider),
         )));
-        crate::PluginHost::new(factories)
+        crate::PluginHost::new(factories, crate::ExecutionBudgets::recommended())
             .build_session(PluginSessionRequest::creation(
                 "admission-probe",
                 crate::plugin::SessionAuthorityContext {
                     tool_access,
-                    ..Default::default()
+                    ..crate::plugin::SessionAuthorityContext::ambient_fixture()
                 },
             ))
             .expect("plugin session")
@@ -1088,10 +1088,10 @@ mod tool_catalog_cache_tests {
             crate::plugin::PluginDeclaration::initial("pinned_surface"),
             crate::PluginSpec::new().with_tool_provider(provider),
         )));
-        let plugins = crate::PluginHost::new(factories)
+        let plugins = crate::PluginHost::new(factories, crate::ExecutionBudgets::recommended())
             .build_session(PluginSessionRequest::creation(
                 "pinned-surface",
-                Default::default(),
+                crate::plugin::SessionAuthorityContext::ambient_fixture(),
             ))
             .expect("plugin session");
         let session = Session::new(
@@ -1220,10 +1220,10 @@ mod tool_catalog_cache_tests {
             crate::plugin::PluginDeclaration::initial("reassignable"),
             spec,
         )));
-        let plugins = crate::PluginHost::new(factories)
+        let plugins = crate::PluginHost::new(factories, crate::ExecutionBudgets::recommended())
             .build_session(PluginSessionRequest::creation(
                 "route-reassignment",
-                Default::default(),
+                crate::plugin::SessionAuthorityContext::ambient_fixture(),
             ))
             .expect("plugin session");
         let session_id = SessionId::from("route-reassignment");

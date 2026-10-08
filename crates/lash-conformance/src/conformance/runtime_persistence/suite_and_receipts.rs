@@ -70,7 +70,7 @@ pub async fn head_and_window_reads_agree_for_each_named_session(store: Arc<dyn R
     admit_conformance_session(&store, &admitted_only).await;
     let state = RuntimeSessionState {
         session_id: committed.clone(),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -157,7 +157,7 @@ pub async fn session_plugin_config_round_trips_through_the_committed_head(
     expected.insert("conformance-plugin", serde_json::json!({"turn_cap": 12}));
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("session-plugin-config"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -207,7 +207,7 @@ pub async fn session_plugin_config_round_trips_through_the_committed_head(
 pub async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
     store: Arc<dyn RuntimeStore>,
 ) {
-    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+    let mut state = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         lash_core::NoProgressBudget::bounded(12),
@@ -297,7 +297,7 @@ pub async fn commit_rejects_carried_nondefault_node_budget(store: Arc<dyn Runtim
     const CONFIGURED_NODE_LIMIT: usize = 1;
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -339,7 +339,7 @@ pub async fn commit_rejects_carried_nondefault_byte_budget(store: Arc<dyn Runtim
     const CONFIGURED_BYTE_LIMIT: usize = 64;
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -371,7 +371,7 @@ pub async fn commit_rejects_carried_nondefault_byte_budget(store: Arc<dyn Runtim
 pub(super) fn commit_budget_conformance_fixture(byte_limit: usize) -> RuntimeCommit {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -506,7 +506,7 @@ pub async fn checkpoint_restore_rejects_turn_index_without_increment_headroom(
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         turn_index,
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -558,7 +558,7 @@ pub async fn checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overfl
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         token_usage,
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),

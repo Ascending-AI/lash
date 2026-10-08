@@ -96,7 +96,7 @@ async fn committed_checkpoint(
         .expect("create blob-reclaim session");
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..crate::RuntimeSessionState::new(request.config.session_policy())
+        ..crate::RuntimeSessionState::ambient_fixture(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     let leaf_node_id = state
@@ -175,7 +175,7 @@ pub(super) async fn commit_content_aliased_checkpoint_roots(
         .expect("create dependent content-alias session");
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..crate::RuntimeSessionState::new(request.config.session_policy())
+        ..crate::RuntimeSessionState::ambient_fixture(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
@@ -798,7 +798,7 @@ async fn attachment_prefix_retention(backend_name: &str, handles: SessionDeleteB
     .await;
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..crate::RuntimeSessionState::new(request.config.session_policy())
+        ..crate::RuntimeSessionState::ambient_fixture(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     state.session_graph.append_message(crate::Message {

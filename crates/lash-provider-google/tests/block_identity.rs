@@ -100,6 +100,7 @@ fn text_runs_around_a_tool_call_get_distinct_sealed_blocks() {
         .block_on(provider.complete(
             request(Arc::clone(&events)),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         ))
         .expect("canonical stream completes");
 

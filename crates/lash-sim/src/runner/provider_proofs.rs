@@ -8,6 +8,7 @@ pub(super) async fn prove_openai_compatible_tool_stream() -> Result<ProofRun, Fi
         .complete(
             openai_compatible_request(true),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await?;
     require(
@@ -56,6 +57,7 @@ pub(super) async fn prove_openai_responses_text_stream() -> Result<ProofRun, Fix
         .complete(
             openai_responses_request(),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await?;
     require(
@@ -154,6 +156,7 @@ pub(super) async fn prove_codex_responses_text_stream() -> Result<ProofRun, Fixe
         .complete(
             codex_request(false, None),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await?;
     require(
@@ -186,6 +189,7 @@ pub(super) async fn prove_codex_responses_tool_call_stream()
         .complete(
             codex_request(true, None),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await?;
     require(
@@ -228,6 +232,7 @@ pub(super) async fn prove_codex_responses_rate_limit() -> Result<ProofRun, Fixed
         .complete(
             codex_request(false, None),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect_err("codex rate-limit script should fail");
@@ -264,6 +269,7 @@ pub(super) async fn prove_codex_responses_disconnect() -> Result<ProofRun, Fixed
         .complete(
             codex_request(false, None),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect_err("codex disconnect script should fail");
@@ -298,6 +304,7 @@ pub(super) async fn prove_anthropic_messages_text_stream()
         .complete(
             anthropic_messages_request(),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await?;
     require(
@@ -334,7 +341,11 @@ pub(super) async fn prove_google_stream_generate_text() -> Result<ProofRun, Fixe
     .with_project_id(Some("project-1".to_string()))
     .with_transport(provider_transport(&transport));
     let response = provider
-        .complete(google_request(true), &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            google_request(true),
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await?;
     require(
         response.terminal_reason == LlmTerminalReason::Stop,
@@ -380,6 +391,7 @@ pub(super) async fn prove_google_generate_text() -> Result<ProofRun, FixedScript
         .complete(
             google_request(false),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await?;
     require(
@@ -424,6 +436,7 @@ pub(super) async fn prove_openai_compatible_rate_limit() -> Result<ProofRun, Fix
         .complete(
             openai_compatible_request(false),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect_err("rate-limit script should fail");
@@ -461,6 +474,7 @@ pub(super) async fn prove_openai_compatible_validation() -> Result<ProofRun, Fix
         .complete(
             openai_compatible_request(false),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect_err("validation script should fail");
@@ -497,6 +511,7 @@ pub(super) async fn prove_openai_compatible_disconnect() -> Result<ProofRun, Fix
         .complete(
             openai_compatible_request(true),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect_err("disconnect script should fail");
@@ -531,6 +546,7 @@ pub(super) async fn prove_openai_compatible_response_start_timeout()
         .complete(
             openai_compatible_request(true),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect_err("response-start timeout script should fail");
@@ -570,6 +586,7 @@ pub(super) async fn prove_openai_compatible_stream_chunk_timeout()
         .complete(
             openai_compatible_request_with_events(Some(sender)),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect_err("stream chunk timeout script should fail");
@@ -630,6 +647,7 @@ pub(super) async fn prove_openai_compatible_cancel_before_response_start()
             .complete(
                 openai_compatible_request_with_events(Some(sender)),
                 &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
             )
             .await
     });
@@ -701,6 +719,7 @@ pub(super) async fn prove_openai_compatible_retry_exhaustion()
                     .expect("the two-attempt proof has one unsafe retry"),
                 max_duplicate_cost_tokens: None,
             },
+            lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
         .await

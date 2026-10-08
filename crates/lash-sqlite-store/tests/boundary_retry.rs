@@ -92,7 +92,7 @@ fn commit(boundary: &str, key: &str, revision: u64) -> RuntimeCommit {
     let state = RuntimeSessionState {
         session_id: "root".into(),
         head_revision: revision,
-        ..RuntimeSessionState::new(SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(SessionPolicy::new(
             TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -128,7 +128,7 @@ async fn semantic_boundary_retry_after_head_advance(boundary: &str, key: &str) {
     admit_run(&store).await;
     let state = RuntimeSessionState {
         session_id: "root".into(),
-        ..RuntimeSessionState::new(SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(SessionPolicy::new(
             TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -216,7 +216,7 @@ async fn initial_park_exact_commit_retry_after_head_advance() {
     admit_run(&store).await;
     let mut state = RuntimeSessionState {
         session_id: "root".into(),
-        ..RuntimeSessionState::new(SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(SessionPolicy::new(
             TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -287,7 +287,7 @@ async fn append_identity_replays_after_head_advance() {
     admit_run(&store).await;
     let mut state = RuntimeSessionState {
         session_id: "root".into(),
-        ..RuntimeSessionState::new(SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(SessionPolicy::new(
             TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),

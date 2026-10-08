@@ -83,7 +83,7 @@ impl Default for RuntimeCheckpointComponents {
 }
 
 impl RuntimeCheckpointComponents {
-    pub(crate) fn complete_empty() -> Self {
+    pub fn complete_empty() -> Self {
         Self {
             completeness: CheckpointComponentCompleteness::Complete,
             entries: std::collections::BTreeMap::new(),
@@ -770,21 +770,42 @@ pub struct RuntimeSessionAuthority {
     run_view: Option<Box<InstalledRunView>>,
 }
 
-impl Default for RuntimeSessionAuthority {
-    /// The blank authority of a state no head has been adopted into yet.
-    /// It is not a host choice: [`adopt_durable_head`] replaces it with the
-    /// session's recorded authority before the state runs anything.
-    fn default() -> Self {
+impl RuntimeSessionAuthority {
+    /// The authority a state is constructed from: its tool access, plugin
+    /// configuration and prompt plan, with no run view installed.
+    pub fn new(
+        tool_access: crate::SessionToolAccess,
+        plugin_config: crate::PluginConfig,
+        prompt_plan: crate::prompt_sections::PromptPlan,
+    ) -> Self {
         Self {
-            tool_access: crate::SessionToolAccess::ambient(),
-            plugin_config: crate::PluginConfig::default(),
-            prompt_plan: crate::prompt_sections::PromptPlan::default(),
+            tool_access,
+            plugin_config,
+            prompt_plan,
             run_view: None,
         }
     }
-}
 
-impl RuntimeSessionAuthority {
+    /// The authority `config` records.
+    pub fn of_config(config: &crate::PersistedSessionConfig) -> Self {
+        Self::new(
+            config.tool_access.clone(),
+            config.plugin_config.clone(),
+            config.prompt_plan.clone(),
+        )
+    }
+
+    /// The fixture authority tests share: ambient tool access, no plugin
+    /// configuration and the default prompt plan.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn ambient_fixture() -> Self {
+        Self::new(
+            crate::SessionToolAccess::ambient(),
+            crate::PluginConfig::default(),
+            crate::prompt_sections::PromptPlan::default(),
+        )
+    }
+
     /// The installed run view, when one is.
     pub fn run_view(&self) -> Option<&InstalledRunView> {
         self.run_view.as_deref()
@@ -859,7 +880,10 @@ pub struct RuntimeSessionState {
 }
 
 impl RuntimeSessionState {
-    pub fn new(policy: SessionPolicy) -> Self {
+    /// A state no head has been adopted into yet, under `authority`: the
+    /// authority its session records, which the state carries until
+    /// [`adopt_durable_head`] replaces it with the head's.
+    pub fn new(policy: SessionPolicy, authority: RuntimeSessionAuthority) -> Self {
         Self {
             session_id: SessionId::parse("root").expect("the root session id is nonblank"),
             policy,
@@ -869,7 +893,7 @@ impl RuntimeSessionState {
             turn_index: 0,
             token_usage: LlmUsage::default(),
             last_prompt_usage: None,
-            authority: Box::default(),
+            authority: Box::new(authority),
             checkpoint_components: RuntimeCheckpointComponents::complete_empty(),
             checkpoint_ref: None,
             head_revision: 0,
@@ -879,10 +903,19 @@ impl RuntimeSessionState {
         }
     }
 
+    /// The fixture state tests share: `policy` under
+    /// [`RuntimeSessionAuthority::ambient_fixture`].
+    #[cfg(any(test, feature = "testing"))]
+    pub fn ambient_fixture(policy: SessionPolicy) -> Self {
+        Self::new(policy, RuntimeSessionAuthority::ambient_fixture())
+    }
+
     /// Builds a `RuntimeSessionState` from snapshot data for protocol and process-engine
     /// implementors while materializing or restoring protocol session state.
-    pub fn from_snapshot(snapshot: SessionSnapshot) -> Self {
-        Self::from_snapshot_for_fleet(snapshot, crate::store::FleetFormat::current())
+    /// A snapshot records no tool access or prompt plan, so the caller
+    /// states the `authority` the state runs under.
+    pub fn from_snapshot(snapshot: SessionSnapshot, authority: RuntimeSessionAuthority) -> Self {
+        Self::from_snapshot_for_fleet(snapshot, authority, crate::store::FleetFormat::current())
     }
 
     /// The fleet-aware restore: descriptors reconstructed for components the
@@ -890,10 +923,9 @@ impl RuntimeSessionState {
     /// component-encoding surface (FIG-3796).
     pub fn from_snapshot_for_fleet(
         snapshot: SessionSnapshot,
+        authority: RuntimeSessionAuthority,
         fleet_format: crate::store::FleetFormat,
     ) -> Self {
-        // Authority deliberately defaults here and must be restored by adopt_durable_head;
-        // consuming a snapshot without the subsequent head adoption would widen authority.
         let checkpoint_components =
             RuntimeCheckpointComponents::from_snapshot(&snapshot, fleet_format);
         let agent_frames = snapshot
@@ -908,7 +940,7 @@ impl RuntimeSessionState {
             turn_index: snapshot.turn_index,
             token_usage: snapshot.token_usage,
             last_prompt_usage: snapshot.last_prompt_usage,
-            authority: Box::default(),
+            authority: Box::new(authority),
             checkpoint_components,
             checkpoint_ref: snapshot.checkpoint_ref,
             head_revision: 0,

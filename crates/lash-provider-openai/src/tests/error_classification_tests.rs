@@ -11,6 +11,7 @@ async fn typed_http_failure(body: &'static str) -> lash_core::provider::Provider
     handle
         .complete(
             request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
         .await

@@ -275,7 +275,7 @@ mod tests {
     impl Default for BatonManager {
         fn default() -> Self {
             Self {
-                snapshot: RuntimeSessionState::new(SessionPolicy::new(
+                snapshot: RuntimeSessionState::ambient_fixture(SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                     lash_core::MaxToolCalls::new(1024),
                     lash_core::NoProgressBudget::bounded(12),
@@ -495,7 +495,7 @@ mod tests {
                         )
                     },
                     session_graph,
-                    ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                    ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
                         lash_core::TurnBudget::Unbounded,
                         lash_core::MaxToolCalls::new(1024),
                         lash_core::NoProgressBudget::bounded(12),
@@ -646,7 +646,7 @@ mod tests {
                         lash_core::NoProgressBudget::bounded(12),
                     )
                 },
-                ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                     lash_core::MaxToolCalls::new(1024),
                     lash_core::NoProgressBudget::bounded(12),
@@ -722,7 +722,7 @@ mod tests {
                         lash_core::NoProgressBudget::bounded(12),
                     )
                 },
-                ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                     lash_core::MaxToolCalls::new(1024),
                     lash_core::NoProgressBudget::bounded(12),

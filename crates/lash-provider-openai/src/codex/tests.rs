@@ -368,6 +368,7 @@ async fn raw_provider_complete_filters_codex_sse_and_websocket_wire_captures() {
         &mut sse_provider,
         adversarial_codex_raw_request(),
         &lash_core::provider::NoSlotDeliveries,
+        &lash_core::provider::LiveCallHorizon::fixture(),
     )
     .await
     .expect("raw Codex SSE completion");
@@ -388,6 +389,7 @@ async fn raw_provider_complete_filters_codex_sse_and_websocket_wire_captures() {
         &mut websocket_provider,
         adversarial_codex_raw_request(),
         &lash_core::provider::NoSlotDeliveries,
+        &lash_core::provider::LiveCallHorizon::fixture(),
     )
     .await
     .expect("raw Codex WebSocket completion");
@@ -674,6 +676,7 @@ async fn assert_trace_cached_delta_for_transport(transport: CodexTransport) {
                 Arc::clone(&trace),
             ),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("first response");
@@ -692,6 +695,7 @@ async fn assert_trace_cached_delta_for_transport(transport: CodexTransport) {
                 Arc::clone(&trace),
             ),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("cached follow-up response");
@@ -741,6 +745,7 @@ async fn assert_trace_stale_retry_for_transport(transport: CodexTransport) {
                 Arc::clone(&trace),
             ),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("first response");
@@ -759,6 +764,7 @@ async fn assert_trace_stale_retry_for_transport(transport: CodexTransport) {
                 Arc::clone(&trace),
             ),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("stale retry response");
@@ -804,6 +810,7 @@ async fn codex_scripted_websocket_default_timeout_survives_a_scheduler_stall() {
             .complete(
                 request(vec![LlmMessage::text(LlmRole::User, "hello")]),
                 &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
             )
             .await
     });
@@ -845,6 +852,7 @@ async fn codex_scripted_websocket_full_turn_sends_response_create() {
         .complete(
             request(vec![LlmMessage::text(LlmRole::User, "hello")]),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("websocket response");
@@ -906,6 +914,7 @@ async fn codex_scripted_websocket_cached_follow_up_omits_previous_assistant_outp
                 ],
             )]),
             &crate::tests::attachment_tests::UrlDelivery,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("first response");
@@ -938,7 +947,11 @@ async fn codex_scripted_websocket_cached_follow_up_omits_previous_assistant_outp
         LlmMessage::text(LlmRole::User, "next"),
     ]);
     let response = provider
-        .complete(second, &crate::tests::attachment_tests::UrlDelivery)
+        .complete(
+            second,
+            &crate::tests::attachment_tests::UrlDelivery,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect("second response");
 
@@ -977,6 +990,7 @@ async fn codex_provider_close_sends_websocket_close_frame_for_cached_session() {
         .complete(
             request(vec![LlmMessage::text(LlmRole::User, "hello")]),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("first response");
@@ -1032,6 +1046,7 @@ async fn codex_provider_close_drains_a_dead_cached_socket_within_bound() {
         .complete(
             request(vec![LlmMessage::text(LlmRole::User, "hello")]),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("first response");
@@ -1098,6 +1113,7 @@ async fn codex_scripted_websocket_same_session_different_frame_does_not_reuse_co
         .complete(
             request(vec![LlmMessage::text(LlmRole::User, "hello")]),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("first response");
@@ -1125,7 +1141,11 @@ async fn codex_scripted_websocket_same_session_different_frame_does_not_reuse_co
         "session-1:request:other",
     );
     let response = provider
-        .complete(second, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            second,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect("second response");
 
@@ -1186,6 +1206,7 @@ async fn codex_scripted_websocket_stale_previous_response_retries_full_context_o
         .complete(
             request(vec![LlmMessage::text(LlmRole::User, "hello")]),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("first response");
@@ -1209,7 +1230,11 @@ async fn codex_scripted_websocket_stale_previous_response_retries_full_context_o
     ]);
     let full_body = provider.build_request_body(&second, true).unwrap();
     let response = provider
-        .complete(second, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            second,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect("stale retry response");
 
@@ -1257,6 +1282,7 @@ async fn codex_stale_continuation_after_allocation_only_event_still_recovers() {
         .complete(
             request(vec![LlmMessage::text(LlmRole::User, "hello")]),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("first response");
@@ -1281,7 +1307,11 @@ async fn codex_stale_continuation_after_allocation_only_event_still_recovers() {
     let full_body = provider.build_request_body(&second, true).unwrap();
 
     let result = provider
-        .complete(second, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            second,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await;
     let captured = ws.captured();
     assert_eq!(captured.len(), 3);
@@ -1317,6 +1347,7 @@ async fn codex_scripted_websocket_dead_reused_socket_reconnects_full_context() {
         .complete(
             request(vec![LlmMessage::text(LlmRole::User, "hello")]),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("first response");
@@ -1341,7 +1372,11 @@ async fn codex_scripted_websocket_dead_reused_socket_reconnects_full_context() {
     ]);
     let full_body = provider.build_request_body(&second, true).unwrap();
     let response = provider
-        .complete(second, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            second,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect("dead reused socket reconnect response");
 
@@ -1385,6 +1420,7 @@ async fn codex_scripted_websocket_incomplete_terminal_response_is_not_cached() {
         .complete(
             request(vec![LlmMessage::text(LlmRole::User, "hello")]),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("incomplete terminal response");
@@ -1395,7 +1431,11 @@ async fn codex_scripted_websocket_incomplete_terminal_response_is_not_cached() {
     ]);
     let full_body = provider.build_request_body(&second, true).unwrap();
     let response = provider
-        .complete(second, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            second,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect("fresh response after incomplete terminal");
 
@@ -1439,11 +1479,19 @@ async fn codex_auto_with_distinct_scopes_uses_uncached_websockets() {
     second.scope = LlmRequestScope::new("direct-b", "direct-b:frame", "direct-b:request");
 
     let first_response = provider
-        .complete(first, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            first,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect("first response");
     let second_response = provider
-        .complete(second, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            second,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect("second response");
 
@@ -1525,11 +1573,19 @@ async fn codex_uncached_websockets_survive_a_failed_accept_between_connections()
     second.scope = LlmRequestScope::new("direct-b", "direct-b:frame", "direct-b:request");
 
     let first_response = provider
-        .complete(first, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            first,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect("first response");
     let second_response = provider
-        .complete(second, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            second,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect("second response");
 
@@ -1591,7 +1647,11 @@ async fn codex_scripted_websocket_accept_loop_retries_every_error_kind() {
     only.scope = LlmRequestScope::new("direct-a", "direct-a:frame", "direct-a:request");
 
     let response = provider
-        .complete(only, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            only,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect("response");
 
@@ -1661,6 +1721,7 @@ async fn codex_auto_allocation_only_event_failure_does_not_fallback_to_sse() {
         .complete(
             request(vec![LlmMessage::text(LlmRole::User, "hello")]),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect_err("events-seen websocket failure");
@@ -1686,6 +1747,7 @@ async fn codex_auto_output_started_failure_does_not_fallback_to_sse() {
         .complete(
             request(vec![LlmMessage::text(LlmRole::User, "hello")]),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect_err("output-started websocket failure");
@@ -1728,7 +1790,11 @@ async fn codex_sse_stream_evidence_carries_allowlisted_response_headers() {
     }));
 
     let response = provider
-        .complete(req, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            req,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect("SSE response");
 
@@ -1800,6 +1866,7 @@ async fn codex_websocket_output_started_forced_delay_pins_hardened_ordering() {
     let result = handle
         .complete(
             request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
         .await;
@@ -1844,7 +1911,11 @@ async fn codex_websocket_clean_eof_completes_by_default_and_fails_when_terminal_
         .capability
         .stream_termination = Some(StreamTermination::RequireTerminalEvidence);
     let error = strict
-        .complete(strict_request, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            strict_request,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect_err("required terminal evidence refuses a clean EOF without it");
 
@@ -1869,6 +1940,7 @@ async fn codex_websocket_clean_eof_completes_by_default_and_fails_when_terminal_
         .complete(
             request(vec![LlmMessage::text(LlmRole::User, "hello")]),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("a clean close after output completes by default");

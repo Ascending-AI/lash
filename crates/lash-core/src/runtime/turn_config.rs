@@ -372,21 +372,24 @@ mod tests {
             )
             .with_session_id(crate::SessionId::fixture(session_id.as_str()))
             .with_plugin_factories(crate::testing::test_standard_protocol_factories())
-            .with_policy(crate::SessionPolicy {
-                model: Some(crate::testing::test_llm_profile_config(
-                    "test-model",
-                    crate::LlmProfileMetadata::builder("test-model")
-                        .cache_retention(crate::provider::CacheRetention::Short)
-                        .context_window_tokens(1024)
-                        .build()
-                        .expect("model"),
-                )),
-                ..crate::SessionPolicy::new(
-                    crate::TurnBudget::Unbounded,
-                    crate::MaxToolCalls::new(1024),
-                    crate::NoProgressBudget::bounded(12),
-                )
-            })
+            .with_creation(
+                crate::SessionPolicy {
+                    model: Some(crate::testing::test_llm_profile_config(
+                        "test-model",
+                        crate::LlmProfileMetadata::builder("test-model")
+                            .cache_retention(crate::provider::CacheRetention::Short)
+                            .context_window_tokens(1024)
+                            .build()
+                            .expect("model"),
+                    )),
+                    ..crate::SessionPolicy::new(
+                        crate::TurnBudget::Unbounded,
+                        crate::MaxToolCalls::new(1024),
+                        crate::NoProgressBudget::bounded(12),
+                    )
+                },
+                crate::SessionToolAccess::ambient(),
+            )
             .build(),
         )
         .await

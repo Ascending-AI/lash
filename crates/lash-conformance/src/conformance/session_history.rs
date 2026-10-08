@@ -29,7 +29,7 @@ fn budget(nodes: u32, bytes: u64) -> HistoryBudget {
 fn state(session_id: &str) -> RuntimeSessionState {
     RuntimeSessionState {
         session_id: SessionId::fixture(session_id),
-        ..RuntimeSessionState::new(SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(SessionPolicy::new(
             TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),

@@ -227,7 +227,7 @@ pub async fn upload_staging_identities_are_distinct_guarded_and_fenced_independe
 fn state(session: &str) -> RuntimeSessionState {
     let mut state = RuntimeSessionState {
         session_id: session.parse().unwrap(),
-        ..RuntimeSessionState::new(SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(SessionPolicy::new(
             TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),

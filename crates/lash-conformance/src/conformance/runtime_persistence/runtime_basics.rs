@@ -19,7 +19,7 @@ pub async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn 
                 lash_core::NoProgressBudget::bounded(12),
             )
         },
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -121,7 +121,7 @@ pub async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Ru
     let make_commit = |node_id: &str| {
         let state = RuntimeSessionState {
             session_id: SessionId::fixture(session_id.to_string()),
-            ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
@@ -209,7 +209,7 @@ pub async fn serves_each_admitted_session_and_refuses_an_unknown_one(store: Arc<
     let state_for = |session_id: &str| {
         let mut state = RuntimeSessionState {
             session_id: SessionId::fixture(session_id),
-            ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
@@ -340,7 +340,7 @@ pub async fn serves_each_admitted_session_and_refuses_an_unknown_one(store: Arc<
 pub async fn load_hydrates_checkpoint(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("hydrated"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -407,7 +407,7 @@ pub async fn session_read_loads_persisted_history(store: Arc<dyn RuntimeStore>) 
                 .expect("derived test frame identity is non-empty"),
         ),
         session_graph: graph,
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),

@@ -141,9 +141,12 @@ impl RlmProtocolPluginFactory {
         )?;
         let plugins = plugin_host.build_session(PluginSessionRequest::creation(
             &request.session_id,
+            // The compile surface is resolved for a process environment,
+            // which records no session: its tool authority is ambient over
+            // the caller's plugin host.
             SessionAuthorityContext {
+                tool_access: lash_core::SessionToolAccess::ambient(),
                 plugin_config: request.execution_env_spec.plugin_config,
-                ..Default::default()
             },
         ))?;
         let tool_catalog = plugins.resolved_tool_catalog()?;
@@ -525,7 +528,10 @@ mod label_annotation_tests {
         ));
         let factory_plugin: std::sync::Arc<dyn lash_core::facade_support::PluginFactory> =
             factory.clone();
-        let plugin_host = lash_core::facade_support::PluginHost::new(vec![factory_plugin]);
+        let plugin_host = lash_core::facade_support::PluginHost::new(
+            vec![factory_plugin],
+            lash_core::ExecutionBudgets::recommended(),
+        );
         let source = "process 42oops() { finish \"x\" }";
         let err = factory
             .compile_lashlang_module(
@@ -662,14 +668,17 @@ mod process_settings_tests {
             Arc::new(TypescriptDialect),
             &backend,
         ));
-        let installing_host = PluginHost::new(vec![
-            Arc::new(RlmProtocolPluginFactory::new(
-                installing(),
-                Arc::new(TypescriptDialect),
-                &backend,
-            )),
-            resource_factory(),
-        ]);
+        let installing_host = PluginHost::new(
+            vec![
+                Arc::new(RlmProtocolPluginFactory::new(
+                    installing(),
+                    Arc::new(TypescriptDialect),
+                    &backend,
+                )),
+                resource_factory(),
+            ],
+            lash_core::ExecutionBudgets::recommended(),
+        );
         let runtime_host = installing_host
             .install_process_engine_contributions(
                 RuntimeHostConfig::new(
@@ -684,13 +693,16 @@ mod process_settings_tests {
                 true,
             )
             .expect("the engine installs");
-        let plugin_config = PluginHost::new(vec![creating_factory.clone()])
-            .resolve_creation_plugin_config(
-                Some(RLM_PROTOCOL_PLUGIN_ID),
-                &lash_core::PluginOptions::default(),
-                &lash_core::store::plugin_writers::PluginAdmission::default(),
-            )
-            .expect("the creating deployment records the RLM namespace");
+        let plugin_config = PluginHost::new(
+            vec![creating_factory.clone()],
+            lash_core::ExecutionBudgets::recommended(),
+        )
+        .resolve_creation_plugin_config(
+            Some(RLM_PROTOCOL_PLUGIN_ID),
+            &lash_core::PluginOptions::default(),
+            &lash_core::store::plugin_writers::PluginAdmission::default(),
+        )
+        .expect("the creating deployment records the RLM namespace");
         let environment = lash_core::ProcessExecutionEnvSpec::new(
             lash_core::AdmittedPluginConfig::new(plugin_config, 0),
             lash_core::SessionPolicy::new(

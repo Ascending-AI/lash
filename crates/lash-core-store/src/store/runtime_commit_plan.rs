@@ -540,7 +540,7 @@ mod tests {
     fn commit_refuses_ingress_and_a_session_command_run_with_its_typed_cause() {
         let state = crate::RuntimeSessionState {
             session_id: SessionId::from("ingress-and-command-run"),
-            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
@@ -580,7 +580,7 @@ mod tests {
     fn fresh_commit_plan_retired_old_leaf_is_invalid_graph_leaf() {
         let state = crate::RuntimeSessionState {
             session_id: "retired-leaf".into(),
-            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),

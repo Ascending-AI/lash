@@ -18,6 +18,7 @@ async fn codex_auto_skips_websocket_while_session_fallback_is_active() {
         .complete(
             request(vec![LlmMessage::text(LlmRole::User, "hello")]),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("first SSE fallback response");
@@ -42,6 +43,7 @@ async fn codex_auto_skips_websocket_while_session_fallback_is_active() {
         .complete(
             request(vec![LlmMessage::text(LlmRole::User, "next")]),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("second SSE fallback response");

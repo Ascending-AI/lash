@@ -571,7 +571,7 @@ fn runtime_commit(
 ) -> RuntimeCommit {
     let state = RuntimeSessionState {
         session_id: session_id.clone(),
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -1347,7 +1347,7 @@ impl BackendRunner {
                     .expect("generated sequence creates handle before commit");
                 let state = RuntimeSessionState {
                     session_id: self.session_id.clone(),
-                    ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                    ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
                         lash_core::TurnBudget::Unbounded,
                         lash_core::MaxToolCalls::new(1024),
                         lash_core::NoProgressBudget::bounded(12),

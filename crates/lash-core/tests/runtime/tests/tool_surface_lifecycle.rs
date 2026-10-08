@@ -149,7 +149,7 @@ fn hidden_authority(tool_name: &str) -> SessionAuthorityContext {
         tool_access: lash_core::SessionToolAccess::ambient()
             .with_hidden_tools([tool_name])
             .expect("valid hidden name"),
-        ..SessionAuthorityContext::default()
+        ..SessionAuthorityContext::ambient_fixture()
     }
 }
 
@@ -221,7 +221,7 @@ async fn broader_authority_fork_regains_parent_hidden_tool() {
     let child = parent
         .fork_for_session(
             "broader-child",
-            lash_core::plugin::SessionAuthorityContext::default(),
+            lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
         )
         .expect("fork with broader child authority");
     let session = lash_core::testing::runtime_internals::Session::new(

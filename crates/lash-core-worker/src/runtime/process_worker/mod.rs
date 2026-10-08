@@ -63,6 +63,11 @@ impl DurableProcessWorkerConfig {
         self.process_work.registry()
     }
 
+    /// The process work wiring a process runtime of this worker is built on.
+    pub fn process_work(&self) -> &crate::ProcessWorkWiring {
+        &self.process_work
+    }
+
     pub fn from_plugin_factories(
         plugin_factories: impl IntoIterator<Item = Arc<dyn PluginFactory>>,
         runtime_host: RuntimeHostConfig,
@@ -70,7 +75,10 @@ impl DurableProcessWorkerConfig {
         lease_owner: crate::LeaseOwnerIdentity,
     ) -> Self {
         Self::new(
-            Arc::new(PluginHost::new(plugin_factories.into_iter().collect())),
+            Arc::new(PluginHost::new(
+                plugin_factories.into_iter().collect(),
+                runtime_host.control.execution_budgets.clone(),
+            )),
             runtime_host,
             process_work,
             lease_owner,

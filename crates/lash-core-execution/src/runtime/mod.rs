@@ -147,7 +147,7 @@ pub use queued_drain_policy::{
     QueuedDrainRequest, QueuedDrainSelection,
 };
 pub use session_catalog::*;
-pub use state::{RuntimeCheckpointComponents, RuntimeSessionState};
+pub use state::{RuntimeCheckpointComponents, RuntimeSessionAuthority, RuntimeSessionState};
 pub use turn_control::{
     QueueWithdrawalPublisher, TurnAddress, TurnAttach, TurnCancelAffectedInput,
     TurnCancelInputOutcome, TurnCancelMode, TurnCancelOutcome, TurnCancelReceipt,

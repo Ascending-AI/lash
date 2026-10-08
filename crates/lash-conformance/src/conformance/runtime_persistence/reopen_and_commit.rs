@@ -137,7 +137,7 @@ pub async fn gc_blobs(factory: ReopenableRuntimeStore) {
     // First commit writes a live checkpoint blob.
     let mut v1 = RuntimeSessionState {
         session_id: SessionId::from("gc-blobs"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -158,7 +158,7 @@ pub async fn gc_blobs(factory: ReopenableRuntimeStore) {
     let mut v2 = RuntimeSessionState {
         session_id: SessionId::from("gc-blobs"),
         head_revision: v1_result.head_revision,
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -262,7 +262,7 @@ pub async fn attachment_acquisition_preserves_receiving_referrer(store: Arc<dyn 
 pub async fn append_receipt_reopen(factory: ReopenableRuntimeStore) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -305,7 +305,7 @@ pub async fn append_receipt_reopen(factory: ReopenableRuntimeStore) {
 pub async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -355,7 +355,7 @@ pub async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimeSt
 pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -438,7 +438,7 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeSto
 pub async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimeStore>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -486,7 +486,7 @@ pub async fn committed_leaf_is_derived_from_the_terminal_appended_node(
 ) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -535,7 +535,7 @@ pub async fn committed_leaf_is_derived_from_the_terminal_appended_node(
 pub async fn preserve_head_commit_reports_the_resident_leaf(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -576,7 +576,7 @@ pub async fn preserve_head_commit_reports_the_resident_leaf(store: Arc<dyn Runti
 pub async fn empty_append_cannot_move_the_head(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("empty-append-head-move"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),

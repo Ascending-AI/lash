@@ -17,11 +17,17 @@ pub async fn plugin_state_boundary_trace(
     Box::pin(async move {
         let fixture = MockPlugin::default();
         let host = fixture.host();
-        let plugins = support::construct(&host, parent_id, None, Default::default()).await;
+        let plugins = support::construct(
+            &host,
+            parent_id,
+            None,
+            lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+        )
+        .await;
         let handle = fixture.state(parent_id);
         let mut state = RuntimeSessionState {
             session_id: parent_id.parse().unwrap(),
-            ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
@@ -60,7 +66,7 @@ pub async fn plugin_state_boundary_trace(
             &rebuilt_host,
             parent_id,
             crash_state.plugin_state(),
-            Default::default(),
+            lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
         )
         .await;
         assert_eq!(
@@ -102,7 +108,7 @@ pub async fn plugin_state_boundary_trace(
             &rebuilt_host,
             parent_id,
             durable.plugin_state(),
-            Default::default(),
+            lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
         )
         .await;
         assert_eq!(
@@ -124,7 +130,10 @@ pub async fn plugin_state_boundary_trace(
         )
         .await;
         let child = plugins
-            .fork_for_session(SessionId::fixture(child_id), Default::default())
+            .fork_for_session(
+                SessionId::fixture(child_id),
+                lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+            )
             .unwrap();
         let child_handle = fixture.state(child_id);
         assert_eq!(child_handle.generation(), handle.generation());
@@ -151,7 +160,7 @@ pub async fn plugin_state_boundary_trace(
         assert_eq!(handle.get("child-only"), None);
         let mut child_state = RuntimeSessionState {
             session_id: child_id.parse().unwrap(),
-            ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),

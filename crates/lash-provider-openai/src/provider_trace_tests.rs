@@ -158,7 +158,11 @@ async fn extended_provider_trace_captures_exact_serialized_chat_body() {
     }));
 
     let response = provider
-        .complete(req, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            req,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect("completion succeeds");
 
@@ -189,7 +193,11 @@ async fn extended_provider_trace_captures_exact_serialized_chat_body() {
         OpenAiCompatibleProvider::new(SECRET_SENTINEL, "https://example.test/v1")
             .with_transport(untraced_transport.clone());
     untraced_provider
-        .complete(request(), &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            request(),
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect("untraced completion succeeds");
     let untraced_body = {
@@ -210,7 +218,11 @@ async fn extended_provider_trace_captures_exact_serialized_chat_body() {
     }));
 
     let error = error_provider
-        .complete(error_req, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            error_req,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect_err("provider error is returned");
     let error_event = error_events
@@ -239,7 +251,11 @@ async fn codex_sse_provider_trace_captures_exact_serialized_request_body() {
     let (req, events) = traced_request(&events);
 
     let error = provider
-        .complete(req, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            req,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect_err("provider error is returned");
 
@@ -276,7 +292,11 @@ async fn codex_websocket_provider_trace_captures_exact_serialized_request_body()
     let (req, events) = traced_request(&events);
 
     let error = provider
-        .complete(req, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            req,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect_err("provider error is returned");
 

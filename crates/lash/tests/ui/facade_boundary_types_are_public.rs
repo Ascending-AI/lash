@@ -90,10 +90,13 @@ fn plugin_types_are_nameable() -> PluginHost {
             .with_tool_result_transform(lash::hook_key!("recover"), Arc::clone(&recover))
             .with_tool_result_check(lash::hook_key!("audit"), Arc::clone(&audit)))
     });
-    PluginHost::new(vec![Arc::new(PluginSpecFactory::new(
-        lash::plugins::PluginDeclaration::initial("facade"),
-        builder,
-    ))])
+    PluginHost::new(
+        vec![Arc::new(PluginSpecFactory::new(
+            lash::plugins::PluginDeclaration::initial("facade"),
+            builder,
+        ))],
+        lash_core::ExecutionBudgets::recommended(),
+    )
 }
 
 struct FacadeCompactor;

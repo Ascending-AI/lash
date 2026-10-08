@@ -36,7 +36,11 @@ async fn fig1123_unsupported_retention_is_refused_before_network() {
     };
 
     let error = provider
-        .complete(req, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            req,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect_err("cross-provider retention must be refused");
 

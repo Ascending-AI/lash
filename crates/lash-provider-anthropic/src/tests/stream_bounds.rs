@@ -137,6 +137,7 @@ async fn malformed_start_is_terminal_and_preserves_only_the_valid_prefix() {
         .complete(
             request(vec![LlmMessage::text(LlmRole::User, "hello")]),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect_err("a later terminal marker cannot turn a malformed stream into success");

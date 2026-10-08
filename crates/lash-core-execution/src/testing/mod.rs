@@ -1950,7 +1950,7 @@ pub struct MockSessionManager {
 impl Default for MockSessionManager {
     fn default() -> Self {
         Self {
-            snapshot: RuntimeSessionState::new(mock_session_policy()).to_snapshot(),
+            snapshot: RuntimeSessionState::ambient_fixture(mock_session_policy()).to_snapshot(),
             tool_catalog: Vec::new(),
             turn: mock_assembled_turn(&SessionId::from("root"), ""),
             tool_registry: None,

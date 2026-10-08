@@ -483,6 +483,7 @@ async fn run_mutation_script(
                 .complete(
                     openai_compatible_request(stream),
                     &lash_core::provider::NoSlotDeliveries,
+                    &lash_core::provider::LiveCallHorizon::fixture(),
                 )
                 .await
         }
@@ -493,6 +494,7 @@ async fn run_mutation_script(
                 .complete(
                     openai_responses_request(),
                     &lash_core::provider::NoSlotDeliveries,
+                    &lash_core::provider::LiveCallHorizon::fixture(),
                 )
                 .await
         }
@@ -504,6 +506,7 @@ async fn run_mutation_script(
                 .complete(
                     anthropic_messages_request(),
                     &lash_core::provider::NoSlotDeliveries,
+                    &lash_core::provider::LiveCallHorizon::fixture(),
                 )
                 .await
         }
@@ -517,6 +520,7 @@ async fn run_mutation_script(
                 .complete(
                     google_request(stream),
                     &lash_core::provider::NoSlotDeliveries,
+                    &lash_core::provider::LiveCallHorizon::fixture(),
                 )
                 .await
         }

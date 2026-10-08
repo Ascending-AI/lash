@@ -59,13 +59,13 @@ mod tests {
             ))])
             .build_session(PluginSessionRequest::creation(
                 "capture-race",
-                Default::default(),
+                crate::plugin::SessionAuthorityContext::ambient_fixture(),
             ))
             .unwrap();
         let store = session_store("capture-race").await;
         let mut state = crate::RuntimeSessionState {
             session_id: "capture-race".into(),
-            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 lash_core_execution::NoProgressBudget::bounded(12),

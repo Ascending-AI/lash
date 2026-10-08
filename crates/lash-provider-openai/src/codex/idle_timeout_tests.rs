@@ -21,7 +21,11 @@ async fn codex_websocket_first_response_frame_emits_establishment_marker_first()
     }));
 
     provider
-        .complete(req, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            req,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect("websocket response");
 
@@ -54,7 +58,11 @@ async fn codex_websocket_idle_before_response_start_emits_no_stream_events() {
 
     let completion = tokio::spawn(async move {
         provider
-            .complete(req, &lash_core::provider::NoSlotDeliveries)
+            .complete(
+                req,
+                &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
+            )
             .await
     });
     advance_scripted_websocket_idle_timeout(&idle_ready).await;
@@ -92,7 +100,11 @@ async fn codex_scripted_websocket_idle_before_start_falls_back_to_sse() {
     let request = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     let completion = tokio::spawn(async move {
         provider
-            .complete(request, &lash_core::provider::NoSlotDeliveries)
+            .complete(
+                request,
+                &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
+            )
             .await
     });
     advance_scripted_websocket_idle_timeout(&idle_ready).await;
@@ -126,6 +138,7 @@ async fn codex_scripted_websocket_idle_after_output_is_terminal_error() {
         .complete(
             request(vec![LlmMessage::text(LlmRole::User, "hello")]),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect_err("idle after output");
@@ -161,6 +174,7 @@ async fn codex_websocket_regular_frames_cannot_outlive_request_deadline() {
         provider.complete(
             request(vec![LlmMessage::text(LlmRole::User, "hello")]),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         ),
     )
     .await

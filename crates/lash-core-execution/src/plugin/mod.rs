@@ -248,10 +248,10 @@ mod tests {
                 )) as Arc<dyn PluginFactory>
             })
             .collect();
-        let session = PluginHost::new(factories)
+        let session = PluginHost::new(factories, crate::ExecutionBudgets::recommended())
             .build_session(PluginSessionRequest::creation(
                 "typed-causes",
-                Default::default(),
+                crate::plugin::SessionAuthorityContext::ambient_fixture(),
             ))
             .unwrap();
         let error = session
@@ -503,9 +503,15 @@ mod tests {
 
     #[tokio::test]
     async fn external_query_defaults_to_current_session_when_requested() {
-        let host = PluginHost::new(vec![Arc::new(MockPluginFactory)]);
+        let host = PluginHost::new(
+            vec![Arc::new(MockPluginFactory)],
+            crate::ExecutionBudgets::recommended(),
+        );
         let session = host
-            .build_session(PluginSessionRequest::creation("root", Default::default()))
+            .build_session(PluginSessionRequest::creation(
+                "root",
+                crate::plugin::SessionAuthorityContext::ambient_fixture(),
+            ))
             .expect("session");
         let (_plugin_id, result) = session
             .query_plugin(
@@ -526,9 +532,15 @@ mod tests {
 
     #[tokio::test]
     async fn plugin_query_generates_schema_and_invokes_typed_output() {
-        let host = PluginHost::new(vec![Arc::new(MockPluginFactory)]);
+        let host = PluginHost::new(
+            vec![Arc::new(MockPluginFactory)],
+            crate::ExecutionBudgets::recommended(),
+        );
         let session = host
-            .build_session(PluginSessionRequest::creation("root", Default::default()))
+            .build_session(PluginSessionRequest::creation(
+                "root",
+                crate::plugin::SessionAuthorityContext::ambient_fixture(),
+            ))
             .expect("session");
 
         let def = session
@@ -626,9 +638,14 @@ mod tests {
             }
         }
 
-        let err = match PluginHost::new(vec![Arc::new(CrossKindFactory)])
-            .build_session(PluginSessionRequest::creation("root", Default::default()))
-        {
+        let err = match PluginHost::new(
+            vec![Arc::new(CrossKindFactory)],
+            crate::ExecutionBudgets::recommended(),
+        )
+        .build_session(PluginSessionRequest::creation(
+            "root",
+            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+        )) {
             Ok(_) => panic!("a task may not reuse a registered query name"),
             Err(err) => err,
         };
@@ -716,12 +733,18 @@ mod tests {
 
     #[tokio::test]
     async fn plugin_session_queries_forked_session() {
-        let host = PluginHost::new(vec![Arc::new(MockPluginFactory)]);
+        let host = PluginHost::new(
+            vec![Arc::new(MockPluginFactory)],
+            crate::ExecutionBudgets::recommended(),
+        );
         let root = host
-            .build_session(PluginSessionRequest::creation("root", Default::default()))
+            .build_session(PluginSessionRequest::creation(
+                "root",
+                crate::plugin::SessionAuthorityContext::ambient_fixture(),
+            ))
             .expect("root");
         let child = root
-            .fork_for_session("child", SessionAuthorityContext::default())
+            .fork_for_session("child", SessionAuthorityContext::ambient_fixture())
             .expect("child");
 
         let (_plugin_id, result) = child
@@ -749,9 +772,15 @@ mod tests {
 
     #[test]
     fn plugin_host_unregisters_sessions() {
-        let host = PluginHost::new(vec![Arc::new(MockPluginFactory)]);
+        let host = PluginHost::new(
+            vec![Arc::new(MockPluginFactory)],
+            crate::ExecutionBudgets::recommended(),
+        );
         let _session = host
-            .build_session(PluginSessionRequest::creation("root", Default::default()))
+            .build_session(PluginSessionRequest::creation(
+                "root",
+                crate::plugin::SessionAuthorityContext::ambient_fixture(),
+            ))
             .expect("session");
         assert!(host.session(&SessionId::from("root")).is_ok());
         host.unregister_session(&SessionId::from("root"))

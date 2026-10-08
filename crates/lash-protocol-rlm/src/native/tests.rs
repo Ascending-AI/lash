@@ -21,9 +21,15 @@ pub(super) fn config(native: bool, termination: RlmTermination) -> TurnMachineCo
         std::sync::Arc::new(crate::TypescriptDialect),
         &crate::testing::sqlite_recording_backend_blocking().clone(),
     );
-    let host = lash_core::facade_support::PluginHost::new(vec![Arc::new(factory)]);
+    let host = lash_core::facade_support::PluginHost::new(
+        vec![Arc::new(factory)],
+        lash_core::ExecutionBudgets::recommended(),
+    );
     let session = host
-        .build_session(PluginSessionRequest::creation("parity", Default::default()))
+        .build_session(PluginSessionRequest::creation(
+            "parity",
+            lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+        ))
         .unwrap();
     let preamble = session
         .protocol_driver()
@@ -77,15 +83,18 @@ fn rlm_catalog_distinguishes_ambient_from_restricted_empty_access() {
             std::sync::Arc::new(crate::TypescriptDialect),
             &crate::testing::sqlite_recording_backend_blocking().clone(),
         );
-        lash_core::facade_support::PluginHost::new(vec![Arc::new(factory)])
-            .build_session(PluginSessionRequest::creation(
-                lash_core::SessionId::fixture(session_id),
-                lash_core::plugin::SessionAuthorityContext {
-                    tool_access,
-                    ..Default::default()
-                },
-            ))
-            .expect("RLM protocol session")
+        lash_core::facade_support::PluginHost::new(
+            vec![Arc::new(factory)],
+            lash_core::ExecutionBudgets::recommended(),
+        )
+        .build_session(PluginSessionRequest::creation(
+            lash_core::SessionId::fixture(session_id),
+            lash_core::plugin::SessionAuthorityContext {
+                tool_access,
+                ..lash_core::plugin::SessionAuthorityContext::ambient_fixture()
+            },
+        ))
+        .expect("RLM protocol session")
     };
 
     let ambient = build("rlm-ambient", lash_core::SessionToolAccess::ambient());
@@ -751,11 +760,14 @@ async fn factory_selects_native_abi_and_completed_cell_events() {
         std::sync::Arc::new(crate::TypescriptDialect),
         &crate::testing::sqlite_recording_backend().await,
     );
-    let host = lash_core::facade_support::PluginHost::new(vec![Arc::new(factory)]);
+    let host = lash_core::facade_support::PluginHost::new(
+        vec![Arc::new(factory)],
+        lash_core::ExecutionBudgets::recommended(),
+    );
     let session = host
         .build_session(PluginSessionRequest::creation(
             "native-plugin",
-            Default::default(),
+            lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
         ))
         .unwrap();
     let catalog = session.resolved_tool_catalog().unwrap();

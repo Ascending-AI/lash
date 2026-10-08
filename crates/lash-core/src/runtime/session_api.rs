@@ -306,8 +306,7 @@ impl LashRuntime {
             empty.agent_frames.clear();
             empty.current_frame_node_id = None;
             empty.checkpoint_ref = None;
-            empty.checkpoint_components =
-                crate::RuntimeSessionState::new(empty.policy.clone()).checkpoint_components;
+            empty.checkpoint_components = crate::RuntimeCheckpointComponents::complete_empty();
             empty.persisted_node_ids.clear();
             empty.head_revision = 0;
             empty.turn_index = 0;
@@ -514,6 +513,13 @@ impl LashRuntime {
                 self.state.admitted_plugin_config(),
             )
             .map_err(|error| RuntimeError::new(RuntimeErrorCode::Plugin, error.to_string()))
+    }
+
+    /// The plugin session this runtime was assembled with, whether or not a
+    /// run has materialized it.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn assembled_plugin_session(&self) -> &Arc<crate::PluginSession> {
+        &self.services.plugins
     }
 
     /// The plugin session bound to the currently active runtime session, if any.

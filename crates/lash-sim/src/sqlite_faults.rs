@@ -529,7 +529,7 @@ async fn run_composition_case(
         .map_err(|failure| failure.reason)?;
     let mut state = RuntimeSessionState {
         session_id: session_id.clone(),
-        ..RuntimeSessionState::new(SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -734,7 +734,7 @@ async fn run_seed(
     let mut store = create_store(backend, Arc::clone(&factory), &session_id).await?;
     let mut state = RuntimeSessionState {
         session_id: session_id.clone(),
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -1255,7 +1255,7 @@ mod tests {
         let head_after_admission = head().await;
         let state = RuntimeSessionState {
             session_id: session_id.clone(),
-            ..RuntimeSessionState::new(SessionPolicy::new(
+            ..RuntimeSessionState::ambient_fixture(SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),

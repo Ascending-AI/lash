@@ -11,7 +11,11 @@ async fn empty_batch_dispatches_predecessor_and_unknown_versions_to_a_typed_prot
         contract_available: true,
         observed_execution_bindings: None,
     });
-    let context = refusing_dispatch_context(provider_plugins(provider, Default::default())).await;
+    let context = refusing_dispatch_context(provider_plugins(
+        provider,
+        crate::plugin::SessionAuthorityContext::ambient_fixture(),
+    ))
+    .await;
     for recorded in [0, 1, 2, 4] {
         let outcomes = execute_final_tool_intents(
             &context.intent_realization_context(),

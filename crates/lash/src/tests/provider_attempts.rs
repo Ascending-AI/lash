@@ -772,7 +772,11 @@ mod facade_settings {
             }));
             assert_eq!(
                 provider
-                    .complete(request(), &NoSlotDeliveries)
+                    .complete(
+                        request(),
+                        &NoSlotDeliveries,
+                        &lash_core::provider::LiveCallHorizon::fixture()
+                    )
                     .await
                     .unwrap()
                     .full_text(),
@@ -866,7 +870,11 @@ mod facade_settings {
             for expected in ["first", "second"] {
                 assert_eq!(
                     provider
-                        .complete(request(), &NoSlotDeliveries)
+                        .complete(
+                            request(),
+                            &NoSlotDeliveries,
+                            &lash_core::provider::LiveCallHorizon::fixture()
+                        )
                         .await
                         .unwrap()
                         .full_text(),

@@ -1382,7 +1382,9 @@ pub mod provider {
     /// Read the request a canonical body says, for an in-process model that
     /// decides from what a call asks.
     pub use lash_core::provider::canonical_request;
-    pub use lash_core::provider::{AttachmentDeliveryError, NoSlotDeliveries, SlotDeliveries};
+    pub use lash_core::provider::{
+        AttachmentDeliveryError, LiveCallHorizon, NoSlotDeliveries, SlotDeliveries,
+    };
     /// The admitted request template and the transient body filled for one attempt
     /// (ADR 0133 §6). Only literals, refs, acceptance and codecs are recorded.
     pub use lash_sansio::llm::types::{

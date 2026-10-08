@@ -60,6 +60,7 @@ async fn raw_provider_complete_filters_chat_wire_capture() {
         &mut provider,
         adversarial_raw_request(),
         &lash_core::provider::NoSlotDeliveries,
+        &lash_core::provider::LiveCallHorizon::fixture(),
     )
     .await
     .expect("raw Chat completion");
@@ -76,6 +77,7 @@ async fn raw_provider_complete_filters_responses_wire_capture() {
         &mut provider,
         adversarial_raw_request(),
         &lash_core::provider::NoSlotDeliveries,
+        &lash_core::provider::LiveCallHorizon::fixture(),
     )
     .await
     .expect("raw Responses completion");
@@ -95,6 +97,7 @@ async fn raw_provider_complete_rejects_endpoint_userinfo_before_transport() {
         &mut provider,
         adversarial_raw_request(),
         &lash_core::provider::NoSlotDeliveries,
+        &lash_core::provider::LiveCallHorizon::fixture(),
     )
     .await
     .expect_err("userinfo-bearing routes must fail closed");
@@ -157,6 +160,7 @@ async fn openai_chat_and_responses_stamp_fresh_replay_with_the_minting_route() {
         &mut chat,
         request(vec![LlmMessage::text(LlmRole::User, "go")]),
         &lash_core::provider::NoSlotDeliveries,
+        &lash_core::provider::LiveCallHorizon::fixture(),
     )
     .await
     .expect("chat response parses");
@@ -190,6 +194,7 @@ async fn openai_chat_and_responses_stamp_fresh_replay_with_the_minting_route() {
         &mut responses,
         request(vec![LlmMessage::text(LlmRole::User, "go")]),
         &lash_core::provider::NoSlotDeliveries,
+        &lash_core::provider::LiveCallHorizon::fixture(),
     )
     .await
     .expect("Responses response parses");

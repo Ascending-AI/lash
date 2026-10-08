@@ -553,14 +553,17 @@ impl RlmProtocolScenario {
             None
         } else {
             Some(
-                PluginHost::new(self.plugin_factories.clone())
-                    .build_session(PluginSessionRequest::creation(
-                        "rlm-protocol-scenario-hooks",
-                        Default::default(),
-                    ))
-                    .unwrap_or_else(|err| {
-                        panic!("{} failed to register plugin hooks: {err}", self.name)
-                    }),
+                PluginHost::new(
+                    self.plugin_factories.clone(),
+                    lash_core::ExecutionBudgets::recommended(),
+                )
+                .build_session(PluginSessionRequest::creation(
+                    "rlm-protocol-scenario-hooks",
+                    lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+                ))
+                .unwrap_or_else(|err| {
+                    panic!("{} failed to register plugin hooks: {err}", self.name)
+                }),
             )
         };
         let mut machine = TurnMachine::new(

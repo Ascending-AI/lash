@@ -512,7 +512,18 @@ pub(crate) fn prepare_compaction_request(
     instructions: Option<&str>,
     config: &StandardCompactionConfig,
 ) -> Result<(SessionSnapshot, String), ContextError> {
-    let mut snapshot = lash_core::runtime::RuntimeSessionState::from_snapshot(state.clone());
+    // The request state only shapes the summarizer's one prompt: it calls no
+    // tool and installs no plugin, and it states so.
+    let no_tools = lash_core::SessionToolAccess::restricted(std::iter::empty())
+        .map_err(|error| ContextError::Session(error.to_string()))?;
+    let mut snapshot = lash_core::runtime::RuntimeSessionState::from_snapshot(
+        state.clone(),
+        lash_core::RuntimeSessionAuthority::new(
+            no_tools,
+            lash_core::PluginConfig::default(),
+            lash_core::prompt_sections::PromptPlan::default(),
+        ),
+    );
     snapshot.policy.turn_budget = lash_core::TurnBudget::bounded(1);
     strip_all_attachments(&mut prefix_messages, COMPACTED_ATTACHMENT_PLACEHOLDER);
     snapshot.set_execution_state_snapshot(None);

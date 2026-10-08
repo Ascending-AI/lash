@@ -139,6 +139,7 @@ async fn google_per_minute_throttle_is_retryable_and_honors_retry_info() {
         .complete(
             request("gemini-3.1-pro-preview", false, false),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect_err("recorded 429");
@@ -161,6 +162,7 @@ async fn google_hard_quota_is_not_retried_as_a_per_minute_throttle() {
             .complete(
                 request("gemini-3.1-pro-preview", false, false),
                 &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
             )
             .await
             .expect_err("recorded hard quota"),
@@ -179,6 +181,7 @@ async fn openai_per_minute_throttle_stays_retryable_without_inventing_backoff() 
             .complete(
                 request("gpt-5.4", false, false),
                 &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
             )
             .await
             .expect_err("recorded OpenAI throttle"),
@@ -203,6 +206,7 @@ async fn openai_insufficient_quota_is_non_retryable() {
             .complete(
                 request("gpt-5.4", false, false),
                 &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
             )
             .await
             .expect_err("recorded OpenAI hard quota"),
@@ -222,6 +226,7 @@ async fn anthropic_rate_limit_and_credit_exhaustion_take_different_retry_paths()
             .complete(
                 request("claude-sonnet-4-20250514", true, false),
                 &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
             )
             .await
             .expect_err("recorded Anthropic rate limit"),
@@ -238,6 +243,7 @@ async fn anthropic_rate_limit_and_credit_exhaustion_take_different_retry_paths()
             .complete(
                 request("claude-sonnet-4-20250514", true, false),
                 &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
             )
             .await
             .expect_err("recorded Anthropic credit exhaustion"),
@@ -254,6 +260,7 @@ async fn structured_output_refusal_is_content_filter_not_empty_provider_error() 
         .complete(
             request("gpt-4o-2024-08-06", false, true),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("documented refusal is a terminal response");
@@ -272,6 +279,7 @@ async fn structured_output_truncation_is_output_limit_not_provider_error() {
         .complete(
             request("gpt-4o-mini-2024-07-18", true, true),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("documented incomplete event is terminal evidence");
@@ -540,7 +548,11 @@ async fn no_credentials_reach_request_debug_recordings_or_traces() {
             sink.lock_recover().push(event)
         }));
         let failure = provider
-            .complete(req, &lash_core::provider::NoSlotDeliveries)
+            .complete(
+                req,
+                &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
+            )
             .await
             .expect_err("scripted provider rejection");
         assert_eq!(failure.http_status, Some(400), "{lane}: {failure:?}");

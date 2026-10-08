@@ -78,7 +78,10 @@ fn session(tools: &CountingTools, mut plugins: Vec<Arc<dyn PluginFactory>>) -> A
         ),
     );
     crate::support::plugin_host(plugins)
-        .build_session(PluginSessionRequest::creation("root", Default::default()))
+        .build_session(PluginSessionRequest::creation(
+            "root",
+            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+        ))
         .expect("plugin session")
 }
 
@@ -406,7 +409,10 @@ fn keyed_registrations_refuse_duplicates_and_unpaired_stream_state() {
             .with_tool_args_check(hook_key!("same"), check),
     );
     let error = crate::support::plugin_host(vec![duplicate])
-        .build_session(PluginSessionRequest::creation("root", Default::default()))
+        .build_session(PluginSessionRequest::creation(
+            "root",
+            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+        ))
         .err()
         .expect("a duplicate key is refused");
     assert!(
@@ -431,7 +437,10 @@ fn keyed_registrations_refuse_duplicates_and_unpaired_stream_state() {
         ),
     );
     let error = crate::support::plugin_host(vec![unpaired])
-        .build_session(PluginSessionRequest::creation("root", Default::default()))
+        .build_session(PluginSessionRequest::creation(
+            "root",
+            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+        ))
         .err()
         .expect("an unpaired stream state is refused");
     assert!(

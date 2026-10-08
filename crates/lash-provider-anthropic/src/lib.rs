@@ -208,7 +208,11 @@ mod tests {
             .with_transport(Arc::new(StaticSseTransport("")));
         assert_eq!(
             provider
-                .complete(base, &lash_core::provider::NoSlotDeliveries)
+                .complete(
+                    base,
+                    &lash_core::provider::NoSlotDeliveries,
+                    &lash_core::provider::LiveCallHorizon::fixture()
+                )
                 .await
                 .unwrap_err()
                 .code
@@ -260,7 +264,11 @@ mod tests {
             .response_metadata_body_paths = vec!["/billing/cost".to_string()];
 
         let response = provider
-            .complete(req, &lash_core::provider::NoSlotDeliveries)
+            .complete(
+                req,
+                &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
+            )
             .await
             .expect("metadata fixture completes");
 
@@ -316,7 +324,11 @@ mod tests {
             .with_transport(Arc::new(StaticSseTransport(body)));
 
         let error = provider
-            .complete(req, &lash_core::provider::NoSlotDeliveries)
+            .complete(
+                req,
+                &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
+            )
             .await
             .expect_err("message_stop is required");
 
@@ -373,6 +385,7 @@ mod tests {
             .complete(
                 request(vec![LlmMessage::text(LlmRole::User, "hello")]),
                 &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
             )
             .await
             .expect("a cumulative trailing zero must not erase a positive count");
@@ -396,6 +409,7 @@ mod tests {
             .complete(
                 request(vec![LlmMessage::text(LlmRole::User, "hello")]),
                 &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
             )
             .await
             .expect_err("one stream cannot change provider response identity");
@@ -425,7 +439,11 @@ mod tests {
             .with_transport(Arc::new(StaticSseTransport(body)));
 
         let error = provider
-            .complete(req, &lash_core::provider::NoSlotDeliveries)
+            .complete(
+                req,
+                &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
+            )
             .await
             .expect_err("EOF mid-arguments must fail without message_stop");
         let partial = error.partial_response.as_deref().expect("partial response");
@@ -511,7 +529,11 @@ mod tests {
             .with_transport(Arc::new(StaticSseTransport(terminal_body)));
         assert_eq!(
             terminal
-                .complete(terminal_req, &lash_core::provider::NoSlotDeliveries)
+                .complete(
+                    terminal_req,
+                    &lash_core::provider::NoSlotDeliveries,
+                    &lash_core::provider::LiveCallHorizon::fixture()
+                )
                 .await
                 .expect("terminal stream")
                 .full_text(),
@@ -529,7 +551,11 @@ mod tests {
             AnthropicProvider::new("key").with_transport(Arc::new(StaticSseTransport(eof_body)));
         assert_eq!(
             tolerant
-                .complete(tolerant_req, &lash_core::provider::NoSlotDeliveries)
+                .complete(
+                    tolerant_req,
+                    &lash_core::provider::NoSlotDeliveries,
+                    &lash_core::provider::LiveCallHorizon::fixture()
+                )
                 .await
                 .expect("tolerated EOF")
                 .full_text(),
@@ -892,7 +918,11 @@ mod tests {
             .enable_all()
             .build()
             .expect("test runtime")
-            .block_on(provider.complete(req, &lash_core::provider::NoSlotDeliveries))
+            .block_on(provider.complete(
+                req,
+                &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
+            ))
             .expect("stream completes");
         let value = beta.lock_recover().clone();
         value.expect("anthropic-beta header sent")
@@ -914,7 +944,11 @@ mod tests {
             .enable_all()
             .build()
             .unwrap()
-            .block_on(provider.complete(req, &lash_core::provider::NoSlotDeliveries))
+            .block_on(provider.complete(
+                req,
+                &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
+            ))
             .unwrap();
         assert_eq!(
             beta.lock_recover().as_deref(),

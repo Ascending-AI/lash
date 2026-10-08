@@ -17,7 +17,7 @@ enum PluginSource {
 pub struct EmbeddedRuntimeBuilder {
     runtime_lease_owner: crate::LeaseOwnerIdentity,
     session_id: Option<SessionId>,
-    policy: Option<SessionPolicy>,
+    creation: Option<(SessionPolicy, crate::SessionToolAccess)>,
     initial_state: Option<RuntimeSessionState>,
     plugin_source: PluginSource,
     core: RuntimeHostConfig,
@@ -35,12 +35,11 @@ impl EmbeddedRuntimeBuilder {
         Self {
             runtime_lease_owner,
             session_id: None,
-            policy: None,
+            creation: None,
             initial_state: None,
             plugin_source: PluginSource::Host(
-                PluginHost::empty()
-                    .with_trace_runtime(core.tracing.clone())
-                    .with_execution_budgets(core.control.execution_budgets.clone()),
+                PluginHost::empty(core.control.execution_budgets.clone())
+                    .with_trace_runtime(core.tracing.clone()),
             ),
             core,
             store: None,
@@ -54,8 +53,15 @@ impl EmbeddedRuntimeBuilder {
         self
     }
 
-    pub fn with_policy(mut self, policy: SessionPolicy) -> Self {
-        self.policy = Some(policy);
+    /// What a session this builder creates records: its policy and its
+    /// tool authority. A builder that opens a recorded session, or runs a
+    /// supplied state, reads both from there and ignores this.
+    pub fn with_creation(
+        mut self,
+        policy: SessionPolicy,
+        tool_access: crate::SessionToolAccess,
+    ) -> Self {
+        self.creation = Some((policy, tool_access));
         self
     }
 
@@ -75,15 +81,15 @@ impl EmbeddedRuntimeBuilder {
     }
 
     pub fn with_plugin_factories(mut self, factories: Vec<Arc<dyn PluginFactory>>) -> Self {
-        let host = PluginHost::new(factories)
-            .with_trace_runtime(self.core.tracing.clone())
-            .with_execution_budgets(self.core.control.execution_budgets.clone());
+        let host = PluginHost::new(factories, self.core.control.execution_budgets.clone())
+            .with_trace_runtime(self.core.tracing.clone());
         self.plugin_source = PluginSource::Host(host);
         self
     }
 
     pub fn with_plugin_stack(self, stack: PluginStack) -> Self {
-        self.with_plugin_host(stack.into_host())
+        let budgets = self.core.control.execution_budgets.clone();
+        self.with_plugin_host(stack.into_host(budgets))
     }
 
     pub fn with_trace_sink(mut self, sink: Option<Arc<dyn lash_trace::TraceSink>>) -> Self {
@@ -136,21 +142,27 @@ impl EmbeddedRuntimeBuilder {
         self
     }
 
-    fn resolve_state_from_defaults(&self) -> Result<RuntimeSessionState, SessionError> {
-        let policy = self.policy.clone().ok_or_else(|| {
+    /// The state of a session this builder creates, under the policy and
+    /// tool authority its creator stated. Creation resolves the session's
+    /// plugin configuration once its plugins are built.
+    fn resolve_created_state(&self) -> Result<RuntimeSessionState, SessionError> {
+        let (policy, tool_access) = self.creation.clone().ok_or_else(|| {
             SessionError::Protocol(
-                "embedded runtime policy is required; construct SessionPolicy with an explicit TurnBudget"
+                "embedded runtime creation is required to create a session; state its SessionPolicy and SessionToolAccess with `with_creation`"
                     .to_string(),
             )
         })?;
-        let mut state = self
-            .initial_state
-            .clone()
-            .unwrap_or_else(|| RuntimeSessionState::new(policy.clone()));
+        let mut state = RuntimeSessionState::new(
+            policy,
+            crate::RuntimeSessionAuthority::new(
+                tool_access,
+                crate::PluginConfig::default(),
+                crate::prompt_sections::PromptPlan::default(),
+            ),
+        );
         if let Some(session_id) = &self.session_id {
             state.session_id = session_id.clone();
         }
-        state.policy = policy;
         Ok(state)
     }
 
@@ -193,13 +205,8 @@ impl EmbeddedRuntimeBuilder {
                 }
                 return Ok((state, false));
             }
-            let mut state = self.resolve_state_from_defaults()?;
-            if let Some(policy) = &self.policy {
-                state.policy = policy.clone();
-            }
-            return Ok((state, true));
         }
-        Ok((self.resolve_state_from_defaults()?, true))
+        Ok((self.resolve_created_state()?, true))
     }
 
     fn resolve_plugins(

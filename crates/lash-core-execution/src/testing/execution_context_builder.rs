@@ -437,12 +437,13 @@ impl<'run> TestExecutionContextBuilder<'run> {
             crate::plugin::PluginDeclaration::initial(crate::PLUGIN_TOOL_SOURCE_ID),
             crate::plugin::PluginSpec::new().with_tool_provider(Arc::clone(&self.provider)),
         )));
-        let plugins = crate::plugin::PluginHost::new(factories)
-            .build_session(PluginSessionRequest::creation(
-                &self.session_id,
-                Default::default(),
-            ))
-            .expect("test plugin session");
+        let plugins =
+            crate::plugin::PluginHost::new(factories, crate::ExecutionBudgets::recommended())
+                .build_session(PluginSessionRequest::creation(
+                    &self.session_id,
+                    crate::plugin::SessionAuthorityContext::ambient_fixture(),
+                ))
+                .expect("test plugin session");
         let (sessions, session_lifecycle, session_graph): (
             Arc<dyn crate::plugin::SessionStateService>,
             Arc<dyn crate::plugin::SessionLifecycleService>,

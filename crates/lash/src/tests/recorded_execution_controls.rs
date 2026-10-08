@@ -269,7 +269,7 @@ async fn creation_refuses_charge_safety_above_the_ceiling_without_recording_a_se
                 crate::testing::runtime_lease_owner(),
             )
             .with_session_id(ID)
-            .with_policy(policy)
+            .with_creation(policy, lash_core::SessionToolAccess::ambient())
             .build(),
         )
         .await

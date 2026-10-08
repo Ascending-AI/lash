@@ -245,11 +245,13 @@ async fn pg_fence_encodes_again_when_f_moves() {
         .expect("finalize the next release");
     let state = lash_core_execution::RuntimeSessionState {
         session_id: session_id.clone(),
-        ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
-            lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        ))
+        ..lash_core_execution::RuntimeSessionState::ambient_fixture(
+            lash_core_execution::SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
+                lash_core_execution::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
+            ),
+        )
     };
     let receipt = store
         .commit_runtime_state(lash_core_execution::RuntimeCommit::persisted_state_for_test(&state))

@@ -101,7 +101,11 @@ async fn hidden_thinking_stream_emits_no_reasoning_events() {
         .with_transport(Arc::new(StaticSseTransport(THINKING_STREAM_UNSIGNED)));
 
     provider
-        .complete(req, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            req,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect("thinking stream completes");
 
@@ -144,7 +148,11 @@ async fn unsigned_thinking_part_carries_content_block_item_id() {
         .with_transport(Arc::new(StaticSseTransport(THINKING_STREAM_UNSIGNED)));
 
     let response = provider
-        .complete(req, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            req,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect("thinking stream completes");
 
@@ -194,7 +202,11 @@ async fn streamed_reasoning_parts_are_stamped_at_the_anthropic_boundary() {
     let expected_route = provider.route_identity("claude-sonnet-4-6");
 
     let response = provider
-        .complete(req, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            req,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect("thinking stream completes");
     let replay = match &response.parts[0] {

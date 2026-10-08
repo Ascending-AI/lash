@@ -119,6 +119,7 @@ fn output_started_refusal(body: &'static str, tokens_at_stake: u64) -> ProviderC
         .block_on(handle.complete_with_charge_safety(
             request(),
             ChargeSafetyPolicy::RequireGuarantee,
+            lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         ))
         .expect_err("escaped provider output must stop the retry ladder");
@@ -157,6 +158,7 @@ fn empty_stream_partial_retry(body: &'static str) -> ProviderCompletionError {
         .block_on(handle.complete_with_charge_safety(
             request(),
             ChargeSafetyPolicy::RequireGuarantee,
+            lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         ))
         .expect_err("two truncated responses exhaust the retry budget");

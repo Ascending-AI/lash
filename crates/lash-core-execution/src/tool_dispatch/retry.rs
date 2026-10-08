@@ -282,10 +282,10 @@ mod panic_tests {
             replay: None,
             prepared_payload: serde_json::Value::Null,
         };
-        let plugins = crate::plugin::PluginHost::empty()
+        let plugins = crate::plugin::PluginHost::empty(crate::ExecutionBudgets::recommended())
             .build_session(crate::plugin::PluginSessionRequest::creation(
                 "session",
-                Default::default(),
+                crate::plugin::SessionAuthorityContext::ambient_fixture(),
             ))
             .expect("plugin session");
         let dispatch = Arc::new(super::ToolDispatchContext {

@@ -38,6 +38,7 @@ async fn chat_completion_epilogue_conformance() {
                 .complete(
                     streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
                     &lash_core::provider::NoSlotDeliveries,
+                    &lash_core::provider::LiveCallHorizon::fixture(),
                 )
                 .await
         })
@@ -58,6 +59,7 @@ async fn responses_completion_epilogue_conformance() {
                         Vec::new(),
                     )))),
                     &lash_core::provider::NoSlotDeliveries,
+                    &lash_core::provider::LiveCallHorizon::fixture(),
                 )
                 .await
         })
@@ -83,6 +85,7 @@ async fn codex_completion_epilogue_conformance() {
                     Vec::new(),
                 )))),
                 &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
             )
             .await
     })

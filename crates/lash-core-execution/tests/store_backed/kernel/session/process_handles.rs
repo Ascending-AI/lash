@@ -106,7 +106,10 @@ mod tests {
             prepares: Arc::new(AtomicUsize::new(0)),
         });
         let plugins = crate::support::plugin_host(Vec::new())
-            .build_session(PluginSessionRequest::creation("root", Default::default()))
+            .build_session(PluginSessionRequest::creation(
+                "root",
+                crate::plugin::SessionAuthorityContext::ambient_fixture(),
+            ))
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
         let backend = crate::support::sqlite_memory_process_store_set().await;
@@ -249,7 +252,10 @@ mod tests {
             prepares: Arc::new(AtomicUsize::new(0)),
         });
         let plugins = crate::support::plugin_host(Vec::new())
-            .build_session(PluginSessionRequest::creation("root", Default::default()))
+            .build_session(PluginSessionRequest::creation(
+                "root",
+                crate::plugin::SessionAuthorityContext::ambient_fixture(),
+            ))
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
         let backend = crate::support::sqlite_memory_process_store_set().await;
@@ -522,7 +528,10 @@ mod tests {
             prepares: Arc::new(AtomicUsize::new(0)),
         });
         let plugins = crate::support::plugin_host(Vec::new())
-            .build_session(PluginSessionRequest::creation("root", Default::default()))
+            .build_session(PluginSessionRequest::creation(
+                "root",
+                crate::plugin::SessionAuthorityContext::ambient_fixture(),
+            ))
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
         let backend = crate::support::sqlite_memory_process_store_backend().await;

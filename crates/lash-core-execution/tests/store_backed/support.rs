@@ -74,5 +74,5 @@ pub fn plugin_host(
     mut factories: Vec<std::sync::Arc<dyn crate::plugin::PluginFactory>>,
 ) -> crate::PluginHost {
     factories.extend(crate::testing::test_standard_protocol_factories());
-    crate::PluginHost::new(factories)
+    crate::PluginHost::new(factories, crate::ExecutionBudgets::recommended())
 }

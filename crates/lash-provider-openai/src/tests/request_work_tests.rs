@@ -55,7 +55,14 @@ async fn facade_provider_error_excerpt_policy_reaches_the_transport() {
         if stream {
             req.stream_events = Some(lash_core::llm::types::LlmEventSender::new(|_| {}));
         }
-        let failure = provider.complete(req, &NoSlotDeliveries).await.unwrap_err();
+        let failure = provider
+            .complete(
+                req,
+                &NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
+            )
+            .await
+            .unwrap_err();
         let raw = failure.raw.as_deref().unwrap();
         assert!(raw.lines().next().unwrap().len() <= 1, "{raw}");
         assert!(raw.contains("[body bytes:"), "{raw}");

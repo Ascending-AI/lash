@@ -58,8 +58,10 @@ impl AppState {
             // A session with no durable head yet: the same empty state the
             // `/api/state` projection falls back to, so an observer that
             // attaches before the first commit sees what the snapshot does.
-            let mut state =
-                lash::persistence::RuntimeSessionState::new(request.config.session_policy());
+            let mut state = lash::persistence::RuntimeSessionState::new(
+                request.config.session_policy(),
+                lash::persistence::RuntimeSessionAuthority::of_config(&request.config),
+            );
             state.session_id = session_id.clone();
             state
         });
@@ -147,8 +149,10 @@ pub(crate) async fn read_state_projection(
             // falls back to, so a page that polls before the first commit
             // sees what an observer would.
             let request = state_store_request(state, session_id);
-            let mut persisted =
-                lash::persistence::RuntimeSessionState::new(request.config.session_policy());
+            let mut persisted = lash::persistence::RuntimeSessionState::new(
+                request.config.session_policy(),
+                lash::persistence::RuntimeSessionAuthority::of_config(&request.config),
+            );
             persisted.session_id = session_id.clone();
             (
                 lash::persistence::SessionReadView::from_persisted_state(&persisted),

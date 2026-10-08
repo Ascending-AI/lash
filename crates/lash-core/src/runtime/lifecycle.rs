@@ -163,11 +163,10 @@ impl LashRuntime {
             .require_runtime_owner()
             .map_err(SessionError::Plugin)?;
         // A state no commit has recorded is a new session's: its creator's
-        // policy is the one it will record, so a defaulted state (e.g.
-        // `RuntimeSessionState::new(SessionPolicy::new(TurnBudget::Unbounded, MaxToolCalls::new(1024),crate::NoProgressBudget::bounded(12)))`)
-        // takes it. A recorded policy is never filled or replaced from the
-        // opener's (FIG-4531): a head that records no model is refused
-        // below, whatever the opener selects.
+        // policy is the one it will record, so an unrecorded state takes it.
+        // A recorded policy is never filled or replaced from the opener's
+        // (FIG-4531): a head that records no model is refused below,
+        // whatever the opener selects.
         let unrecorded = state.checkpoint_ref.is_none() && state.head_revision == 0;
         if unrecorded {
             if state.policy.model.is_none() {
@@ -656,6 +655,11 @@ impl LashRuntime {
             session_id: self.state.session_id.clone(),
             store,
             policy: self.state.effective_policy().clone(),
+            authority: crate::RuntimeSessionAuthority::new(
+                self.state.authority.tool_access.clone(),
+                self.state.authority.plugin_config.clone(),
+                self.state.authority.prompt_plan.clone(),
+            ),
             runtime_lease_owner: self.runtime_lease_owner,
             runtime_lease_executor_id: self.runtime_lease_executor_id,
         }
@@ -773,7 +777,7 @@ impl LashRuntime {
         .map(|loaded| loaded.state);
         let state = loaded.unwrap_or_else(|| RuntimeSessionState {
             session_id: parked.session_id.clone(),
-            ..RuntimeSessionState::new(parked.policy.clone())
+            ..RuntimeSessionState::new(parked.policy.clone(), parked.authority.clone())
         });
         Self::from_environment_for_executor(
             env,
@@ -815,7 +819,7 @@ mod tests {
         let plugins = crate::testing::test_plugin_host(Vec::new())
             .build_session(crate::plugin::PluginSessionRequest::creation(
                 state.session_id.clone(),
-                Default::default(),
+                crate::plugin::SessionAuthorityContext::ambient_fixture(),
             ))
             .expect("plugin session");
         let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
@@ -850,7 +854,7 @@ mod tests {
     async fn a_recorded_head_with_no_model_is_refused_and_never_filled_from_the_opener() {
         let mut recorded = crate::RuntimeSessionState {
             session_id: SessionId::from("recorded-without-model"),
-            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
@@ -870,7 +874,7 @@ mod tests {
 
         let unrecorded = crate::RuntimeSessionState {
             session_id: SessionId::from("never-committed"),
-            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
@@ -889,7 +893,7 @@ mod tests {
     fn initial_park_identity_is_stable_for_replay_and_distinguishes_content() {
         let mut state = crate::RuntimeSessionState {
             session_id: SessionId::from("park-identity"),
-            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
@@ -968,7 +972,7 @@ mod tests {
             crate::RuntimeSessionState {
                 session_id: SessionId::fixture(session_id.to_string()),
                 policy,
-                ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
                     crate::NoProgressBudget::bounded(12),
@@ -1056,7 +1060,7 @@ mod tests {
             crate::RuntimeSessionState {
                 session_id: SessionId::fixture(session_id.to_string()),
                 policy,
-                ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
                     crate::NoProgressBudget::bounded(12),

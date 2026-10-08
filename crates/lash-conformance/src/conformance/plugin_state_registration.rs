@@ -13,7 +13,13 @@ pub(super) async fn registration_state_law(
     registration: Registration,
 ) {
     let fixture = MockPlugin::default();
-    let plugins = support::construct(&fixture.host(), id, None, Default::default()).await;
+    let plugins = support::construct(
+        &fixture.host(),
+        id,
+        None,
+        lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+    )
+    .await;
     let handle = fixture.state(id);
     for (name, commands) in [
         (
@@ -42,7 +48,7 @@ pub(super) async fn registration_state_law(
     assert_eq!(handle.generation(), 5);
     let mut state = RuntimeSessionState {
         session_id: id.parse().unwrap(),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -64,7 +70,7 @@ pub(super) async fn registration_state_law(
         &rebuilt.host(),
         id,
         durable.plugin_state(),
-        Default::default(),
+        lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
     )
     .await;
     let handle = rebuilt.state(id);

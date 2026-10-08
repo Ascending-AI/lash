@@ -142,6 +142,7 @@ async fn fixed_texts_provider_response_shape_mutation_guard() {
     let response = provider
         .complete(
             openai_compatible_request(false),
+            lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
         .await
@@ -163,6 +164,7 @@ async fn rlm_final_value_provider_response_shape_mutation_guard() {
     let response = provider
         .complete(
             openai_compatible_request(true),
+            lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
         .await
@@ -182,6 +184,7 @@ async fn pending_tool_roundtrip_provider_response_shape_mutation_guard() {
     let tool_response = provider
         .complete(
             openai_compatible_request(false),
+            lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
         .await
@@ -199,6 +202,7 @@ async fn pending_tool_roundtrip_provider_response_shape_mutation_guard() {
     let final_response = provider
         .complete(
             openai_compatible_request(false),
+            lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
         .await

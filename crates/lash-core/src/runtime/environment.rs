@@ -81,6 +81,9 @@ pub struct ParkedSession {
     pub(crate) session_id: SessionId,
     pub(crate) store: crate::store::SessionStore,
     pub(crate) policy: crate::SessionPolicy,
+    /// The authority the parked runtime ran under: what a resume builds its
+    /// state from when the store holds no head for the session yet.
+    pub(crate) authority: crate::RuntimeSessionAuthority,
     pub(crate) runtime_lease_owner: crate::LeaseOwnerIdentity,
     pub(crate) runtime_lease_executor_id: String,
 }

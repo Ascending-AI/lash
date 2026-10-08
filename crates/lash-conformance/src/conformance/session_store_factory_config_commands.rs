@@ -25,7 +25,7 @@ async fn commit_session_command_run_with(
         .unwrap_or_else(|| crate::RuntimeSessionState {
             session_id: request.session_id.clone(),
             policy: request.config.session_policy(),
-            ..crate::RuntimeSessionState::new(request.config.session_policy())
+            ..crate::RuntimeSessionState::ambient_fixture(request.config.session_policy())
         });
     state.ensure_agent_frame_initialized();
     adjust(&mut state);
@@ -198,22 +198,25 @@ async fn runtime_for_config_settlement(
         .unwrap_or_else(|| crate::RuntimeSessionState {
             session_id: request.session_id.clone(),
             policy: request.config.session_policy(),
-            ..crate::RuntimeSessionState::new(request.config.session_policy())
+            ..crate::RuntimeSessionState::ambient_fixture(request.config.session_policy())
         });
     state.ensure_agent_frame_initialized();
-    let host = crate::PluginHost::new(crate::testing::test_standard_protocol_factories());
+    let host = crate::PluginHost::new(
+        crate::testing::test_standard_protocol_factories(),
+        lash_core::ExecutionBudgets::recommended(),
+    );
     let plugins = match state.plugin_state() {
         Some(snapshot) => host.build_session(PluginSessionRequest::rematerialization(
             request.session_id.clone(),
             snapshot,
             crate::plugin::SessionAuthorityContext {
                 plugin_config: state.admitted_plugin_config(),
-                ..Default::default()
+                ..lash_core::plugin::SessionAuthorityContext::ambient_fixture()
             },
         )),
         None => host.build_session(PluginSessionRequest::creation(
             request.session_id.clone(),
-            Default::default(),
+            lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
         )),
     }
     .expect("config-settlement plugins");

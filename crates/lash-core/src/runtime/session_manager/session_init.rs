@@ -134,7 +134,14 @@ fn plan_session_init(
     // get their state from the store, not from the create request.
     let start_state = RuntimeSessionState {
         session_id: session_id.clone(),
-        ..RuntimeSessionState::new(policy.clone())
+        ..RuntimeSessionState::new(
+            policy.clone(),
+            crate::RuntimeSessionAuthority::new(
+                request.tool_access.clone(),
+                recorded_plugin_config.clone(),
+                request.prompt_plan.clone().unwrap_or_default(),
+            ),
+        )
     };
     // The child records the minted binding in its policy; the request's key
     // has done its work.
@@ -350,8 +357,6 @@ fn build_runtime_state(
     base.set_plugin_state(None);
     base.clear_plugin_admission_snapshot();
     base.policy = policy.clone();
-    base.authority.tool_access = request.tool_access.clone();
-    base.authority.prompt_plan = request.prompt_plan.clone().unwrap_or_default();
     base.session_graph = crate::SessionGraph::default();
     base.agent_frames.clear();
     base.current_frame_node_id = None;

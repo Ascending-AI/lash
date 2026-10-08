@@ -340,7 +340,11 @@ async fn session_affinity_is_disabled_without_endpoint_capability() {
     let req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
 
     provider
-        .complete(req, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            req,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect("request succeeds");
 
@@ -360,6 +364,7 @@ async fn default_wire_config_uses_bearer_authorization() {
         .complete(
             request(vec![LlmMessage::text(LlmRole::User, "hello")]),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("request succeeds");
@@ -389,6 +394,7 @@ async fn custom_wire_config_controls_auth_header_and_prefix() {
         .complete(
             request(vec![LlmMessage::text(LlmRole::User, "hello")]),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("request succeeds");
@@ -418,7 +424,11 @@ async fn empty_auth_value_prefix_sends_raw_key_without_spacing() {
     provider.wire.auth_header_name = "x-api-key".to_string();
     provider.wire.auth_value_prefix.clear();
     provider
-        .complete(request(vec![]), &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            request(vec![]),
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .unwrap();
     let requests = transport.requests.lock_recover();
@@ -459,6 +469,7 @@ async fn static_query_params_append_to_urls_with_and_without_existing_query() {
             .complete(
                 request(vec![LlmMessage::text(LlmRole::User, "hello")]),
                 &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
             )
             .await
             .expect("request succeeds");
@@ -479,7 +490,11 @@ async fn direct_openai_prompt_cache_key_does_not_enable_body_session_affinity() 
     let expected_cache_key = req.provider_prompt_cache_key();
 
     provider
-        .complete(req, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            req,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect("request succeeds");
 
@@ -519,6 +534,7 @@ async fn response_metadata_captures_only_allowlisted_headers() {
         .complete(
             capturing(req, &["X-Opper-Cost"], &[]),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("request succeeds");
@@ -555,6 +571,7 @@ async fn response_metadata_captures_buffered_responses_endpoint_observations() {
                 &["/cost"],
             ),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("Responses request succeeds");
@@ -1523,7 +1540,11 @@ async fn openrouter_handle_records_failed_request_id_then_served_model_evidence(
     req.model.metadata_mut().wire_model = "openrouter/auto".to_string();
 
     let completion = handle
-        .complete(req, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            req,
+            lash_core::ExecutionBudgets::recommended(),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("retry succeeds");
     assert_eq!(completion.call_record.attempts.len(), 2);
@@ -1745,6 +1766,7 @@ async fn responses_handle_does_not_retry_unfinished_tool_arguments() {
             requiring_terminal_evidence(streamed_request(Arc::new(std::sync::Mutex::new(
                 Vec::new(),
             )))),
+            lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
         .await;
@@ -1785,6 +1807,7 @@ async fn responses_handle_does_not_retry_opaque_reasoning_output() {
             requiring_terminal_evidence(streamed_request(Arc::new(std::sync::Mutex::new(
                 Vec::new(),
             )))),
+            lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
         .await;
@@ -1821,6 +1844,7 @@ async fn chat_stream_ending_without_finish_reason_is_retryable_truncation_with_p
         .complete(
             streamed_request(Arc::clone(&events)),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect_err("missing finish_reason must fail");
@@ -1861,6 +1885,7 @@ async fn chat_stream_with_finish_reason_succeeds_and_eof_tolerated_preserves_com
         .complete(
             streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("finish_reason is terminal evidence");
@@ -1879,6 +1904,7 @@ async fn chat_stream_with_finish_reason_succeeds_and_eof_tolerated_preserves_com
         .complete(
             streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("explicit EOF tolerance preserves compatibility");
@@ -1902,6 +1928,7 @@ async fn responses_stream_without_terminal_event_completes_by_default_and_fails_
         .complete(
             streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("a stream without its terminal event completes by default");
@@ -1914,7 +1941,11 @@ async fn responses_stream_without_terminal_event_completes_by_default_and_fails_
     required.model.metadata_mut().capability.stream_termination =
         Some(StreamTermination::RequireTerminalEvidence);
     let error = strict
-        .complete(required, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            required,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect_err("required terminal evidence refuses the stream");
     assert_eq!(
@@ -1943,6 +1974,7 @@ async fn responses_stream_without_terminal_event_completes_by_default_and_fails_
         .complete(
             streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("response.incomplete is terminal evidence");

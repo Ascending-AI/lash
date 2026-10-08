@@ -50,24 +50,32 @@ fn host(reducer_calls: &Arc<AtomicUsize>) -> crate::PluginHost {
             "panics",
             Arc::new(|_: StateReduction<'_>| panic!("a reducer bug")),
         );
-    crate::PluginHost::new(vec![
-        Arc::new(StaticPluginFactory::new(
-            PluginDeclaration::initial(LEDGER),
-            ledger,
-        )),
-        Arc::new(StaticPluginFactory::new(
-            PluginDeclaration::initial(OTHER),
-            PluginSpec::new(),
-        )),
-    ])
+    crate::PluginHost::new(
+        vec![
+            Arc::new(StaticPluginFactory::new(
+                PluginDeclaration::initial(LEDGER),
+                ledger,
+            )),
+            Arc::new(StaticPluginFactory::new(
+                PluginDeclaration::initial(OTHER),
+                PluginSpec::new(),
+            )),
+        ],
+        crate::ExecutionBudgets::recommended(),
+    )
 }
 
 fn session(host: &crate::PluginHost, snapshot: Option<&PluginState>) -> Arc<crate::PluginSession> {
     let request = match snapshot {
-        Some(snapshot) => {
-            PluginSessionRequest::rematerialization("state-owner", snapshot, Default::default())
-        }
-        None => PluginSessionRequest::creation("state-owner", Default::default()),
+        Some(snapshot) => PluginSessionRequest::rematerialization(
+            "state-owner",
+            snapshot,
+            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+        ),
+        None => PluginSessionRequest::creation(
+            "state-owner",
+            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+        ),
     };
     host.isolated_registry().build_session(request).unwrap()
 }
@@ -709,19 +717,22 @@ async fn a_recorded_resolution_replays_without_its_reducer() {
     publish(&live, "add", outcome.clone()).unwrap();
     assert_eq!(reducer_calls.load(Ordering::SeqCst), 1);
 
-    let changed = crate::PluginHost::new(vec![
-        Arc::new(StaticPluginFactory::new(
-            PluginDeclaration::initial(LEDGER),
-            PluginSpec::new().with_state_reducer(
-                "add",
-                Arc::new(|_: StateReduction<'_>| panic!("a recorded resolution never reduces")),
-            ),
-        )),
-        Arc::new(StaticPluginFactory::new(
-            PluginDeclaration::initial(OTHER),
-            PluginSpec::new(),
-        )),
-    ]);
+    let changed = crate::PluginHost::new(
+        vec![
+            Arc::new(StaticPluginFactory::new(
+                PluginDeclaration::initial(LEDGER),
+                PluginSpec::new().with_state_reducer(
+                    "add",
+                    Arc::new(|_: StateReduction<'_>| panic!("a recorded resolution never reduces")),
+                ),
+            )),
+            Arc::new(StaticPluginFactory::new(
+                PluginDeclaration::initial(OTHER),
+                PluginSpec::new(),
+            )),
+        ],
+        crate::ExecutionBudgets::recommended(),
+    );
     let cold = session(&changed, Some(&base));
     publish(&cold, "add", journaled(&outcome)).unwrap();
     assert_eq!(value(&cold, LEDGER, "total"), Some(serde_json::json!(7)));
@@ -1062,6 +1073,7 @@ async fn a_publication_past_the_session_budget_warns_then_is_refused() {
                 )) as Arc<dyn crate::plugin::PluginFactory>
             })
             .collect(),
+        crate::ExecutionBudgets::recommended(),
     );
     let live = session(&host, None);
     // Four values each just under the value limit: about 120 KB a namespace.

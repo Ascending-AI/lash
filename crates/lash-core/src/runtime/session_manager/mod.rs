@@ -376,6 +376,12 @@ impl RuntimeSessionServices {
         self.current.plugins.adopt_plugin_admission(admission);
     }
 
+    /// The plugin session the owner runs under.
+    #[cfg(any(test, feature = "testing"))]
+    pub(in crate::runtime) fn plugin_session(&self) -> &Arc<crate::PluginSession> {
+        &self.current.plugins
+    }
+
     pub(in crate::runtime) fn state_service(
         self: &Arc<Self>,
     ) -> Arc<dyn crate::plugin::SessionStateService> {
@@ -622,6 +628,7 @@ mod process_visibility_tests {
         let env = crate::RuntimeEnvironment::builder(core)
             .with_plugin_host(Arc::new(crate::PluginHost::new(
                 crate::testing::test_standard_protocol_factories(),
+                crate::ExecutionBudgets::recommended(),
             )))
             .with_process_work(crate::testing::process_work_wiring_for_registry(
                 registry.clone(),
@@ -634,7 +641,7 @@ mod process_visibility_tests {
             crate::RuntimeSessionState {
                 session_id: SessionId::fixture(SESSION_ID.to_string()),
                 policy,
-                ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
                     crate::NoProgressBudget::bounded(12),

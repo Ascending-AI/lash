@@ -30,8 +30,9 @@ impl PluginStack {
         self.protocol_factory.as_ref()
     }
 
-    pub fn into_host(self) -> crate::PluginHost {
-        let host = crate::PluginHost::new(self.factories);
+    /// The stack's plugin host, under `execution_budgets`.
+    pub fn into_host(self, execution_budgets: crate::ExecutionBudgets) -> crate::PluginHost {
+        let host = crate::PluginHost::new(self.factories, execution_budgets);
         match self.protocol_factory {
             Some(protocol) => host.with_protocol_plugin(protocol),
             None => host,

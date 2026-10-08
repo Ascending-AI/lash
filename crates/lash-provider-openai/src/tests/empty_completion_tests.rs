@@ -38,6 +38,7 @@ async fn valid_empty_terminal_completions_succeed_across_chat_and_responses() {
         .complete(
             request(vec![LlmMessage::text(LlmRole::User, "hello")]),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("buffered Chat normal stop may carry no content");
@@ -55,6 +56,7 @@ async fn valid_empty_terminal_completions_succeed_across_chat_and_responses() {
         .complete(
             streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("streamed Chat normal stop may carry no content");
@@ -72,6 +74,7 @@ async fn valid_empty_terminal_completions_succeed_across_chat_and_responses() {
         .complete(
             request(vec![LlmMessage::text(LlmRole::User, "hello")]),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("buffered Responses normal completion may carry no content");
@@ -92,6 +95,7 @@ async fn valid_empty_terminal_completions_succeed_across_chat_and_responses() {
         .complete(
             streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("streamed Responses normal completion may carry no content");
@@ -144,7 +148,11 @@ async fn eof_tolerance_does_not_turn_empty_unterminated_streams_into_success() {
             req.model.metadata_mut().capability.stream_termination =
                 Some(StreamTermination::EofTolerated);
             let error = provider
-                .complete(req, &lash_core::provider::NoSlotDeliveries)
+                .complete(
+                    req,
+                    &lash_core::provider::NoSlotDeliveries,
+                    &lash_core::provider::LiveCallHorizon::fixture(),
+                )
                 .await
                 .expect_err("empty EOF without terminal evidence must be retryable truncation");
             assert_eq!(
@@ -187,6 +195,7 @@ async fn assert_empty_responses_stream_is_rejected(body: &'static str, descripti
         .complete(
             streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect_err(description);
@@ -259,6 +268,7 @@ async fn empty_buffered_responses_require_completed_status() {
             .complete(
                 request(vec![LlmMessage::text(LlmRole::User, "hello")]),
                 &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
             )
             .await
             .expect_err(description);
@@ -296,6 +306,7 @@ async fn empty_chat_requires_wire_stop_even_when_native_evidence_exists() {
         .complete(
             request(vec![LlmMessage::text(LlmRole::User, "hello")]),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect_err("native evidence cannot replace a missing wire finish_reason");

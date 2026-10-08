@@ -473,10 +473,12 @@ mod admission_tests {
             tokio::join!(
                 first.complete(
                     super::super::tests::empty_request(),
+                    lash_sansio::ExecutionBudgets::recommended(),
                     &crate::provider::NoSlotDeliveries
                 ),
                 second.complete(
                     super::super::tests::empty_request(),
+                    lash_sansio::ExecutionBudgets::recommended(),
                     &crate::provider::NoSlotDeliveries
                 )
             )
@@ -569,6 +571,7 @@ mod admission_tests {
         let completion = handle
             .complete(
                 super::super::tests::empty_request(),
+                lash_sansio::ExecutionBudgets::recommended(),
                 &crate::provider::NoSlotDeliveries,
             )
             .await
@@ -595,6 +598,7 @@ mod admission_tests {
         first
             .complete(
                 super::super::tests::empty_request(),
+                lash_sansio::ExecutionBudgets::recommended(),
                 &crate::provider::NoSlotDeliveries,
             )
             .await
@@ -618,14 +622,22 @@ mod admission_tests {
         let request = super::super::tests::empty_request();
         assert!(
             second_handle
-                .complete(request.clone(), &crate::provider::NoSlotDeliveries)
+                .complete(
+                    request.clone(),
+                    lash_sansio::ExecutionBudgets::recommended(),
+                    &crate::provider::NoSlotDeliveries
+                )
                 .now_or_never()
                 .is_none(),
             "the cloned binding shares the outstanding concurrency permit"
         );
         drop(held);
         second_handle
-            .complete(request, &crate::provider::NoSlotDeliveries)
+            .complete(
+                request,
+                lash_sansio::ExecutionBudgets::recommended(),
+                &crate::provider::NoSlotDeliveries,
+            )
             .await
             .unwrap();
         assert_eq!(replacement.timestamp_ms(), 1000);

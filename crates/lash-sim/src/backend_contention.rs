@@ -241,7 +241,7 @@ async fn stale_head_transaction_is_rejected(
     let current = RuntimeSessionState {
         session_id: SessionId::fixture(session_id.to_string()),
         head_revision: expected_head_revision,
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -254,7 +254,7 @@ async fn stale_head_transaction_is_rejected(
     let stale = RuntimeSessionState {
         session_id: SessionId::fixture(session_id.to_string()),
         head_revision: expected_head_revision,
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -292,7 +292,7 @@ async fn operation_commit_retry_and_conflict_are_fenced(
 ) -> Result<BackendContentionOperation, String> {
     let state = RuntimeSessionState {
         session_id: session_id.clone(),
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -320,7 +320,7 @@ async fn operation_commit_retry_and_conflict_are_fenced(
     let changed_state = RuntimeSessionState {
         session_id: SessionId::fixture(session_id.to_string()),
         turn_index: 1,
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),

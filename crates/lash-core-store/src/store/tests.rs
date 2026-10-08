@@ -32,7 +32,7 @@ fn intent_fixture() -> RuntimeCommit {
     let mut state = crate::RuntimeSessionState {
         session_id: SessionId::from("golden-session"),
         turn_index: 7,
-        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),

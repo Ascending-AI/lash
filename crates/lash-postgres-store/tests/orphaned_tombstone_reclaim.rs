@@ -83,7 +83,7 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
             .expect("create store");
         let mut state = lash_core_execution::RuntimeSessionState {
             session_id: SessionId::fixture(session_id.to_string()),
-            ..lash_core_execution::RuntimeSessionState::new(policy.clone())
+            ..lash_core_execution::RuntimeSessionState::ambient_fixture(policy.clone())
         };
         state.ensure_agent_frame_initialized();
         let leaf = state

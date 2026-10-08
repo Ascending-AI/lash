@@ -60,7 +60,10 @@ async fn runtime_open_defers_capabilities_until_recorded_publication() {
         crate::testing::runtime_lease_owner(),
     )
     .with_session_id("deferred-construction")
-    .with_policy(crate::testing::mock_session_policy())
+    .with_creation(
+        crate::testing::mock_session_policy(),
+        crate::SessionToolAccess::ambient(),
+    )
     .with_plugin_factories(factories)
     .build()
     .await
@@ -69,7 +72,10 @@ async fn runtime_open_defers_capabilities_until_recorded_publication() {
     assert!(runtime.session.is_none());
     drop(runtime);
 
-    let old_host = crate::PluginHost::new(crate::testing::test_standard_protocol_factories());
+    let old_host = crate::PluginHost::new(
+        crate::testing::test_standard_protocol_factories(),
+        crate::ExecutionBudgets::recommended(),
+    );
     let id = crate::SessionId::from("deferred-cold-composition");
     let request = crate::plugin::PluginTransitionRequest {
         id: crate::plugin::PluginTransitionId(
@@ -112,7 +118,8 @@ async fn runtime_open_defers_capabilities_until_recorded_publication() {
         state: native_state.clone(),
         config: native_config.clone(),
     };
-    let mut state = crate::RuntimeSessionState::new(crate::testing::mock_session_policy());
+    let mut state =
+        crate::RuntimeSessionState::ambient_fixture(crate::testing::mock_session_policy());
     state.session_id = id;
     state.set_plugin_state(Some(native_state));
     state.authority.plugin_config = native_config;
@@ -196,7 +203,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
                         for (id, host) in hosts.lock_recover().iter() {
                             let session = host.session(&SessionId::from(id)).unwrap();
                             assert!(session.export_state().plugins.is_empty());
-                            let mut exported = crate::RuntimeSessionState::new(
+                            let mut exported = crate::RuntimeSessionState::ambient_fixture(
                                 crate::testing::mock_session_policy(),
                             );
                             exported
@@ -276,11 +283,11 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
             hosts: hosts.clone(),
         }) as Arc<dyn crate::plugin::PluginFactory>,
     ]);
-    let host = crate::PluginHost::new(factories);
+    let host = crate::PluginHost::new(factories, crate::ExecutionBudgets::recommended());
     let parent = host
         .defer_session(PluginSessionRequest::creation(
             "private-parent",
-            Default::default(),
+            crate::plugin::SessionAuthorityContext::ambient_fixture(),
         ))
         .unwrap();
     let transition = |id: &str, state: &crate::PluginState| {
@@ -334,7 +341,10 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
         .session(&SessionId::from("private-parent"))
         .unwrap();
     let child = restricted
-        .fork_for_session("private-child", Default::default())
+        .fork_for_session(
+            "private-child",
+            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+        )
         .unwrap();
     let owned_child = host.session(&SessionId::from("private-child")).unwrap();
     owned_child
@@ -363,7 +373,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
             .plugins
             .is_empty()
     );
-    let mut runtime_state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+    let mut runtime_state = crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),

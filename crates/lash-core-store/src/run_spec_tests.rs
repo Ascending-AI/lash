@@ -166,7 +166,7 @@ fn recorded_render_survives_run_and_detached_environment_round_trip() {
     let decoded: ResolvedRun = serde_json::from_slice(&encoded).expect("decode run");
     assert_eq!(decoded.render, Some(record.clone()));
 
-    let mut state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+    let mut state = crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),

@@ -14,7 +14,10 @@ async fn authority_hidden_tool_executes_on_pinned_registry_but_is_absent_from_ca
         lash_core_execution::plugin::PluginDeclaration::initial("test_tools"),
         crate::PluginSpec::new().with_tool_provider(provider),
     ))])
-    .build_session(PluginSessionRequest::creation("root", Default::default()))
+    .build_session(PluginSessionRequest::creation(
+        "root",
+        crate::plugin::SessionAuthorityContext::ambient_fixture(),
+    ))
     .expect("plugin session");
     let session = crate::Session::new(
         crate::testing::runtime_services_without_ports(plugins),

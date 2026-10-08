@@ -436,7 +436,7 @@ async fn open_with_state_keeps_supplied_policy_without_rewriting_frame_history()
         policy: with_model("historical-model", 11_111),
         agent_frames: Vec::new(),
         current_frame_node_id: None,
-        ..lash_core::RuntimeSessionState::new(unbounded())
+        ..lash_core::RuntimeSessionState::ambient_fixture(unbounded())
     };
     persisted.ensure_agent_frame_initialized();
     let historical_frame_id = persisted

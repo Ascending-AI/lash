@@ -16,11 +16,17 @@ pub async fn ingress_plugin_callbacks_publish_state_that_survives_a_checkpoint(
         writes_on_before: true,
         ..Default::default()
     };
-    let plugins = support::construct(&fixture.host(), id, None, Default::default()).await;
+    let plugins = support::construct(
+        &fixture.host(),
+        id,
+        None,
+        lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+    )
+    .await;
     let policy = crate::testing::mock_session_policy();
     let mut state = RuntimeSessionState {
         session_id: id.into(),
-        ..RuntimeSessionState::new(policy.clone())
+        ..RuntimeSessionState::ambient_fixture(policy.clone())
     };
     let hook_context = crate::plugin::TurnHookContext {
         session_id: id.into(),
@@ -71,7 +77,7 @@ pub async fn ingress_plugin_callbacks_publish_state_that_survives_a_checkpoint(
         state.plugin_state(),
         SessionAuthorityContext {
             plugin_config: state.admitted_plugin_config(),
-            ..Default::default()
+            ..lash_core::plugin::SessionAuthorityContext::ambient_fixture()
         },
     )
     .await;
@@ -110,9 +116,15 @@ pub(super) async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) 
     };
     let mut state = RuntimeSessionState {
         session_id: id.into(),
-        ..RuntimeSessionState::new(policy.clone())
+        ..RuntimeSessionState::ambient_fixture(policy.clone())
     };
-    let plugins = support::construct(&fixture.host(), id, None, Default::default()).await;
+    let plugins = support::construct(
+        &fixture.host(),
+        id,
+        None,
+        lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+    )
+    .await;
     state
         .capture_plugin_states(&plugins, lash_core::FleetFormat::current())
         .unwrap();
@@ -185,7 +197,7 @@ pub(super) async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) 
         Some(durable),
         SessionAuthorityContext {
             plugin_config: state.admitted_plugin_config(),
-            ..Default::default()
+            ..lash_core::plugin::SessionAuthorityContext::ambient_fixture()
         },
     )
     .await;

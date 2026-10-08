@@ -401,6 +401,7 @@ mod tests {
                                 trace_sink.lock_recover().push(event);
                             }),
                         ),
+                        lash_core::ExecutionBudgets::recommended(),
                         &lash_core::provider::NoSlotDeliveries,
                     )
                     .await

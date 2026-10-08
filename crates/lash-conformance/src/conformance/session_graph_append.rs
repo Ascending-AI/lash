@@ -375,26 +375,29 @@ async fn append_conformance_runtime(
         .unwrap_or_else(|| crate::RuntimeSessionState {
             session_id: request.session_id.clone(),
             policy: request.config.session_policy(),
-            ..crate::RuntimeSessionState::new(request.config.session_policy())
+            ..crate::RuntimeSessionState::ambient_fixture(request.config.session_policy())
         });
     if state.policy.model.is_none() {
         state.policy = request.config.session_policy();
     }
     // The protocol-session capability is embedder-supplied; the in-tree fake is
     // enough here because this suite never runs a turn.
-    let host = crate::PluginHost::new(crate::testing::test_standard_protocol_factories());
+    let host = crate::PluginHost::new(
+        crate::testing::test_standard_protocol_factories(),
+        lash_core::ExecutionBudgets::recommended(),
+    );
     let plugins = match state.plugin_state() {
         Some(snapshot) => host.defer_session(PluginSessionRequest::rematerialization(
             request.session_id.clone(),
             snapshot,
             crate::plugin::SessionAuthorityContext {
                 plugin_config: state.admitted_plugin_config(),
-                ..Default::default()
+                ..lash_core::plugin::SessionAuthorityContext::ambient_fixture()
             },
         )),
         None => host.defer_session(PluginSessionRequest::creation(
             request.session_id.clone(),
-            Default::default(),
+            lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
         )),
     }
     .expect("append conformance plugin session");

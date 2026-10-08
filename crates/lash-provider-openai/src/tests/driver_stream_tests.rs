@@ -31,7 +31,11 @@ async fn unsuccessful_http_response_emits_no_response_establishment_marker() {
     }));
 
     provider
-        .complete(req, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            req,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect_err("unsuccessful response is returned as an error");
 
@@ -359,6 +363,7 @@ async fn slow_stream_start_uses_response_start_timeout_classification() {
         .complete(
             streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect_err("slow response start must fail at the start timeout");
@@ -395,6 +400,7 @@ async fn slow_mid_stream_uses_chunk_timeout_classification() {
         .complete(
             streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect_err("slow mid-stream response must fail at the chunk timeout");
@@ -434,6 +440,7 @@ async fn aborted_chat_stream_emits_the_completed_tool_call_through_the_driver() 
         .complete(
             streamed_request(Arc::clone(&events)),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect_err("an aborted stream fails the turn");
@@ -494,6 +501,7 @@ async fn aborted_responses_stream_emits_the_completed_tool_call_through_the_driv
         .complete(
             streamed_request(Arc::clone(&events)),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect_err("an aborted stream fails the turn");
@@ -597,7 +605,11 @@ async fn responses_handle_resumes_after_the_last_sequence_without_duplicate_outp
     }));
 
     let completion = handle
-        .complete(request, &super::attachment_tests::UrlDelivery)
+        .complete(
+            request,
+            lash_core::ExecutionBudgets::recommended(),
+            &super::attachment_tests::UrlDelivery,
+        )
         .await
         .expect("the interrupted Responses generation resumes");
 
@@ -723,14 +735,22 @@ async fn responses_checkpoint_does_not_resume_a_different_logical_call() {
     let mut call_a = streamed_request(Arc::new(std::sync::Mutex::new(Vec::new())));
     call_a.messages = vec![LlmMessage::text(LlmRole::User, "call A")];
     handle
-        .complete(call_a, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            call_a,
+            lash_core::ExecutionBudgets::recommended(),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect_err("call A exhausts its retry budget after interruption");
 
     let mut call_b = streamed_request(Arc::new(std::sync::Mutex::new(Vec::new())));
     call_b.messages = vec![LlmMessage::text(LlmRole::User, "call B")];
     let completion = handle
-        .complete(call_b, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            call_b,
+            lash_core::ExecutionBudgets::recommended(),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect("call B starts and completes a fresh generation");
 
@@ -783,6 +803,7 @@ async fn responses_resume_event_without_sequence_number_fails_closed() {
     let failure = handle
         .complete(
             streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
+            lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
         .await
@@ -836,6 +857,7 @@ async fn responses_resume_response_without_event_stream_fails_closed() {
     let failure = handle
         .complete(
             streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
+            lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
         .await
@@ -880,6 +902,7 @@ async fn retry_guarantee_stays_none_without_a_response_id_and_for_chat_completio
     let failure = handle
         .complete(
             streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
+            lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
         .await
@@ -907,6 +930,7 @@ async fn retry_guarantee_stays_none_without_a_response_id_and_for_chat_completio
         .complete(
             no_sequence_request.clone(),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect_err("a response id without a sequence cursor remains interrupted");
@@ -979,6 +1003,7 @@ async fn responses_resume_keeps_cumulative_usage_as_one_generation_bill() {
     let completion = handle
         .complete(
             streamed_request(Arc::clone(&events)),
+            lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
         .await
@@ -1032,6 +1057,7 @@ async fn buffered_responses_emits_each_message_item_as_its_own_block() {
         .complete(
             streamed_request(Arc::clone(&events)),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("buffered responses body completes");
@@ -1088,6 +1114,7 @@ async fn completed_responses_stream_seals_every_open_block() {
         .complete(
             thinking_exposed(streamed_request(Arc::clone(&events))),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("completed response");
@@ -1150,6 +1177,7 @@ async fn aborted_responses_stream_seals_the_open_reasoning_block() {
         .complete(
             thinking_exposed(streamed_request(Arc::clone(&events))),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect_err("the scripted abort fails the call");
@@ -1202,6 +1230,7 @@ async fn aborted_chat_stream_seals_the_open_reasoning_block() {
         .complete(
             thinking_exposed(streamed_request(Arc::clone(&events))),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect_err("the scripted abort fails the call");

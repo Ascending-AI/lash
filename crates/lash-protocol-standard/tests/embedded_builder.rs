@@ -56,7 +56,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
             cache_write_input_tokens: 0,
             reasoning_output_tokens: 1,
         },
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -126,7 +126,7 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
                 lash_core::NoProgressBudget::bounded(12),
             )
         },
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),

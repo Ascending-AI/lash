@@ -217,8 +217,14 @@ fn batch_config_ceiling_is_refused_at_build() {
                     max_members: max(members),
                 }),
             ));
-        lash_core::facade_support::PluginHost::new(vec![factory])
-            .build_session(PluginSessionRequest::creation("root", Default::default()))
+        lash_core::facade_support::PluginHost::new(
+            vec![factory],
+            lash_core::ExecutionBudgets::recommended(),
+        )
+        .build_session(PluginSessionRequest::creation(
+            "root",
+            lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+        ))
     };
     let refused = build(65)
         .err()

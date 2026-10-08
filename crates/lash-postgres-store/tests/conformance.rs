@@ -606,11 +606,13 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         .expect("stamp turn-owned upload");
     let state = lash_core_execution::RuntimeSessionState {
         session_id: SessionId::fixture(SESSION_ID.to_string()),
-        ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
-            lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        ))
+        ..lash_core_execution::RuntimeSessionState::ambient_fixture(
+            lash_core_execution::SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
+                lash_core_execution::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
+            ),
+        )
     };
     // A mid-turn commit: the stamps are the subject, and a final commit
     // would also need its run's admitted cancellation snapshot (FIG-4848).

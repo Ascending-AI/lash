@@ -18,7 +18,11 @@ async fn host_enabled_session_affinity_works_through_a_custom_proxy_url() {
     let expected = req.scope.provider_session_affinity_key();
 
     provider
-        .complete(req, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            req,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect("request succeeds");
 

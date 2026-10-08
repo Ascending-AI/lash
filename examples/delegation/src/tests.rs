@@ -218,10 +218,13 @@ fn offered(namespace: Option<DelegatedChild>) -> Vec<String> {
         child_spec(),
         lash::process::lifetime::starter,
     ));
-    let host = PluginHost::new(vec![
-        Arc::new(lash::plugins::StandardProtocolPluginFactory::new()),
-        factory,
-    ]);
+    let host = PluginHost::new(
+        vec![
+            Arc::new(lash::plugins::StandardProtocolPluginFactory::new()),
+            factory,
+        ],
+        lash::ExecutionBudgets::recommended(),
+    );
     let options = match namespace {
         Some(child) => PluginOptions::typed(DELEGATION_PLUGIN_ID, child).expect("the namespace"),
         None => PluginOptions::default(),
@@ -238,7 +241,7 @@ fn offered(namespace: Option<DelegatedChild>) -> Vec<String> {
             "offered",
             SessionAuthorityContext {
                 plugin_config: AdmittedPluginConfig::new(config, 0),
-                ..Default::default()
+                ..SessionAuthorityContext::ambient_fixture()
             },
         ))
         .expect("the session builds");

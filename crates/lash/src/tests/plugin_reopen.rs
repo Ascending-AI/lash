@@ -23,10 +23,13 @@ fn probe(payload: serde_json::Value) -> Arc<dyn PluginFactory> {
 }
 
 fn host(payload: serde_json::Value) -> PluginHost {
-    PluginHost::new(vec![
-        Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new()),
-        probe(payload),
-    ])
+    PluginHost::new(
+        vec![
+            Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new()),
+            probe(payload),
+        ],
+        lash_core::ExecutionBudgets::recommended(),
+    )
 }
 
 /// The plugin configuration a real creation records: every registered owner
@@ -41,7 +44,7 @@ fn creation_authority(host: &PluginHost) -> SessionAuthorityContext {
         .expect("the creation config resolves");
     SessionAuthorityContext {
         plugin_config: lash_core::AdmittedPluginConfig::new(config, 0),
-        ..Default::default()
+        ..lash_core::plugin::SessionAuthorityContext::ambient_fixture()
     }
 }
 
@@ -70,7 +73,7 @@ fn live_extension_data_changed_after_creation_does_not_rewrite_the_record() -> R
             &snapshot,
             SessionAuthorityContext {
                 plugin_config: config.clone(),
-                ..Default::default()
+                ..lash_core::plugin::SessionAuthorityContext::ambient_fixture()
             },
         ))
         .expect("reopened session");

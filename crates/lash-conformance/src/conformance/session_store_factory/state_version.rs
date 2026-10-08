@@ -39,7 +39,7 @@ pub(super) async fn session_state_version_admission_contract(
 
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..crate::RuntimeSessionState::new(request.config.session_policy())
+        ..crate::RuntimeSessionState::ambient_fixture(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     store

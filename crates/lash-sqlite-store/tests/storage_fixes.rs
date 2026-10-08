@@ -55,7 +55,7 @@ fn commit_at(
 ) -> RuntimeCommit {
     let state = RuntimeSessionState {
         session_id: session_id.clone(),
-        ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),

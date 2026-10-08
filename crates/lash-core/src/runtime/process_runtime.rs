@@ -70,15 +70,21 @@ impl ProcessRuntimeContext {
             lease_owner,
             turn_phase_probe,
         } = build;
-        let plugins = plugin_host.isolated_registry().defer_session(
-            crate::plugin::PluginSessionRequest::process_creation(
+        // The process runs under the budgets its host config records,
+        // whatever the supplied plugin host was constructed with.
+        let plugins = Arc::unwrap_or_clone(plugin_host)
+            .with_execution_budgets(host.control.execution_budgets.clone())
+            .isolated_registry()
+            .defer_session(crate::plugin::PluginSessionRequest::process_creation(
                 process_id.clone(),
+                // A process records no session: its captured environment
+                // states its plugin configuration, and its tool authority is
+                // ambient over the worker's registry by construction.
                 crate::plugin::SessionAuthorityContext {
+                    tool_access: crate::SessionToolAccess::ambient(),
                     plugin_config: environment.plugin_config.clone(),
-                    ..Default::default()
                 },
-            ),
-        )?;
+            ))?;
         // The process's attachments are held by its own record: a put it
         // makes names `ProcessRecord(id)` as its referrer, and the cleanup its
         // terminal publication plans ends that edge (ADR 0124).
@@ -117,6 +123,12 @@ impl ProcessRuntimeContext {
 }
 
 impl ProcessRuntimeContext {
+    /// The plugin session this runtime's process runs under.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn plugin_session(&self) -> &Arc<crate::PluginSession> {
+        self.services.plugin_session()
+    }
+
     /// The catalog this runtime's process's steps resolve against: its own
     /// plugin session's tools.
     ///

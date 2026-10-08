@@ -60,11 +60,13 @@ async fn persisted_record_decode_store(
         .expect("admit persisted-record decode session");
     let state = lash_core_execution::RuntimeSessionState {
         session_id: session_id.clone(),
-        ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
-            lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        ))
+        ..lash_core_execution::RuntimeSessionState::ambient_fixture(
+            lash_core_execution::SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
+                lash_core_execution::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
+            ),
+        )
     };
     store
         .commit_runtime_state(lash_core_execution::RuntimeCommit::persisted_state_for_test(&state))
@@ -183,11 +185,13 @@ async fn seed_failure_evidence_session(
         .expect("bind receipt-refusal session");
     let state = lash_core_execution::RuntimeSessionState {
         session_id: SessionId::fixture(session_id.to_string()),
-        ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
-            lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        ))
+        ..lash_core_execution::RuntimeSessionState::ambient_fixture(
+            lash_core_execution::SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
+                lash_core_execution::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
+            ),
+        )
     };
     let mut commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state);
     commit.failure_evidence = vec![lash_core_execution::TurnFailureEvidence {
@@ -766,11 +770,13 @@ async fn admitted_input_fixture(
         .expect("admit the fixture session");
     let mut state = lash_core_execution::RuntimeSessionState {
         session_id: session_id.clone(),
-        ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
-            lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        ))
+        ..lash_core_execution::RuntimeSessionState::ambient_fixture(
+            lash_core_execution::SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
+                lash_core_execution::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
+            ),
+        )
     };
     let seeded = store
         .commit_runtime_state(lash_core_execution::RuntimeCommit::persisted_state_for_test(&state))
@@ -1155,11 +1161,13 @@ async fn postgres_gc_sweep_statement_count_is_dead_set_invariant_when_configured
         .expect("admit gc statement-pin session");
     let state = lash_core_execution::RuntimeSessionState {
         session_id: session_id.clone(),
-        ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
-            lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        ))
+        ..lash_core_execution::RuntimeSessionState::ambient_fixture(
+            lash_core_execution::SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
+                lash_core_execution::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
+            ),
+        )
     };
     store
         .commit_runtime_state(lash_core_execution::RuntimeCommit::persisted_state_for_test(&state))

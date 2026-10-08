@@ -414,7 +414,7 @@ mod commit_scaling_tests {
 
     fn measure(turns: usize) -> anyhow::Result<(f64, f64, f64)> {
         const SAMPLES: usize = 256;
-        let mut state = RuntimeSessionState::new(lash_core::SessionPolicy::new(
+        let mut state = RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),

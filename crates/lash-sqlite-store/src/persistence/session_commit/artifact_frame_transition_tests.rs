@@ -190,11 +190,13 @@ async fn committed_first_frame(
     .expect("admit session");
     let mut state = lash_core_execution::RuntimeSessionState {
         session_id,
-        ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
-            lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        ))
+        ..lash_core_execution::RuntimeSessionState::ambient_fixture(
+            lash_core_execution::SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
+                lash_core_execution::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
+            ),
+        )
     };
     state.ensure_agent_frame_initialized_with_clock(clock);
     commit_frame_opens(store, &mut state, None).await;

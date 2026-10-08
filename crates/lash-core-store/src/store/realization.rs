@@ -191,7 +191,7 @@ mod tests {
     #[tokio::test]
     async fn verified_commit_records_one_budget_histogram_observation_across_planner_validation() {
         let metrics = crate::operational_metrics::TestMetrics::install();
-        let state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+        let state = crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
@@ -218,7 +218,7 @@ mod tests {
     #[tokio::test]
     async fn verified_commit_owns_the_live_budget_observation_at_its_sql_boundary() {
         let metrics = crate::operational_metrics::TestMetrics::install();
-        let state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+        let state = crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
@@ -244,7 +244,7 @@ mod tests {
     #[tokio::test]
     async fn verified_commit_records_node_budget_rejection_after_binding() {
         let metrics = crate::operational_metrics::TestMetrics::install();
-        let state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+        let state = crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
@@ -279,7 +279,7 @@ mod tests {
     #[tokio::test]
     async fn verified_commit_does_not_record_budget_before_binding_fences() {
         let metrics = crate::operational_metrics::TestMetrics::install();
-        let state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+        let state = crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
@@ -321,7 +321,7 @@ mod tests {
     #[tokio::test]
     async fn verified_commit_skips_histogram_for_unbounded_byte_budget() {
         let metrics = crate::operational_metrics::TestMetrics::install();
-        let state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+        let state = crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
@@ -357,7 +357,7 @@ mod tests {
         let store = FacadeTestStore::default();
         let mut state = crate::RuntimeSessionState {
             session_id: SessionId::from("loose-store-session"),
-            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
@@ -386,7 +386,7 @@ mod tests {
     async fn verified_commit_rejects_node_budget_before_calling_a_non_validating_store() {
         let state = crate::RuntimeSessionState {
             session_id: SessionId::from("boundary-budget"),
-            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
@@ -440,7 +440,7 @@ mod tests {
     #[tokio::test]
     #[should_panic(expected = "committed head revision must advance")]
     async fn verified_commit_rejects_nonadvancing_store_receipt() {
-        let mut state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+        let mut state = crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
@@ -457,7 +457,7 @@ mod tests {
 
     #[tokio::test]
     async fn verified_commit_preserves_nonadvancing_receipt_replay() {
-        let mut state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+        let mut state = crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),

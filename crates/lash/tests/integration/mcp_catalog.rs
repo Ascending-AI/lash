@@ -98,8 +98,10 @@ async fn recorded_tool_surface_is_preserved_when_advertised_tools_change() {
     );
     // The plugin configuration a real creation records: the protocol's
     // recorded `behaviour` is what its rematerialization must find.
-    let created_host =
-        lash_core::facade_support::PluginHost::new(vec![protocol(), created_factory.clone()]);
+    let created_host = lash_core::facade_support::PluginHost::new(
+        vec![protocol(), created_factory.clone()],
+        lash_core::ExecutionBudgets::recommended(),
+    );
     let plugin_config = created_host
         .resolve_creation_plugin_config(
             Some(lash_protocol_standard::STANDARD_PROTOCOL_PLUGIN_ID),
@@ -112,7 +114,7 @@ async fn recorded_tool_surface_is_preserved_when_advertised_tools_change() {
             "advertised-surface",
             lash_core::plugin::SessionAuthorityContext {
                 plugin_config: lash_core::AdmittedPluginConfig::new(plugin_config, 0),
-                ..Default::default()
+                ..lash_core::plugin::SessionAuthorityContext::ambient_fixture()
             },
         ))
         .expect("created session");
@@ -131,17 +133,19 @@ async fn recorded_tool_surface_is_preserved_when_advertised_tools_change() {
         .await
         .expect("reopened peer connects"),
     );
-    let reopened =
-        lash_core::facade_support::PluginHost::new(vec![protocol(), reopened_factory.clone()])
-            .build_session(lash_core::plugin::PluginSessionRequest::rematerialization(
-                "advertised-surface",
-                &snapshot,
-                lash_core::plugin::SessionAuthorityContext {
-                    plugin_config: config,
-                    ..Default::default()
-                },
-            ))
-            .expect("reopened session");
+    let reopened = lash_core::facade_support::PluginHost::new(
+        vec![protocol(), reopened_factory.clone()],
+        lash_core::ExecutionBudgets::recommended(),
+    )
+    .build_session(lash_core::plugin::PluginSessionRequest::rematerialization(
+        "advertised-surface",
+        &snapshot,
+        lash_core::plugin::SessionAuthorityContext {
+            plugin_config: config,
+            ..lash_core::plugin::SessionAuthorityContext::ambient_fixture()
+        },
+    ))
+    .expect("reopened session");
     let live = reopened.resolved_tool_catalog().expect("live catalog");
     assert!(
         live.has_callable_tool(&search),
@@ -258,7 +262,10 @@ async fn server_instructions_render_once_per_module_on_every_prompt_surface() {
                 lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
             )
         };
-        let host = lash_core::facade_support::PluginHost::new(vec![protocol, factory.clone()]);
+        let host = lash_core::facade_support::PluginHost::new(
+            vec![protocol, factory.clone()],
+            lash_core::ExecutionBudgets::recommended(),
+        );
         let plugin_config = host
             .resolve_creation_plugin_config(
                 Some(protocol_id),
@@ -271,7 +278,7 @@ async fn server_instructions_render_once_per_module_on_every_prompt_surface() {
                 surface,
                 lash_core::plugin::SessionAuthorityContext {
                     plugin_config: lash_core::AdmittedPluginConfig::new(plugin_config, 0),
-                    ..Default::default()
+                    ..lash_core::plugin::SessionAuthorityContext::ambient_fixture()
                 },
             ))
             .expect("prompt session");

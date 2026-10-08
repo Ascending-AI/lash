@@ -33,6 +33,7 @@ async fn provider_wire_script_openai_compatible_chat_stream_uses_real_provider_p
         .complete(
             request(Some(sender)),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("scripted response");
@@ -65,7 +66,11 @@ async fn provider_wire_script_openai_compatible_rate_limit_error_preserves_envel
     let mut provider = scripted_provider(OPENAI_COMPAT_RATE_LIMIT);
 
     let err = provider
-        .complete(request(None), &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            request(None),
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect_err("rate limit error");
 
@@ -102,7 +107,11 @@ async fn provider_wire_script_openai_compatible_validation_error_preserves_envel
     let mut provider = scripted_provider(OPENAI_COMPAT_VALIDATION);
 
     let err = provider
-        .complete(request(None), &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            request(None),
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect_err("validation error");
 
@@ -138,6 +147,7 @@ async fn provider_wire_script_openai_compatible_mid_stream_disconnect_surfaces_s
         .complete(
             request(Some(sender)),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect_err("mid-stream disconnect");
@@ -155,7 +165,11 @@ async fn provider_wire_script_direct_openai_responses_uses_real_provider_parser(
     let mut provider = OpenAiProvider::new("test-key").with_transport(transport);
 
     let response = provider
-        .complete(responses_request(), &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            responses_request(),
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect("scripted OpenAI Responses response");
 
@@ -182,6 +196,7 @@ async fn provider_wire_script_cancellation_before_response_start_commits_no_outp
             .complete(
                 request(Some(sender)),
                 &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
             )
             .await
     });
@@ -219,6 +234,7 @@ async fn scripted_transport_response_start_gate_timeout_uses_production_timeout_
         .complete(
             request(Some(sender)),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect_err("response start gate should time out");
@@ -280,6 +296,7 @@ async fn scripted_transport_buffers_scheduler_releases_before_provider_parks() {
         .complete(
             request(Some(sender)),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("early scheduler releases must be buffered, not retried into no-script");

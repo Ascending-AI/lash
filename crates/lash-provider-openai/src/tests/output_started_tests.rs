@@ -330,6 +330,7 @@ async fn responses_handle_retries_allocation_only_stream_failure() {
     let result = handle
         .complete(
             streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
+            lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
         .await;
@@ -357,6 +358,7 @@ async fn assert_streamed_output_stops_retry(first: &'static str) {
             requiring_terminal_evidence(streamed_request(Arc::new(std::sync::Mutex::new(
                 Vec::new(),
             )))),
+            lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
         .await
@@ -449,6 +451,7 @@ async fn responses_handle_retries_canonical_empty_failed_response() {
     let response = handle
         .complete(
             streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
+            lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
         .await
@@ -480,6 +483,7 @@ async fn responses_handle_retries_after_ping_and_response_debug() {
     let response = handle
         .complete(
             streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
+            lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
         .await

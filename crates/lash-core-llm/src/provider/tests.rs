@@ -771,7 +771,11 @@ async fn provider_handle_records_drop_without_provider_trace_and_stamps_fresh_st
     let mut handle = ProviderHandle::new(ProviderComponents::new(Box::new(ReplayCaptureProvider)));
 
     let completion = handle
-        .complete(request, &NoSlotDeliveries)
+        .complete(
+            request,
+            lash_sansio::ExecutionBudgets::recommended(),
+            &NoSlotDeliveries,
+        )
         .await
         .expect("provider succeeds");
 
@@ -831,7 +835,11 @@ async fn same_provider_and_model_on_distinct_gateways_are_foreign_routes() {
     )));
 
     let completion = handle
-        .complete(request, &NoSlotDeliveries)
+        .complete(
+            request,
+            lash_sansio::ExecutionBudgets::recommended(),
+            &NoSlotDeliveries,
+        )
         .await
         .expect("provider succeeds");
     assert_eq!(completion.call_record.replay_drops.len(), 1);
@@ -856,7 +864,11 @@ async fn invalid_endpoint_failure_records_a_real_no_response_attempt() {
     )));
 
     let failure = handle
-        .complete(empty_request(), &NoSlotDeliveries)
+        .complete(
+            empty_request(),
+            lash_sansio::ExecutionBudgets::recommended(),
+            &NoSlotDeliveries,
+        )
         .await
         .expect_err("endpoint userinfo is rejected before transport");
 
@@ -900,11 +912,19 @@ async fn call_id_derives_from_the_request_scope() {
 
     let request = empty_request();
     let first = handle
-        .complete(request.clone(), &NoSlotDeliveries)
+        .complete(
+            request.clone(),
+            lash_sansio::ExecutionBudgets::recommended(),
+            &NoSlotDeliveries,
+        )
         .await
         .expect("first completion");
     let second = handle
-        .complete(request, &NoSlotDeliveries)
+        .complete(
+            request,
+            lash_sansio::ExecutionBudgets::recommended(),
+            &NoSlotDeliveries,
+        )
         .await
         .expect("second completion");
     assert_eq!(first.call_record.call_id, second.call_record.call_id);
@@ -916,7 +936,11 @@ async fn call_id_derives_from_the_request_scope() {
     let mut other = empty_request();
     other.scope.request_id = "provider-test:other-request".to_string();
     let third = handle
-        .complete(other, &NoSlotDeliveries)
+        .complete(
+            other,
+            lash_sansio::ExecutionBudgets::recommended(),
+            &NoSlotDeliveries,
+        )
         .await
         .expect("third completion");
     assert_ne!(third.call_record.call_id, first.call_record.call_id);
@@ -929,7 +953,11 @@ async fn provider_handle_rejects_instead_of_recertifying_foreign_stamped_output(
     )));
 
     let failure = handle
-        .complete(empty_request(), &NoSlotDeliveries)
+        .complete(
+            empty_request(),
+            lash_sansio::ExecutionBudgets::recommended(),
+            &NoSlotDeliveries,
+        )
         .await
         .expect_err("foreign-stamped output is a provider contract violation");
 
@@ -949,7 +977,11 @@ async fn partial_response_origin_conflict_retains_original_provider_failure_evid
     )));
 
     let failure = handle
-        .complete(empty_request(), &NoSlotDeliveries)
+        .complete(
+            empty_request(),
+            lash_sansio::ExecutionBudgets::recommended(),
+            &NoSlotDeliveries,
+        )
         .await
         .expect_err("foreign-stamped partial output is a provider contract violation");
 
@@ -1172,7 +1204,11 @@ async fn provider_handle_records_aborted_and_interrupted_outcomes() {
             text,
         })));
         let completion = handle
-            .complete(empty_request(), &NoSlotDeliveries)
+            .complete(
+                empty_request(),
+                lash_sansio::ExecutionBudgets::recommended(),
+                &NoSlotDeliveries,
+            )
             .await
             .expect("completion");
         assert_eq!(completion.call_record.attempts[0].outcome, expected_outcome);
@@ -1190,7 +1226,11 @@ async fn failed_stream_attempt_retains_observed_usage_and_evidence_in_ledger() {
     )));
 
     let failure = handle
-        .complete(empty_request(), &NoSlotDeliveries)
+        .complete(
+            empty_request(),
+            lash_sansio::ExecutionBudgets::recommended(),
+            &NoSlotDeliveries,
+        )
         .await
         .expect_err("truncated stream must fail");
     let attempt = &failure.call_record.attempts[0];
@@ -1235,7 +1275,11 @@ async fn output_started_failure_is_typed_non_retryable_when_max_attempts_is_one(
     )));
 
     let failure = handle
-        .complete(empty_request(), &NoSlotDeliveries)
+        .complete(
+            empty_request(),
+            lash_sansio::ExecutionBudgets::recommended(),
+            &NoSlotDeliveries,
+        )
         .await
         .expect_err("paid output cannot be safely retried by the host");
 
@@ -1568,7 +1612,11 @@ async fn provider_handle_records_usage_and_evidence_for_any_provider_kind() {
     let mut handle = ProviderHandle::new(ProviderComponents::new(Box::new(ReportingProvider)));
 
     let completion = handle
-        .complete(empty_request(), &NoSlotDeliveries)
+        .complete(
+            empty_request(),
+            lash_sansio::ExecutionBudgets::recommended(),
+            &NoSlotDeliveries,
+        )
         .await
         .expect("reporting provider succeeds");
 
@@ -1685,7 +1733,11 @@ async fn provider_handle_stops_on_non_retryable_failure() {
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let err = handle
-        .complete(empty_request(), &NoSlotDeliveries)
+        .complete(
+            empty_request(),
+            lash_sansio::ExecutionBudgets::recommended(),
+            &NoSlotDeliveries,
+        )
         .await
         .expect_err("non retryable");
 
@@ -1779,7 +1831,11 @@ async fn provider_handle_retry_after_beyond_cap_fails_without_sleeping() {
         ProviderHandle::new(provider.into_components()).with_clock(Arc::clone(&clock) as _);
 
     let failure = handle
-        .complete(empty_request(), &NoSlotDeliveries)
+        .complete(
+            empty_request(),
+            lash_sansio::ExecutionBudgets::recommended(),
+            &NoSlotDeliveries,
+        )
         .await
         .expect_err("a server delay beyond the host cap must fail fast");
     assert_eq!(attempts.load(Ordering::SeqCst), 1);
@@ -1810,7 +1866,11 @@ async fn provider_handle_repeated_past_http_dates_are_attempt_bounded() {
         ProviderHandle::new(provider.into_components()).with_clock(Arc::clone(&clock) as _);
 
     let failure = handle
-        .complete(empty_request(), &NoSlotDeliveries)
+        .complete(
+            empty_request(),
+            lash_sansio::ExecutionBudgets::recommended(),
+            &NoSlotDeliveries,
+        )
         .await
         .expect_err("past-date throttle storm must exhaust the attempt ladder");
 
@@ -1855,7 +1915,11 @@ async fn provider_handle_throttle_budget_exhaustion_degrades_to_attempt_counting
         ProviderHandle::new(provider.into_components()).with_clock(Arc::clone(&clock) as _);
 
     let err = handle
-        .complete(empty_request(), &NoSlotDeliveries)
+        .complete(
+            empty_request(),
+            lash_sansio::ExecutionBudgets::recommended(),
+            &NoSlotDeliveries,
+        )
         .await
         .expect_err("throttle storm outlives budget and attempts");
 
@@ -1883,7 +1947,11 @@ async fn provider_handle_one_second_throttle_storm_has_a_total_call_bound() {
         ProviderHandle::new(provider.into_components()).with_clock(Arc::clone(&clock) as _);
 
     let failure = handle
-        .complete(empty_request(), &NoSlotDeliveries)
+        .complete(
+            empty_request(),
+            lash_sansio::ExecutionBudgets::recommended(),
+            &NoSlotDeliveries,
+        )
         .await
         .expect_err("throttle storm must hit the total provider-call bound");
 
@@ -1929,7 +1997,11 @@ async fn provider_handle_throttle_without_retry_after_uses_counted_backoff_retry
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let err = handle
-        .complete(empty_request(), &NoSlotDeliveries)
+        .complete(
+            empty_request(),
+            lash_sansio::ExecutionBudgets::recommended(),
+            &NoSlotDeliveries,
+        )
         .await
         .expect_err("no server-stated wait, so the normal ladder applies");
 
@@ -1960,7 +2032,11 @@ async fn provider_handle_throttle_with_malformed_retry_after_uses_counted_backof
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let err = handle
-        .complete(empty_request(), &NoSlotDeliveries)
+        .complete(
+            empty_request(),
+            lash_sansio::ExecutionBudgets::recommended(),
+            &NoSlotDeliveries,
+        )
         .await
         .expect_err("malformed Retry-After cannot prove safe resubmission");
 
@@ -1992,7 +2068,11 @@ async fn provider_handle_server_error_with_retry_after_is_not_retried() {
         .with_clock(Arc::new(RecordingClock::default()) as _);
 
     let err = handle
-        .complete(empty_request(), &NoSlotDeliveries)
+        .complete(
+            empty_request(),
+            lash_sansio::ExecutionBudgets::recommended(),
+            &NoSlotDeliveries,
+        )
         .await
         .expect_err("5xx is a failure, not a throttle");
 
@@ -2019,7 +2099,11 @@ async fn provider_handle_attachment_413_remains_plain_non_retryable_validation()
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let error = handle
-        .complete(empty_request(), &NoSlotDeliveries)
+        .complete(
+            empty_request(),
+            lash_sansio::ExecutionBudgets::recommended(),
+            &NoSlotDeliveries,
+        )
         .await
         .expect_err("attachment 413 is terminal validation");
 
@@ -2122,7 +2206,11 @@ async fn admission_decorator_observes_all_retry_requests_with_session_identity()
     request.scope = crate::LlmRequestScope::new("host-tenant-session", "frame", "request");
     request.messages = vec![LlmMessage::text(LlmRole::User, "preserve this payload")];
     let completion = handle
-        .complete(request.clone(), &NoSlotDeliveries)
+        .complete(
+            request.clone(),
+            lash_sansio::ExecutionBudgets::recommended(),
+            &NoSlotDeliveries,
+        )
         .await
         .expect("third attempt succeeds");
     assert_eq!(attempts.load(Ordering::SeqCst), 3);

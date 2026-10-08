@@ -574,7 +574,7 @@ mod tests {
         let clock = crate::SystemClock;
         let mut state = RuntimeSessionState {
             session_id: session_id.clone(),
-            ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
@@ -856,7 +856,7 @@ mod tests {
         let clock = crate::SystemClock;
         let mut state = RuntimeSessionState {
             session_id: SessionId::from("frame-replacement"),
-            ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),

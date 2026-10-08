@@ -134,17 +134,20 @@ async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
     let backend = sqlite_memory_store_backend().await;
     let artifact_store = lash_lashlang_runtime::LashlangArtifacts::of_backend(&backend.clone());
     let factory = Arc::new(rlm_factory(&backend));
-    let plugin_host = lash_core::facade_support::PluginHost::new(vec![
-        Arc::clone(&factory) as Arc<dyn PluginFactory>,
-        Arc::new(CompileSurfaceToolFactory::new(
-            "compile-core-tool",
-            "compile_core_tool",
-        )),
-        Arc::new(CompileSurfaceToolFactory::new(
-            "compile-extra-tool",
-            "fallback",
-        )),
-    ]);
+    let plugin_host = lash_core::facade_support::PluginHost::new(
+        vec![
+            Arc::clone(&factory) as Arc<dyn PluginFactory>,
+            Arc::new(CompileSurfaceToolFactory::new(
+                "compile-core-tool",
+                "compile_core_tool",
+            )),
+            Arc::new(CompileSurfaceToolFactory::new(
+                "compile-extra-tool",
+                "fallback",
+            )),
+        ],
+        lash_core::ExecutionBudgets::recommended(),
+    );
     let plugin_config = || {
         let mut config = lash_core::PluginConfig::default();
         config.insert(

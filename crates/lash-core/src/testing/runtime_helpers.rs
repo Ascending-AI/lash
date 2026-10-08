@@ -22,7 +22,7 @@ pub use super::layered_backend::{LayeredBackend, LayeredStores};
 pub use super::recording_store::{EndRefusedRunHook, RecordingDeploymentStore, RecordingStore};
 
 pub fn default_state() -> RuntimeSessionState {
-    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+    let mut state = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -436,10 +436,10 @@ pub fn plugin_session_with_tools(
     );
     let mut factories = crate::testing::test_standard_protocol_factories();
     factories.push(Arc::new(tool_factory));
-    crate::PluginHost::new(factories)
+    crate::PluginHost::new(factories, crate::ExecutionBudgets::recommended())
         .build_session(PluginSessionRequest::creation(
             session_id,
-            Default::default(),
+            crate::plugin::SessionAuthorityContext::ambient_fixture(),
         ))
         .expect("plugins")
 }
@@ -477,7 +477,7 @@ pub async fn advance_session_head(
                 .await
                 .expect("load the session binding")
                 .expect("the store is bound to a session");
-            let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+            let mut state = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
@@ -734,7 +734,7 @@ impl TestRuntime {
         // applies, rather than widening the builtin set for every crate that
         // turns on the `testing` feature.
         let plugin_host = test_runtime_plugin_host(self.plugins, self.tools);
-        let mut initial_state = RuntimeSessionState::new(crate::SessionPolicy::new(
+        let mut initial_state = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
@@ -758,7 +758,7 @@ impl TestRuntime {
                 initial_state.session_id.clone(),
                 crate::plugin::SessionAuthorityContext {
                     plugin_config: initial_state.admitted_plugin_config(),
-                    ..Default::default()
+                    ..crate::plugin::SessionAuthorityContext::ambient_fixture()
                 },
             ))
             .expect("plugins");

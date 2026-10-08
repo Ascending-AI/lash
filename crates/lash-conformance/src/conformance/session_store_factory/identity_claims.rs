@@ -24,7 +24,7 @@ pub async fn fork_inherits_history_without_execution_queues_waits_or_journals(
         .expect("admit source");
     let mut state = crate::RuntimeSessionState {
         session_id: source_id.clone(),
-        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -158,7 +158,7 @@ pub async fn reclaim_races_fork_and_unpin_without_using_process_roots(
         .expect("source");
     let mut state = crate::RuntimeSessionState {
         session_id: id.clone(),
-        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),

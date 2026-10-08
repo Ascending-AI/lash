@@ -335,7 +335,7 @@ pub use queued_drain_policy::{
     QueuedDrainRequest, QueuedDrainSelection,
 };
 pub use scenario_contracts::{RUNTIME_SCENARIO_CONTRACTS, ScenarioContractSpec};
-pub use state::{RuntimeCheckpointComponents, RuntimeSessionState};
+pub use state::{RuntimeCheckpointComponents, RuntimeSessionAuthority, RuntimeSessionState};
 use state::{append_session_nodes_to_state_with_clock, open_agent_frame_in_state_with_clock};
 pub use turn_control::{
     QueueWithdrawalPublisher, TurnAddress, TurnAttach, TurnCancelAffectedInput,

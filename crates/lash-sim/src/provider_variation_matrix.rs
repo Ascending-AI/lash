@@ -2,7 +2,6 @@
 
 use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use lash_core::provider::{
@@ -31,6 +30,9 @@ use crate::provider_variations::TYPESCRIPT_CLOSE_DELIMITER;
 #[path = "provider_variation_matrix/schema.rs"]
 mod schema;
 use schema::*;
+#[path = "provider_variation_matrix/dialects.rs"]
+mod dialects;
+use dialects::*;
 
 const MATRIX_SCHEMA: &str = "lash.provider-variation-matrix.v1";
 const MATRIX_JSON: &str = include_str!("../provider-scripts/variation-matrix/v1/matrix.json");
@@ -683,6 +685,7 @@ async fn complete_websocket_with_events_and_capture(
     let result = provider
         .complete(
             matrix_request("codex.responses-websocket", row, Arc::clone(events)),
+            lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
         .await
@@ -816,7 +819,11 @@ async fn complete_http_buffered(
     let mut request = matrix_request(dialect, row, Arc::new(Mutex::new(Vec::new())));
     request.stream_events = None;
     provider
-        .complete(request, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            request,
+            lash_core::ExecutionBudgets::recommended(),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .map_err(Box::new)
 }
@@ -844,6 +851,7 @@ async fn complete_http_with_events(
     provider
         .complete(
             matrix_request(dialect, row, Arc::clone(events)),
+            lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
         .await
@@ -1560,37 +1568,4 @@ fn completion_route(dialect: &str) -> lash_core::ProviderRouteIdentity {
     let transport =
         Arc::new(ScriptedLlmHttpTransport::from_scripts([]).expect("empty provider script queue"));
     http_provider(dialect, transport).route_identity(dialect_model(dialect))
-}
-
-fn dialect_model(dialect: &str) -> &'static str {
-    match dialect {
-        "anthropic.messages" => "claude-matrix",
-        "google.generate-content" => "gemini-matrix",
-        "openai.chat-completions" => "openai/matrix",
-        "openai.responses" => "gpt-matrix",
-        "codex.responses-sse" | "codex.responses-websocket" => "gpt-matrix-codex",
-        other => panic!("unknown matrix dialect {other}"),
-    }
-}
-
-fn dialect_path(dialect: &str) -> &'static str {
-    match dialect {
-        "anthropic.messages" => "/v1/messages",
-        "google.generate-content" => "/v1internal:streamGenerateContent",
-        "openai.chat-completions" => "/chat/completions",
-        "openai.responses" => "/responses",
-        "codex.responses-sse" => "/backend-api/codex/responses",
-        other => panic!("unknown HTTP matrix dialect {other}"),
-    }
-}
-
-fn matrix_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("provider-scripts/variation-matrix/v1")
-}
-
-fn matrix_generator() -> PathBuf {
-    matrix_dir()
-        .parent()
-        .expect("version directory has generator parent")
-        .join("generate.py")
 }

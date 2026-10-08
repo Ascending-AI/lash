@@ -30,10 +30,10 @@ fn test_execution_context() -> RuntimeExecutionContext<'static> {
 fn test_execution_context_with_env_store(
     env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
 ) -> RuntimeExecutionContext<'static> {
-    let plugins = crate::plugin::PluginHost::empty()
+    let plugins = crate::plugin::PluginHost::empty(crate::ExecutionBudgets::recommended())
         .build_session(PluginSessionRequest::creation(
             "session",
-            Default::default(),
+            crate::plugin::SessionAuthorityContext::ambient_fixture(),
         ))
         .expect("plugin session");
     let dispatch = Arc::new(ToolDispatchContext {

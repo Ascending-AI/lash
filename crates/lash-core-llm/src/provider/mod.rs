@@ -53,6 +53,6 @@ pub use options::{
 pub use rate_limit::{ProviderRateLimitPermit, ProviderRateLimiter};
 pub use slot_delivery::{AttachmentDeliveryError, NoSlotDeliveries, SlotDeliveries};
 pub use traits::{
-    DefaultProviderFailureClassifier, GenerationRetryGuarantee, Provider,
+    DefaultProviderFailureClassifier, GenerationRetryGuarantee, LiveCallHorizon, Provider,
     ProviderFailureClassifier, canonical_request, is_context_overflow_text,
 };

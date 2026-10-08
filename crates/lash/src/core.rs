@@ -1284,10 +1284,9 @@ pub(crate) fn build_plugin_host(
         factories.push(Arc::clone(protocol_factory));
     }
     factories.extend(plugin_factories.iter().cloned());
-    let mut host = PluginHost::new(factories)
+    let mut host = PluginHost::new(factories, core.control.execution_budgets.clone())
         .with_prompt_render_pool(core.control.prompt_render_pool.clone())
-        .with_trace_runtime(core.tracing.clone())
-        .with_execution_budgets(core.control.execution_budgets.clone());
+        .with_trace_runtime(core.tracing.clone());
     if let Some(protocol) = protocol_factory {
         host = host.with_protocol_plugin(Arc::clone(protocol));
     }

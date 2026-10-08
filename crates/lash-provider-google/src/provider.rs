@@ -792,7 +792,11 @@ mod error_detail_tests {
             ))
             .with_transport(transport.clone());
             let error = provider
-                .complete(req, &lash_core::provider::NoSlotDeliveries)
+                .complete(
+                    req,
+                    &lash_core::provider::NoSlotDeliveries,
+                    &lash_core::provider::LiveCallHorizon::fixture(),
+                )
                 .await
                 .expect_err(label);
             assert_eq!(
@@ -821,7 +825,11 @@ mod error_detail_tests {
         for _ in 0..2 {
             let mut call_copy = provider.clone();
             let response = call_copy
-                .complete(completion_request(), &lash_core::provider::NoSlotDeliveries)
+                .complete(
+                    completion_request(),
+                    &lash_core::provider::NoSlotDeliveries,
+                    &lash_core::provider::LiveCallHorizon::fixture(),
+                )
                 .await
                 .expect("credentialed completion succeeds");
             assert_eq!(response.full_text(), "done");
@@ -855,7 +863,11 @@ mod error_detail_tests {
             };
 
         let error = provider
-            .complete(request, &lash_core::provider::NoSlotDeliveries)
+            .complete(
+                request,
+                &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
+            )
             .await
             .expect_err("provider-native retention must be refused");
 
@@ -944,6 +956,7 @@ mod token_source_tests {
             .complete(
                 super::error_detail_tests::completion_request(),
                 &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
             )
             .await
             .expect("the resend with the fresh token completes");

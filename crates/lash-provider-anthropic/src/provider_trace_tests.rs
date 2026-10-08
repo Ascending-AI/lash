@@ -122,7 +122,11 @@ async fn extended_provider_trace_captures_exact_serialized_anthropic_body_withou
     }));
 
     let response = provider
-        .complete(req, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            req,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect("completion succeeds");
     let request_event = events
@@ -158,7 +162,11 @@ async fn extended_provider_trace_captures_exact_serialized_anthropic_body_withou
     }));
 
     let error = error_provider
-        .complete(error_req, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            error_req,
+            &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
+        )
         .await
         .expect_err("provider error is returned");
     let error_event = error_events

@@ -465,7 +465,7 @@ pub(super) async fn selected_observer_intents(
         let source = admit_test_session(factory.clone(), &source_request)
             .await
             .expect("history source");
-        let mut state = RuntimeSessionState::new(request.config.session_policy());
+        let mut state = RuntimeSessionState::ambient_fixture(request.config.session_policy());
         state.session_id = source_id.clone();
         state.ensure_agent_frame_initialized();
         let head_revision = source

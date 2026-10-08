@@ -104,7 +104,7 @@ impl MockPlugin {
     pub(super) fn host(&self) -> crate::PluginHost {
         let mut factories = crate::testing::test_standard_protocol_factories();
         factories.push(Arc::new(self.clone()));
-        crate::PluginHost::new(factories)
+        crate::PluginHost::new(factories, lash_core::ExecutionBudgets::recommended())
     }
     pub(super) fn state(&self, id: &str) -> PluginStateView {
         self.handles.lock_recover()[id].clone()

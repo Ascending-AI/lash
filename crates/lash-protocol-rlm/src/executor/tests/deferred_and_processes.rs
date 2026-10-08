@@ -85,16 +85,19 @@ async fn restricted_empty_deferred_context(
         lash_core::plugin::PluginDeclaration::initial("deferred_grant_provider"),
         lash_core::plugin::PluginSpec::new().with_tool_provider(provider.clone()),
     )));
-    let session = lash_core::facade_support::PluginHost::new(factories)
-        .build_session(PluginSessionRequest::creation(
-            lash_core::SessionId::fixture(session_id),
-            lash_core::plugin::SessionAuthorityContext {
-                tool_access: lash_core::SessionToolAccess::restricted([])
-                    .expect("restricted empty is valid"),
-                ..Default::default()
-            },
-        ))
-        .expect("restricted-empty deferred session");
+    let session = lash_core::facade_support::PluginHost::new(
+        factories,
+        lash_core::ExecutionBudgets::recommended(),
+    )
+    .build_session(PluginSessionRequest::creation(
+        lash_core::SessionId::fixture(session_id),
+        lash_core::plugin::SessionAuthorityContext {
+            tool_access: lash_core::SessionToolAccess::restricted([])
+                .expect("restricted empty is valid"),
+            ..lash_core::plugin::SessionAuthorityContext::ambient_fixture()
+        },
+    ))
+    .expect("restricted-empty deferred session");
     let catalog = session
         .resolved_tool_catalog()
         .expect("restricted-empty catalog");

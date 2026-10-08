@@ -113,6 +113,7 @@ fn charge_safety_google_escaped_content_refuses_retry_with_typed_reason() {
         .block_on(handle.complete_with_charge_safety(
             request(),
             ChargeSafetyPolicy::RequireGuarantee,
+            lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         ))
         .expect_err("escaped provider output must stop the retry ladder");
@@ -160,6 +161,7 @@ fn charge_safety_google_truly_empty_partial_schedules_empty_stream_retry() {
         .block_on(handle.complete_with_charge_safety(
             request(),
             ChargeSafetyPolicy::RequireGuarantee,
+            lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         ))
         .expect_err("two truncated responses exhaust the retry budget");

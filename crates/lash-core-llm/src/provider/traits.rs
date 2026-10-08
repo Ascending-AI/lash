@@ -18,6 +18,31 @@ pub enum GenerationRetryGuarantee {
     Resumable,
 }
 
+/// What a live call outside admission runs under: the caller's clock and its
+/// recorded provider attempt limits. [`Provider::complete`] has no handle to
+/// take them from, so its caller states both.
+#[derive(Clone, Debug)]
+pub struct LiveCallHorizon {
+    pub clock: Arc<dyn crate::Clock>,
+    pub limits: lash_sansio::ProviderAttemptLimits,
+}
+
+impl LiveCallHorizon {
+    pub fn new(clock: Arc<dyn crate::Clock>, limits: lash_sansio::ProviderAttemptLimits) -> Self {
+        Self { clock, limits }
+    }
+
+    /// The horizon test callers of [`Provider::complete`] share: the system
+    /// clock and the recommended attempt limits.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn fixture() -> Self {
+        Self::new(
+            Arc::new(crate::SystemClock),
+            lash_sansio::ProviderAttemptLimits::recommended(),
+        )
+    }
+}
+
 /// A configured LLM backend: its identity, host-config serialization, its
 /// generation options, and the request transport.
 ///
@@ -98,21 +123,24 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
     /// One live call outside admission: lower `request`, fill its slots as
     /// an admitted attempt does, build its response context, send. Lowering
     /// and delivery are bounded by the request timeout; `send` applies the
-    /// route's own timeouts.
+    /// route's own timeouts. The call runs under `horizon`: its deliveries
+    /// stay valid for the route's request timeout, or the caller's recorded
+    /// per-request limit when the route sets none, read on the caller's
+    /// clock.
     async fn complete(
         &mut self,
         request: LlmRequest,
         deliveries: &dyn super::SlotDeliveries,
+        horizon: &LiveCallHorizon,
     ) -> Result<LlmResponse, LlmTransportError> {
         let timeout = self.options().llm_timeouts().request_timeout;
-        let horizon = timeout
-            .unwrap_or_else(|| lash_sansio::ProviderAttemptLimits::recommended().per_request());
+        let valid_for = timeout.unwrap_or_else(|| horizon.limits.per_request());
         let prepare = async {
-            use lash_core_ids::clock::ClockWallTime as _;
             let template = std::sync::Arc::new(self.lower(&request).await?);
-            let valid_through_ms = crate::SystemClock
+            let valid_through_ms = horizon
+                .clock
                 .timestamp_ms()
-                .saturating_add(u64::try_from(horizon.as_millis()).unwrap_or(u64::MAX))
+                .saturating_add(u64::try_from(valid_for.as_millis()).unwrap_or(u64::MAX))
                 .saturating_add(template.fetch_horizon.millis);
             let (live, delivered) =
                 super::slot_delivery::fill_slots(&*self, &template, deliveries, valid_through_ms)

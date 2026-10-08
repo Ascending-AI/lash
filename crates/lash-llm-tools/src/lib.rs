@@ -437,7 +437,7 @@ mod tests {
     impl Default for DirectCompletionManager {
         fn default() -> Self {
             Self {
-                snapshot: RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                snapshot: RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                     lash_core::MaxToolCalls::new(1024),
                     lash_core::NoProgressBudget::bounded(12),
@@ -556,7 +556,7 @@ mod tests {
                     model: llm_profile_spec("root-model", Some("fast")),
                     ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024),lash_core::NoProgressBudget::bounded(12))
                 },
-                ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024),lash_core::NoProgressBudget::bounded(12)))
+                ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024),lash_core::NoProgressBudget::bounded(12)))
             },
             requests: Mutex::new(Vec::new()),
             response_text:
@@ -615,7 +615,7 @@ mod tests {
                         lash_core::NoProgressBudget::bounded(12),
                     )
                 },
-                ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                     lash_core::MaxToolCalls::new(1024),
                     lash_core::NoProgressBudget::bounded(12),

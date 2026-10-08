@@ -55,7 +55,7 @@ async fn factory_state(
     RuntimeSessionState {
         session_id: SessionId::fixture(session_id.to_string()),
         head_revision,
-        ..RuntimeSessionState::new(SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -78,7 +78,7 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         turn_index: 1,
-        ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),

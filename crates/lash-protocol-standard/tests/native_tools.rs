@@ -25,18 +25,21 @@ fn standard_session_with_access(
     tool_access: lash_core::SessionToolAccess,
 ) -> Arc<lash_core::facade_support::PluginSession> {
     let fixture: Arc<dyn lash_core::ToolProvider> = Arc::new(lash_core::testing::FixtureTools);
-    PluginHost::new(vec![
-        Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new()),
-        Arc::new(lash_core::plugin::StaticPluginFactory::new(
-            lash_core::plugin::PluginDeclaration::initial("native-tools-fixture"),
-            lash_core::facade_support::PluginSpec::new().with_tool_provider(fixture),
-        )),
-    ])
+    PluginHost::new(
+        vec![
+            Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new()),
+            Arc::new(lash_core::plugin::StaticPluginFactory::new(
+                lash_core::plugin::PluginDeclaration::initial("native-tools-fixture"),
+                lash_core::facade_support::PluginSpec::new().with_tool_provider(fixture),
+            )),
+        ],
+        lash_core::ExecutionBudgets::recommended(),
+    )
     .build_session(PluginSessionRequest::creation(
         lash_core::SessionId::fixture(session_id),
         lash_core::plugin::SessionAuthorityContext {
             tool_access,
-            ..Default::default()
+            ..lash_core::plugin::SessionAuthorityContext::ambient_fixture()
         },
     ))
     .expect("standard protocol session")
@@ -63,14 +66,22 @@ fn a_catalogue_tool_named_batch_is_refused_while_the_sugar_is_offered() {
         config: lash_protocol_standard::StandardProtocolConfig,
     ) -> Result<Vec<String>, lash_core::PluginError> {
         let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(NamedBatch);
-        let session = PluginHost::new(vec![
-            Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::with_config(config)),
-            Arc::new(lash_core::plugin::StaticPluginFactory::new(
-                lash_core::plugin::PluginDeclaration::initial("catalogue-batch"),
-                lash_core::facade_support::PluginSpec::new().with_tool_provider(tools),
-            )),
-        ])
-        .build_session(PluginSessionRequest::creation("root", Default::default()))?;
+        let session = PluginHost::new(
+            vec![
+                Arc::new(
+                    lash_protocol_standard::StandardProtocolPluginFactory::with_config(config),
+                ),
+                Arc::new(lash_core::plugin::StaticPluginFactory::new(
+                    lash_core::plugin::PluginDeclaration::initial("catalogue-batch"),
+                    lash_core::facade_support::PluginSpec::new().with_tool_provider(tools),
+                )),
+            ],
+            lash_core::ExecutionBudgets::recommended(),
+        )
+        .build_session(PluginSessionRequest::creation(
+            "root",
+            lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+        ))?;
         Ok(session
             .resolved_tool_catalog()?
             .tool_names()

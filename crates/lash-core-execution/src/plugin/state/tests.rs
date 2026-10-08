@@ -10,20 +10,23 @@ async fn an_equal_format_different_revision_redrive_parks_before_callbacks_or_ef
     declaration.behavior_revision = crate::plugin::BehaviorRevision::new(2).unwrap();
     let counted_callbacks = callbacks.clone();
     let counted_effects = effects.clone();
-    let host = crate::PluginHost::new(vec![Arc::new(crate::plugin::StaticPluginFactory::new(
-        declaration,
-        crate::plugin::PluginSpec::new().with_before_turn(
-            crate::hook_key!("probe"),
-            Arc::new(move |_| {
-                counted_callbacks.fetch_add(1, Ordering::SeqCst);
-                let effects = counted_effects.clone();
-                Box::pin(async move {
-                    effects.fetch_add(1, Ordering::SeqCst);
-                    Ok(Default::default())
-                })
-            }),
-        ),
-    ))]);
+    let host = crate::PluginHost::new(
+        vec![Arc::new(crate::plugin::StaticPluginFactory::new(
+            declaration,
+            crate::plugin::PluginSpec::new().with_before_turn(
+                crate::hook_key!("probe"),
+                Arc::new(move |_| {
+                    counted_callbacks.fetch_add(1, Ordering::SeqCst);
+                    let effects = counted_effects.clone();
+                    Box::pin(async move {
+                        effects.fetch_add(1, Ordering::SeqCst);
+                        Ok(Default::default())
+                    })
+                }),
+            ),
+        ))],
+        crate::ExecutionBudgets::recommended(),
+    );
     let recorded = crate::store::plugin_writers::PluginAdmission::from_plugins(
         host.factories()
             .iter()
@@ -40,7 +43,7 @@ async fn an_equal_format_different_revision_redrive_parks_before_callbacks_or_ef
     let session = host
         .build_session(PluginSessionRequest::creation(
             "revision-redrive",
-            Default::default(),
+            crate::plugin::SessionAuthorityContext::ambient_fixture(),
         ))
         .unwrap();
     let identity = &session.capabilities().contributions.before_turn_hooks[0].identity;
@@ -51,7 +54,7 @@ async fn an_equal_format_different_revision_redrive_parks_before_callbacks_or_ef
         .isolated_registry()
         .build_session(PluginSessionRequest::creation(
             "revision-redrive",
-            Default::default(),
+            crate::plugin::SessionAuthorityContext::ambient_fixture(),
         ))
         .unwrap();
     assert_eq!(
@@ -59,7 +62,7 @@ async fn an_equal_format_different_revision_redrive_parks_before_callbacks_or_ef
         &rebuilt.capabilities().contributions.before_turn_hooks[0].identity
     );
     session.adopt_plugin_admission(recorded);
-    let state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+    let state = crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -209,7 +212,10 @@ impl crate::SessionPlugin for FormatProbe {
 #[test]
 fn plugin_formats_refuse_before_callbacks_and_preserve_bytes() {
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let host = crate::PluginHost::new(vec![Arc::new(FormatProbe(calls.clone()))]);
+    let host = crate::PluginHost::new(
+        vec![Arc::new(FormatProbe(calls.clone()))],
+        crate::ExecutionBudgets::recommended(),
+    );
     let snapshot: PluginState = serde_json::from_value(serde_json::json!({
         "format-probe": {"generation": 7, "format_version": 4294967295_u32, "fork": "copy", "publication": {"owner_segment": 0, "settled": null, "recent": []}, "values": {"old": 17}}
     }))
@@ -218,7 +224,7 @@ fn plugin_formats_refuse_before_callbacks_and_preserve_bytes() {
     let result = host.build_session(PluginSessionRequest::rematerialization(
         "unreadable",
         &snapshot,
-        Default::default(),
+        crate::plugin::SessionAuthorityContext::ambient_fixture(),
     ));
     assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
     assert!(
@@ -267,7 +273,7 @@ fn plugin_formats_refuse_before_callbacks_and_preserve_bytes() {
         "bad-config",
         crate::plugin::SessionAuthorityContext {
             plugin_config: crate::AdmittedPluginConfig::new(config.clone(), 3),
-            ..Default::default()
+            ..crate::plugin::SessionAuthorityContext::ambient_fixture()
         },
     ));
     assert!(matches!(
@@ -427,7 +433,10 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
     // `PluginError::State` at any stamp the plugin admits — including its
     // native one, whose path ran no value validation before.
     let calls_probe = calls();
-    let host = crate::PluginHost::new(vec![Arc::new(FormatProbe(calls_probe.clone()))]);
+    let host = crate::PluginHost::new(
+        vec![Arc::new(FormatProbe(calls_probe.clone()))],
+        crate::ExecutionBudgets::recommended(),
+    );
     for stamp in [1_u32, 2] {
         for malformed in [
             serde_json::json!({"bad/key": 1}),
@@ -442,7 +451,7 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
             let result = host.build_session(PluginSessionRequest::rematerialization(
                 "malformed",
                 &snapshot,
-                Default::default(),
+                crate::plugin::SessionAuthorityContext::ambient_fixture(),
             ));
             assert!(
                 matches!(result, Err(crate::PluginError::State(_))),
@@ -463,7 +472,10 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
     // `PluginError::Format`: distinct from a too-new stamp only by
     // direction, and refused before the factory builds.
     let calls_no_migrate = calls();
-    let host = crate::PluginHost::new(vec![Arc::new(NoMigrateProbe(calls_no_migrate.clone()))]);
+    let host = crate::PluginHost::new(
+        vec![Arc::new(NoMigrateProbe(calls_no_migrate.clone()))],
+        crate::ExecutionBudgets::recommended(),
+    );
     let snapshot: PluginState = serde_json::from_value(serde_json::json!({
         "no-migrate": {"generation": 7, "format_version": 1, "fork": "copy", "publication": {"owner_segment": 0, "settled": null, "recent": []}, "values": {"old": 17}},
         "inactive": inactive,
@@ -473,7 +485,7 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
     let result = host.build_session(PluginSessionRequest::rematerialization(
         "unreadable-past",
         &snapshot,
-        Default::default(),
+        crate::plugin::SessionAuthorityContext::ambient_fixture(),
     ));
     let Err(crate::PluginError::Format(refusal)) = result else {
         panic!("a missing converter is a typed format refusal");
@@ -493,7 +505,7 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
         "unreadable-config",
         crate::plugin::SessionAuthorityContext {
             plugin_config: crate::AdmittedPluginConfig::new(config.clone(), 3),
-            ..Default::default()
+            ..crate::plugin::SessionAuthorityContext::ambient_fixture()
         },
     ));
     assert!(
@@ -517,10 +529,13 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
     // A factory whose declaration names another owner is `PluginError::
     // Declaration` before its build, registration or readiness runs.
     let calls_owner = calls();
-    let host = crate::PluginHost::new(vec![Arc::new(DeclaredAs {
-        declared: "another",
-        calls: calls_owner.clone(),
-    })]);
+    let host = crate::PluginHost::new(
+        vec![Arc::new(DeclaredAs {
+            declared: "another",
+            calls: calls_owner.clone(),
+        })],
+        crate::ExecutionBudgets::recommended(),
+    );
     let snapshot: PluginState = serde_json::from_value(serde_json::json!({
         "registered": {"generation": 7, "format_version": 1, "fork": "copy", "publication": {"owner_segment": 0, "settled": null, "recent": []}, "values": {"value": 1}},
         "inactive": inactive,
@@ -528,11 +543,14 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
     .unwrap();
     let bytes = rmp_serde::to_vec_named(&snapshot).unwrap();
     for request in [
-        PluginSessionRequest::creation("wrong-owner-create", Default::default()),
+        PluginSessionRequest::creation(
+            "wrong-owner-create",
+            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+        ),
         PluginSessionRequest::rematerialization(
             "wrong-owner-reopen",
             &snapshot,
-            Default::default(),
+            crate::plugin::SessionAuthorityContext::ambient_fixture(),
         ),
     ] {
         let result = host.build_session(request);
@@ -552,7 +570,10 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
 #[test]
 fn plugin_formats_convert_only_in_recorded_transition() {
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let host = crate::PluginHost::new(vec![Arc::new(FormatProbe(calls))]);
+    let host = crate::PluginHost::new(
+        vec![Arc::new(FormatProbe(calls))],
+        crate::ExecutionBudgets::recommended(),
+    );
     let snapshot: PluginState = serde_json::from_value(serde_json::json!({
         "format-probe": {"generation": 7, "format_version": 1, "fork": "copy", "publication": {"owner_segment": 0, "settled": null, "recent": []}, "values": {"old": 17}}
     }))
@@ -573,7 +594,7 @@ fn plugin_formats_convert_only_in_recorded_transition() {
                 &snapshot,
                 crate::plugin::SessionAuthorityContext {
                     plugin_config: crate::AdmittedPluginConfig::new(config.clone(), 3),
-                    ..Default::default()
+                    ..crate::plugin::SessionAuthorityContext::ambient_fixture()
                 },
             ))
             .unwrap();
@@ -619,9 +640,12 @@ fn plugin_formats_convert_only_in_recorded_transition() {
 
 #[test]
 fn plugin_formats_stamp_every_state_write() {
-    let host = crate::PluginHost::new(vec![Arc::new(FormatProbe(Arc::new(
-        std::sync::atomic::AtomicUsize::new(0),
-    )))]);
+    let host = crate::PluginHost::new(
+        vec![Arc::new(FormatProbe(Arc::new(
+            std::sync::atomic::AtomicUsize::new(0),
+        )))],
+        crate::ExecutionBudgets::recommended(),
+    );
     let native: PluginState = serde_json::from_value(serde_json::json!({
         "format-probe": {"generation": 8, "format_version": 2, "fork": "copy", "publication": {"owner_segment": 0, "settled": null, "recent": []}, "values": {"native": 18}},
         "inactive": {"generation": 7, "format_version": 99, "fork": "copy", "publication": {"owner_segment": 0, "settled": null, "recent": []}, "values": {"opaque": 5}}
@@ -719,16 +743,19 @@ fn fork_preserves_absent_namespaces_and_canonical_order() {
             },
         )]),
     };
-    let host = crate::PluginHost::empty();
+    let host = crate::PluginHost::empty(crate::ExecutionBudgets::recommended());
     let parent = host
         .build_session(PluginSessionRequest::rematerialization(
             "parent",
             &durable,
-            crate::plugin::SessionAuthorityContext::default(),
+            crate::plugin::SessionAuthorityContext::ambient_fixture(),
         ))
         .unwrap();
     let child = parent
-        .fork_for_session("child", Default::default())
+        .fork_for_session(
+            "child",
+            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+        )
         .unwrap();
     assert_eq!(child.export_state(), parent.export_state());
     assert_eq!(
@@ -816,9 +843,12 @@ impl crate::store::FleetFormatStore for FleetRecord {
 
 #[tokio::test]
 async fn a_session_writes_state_in_its_admissions_recorded_format_across_a_finalize() {
-    let host = crate::PluginHost::new(vec![Arc::new(FormatProbe(Arc::new(
-        std::sync::atomic::AtomicUsize::new(0),
-    )))]);
+    let host = crate::PluginHost::new(
+        vec![Arc::new(FormatProbe(Arc::new(
+            std::sync::atomic::AtomicUsize::new(0),
+        )))],
+        crate::ExecutionBudgets::recommended(),
+    );
     let fleet = FleetRecord::permitting(1, 1);
     let stored: PluginState = serde_json::from_value(serde_json::json!({
         "format-probe": {"generation": 7, "format_version": 1, "fork": "copy", "publication": {"owner_segment": 0, "settled": null, "recent": []}, "values": {"old": 17}}
@@ -829,7 +859,7 @@ async fn a_session_writes_state_in_its_admissions_recorded_format_across_a_final
         .defer_session(PluginSessionRequest::rematerialization(
             "admitted",
             &stored,
-            Default::default(),
+            crate::plugin::SessionAuthorityContext::ambient_fixture(),
         ))
         .unwrap();
     let record = host.transition_plugins(
@@ -963,18 +993,21 @@ fn recorded_transition_keeps_typed_refusal_and_publishes_neither_namespace() {
         }
     }
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let host = crate::PluginHost::new(vec![
-        Arc::new(Converter {
-            id: "first",
-            refuse: false,
-            calls: Arc::clone(&calls),
-        }),
-        Arc::new(Converter {
-            id: "second",
-            refuse: true,
-            calls: Arc::clone(&calls),
-        }),
-    ]);
+    let host = crate::PluginHost::new(
+        vec![
+            Arc::new(Converter {
+                id: "first",
+                refuse: false,
+                calls: Arc::clone(&calls),
+            }),
+            Arc::new(Converter {
+                id: "second",
+                refuse: true,
+                calls: Arc::clone(&calls),
+            }),
+        ],
+        crate::ExecutionBudgets::recommended(),
+    );
     let base = PluginState {
         plugins: ["first", "second", "inactive"]
             .into_iter()
@@ -1027,11 +1060,11 @@ fn recorded_transition_keeps_typed_refusal_and_publishes_neither_namespace() {
     assert!(
         matches!(record.candidate(), Err(crate::PluginError::Format(ref refusal)) if refusal.plugin == "second")
     );
-    let session = crate::PluginHost::empty()
+    let session = crate::PluginHost::empty(crate::ExecutionBudgets::recommended())
         .build_session(PluginSessionRequest::rematerialization(
             "transition-owner",
             &base,
-            Default::default(),
+            crate::plugin::SessionAuthorityContext::ambient_fixture(),
         ))
         .unwrap();
     let before = session.export_state();
@@ -1133,7 +1166,10 @@ async fn pure_initialization_precedes_read_only_registration_and_readiness() {
         }
     }
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let host = crate::PluginHost::new(vec![Arc::new(ReadOnly(calls.clone()))]);
+    let host = crate::PluginHost::new(
+        vec![Arc::new(ReadOnly(calls.clone()))],
+        crate::ExecutionBudgets::recommended(),
+    );
     let request = transition_request("read-only-owner", &host);
     let record = host.transition_plugins(request, &Default::default(), &Default::default());
     let view = crate::plugin::PluginNativeView {
@@ -1150,7 +1186,7 @@ async fn pure_initialization_precedes_read_only_registration_and_readiness() {
             .isolated_registry()
             .defer_session(PluginSessionRequest::creation(
                 "read-only-owner",
-                Default::default(),
+                crate::plugin::SessionAuthorityContext::ambient_fixture(),
             ))
             .unwrap();
         session

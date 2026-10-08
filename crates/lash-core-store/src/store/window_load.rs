@@ -11,7 +11,7 @@ pub struct LoadedSessionWindow {
     pub config: crate::PersistedSessionConfig,
 }
 
-/// Adopt a window read onto a default state. Adoption is head-authoritative
+/// Adopt a window read onto a state built under the read's own config. Adoption is head-authoritative
 /// (FIG-1875): every config fact is the head's, and the window names its
 /// session.
 pub fn window_state(
@@ -19,11 +19,14 @@ pub fn window_state(
     fleet: super::FleetFormat,
 ) -> Result<LoadedSessionWindow, StoreError> {
     let config = read.config.clone();
-    let mut state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
-        config.turn_budget,
-        config.max_tool_calls,
-        crate::NoProgressBudget::bounded(12),
-    ));
+    let mut state = crate::RuntimeSessionState::new(
+        crate::SessionPolicy::new(
+            config.turn_budget,
+            config.max_tool_calls,
+            crate::NoProgressBudget::bounded(12),
+        ),
+        crate::session_state::RuntimeSessionAuthority::of_config(&config),
+    );
     crate::runtime::state::adopt_durable_head(&mut state, read, fleet)?;
     Ok(LoadedSessionWindow { state, config })
 }

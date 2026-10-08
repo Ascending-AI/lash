@@ -1095,7 +1095,7 @@ fn fixture_record_config_operation() -> OperationId {
 fn fixture_state() -> RuntimeSessionState {
     RuntimeSessionState {
         session_id: SessionId::fixture(SESSION_ID.to_string()),
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),

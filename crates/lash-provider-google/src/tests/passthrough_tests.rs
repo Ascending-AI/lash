@@ -65,7 +65,11 @@ async fn cloud_request_passthrough_refuses_owned_nested_and_header_conflicts() {
     let mut provider = provider.with_extra_headers(vec![("CoNtEnT-TyPe".into(), "other".into())]);
     assert_eq!(
         provider
-            .complete(base, &lash_core::provider::NoSlotDeliveries)
+            .complete(
+                base,
+                &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture()
+            )
             .await
             .unwrap_err()
             .code

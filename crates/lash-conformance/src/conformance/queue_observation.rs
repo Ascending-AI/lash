@@ -29,7 +29,7 @@ pub async fn queue_head_read_failure_publishes_recoverable_gap(backend: crate::B
         if committed {
             let state = RuntimeSessionState {
                 session_id: session_id.clone(),
-                ..RuntimeSessionState::new(crate::SessionPolicy::new(
+                ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
                     lash_core::NoProgressBudget::bounded(12),

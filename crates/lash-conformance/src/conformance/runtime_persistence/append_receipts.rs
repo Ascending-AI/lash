@@ -72,7 +72,7 @@ pub(super) async fn seed_append_receipt_state(
 ) -> RuntimeSessionState {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -602,7 +602,7 @@ pub async fn append_receipt_corrupt_identity_encoding_version_is_refused<F, Fut>
 pub async fn concurrent_same_append_operation_applies_exactly_once(store: Arc<dyn RuntimeStore>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -886,7 +886,7 @@ pub async fn append_receipt_encoding_version_mismatch_keeps_exact_hash_semantics
 pub async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),

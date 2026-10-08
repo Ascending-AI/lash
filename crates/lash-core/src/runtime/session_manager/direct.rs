@@ -441,6 +441,7 @@ mod tests {
         ))
         .with_plugin_host(Arc::new(crate::PluginHost::new(
             crate::testing::test_standard_protocol_factories(),
+            crate::ExecutionBudgets::recommended(),
         )))
         .build();
         let policy = standard_test_policy();
@@ -450,7 +451,7 @@ mod tests {
             crate::RuntimeSessionState {
                 session_id: crate::SessionId::fixture(SESSION_ID.to_string()),
                 policy: policy.clone(),
-                ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
                     crate::NoProgressBudget::bounded(12),

@@ -123,7 +123,7 @@ async fn seed(
         .expect("admit lineage conformance session");
     let mut state = RuntimeSessionState {
         session_id: SessionId::fixture(session_id.to_string()),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),

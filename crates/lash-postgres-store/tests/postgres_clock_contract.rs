@@ -282,7 +282,7 @@ async fn session_command_and_pending_input_decisions_follow_the_postgres_clock()
     );
     let mut state = RuntimeSessionState {
         session_id: session.clone(),
-        ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -395,7 +395,7 @@ async fn final_turn_commit_stamps_follow_the_injected_store_clock() {
     let store = factory;
     let state = RuntimeSessionState {
         session_id: SessionId::fixture(session_id.clone()),
-        ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),

@@ -45,15 +45,18 @@ fn assert_restricted_empty_catalog(access: crate::SessionToolAccess, session_id:
         lash_core::plugin::PluginDeclaration::initial("tool_access_recovery_resident"),
         lash_core::plugin::PluginSpec::new().with_tool_provider(Arc::new(ResidentProvider)),
     )));
-    let session = lash_core::facade_support::PluginHost::new(factories)
-        .build_session(PluginSessionRequest::creation(
-            lash_core::SessionId::fixture(session_id),
-            lash_core::plugin::SessionAuthorityContext {
-                tool_access: access,
-                ..Default::default()
-            },
-        ))
-        .expect("build session from recovered authority");
+    let session = lash_core::facade_support::PluginHost::new(
+        factories,
+        lash_core::ExecutionBudgets::recommended(),
+    )
+    .build_session(PluginSessionRequest::creation(
+        lash_core::SessionId::fixture(session_id),
+        lash_core::plugin::SessionAuthorityContext {
+            tool_access: access,
+            ..lash_core::plugin::SessionAuthorityContext::ambient_fixture()
+        },
+    ))
+    .expect("build session from recovered authority");
     assert!(
         session
             .resolved_tool_catalog()
@@ -85,7 +88,7 @@ pub async fn session_tool_access_durable_recovery(
         .expect("admit the explicit-tool-access session");
     let mut state = crate::RuntimeSessionState {
         session_id: session_id.clone(),
-        ..crate::RuntimeSessionState::new(request.config.session_policy())
+        ..crate::RuntimeSessionState::ambient_fixture(request.config.session_policy())
     };
     state.authority.tool_access =
         crate::SessionToolAccess::restricted([]).expect("restricted empty is valid");

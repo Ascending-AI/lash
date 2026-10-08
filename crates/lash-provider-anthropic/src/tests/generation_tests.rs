@@ -151,7 +151,11 @@ async fn refused_settings_never_reach_the_transport() {
         let transport = Arc::new(CountingTransport::default());
         let mut provider = AnthropicProvider::new("key").with_transport(transport.clone());
         let error = provider
-            .complete(req, &lash_core::provider::NoSlotDeliveries)
+            .complete(
+                req,
+                &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
+            )
             .await
             .expect_err(label);
         assert_eq!(refusal_code(&error).as_deref(), Some(code), "{label}");

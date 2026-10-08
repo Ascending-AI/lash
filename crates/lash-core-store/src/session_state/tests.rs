@@ -54,7 +54,7 @@ fn commit_result_mismatch_remains_sticky_until_execution_state_staging() {
     const LEAF_A: &str = "execution_state/leaf-a";
     const LEAF_B: &str = "execution_state/leaf-b";
 
-    let mut resident = RuntimeSessionState::new(crate::SessionPolicy::new(
+    let mut resident = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -132,7 +132,7 @@ fn commit_result_mismatch_remains_sticky_until_execution_state_staging() {
 
 #[test]
 fn committing_execution_state_leaves_releases_their_resident_bodies() {
-    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+    let mut state = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -205,7 +205,7 @@ fn committing_execution_state_leaves_releases_their_resident_bodies() {
 }
 
 fn two_leaf_execution(root: &[u8], leaf_key: &str, leaf_body: &[u8]) -> RuntimeSessionState {
-    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+    let mut state = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -305,7 +305,7 @@ fn released_execution_bodies_without_a_retained_snapshot_refuse_hydration() {
         "a later store-backed release must not launder the refusal into no execution"
     );
 
-    let mut rootless = RuntimeSessionState::new(crate::SessionPolicy::new(
+    let mut rootless = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -415,7 +415,7 @@ fn restoring_a_capture_keeps_held_leaves_unchanged_and_stages_missing_ones() {
 
 #[test]
 fn descriptorless_execution_state_leaves_without_a_root_remain_corrupt() {
-    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+    let mut state = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -440,13 +440,16 @@ fn descriptorless_execution_state_leaves_without_a_root_remain_corrupt() {
 
 #[test]
 fn incomplete_checkpoint_component_projection_is_a_typed_error() {
-    let projected = RuntimeSessionState::new(crate::SessionPolicy::new(
+    let projected = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
     ))
     .to_snapshot();
-    let state = RuntimeSessionState::from_snapshot(projected);
+    let state = RuntimeSessionState::from_snapshot(
+        projected,
+        crate::session_state::RuntimeSessionAuthority::ambient_fixture(),
+    );
 
     let error = state
         .checkpoint_components
@@ -465,7 +468,7 @@ fn incomplete_checkpoint_component_projection_is_a_typed_error() {
 #[test]
 #[should_panic(expected = "adopted head revision must advance")]
 fn persisted_commit_cannot_adopt_nonadvancing_revision() {
-    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+    let mut state = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -476,7 +479,7 @@ fn persisted_commit_cannot_adopt_nonadvancing_revision() {
 }
 
 fn fresh_state_with_initial_frame() -> RuntimeSessionState {
-    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+    let mut state = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -529,7 +532,7 @@ fn an_unpersisted_initial_frame_opens_under_the_installed_plugin_config() {
         settled.protocol_turn_options()
     );
 
-    let mut reopened = RuntimeSessionState::new(crate::SessionPolicy::new(
+    let mut reopened = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -577,7 +580,7 @@ fn install_view(state: &mut RuntimeSessionState, config: &crate::PersistedSessio
 /// sticky config, not the first view's.
 #[test]
 fn taking_a_run_view_restores_the_sticky_config() {
-    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+    let mut state = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -627,7 +630,7 @@ fn taking_a_run_view_restores_the_sticky_config() {
 /// the sticky config, while the state's own policy stays the run's.
 #[test]
 fn recorded_session_view_reads_the_sticky_config_under_a_run_view() {
-    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+    let mut state = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -663,7 +666,7 @@ fn recorded_session_view_reads_the_sticky_config_under_a_run_view() {
 
 #[test]
 fn recorded_run_view_never_becomes_sticky_after_commit_replay_or_failed_settlement() {
-    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+    let mut state = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -739,7 +742,7 @@ fn recorded_run_view_never_becomes_sticky_after_commit_replay_or_failed_settleme
 /// config is still the head's.
 #[test]
 fn a_run_commit_identity_covers_its_view_not_the_sticky_config_it_writes() {
-    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+    let mut state = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -857,7 +860,7 @@ fn assert_read_views_current_frame(
 /// FIG-5248: a fresh session exposes its initial frame without a snapshot projection.
 #[test]
 fn read_view_current_frame_is_the_initial_frame() {
-    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+    let mut state = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -878,7 +881,7 @@ fn a_durable_frame_switch_leaves_only_the_new_frame_resident() {
     let clock = crate::SystemClock;
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("frame-residency"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
@@ -990,7 +993,7 @@ fn a_redriven_run_executes_under_its_admitted_plugin_config_revision() {
     let mut head = admitted.clone();
     head.plugin_config = capped_plugin_config(20);
     head.config_revision = 5;
-    let mut state = RuntimeSessionState::new(policy.clone());
+    let mut state = RuntimeSessionState::ambient_fixture(policy.clone());
     adopt_session_config(&mut state, &head);
     assert_eq!(
         state.admitted_plugin_config(),

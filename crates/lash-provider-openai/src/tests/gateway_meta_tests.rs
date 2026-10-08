@@ -56,6 +56,7 @@ async fn allowlisted_meta_is_captured_on_a_buffered_chat_completion() {
         .complete(
             with_meta_allowlist(request(vec![LlmMessage::text(LlmRole::User, "hello")])),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("request succeeds");
@@ -95,6 +96,7 @@ async fn allowlisted_meta_capture_is_last_wins_on_a_buffered_sse_chat_completion
         .complete(
             with_meta_allowlist(request(vec![LlmMessage::text(LlmRole::User, "hello")])),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("buffered SSE-shaped response succeeds");
@@ -117,6 +119,7 @@ async fn allowlisted_meta_capture_is_last_wins_on_a_streaming_chat_completion() 
                 std::sync::Mutex::new(Vec::new()),
             ))),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("terminal stream succeeds");
@@ -136,6 +139,7 @@ async fn allowlisted_meta_is_captured_on_a_buffered_responses_request() {
         .complete(
             with_meta_allowlist(request(vec![LlmMessage::text(LlmRole::User, "hello")])),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("Responses request succeeds");
@@ -174,6 +178,7 @@ async fn allowlisted_meta_capture_is_last_wins_on_a_buffered_sse_responses_reque
         .complete(
             with_meta_allowlist(request(vec![LlmMessage::text(LlmRole::User, "hello")])),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("buffered SSE-shaped Responses body succeeds");
@@ -195,6 +200,7 @@ async fn allowlisted_meta_capture_is_last_wins_on_a_streaming_responses_request(
                 std::sync::Mutex::new(Vec::new()),
             ))),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("terminal stream succeeds");
@@ -215,6 +221,7 @@ async fn without_an_allowlist_a_gateway_meta_block_captures_nothing() {
         .complete(
             request(vec![LlmMessage::text(LlmRole::User, "hello")]),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("request succeeds");
@@ -239,6 +246,7 @@ async fn without_an_allowlist_a_gateway_meta_block_captures_nothing() {
         .complete(
             streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
             &lash_core::provider::NoSlotDeliveries,
+            &lash_core::provider::LiveCallHorizon::fixture(),
         )
         .await
         .expect("terminal stream succeeds");

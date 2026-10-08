@@ -153,7 +153,7 @@ mod tests {
     }
 
     fn state_with_messages(messages: &[Message]) -> RuntimeSessionState {
-        let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+        let mut state = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             UNBOUNDED,
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),

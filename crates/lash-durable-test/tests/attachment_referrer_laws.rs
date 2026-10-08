@@ -508,11 +508,14 @@ impl Law {
     /// One due pass of the artifact-cleanup relay at `relay_lead` past the
     /// law's clock, over every engine the law's protocol contributes.
     async fn cleanup_pass(&self) {
-        let host = lash_core::facade_support::PluginHost::new(vec![Arc::new(served::rlm(
-            &self.backend,
-            None,
-            sim::untimed_workers(),
-        ))]);
+        let host = lash_core::facade_support::PluginHost::new(
+            vec![Arc::new(served::rlm(
+                &self.backend,
+                None,
+                sim::untimed_workers(),
+            ))],
+            lash_core::ExecutionBudgets::recommended(),
+        );
         let engines = host
             .install_process_engine_contributions(
                 lash_core::facade_support::RuntimeHostConfig::new(

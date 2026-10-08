@@ -355,6 +355,7 @@ async fn run(
     let result = provider
         .complete(
             with_llm_profile_cap(request, cap),
+            lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
         .await
@@ -851,6 +852,7 @@ async fn route_headers_are_sent_or_refused_before_io() {
         let completion = provider
             .complete(
                 with_llm_profile_cap(dialect.request(), cap),
+                lash_core::ExecutionBudgets::recommended(),
                 &lash_core::provider::NoSlotDeliveries,
             )
             .await
@@ -880,6 +882,7 @@ async fn route_headers_are_sent_or_refused_before_io() {
         let error = provider
             .complete(
                 with_llm_profile_cap(dialect.request(), cap),
+                lash_core::ExecutionBudgets::recommended(),
                 &lash_core::provider::NoSlotDeliveries,
             )
             .await
@@ -913,7 +916,11 @@ async fn thinking_visibility_and_summary_have_distinct_receipts() {
             .request_defaults
             .expose_thinking = true;
         let completion = provider
-            .complete(request, &lash_core::provider::NoSlotDeliveries)
+            .complete(
+                request,
+                lash_core::ExecutionBudgets::recommended(),
+                &lash_core::provider::NoSlotDeliveries,
+            )
             .await
             .unwrap_or_else(|error| panic!("{dialect:?}: {error}"));
         let receipt = completion.generation_disposition.expect("receipt");
@@ -960,7 +967,11 @@ async fn receipt_survives_a_failure_after_send() {
     let mut request = dialect.request();
     request.generation.temperature = Some(NonNegativeFiniteF64::new(0.25).expect("finite"));
     let error = provider
-        .complete(request, &lash_core::provider::NoSlotDeliveries)
+        .complete(
+            request,
+            lash_core::ExecutionBudgets::recommended(),
+            &lash_core::provider::NoSlotDeliveries,
+        )
         .await
         .expect_err("provider failure");
     assert_eq!(transport.exchanges().expect("exchanges").len(), 1);
@@ -1014,7 +1025,11 @@ async fn websocket_generation_settings_have_the_same_dispositions_as_sse() {
         let mut request = dialect.request();
         let expected = setting.apply(&mut request);
         let result = provider
-            .complete(request, &lash_core::provider::NoSlotDeliveries)
+            .complete(
+                request,
+                lash_core::ExecutionBudgets::recommended(),
+                &lash_core::provider::NoSlotDeliveries,
+            )
             .await;
         let captured = server.captured();
         if setting.supported(dialect) {

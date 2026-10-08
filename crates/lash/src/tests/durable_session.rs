@@ -309,11 +309,12 @@ async fn open_of_a_missing_id_is_unknown_session_and_writes_no_row() {
     };
     assert!(is_unknown(core.session(id("never-opened")).open().await));
     let state = || {
-        let mut state = lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-            crate::NoProgressBudget::bounded(12),
-        ));
+        let mut state =
+            lash_core::RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
+            ));
         state.session_id = missing.clone();
         state
     };

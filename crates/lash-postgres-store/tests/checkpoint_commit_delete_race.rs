@@ -66,7 +66,7 @@ async fn commit_waits_for_delete_then_refuses(branch: ReuseBranch) {
         .expect("create delete victim");
     let mut victim_state = RuntimeSessionState {
         session_id: SessionId::from("commit-delete-victim"),
-        ..RuntimeSessionState::new(
+        ..RuntimeSessionState::ambient_fixture(
             request(&SessionId::from("commit-delete-victim"))
                 .config
                 .session_policy(),
@@ -90,7 +90,7 @@ async fn commit_waits_for_delete_then_refuses(branch: ReuseBranch) {
         .expect("create commit target");
     let mut target_state = RuntimeSessionState {
         session_id: SessionId::from("commit-delete-target"),
-        ..RuntimeSessionState::new(
+        ..RuntimeSessionState::ambient_fixture(
             request(&SessionId::from("commit-delete-target"))
                 .config
                 .session_policy(),

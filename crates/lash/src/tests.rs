@@ -423,6 +423,8 @@ mod node_drain;
 mod output_retention;
 mod panic_containment;
 mod projection;
+#[cfg(feature = "rlm")]
+mod recorded_carriers;
 mod tracing;
 pub(crate) use harness::{
     DecoratedBackend, explicit_ephemeral_facets, explicit_ephemeral_facets_with_budget,

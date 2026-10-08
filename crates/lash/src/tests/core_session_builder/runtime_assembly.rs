@@ -34,14 +34,15 @@ async fn assert_runtime_assembly_refuses_without_writes(
     let policy = lash_core::testing::standard_test_policy();
     let state = RuntimeSessionState {
         session_id: session_id.clone(),
-        ..RuntimeSessionState::new(policy.clone())
+        ..RuntimeSessionState::ambient_fixture(policy.clone())
     };
     let plugins = lash_core::facade_support::PluginHost::new(
         lash_core::testing::test_standard_protocol_factories(),
+        lash_core::ExecutionBudgets::recommended(),
     )
     .build_session(PluginSessionRequest::creation(
         session_id.clone(),
-        Default::default(),
+        lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
     ))
     .expect("runtime plugins");
     for builder in [false, true] {

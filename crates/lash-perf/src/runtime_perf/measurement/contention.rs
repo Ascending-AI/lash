@@ -654,7 +654,7 @@ mod contention_tests {
         let store: Arc<dyn lash_core::RuntimeStore> = factory;
         let mut first_state = RuntimeSessionState {
             session_id: SessionId::from(session_id),
-            ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),

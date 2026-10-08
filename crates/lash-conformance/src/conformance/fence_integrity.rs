@@ -76,7 +76,7 @@ async fn negative_session_head_revision(handles: FenceIntegrityHandles) {
         .expect("admit negative-head session");
     let state = crate::RuntimeSessionState {
         session_id: SessionId::fixture(session_id.to_string()),
-        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+        ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),

@@ -109,11 +109,11 @@ pub struct SessionAuthorityContext {
     pub plugin_config: super::AdmittedPluginConfig,
 }
 
-impl Default for SessionAuthorityContext {
-    /// The blank context of a plugin session built for no recorded session:
-    /// ambient authority and no plugin configuration. It is not a host
-    /// choice; a session's own context carries its recorded authority.
-    fn default() -> Self {
+impl SessionAuthorityContext {
+    /// The fixture context tests share: ambient tool access and no plugin
+    /// configuration.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn ambient_fixture() -> Self {
         Self {
             tool_access: SessionToolAccess::ambient(),
             plugin_config: super::AdmittedPluginConfig::default(),
@@ -142,11 +142,18 @@ impl PluginHost {
         }
     }
 
-    pub fn empty() -> Self {
-        Self::new(Vec::new())
+    /// A host of the builtin plugins alone, under `execution_budgets`.
+    pub fn empty(execution_budgets: crate::ExecutionBudgets) -> Self {
+        Self::new(Vec::new(), execution_budgets)
     }
 
-    pub fn new(factories: Vec<Arc<dyn PluginFactory>>) -> Self {
+    /// A host of `factories` over the builtin plugins. Every catalog its
+    /// sessions build admits its tools against `execution_budgets`, the
+    /// budgets its runtime's host config records.
+    pub fn new(
+        factories: Vec<Arc<dyn PluginFactory>>,
+        execution_budgets: crate::ExecutionBudgets,
+    ) -> Self {
         let override_ids: BTreeSet<&'static str> =
             factories.iter().map(|factory| factory.id()).collect();
         let mut all_factories = super::builtin_plugin_factories();
@@ -169,7 +176,7 @@ impl PluginHost {
             sessions: Arc::new(StdMutex::new(BTreeMap::new())),
             config_registry,
             trace_runtime: crate::trace::TraceRuntime::new(Arc::new(crate::SystemClock)),
-            execution_budgets: crate::ExecutionBudgets::recommended(),
+            execution_budgets,
         }
     }
 
@@ -201,8 +208,8 @@ impl PluginHost {
         &self.trace_runtime
     }
 
-    /// The runtime's execution budgets, stamped from its host config: every
-    /// catalog this host's sessions build admits its tools against them.
+    /// Replace the budgets this host was constructed with by the ones the
+    /// runtime adopting it records in its host config.
     pub fn with_execution_budgets(mut self, execution_budgets: crate::ExecutionBudgets) -> Self {
         self.execution_budgets = execution_budgets;
         self

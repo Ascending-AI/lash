@@ -32,7 +32,7 @@ fn test_state(session_id: &SessionId) -> RuntimeSessionState {
     RuntimeSessionState {
         session_id: session_id.clone(),
         turn_index: 1,
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+        ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
