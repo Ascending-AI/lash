@@ -22,9 +22,11 @@ impl From<lash_core::runtime::PluginOperationCommandOutcome> for RemoteOperation
             lash_core::runtime::PluginOperationCommandOutcome::Failed { failure } => {
                 Self::Failed { failure }
             }
-            lash_core::runtime::PluginOperationCommandOutcome::Refused { error } => Self::Refused {
-                failure: Box::new((*error).into()),
-            },
+            lash_core::runtime::PluginOperationCommandOutcome::Refused { refusal } => {
+                Self::Refused {
+                    failure: Box::new(lash_core::RuntimeError::from(refusal).into()),
+                }
+            }
             lash_core::runtime::PluginOperationCommandOutcome::Cancelled => Self::Cancelled,
         }
     }

@@ -619,9 +619,9 @@ impl SessionAdmin {
         match outcome {
             lash_core::runtime::CompactContextOutcome::Opened { .. } => Ok(true),
             lash_core::runtime::CompactContextOutcome::NothingToCompact => Ok(false),
-            lash_core::runtime::CompactContextOutcome::Failed { code, message } => Err(
-                EmbedError::Runtime(lash_core::RuntimeError::new(code, message)),
-            ),
+            lash_core::runtime::CompactContextOutcome::Failed { refusal } => {
+                Err(EmbedError::Runtime(refusal.into()))
+            }
         }
     }
 

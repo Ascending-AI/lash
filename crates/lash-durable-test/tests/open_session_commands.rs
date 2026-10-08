@@ -10,8 +10,13 @@
 //!   nothing: the committed head keeps its config, its current frame and its
 //!   leaf, and the open session's resident state keeps the config the host
 //!   changed before the refusal.
+//! - **Refused commit (FIG-5376, FIG-5391):** a terminally refused applying
+//!   commit settles its command with the recorded refusal, typed cause
+//!   included, on every tier, and the lane goes on.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+#[path = "support/dialect.rs"]
+mod dialect;
 #[path = "support/served.rs"]
 mod served;
 #[path = "support/sim.rs"]
@@ -212,20 +217,45 @@ tiered_laws!(
     opening_a_historical_frame_is_refused_and_keeps_the_changed_config,
 );
 
-/// ADR 0101 §4 / FIG-5376: a terminal refusal of the applying commit
-/// settles that command with its typed code, discards its head changes,
-/// and lets the next command apply without a failed activation.
-#[tokio::test]
-async fn a_terminally_refused_command_commit_settles_and_the_lane_continues() {
+/// The dialect and server of `tier`, or `None` for a PostgreSQL leg the
+/// run was handed no server for.
+fn dialect_of(tier: Tier) -> Option<(dialect::Dialect, Option<String>)> {
+    match tier {
+        Tier::SqliteMemory => Some((dialect::Dialect::SqliteMemory, None)),
+        Tier::SqliteFile => Some((dialect::Dialect::SqliteFile, None)),
+        Tier::Postgres => match dialect::postgres_url() {
+            Some(url) => Some((dialect::Dialect::Postgres, Some(url))),
+            None => {
+                eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
+                None
+            }
+        },
+    }
+}
+
+/// ADR 0101 §4 / FIG-5376 / FIG-5391: a terminal refusal of the applying
+/// commit settles that command with its recorded refusal, code and typed
+/// cause, discards its head changes, and lets the next command apply
+/// without a failed activation. The refusal is one the store mints with a
+/// cause, an ended artifact referrer, so a settlement that kept only the
+/// code and message answers `ended_referrer()` with nothing.
+async fn a_terminally_refused_command_commit_settles_with_its_cause_and_the_lane_continues(
+    tier: Tier,
+) {
     use lash_core::runtime::durable::session::SessionActivation;
     use lash_durable::{ActorKey, ActorState, CommitLabel, DomainRefusal, DomainWrite};
     use lash_durable_test::{Matrix, Script, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire};
     use lash_sansio::sync::MutexExt as _;
     use std::sync::Mutex;
 
+    let Some((dialect, postgres_url)) = dialect_of(tier) else {
+        return;
+    };
     let clock = SimClock::new();
-    let stores = Arc::new(sim::memory(Arc::clone(&clock)).await);
-    let backend = sim::backend(stores);
+    let keep = Mutex::new(Vec::new());
+    let (stores, database) =
+        dialect::open(dialect, postgres_url.as_deref(), Arc::clone(&clock), &keep).await;
+    let backend = served::configured_backend(stores, sim::settings(), Vec::new());
     let core = lash::LashCore::standard_builder(backend.clone())
         .serve_sessions(false)
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
@@ -246,7 +276,7 @@ async fn a_terminally_refused_command_commit_settles_and_the_lane_continues() {
     let commands = live.admin().commands();
     let script = Script::new();
     let nodes = SimNodes::new(
-        Arc::clone(backend.durable()),
+        database,
         clock,
         script,
         SimNodesConfig {
@@ -300,8 +330,9 @@ async fn a_terminally_refused_command_commit_settles_and_the_lane_continues() {
         )
         .await
         .unwrap();
-    let refusal = lash_core::StoreError::NodeIdCollision {
-        node_id: lash_core::NodeId::try_from("command-node".to_owned()).unwrap(),
+    let referrer = lash_core_store::artifact_referrer::ArtifactReferrer::Session(id.clone());
+    let refusal = lash_core::StoreError::ArtifactReferrerEnded {
+        referrer: referrer.clone(),
     };
     let expected_code = refusal.runtime_code();
     let expected_message = refusal.to_string();
@@ -350,12 +381,37 @@ async fn a_terminally_refused_command_commit_settles_and_the_lane_continues() {
         "the refused command never settled; applying attempts: {}",
         *seen.lock_recover()
     );
+    let recorded = completion
+        .unwrap()
+        .command_outcomes
+        .remove(&receipt.batch_id)
+        .expect("the applying commit records the command's outcome");
     let settled = commands.settle(receipt.clone()).await.unwrap();
+    let lash_core::runtime::SessionCommandSettlement::Applied {
+        outcome: lash_core::runtime::SessionCommandOutcome::Failed { refusal },
+        ..
+    } = settled
+    else {
+        panic!("the refused command settles failed: {settled:?}");
+    };
     assert!(
-        matches!(settled, lash_core::runtime::SessionCommandSettlement::Applied {
-        outcome: lash_core::runtime::SessionCommandOutcome::Failed { code, message }, ..
-    } if code == expected_code && message == expected_message),
-        "the settlement keeps the store's typed refusal"
+        matches!(
+            &recorded,
+            lash_core::runtime::SessionCommandOutcome::Failed { refusal: stored }
+                if *stored == refusal
+        ),
+        "the settlement answers the recorded outcome: {recorded:?}"
+    );
+    assert_eq!(
+        refusal.code, expected_code,
+        "the settlement keeps the store's code"
+    );
+    assert_eq!(refusal.message, expected_message);
+    let answered = lash_core::RuntimeError::from(refusal);
+    assert_eq!(
+        answered.ended_referrer(),
+        Some(&referrer),
+        "the settlement keeps the store's typed cause"
     );
     assert_eq!(
         *seen.lock_recover(),
@@ -438,4 +494,29 @@ async fn a_terminally_refused_command_commit_settles_and_the_lane_continues() {
     nodes.kill("owner");
     core.shutdown().await.unwrap();
     drop(durable);
+    drop(keep);
+}
+
+#[tokio::test]
+async fn a_terminally_refused_command_commit_settles_with_its_cause_on_sqlite_memory() {
+    a_terminally_refused_command_commit_settles_with_its_cause_and_the_lane_continues(
+        Tier::SqliteMemory,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_terminally_refused_command_commit_settles_with_its_cause_on_sqlite_file() {
+    a_terminally_refused_command_commit_settles_with_its_cause_and_the_lane_continues(
+        Tier::SqliteFile,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_terminally_refused_command_commit_settles_with_its_cause_on_postgres() {
+    a_terminally_refused_command_commit_settles_with_its_cause_and_the_lane_continues(
+        Tier::Postgres,
+    )
+    .await;
 }

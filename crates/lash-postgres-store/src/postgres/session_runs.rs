@@ -280,9 +280,7 @@ pub(crate) async fn end_refused_run_tx(
         UnansweredRun::Unknown => Ok(RunEndOutcome::Unknown),
         UnansweredRun::Open => {
             let cause = RunTerminalCause::Refused {
-                code: refusal.code.clone(),
-                message: refusal.message.clone(),
-                refusal_cause: refusal.cause.clone(),
+                refusal: refusal.into(),
             };
             write_unanswered_run_end_tx(tx, &target, at_ms, cause)
                 .await

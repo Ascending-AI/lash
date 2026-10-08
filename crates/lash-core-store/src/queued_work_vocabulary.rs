@@ -187,10 +187,10 @@ pub enum SessionCommandOutcome {
     },
     /// The command could not apply, for a reason its own outcome does not
     /// name: nothing of it committed, and the command is settled, so it is
-    /// never applied again and the lane never waits on it.
+    /// never applied again and the lane never waits on it. It keeps the
+    /// refusal with its typed cause (FIG-5391).
     Failed {
-        code: crate::RuntimeErrorCode,
-        message: String,
+        refusal: crate::runtime_error::RecordedRefusal,
     },
 }
 
@@ -215,9 +215,12 @@ pub enum PluginOperationCommandOutcome {
     Failed {
         failure: Box<lash_sansio::PluginOperationFailure>,
     },
-    /// Queued input was refused at admission. The cause is retained for the
-    /// submitting host, and none of the operation's inputs were admitted.
-    Refused { error: Box<crate::RuntimeError> },
+    /// Queued input was refused at admission. The refusal and its typed
+    /// cause are retained for the submitting host, and none of the
+    /// operation's inputs were admitted.
+    Refused {
+        refusal: crate::runtime_error::RecordedRefusal,
+    },
     /// A host cancelled the task after a shift admitted it, and its shift
     /// found the cancel requested before or once the task's code returned
     /// (FIG-4391, FIG-4453): nothing of the task committed, and the command
@@ -238,8 +241,7 @@ pub enum OpenAgentFrameCommandOutcome {
     /// historical frame, the seed carried artifacts a host open cannot hand
     /// over, or a follow-on owns the frame.
     Refused {
-        code: crate::RuntimeErrorCode,
-        message: String,
+        refusal: crate::runtime_error::RecordedRefusal,
     },
 }
 
@@ -259,9 +261,7 @@ pub enum CompactContextOutcome {
     /// The compaction failed. No frame opened, and the command is settled:
     /// it is never applied again.
     Failed {
-        #[schemars(with = "String")]
-        code: crate::RuntimeErrorCode,
-        message: String,
+        refusal: crate::runtime_error::RecordedRefusal,
     },
 }
 

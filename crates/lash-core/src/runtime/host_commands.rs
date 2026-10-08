@@ -143,17 +143,19 @@ impl LashRuntime {
                 // over the durable head, with nothing appended.
                 self.invalidate_resident_session_state();
                 self.reload_invalidated_resident_session_state().await?;
-                let committed = Box::pin(self.commit_host_command(
-                    owner,
-                    &completion,
-                    None,
-                    None,
-                    |_, _| crate::runtime::SessionCommandOutcome::Failed {
-                        code: RuntimeErrorCode::SessionCommandRun,
-                        message: format!("the protocol refused the appended nodes: {error}"),
-                    },
-                ))
-                .await?;
+                let committed =
+                    Box::pin(
+                        self.commit_host_command(owner, &completion, None, None, |_, _| {
+                            crate::runtime::SessionCommandOutcome::Failed {
+                                refusal: RuntimeError::new(
+                                    RuntimeErrorCode::SessionCommandRun,
+                                    format!("the protocol refused the appended nodes: {error}"),
+                                )
+                                .into(),
+                            }
+                        }),
+                    )
+                    .await?;
                 return Ok(!matches!(committed, CommandCommit::Withdrawn));
             }
         }
@@ -248,7 +250,9 @@ impl LashRuntime {
                 }
                 match error {
                     PluginOperationInvokeError::AdmissionRefused(error) => {
-                        crate::runtime::PluginOperationCommandOutcome::Refused { error }
+                        crate::runtime::PluginOperationCommandOutcome::Refused {
+                            refusal: (*error).into(),
+                        }
                     }
                     error => crate::runtime::PluginOperationCommandOutcome::Failed {
                         failure: Box::new(error.into_failure()),
@@ -498,8 +502,7 @@ impl LashRuntime {
                 self.reload_invalidated_resident_session_state().await?;
                 (
                     crate::runtime::OpenAgentFrameCommandOutcome::Refused {
-                        code: error.code,
-                        message: error.message,
+                        refusal: error.into(),
                     },
                     None,
                 )
@@ -596,8 +599,7 @@ impl LashRuntime {
             Box::pin(
                 self.commit_host_command_once(owner, completion, None, None, |_, _| {
                     crate::runtime::SessionCommandOutcome::Failed {
-                        code: refusal.code.clone(),
-                        message: refusal.message.clone(),
+                        refusal: crate::RecordedRefusal::from(&refusal),
                     }
                 }),
             )

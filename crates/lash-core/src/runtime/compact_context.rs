@@ -107,8 +107,7 @@ impl LashRuntime {
             }
             CompactionRun::NothingToCompact => Ok(super::CompactContextOutcome::NothingToCompact),
             CompactionRun::Failed(error) => Ok(super::CompactContextOutcome::Failed {
-                code: error.code,
-                message: error.message,
+                refusal: error.into(),
             }),
         }
     }
@@ -318,8 +317,7 @@ impl LashRuntime {
                 }
                 (None, None) => super::CompactContextOutcome::NothingToCompact,
                 (None, Some(error)) => super::CompactContextOutcome::Failed {
-                    code: error.code.clone(),
-                    message: error.message.clone(),
+                    refusal: crate::RecordedRefusal::from(error),
                 },
             };
             commit.applied_commands = Some(completion.clone());

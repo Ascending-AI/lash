@@ -177,13 +177,11 @@ pub(super) async fn resolve_run(parts: &SendParts, run: &TurnId) -> Result<Resol
                         outcome: Box::new(outcome),
                     });
                 }
-                lash_core::runtime::SessionCommandOutcome::Failed { code, message } => {
+                lash_core::runtime::SessionCommandOutcome::Failed { refusal } => {
                     return Ok(Resolution::OperationSettled {
                         run: run.clone(),
                         outcome: Box::new(
-                            lash_core::runtime::PluginOperationCommandOutcome::Refused {
-                                error: Box::new(lash_core::RuntimeError::new(code, message)),
-                            },
+                            lash_core::runtime::PluginOperationCommandOutcome::Refused { refusal },
                         ),
                     });
                 }
@@ -198,15 +196,9 @@ pub(super) async fn resolve_run(parts: &SendParts, run: &TurnId) -> Result<Resol
                 | RunTerminalCause::Forked { .. }
                 | RunTerminalCause::SessionDeleted { .. },
             ) => Some(PluginOperationCommandOutcome::Cancelled),
-            Some(RunTerminalCause::Refused {
-                code,
-                message,
-                refusal_cause,
-            }) => {
-                let mut error = lash_core::RuntimeError::new(code.clone(), message.clone());
-                error.cause = refusal_cause.clone();
+            Some(RunTerminalCause::Refused { refusal }) => {
                 Some(PluginOperationCommandOutcome::Refused {
-                    error: Box::new(error),
+                    refusal: refusal.clone(),
                 })
             }
             _ => None,
@@ -236,17 +228,9 @@ pub(super) async fn resolve_run(parts: &SendParts, run: &TurnId) -> Result<Resol
                 }),
             });
         }
-        Some(RunTerminalCause::Refused {
-            code,
-            message,
-            refusal_cause,
-        }) => {
-            // The structured cause is the refusal's type: a session-retirement
-            // refusal must answer as one, not as its bare code.
-            let mut refusal = lash_core::RuntimeError::new(code, message);
-            refusal.cause = refusal_cause;
-            Some(refusal)
-        }
+        // The structured cause is the refusal's type: a session-retirement
+        // refusal must answer as one, not as its bare code.
+        Some(RunTerminalCause::Refused { refusal }) => Some(lash_core::RuntimeError::from(refusal)),
         // An operator's end or the session's deletion carries no
         // answer of its own, and a command run answers no send: its
         // commands settle through their own receipts.

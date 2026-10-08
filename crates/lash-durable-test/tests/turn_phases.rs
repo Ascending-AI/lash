@@ -1182,9 +1182,11 @@ async fn colliding_commit_laws(
     }
     match database.turn_end(&session(), &run()).await {
         Ok(Some(end)) => match end.cause {
-            lash_core_store::store::RunTerminalCause::Refused { code, message, .. }
-                if code == lash_core::RuntimeErrorCode::StoreRefused
-                    && message.contains("already exists in durable session history") => {}
+            lash_core_store::store::RunTerminalCause::Refused { refusal }
+                if refusal.code == lash_core::RuntimeErrorCode::StoreRefused
+                    && refusal
+                        .message
+                        .contains("already exists in durable session history") => {}
             cause => violations.push(format!(
                 "the run ended {cause:?}, not refused for the collision"
             )),

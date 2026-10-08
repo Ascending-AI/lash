@@ -140,12 +140,12 @@ impl RuntimeSessionServices {
             crate::store::RunTerminalCause::Cancelled { evidence } => {
                 crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled { evidence })
             }
-            crate::store::RunTerminalCause::Refused { code, message, .. } => {
+            crate::store::RunTerminalCause::Refused { refusal } => {
                 return Ok(crate::ProcessAwaitOutput::from_tool_output(
                     crate::ToolCallOutput::failure(crate::ToolFailure::tool(
                         crate::ToolFailureClass::Execution,
                         "process_session_turn_refused",
-                        format!("{code}: {message}"),
+                        format!("{}: {}", refusal.code, refusal.message),
                     )),
                 ));
             }

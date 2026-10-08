@@ -920,9 +920,11 @@ async fn cancelling_a_settled_operation_answers_unknown_or_revoked() {
         session: session_id,
         run: operation.run_id(),
         cause: Box::new(lash_core::store::RunTerminalCause::Refused {
-            code: lash_core::RuntimeErrorCode::SessionCommandRun,
-            message: "operation refused before execution".to_owned(),
-            refusal_cause: None,
+            refusal: lash_core::RuntimeError::new(
+                lash_core::RuntimeErrorCode::SessionCommandRun,
+                "operation refused before execution",
+            )
+            .into(),
         }),
         head_revision: None,
     }));

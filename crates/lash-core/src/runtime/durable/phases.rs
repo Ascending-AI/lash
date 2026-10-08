@@ -534,9 +534,7 @@ pub(super) async fn refuse(
         session: row.session.clone(),
         run: row.run.clone(),
         cause: Box::new(crate::store::RunTerminalCause::Refused {
-            code: refusal.code,
-            message: refusal.message,
-            refusal_cause: refusal.cause,
+            refusal: refusal.into(),
         }),
         head_revision: None,
     }));

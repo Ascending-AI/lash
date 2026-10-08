@@ -270,6 +270,10 @@ pub use lash_core::{
 };
 // A host's head write is a session command it submits, settles and may
 // withdraw (FIG-4202): the settlement and the typed outcomes it carries.
+/// The one recorded form of a refusal those outcomes and a run's refused
+/// terminal keep: its code, message and typed cause (FIG-5391). A host reads
+/// it back as the `RuntimeError` it was, with `RuntimeError::from`.
+pub use lash_core::RecordedRefusal;
 pub use lash_core::runtime::{
     CompactContextOutcome, OpenAgentFrameCommandOutcome, PluginOperationCommandOutcome,
     SessionCommandOutcome, SessionCommandSettlement,

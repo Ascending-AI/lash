@@ -97,14 +97,11 @@ impl SessionAdmin {
                             lash_core::runtime::SessionCommandOutcome::OpenAgentFrame {
                                 outcome:
                                     lash_core::runtime::OpenAgentFrameCommandOutcome::Refused {
-                                        code,
-                                        message,
+                                        refusal,
                                     },
                             },
                         ..
-                    } => Err(EmbedError::Runtime(lash_core::RuntimeError::new(
-                        code, message,
-                    ))),
+                    } => Err(EmbedError::Runtime(refusal.into())),
                     settlement => Err(unsettled_command_error(settlement)),
                 }
             }
@@ -212,10 +209,12 @@ impl SessionAdmin {
                         outcome:
                             lash_core::runtime::SessionCommandOutcome::PluginOperation {
                                 outcome:
-                                    lash_core::runtime::PluginOperationCommandOutcome::Refused { error },
+                                    lash_core::runtime::PluginOperationCommandOutcome::Refused {
+                                        refusal,
+                                    },
                             },
                         ..
-                    } => return Err(EmbedError::Runtime(*error)),
+                    } => return Err(EmbedError::Runtime(refusal.into())),
                     lash_core::runtime::SessionCommandSettlement::Applied {
                         receipt,
                         outcome:
@@ -333,9 +332,9 @@ pub(super) fn unsettled_command_error(
         lash_core::runtime::SessionCommandSettlement::Rejected(error) => EmbedError::Runtime(error),
         // A command that could not apply settles with its typed failure.
         lash_core::runtime::SessionCommandSettlement::Applied {
-            outcome: lash_core::runtime::SessionCommandOutcome::Failed { code, message },
+            outcome: lash_core::runtime::SessionCommandOutcome::Failed { refusal },
             ..
-        } => EmbedError::Runtime(lash_core::RuntimeError::new(code, message)),
+        } => EmbedError::Runtime(refusal.into()),
         settlement => EmbedError::Session(SessionError::Protocol(format!(
             "a session command settled with another command's settlement: {settlement:?}"
         ))),

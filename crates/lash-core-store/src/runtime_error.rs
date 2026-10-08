@@ -14,8 +14,10 @@ pub use attachment_retention::{AttachmentRetentionFailure, AttachmentRetentionSt
 mod cause;
 mod classification;
 mod controller;
+mod recorded_refusal;
 pub use cause::{RuntimeErrorCause, StoredDataCorruption};
 pub use controller::RuntimeEffectControllerError;
+pub use recorded_refusal::RecordedRefusal;
 pub(crate) mod llm_profile_unavailable;
 mod run_shape;
 mod tool_call_limit;

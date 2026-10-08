@@ -643,7 +643,7 @@ mod ddl_tests {
             )
         };
         let cancelled = r#"{"cause":"operator_cancelled","intent":1}"#;
-        let refused = r#"{"cause":"refused","code":"x","message":"m"}"#;
+        let refused = r#"{"cause":"refused","refusal":{"code":"x","message":"m"}}"#;
         assert!(end("a", "answered", cancelled).is_err());
         assert!(end("c", "answered", refused).is_err());
         assert!(end("d", "cancelled", r#"{"cause":"unknown"}"#).is_err());

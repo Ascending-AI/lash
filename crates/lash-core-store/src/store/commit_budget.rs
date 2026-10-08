@@ -62,9 +62,10 @@ impl CommitBudget {
     }
 }
 
-/// The longest message a failed settlement's refusal receipt carries
-/// uncharged. The longest budget refusal, every count at `usize::MAX`, fits.
-const MAX_UNCHARGED_REFUSAL_MESSAGE_BYTES: usize = 512;
+/// The longest recorded refusal, its code, message and typed cause encoded,
+/// that a failed settlement's receipt carries uncharged. The longest budget
+/// refusal, every count at `usize::MAX`, fits.
+const MAX_UNCHARGED_REFUSAL_BYTES: usize = 1024;
 
 /// Whether `outcome` is a failed settlement's bounded refusal receipt, which
 /// the byte budget does not charge (FIG-4471).
@@ -74,13 +75,13 @@ const MAX_UNCHARGED_REFUSAL_MESSAGE_BYTES: usize = 512;
 /// adds. Charging that receipt would put a failed settlement over the size of
 /// the head's bare commit, which is what creation admits (FIG-4393), so a
 /// command over a budget its head fits could never settle and would stay
-/// open. Every other outcome, and a refusal whose message exceeds the bound,
-/// is charged.
+/// open. Every other outcome, and a refusal whose encoded record exceeds the
+/// bound, is charged.
 fn is_uncharged_refusal_receipt(outcome: &crate::SessionCommandOutcome) -> bool {
     matches!(
         outcome,
-        crate::SessionCommandOutcome::Failed { message, .. }
-            if message.len() <= MAX_UNCHARGED_REFUSAL_MESSAGE_BYTES
+        crate::SessionCommandOutcome::Failed { refusal }
+            if refusal.encoded_len() <= MAX_UNCHARGED_REFUSAL_BYTES
     )
 }
 
@@ -576,11 +577,13 @@ mod tests {
             max_nodes: usize::MAX,
         };
         for refusal in [bytes, nodes] {
-            let message = crate::runtime_error::runtime_error_from_store_commit(refusal).message;
+            let recorded = crate::runtime_error::RecordedRefusal::from(
+                crate::runtime_error::runtime_error_from_store_commit(refusal),
+            );
             assert!(
-                message.len() <= MAX_UNCHARGED_REFUSAL_MESSAGE_BYTES,
-                "{} bytes: {message}",
-                message.len()
+                recorded.encoded_len() <= MAX_UNCHARGED_REFUSAL_BYTES,
+                "{} bytes: {recorded:?}",
+                recorded.encoded_len()
             );
         }
     }
@@ -618,12 +621,18 @@ mod tests {
                 .insert(crate::BatchId::from("qwb:settled"), outcome);
             commit
         };
-        let refusal = |message: String| crate::SessionCommandOutcome::Failed {
-            code: crate::RuntimeErrorCode::StoreCommitByteBudgetExceeded,
-            message,
+        // A refusal whose encoded record is `bytes` long.
+        let refusal = |bytes: usize| {
+            let mut refusal = crate::runtime_error::RecordedRefusal {
+                code: crate::RuntimeErrorCode::StoreCommitByteBudgetExceeded,
+                message: String::new(),
+                cause: None,
+            };
+            refusal.message = "r".repeat(bytes - refusal.encoded_len());
+            crate::SessionCommandOutcome::Failed { refusal }
         };
 
-        let failed = settled(refusal("r".repeat(MAX_UNCHARGED_REFUSAL_MESSAGE_BYTES)));
+        let failed = settled(refusal(MAX_UNCHARGED_REFUSAL_BYTES));
         assert_eq!(
             failed
                 .measure_budget()
@@ -636,7 +645,7 @@ mod tests {
             .expect("a budget the bare commit fits admits its failed settlement");
 
         for charged in [
-            refusal("r".repeat(MAX_UNCHARGED_REFUSAL_MESSAGE_BYTES + 1)),
+            refusal(MAX_UNCHARGED_REFUSAL_BYTES + 1),
             crate::SessionCommandOutcome::AppendSessionNodes {
                 outcome: crate::session_append::AppendSessionNodesOutcome::Appended {
                     node_ids: Vec::new(),

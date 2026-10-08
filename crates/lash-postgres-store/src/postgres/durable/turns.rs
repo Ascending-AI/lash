@@ -584,7 +584,7 @@ mod ddl_tests {
             .await
         };
         let cancelled = r#"{"cause":"operator_cancelled","intent":1}"#;
-        let refused_cause = r#"{"cause":"refused","code":"x","message":"m"}"#;
+        let refused_cause = r#"{"cause":"refused","refusal":{"code":"x","message":"m"}}"#;
         assert!(refused(end("a", "answered", cancelled).await));
         assert!(refused(end("c", "answered", refused_cause).await));
         assert!(refused(

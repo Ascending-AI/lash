@@ -1130,8 +1130,8 @@ impl<Output, Error> RunHandle<Output, Error> {
                         lash_core::facade_support::PluginOperationInvokeError::Failed(failure),
                     ))
                 }
-                lash_core::runtime::PluginOperationCommandOutcome::Refused { error } => {
-                    Err(EmbedError::Runtime(*error))
+                lash_core::runtime::PluginOperationCommandOutcome::Refused { refusal } => {
+                    Err(EmbedError::Runtime(refusal.into()))
                 }
                 lash_core::runtime::PluginOperationCommandOutcome::Cancelled => {
                     Err(EmbedError::from(SendError::NotSettled {

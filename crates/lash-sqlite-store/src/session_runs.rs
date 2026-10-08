@@ -287,9 +287,7 @@ pub(crate) fn end_refused_run_conn(
         UnansweredRun::Unknown => Ok(RunEndOutcome::Unknown),
         UnansweredRun::Open => {
             let cause = RunTerminalCause::Refused {
-                code: refusal.code.clone(),
-                message: refusal.message.clone(),
-                refusal_cause: refusal.cause.clone(),
+                refusal: refusal.into(),
             };
             write_unanswered_run_end_conn(tx, &target, at_ms, cause).map(RunEndOutcome::Ended)
         }

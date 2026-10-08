@@ -193,10 +193,7 @@ pub enum RunTerminalCause {
     /// refusal, which is the answer of every input the run took, with its
     /// structured cause: a session-retirement refusal answers as one.
     Refused {
-        code: crate::RuntimeErrorCode,
-        message: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        refusal_cause: Option<crate::RuntimeErrorCause>,
+        refusal: crate::runtime_error::RecordedRefusal,
     },
     /// A command run applied the session's open command run and admitted
     /// no turn (ADR 0101 §4, FIG-4202). Its end, written once the command
