@@ -2,9 +2,9 @@
 //!
 //! A simulated turn runs where a deployment runs one: on lash's durable
 //! engine ([`SimEngine`]), over a SQLite memory store set. The engine is
-//! built through [`lash::durable::DurableBackendBuilder`], which I0
-//! (FIG-5194) assembles and L3 (FIG-5172) makes serve; until then a world
-//! that runs a turn stops at the builder. When the simulator records the
+//! built through [`lash::durable::DurableBackendBuilder`], and the core a
+//! world builds over it serves its own node, which runs every turn the
+//! world sends (FIG-5172). When the simulator records the
 //! checkpoint writes a run commits, it wraps the engine backend's session
 //! factory in an observer, and every other port stays the backend's.
 

@@ -169,7 +169,6 @@ fn definition_value(source: &str) -> (String, FlowValue) {
 }
 
 #[test]
-#[ignore = "blocked: L6 (FIG-5175): ActorContext::process_effect refuses process and process-definition commands (RuntimeEffectLocalExecutorMismatch); repro testing::cell_conformance::persistence::a_cell_binding_a_process_literal_publishes_its_definition"]
 fn a_cell_module_is_published_under_its_execution_then_held_by_its_frame() {
     block_on(async {
         let store = Arc::new(RecordingArtifactStore::default());
@@ -192,7 +191,6 @@ fn a_cell_module_is_published_under_its_execution_then_held_by_its_frame() {
 }
 
 #[test]
-#[ignore = "blocked: L6 (FIG-5175): ActorContext::process_effect refuses process and process-definition commands (RuntimeEffectLocalExecutorMismatch); repro testing::cell_conformance::persistence::a_cell_binding_a_process_literal_publishes_its_definition"]
 fn a_switched_frame_refusing_its_edge_is_a_replay_and_the_cell_goes_on() {
     block_on(async {
         let store = Arc::new(RecordingArtifactStore::default());
@@ -237,7 +235,6 @@ fn a_bare_module_reference_does_not_acquire_a_definition() {
 }
 
 #[test]
-#[ignore = "blocked: L6 (FIG-5175): ActorContext::process_effect refuses process and process-definition commands (RuntimeEffectLocalExecutorMismatch); repro testing::cell_conformance::persistence::a_cell_binding_a_process_literal_publishes_its_definition"]
 fn a_definition_held_only_inside_a_map_is_held_by_the_frame() {
     block_on(async {
         let store = Arc::new(RecordingArtifactStore::default());

@@ -40,6 +40,126 @@ async fn unsuccessful_http_response_emits_no_response_establishment_marker() {
     );
 }
 
+const CHAT_REASONING_AND_TEXT_STREAM: &str = concat!(
+    "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"private chain\"}}]}\n\n",
+    "data: {\"choices\":[{\"delta\":{\"content\":\"public answer\"}}]}\n\n",
+    "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+    "data: [DONE]\n\n"
+);
+
+const BUFFERED_RESPONSES_WITH_TWO_REASONING_PARTS: &str = r#"{
+    "id":"resp_reasoning_parts",
+    "status":"completed",
+    "output":[
+        {
+            "type":"reasoning",
+            "id":"reasoning-a",
+            "summary":[{"type":"summary_text","text":"same reasoning"}],
+            "encrypted_content":"opaque-a"
+        },
+        {
+            "type":"reasoning",
+            "id":"reasoning-b",
+            "summary":[{"type":"summary_text","text":"same reasoning"}],
+            "encrypted_content":"opaque-b"
+        }
+    ]
+}"#;
+
+/// The reasoning deltas a settled turn's activity holds.
+fn reasoning_deltas(output: &lash::TurnOutput) -> Vec<&str> {
+    output
+        .activities
+        .iter()
+        .filter_map(|activity| match &activity.event {
+            lash::TurnEvent::ReasoningDelta { text, .. } => Some(text.as_ref()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A facade turn shows the Chat Completions stream's reasoning to the host
+/// only when the model's profile exposes thinking; the public answer settles
+/// either way.
+#[tokio::test(flavor = "multi_thread")]
+async fn openai_chat_runtime_respects_expose_thinking() {
+    for (expose_thinking, expected_reasoning) in
+        [(false, Vec::new()), (true, vec!["private chain"])]
+    {
+        let provider = openrouter_provider()
+            .with_transport(single_stream_transport(CHAT_REASONING_AND_TEXT_STREAM));
+        let core = super::facade_turns::durable_core(
+            "provider/model",
+            lash::LlmProfileMetadata::builder("provider/model")
+                .context_window_tokens(16_000)
+                .expose_thinking(expose_thinking)
+                .build()
+                .expect("valid model spec"),
+            ProviderHandle::new(provider.into_components()),
+            None,
+        )
+        .await;
+        let session = super::facade_turns::session(
+            &core,
+            "provider/model",
+            &format!("openai-reasoning-visible-{expose_thinking}"),
+        )
+        .await;
+        let output = super::facade_turns::send(&session, "answer privately").await;
+
+        assert_eq!(reasoning_deltas(&output), expected_reasoning);
+        assert_eq!(output.assistant_message(), Some("public answer"));
+        core.shutdown().await.expect("the core shuts down");
+    }
+}
+
+/// A buffered Responses answer with two reasoning items of the same text
+/// reaches the host and the committed transcript as two reasoning parts,
+/// never folded into one.
+#[tokio::test(flavor = "multi_thread")]
+async fn openai_buffered_responses_runtime_preserves_reasoning_part_boundaries() {
+    let transport = Arc::new(ScriptedHttpTransport {
+        responses: std::sync::Mutex::new(VecDeque::from([(
+            200,
+            vec![("content-type".to_string(), "application/json".to_string())],
+            BUFFERED_RESPONSES_WITH_TWO_REASONING_PARTS,
+        )])),
+        calls: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let provider = OpenAiProvider::new("key").with_transport(transport);
+    let core = super::facade_turns::durable_core(
+        "gpt-5.4",
+        lash::LlmProfileMetadata::builder("gpt-5.4")
+            .context_window_tokens(16_000)
+            .expose_thinking(true)
+            .build()
+            .expect("valid model spec"),
+        ProviderHandle::new(provider.into_components()),
+        None,
+    )
+    .await;
+    let session =
+        super::facade_turns::session(&core, "gpt-5.4", "openai-buffered-reasoning-boundaries")
+            .await;
+
+    let output = super::facade_turns::send(&session, "reason in two parts").await;
+    let read_view = output.result.state.read_view();
+    let durable = read_view
+        .messages()
+        .iter()
+        .flat_map(|message| message.parts.iter())
+        .filter(|part| part.kind() == lash_core::PartKind::Reasoning)
+        .map(|part| part.content())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        reasoning_deltas(&output),
+        ["same reasoning", "same reasoning"]
+    );
+    assert_eq!(durable, ["same reasoning", "same reasoning"]);
+    core.shutdown().await.expect("the core shuts down");
+}
+
 /// One scripted step of a response body: either bytes, or the transport-level
 /// failure that models a server hanging up mid-stream.
 #[derive(Debug)]

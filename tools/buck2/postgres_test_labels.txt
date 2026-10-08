@@ -1,4 +1,6 @@
 //crates/lash-durable-test:after_turn_crash_laws__test
+//crates/lash-durable-test:attachment_referrer_laws__test
+//crates/lash-durable-test:cell_process_handles__test
 //crates/lash-durable-test:cell_restore_laws__test
 //crates/lash-durable-test:committed_turns__test
 //crates/lash-durable-test:config_change_observer_laws__test
@@ -6,16 +8,20 @@
 //crates/lash-durable-test:declared_start__test
 //crates/lash-durable-test:declared_start_crash_laws__test
 //crates/lash-durable-test:drain_by_release__test
+//crates/lash-durable-test:frame_switch_laws__test
 //crates/lash-durable-test:plugin_state_storage_laws__test
 //crates/lash-durable-test:process_tool_call_crash_laws__test
 //crates/lash-durable-test:process_tool_calls__test
+//crates/lash-durable-test:recorded_behaviour_laws__test
 //crates/lash-durable-test:session_send__test
+//crates/lash-durable-test:standard_turn_outcomes__test
 //crates/lash-durable-test:steering_crash_laws__test
 //crates/lash-durable-test:tool_activity__test
 //crates/lash-durable-test:tool_batches__test
 //crates/lash-durable-test:tool_call_identity__test
 //crates/lash-durable-test:tool_crash_laws__test
 //crates/lash-durable-test:tool_group_pool_width__test
+//crates/lash-durable-test:tool_surface_laws__test
 //crates/lash-durable-test:trigger_start_proof__test
 //crates/lash-durable-test:turn_phases__test
 //crates/lash-durable-test:vertical_crash_proof__test

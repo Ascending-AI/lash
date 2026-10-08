@@ -367,6 +367,7 @@ impl lash_core::Clock for CancelWatchTestClock {
 
 mod config_transactions;
 mod effects_and_queue;
+mod refresh_refusal;
 mod turn_lifecycle;
 
 use effects_and_queue::*;

@@ -6,14 +6,35 @@ use super::budgets::{
 };
 use super::guards::required_phases;
 use super::{RuntimePerfScenario, ScenarioHarnessKind};
+use crate::perf_support::stack::StackProfile;
 use crate::runtime_perf::measurement::{
-    CheckpointCurveConfig, RuntimePerfPhaseProbe, phase_name, run_once_durable_checkpoint_curve,
-    run_once_store_hardening_hot_paths,
+    CHECKPOINT_HASH_PASSES_PER_CHANGED_BODY, CheckpointCurveAxis, CheckpointCurveConfig,
+    HighTrafficConfig, RuntimePerfPhaseProbe, checkpoint_curve_points, phase_name, run_once,
+    run_once_durable_checkpoint_curve, run_once_store_hardening_hot_paths, stage,
 };
 use crate::runtime_perf::scenarios::ScenarioPhaseContract;
 use lash_core::runtime::RuntimeTurnPhaseProbe;
 use lash_core::store::QueuedWorkStore as _;
 use lash_core::{SessionCatalogStore as _, SessionListFilter};
+
+const STABLE_DURABLE_PHASES: [&str; 5] = [
+    "prepared_turn",
+    "committed_turn",
+    "post_commit_delivery",
+    "effect_loop",
+    "context_transform",
+];
+
+fn high_traffic_config() -> HighTrafficConfig {
+    HighTrafficConfig::parse(
+        4,
+        0,
+        "plain=1,tool=1,queued=1,child=1,wake=1,trigger=1",
+        "2,4",
+        1.25,
+    )
+    .expect("valid high-traffic test config")
+}
 
 fn checkpoint_curve_config() -> CheckpointCurveConfig {
     CheckpointCurveConfig::new(8 * 1024, 2, 4, 8).expect("valid checkpoint curve test config")
@@ -144,6 +165,182 @@ fn ending_an_unstarted_phase_is_a_no_op() {
     assert!(probe.take_completed().is_empty());
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "FIG-5342: a session's phase probe never reaches the run the node executes"]
+async fn stable_durable_sqlite_turn_scenarios_report_phases_and_store_calls() {
+    for scenario in RuntimePerfScenario::DURABLE_REPRESENTATIVE_TURNS
+        .into_iter()
+        .filter(|scenario| !scenario.uses_postgres())
+        // Curves, contention, and load have explicit scenario-specific phase
+        // contracts and dedicated structural tests below. This test covers
+        // every durable scenario whose contract includes the stable turn
+        // phases and decorated store-call counters.
+        .filter(|scenario| scenario.phase_contract() == ScenarioPhaseContract::StableDurableTurn)
+    {
+        let result = Box::pin(run_once(
+            scenario,
+            1,
+            &checkpoint_curve_config(),
+            &high_traffic_config(),
+        ))
+        .await
+        .unwrap_or_else(|error| panic!("{} failed: {error:#}", scenario.name()));
+        for phase in STABLE_DURABLE_PHASES {
+            assert!(
+                result.phase_profile.contains_key(phase),
+                "{} omitted stable phase {phase}: {:?}",
+                scenario.name(),
+                result.phase_profile.keys().collect::<Vec<_>>()
+            );
+        }
+        for counter in [
+            "store_calls.commit_runtime_state",
+            "store_calls.load_session_window",
+            "durable_commit.logical_bytes",
+            "durable_commit.logical_rows",
+        ] {
+            assert!(
+                result
+                    .extra_counters
+                    .get(counter)
+                    .is_some_and(|value| *value > 0),
+                "{} omitted positive {counter}: {:?}",
+                scenario.name(),
+                result.extra_counters
+            );
+        }
+        assert!(
+            result
+                .extra_counters
+                .get("store_calls.total")
+                .is_some_and(|calls| *calls > 0),
+            "{} emitted no decorated store calls: {:?}",
+            scenario.name(),
+            result.extra_counters
+        );
+
+        for (call_key, calls) in result.extra_counters.iter().filter(|(key, _)| {
+            key.starts_with("store_calls.") && key.as_str() != "store_calls.total"
+        }) {
+            let operation = call_key
+                .strip_prefix("store_calls.")
+                .expect("filtered store call key");
+            let family = format!("store.op.{operation}.observed_micros");
+            assert!(
+                !family.contains("transaction") && !family.contains("pool_wait"),
+                "decorator latency key overclaims its bracket: {family}"
+            );
+            assert_eq!(
+                result.extra_counters.get(&format!("{family}.count")),
+                Some(calls),
+                "{family} count must match the existing decorator call count"
+            );
+            assert!(
+                result
+                    .extra_counters
+                    .contains_key(&format!("{family}.total")),
+                "{family} is missing total observed microseconds"
+            );
+            assert_eq!(
+                result.metric_samples.get(&family).map(Vec::len),
+                Some(*calls as usize),
+                "{family} must retain one latency sample per decorated call"
+            );
+        }
+
+        let summaries = super::summarize(
+            std::slice::from_ref(&result),
+            std::slice::from_ref(&scenario),
+            1,
+            &StackProfile::capture(None, None),
+        );
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].runs, 1);
+        for phase in STABLE_DURABLE_PHASES {
+            assert!(
+                summaries[0].phase_summary.contains_key(phase),
+                "{} summary omitted stable phase {phase}",
+                scenario.name()
+            );
+        }
+        for family in result
+            .metric_samples
+            .keys()
+            .filter(|key| key.starts_with("store.op."))
+        {
+            assert!(
+                summaries[0].metric_summary.contains_key(family),
+                "{} summary omitted latency family {family}",
+                scenario.name()
+            );
+        }
+
+        for key in [
+            "process.cpu_ms",
+            "process.cpu_utilization",
+            "runtime.workers",
+            "runtime.global_queue_depth_max",
+        ] {
+            assert!(
+                result.metric_samples.contains_key(key),
+                "{} omitted scheduler metric {key}",
+                scenario.name()
+            );
+        }
+        let cpu_ms = result.metric_samples["process.cpu_ms"][0];
+        let available_cores =
+            std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get) as f64;
+        let total_ms = result
+            .stage(stage::TOTAL)
+            .expect("measured runs record a total stage")
+            .duration_ms;
+        assert!(
+            cpu_ms <= total_ms * available_cores,
+            "process CPU {cpu_ms} ms exceeds {total_ms} ms across {available_cores} cores",
+        );
+        assert!(result.metric_samples["process.cpu_utilization"][0] >= 0.0);
+        assert!(result.metric_samples["runtime.workers"][0] >= 1.0);
+
+        #[cfg(target_has_atomic = "64")]
+        {
+            for key in [
+                "runtime.worker_busy_ms",
+                "runtime.busy_fraction",
+                "runtime.worker_park_count",
+            ] {
+                assert!(
+                    result.metric_samples.contains_key(key),
+                    "{} omitted 64-bit scheduler metric {key}",
+                    scenario.name()
+                );
+            }
+            let busy_fraction = result.metric_samples["runtime.busy_fraction"][0];
+            assert!(
+                (0.0..=1.0).contains(&busy_fraction),
+                "busy fraction out of bounds: {busy_fraction}"
+            );
+        }
+        #[cfg(not(target_has_atomic = "64"))]
+        for key in [
+            "runtime.worker_busy_ms",
+            "runtime.busy_fraction",
+            "runtime.worker_park_count",
+        ] {
+            assert!(
+                !result.metric_samples.contains_key(key),
+                "{} must omit unavailable 64-bit scheduler metric {key}",
+                scenario.name()
+            );
+        }
+
+        let report = serde_json::to_string(&result).expect("runtime perf result serializes");
+        assert!(
+            !report.contains("turn.cpu"),
+            "per-turn CPU attribution must never appear in a report"
+        );
+    }
+}
+
 #[test]
 fn durable_representative_turn_inventory_is_backend_complete_and_opt_in() {
     assert_eq!(
@@ -253,6 +450,334 @@ fn durable_checkpoint_curve_inventory_is_backend_complete_and_opt_in() {
         );
         assert!(metadata.harness_rationale.contains("CLI-configurable"));
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "FIG-5342: the checkpoint binding is still an engine-handler stub"]
+async fn checkpoint_state_hot_paths_capture_one_changed_component_per_turn() {
+    let result = Box::pin(run_once(
+        RuntimePerfScenario::CheckpointStateHotPaths,
+        2,
+        &checkpoint_curve_config(),
+        &high_traffic_config(),
+    ))
+    .await
+    .expect("checkpoint state hot paths should run");
+
+    assert_eq!(result.turns.len(), 2);
+    assert_eq!(result.extra_counters["execution_state_bindings"], 300);
+    assert_eq!(result.extra_counters["execution_state_components"], 300);
+    assert_eq!(result.extra_counters["incremental_changed_components"], 1);
+    assert!(result.extra_counters["checkpoint_bytes"] > 0);
+    assert!(result.extra_counters["hydrated_execution_state_bytes"] > 0);
+    for turn in &result.turns {
+        for phase in [
+            "incremental_capture",
+            "measure_budget",
+            "component_commit",
+            "component_load",
+            "execution_restore",
+        ] {
+            assert!(
+                turn.phase_profile
+                    .contains_key(&format!("checkpoint_state.{phase}")),
+                "turn {} must measure {phase}",
+                turn.turn_index,
+            );
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "FIG-5342: the checkpoint binding is still an engine-handler stub"]
+async fn durable_sqlite_checkpoint_curve_reports_paired_structural_samples() {
+    let config = checkpoint_curve_config();
+    let samples = 2;
+    let result = Box::pin(run_once(
+        RuntimePerfScenario::DurableCheckpointCurveSqlite,
+        samples,
+        &config,
+        &high_traffic_config(),
+    ))
+    .await
+    .expect("durable checkpoint curve should run");
+
+    let points = checkpoint_curve_points(&config);
+    assert_eq!(
+        result.extra_counters["checkpoint_curve.point_count"],
+        points.len() as u64
+    );
+    for point in &points {
+        let prefix = point.prefix();
+        for metric in [
+            "manifest_count",
+            "changed_body_count",
+            "changed_body_bytes",
+            "runtime_hash_count",
+            "runtime_hash_bytes",
+            "runtime_body_copy_count",
+            "runtime_body_copy_bytes",
+        ] {
+            assert_eq!(
+                result
+                    .metric_samples
+                    .get(&format!("{prefix}.{metric}"))
+                    .map(Vec::len),
+                Some(samples),
+                "{prefix} must report a complete {metric} sample vector"
+            );
+        }
+        for phase in ["capture", "serialize", "commit", "load"] {
+            assert_eq!(
+                result
+                    .metric_samples_ms
+                    .get(&format!("{prefix}.{phase}_ms"))
+                    .map(Vec::len),
+                Some(samples),
+                "{prefix} must report a complete {phase} sample vector"
+            );
+        }
+        for sample in 0..samples {
+            let value =
+                |metric: &str| result.metric_samples[&format!("{prefix}.{metric}")][sample] as u64;
+            let changed_count = value("changed_body_count");
+            let changed_bytes = value("changed_body_bytes");
+            assert!(
+                changed_count > 0,
+                "{prefix} sample {sample} must change bodies"
+            );
+            assert!(
+                changed_bytes > 0,
+                "{prefix} sample {sample} must change bytes"
+            );
+            let hash_count = value("runtime_hash_count");
+            let hash_bytes = value("runtime_hash_bytes");
+            let copy_count = value("runtime_body_copy_count");
+            let copy_bytes = value("runtime_body_copy_bytes");
+            let manifest_count = value("manifest_count");
+            let expected_hash_count =
+                changed_count * CHECKPOINT_HASH_PASSES_PER_CHANGED_BODY + manifest_count;
+            assert_eq!(
+                hash_count, expected_hash_count,
+                "{prefix} sample {sample} observed {hash_count} runtime hash passes for {changed_count} changed bodies and {manifest_count} loaded bodies; expected exactly {expected_hash_count}"
+            );
+            assert!(
+                hash_bytes >= changed_bytes,
+                "{prefix} sample {sample} hashed {hash_bytes} bytes for {changed_bytes} changed-body bytes"
+            );
+            assert_eq!(
+                copy_count, 0,
+                "{prefix} sample {sample} observed {copy_count} runtime body copies; bodies are shared, not copied"
+            );
+            assert_eq!(
+                copy_bytes, 0,
+                "{prefix} sample {sample} copied {copy_bytes} bytes; bodies are shared, not copied"
+            );
+        }
+    }
+
+    let component_points = points
+        .iter()
+        .filter(|point| point.axis == CheckpointCurveAxis::Components)
+        .collect::<Vec<_>>();
+    for pair in component_points.windows(2) {
+        let left = &result.metric_samples[&format!("{}.manifest_count", pair[0].prefix())];
+        let right = &result.metric_samples[&format!("{}.manifest_count", pair[1].prefix())];
+        assert!(
+            left.iter().zip(right).all(|(left, right)| left < right),
+            "component curve manifest count must increase monotonically: left={left:?}, right={right:?}"
+        );
+        for metric in ["runtime_body_copy_count", "runtime_body_copy_bytes"] {
+            let left = &result.metric_samples[&format!("{}.{metric}", pair[0].prefix())];
+            let right = &result.metric_samples[&format!("{}.{metric}", pair[1].prefix())];
+            assert!(
+                left.iter().zip(right).all(|(left, right)| left <= right),
+                "component curve {metric} must be monotonic"
+            );
+        }
+        let left = &result.metric_samples[&format!("{}.runtime_hash_count", pair[0].prefix())];
+        let right = &result.metric_samples[&format!("{}.runtime_hash_count", pair[1].prefix())];
+        let manifest_left = &result.metric_samples[&format!("{}.manifest_count", pair[0].prefix())];
+        let manifest_right =
+            &result.metric_samples[&format!("{}.manifest_count", pair[1].prefix())];
+        assert!(
+            left.iter()
+                .zip(right)
+                .zip(manifest_left.iter().zip(manifest_right))
+                .all(|((left, right), (manifest_left, manifest_right))| {
+                    left - manifest_left == right - manifest_right
+                }),
+            "component curve commit-side hash count must stay flat after accounting for loaded-body validation: left={left:?}, right={right:?}, manifest_left={manifest_left:?}, manifest_right={manifest_right:?}"
+        );
+    }
+    let byte_points = points
+        .iter()
+        .filter(|point| point.axis == CheckpointCurveAxis::Bytes)
+        .collect::<Vec<_>>();
+    for pair in byte_points.windows(2) {
+        let left = &result.metric_samples[&format!("{}.changed_body_bytes", pair[0].prefix())];
+        let right = &result.metric_samples[&format!("{}.changed_body_bytes", pair[1].prefix())];
+        assert!(
+            left.iter().zip(right).all(|(left, right)| left < right),
+            "byte curve changed-body bytes must increase strictly: left={left:?}, right={right:?}"
+        );
+        for metric in [
+            "runtime_hash_count",
+            "runtime_hash_bytes",
+            "runtime_body_copy_count",
+            "runtime_body_copy_bytes",
+        ] {
+            let left = &result.metric_samples[&format!("{}.{metric}", pair[0].prefix())];
+            let right = &result.metric_samples[&format!("{}.{metric}", pair[1].prefix())];
+            assert!(
+                left.iter().zip(right).all(|(left, right)| left <= right),
+                "byte curve {metric} must be monotonic"
+            );
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "FIG-5342: a high-traffic child operation stops at MaxTurns on the served node"]
+async fn high_traffic_sqlite_smoke_reports_load_structure() {
+    let result = Box::pin(run_once(
+        RuntimePerfScenario::HighTrafficLoadSqlite,
+        1,
+        &checkpoint_curve_config(),
+        &high_traffic_config(),
+    ))
+    .await
+    .expect("high-traffic SQLite load smoke should run");
+
+    assert!(
+        result
+            .extra_counters
+            .get("throughput.turns_per_second_milli")
+            .is_some_and(|value| *value > 0)
+    );
+    assert!(result.phase_profile.contains_key("wait.store_transaction"));
+    assert!(result.phase_profile.contains_key("wait.queue_enqueue"));
+    assert!(result.phase_profile.contains_key("prepared_turn"));
+    assert!(
+        result
+            .extra_counters
+            .contains_key("load.phase.committed_turn.p95_micros")
+    );
+    assert!(
+        result
+            .extra_counters
+            .get("queue_depth.samples")
+            .is_some_and(|value| *value > 0)
+    );
+    assert!(
+        result
+            .extra_counters
+            .keys()
+            .any(|key| key.starts_with("wait.top."))
+    );
+    assert_eq!(
+        result
+            .extra_counters
+            .get("wait.arrival_pacing_lateness.observable"),
+        Some(&0)
+    );
+    assert!(
+        !result
+            .extra_counters
+            .keys()
+            .any(|key| key.starts_with("knee."))
+    );
+    assert!(
+        !result
+            .extra_counters
+            .keys()
+            .any(|key| key.contains("facade_mutex") || key.contains("driver_dispatch"))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "FIG-5342: a high-traffic child operation stops at MaxTurns on the served node"]
+async fn high_traffic_sqlite_knee_smoke_reports_each_step() {
+    let result = Box::pin(run_once(
+        RuntimePerfScenario::HighTrafficKneeSqlite,
+        1,
+        &checkpoint_curve_config(),
+        &high_traffic_config(),
+    ))
+    .await
+    .expect("high-traffic SQLite knee smoke should run");
+
+    assert_eq!(
+        result.extra_counters.get("knee.step.0.population"),
+        Some(&2)
+    );
+    assert!(result.phase_profile.contains_key("prepared_turn"));
+    assert_eq!(
+        result.extra_counters.get("knee.step.1.population"),
+        Some(&4)
+    );
+    assert!(
+        result
+            .extra_counters
+            .contains_key("knee.step.1.p95_vs_base_ratio_milli")
+    );
+    assert!(
+        result
+            .extra_counters
+            .contains_key("knee.step.1.throughput_vs_linear_ratio_milli")
+    );
+    assert!(
+        result
+            .extra_counters
+            .contains_key("knee.step.1.wait.store_transaction.micros")
+    );
+    assert!(
+        result
+            .extra_counters
+            .contains_key("knee.step.1.wait.admission_scan.micros")
+    );
+    let durable_samples = result
+        .extra_counters
+        .keys()
+        .filter(|key| key.contains("queue_depth.durable.sample."))
+        .count();
+    assert_eq!(durable_samples, result.turns.len());
+    assert_eq!(
+        result
+            .turns
+            .iter()
+            .map(|turn| turn.turn_index)
+            .collect::<BTreeSet<_>>()
+            .len(),
+        result.turns.len()
+    );
+    assert!(
+        result
+            .turns
+            .iter()
+            .any(|turn| { turn.turn_index >= 100_000_000 && turn.turn_index < 200_000_000 })
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "FIG-5342: the high-traffic trigger operation is still an engine-handler stub"]
+async fn high_traffic_trigger_waits_for_terminal_delivery() {
+    let config = HighTrafficConfig::parse(1, 0, "trigger=1", "1,2", 1.25)
+        .expect("valid trigger-only config");
+    let result = Box::pin(run_once(
+        RuntimePerfScenario::HighTrafficLoadSqlite,
+        1,
+        &checkpoint_curve_config(),
+        &config,
+    ))
+    .await
+    .expect("trigger-only high-traffic operation should observe terminal delivery");
+
+    assert_eq!(
+        result.extra_counters.get("turn_mix.trigger.completed"),
+        Some(&1)
+    );
+    assert_eq!(result.turns.len(), 1);
 }
 
 #[test]
@@ -448,5 +973,28 @@ fn runtime_perf_runtime_scenario_rationales_explain_lower_layer_ownership() {
             metadata.name,
             metadata.harness_rationale
         );
+    }
+}
+
+#[tokio::test]
+async fn async_completion_smoke_witnesses_match_session_geometry() {
+    for scenario in [
+        RuntimePerfScenario::StandardAsyncToolCompletion,
+        RuntimePerfScenario::RlmAsyncToolCompletion,
+        RuntimePerfScenario::RlmProcessAsyncToolCompletion,
+    ] {
+        crate::runtime_perf::smoke::execute(
+            true,
+            scenario,
+            3,
+            run_once(
+                scenario,
+                3,
+                &checkpoint_curve_config(),
+                &high_traffic_config(),
+            ),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{} completion witness: {error:#}", scenario.name()));
     }
 }

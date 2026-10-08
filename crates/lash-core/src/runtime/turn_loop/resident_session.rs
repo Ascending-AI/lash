@@ -304,11 +304,16 @@ impl LashRuntime {
     /// Bring the resident session to its store's committed head when another
     /// runtime committed past it (FIG-3600: a turn a session-work engine ran
     /// for this session). Answers whether it reloaded.
+    ///
+    /// An open builds no capabilities (FIG-4857), so a runtime whose turns a
+    /// node ran may hold no session: it reads the head through its own store
+    /// (FIG-5310), or a park would flush its stale state over that head.
     pub async fn adopt_committed_head(&mut self) -> Result<bool, RuntimeError> {
         let Some(store) = self
             .session
             .as_ref()
             .and_then(|session| session.history_store())
+            .or_else(|| self.services.store.clone())
         else {
             return Ok(false);
         };

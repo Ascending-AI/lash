@@ -595,6 +595,50 @@ mod contention_tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore = "FIG-5342: a same-session waiter completes while the held turn runs"]
+    async fn writer_contention_smoke_reports_wait_release_latency_and_execution() {
+        let result = Box::pin(run_once_writer_contention(
+            RuntimePerfScenario::WriterContention2Workers,
+            1,
+        ))
+        .await
+        .expect("writer contention smoke");
+        for scope in ["same_session", "many_sessions"] {
+            for phase in ["wait_ms", "release_latency_ms", "execution_ms"] {
+                assert!(
+                    result
+                        .metric_samples_ms
+                        .contains_key(&format!("writer_contention.{scope}.{phase}"))
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "FIG-5342: the settlement scenario opens no child span on the served node"]
+    async fn async_settlement_smoke_drains_every_open_child_span() {
+        let result = Box::pin(run_once_async_process_settlement(
+            RuntimePerfScenario::AsyncProcessSettlement2Children,
+            1,
+        ))
+        .await
+        .expect("async settlement smoke");
+
+        assert!(result.extra_counters["async_settlement.open_spans_before_settle"] >= 2);
+        assert_eq!(
+            result.extra_counters["async_settlement.open_spans_after_drain"],
+            0
+        );
+        for phase in ["spawn_ms", "settle_ms", "drain_ms"] {
+            assert!(
+                result
+                    .metric_samples_ms
+                    .contains_key(&format!("async_settlement.{phase}"))
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn gate_bypass_second_completer_hits_receipt_conflict_then_rebuilds_after_backoff() {
         let session_id = "commit-admission-bypass";
         let factory = sqlite_memory_stores()

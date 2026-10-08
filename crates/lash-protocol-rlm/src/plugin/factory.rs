@@ -700,3 +700,175 @@ mod label_annotation_tests {
         assert!(!config.lashlang_language_features.label_annotations);
     }
 }
+
+/// FIG-4398, ported by FIG-5310 from the deleted
+/// `recorded_inheritance_tests.rs`: a lashlang process records one engine
+/// shape at creation, from the RLM namespace its environment captured, not
+/// from the factory of the deployment that installs the engine.
+#[cfg(test)]
+mod process_settings_tests {
+    use std::sync::Arc;
+
+    use lash_core::facade_support::{PluginFactory, PluginHost, RuntimeHostConfig};
+    use lash_core::{CommitBudget, ProcessEngine as _, QueuedWorkBatchingConfig};
+
+    use crate::plugin::{InstructionBound, MemoryBound, RlmProtocolPluginConfig};
+    use crate::{RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmProtocolPluginFactory, TypescriptDialect};
+
+    /// The deployment that records the session's RLM namespace.
+    fn creating() -> RlmProtocolPluginConfig {
+        RlmProtocolPluginConfig::builder()
+            .channel(RlmChannel::Cell)
+            .instruction_limit(InstructionBound::instructions(1_000_000))
+            .memory_limit(MemoryBound::mebibytes(64))
+            .build()
+    }
+
+    /// The deployment whose factory installs the engine: other bounds and
+    /// features.
+    fn installing() -> RlmProtocolPluginConfig {
+        let mut config = RlmProtocolPluginConfig::builder()
+            .channel(RlmChannel::Cell)
+            .instruction_limit(InstructionBound::instructions(50))
+            .memory_limit(MemoryBound::mebibytes(1))
+            .build();
+        config.prompt_features.decomposition = false;
+        config.lashlang_language_features.label_annotations = false;
+        config.max_output_chars = 100;
+        config.continue_as_soft_warn_tokens = None;
+        config
+    }
+
+    fn resources() -> lashlang::LashlangHostCatalog {
+        let mut resources = lashlang::LashlangHostCatalog::new();
+        resources
+            .add_named_data_type(
+                lashlang::NamedDataType::object(
+                    "settings.Record",
+                    vec![lashlang::TypeField {
+                        name: "value".into(),
+                        ty: lashlang::TypeExpr::Str,
+                        optional: false,
+                    }],
+                )
+                .expect("a named data type"),
+            )
+            .expect("the type registers");
+        resources
+    }
+
+    /// A plugin contributing [`resources`] to the lashlang surface.
+    fn resource_factory() -> Arc<dyn PluginFactory> {
+        Arc::new(lash_core::plugin::PluginSpecFactory::new(
+            lash_core::plugin::PluginDeclaration::initial("settings-resources"),
+            Arc::new(|_| {
+                Ok(
+                    lash_core::plugin::PluginSpec::new().with_extension_contribution(
+                        lash_lashlang_runtime::lashlang_surface_extension(
+                            &lash_lashlang_runtime::LashlangSurfaceContribution::new(
+                                lashlang::LashlangAbilities::default(),
+                                lashlang::LashlangLanguageFeatures::default(),
+                                resources(),
+                            ),
+                        )
+                        .expect("the surface extension"),
+                    ),
+                )
+            }),
+        ))
+    }
+
+    #[tokio::test]
+    async fn process_settings_have_one_recorded_engine_shape() {
+        let backend = crate::testing::sqlite_memory_store_backend().await;
+        let creating_factory = Arc::new(
+            RlmProtocolPluginFactory::new(creating(), Arc::new(TypescriptDialect), &backend)
+                .with_process_lifecycle(false),
+        );
+        let installing_host = PluginHost::new(vec![
+            Arc::new(RlmProtocolPluginFactory::new(
+                installing(),
+                Arc::new(TypescriptDialect),
+                &backend,
+            )),
+            resource_factory(),
+        ]);
+        let runtime_host = installing_host
+            .install_process_engine_contributions(
+                RuntimeHostConfig::new(
+                    backend.clone(),
+                    CommitBudget::bounded(8 * 1024 * 1024, 1024),
+                    QueuedWorkBatchingConfig::new(1),
+                ),
+                true,
+            )
+            .expect("the engine installs");
+        let plugin_config = PluginHost::new(vec![creating_factory.clone()])
+            .resolve_creation_plugin_config(
+                Some(RLM_PROTOCOL_PLUGIN_ID),
+                &lash_core::PluginOptions::default(),
+                &lash_core::store::plugin_writers::PluginAdmission::default(),
+            )
+            .expect("the creating deployment records the RLM namespace");
+        let environment = lash_core::ProcessExecutionEnvSpec::new(
+            lash_core::AdmittedPluginConfig::new(plugin_config, 0),
+            lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            ),
+        );
+        let record = runtime_host
+            .process_engines
+            .require(lash_lashlang_runtime::LASHLANG_ENGINE_KIND)
+            .expect("the lashlang engine is installed")
+            .creation_config(&environment)
+            .expect("the settings record")
+            .expect("captured settings are mapped into the process row");
+        assert_eq!(
+            record["execution_bounds"]["instruction_budget"],
+            serde_json::json!({"bounded": 1_000_000})
+        );
+        assert_eq!(
+            record["execution_bounds"]["memory_limit"],
+            serde_json::json!({"bounded": 67_108_864})
+        );
+        assert_eq!(record["abilities"]["sleep"], serde_json::json!(false));
+        assert_eq!(
+            record["language_features"]["label_annotations"],
+            serde_json::json!(true)
+        );
+        assert_eq!(
+            record["resources"],
+            serde_json::to_value(resources()).expect("the resources encode"),
+            "creation captures dynamic plugin resources"
+        );
+        for unused in [
+            "prompt_features",
+            "max_output_chars",
+            "continue_as_soft_warn_tokens",
+            "discovery_operation",
+            "render",
+        ] {
+            assert!(
+                record.get(unused).is_none(),
+                "process record contains unused RLM field {unused}"
+            );
+        }
+        let hand_built = lash_lashlang_runtime::LashlangProcessEngine::new(
+            creating_factory.artifact_store(),
+            lash_lashlang_runtime::LashlangSurface::new(
+                lashlang::LashlangAbilities::default(),
+                lashlang::LashlangLanguageFeatures::default().with_label_annotations(),
+                resources(),
+            ),
+        )
+        .with_execution_bounds(creating().execution_bounds().into_engine());
+        assert_eq!(
+            hand_built
+                .creation_config(&environment)
+                .expect("the settings record"),
+            Some(record),
+            "a hand-built engine on the recorded facts records the same shape"
+        );
+    }
+}

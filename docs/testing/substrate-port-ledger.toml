@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1671 rows over 873 files, 4033 laws.
-# By class: mechanical 184, semantic 128, delete 888, replace 471.
-# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 87, L9c 352, L9d 91, L9e 138, L9f 125, L9g 98, L9h 123, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
-# By status: todo 312, ported 116, deleted 1243.
+# 1687 rows over 873 files, 4049 laws.
+# By class: mechanical 198, semantic 130, delete 888, replace 471.
+# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 92, L9c 354, L9d 100, L9e 138, L9f 125, L9g 98, L9h 123, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
+# By status: todo 266, ported 135, deleted 1286.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -219,10 +219,6 @@
 #   generated backend failure seed records script evidence
 # - L9f: crates/lash-sim/src/cache_regression.rs::rlm_live_bound_state_is_prefix_stable_for_every_serializer
 #   rlm live bound state is prefix stable for every serializer
-# - L9f: crates/lash-sim/src/generation_disposition_matrix.rs::protocol_owned_stop_is_absent_from_the_wire_and_reported_suppressed
-#   an RLM session's protocol-owned stop sequence is left off the wire and the attempt receipt reports SuppressedProtocolOwned
-# - L9f: crates/lash-sim/src/generation_disposition_matrix.rs::runtime_clamps_a_requested_cap_and_reports_the_reduced_wire_value
-#   a session's output-token cap above the model's capacity is clamped on the wire and the turn's attempt receipt reports ClampedToCapacity
 # - L9f: crates/lash-sim/src/invariants/tests.rs::a_broken_frame_chain_breaks_frame_lineage
 #   a broken frame chain breaks frame lineage
 # - L9f: crates/lash-sim/src/invariants/tests.rs::a_rerun_outside_the_window_breaks_the_effect_window
@@ -345,40 +341,6 @@
 #   standard generated run checks commits and requires v3 state
 # - L9f: crates/lash-sim/tests/logical_turn.rs
 #   admitted switch is seeded atomic ordered and exactly once; and 4 more law(s) of the file, by test name
-# - L9f: crates/lash-sim/tests/stack_policy.rs::assert_product_stack_probe_passes
-#   every fixed Agent product contract runs to completion in a child process held to the 2 MiB product stack budget, one case per contract
-# - L9h: crates/lash-perf/src/bin/tool_batch_baseline/native_run_cost_tests.rs
-#   l15 census tracks native run records and all descendants
-# - L9h: crates/lash-perf/src/runtime_perf/harness/tests.rs::a_dropped_runtime_frees_its_in_process_lane
-#   a dropped runtime frees its in process lane
-# - L9h: crates/lash-perf/src/runtime_perf/harness/tests.rs::rlm_globals_keeps_fixed_session_projection_across_real_turns
-#   the RLM-globals perf scenario keeps one fixed session projection across real turns
-# - L9h: crates/lash-perf/src/runtime_perf/harness/tests.rs::scenario_wiring_drives_the_benchmark_plugin_list_in_order
-#   scenario wiring drives the benchmark plugin list in order
-# - L9h: crates/lash-perf/src/runtime_perf/measurement/contention.rs::async_settlement_smoke_drains_every_open_child_span
-#   the async-settlement scenario drains every open child span and reports spawn, settle and drain samples
-# - L9h: crates/lash-perf/src/runtime_perf/measurement/contention.rs::writer_contention_smoke_reports_wait_release_latency_and_execution
-#   the writer-contention scenario reports wait, release-latency and execution samples for same-session and many-session writers
-# - L9h: crates/lash-perf/src/runtime_perf/measurement/queued_work.rs::queued_work_admission_stress_advances_its_commit_cursor
-#   queued-work admission under stress advances its commit cursor
-# - L9h: crates/lash-perf/src/runtime_perf/measurement/queued_work.rs::turn_input_ingress_stress_advances_its_commit_cursor
-#   turn-input ingress under stress advances its commit cursor
-# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::async_completion_smoke_witnesses_match_session_geometry
-#   async-completion witnesses match the session geometry
-# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::checkpoint_state_hot_paths_capture_one_changed_component_per_turn
-#   checkpoint-state hot paths capture one changed component per turn
-# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::durable_queued_work_contention_sqlite_smoke_reports_structure_and_counters
-#   the durable queued-work contention scenario on SQLite reports its structure and counters
-# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::durable_sqlite_checkpoint_curve_reports_paired_structural_samples
-#   the durable SQLite checkpoint curve reports paired structural samples
-# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::high_traffic_sqlite_knee_smoke_reports_each_step
-#   the high-traffic SQLite knee scenario reports each step
-# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::high_traffic_sqlite_smoke_reports_load_structure
-#   the high-traffic SQLite scenario reports its load structure
-# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::high_traffic_trigger_waits_for_terminal_delivery
-#   a high-traffic trigger waits for terminal delivery
-# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::stable_durable_sqlite_turn_scenarios_report_phases_and_store_calls
-#   durable SQLite turn scenarios report their phases and store calls
 # - L9h: examples/workflow-graph-roundtrip/tests/authoring.rs
 #   blank workflow full authoring round trip rejects malformed then runs; and 5 more law(s) of the file, by test name
 # - L9h: examples/workflow-graph-roundtrip/tests/durable_run.rs
@@ -915,9 +877,9 @@ laws = [
   "a_refused_commit_publishes_none_of_the_stopped_terminal",
   "an_immediate_cancel_publishes_its_stop_after_the_commit",
 ]
-disposition = "port"
-status = "todo"
-note = "the phase runner's half of a_refused_commit_publishes_none_of_the_stopped_terminal runs at crates/lash-durable-test/tests/turn_round_crash_matrix.rs::a_refused_turn_commit_publishes_no_terminal_event (FIG-5229): a drive is told its turn committed only once turn.commit is acknowledged"
+disposition = "covered-by:crates/lash-durable-test/tests/turn_round_crash_matrix.rs::a_refused_turn_commit_publishes_no_terminal_event"
+status = "deleted"
+note = "FIG-5310: a durable drive holds every terminal, a provider failure's and an immediate cancel's stop among them, and releases it only at TurnDrive::committed, once turn.commit is acknowledged (FIG-5229, 992435c195); the crash matrix runs the publication law in every cell, and a refused commit publishes nothing"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/attachment_continuation.rs"
@@ -931,8 +893,9 @@ laws = [
   "accepted_tool_attachment_round_trips_without_degradation",
   "attachment_in_array_tool_value_then_immediate_cancel_loses_nothing",
 ]
-disposition = "port"
-status = "todo"
+disposition = "replaced-by:crates/lash-durable-test/tests/standard_turn_outcomes.rs"
+status = "deleted"
+note = "FIG-5310: the three laws run on the served node in standard_turn_outcomes.rs. An unsupported committed tool attachment degrades at tool admission into a typed <attachment_unavailable> notice, so the law reads the notice, not a request-time trace; an immediately cancelled durable turn commits nothing, so the cancel law pins that the head keeps turn one whole and resume-safe and a third turn answers"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/attempt_atomicity.rs"
@@ -1432,8 +1395,51 @@ laws = [
   "rejected_refresh_does_not_retain_stale_checkpoint_components",
   "ambiguous_turn_commit_does_not_redispatch_the_model_call",
 ]
-disposition = "port"
-status = "todo"
+disposition = "replaced-by:crates/lash-durable-test/tests/standard_turn_outcomes.rs"
+status = "deleted"
+note = "FIG-5310: the standard-runtime and usage laws run on the served node in standard_turn_outcomes.rs (a durable report is thin, so usage is read off the Usage activity and the attempt records); rejected_refresh_does_not_retain_stale_checkpoint_components moved to crates/lash-core/tests/runtime/tests/turns/refresh_refusal.rs on SQLite memory; the in-flight cancel and the ambiguous commit have function rows"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/persistence.rs"
+test = "standard_runtime_cancels_in_flight_tool_calls_when_token_fires"
+area = "persistence"
+needs = ["turn", "round"]
+class = "mechanical"
+lane = "L9b"
+laws = [
+  "standard_runtime_cancels_in_flight_tool_calls_when_token_fires",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/turn_round_crash_matrix.rs::a_cancel_while_a_member_runs_ends_the_round_and_the_turn"
+status = "deleted"
+note = "FIG-5310: a host cancel while a tool call runs ends the round and the turn on the durable path"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/persistence.rs"
+test = "ambiguous_turn_commit_does_not_redispatch_the_model_call"
+area = "persistence"
+needs = ["turn", "round"]
+class = "mechanical"
+lane = "L9b"
+laws = [
+  "ambiguous_turn_commit_does_not_redispatch_the_model_call",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/turn_phases.rs::a_turn_of_two_model_calls_resumes_at_every_label_without_replay"
+status = "deleted"
+note = "FIG-5310: the matrix cuts turn.commit under AckHidden among its faults and holds the re-send law: an admitted call is never composed or sent again"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/persistence.rs"
+test = "rejected_refresh_does_not_retain_stale_checkpoint_components"
+area = "persistence"
+needs = ["turn", "round"]
+class = "mechanical"
+lane = "L9b"
+laws = [
+  "rejected_refresh_does_not_retain_stale_checkpoint_components",
+]
+disposition = "replaced-by:crates/lash-core/tests/runtime/tests/turns/refresh_refusal.rs::rejected_refresh_does_not_retain_stale_checkpoint_components"
+status = "deleted"
+note = "FIG-5310: the same law over a SQLite memory store set in the runtime_turns target"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/plugin_lifecycle.rs"
@@ -1650,8 +1656,37 @@ laws = [
   "a_resident_resync_on_a_require_core_reloads_and_reports",
   "a_persisted_state_install_on_a_require_core_reports_instead_of_refusing",
 ]
-disposition = "port"
-status = "todo"
+disposition = "replaced-by:crates/lash-durable-test/tests/tool_surface_laws.rs"
+status = "deleted"
+note = "FIG-5310: capabilities exist only inside a run (FIG-4857, FIG-5134), so the restore laws run on the served node: fig3353_sequence_keeps_curation_across_an_orphaned_commit, alias_replacement_is_reported_as_superseded_and_never_refuses, a_host_restore_on_a_require_core_reports_instead_of_refusing and a_require_run_that_would_lose_a_member_is_refused_typed, which runs since FIG-5325 (8f0d6b2d05) restored the Require check on a durable run"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/tool_restore_report.rs"
+test = "a_resident_resync_on_a_require_core_reloads_and_reports"
+area = "tool-surface"
+needs = ["turn", "round"]
+class = "mechanical"
+lane = "L9b"
+laws = [
+  "a_resident_resync_on_a_require_core_reloads_and_reports",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/tool_surface_laws.rs::a_host_restore_on_a_require_core_reports_instead_of_refusing"
+status = "deleted"
+note = "FIG-5310: a session's capabilities live only in a run on the node, and the resident re-sync runs inside the command run that applies a host restore (tool_state_commands reloads before it applies); that run on a Require core reports the loss and does not fail"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/tool_restore_report.rs"
+test = "a_persisted_state_install_on_a_require_core_reports_instead_of_refusing"
+area = "tool-surface"
+needs = ["turn", "round"]
+class = "mechanical"
+lane = "L9b"
+laws = [
+  "a_persisted_state_install_on_a_require_core_reports_instead_of_refusing",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/tool_surface_laws.rs::a_host_restore_on_a_require_core_reports_instead_of_refusing"
+status = "deleted"
+note = "FIG-5310: an open builds no capabilities, so a facade persisted-state install has no registry to install onto; the install a session's tool state gets is its run's, which the host-restore law drives on a Require core"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/tool_surface_lifecycle.rs"
@@ -1678,9 +1713,135 @@ laws = [
   "orphan_lifecycle_rebinds_by_id_and_supersedes_same_name_without_duplicates",
   "public_apply_tool_state_round_trip_keeps_delta_and_generation_fencing",
 ]
+disposition = "replaced-by:crates/lash-durable-test/tests/tool_surface_laws.rs"
+status = "deleted"
+note = "FIG-5310: the surface laws run on the served node in tool_surface_laws.rs: tool access in both directions, access across park and resume on a restarted core, cold-resume discovery without flapping, hidden tools never offered nor run nor curated, the orphan lifecycle, the apply_state delta and fence, the session fork, and a host start's observers; the laws covered elsewhere have function rows"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/tool_surface_lifecycle.rs"
+test = "parked_resume_keeps_the_store_bound_session_id"
+area = "tool-surface"
+needs = ["turn", "round", "process"]
+class = "mechanical"
+lane = "L9d"
+laws = [
+  "parked_resume_keeps_the_store_bound_session_id",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/tool_surface_laws.rs::updated_tool_access_survives_park_and_resume"
+status = "deleted"
+note = "FIG-5310: the law asserts the resumed session keeps its store-bound id"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/tool_surface_lifecycle.rs"
+test = "park_resume_restores_tool_and_subagent_authority"
+area = "tool-surface"
+needs = ["turn", "round", "process"]
+class = "mechanical"
+lane = "L9d"
+laws = [
+  "park_resume_restores_tool_and_subagent_authority",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/tool_surface_laws.rs::updated_tool_access_survives_park_and_resume"
+status = "deleted"
+note = "FIG-5310: the tool half: a tool advertised only after the restart stays hidden by the recorded authority; the subagent half is subject-deleted: FIG-5296 (35b70ca82b) deleted subagent session context and inheritance"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/tool_surface_lifecycle.rs"
+test = "park_resume_uses_broader_persisted_authority_over_narrower_live_authority"
+area = "tool-surface"
+needs = ["turn", "round", "process"]
+class = "mechanical"
+lane = "L9d"
+laws = [
+  "park_resume_uses_broader_persisted_authority_over_narrower_live_authority",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/tool_surface_laws.rs::updated_tool_access_survives_park_and_resume"
+status = "deleted"
+note = "FIG-5310: an open supplies no live authority (FIG-4857); a run reads only the recorded access, which the law changes by its config command and reads back after a restart"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/tool_surface_lifecycle.rs"
+test = "tool_access_setter_changes_live_plugin_discovery_in_both_directions"
+area = "tool-surface"
+needs = ["turn", "round", "process"]
+class = "mechanical"
+lane = "L9d"
+laws = [
+  "tool_access_setter_changes_live_plugin_discovery_in_both_directions",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/tool_surface_laws.rs::tool_access_setter_changes_the_next_model_request_in_both_directions"
+status = "deleted"
+note = "FIG-5310: discovery is built per run from the recorded access, with no resident catalog to go stale; the model request is what discovery serves"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/tool_surface_lifecycle.rs"
+test = "process_tool_filter_narrows_only_session_tools_and_never_internal_wakes"
+area = "tool-surface"
+needs = ["turn", "round", "process"]
+class = "mechanical"
+lane = "L9d"
+laws = [
+  "process_tool_filter_narrows_only_session_tools_and_never_internal_wakes",
+]
+disposition = "covered-by:crates/lash-core/src/runtime/session_manager/mod.rs::process_service_filter_policy_is_enforced_by_every_production_operation"
+status = "deleted"
+note = "FIG-5310: the model-tool view narrows list and validate, the full (host) view and signal never consult the filter; wakes are session mail since FIG-5196 and never read the process service"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/tool_surface_lifecycle.rs"
+test = "pruned_previous_turn_model_handle_preserves_typed_operation_outcomes"
+area = "tool-surface"
+needs = ["turn", "round", "process"]
+class = "mechanical"
+lane = "L9d"
+laws = [
+  "pruned_previous_turn_model_handle_preserves_typed_operation_outcomes",
+]
+disposition = "covered-by:crates/lash-core-execution/tests/store_backed/kernel/session/process_handles.rs::process_handle_operations_share_one_authority_rule"
+status = "deleted"
+note = "FIG-5310: a pruned handle's await is information (process_no_longer_retained) and its cancel and signal keep the typed no-longer-retained outcome"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/tool_surface_lifecycle.rs"
+test = "session_creation_applies_only_named_process_observers_with_typed_outcomes"
+area = "tool-surface"
+needs = ["turn", "round", "process"]
+class = "mechanical"
+lane = "L9d"
+laws = [
+  "session_creation_applies_only_named_process_observers_with_typed_outcomes",
+]
+disposition = "replaced-by:crates/lash-core-execution/tests/store_backed/kernel/runtime/process/observer_intent.rs::named_observer_intents_add_only_their_edges_with_typed_outcomes"
+status = "deleted"
+note = "FIG-5310: the creation half; the start half (a wake target implies no observer edge) is crates/lash-durable-test/tests/tool_surface_laws.rs::a_host_start_observes_only_the_sessions_it_names"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/tool_surface_lifecycle.rs"
+test = "broader_authority_fork_regains_parent_hidden_tool"
+area = "tool-surface"
+needs = ["turn", "round", "process"]
+class = "mechanical"
+lane = "L9d"
+laws = [
+  "broader_authority_fork_regains_parent_hidden_tool",
+]
 disposition = "port"
-status = "todo"
-note = "the capability fixture and every law run a command or turn Run through execute_next_run; owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
+status = "ported"
+note = "runs in place, on no backend"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/tool_surface_lifecycle.rs"
+test = "composed_session_catalog_discovers_callable_tool_without_exposing_hidden_tool"
+area = "tool-surface"
+needs = ["turn", "round", "process"]
+class = "mechanical"
+lane = "L9d"
+laws = [
+  "composed_session_catalog_discovers_callable_tool_without_exposing_hidden_tool",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/tool_surface_laws.rs::session_fork_discovers_live_tools_and_preserves_curation_and_hidden_policy"
+status = "deleted"
+note = "FIG-5310: a tool the source advertises after the session's last turn is offered and runs on the next, and a hidden one is neither offered nor run"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/tracing.rs"
@@ -1904,7 +2065,8 @@ laws = [
   "a_run_admitted_at_a_head_the_resident_does_not_hold_reloads_once",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5310: the_admitted_window_of_a_frame_switching_turn_is_its_admission_frame runs on the served node over every tier in crates/lash-durable-test/tests/frame_switch_laws.rs: a window read pinned at the head the switching turn was admitted on stays anchored at its frame, under its config and rows, after the turn's own commit moved the head (the pending follow-on check went with the follow-on fact: a follow-on is session mail, fd2db318d6, FIG-5232). The four residency laws (explicit_compaction, pressure and continue_as start a frame without a reload; a_run_admitted_at_a_head_the_resident_does_not_hold_reloads_once) are subject-deleted: no runtime stays resident across turns since bca2bd4534 (FIG-5172); each activation pass opens one at the committed head"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turns/lease_and_admissions.rs"
@@ -2110,9 +2272,9 @@ lane = "L9d"
 laws = [
   "work_withheld_before_a_frame_switch_waits_for_its_follow_on",
 ]
-disposition = "port"
-status = "todo"
-note = "owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5310: the guarantee is gone. 0cc1b81d98 (FIG-5196) deleted run admission and the binding that kept withheld work on its run until the switch's follow-on, and the follow-on became ordinary session mail at the next ingress position (ADR 0101 §3, fd2db318d6, FIG-5232), so work queued before the switch commits runs first. The new order is pinned on every tier by crates/lash-durable-test/tests/frame_switch_laws.rs::work_queued_before_a_frame_switch_commits_runs_before_its_follow_on, and a withheld wake running once next by crates/lash-durable-test/tests/steering_crash_laws.rs::a_process_wake_after_the_last_work_checkpoint_runs_next"
 
 [[row]]
 path = "crates/lash-core/tests/runtime_support/effect_recording_authority.rs"
@@ -2594,8 +2756,8 @@ laws = [
   "typescript_signal_round_trip_crosses_protocol_and_process_engine",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; not written yet"
+status = "ported"
+note = "FIG-5310: runs on the served node at crates/lash-durable-test/tests/cell_process_handles.rs"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/deferred_and_processes.rs"
@@ -2608,8 +2770,8 @@ laws = [
   "typescript_restored_process_handle_await_crosses_turn_boundary",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; not written yet"
+status = "ported"
+note = "FIG-5310: runs on the served node at crates/lash-durable-test/tests/cell_process_handles.rs"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/deferred_and_processes.rs"
@@ -2622,8 +2784,8 @@ laws = [
   "typescript_cell_reads_process_handle_id_and_invokes_subsequent_operation",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; not written yet"
+status = "ported"
+note = "FIG-5310: runs on the served node at crates/lash-durable-test/tests/cell_process_handles.rs"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/deferred_and_processes.rs"
@@ -2707,8 +2869,8 @@ laws = [
   "a_cell_module_is_published_under_its_execution_then_held_by_its_frame",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; the law is written and #[ignore]d"
+status = "ported"
+note = "FIG-5310: un-ignored; passes since L6 (FIG-5175) landed"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/frame_referrers.rs"
@@ -2721,8 +2883,8 @@ laws = [
   "a_switched_frame_refusing_its_edge_is_a_replay_and_the_cell_goes_on",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; the law is written and #[ignore]d"
+status = "ported"
+note = "FIG-5310: un-ignored; passes since L6 (FIG-5175) landed"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/frame_referrers.rs"
@@ -2735,8 +2897,8 @@ laws = [
   "a_definition_held_only_inside_a_map_is_held_by_the_frame",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition; the law is written and #[ignore]d"
+status = "ported"
+note = "FIG-5310: un-ignored; passes since L6 (FIG-5175) landed"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/lifecycle_and_diagnostics.rs"
@@ -3296,8 +3458,8 @@ laws = [
   "a_redriven_run_executes_under_its_recorded_behaviour_on_postgres_always_replay",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: fig-5172-prod (L3, FIG-5172): no production TurnServices runs a facade turn (the only impls are lash-durable-test's and lash-postgres-workers'), so a facade session opens on SQLite memory but its send never completes: a probe that builds a standard core over sqlite_memory_store_backend, opens a session and sends one text input times out after 20 s with the provider never called (L3s's session mail, FIG-5196, has landed); the law is not written yet"
+status = "ported"
+note = "FIG-5310: the redrive law runs on every tier as crates/lash-durable-test/tests/recorded_behaviour_laws.rs::an_rlm_run_executes_under_its_recorded_behaviour: the creating core records the session, drains, and writes the turn's mail; a core whose RLM factory states a 50-instruction bound and no decomposition claims and runs it under the recorded bound and features. The always_replay legs forced Restate replay, which went with the engine (5ad9641f9e, FIG-5190)"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/plugin/recorded_inheritance_tests.rs"
@@ -3312,8 +3474,8 @@ laws = [
   "on_every_store! generates: missing_process_settings_are_terminal, missing_process_settings_are_terminal_on_sqlite_file, missing_process_settings_are_terminal_on_sqlite_file_always_replay, missing_process_settings_are_terminal_on_sqlite_memory, missing_process_settings_are_terminal_on_sqlite_memory_always_replay, missing_process_settings_are_terminal_on_postgres, missing_process_settings_are_terminal_on_postgres_always_replay, corrupt_process_settings_are_terminal, corrupt_process_settings_are_terminal_on_sqlite_file, corrupt_process_settings_are_terminal_on_sqlite_file_always_replay, corrupt_process_settings_are_terminal_on_sqlite_memory, corrupt_process_settings_are_terminal_on_sqlite_memory_always_replay, corrupt_process_settings_are_terminal_on_postgres, corrupt_process_settings_are_terminal_on_postgres_always_replay, recorded_sleep_is_not_enabled_by_run_wiring, recorded_sleep_is_not_enabled_by_run_wiring_on_sqlite_file, recorded_sleep_is_not_enabled_by_run_wiring_on_sqlite_file_always_replay, recorded_sleep_is_not_enabled_by_run_wiring_on_sqlite_memory, recorded_sleep_is_not_enabled_by_run_wiring_on_sqlite_memory_always_replay, recorded_sleep_is_not_enabled_by_run_wiring_on_postgres, recorded_sleep_is_not_enabled_by_run_wiring_on_postgres_always_replay, process_settings_have_one_recorded_engine_shape, process_settings_have_one_recorded_engine_shape_on_sqlite_file, process_settings_have_one_recorded_engine_shape_on_sqlite_file_always_replay, process_settings_have_one_recorded_engine_shape_on_sqlite_memory, process_settings_have_one_recorded_engine_shape_on_sqlite_memory_always_replay, process_settings_have_one_recorded_engine_shape_on_postgres, process_settings_have_one_recorded_engine_shape_on_postgres_always_replay, recorded_resources_are_not_overwritten_at_run, recorded_resources_are_not_overwritten_at_run_on_sqlite_file, recorded_resources_are_not_overwritten_at_run_on_sqlite_file_always_replay, recorded_resources_are_not_overwritten_at_run_on_sqlite_memory, recorded_resources_are_not_overwritten_at_run_on_sqlite_memory_always_replay, recorded_resources_are_not_overwritten_at_run_on_postgres, recorded_resources_are_not_overwritten_at_run_on_postgres_always_replay, a_host_started_process_runs_under_the_behaviour_its_creation_recorded_on_sqlite_file, a_host_started_process_runs_under_the_behaviour_its_creation_recorded_on_sqlite_file_always_replay, a_host_started_process_runs_under_the_behaviour_its_creation_recorded_on_sqlite_memory, a_host_started_process_runs_under_the_behaviour_its_creation_recorded_on_sqlite_memory_always_replay, a_host_started_process_runs_under_the_behaviour_its_creation_recorded_on_postgres, a_host_started_process_runs_under_the_behaviour_its_creation_recorded_on_postgres_always_replay, a_child_session_runs_under_its_parents_recorded_behaviour, a_child_session_runs_under_its_parents_recorded_behaviour_on_sqlite_file, a_child_session_runs_under_its_parents_recorded_behaviour_on_sqlite_file_always_replay, a_child_session_runs_under_its_parents_recorded_behaviour_on_sqlite_memory, a_child_session_runs_under_its_parents_recorded_behaviour_on_sqlite_memory_always_replay, a_child_session_runs_under_its_parents_recorded_behaviour_on_postgres, a_child_session_runs_under_its_parents_recorded_behaviour_on_postgres_always_replay",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: fig-5172-prod (L3, FIG-5172): no production TurnServices runs a facade turn (the only impls are lash-durable-test's and lash-postgres-workers'), so a facade session opens on SQLite memory but its send never completes: a probe that builds a standard core over sqlite_memory_store_backend, opens a session and sends one text input times out after 20 s with the provider never called (L3s's session mail, FIG-5196, has landed); the law is not written yet; its process laws are also blocked: L6 (FIG-5175): ActorContext::process_effect hands Process and Definition commands to RuntimeEffectLocalExecutor::execute, which refuses them (runtime_effect_local_executor_mismatch), so a cell cannot publish, start, signal or await a process; repro crates/lash-protocol-rlm/src/testing/cell_conformance/persistence.rs::a_cell_binding_a_process_literal_publishes_its_definition"
+status = "ported"
+note = "FIG-5310: a_host_started_process_runs_under_the_behaviour_its_creation_recorded runs on every tier in crates/lash-durable-test/tests/recorded_behaviour_laws.rs; missing and corrupt settings and the recorded sleep ability are vm_run laws in crates/lash-lashlang-runtime/src/engine/advance_tests.rs (unreadable_recorded_settings_end_the_process_typed, recorded_sleep_is_neither_enabled_nor_withheld_by_run_wiring); process_settings_have_one_recorded_engine_shape is in crates/lash-protocol-rlm/src/plugin/factory.rs and pins the captured plugin resources, which vm_run reads from the record alone (FIG-5198). a_child_session_runs_under_its_parents_recorded_behaviour is subject-deleted: 35b70ca82b (FIG-5296) made a non-fork create record only what its request states. process_law_on_double, the always_replay legs and the live Restate leg went with the engine (5ad9641f9e, FIG-5190)"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/plugin/runtime_state.rs"
@@ -3428,8 +3590,8 @@ laws = [
   "lash_conformance::frame_open_protocol_redrive_tests!",
 ]
 disposition = "port"
-status = "todo"
-note = "L9g (FIG-5185): not ported. Every law here drives its turn in process through the runtime (LashRuntime::execute_turn and its kin) over the tier's runner. Since L3s (FIG-5196) a turn input is session mail the session actor admits and runs, so on the durable backend that call answers SessionRunPending, as it does for the turn laws L9g ran on the SQLite tiers (turn_config, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence). Each law must be rewritten to send() its input and let a served node run the turn, or be deleted with a disposition; owed."
+status = "ported"
+note = "FIG-5310: the macros were deleted with the shift (0cc1b81d98, FIG-5196). Their protocol-neutral laws run on the production session activation in crates/lash-durable-test/tests/pressure_frame_crash_proof.rs: an overflow-recovery pressure frame opens once, cut at every label on every tier, and the turn runs in it. They are ignored on FIG-5355: on the durable substrate the frame's own commit is refused while its run owns the head, so the session parks. The RLM legs (execution state restarts from the seed; pressure then continue_as commits both frames once) are owed in FIG-5355, which needs an openable frame"
 
 [[row]]
 path = "crates/lash-protocol-rlm/tests/protocol_drivers/budget_warning_runbook.rs"
@@ -3456,8 +3618,8 @@ laws = [
   "stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_reopen",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: fig-5172-prod (L3, FIG-5172): no production TurnServices runs a facade turn (the only impls are lash-durable-test's and lash-postgres-workers'), so a facade session opens on SQLite memory but its send never completes: a probe that builds a standard core over sqlite_memory_store_backend, opens a session and sends one text input times out after 20 s with the provider never called (L3s's session mail, FIG-5196, has landed); the law is not written yet"
+status = "ported"
+note = "FIG-5310: runs on the served node over both SQLite tiers as crates/lash-durable-test/tests/render_cache_laws.rs::stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_reopen; the restart is a new core over the same stores"
 
 [[row]]
 path = "crates/lash-protocol-rlm/tests/tool_batch_parallelism.rs"
@@ -3569,8 +3731,8 @@ laws = [
   "a_refused_render_is_typed_and_an_unreadable_namespace_is_corruption",
 ]
 disposition = "port"
-status = "todo"
-note = "the redrive law (a run resumed on another node executes under the behaviour its admission recorded): blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; the always_replay legs are forced replay, deleted machinery; run_options_apply_over_the_recorded_render_field_by_field and a_refused_render_is_typed_and_an_unreadable_namespace_is_corruption run in the file without an engine"
+status = "ported"
+note = "FIG-5310: the redrive law runs on every tier as crates/lash-durable-test/tests/recorded_behaviour_laws.rs::a_standard_run_executes_under_its_recorded_behaviour (a core withholding batch runs a session recorded with batch at most 3 and offers it); the two render laws run in place; the always_replay legs forced Restate replay, which went with the engine (5ad9641f9e, FIG-5190)"
 
 [[row]]
 path = "crates/lash-protocol-standard/src/retention_failure_tests.rs"
@@ -3728,8 +3890,8 @@ laws = [
   "standard_runtime_keeps_recorded_history_across_params_renderer_and_reopen",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
+status = "ported"
+note = "FIG-5310: standard_runtime_keeps_recorded_history_across_params_renderer_and_reopen runs on the served node over both SQLite tiers in crates/lash-durable-test/tests/render_cache_laws.rs; retention is read as the store's distinct values, so each cut result returns its own. journaled_standard_presentation_replays_without_render_or_retention_io redrove a Restate journal entry; a durable turn runs its effects in place and resumes from committed rows (bca2bd4534, FIG-5172), and the same law's restart pins that a committed presentation is read back with no render and no retention"
 
 [[row]]
 path = "crates/lash-protocol-standard/tests/tool_batch_parallelism.rs"
@@ -3759,7 +3921,8 @@ laws = [
   "google_streaming_runtime_does_not_republish_reasoning_after_signature_only_part",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5310: recreated; both laws run a facade turn on a SQLite memory durable core"
 
 [[row]]
 path = "crates/lash-provider-openai/src/tests/driver_stream_tests.rs"
@@ -3788,7 +3951,8 @@ laws = [
   "aborted_chat_stream_seals_the_open_reasoning_block",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5310: the two runtime laws run a facade turn on a SQLite memory durable core (crates/lash-provider-openai/src/tests/facade_turns.rs)"
 
 [[row]]
 path = "crates/lash-provider-openai/src/tests/strict_tool_omission_tests.rs"
@@ -3816,8 +3980,36 @@ laws = [
   "resolved_tool_dialect_owns_wire_strictness_and_omission_decoder",
 ]
 disposition = "port"
-status = "todo"
-note = "the strict round-trip, rejected-before-dispatch and non-strict laws drive a facade turn: blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round; the persisted_effect_replay laws are journal replay, deleted machinery; the decoder, dialect and canonical-call request laws run in the file without an engine"
+status = "ported"
+note = "FIG-5310: the eight facade laws run on a SQLite memory durable core (crates/lash-provider-openai/src/tests/facade_turns.rs); the persisted-effect replay laws have function rows"
+
+[[row]]
+path = "crates/lash-provider-openai/src/tests/strict_tool_omission_tests.rs"
+test = "chat_persisted_effect_replay_ignores_strict_tools_toggle"
+area = "providers"
+needs = ["turn", "round"]
+class = "semantic"
+lane = "L9c"
+laws = [
+  "chat_persisted_effect_replay_ignores_strict_tools_toggle",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/turn_phases.rs::a_turn_of_two_model_calls_resumes_at_every_label_without_replay"
+status = "deleted"
+note = "FIG-5310: there is no effect journal to replay; WIRE holds that every attempt sends the exact body its admission stored, whatever the provider's settings are by then"
+
+[[row]]
+path = "crates/lash-provider-openai/src/tests/strict_tool_omission_tests.rs"
+test = "responses_persisted_effect_replay_ignores_strict_tools_toggle"
+area = "providers"
+needs = ["turn", "round"]
+class = "semantic"
+lane = "L9c"
+laws = [
+  "responses_persisted_effect_replay_ignores_strict_tools_toggle",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/turn_phases.rs::a_turn_of_two_model_calls_resumes_at_every_label_without_replay"
+status = "deleted"
+note = "FIG-5310: there is no effect journal to replay; WIRE holds that every attempt sends the exact body its admission stored, whatever the provider's settings are by then"
 
 [[row]]
 path = "crates/lash-provider-openai/tests/codex_websocket_runtime.rs"
@@ -3830,8 +4022,9 @@ laws = [
   "codex_websocket_facade_turn_streams_text_from_local_server",
   "codex_websocket_facade_turn_round_trips_a_tool_call",
 ]
-disposition = "port"
-status = "todo"
+disposition = "replaced-by:crates/lash-provider-openai/src/tests/facade_turns.rs"
+status = "deleted"
+note = "FIG-5310: both Codex WebSocket laws run a facade turn on a SQLite memory durable core"
 
 [[row]]
 path = "crates/lash-restate-test/src/protocol/frame.rs"
@@ -8340,8 +8533,8 @@ laws = [
   "(no test functions) defines: new, restate, backend, serve_processes, run_text_turn, run_turn, run_turn_releasing, settle_session_shift, hold_session_shift, over",
 ]
 disposition = "port"
-status = "todo"
-note = "the crash matrix and the soak assemble the durable runtime through L2's harness in crates/lash-sim/src/crash_matrix/deployment.rs (one runtime, no second scheduler); SimEngine's facade turns are blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+status = "ported"
+note = "FIG-5310: the core a world builds over SimEngine's backend serves its own node, so run_turn sends and the node settles the turn; the fixed Agent contracts drive it (crates/lash-sim/tests/stack_policy.rs) as do the runtime generation laws (crates/lash-sim/src/generation_disposition_matrix.rs). restate, serve_processes and the shift hooks are gone with their engine"
 
 [[row]]
 path = "crates/lash-sim/src/chaos_soak/driver.rs"
@@ -9635,9 +9828,9 @@ lane = "L9c"
 laws = [
   "a_turn_crashed_after_its_sync_replays_the_prelude_it_stored_by_digest",
 ]
-disposition = "port"
-status = "todo"
-note = "a turn crashed after its sync resumes with the prelude it stored by digest; the journal-only-digest assertion is deleted; blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+disposition = "covered-by:crates/lash-durable-test/tests/turn_phases.rs::a_turn_of_two_model_calls_resumes_at_every_label_without_replay"
+status = "deleted"
+note = "FIG-5310: a durable turn's sync runs in place and is never journaled (bca2bd4534, FIG-5172): a turn cut before model.start recomputes its preparation from committed state, and one cut after it sends exactly the body its admission stored, which the matrix holds at every label; the journal-only-digest assertion went with the journal"
 
 [[row]]
 path = "crates/lash/src/tests/recorded_turn_prelude.rs"
@@ -9649,9 +9842,9 @@ lane = "L9c"
 laws = [
   "a_replayed_sync_whose_prelude_is_gone_refuses_the_run_typed",
 ]
-disposition = "port"
-status = "todo"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5310: no durable turn replays its sync from a journal: bca2bd4534 (FIG-5172) runs every turn effect in place and resumes from committed rows, so there is no replayed sync whose recorded prelude could be missing"
 
 [[row]]
 path = "crates/lash/src/tests/redrive_residue.rs"
@@ -10212,8 +10405,8 @@ laws = [
   "tiered! generates: engine_and_session_turn_create_only_real_sessions, delivered_attachment_survives_prune_and_replay_start_input, delivered_attachment_survives_prune_and_replay_start_input_crash_after_record, process_referrer_cleanup_is_complete_without_sessions, upload_expiry_is_local, queued_input_outlives_its_upload_expiry, redrive_replays_recorded_attachment_result, a_cancelled_child_keeps_its_puts_until_pruned, a_cancelled_child_keeps_its_puts_until_pruned_with_cancel_contention",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: fig-5172-prod (L3, FIG-5172): no production TurnServices runs a facade turn (the only impls are lash-durable-test's and lash-postgres-workers'), so a facade session opens on SQLite memory but its send never completes: a probe that builds a standard core over sqlite_memory_store_backend, opens a session and sends one text input times out after 20 s with the provider never called (L3s's session mail, FIG-5196, has landed); the law is not written yet"
+status = "ported"
+note = "FIG-5310: the laws run on a served node over every tier in crates/lash-durable-test/tests/attachment_referrer_laws.rs, each store set on a test clock and the cleanup relay's due pass driven by the law: engine_and_session_turn_create_only_real_sessions, process_referrer_cleanup_is_complete_without_sessions, upload_expiry_is_local, queued_input_outlives_its_upload_expiry (the input waits in a session whose node drained) and a_cancelled_child_keeps_its_puts_until_pruned. delivered_attachment_survives_prune_and_replay_start_input is ignored on FIG-5351: a durable turn's put holds a day-long upload edge, not its execution's (bbffe67d98, FIG-5208, dropped the binding). The crash leg is covered by crates/lash-durable-test/tests/declared_start_crash_laws.rs::declared_start_child_crash_at_every_process_boundary, and redrive_replays_recorded_attachment_result by crates/lash-durable-test/tests/process_step_crash_proof.rs::a_host_engines_once_tool_step_killed_at_every_label_runs_at_most_once with engine_and_session_turn_create_only_real_sessions for the record's edge. The cancel-contention leg held the Restate LashTurn service and postgres_variants_never_pass_without_a_database_url guarded the double's ignored PostgreSQL variants; both went with the engine (5ad9641f9e, FIG-5190), and the hermetic-postgres tag hands every PostgreSQL leg its own server"
 
 [[row]]
 path = "crates/lash/tests/attachment_referrers_evidence/fixture.rs"
@@ -12275,10 +12468,10 @@ lane = "L9h"
 laws = [
   "l15_census_tracks_native_run_records_and_all_descendants",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "subject-deleted"
+status = "deleted"
 owed = "l15 census tracks native run records and all descendants"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5310: the census read Restate invocation journals and the RunRecord events of the Run journal; the tool_batch_baseline binary went with Restate (5ad9641f9e, FIG-5190) and the Run journal and its records were deleted by c1a00eb8dd (FIG-5174)"
 
 [[row]]
 path = "crates/lash-perf/src/latency/restate.rs"
@@ -12304,10 +12497,10 @@ lane = "L9h"
 laws = [
   "scenario_wiring_drives_the_benchmark_plugin_list_in_order",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-perf/src/runtime_perf/harness/tests.rs::scenario_wiring_drives_the_benchmark_plugin_list_in_order"
+status = "deleted"
 owed = "scenario wiring drives the benchmark plugin list in order"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "FIG-5310: the plugin list is built over the in-process lane's effect host; the subagents plugin is now the host's delegation plugin (FIG-5296)"
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/harness/tests.rs"
@@ -12319,10 +12512,10 @@ lane = "L9h"
 laws = [
   "a_dropped_runtime_frees_its_in_process_lane",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-perf/src/runtime_perf/harness/tests.rs::a_dropped_runtime_frees_its_in_process_lane"
+status = "deleted"
 owed = "a dropped runtime frees its in process lane"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "FIG-5310: two turns run on the served node, then the dropped runtime's lane session store, reachable only through its core, node and store set, is freed within 5 s"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/cell_segment_handover.rs"
@@ -19140,10 +19333,10 @@ laws = [
   "stack_policy_probe_agent_tuple_values_finish_as_json_arrays_passes_at_2_mib",
   "stack_policy_probe_cases_cover_every_fixed_agent_product_contract",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/tests/stack_policy.rs"
+status = "deleted"
 owed = "every fixed Agent product contract runs to completion in a child process held to the 2 MiB product stack budget, one case per contract"
-note = "FIG-5190 follow-up deleted this test: it replays a contract on the durable engine, whose backend is not assembled yet (FIG-5194). The lexical stack-policy lint in the same file stays. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5310: restored on the durable engine, one case per fixed Agent product contract, each a lash-sim child held to 2 MiB; the started-process child spawn case replaces the subagent one (FIG-5296). The durable-input, child-spawn and nested-start cases are ignored on FIG-5337: a durable process's tool steps run with no process execution, so its starts carry no spawn provenance and its park announcement has no process event context"
 
 [[row]]
 path = "crates/lash-sim/src/runner/agent_contracts_effect_boundary_tests.rs"
@@ -19337,10 +19530,10 @@ lane = "L9f"
 laws = [
   "runtime_clamps_a_requested_cap_and_reports_the_reduced_wire_value",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/generation_disposition_matrix.rs::runtime_clamps_a_requested_cap_and_reports_the_reduced_wire_value"
+status = "deleted"
 owed = "a session's output-token cap above the model's capacity is clamped on the wire and the turn's attempt receipt reports ClampedToCapacity"
-note = "FIG-5190 follow-up deleted this test: it replays a contract on the durable engine, whose backend is not assembled yet (FIG-5194). The provider-level cases of generation_disposition_matrix stay. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5310: restored as its own test on SimEngine; the durable report's sealed call record carries the attempt receipt"
 
 [[row]]
 path = "crates/lash-sim/src/generation_disposition_matrix.rs"
@@ -19352,10 +19545,10 @@ lane = "L9f"
 laws = [
   "protocol_owned_stop_is_absent_from_the_wire_and_reported_suppressed",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-sim/src/generation_disposition_matrix.rs::protocol_owned_stop_is_absent_from_the_wire_and_reported_suppressed"
+status = "deleted"
 owed = "an RLM session's protocol-owned stop sequence is left off the wire and the attempt receipt reports SuppressedProtocolOwned"
-note = "FIG-5190 follow-up deleted this test: it replays a contract on the durable engine, whose backend is not assembled yet (FIG-5194). The provider-level cases of generation_disposition_matrix stay. blocked: fig-5172-prod (L3, FIG-5172): no facade turn runs on the durable engine: the facade wires no TurnServices and no node serves a LashCore's sessions, so a lash-sim runner turn never settles; repro: crates/lash-sim/src/runner/runtime_proofs.rs::prove_runtime_facade_turn under a 20 s timeout (SimEngine::new, LashCore::standard_builder(engine.backend()), SimEngine::run_turn)"
+note = "FIG-5310: restored as its own test on an RLM core over SimEngine"
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/harness/tests.rs"
@@ -19367,10 +19560,10 @@ lane = "L9h"
 laws = [
   "rlm_globals_keeps_fixed_session_projection_across_real_turns",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-perf/src/runtime_perf/harness/tests.rs::rlm_globals_keeps_fixed_session_projection_across_real_turns"
+status = "deleted"
 owed = "the RLM-globals perf scenario keeps one fixed session projection across real turns"
-note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+note = "FIG-5310: restored; the turn runs on the core's served node"
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/measurement/contention.rs"
@@ -19382,10 +19575,10 @@ lane = "L9h"
 laws = [
   "writer_contention_smoke_reports_wait_release_latency_and_execution",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-perf/src/runtime_perf/measurement/contention.rs::writer_contention_smoke_reports_wait_release_latency_and_execution"
+status = "deleted"
 owed = "the writer-contention scenario reports wait, release-latency and execution samples for same-session and many-session writers"
-note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+note = "FIG-5310: restored on the in-process durable lane; ignored on FIG-5342 because the scenario's measurement code does not yet run on the served node: a same-session waiter completes while the held turn runs"
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/measurement/contention.rs"
@@ -19397,10 +19590,10 @@ lane = "L9h"
 laws = [
   "async_settlement_smoke_drains_every_open_child_span",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-perf/src/runtime_perf/measurement/contention.rs::async_settlement_smoke_drains_every_open_child_span"
+status = "deleted"
 owed = "the async-settlement scenario drains every open child span and reports spawn, settle and drain samples"
-note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+note = "FIG-5310: restored on the in-process durable lane; ignored on FIG-5342 because the scenario's measurement code does not yet run on the served node: no child span opens"
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/measurement/queued_work.rs"
@@ -19412,10 +19605,10 @@ lane = "L9h"
 laws = [
   "queued_work_admission_stress_advances_its_commit_cursor",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "subject-deleted"
+status = "deleted"
 owed = "queued-work admission under stress advances its commit cursor"
-note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+note = "FIG-5310: the queued_work_admission_stress scenario measured run admission, renew and completion below the facade; 0cc1b81d98 (FIG-5196) deleted run admission, the shift fence and the scenario with its measurement module"
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/measurement/queued_work.rs"
@@ -19427,10 +19620,10 @@ lane = "L9h"
 laws = [
   "turn_input_ingress_stress_advances_its_commit_cursor",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "subject-deleted"
+status = "deleted"
 owed = "turn-input ingress under stress advances its commit cursor"
-note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+note = "FIG-5310: the turn_input_ingress_interrupt scenario measured turn-input ingress, interrupt and reclaim under the shift; 0cc1b81d98 (FIG-5196) deleted that admission path and the scenario with its measurement module"
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
@@ -19442,10 +19635,10 @@ lane = "L9h"
 laws = [
   "stable_durable_sqlite_turn_scenarios_report_phases_and_store_calls",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-perf/src/runtime_perf/report_phase_tests.rs::stable_durable_sqlite_turn_scenarios_report_phases_and_store_calls"
+status = "deleted"
 owed = "durable SQLite turn scenarios report their phases and store calls"
-note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+note = "FIG-5310: restored on the in-process durable lane; ignored on FIG-5342 because the scenario's measurement code does not yet run on the served node: the session's phase probe never reaches the node's run"
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
@@ -19457,10 +19650,10 @@ lane = "L9h"
 laws = [
   "durable_queued_work_contention_sqlite_smoke_reports_structure_and_counters",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "subject-deleted"
+status = "deleted"
 owed = "the durable queued-work contention scenario on SQLite reports its structure and counters"
-note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+note = "FIG-5310: 0cc1b81d98 (FIG-5196) deleted the durable_queued_work_contention_sqlite scenario with the claim, renew and reclaim admission it measured"
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
@@ -19472,10 +19665,10 @@ lane = "L9h"
 laws = [
   "checkpoint_state_hot_paths_capture_one_changed_component_per_turn",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-perf/src/runtime_perf/report_phase_tests.rs::checkpoint_state_hot_paths_capture_one_changed_component_per_turn"
+status = "deleted"
 owed = "checkpoint-state hot paths capture one changed component per turn"
-note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+note = "FIG-5310: restored on the in-process durable lane; ignored on FIG-5342 because the scenario's measurement code does not yet run on the served node: the checkpoint binding is still a stub"
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
@@ -19487,10 +19680,10 @@ lane = "L9h"
 laws = [
   "durable_sqlite_checkpoint_curve_reports_paired_structural_samples",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-perf/src/runtime_perf/report_phase_tests.rs::durable_sqlite_checkpoint_curve_reports_paired_structural_samples"
+status = "deleted"
 owed = "the durable SQLite checkpoint curve reports paired structural samples"
-note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+note = "FIG-5310: restored on the in-process durable lane; ignored on FIG-5342 because the scenario's measurement code does not yet run on the served node: the checkpoint binding is still a stub"
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
@@ -19502,10 +19695,10 @@ lane = "L9h"
 laws = [
   "high_traffic_sqlite_smoke_reports_load_structure",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-perf/src/runtime_perf/report_phase_tests.rs::high_traffic_sqlite_smoke_reports_load_structure"
+status = "deleted"
 owed = "the high-traffic SQLite scenario reports its load structure"
-note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+note = "FIG-5310: restored on the in-process durable lane; ignored on FIG-5342 because the scenario's measurement code does not yet run on the served node: a child operation stops at MaxTurns"
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
@@ -19517,10 +19710,10 @@ lane = "L9h"
 laws = [
   "high_traffic_sqlite_knee_smoke_reports_each_step",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-perf/src/runtime_perf/report_phase_tests.rs::high_traffic_sqlite_knee_smoke_reports_each_step"
+status = "deleted"
 owed = "the high-traffic SQLite knee scenario reports each step"
-note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+note = "FIG-5310: restored on the in-process durable lane; ignored on FIG-5342 because the scenario's measurement code does not yet run on the served node: a child operation stops at MaxTurns"
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
@@ -19532,10 +19725,10 @@ lane = "L9h"
 laws = [
   "high_traffic_trigger_waits_for_terminal_delivery",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-perf/src/runtime_perf/report_phase_tests.rs::high_traffic_trigger_waits_for_terminal_delivery"
+status = "deleted"
 owed = "a high-traffic trigger waits for terminal delivery"
-note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+note = "FIG-5310: restored on the in-process durable lane; ignored on FIG-5342 because the scenario's measurement code does not yet run on the served node: the trigger operation is still a stub"
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
@@ -19547,10 +19740,10 @@ lane = "L9h"
 laws = [
   "async_completion_smoke_witnesses_match_session_geometry",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-perf/src/runtime_perf/report_phase_tests.rs::async_completion_smoke_witnesses_match_session_geometry"
+status = "deleted"
 owed = "async-completion witnesses match the session geometry"
-note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+note = "FIG-5310: restored; runs on the served node"
 
 [[row]]
 path = "runbooks/workbench-cron-schedule/runbook.md"

@@ -1,17 +1,19 @@
 //! Executable generation-setting dispositions at the provider transport seam.
 
 use std::num::NonZeroUsize;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use async_trait::async_trait;
 use lash_core::NonNegativeFiniteF64;
+use lash_core::facade_support::LlmTransportError;
 use lash_core::provider::{
     AnthropicThinkingRetention, GoogleDialect, LlmProfileCapability, OpenAiReasoningContext,
     ProviderHandle, ProviderOptions, ReasoningCapability, ReasoningEncoding,
     ReasoningRetentionCapability, ReasoningRetentionPolicy, ReasoningRetentionSelection,
     ReasoningSelection, SamplingCapability,
 };
-use lash_llm_transport::LlmHttpTransport;
+use lash_llm_transport::{LlmHttpRequest, LlmHttpResponse, LlmHttpTransport};
 use lash_provider_anthropic::AnthropicProvider;
 use lash_provider_google::{GoogleOAuthClient, GoogleOAuthProvider};
 use lash_provider_openai::codex::ws_testing::{ScriptedWsAction, spawn_scripted_websocket};
@@ -20,10 +22,31 @@ use lash_sansio::llm::types::{
     GenerationOptionOutcome as Outcome, GenerationReceipt, LlmEventSender, LlmMessage, LlmRequest,
     LlmRequestScope, LlmRole, LlmToolChoice, LlmToolSpec,
 };
+use lash_sansio::sync::MutexExt;
 use lash_sansio::{FailureCode, TurnFailureCode};
 use serde_json::{Value, json};
 
 use crate::provider::{ProviderWireEvent, ProviderWireScript, ScriptedLlmHttpTransport};
+
+#[derive(Debug)]
+struct CapturingTransport {
+    inner: Arc<dyn LlmHttpTransport>,
+    bodies: Mutex<Vec<Value>>,
+}
+
+#[async_trait]
+impl LlmHttpTransport for CapturingTransport {
+    async fn send(
+        &self,
+        request: LlmHttpRequest,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<LlmHttpResponse, LlmTransportError> {
+        self.bodies
+            .lock_recover()
+            .push(serde_json::from_slice(&request.body).expect("request JSON"));
+        self.inner.send(request, timeout).await
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 enum Dialect {
@@ -394,6 +417,152 @@ async fn every_simple_generation_control_is_sent_or_refused_before_io() {
     }
     eprintln!(
         "generation disposition matrix: {count} cases in {:?}",
+        start.elapsed()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn runtime_clamps_a_requested_cap_and_reports_the_reduced_wire_value() {
+    let start = Instant::now();
+    let script = crate::runtime_providers::runtime_script_for_text(
+        crate::runtime_providers::OPENAI_COMPATIBLE,
+        "done",
+    )
+    .expect("runtime script");
+    let transport = Arc::new(CapturingTransport {
+        inner: Arc::new(ScriptedLlmHttpTransport::new(script).expect("scripted transport")),
+        bodies: Mutex::new(Vec::new()),
+    });
+    let (provider, _, _) = crate::runtime_providers::runtime_provider_components(
+        crate::runtime_providers::OPENAI_COMPATIBLE,
+        &transport,
+    )
+    .expect("runtime provider");
+    let model = lash::LlmProfileMetadata::builder("openai/gpt-5.4")
+        .context_window_tokens(200_000)
+        .output_token_capacity(2_048)
+        .build()
+        .expect("model");
+    let engine = crate::backend::SimEngine::new(0x4122)
+        .await
+        .expect("sim engine");
+    let core = lash::LashCore::standard_builder(engine.backend())
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .serve_test_llm_profile(provider, model.clone())
+        .build(crate::sim_process_owner())
+        .expect("runtime core");
+    let session = crate::open_created_session_from(
+        lash::SessionSpec::new(
+            model.wire_model.clone(),
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )
+        .generation(lash_core::GenerationOptions {
+            output_token_cap: NonZeroUsize::new(32_000),
+            ..Default::default()
+        }),
+        &core,
+        "matrix-cap",
+    )
+    .await
+    .expect("session");
+    let turn = engine
+        .run_text_turn(&session, "matrix-cap-turn", "answer")
+        .await
+        .expect("handler")
+        .expect("turn");
+    let bodies = transport.bodies.lock_recover();
+    assert_eq!(bodies.len(), 1);
+    assert_eq!(bodies[0].pointer("/max_tokens"), Some(&json!(2_048)));
+    let receipt = turn
+        .result
+        .llm_calls
+        .iter()
+        .flat_map(|call| &call.attempts)
+        .find_map(|attempt| attempt.generation_disposition)
+        .unwrap_or_else(|| panic!("attempt receipt: {:?}", turn.result.llm_calls));
+    assert_eq!(receipt.output_token_cap, Outcome::ClampedToCapacity);
+    eprintln!(
+        "runtime cap disposition matrix: 1 case in {:?}",
+        start.elapsed()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn protocol_owned_stop_is_absent_from_the_wire_and_reported_suppressed() {
+    let start = Instant::now();
+    let paired = Arc::new(
+        crate::provider_variations::PairedProviderStopTransport::new(
+            crate::provider_variations::ProviderStopDialect::OpenAiCompatibleChat,
+        ),
+    );
+    let transport = Arc::new(CapturingTransport {
+        inner: paired,
+        bodies: Mutex::new(Vec::new()),
+    });
+    let (provider, model, _) = crate::runtime_providers::runtime_provider_components(
+        crate::runtime_providers::OPENAI_COMPATIBLE,
+        &transport,
+    )
+    .expect("runtime provider");
+    let engine = crate::backend::SimEngine::new(0x4123)
+        .await
+        .expect("sim engine");
+    let backend = engine.backend();
+    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+        lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+            .channel(lash_protocol_rlm::RlmChannel::Cell)
+            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+            .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+            .build(),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
+        &backend,
+    );
+    let core = lash::LashCore::rlm_builder(backend, factory)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .serve_test_llm_profile(provider, model.clone())
+        .build(crate::sim_process_owner())
+        .expect("RLM core");
+    let session = crate::open_created_session_from(
+        lash::SessionSpec::new(
+            model.wire_model.clone(),
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )
+        .generation(lash_core::GenerationOptions {
+            stop_sequences: vec![
+                crate::provider_variations::TYPESCRIPT_CLOSE_DELIMITER.to_string(),
+            ],
+            ..Default::default()
+        }),
+        &core,
+        "matrix-stop",
+    )
+    .await
+    .expect("session");
+    let turn = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        engine.run_text_turn(
+            &session,
+            "matrix-stop-turn",
+            "finish with the scripted value",
+        ),
+    )
+    .await
+    .expect("turn timeout")
+    .expect("handler")
+    .expect("turn");
+    let bodies = transport.bodies.lock_recover();
+    assert_eq!(bodies.len(), 1);
+    assert!(bodies[0].pointer("/stop").is_none(), "{:?}", bodies[0]);
+    let receipt = turn.result.llm_calls[0].attempts[0]
+        .generation_disposition
+        .expect("attempt receipt");
+    assert_eq!(receipt.stop_sequences, Outcome::SuppressedProtocolOwned);
+    eprintln!(
+        "protocol stop disposition matrix: 1 case in {:?}",
         start.elapsed()
     );
 }

@@ -79,6 +79,52 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
+    name = "attachment_referrer_laws__test",
+    crate_features = [],
+    crate_name = "attachment_referrer_laws",
+    crate_root = "tests/attachment_referrer_laws.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-durable-test", "attachment_referrer_laws", "//crates/lash-durable-test:attachment_referrer_laws__test"),
+    extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    library = ":lash-durable-test",
+    library_crate_name = "lash_durable_test",
+    manifest_dir = "crates/lash-durable-test",
+    package_name = "lash-internal-durable-test",
+    rustc_env = {},
+    tags = [
+        "hermetic-postgres",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
+    name = "cell_process_handles__test",
+    crate_features = [],
+    crate_name = "cell_process_handles",
+    crate_root = "tests/cell_process_handles.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-durable-test", "cell_process_handles", "//crates/lash-durable-test:cell_process_handles__test"),
+    extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    library = ":lash-durable-test",
+    library_crate_name = "lash_durable_test",
+    manifest_dir = "crates/lash-durable-test",
+    package_name = "lash-internal-durable-test",
+    rustc_env = {},
+    tags = [
+        "hermetic-postgres",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "cell_restore_laws__test",
     crate_features = [],
     crate_name = "cell_restore_laws",
@@ -329,6 +375,29 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
+    name = "frame_switch_laws__test",
+    crate_features = [],
+    crate_name = "frame_switch_laws",
+    crate_root = "tests/frame_switch_laws.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-durable-test", "frame_switch_laws", "//crates/lash-durable-test:frame_switch_laws__test"),
+    extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    library = ":lash-durable-test",
+    library_crate_name = "lash_durable_test",
+    manifest_dir = "crates/lash-durable-test",
+    package_name = "lash-internal-durable-test",
+    rustc_env = {},
+    tags = [
+        "hermetic-postgres",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "open_session_commands__test",
     crate_features = [],
     crate_name = "open_session_commands",
@@ -369,6 +438,27 @@ lash_rust_integration_test(
     tags = [
         "hermetic-postgres",
     ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
+    name = "pressure_frame_crash_proof__test",
+    crate_features = [],
+    crate_name = "pressure_frame_crash_proof",
+    crate_root = "tests/pressure_frame_crash_proof.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-durable-test", "pressure_frame_crash_proof", "//crates/lash-durable-test:pressure_frame_crash_proof__test"),
+    extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)", "RUST_TEST_THREADS": "1"},
+    library = ":lash-durable-test",
+    library_crate_name = "lash_durable_test",
+    manifest_dir = "crates/lash-durable-test",
+    package_name = "lash-internal-durable-test",
+    rustc_env = {},
+    tags = [],
     version = "0.0.0-dev",
 )
 
@@ -484,6 +574,50 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
+    name = "recorded_behaviour_laws__test",
+    crate_features = [],
+    crate_name = "recorded_behaviour_laws",
+    crate_root = "tests/recorded_behaviour_laws.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-durable-test", "recorded_behaviour_laws", "//crates/lash-durable-test:recorded_behaviour_laws__test"),
+    extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    library = ":lash-durable-test",
+    library_crate_name = "lash_durable_test",
+    manifest_dir = "crates/lash-durable-test",
+    package_name = "lash-internal-durable-test",
+    rustc_env = {},
+    tags = [
+        "hermetic-postgres",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
+    name = "render_cache_laws__test",
+    crate_features = [],
+    crate_name = "render_cache_laws",
+    crate_root = "tests/render_cache_laws.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-durable-test", "render_cache_laws", "//crates/lash-durable-test:render_cache_laws__test"),
+    extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    library = ":lash-durable-test",
+    library_crate_name = "lash_durable_test",
+    manifest_dir = "crates/lash-durable-test",
+    package_name = "lash-internal-durable-test",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "round_crash_matrix__test",
     crate_features = [],
     crate_name = "round_crash_matrix",
@@ -511,6 +645,29 @@ lash_rust_integration_test(
     crate_root = "tests/session_send.rs",
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "session_send", "//crates/lash-durable-test:session_send__test"),
+    extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    library = ":lash-durable-test",
+    library_crate_name = "lash_durable_test",
+    manifest_dir = "crates/lash-durable-test",
+    package_name = "lash-internal-durable-test",
+    rustc_env = {},
+    tags = [
+        "hermetic-postgres",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
+    name = "standard_turn_outcomes__test",
+    crate_features = [],
+    crate_name = "standard_turn_outcomes",
+    crate_root = "tests/standard_turn_outcomes.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-durable-test", "standard_turn_outcomes", "//crates/lash-durable-test:standard_turn_outcomes__test"),
     extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
@@ -656,6 +813,29 @@ lash_rust_integration_test(
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)", "RUST_TEST_THREADS": "1"},
+    library = ":lash-durable-test",
+    library_crate_name = "lash_durable_test",
+    manifest_dir = "crates/lash-durable-test",
+    package_name = "lash-internal-durable-test",
+    rustc_env = {},
+    tags = [
+        "hermetic-postgres",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
+    name = "tool_surface_laws__test",
+    crate_features = [],
+    crate_name = "tool_surface_laws",
+    crate_root = "tests/tool_surface_laws.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-durable-test", "tool_surface_laws", "//crates/lash-durable-test:tool_surface_laws__test"),
+    extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-durable-test",
     library_crate_name = "lash_durable_test",
     manifest_dir = "crates/lash-durable-test",

@@ -43,7 +43,7 @@ uuid = { workspace = true, features = ["v4"] }
 # a bare `cargo test -p lash-internal-provider-google` runs the conformance law instead of
 # quietly compiling it out (FIG-1266).
 lash-provider-google = { package = "lash-internal-provider-google", path = ".", features = ["testing"] }
-lash = { package = "lash-runtime", path = "../lash" }
+lash = { package = "lash-runtime", path = "../lash", features = ["sqlite"] }
 lash-core = { workspace = true, features = ["testing"] }
 lash-llm-transport = { workspace = true, features = ["proptest-support", "testing"] }
-tokio = { workspace = true, features = ["rt", "time"] }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time"] }

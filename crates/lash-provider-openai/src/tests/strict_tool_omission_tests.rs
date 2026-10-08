@@ -1,8 +1,15 @@
 use super::*;
 
+use async_trait::async_trait;
+use lash::tools::{
+    StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolCall, ToolDefinition,
+    ToolOutcome,
+};
 use lash_core::llm::types::{LlmContentBlock, LlmRole};
+use std::sync::Mutex;
 
 const TOOL_NAME: &str = "strict_omission_probe";
+const DEFAULT_LIMIT: usize = 37;
 
 #[derive(Clone, Copy, Debug)]
 enum Endpoint {
@@ -10,7 +17,93 @@ enum Endpoint {
     Responses,
 }
 
-impl Endpoint {}
+impl Endpoint {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Chat => "chat",
+            Self::Responses => "responses",
+        }
+    }
+}
+
+#[derive(Debug)]
+struct CapturingScriptedTransport {
+    responses: Mutex<VecDeque<String>>,
+    requests: Mutex<Vec<LlmHttpRequest>>,
+}
+
+impl CapturingScriptedTransport {
+    fn new(responses: impl IntoIterator<Item = String>) -> Self {
+        Self {
+            responses: Mutex::new(responses.into_iter().collect()),
+            requests: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn request_bodies(&self) -> Vec<Value> {
+        self.requests
+            .lock_recover()
+            .iter()
+            .map(|request| serde_json::from_slice(&request.body).expect("JSON request body"))
+            .collect()
+    }
+}
+
+#[async_trait]
+impl LlmHttpTransport for CapturingScriptedTransport {
+    async fn send(
+        &self,
+        request: LlmHttpRequest,
+        _timeout: Option<std::time::Duration>,
+    ) -> Result<lash_llm_transport::LlmHttpResponse, LlmTransportError> {
+        self.requests.lock_recover().push(request);
+        let body = self
+            .responses
+            .lock_recover()
+            .pop_front()
+            .expect("scripted response");
+        Ok(lash_llm_transport::LlmHttpResponse {
+            status: 200,
+            headers: vec![("content-type".to_string(), "application/json".to_string())],
+            body: LlmHttpBody::buffered(body),
+        })
+    }
+}
+
+#[derive(Debug, PartialEq)]
+struct CapturedCall {
+    args: Value,
+    limit: Option<usize>,
+}
+
+struct OmissionProbe {
+    seen: Arc<Mutex<Vec<CapturedCall>>>,
+}
+
+#[async_trait]
+impl StaticToolExecute for OmissionProbe {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
+        (async {
+            let limit = match lash_tool_support::parse_optional_usize_arg(
+                call.args,
+                "limit",
+                Some(DEFAULT_LIMIT),
+                false,
+                1,
+            ) {
+                Ok(limit) => limit,
+                Err(outcome) => return outcome,
+            };
+            self.seen.lock_recover().push(CapturedCall {
+                args: call.args.clone(),
+                limit,
+            });
+            ToolOutcome::ok(json!({ "limit": limit }))
+        })
+        .await
+        .into()
+    }
+}
 
 fn tool_input_schema() -> Value {
     json!({
@@ -60,6 +153,167 @@ fn tool_input_schema() -> Value {
     })
 }
 
+fn tool_definition() -> ToolDefinition {
+    ToolDefinition::raw(
+        "tool:strict_omission_probe",
+        TOOL_NAME,
+        "Capture strict omission behavior.",
+        tool_input_schema(),
+        json!({
+            "type": "object",
+            "properties": { "limit": { "type": ["integer", "null"] } },
+            "required": ["limit"],
+            "additionalProperties": false
+        }),
+    )
+    .expect("valid declared tool schemas")
+}
+
+fn provider(
+    endpoint: Endpoint,
+    strict_tools: bool,
+    transport: Arc<CapturingScriptedTransport>,
+) -> ProviderHandle {
+    let compat = OpenAiCompat {
+        schema_capabilities: Some(ProviderSchemaCapabilities::openai(strict_tools)),
+        ..OpenAiCompat::default()
+    };
+    match endpoint {
+        Endpoint::Chat => ProviderHandle::new(
+            OpenAiCompatibleProvider::new("key", "https://openai.test/v1")
+                .with_compat(compat)
+                .with_transport(transport)
+                .into_components(),
+        ),
+        Endpoint::Responses => {
+            let mut provider = OpenAiProvider::new("key").with_transport(transport);
+            provider.inner.compat = compat;
+            ProviderHandle::new(provider.into_components())
+        }
+    }
+}
+
+fn tool_response(endpoint: Endpoint, arguments: &Value) -> String {
+    let arguments = serde_json::to_string(arguments).expect("arguments JSON");
+    match endpoint {
+        Endpoint::Chat => json!({
+            "id": "chat-tool",
+            "model": "gpt-5.4",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call-1",
+                        "type": "function",
+                        "function": { "name": TOOL_NAME, "arguments": arguments }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        })
+        .to_string(),
+        Endpoint::Responses => json!({
+            "id": "response-tool",
+            "model": "gpt-5.4",
+            "status": "completed",
+            "output": [{
+                "type": "function_call",
+                "id": "fc-1",
+                "call_id": "call-1",
+                "name": TOOL_NAME,
+                "arguments": arguments,
+                "status": "completed"
+            }]
+        })
+        .to_string(),
+    }
+}
+
+fn final_response(endpoint: Endpoint) -> String {
+    match endpoint {
+        Endpoint::Chat => json!({
+            "id": "chat-final",
+            "model": "gpt-5.4",
+            "choices": [{
+                "message": { "role": "assistant", "content": "done" },
+                "finish_reason": "stop"
+            }]
+        })
+        .to_string(),
+        Endpoint::Responses => json!({
+            "id": "response-final",
+            "model": "gpt-5.4",
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "id": "message-1",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{ "type": "output_text", "text": "done" }]
+            }]
+        })
+        .to_string(),
+    }
+}
+
+struct CaseResult {
+    seen: Arc<Mutex<Vec<CapturedCall>>>,
+    requests: Vec<Value>,
+}
+
+async fn run_case(
+    endpoint: Endpoint,
+    strict_tools: bool,
+    arguments: Value,
+    label: &str,
+) -> CaseResult {
+    let transport = Arc::new(CapturingScriptedTransport::new([
+        tool_response(endpoint, &arguments),
+        final_response(endpoint),
+    ]));
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let core = super::facade_turns::durable_core(
+        "gpt-5.4",
+        lash::LlmProfileMetadata::builder("gpt-5.4")
+            .context_window_tokens(16_000)
+            .build()
+            .expect("valid model spec"),
+        provider(endpoint, strict_tools, Arc::clone(&transport)),
+        Some(Arc::new(StaticToolProvider::new(
+            vec![tool_definition()],
+            OmissionProbe {
+                seen: Arc::clone(&seen),
+            },
+        ))),
+    )
+    .await;
+    let session =
+        super::facade_turns::session(&core, "gpt-5.4", &format!("strict-omission-{label}")).await;
+    let result = super::facade_turns::send(&session, "Call the probe.").await;
+    assert_eq!(result.assistant_message(), Some("done"));
+    core.shutdown().await.expect("the core shuts down");
+    CaseResult {
+        seen,
+        requests: transport.request_bodies(),
+    }
+}
+
+fn strict_arguments() -> Value {
+    json!({
+        "required_name": "ok",
+        "limit": null,
+        "nullable_note": null,
+        "nullable_referenced": null,
+        "nested": { "id": "nested", "optional_count": null },
+        "rows": [
+            { "id": "first", "optional_count": null },
+            { "id": "second", "optional_count": 9 }
+        ],
+        "referenced": { "id": "ref", "optional_count": null }
+    })
+}
+
 fn canonical_arguments() -> Value {
     json!({
         "required_name": "ok",
@@ -69,6 +323,19 @@ fn canonical_arguments() -> Value {
         "rows": [{ "id": "first" }, { "id": "second", "optional_count": 9 }],
         "referenced": { "id": "ref" }
     })
+}
+
+fn advertised_tool(endpoint: Endpoint, request: &Value) -> &Value {
+    request["tools"]
+        .as_array()
+        .expect("advertised tools")
+        .iter()
+        .map(|tool| match endpoint {
+            Endpoint::Chat => &tool["function"],
+            Endpoint::Responses => tool,
+        })
+        .find(|tool| tool["name"] == TOOL_NAME)
+        .expect("advertised omission probe")
 }
 
 fn recorded_arguments(endpoint: Endpoint, request: &Value) -> Value {
@@ -92,6 +359,170 @@ fn recorded_arguments(endpoint: Endpoint, request: &Value) -> Value {
     }
     .expect("encoded arguments");
     serde_json::from_str(encoded).expect("recorded arguments JSON")
+}
+
+async fn strict_omission_round_trip(endpoint: Endpoint) {
+    let result = run_case(
+        endpoint,
+        true,
+        strict_arguments(),
+        &format!("{}-round-trip", endpoint.label()),
+    )
+    .await;
+    assert_eq!(result.requests.len(), 2);
+
+    let advertised = advertised_tool(endpoint, &result.requests[0]);
+    assert_eq!(advertised["strict"], true);
+    assert_eq!(
+        advertised["parameters"]["required"],
+        json!([
+            "limit",
+            "nested",
+            "nullable_note",
+            "nullable_referenced",
+            "referenced",
+            "required_name",
+            "rows"
+        ])
+    );
+    assert_eq!(
+        advertised["parameters"]["properties"]["limit"]["type"],
+        json!(["integer", "null"])
+    );
+
+    assert_eq!(
+        result.seen.lock_recover().as_slice(),
+        [CapturedCall {
+            args: canonical_arguments(),
+            limit: Some(DEFAULT_LIMIT),
+        }]
+    );
+    assert_eq!(
+        recorded_arguments(endpoint, &result.requests[1]),
+        canonical_arguments(),
+        "the follow-up built from the committed call must contain canonical arguments"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn chat_strict_default_nullable_nested_array_ref_and_journal_round_trip() {
+    strict_omission_round_trip(Endpoint::Chat).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn responses_strict_default_nullable_nested_array_ref_and_journal_round_trip() {
+    strict_omission_round_trip(Endpoint::Responses).await;
+}
+
+async fn rejected_before_dispatch(endpoint: Endpoint, arguments: Value, field: &str, label: &str) {
+    let result = run_case(endpoint, true, arguments, label).await;
+    assert!(result.seen.lock_recover().is_empty());
+    let follow_up = result.requests[1].to_string();
+    assert!(
+        follow_up.contains(field) && follow_up.contains("Tool execution failed"),
+        "expected a validation error for {field}, got {follow_up}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn chat_strict_required_nonnullable_null_is_rejected_before_dispatch() {
+    let mut arguments = strict_arguments();
+    arguments["required_name"] = Value::Null;
+    rejected_before_dispatch(
+        Endpoint::Chat,
+        arguments,
+        "required_name",
+        "chat-required-null",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn responses_strict_required_nonnullable_null_is_rejected_before_dispatch() {
+    let mut arguments = strict_arguments();
+    arguments["required_name"] = Value::Null;
+    rejected_before_dispatch(
+        Endpoint::Responses,
+        arguments,
+        "required_name",
+        "responses-required-null",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn chat_strict_wrong_type_is_rejected_before_dispatch() {
+    let mut arguments = strict_arguments();
+    arguments["required_name"] = json!(42);
+    rejected_before_dispatch(
+        Endpoint::Chat,
+        arguments,
+        "required_name",
+        "chat-wrong-type",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn responses_strict_wrong_type_is_rejected_before_dispatch() {
+    let mut arguments = strict_arguments();
+    arguments["required_name"] = json!(42);
+    rejected_before_dispatch(
+        Endpoint::Responses,
+        arguments,
+        "required_name",
+        "responses-wrong-type",
+    )
+    .await;
+}
+
+async fn non_strict_optional_null_is_rejected(endpoint: Endpoint) {
+    let arguments = json!({
+        "required_name": "ok",
+        "limit": null,
+        "nested": { "id": "nested" },
+        "rows": [],
+        "referenced": { "id": "ref" }
+    });
+    let result = run_case(
+        endpoint,
+        false,
+        arguments,
+        &format!("{}-non-strict-null", endpoint.label()),
+    )
+    .await;
+    assert!(result.seen.lock_recover().is_empty());
+    let advertised = advertised_tool(endpoint, &result.requests[0]);
+    assert_eq!(advertised["strict"], false);
+    assert_eq!(
+        advertised["parameters"]["properties"]["limit"]["type"],
+        "integer"
+    );
+    assert!(
+        !advertised["parameters"]["required"]
+            .as_array()
+            .expect("required")
+            .contains(&json!("limit"))
+    );
+    assert_eq!(
+        recorded_arguments(endpoint, &result.requests[1])["limit"],
+        Value::Null
+    );
+    assert!(
+        result.requests[1]
+            .to_string()
+            .contains("Tool execution failed")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn chat_non_strict_optional_null_is_not_normalized() {
+    non_strict_optional_null_is_rejected(Endpoint::Chat).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn responses_non_strict_optional_null_is_not_normalized() {
+    non_strict_optional_null_is_rejected(Endpoint::Responses).await;
 }
 
 fn replay_request_with_canonical_call() -> LlmRequest {

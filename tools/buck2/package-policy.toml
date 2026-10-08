@@ -56,14 +56,15 @@ tags = ["hermetic-postgres"]
 # process laws (FIG-5216), the cell restore laws (FIG-5224) and the tool
 # activity laws (FIG-5251), the after-turn laws (FIG-5283), the checkpoint
 # mail laws (FIG-5293, FIG-5294), the committed-turn read laws (FIG-5297),
-# the plugin state storage laws (FIG-5301) and the config-change observer
-# laws (FIG-5333) run on all three tiers, and the pool-width laws (FIG-5237)
-# on PostgreSQL. Each PostgreSQL leg gets a server
-# of its own.
+# the plugin state storage laws (FIG-5301), the config-change observer laws
+# (FIG-5333), and the cell process handle, standard turn outcome, tool
+# surface, recorded behaviour, attachment referrer and frame switch laws
+# (FIG-5310) run on all three tiers, and the pool-width laws (FIG-5237) on
+# PostgreSQL. Each PostgreSQL leg gets a server of its own.
 [[rule]]
 packages = ["lash-internal-durable-test"]
 kinds = ["test"]
-targets = ["vertical_crash_proof", "turn_phases", "trigger_start_proof", "drain_by_release", "tool_batches", "tool_call_identity", "tool_crash_laws", "tool_group_pool_width", "cell_restore_laws", "core_node_processes", "declared_start", "declared_start_crash_laws", "process_tool_calls", "process_tool_call_crash_laws", "tool_activity", "session_send", "after_turn_crash_laws", "steering_crash_laws", "committed_turns", "plugin_state_storage_laws", "config_change_observer_laws"]
+targets = ["vertical_crash_proof", "turn_phases", "trigger_start_proof", "drain_by_release", "tool_batches", "tool_call_identity", "tool_crash_laws", "tool_group_pool_width", "cell_restore_laws", "core_node_processes", "declared_start", "declared_start_crash_laws", "process_tool_calls", "process_tool_call_crash_laws", "tool_activity", "session_send", "after_turn_crash_laws", "steering_crash_laws", "committed_turns", "plugin_state_storage_laws", "config_change_observer_laws", "cell_process_handles", "standard_turn_outcomes", "tool_surface_laws", "recorded_behaviour_laws", "attachment_referrer_laws", "frame_switch_laws"]
 tags = ["hermetic-postgres"]
 
 # The declared-start crash laws (FIG-5216) are five matrices and two single
@@ -84,7 +85,7 @@ timeout = "long"
 [[rule]]
 packages = ["lash-internal-durable-test"]
 kinds = ["test"]
-targets = ["cell_restore_laws", "child_turn_crash_proof", "declared_start_crash_laws", "drain_by_release", "frame_switch_crash_proof", "plugin_state_storage_laws", "process_crash_proof", "process_step_crash_proof", "process_tool_call_crash_laws", "round_crash_matrix", "tool_crash_laws", "tool_group_pool_width", "trigger_start_proof", "turn_phases", "turn_round_crash_matrix", "vertical_crash_proof"]
+targets = ["cell_restore_laws", "child_turn_crash_proof", "declared_start_crash_laws", "drain_by_release", "frame_switch_crash_proof", "plugin_state_storage_laws", "pressure_frame_crash_proof", "process_crash_proof", "process_step_crash_proof", "process_tool_call_crash_laws", "round_crash_matrix", "tool_crash_laws", "tool_group_pool_width", "trigger_start_proof", "turn_phases", "turn_round_crash_matrix", "vertical_crash_proof"]
 serial = true
 
 [[rule]]
@@ -516,6 +517,7 @@ service_floor = { memory_kb = 1048576, packages = ["lash-internal-postgres-store
 "//crates/lash-durable-test:drain_by_release__test" = { cpu_count = 4, memory_kb = 524288 }
 "//crates/lash-durable-test:frame_switch_crash_proof__test" = { cpu_count = 4, memory_kb = 524288 }
 "//crates/lash-durable-test:plugin_state_storage_laws__test" = { cpu_count = 4, memory_kb = 524288 }
+"//crates/lash-durable-test:pressure_frame_crash_proof__test" = { cpu_count = 4, memory_kb = 524288 }
 "//crates/lash-durable-test:process_crash_proof__test" = { cpu_count = 4, memory_kb = 524288 }
 "//crates/lash-durable-test:process_step_crash_proof__test" = { cpu_count = 4, memory_kb = 524288 }
 "//crates/lash-durable-test:process_tool_call_crash_laws__test" = { cpu_count = 4, memory_kb = 524288 }
