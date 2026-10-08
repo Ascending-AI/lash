@@ -16,11 +16,13 @@ mod served;
 mod sim;
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use lash_core::{ArtifactReferrer, AttachmentId, ToolDefinitionBindingExt as _, ToolProvider};
+use lash_core::{
+    ArtifactReferrer, AttachmentId, ClockWallTime as _, ToolDefinitionBindingExt as _, ToolProvider,
+};
 use lash_core_execution::StoreSet;
 use lash_sansio::sync::MutexExt as _;
 
@@ -43,6 +45,11 @@ struct Witness {
     holds: AtomicUsize,
     /// Released once the law has checked the held state.
     release: tokio::sync::Semaphore,
+    /// A permit each time `start_turn_child` has stored its input, while its
+    /// turn still runs.
+    stored: tokio::sync::Semaphore,
+    /// Released once the law has run a cleanup pass inside that turn.
+    resume: tokio::sync::Semaphore,
 }
 
 impl Witness {
@@ -52,6 +59,8 @@ impl Witness {
             held: tokio::sync::Notify::new(),
             holds: AtomicUsize::new(0),
             release: tokio::sync::Semaphore::new(0),
+            stored: tokio::sync::Semaphore::new(0),
+            resume: tokio::sync::Semaphore::new(0),
         })
     }
 
@@ -74,6 +83,15 @@ impl Witness {
 
     fn release_one(&self) {
         self.release.add_permits(1);
+    }
+
+    /// Wait until `start_turn_child` has stored its input and parked.
+    async fn stored(&self) {
+        tokio::time::timeout(SETTLE, self.stored.acquire())
+            .await
+            .expect("the tool stored its input")
+            .expect("the stored semaphore stays open")
+            .forget();
     }
 }
 
@@ -130,8 +148,8 @@ fn text_meta(name: &str) -> lash_core::AttachmentCreateMeta {
 
 /// `put_blob({ text })` stores `text` and returns it; `hold({})` parks until
 /// released or cooperatively cancelled; `start_turn_child({ text })` stores
-/// `text` and starts a detached SessionTurn child whose turn input carries
-/// it, answering only `"started"`.
+/// `text`, parks until the law resumes it, and starts a detached SessionTurn
+/// child whose turn input carries it, answering only `"started"`.
 struct BlobTools {
     witness: Arc<Witness>,
 }
@@ -148,6 +166,15 @@ impl BlobTools {
             .put(text.into_bytes(), text_meta("child-input.txt"))
             .await
             .map_err(|error| error.to_string())?;
+        // Park inside the turn until the law has run a cleanup pass over the
+        // put's guard, as the core's own due pass may while the turn runs.
+        self.witness.stored.add_permits(1);
+        self.witness
+            .resume
+            .acquire()
+            .await
+            .map_err(|error| error.to_string())?
+            .forget();
         let session_id = context
             .session_id()
             .map_err(|error| error.to_string())?
@@ -373,6 +400,10 @@ async fn stores(tier: Tier, clock: Arc<dyn lash_core::Clock>) -> Option<(Arc<dyn
 struct Law {
     backend: lash::Backend,
     clock: Arc<lash_core::testing::TestClock>,
+    /// How far past `clock` the law's own cleanup passes run: a pass there
+    /// claims a row deferred until then, while the node's heartbeat and
+    /// leases keep reading `clock`.
+    relay_lead: AtomicU64,
     queue: Responses,
     witness: Arc<Witness>,
     core: lash::LashCore,
@@ -397,6 +428,7 @@ impl Law {
         Some(Self {
             backend,
             clock,
+            relay_lead: AtomicU64::new(0),
             queue,
             witness,
             core,
@@ -461,8 +493,8 @@ impl Law {
             .expect("read attachment referrers")
     }
 
-    /// One due pass of the artifact-cleanup relay, over every engine the
-    /// law's protocol contributes.
+    /// One due pass of the artifact-cleanup relay at `relay_lead` past the
+    /// law's clock, over every engine the law's protocol contributes.
     async fn cleanup_pass(&self) {
         let host = lash_core::facade_support::PluginHost::new(vec![Arc::new(served::rlm(
             &self.backend,
@@ -484,9 +516,12 @@ impl Law {
             &self.backend,
             engines,
         );
+        let at = lash_core::testing::TestClock::new(
+            self.clock.timestamp_ms() + self.relay_lead.load(Ordering::SeqCst),
+        );
         lash_core::runtime::obligations::relay::relay_due(
             &relay,
-            self.clock.as_ref(),
+            &at,
             std::num::NonZeroUsize::new(256).expect("a page"),
         )
         .await
@@ -520,13 +555,35 @@ impl Law {
         }
     }
 
-    /// Prune every terminal process, as a host's retention pass does.
-    async fn prune(&self) -> lash_core::ProcessPruneReport {
-        self.core
-            .processes()
-            .prune(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
-            .await
-            .expect("prune terminal processes")
+    /// Prune terminal processes, as a host's retention pass does, until
+    /// `process_id`'s record is gone. A process's output is published before
+    /// its record is retired for prune (its scope cascade and consumer hold
+    /// settle after), so one pass may find nothing to prune.
+    async fn prune(&self, process_id: &lash_core::ProcessId) {
+        tokio::time::timeout(SETTLE, async {
+            loop {
+                self.core
+                    .processes()
+                    .prune(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
+                    .await
+                    .expect("prune terminal processes");
+                match self
+                    .backend
+                    .process_registry()
+                    .get_process(process_id)
+                    .await
+                {
+                    Ok(Some(_)) => {}
+                    Ok(None) | Err(lash_core::PluginError::ProcessNoLongerRetained { .. }) => {
+                        return;
+                    }
+                    Err(error) => panic!("read the pruned process: {error}"),
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("the terminal process's record is pruned");
     }
 
     /// One collecting sweep: grace 0, and an empty root set may delete.
@@ -667,7 +724,7 @@ async fn engine_and_session_turn_create_only_real_sessions(tier: Tier) {
         "a process runtime admits no session of its own"
     );
 
-    law.prune().await;
+    law.prune(&engine).await;
     law.wait_referrers(&id, "no referrer after prune", <[_]>::is_empty)
         .await;
     let report = law.sweep().await;
@@ -688,7 +745,8 @@ async fn engine_and_session_turn_create_only_real_sessions(tier: Tier) {
 /// SessionTurn child `K` whose turn input carries it, answering nothing
 /// that names `R`. `K`'s registration acquires its record, so `R` outlives
 /// `T1`'s execution and a sweep, and `K`'s commit holds it on `K`'s own
-/// session.
+/// session. `T1`'s edge ends even when a due pass reached its guard while
+/// `T1` ran (FIG-5370).
 async fn delivered_attachment_survives_prune_and_replay_start_input(tier: Tier) {
     let put = "law-3-start-input";
     let Some(law) = Law::new(
@@ -707,11 +765,26 @@ finish(started);"
     };
     let session_id = "law-3-start-input";
     let session = law.session(session_id).await;
-    run(&session, lash::TurnInput::text("start the turn child")).await;
-    law.witness.held_times(1).await;
     let id = blob_id(put);
+    // A due pass that reaches `T1`'s guard while `T1` runs finds the
+    // execution unsettled and defers the row.
+    tokio::join!(
+        async {
+            law.witness.stored().await;
+            law.cleanup_pass().await;
+            law.witness.resume.add_permits(1);
+        },
+        run(&session, lash::TurnInput::text("start the turn child")),
+    );
+    law.witness.held_times(1).await;
     // `T1` committed without naming `R`, so its execution's edge ends; `K`'s
-    // registration acquired its record before `K` ran.
+    // registration acquired its record before `K` ran. Settlement does not
+    // shorten the deferral: the row is owed again at the relay's maximum
+    // backoff (ADR 0113 §2.5), so the law's passes run at that instant.
+    law.relay_lead.store(
+        lash_core::runtime::obligations::relay::RelayPolicy::default().max_backoff_ms,
+        Ordering::SeqCst,
+    );
     let held = law
         .wait_referrers(&id, "the child's record without T1", |found| {
             kinds(found).contains(&"process_record") && !kinds(found).contains(&"execution")
@@ -732,7 +805,7 @@ finish(started);"
 
     law.witness.release_one();
     law.process_terminal(&child).await;
-    law.prune().await;
+    law.prune(&child).await;
     let child_session = lash_core::SessionId::fixture(format!("session:process:{child}"));
     let committed = law
         .wait_referrers(&id, "the child session's edge alone", |found| {
@@ -790,7 +863,7 @@ async fn process_referrer_cleanup_is_complete_without_sessions(tier: Tier) {
         .await;
     }
 
-    law.prune().await;
+    law.prune(&engine).await;
     for text in [first, second] {
         law.wait_referrers(&blob_id(text), "no edge", <[_]>::is_empty)
             .await;
@@ -1021,7 +1094,7 @@ async fn a_cancelled_child_keeps_its_puts_until_pruned(tier: Tier) {
         vec![record],
         "a cancelled child's record holds its puts until prune"
     );
-    law.prune().await;
+    law.prune(&engine).await;
     law.wait_referrers(&id, "no edge after prune", <[_]>::is_empty)
         .await;
     law.shutdown().await;
