@@ -33,7 +33,6 @@ lash_conformance::process_prune_reclaim_tests!({
     };
     let storage = Arc::new(storage);
     let factory = Arc::new(storage.store()) as Arc<dyn DeploymentStore>;
-    lash_core::testing::process_execution_env_fixture(&storage.process_env_store()).await;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
     let probe = Arc::new(blob_probe::PostgresBlobProbe::new(
         storage,
@@ -108,7 +107,6 @@ async fn postgres_process_prune_fence_and_obligation_survive_reopen_when_configu
         eprintln!("skipping Postgres process cleanup recovery: database URL is not set");
         return;
     };
-    lash_core::testing::process_execution_env_fixture(&storage.process_env_store()).await;
     let registry = storage.process_registry();
     let registered = registry
         .register_process(
@@ -120,7 +118,9 @@ async fn postgres_process_prune_fence_and_obligation_survive_reopen_when_configu
                 lash_core_execution::ProcessProvenance::host(),
                 lash_core_execution::Lifetime::Detached,
             )
-            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref())),
+            .with_execution_env_ref(Some(
+                lash_core_execution::ProcessExecutionEnvRef::new("process-env:postgres-cleanup"),
+            )),
         )
         .await
         .expect("register cleanup process");

@@ -16,10 +16,10 @@ pub(crate) use crate::{AttachmentStore, AttachmentStoreError, AttachmentStorePer
 pub(crate) use crate::{
     CausalRef, JsonSchema, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
     ProcessCompletionAuthority, ProcessEventAppendRequest, ProcessEventSemanticsSpec,
-    ProcessEventType, ProcessIdentity, ProcessInput, ProcessListFilter, ProcessLiveReferenceView,
-    ProcessOriginatorFilter, ProcessProvenance, ProcessRegistration, ProcessRegistry,
-    ProcessStatus, ProcessStatusFilter, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec,
-    SessionScope, WaitKind, WaitState,
+    ProcessEventType, ProcessExecutionEnvRef, ProcessIdentity, ProcessInput, ProcessListFilter,
+    ProcessLiveReferenceView, ProcessOriginatorFilter, ProcessProvenance, ProcessRegistration,
+    ProcessRegistry, ProcessStatus, ProcessStatusFilter, ProcessValueSelector, ProcessWakeDelivery,
+    ProcessWakeSpec, SessionScope, WaitKind, WaitState,
 };
 pub(crate) use lash_sansio::{
     AttachmentCreateMeta, AttachmentTypeMetadata, EffectAddress, MediaType, SessionId,

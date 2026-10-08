@@ -53,7 +53,6 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
     )
     .await
     .expect("open paused process registry reader");
-    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
     let reader = stores.process_registry();
     let process_id = reader
         .register_process(

@@ -15,7 +15,9 @@ fn register_command(owner: &str, key: &str, source_type: &'static str) -> Trigge
         ),
         draft: lash_core_execution::TriggerSubscriptionDraft::for_process(
             key,
-            lash_core::testing::process_execution_env_fixture_ref(),
+            lash_core_execution::ProcessExecutionEnvRef::new(format!(
+                "process-env:fixture-{owner}"
+            )),
             source_type,
             source_key,
             lash_core_execution::ProcessInput::Engine {
@@ -51,7 +53,6 @@ async fn trigger_revision_columns_carry_the_record_revision() {
     let stores = crate::SqliteStoreSet::open(&path)
         .await
         .expect("open store set");
-    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
     let store = stores.trigger_store();
 
     let registered = receipt_of(

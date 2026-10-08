@@ -134,42 +134,6 @@ pub(crate) async fn lock_referrer_tx(
     .map(|_| ())
 }
 
-/// Validate and retain a start's environment in its admission transaction.
-/// The artifact lock orders this acquisition against source cleanup.
-pub(crate) async fn acquire_process_env_tx(
-    tx: &mut crate::guarded_tx::GuardedTx<'_>,
-    env: &lash_core_execution::ProcessExecutionEnvRef,
-    process: &lash_core_execution::ProcessId,
-) -> Result<(), lash_core_execution::PluginError> {
-    let referrer = ArtifactReferrer::ProcessRecord(process.clone());
-    lock_referrer_tx(tx, &referrer).await.map_err(backend)?;
-    if is_fenced_tx(tx, &referrer).await? {
-        return Err(ArtifactStoreError::ReferrerEnded { referrer }.into());
-    }
-    lock_artifact_tx(tx, PROCESS_ENV_NAMESPACE, env.as_str()).await?;
-    let exists: bool = sqlx::query_scalar(artifact_sql().lashlang_artifacts.exists.sql())
-        .bind(PROCESS_ENV_NAMESPACE)
-        .bind(env.as_str())
-        .fetch_one(&mut ***tx)
-        .await
-        .map_err(backend)?;
-    if !exists {
-        return Err(ArtifactStoreError::ArtifactMissing {
-            artifact_ref: env.as_str().to_owned(),
-        }
-        .into());
-    }
-    sqlx::query(artifact_sql().edges.insert_edge.sql())
-        .bind(PROCESS_ENV_NAMESPACE)
-        .bind(env.as_str())
-        .bind(referrer.kind().as_str())
-        .bind(referrer.canonical_id())
-        .execute(&mut ***tx)
-        .await
-        .map_err(backend)?;
-    Ok(())
-}
-
 async fn lock_artifact_tx(
     tx: &mut Transaction<'_, Postgres>,
     namespace: &str,

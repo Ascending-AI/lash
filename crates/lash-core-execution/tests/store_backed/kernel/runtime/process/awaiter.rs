@@ -3,7 +3,7 @@ mod tests {
 
     use crate::facade_support::{ProcessEventSink, watch_process_registry};
 
-    use crate::support::sqlite_memory_process_store_set;
+    use crate::support::sqlite_memory_store_set;
 
     struct TestSink;
 
@@ -14,7 +14,7 @@ mod tests {
 
     #[tokio::test]
     async fn registration_detaches_its_sink_on_drop() {
-        let backend = sqlite_memory_process_store_set().await;
+        let backend = sqlite_memory_store_set().await;
         let watched = watch_process_registry(backend.process_registry());
         let registration = watched.add_event_sink(Arc::new(TestSink));
         assert_eq!(watched.event_sink_count_for_testing(), 1);

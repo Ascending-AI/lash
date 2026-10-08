@@ -373,7 +373,6 @@ pub(super) async fn selected_observer_intents(
     let memory = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("SQLite memory observer backend");
-    lash_core::testing::process_execution_env_fixture(memory.process_env_store().as_ref()).await;
     let backends: Vec<(
         Arc<dyn DeploymentStore>,
         Arc<dyn lash_core::ProcessRegistry>,

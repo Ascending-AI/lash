@@ -420,7 +420,9 @@ pub async fn scope_replay_cancel_and_trace_ignore_environment_rebinding(
     .into();
     let request = crate::started_until_starter(engine, scope.clone())
         .with_start_key(Some(key))
-        .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref()));
+        .with_execution_env_ref(Some(crate::ProcessExecutionEnvRef::new(
+            "environment-old-session",
+        )));
     let first = registry
         .register_process_reporting_outcome(request.clone(), &[])
         .await
@@ -433,7 +435,9 @@ pub async fn scope_replay_cancel_and_trace_ignore_environment_rebinding(
     )
     .expect("trace snapshot");
     let mut rebound = request;
-    rebound.env_ref = Some(super::super::helpers::process_registry_alternate_environment_ref());
+    rebound.env_ref = Some(crate::ProcessExecutionEnvRef::new(
+        "environment-new-session",
+    ));
     let replay = registry
         .register_process_reporting_outcome(rebound, &[])
         .await

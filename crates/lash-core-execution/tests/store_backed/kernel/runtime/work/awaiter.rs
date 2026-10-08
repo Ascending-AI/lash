@@ -16,7 +16,7 @@ mod tests {
     };
 
     async fn memory_registry() -> Arc<dyn ProcessRegistry> {
-        crate::support::sqlite_memory_process_store_set()
+        crate::support::sqlite_memory_store_set()
             .await
             .process_registry()
     }
@@ -376,7 +376,8 @@ mod tests {
             ProcessProvenance::host(),
             crate::Lifetime::Detached,
         );
-        lifecycle_registration.env_ref = Some(crate::testing::process_execution_env_fixture_ref());
+        lifecycle_registration.env_ref =
+            Some(crate::ProcessExecutionEnvRef::new("process-env:test"));
         let lifecycle_id = registry
             .register_process(lifecycle_registration)
             .await

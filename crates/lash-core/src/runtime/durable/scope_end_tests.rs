@@ -1387,10 +1387,6 @@ async fn try_start_process(
     scope: ScopeId,
     kind: &str,
 ) -> Result<ProcessId, crate::PluginError> {
-    lash_core_execution::testing::process_execution_env_fixture(
-        backend.process_env_store().as_ref(),
-    )
-    .await;
     let mut registration = crate::ProcessRegistration::new(
         crate::ProcessInput::Engine {
             kind: kind.to_owned(),
@@ -1419,10 +1415,6 @@ async fn try_start_detached(
     backend: &Backend,
     starter: ScopeId,
 ) -> Result<ProcessId, crate::PluginError> {
-    lash_core_execution::testing::process_execution_env_fixture(
-        backend.process_env_store().as_ref(),
-    )
-    .await;
     let mut registration = lash_core_execution::testing::held_engine_registration(
         serde_json::Value::Null,
         crate::ProcessProvenance::host(),

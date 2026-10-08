@@ -167,9 +167,6 @@ impl SqliteProcessRegistry {
                 &hold.key,
             ));
         }
-        if let Some(env) = registration.env_ref.as_ref() {
-            crate::artifact_store::acquire_process_env_tx(tx, env, &process_id)?;
-        }
         // Minted only once the start is admitted, so no refusal
         // names an id that was never registered.
         let change_seq = Self::next_change_seq_conn(tx)?;

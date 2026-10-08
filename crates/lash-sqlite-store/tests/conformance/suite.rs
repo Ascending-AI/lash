@@ -502,15 +502,6 @@ lash_conformance::process_registry_reopenable_tests!({
     let retained: Retained<TestBackend> = Retained::default();
     (retained.clone(), move |_label: &str| {
         let backend = retained.open_blocking();
-        sync_await({
-            let backend = backend.clone();
-            async move {
-                lash_conformance::publish_process_registry_fixture_environments(
-                    backend.process_env_store().as_ref(),
-                )
-                .await;
-            }
-        });
         let reopened = sync_await({
             let backend = backend.clone();
             async move { backend.reopen().await }
@@ -528,7 +519,6 @@ lash_conformance::process_registry_reopenable_tests!({
 #[tokio::test]
 async fn sqlite_recently_retired_filter_uses_the_extracted_updated_at_column() {
     let backend = TestBackend::open(SUBSTRATE).await;
-    lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
     let registry = backend.process_registry();
     let recent_pushdown_id = registry
         .register_process(
@@ -603,7 +593,6 @@ async fn sqlite_recently_retired_filter_uses_the_extracted_updated_at_column() {
 
 lash_conformance::process_projection_repair_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
-    lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
     let registry = backend.process_registry();
     let corruption = backend.clone();
     (
@@ -632,8 +621,6 @@ lash_conformance::store_contract_state_machine_tests!({
         async move {
             let backend = TestBackend::open(SUBSTRATE).await;
             retained.keep(&backend);
-            lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref())
-                .await;
             lash_conformance::StoreContractHandles {
                 registry: backend.process_registry() as Arc<dyn ProcessRegistry>,
                 runtime: backend.store().await as Arc<dyn RuntimeStore>,
@@ -735,7 +722,9 @@ async fn sqlite_trigger_ingress_skips_malformed_matching_subscription() {
         ),
         draft: lash_core_execution::TriggerSubscriptionDraft::for_process(
             key,
-            lash_core::testing::process_execution_env_fixture_ref(),
+            lash_core_execution::ProcessExecutionEnvRef::new(format!(
+                "process-env:fixture-{owner}"
+            )),
             source_type,
             source_key.clone(),
             lash_core_execution::ProcessInput::Engine {

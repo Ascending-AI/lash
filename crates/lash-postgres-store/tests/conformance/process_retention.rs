@@ -16,7 +16,9 @@ async fn assert_waiting_process_is_live_not_prunable(registry: &dyn ProcessRegis
                 lash_core_execution::ProcessProvenance::host(),
                 lash_core_execution::Lifetime::Detached,
             )
-            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref())),
+            .with_execution_env_ref(Some(
+                lash_core_execution::ProcessExecutionEnvRef::new("process-env:retention-test"),
+            )),
         )
         .await
         .expect("register waiting retention process")
@@ -103,7 +105,6 @@ async fn postgres_waiting_processes_are_live_not_prunable_when_configured() {
         return;
     };
     reset(storage.pool()).await;
-    lash_core::testing::process_execution_env_fixture(&storage.process_env_store()).await;
     let registry = storage.process_registry();
     assert_waiting_process_is_live_not_prunable(&registry).await;
 }

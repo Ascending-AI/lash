@@ -19,9 +19,10 @@ use lash_conformance::{
     StoreContractHandles, StoreContractOp, StoreContractScenario, sample_store_contract_operations,
 };
 use lash_core::{
-    AttachmentCreateMeta, AttachmentStore, MediaType, ProcessIdentity, ProcessInput,
-    ProcessOriginator, RuntimeStore, SessionScope, TriggerCommand, TriggerInputBinding,
-    TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore, TriggerSubscriptionDraft,
+    AttachmentCreateMeta, AttachmentStore, MediaType, ProcessExecutionEnvRef, ProcessIdentity,
+    ProcessInput, ProcessOriginator, RuntimeStore, SessionScope, TriggerCommand,
+    TriggerInputBinding, TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore,
+    TriggerSubscriptionDraft,
 };
 use lash_s3_store::{S3AttachmentStore, S3AttachmentStoreConfig};
 use lash_sqlite_store::{SqliteStore, SqliteStoreSet, SqliteStoreSetOptions};
@@ -237,7 +238,7 @@ impl SurfaceRunner {
                             serde_json::json!({"account": "surface"}),
                         ),
                         subscription_key,
-                        env_ref: lash_core::testing::process_execution_env_fixture_ref(),
+                        env_ref: ProcessExecutionEnvRef::new("surface-env"),
                         wake_target: Some(SessionScope::new(SURFACE_SESSION)),
                         name: Some("surface-worker".to_string()),
                         source_type: "surface.event".to_string(),
@@ -397,8 +398,6 @@ async fn surface_runners(
     )
     .await
     .unwrap();
-    lash_core::testing::process_execution_env_fixture(sqlite_stores.process_env_store().as_ref())
-        .await;
     let sqlite_registry = sqlite_stores.process_registry();
     let sqlite_triggers = sqlite_stores.trigger_store();
 

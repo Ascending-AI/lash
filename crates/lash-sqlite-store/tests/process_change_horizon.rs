@@ -14,8 +14,6 @@ mod file {
         let backend = SqliteStoreSet::open(dir.path().join("lash.db"))
             .await
             .expect("open the prune-horizon file backend");
-        lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref())
-            .await;
         let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
         ((dir, backend), registry)
     });
@@ -28,8 +26,6 @@ mod memory {
         let backend = SqliteStoreSet::memory()
             .await
             .expect("open the prune-horizon memory backend");
-        lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref())
-            .await;
         let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
         (backend, registry)
     });

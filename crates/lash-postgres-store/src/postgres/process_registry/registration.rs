@@ -180,9 +180,6 @@ pub(crate) async fn apply_registration_tx(
         let wake = wake_session_id_tx(tx, &winner.id).await?;
         return Ok(AppliedRegistration::LostRace { winner, wake });
     }
-    if let Some(env) = record.env_ref.as_ref() {
-        crate::artifact_store::acquire_process_env_tx(tx, env, &record.id).await?;
-    }
     // The process's actor commits with its row, ready: the start is a wake
     // of the actor, never a relayed obligation (ADR 0132 §12).
     crate::durable::processes::create_actor_within(

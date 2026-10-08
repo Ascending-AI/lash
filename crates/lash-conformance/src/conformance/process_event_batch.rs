@@ -24,7 +24,9 @@ fn batch_registration() -> ProcessRegistration {
         ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
-    .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref()))
+    .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new(
+        "process-env:test-engine",
+    )))
 }
 
 /// Register a process and start its first engine invocation.

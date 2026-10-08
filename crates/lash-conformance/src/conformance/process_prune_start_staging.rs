@@ -153,7 +153,6 @@ pub async fn a_refused_start_never_strands_a_concurrent_start_under_its_key(
     registry: Arc<dyn crate::ProcessRegistry>,
     ports: crate::ArtifactReferrerPorts,
 ) {
-    lash_core::testing::process_execution_env_fixture(ports.env().as_ref()).await;
     let key = crate::StartKey::for_host("refused-start-concurrent-stager");
     let external = || {
         lash_core::testing::held_engine_registration(
@@ -340,7 +339,6 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
         )
     };
 
-    lash_core::testing::process_execution_env_fixture(ports.env().as_ref()).await;
     // A's starter: a process that has ended, so a start it makes is refused.
     let ended = registry
         .register_process(lash_core::testing::held_engine_registration(

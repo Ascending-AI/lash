@@ -16,7 +16,7 @@ mod tests {
     use crate::{ProcessId, ProcessRegistry, SessionId};
 
     async fn memory_registry() -> Arc<dyn ProcessRegistry> {
-        crate::support::sqlite_memory_process_store_set()
+        crate::support::sqlite_memory_store_set()
             .await
             .process_registry()
     }

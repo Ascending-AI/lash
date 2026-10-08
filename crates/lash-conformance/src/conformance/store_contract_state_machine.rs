@@ -520,12 +520,14 @@ fn registration(label: &str, wake_target: Option<SessionId>) -> ProcessRegistrat
     let registration = ProcessRegistration::new(
         ProcessInput::Engine {
             kind: "store-contract-property".to_string(),
-            payload: serde_json::json!({"label": label}),
+            payload: serde_json::Value::Null,
         },
         ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
-    .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref()));
+    .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
+        "process-env:fixture-{label}"
+    ))));
     registration
         .with_extra_event_types([
             ProcessEventType {

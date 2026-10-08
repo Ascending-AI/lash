@@ -14,7 +14,9 @@ pub(super) async fn raw_signal_appends_are_refused(registry: Arc<dyn ProcessRegi
                 ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
-            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref()))
+            .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(
+                "process-env:raw-signal-refusal",
+            )))
             .with_extra_event_types([
                 plain_event_type("signal.ready"),
                 plain_event_type("producer.note"),
@@ -256,7 +258,9 @@ pub(super) async fn signal_admission_retains_its_identity_and_selected_wait(
                 ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
-            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref()))
+            .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(
+                "process-env:signal-admission",
+            )))
             .with_extra_event_types([plain_event_type("signal.ready")]),
         )
         .await
