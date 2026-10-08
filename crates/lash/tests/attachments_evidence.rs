@@ -12,6 +12,7 @@ fn member_witness<T>(_: T) {}
 fn field_witness<T>(_: impl FnOnce(&T)) {}
 fn variant_witness<T>(_: impl FnOnce(&T) -> bool) {}
 
+#[test]
 fn drain_area_witnesses() {
     // W0001: lash::InputItem::Attachment [variant]
     variant_witness(|value: &lash::InputItem| matches!(value, lash::InputItem::Attachment { .. }));
@@ -387,6 +388,7 @@ async fn host_upload_is_ref_only(
     Ok(lash::InputItem::attachment(reference))
 }
 
+#[test]
 fn host_store_delivery_contracts() {
     type_witness::<lash::attachments::AttachmentPosition>();
     type_witness::<lash::attachments::DeliveryForms>();

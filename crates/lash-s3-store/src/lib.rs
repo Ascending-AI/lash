@@ -579,6 +579,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn s3_attachment_delivery_derives_per_media_type() {
+        lash_conformance::attachment_delivery_derives_per_media_type(Arc::new(
+            S3AttachmentStore::from_object_store(
+                Arc::new(object_store::memory::InMemory::new()),
+                None,
+            ),
+        ))
+        .await;
+    }
+
+    #[tokio::test]
+    async fn s3_attachment_delivery_charges_a_provider_file_as_a_file() {
+        lash_conformance::attachment_delivery_charges_a_provider_file_as_a_file(Arc::new(
+            S3AttachmentStore::from_object_store(
+                Arc::new(object_store::memory::InMemory::new()),
+                None,
+            ),
+        ))
+        .await;
+    }
+
+    #[tokio::test]
     async fn falsely_small_object_metadata_refuses_stream_before_next_chunk() {
         use futures_util::StreamExt;
         let raw = object_store::memory::InMemory::new();
