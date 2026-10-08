@@ -545,7 +545,17 @@ impl SessionActivation {
             }
             Err(error) => return Err(error),
         };
-        match phases::run_phases(cx, self.services.as_ref(), turn, heads).await? {
+        let ran = match phases::run_phases(cx, self.services.as_ref(), turn, heads).await {
+            // A refusal no pass would clear, met as the turn finishes (an
+            // after-turn callback's), ends the run with it, as one met at
+            // preparation does: retrying the pass would meet it again.
+            Err(TurnError::Runtime(refusal)) if refusal.is_terminal() => {
+                phases::refuse(cx, &row, refusal).await?;
+                return Ok(Pass::Again);
+            }
+            ran => ran?,
+        };
+        match ran {
             PhaseExit::Committed(_) | PhaseExit::CancelRequested => Ok(Pass::Again),
             PhaseExit::Lost => Ok(Pass::Lost),
             PhaseExit::Drained => drain_release(cx).await,

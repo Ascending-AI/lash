@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1631 rows over 873 files, 4004 laws.
-# By class: mechanical 175, semantic 120, delete 871, replace 465.
-# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 78, L9c 347, L9d 89, L9e 131, L9f 125, L9g 98, L9h 106, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
-# By status: todo 367, ported 104, deleted 1160.
+# 1645 rows over 873 files, 4018 laws.
+# By class: mechanical 184, semantic 125, delete 871, replace 465.
+# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 87, L9c 352, L9d 89, L9e 131, L9f 125, L9g 98, L9h 106, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
+# By status: todo 364, ported 105, deleted 1176.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -2045,7 +2045,134 @@ laws = [
   "continue_as_frame_rotation_reconciles_newly_advertised_tool",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "double_invalidation_preserves_first_decision_id runs in the file over SQLite memory; every other law listed here went with LashRuntime::execute_turn (FIG-5208, bbffe67d98) and has a row of its own"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/turns/turn_lifecycle.rs"
+test = "dropping_suspended_host_delivery_keeps_committed_state_adopted"
+area = "turn-commit"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9b"
+laws = [
+  "dropping_suspended_host_delivery_keeps_committed_state_adopted",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "no host future drives a turn or holds its post-commit delivery: each runtime a session actor opens is at the session's committed head and serves one activation pass (FIG-5208, bbffe67d98; ADR 0132 §4), and the turn publishes only once its turn.commit is acknowledged (crates/lash-durable-test/tests/turn_round_crash_matrix.rs::a_refused_turn_commit_publishes_no_terminal_event)"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/turns/turn_lifecycle.rs"
+test = "post_commit_restore_failure_is_a_diagnostic_and_forces_reload"
+area = "turn-commit"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9b"
+laws = [
+  "post_commit_restore_failure_is_a_diagnostic_and_forces_reload",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "no resident runtime is restored after a commit: each runtime a session actor opens is at the session's committed head and serves one activation pass (FIG-5208, bbffe67d98; ADR 0132 §4)"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/turns/turn_lifecycle.rs"
+test = "final_commit_refusals_reach_the_runtime_host_mapper"
+area = "turn-commit"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9b"
+laws = [
+  "final_commit_refusals_reach_the_runtime_host_mapper",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/turn_phases.rs::a_restore_after_the_head_moved_rebuilds_the_window_the_turn_started_from"
+status = "deleted"
+note = "a turn.commit over a moved head no longer reaches the host: the owner evicts its cached head and commits over the moved one (FIG-5207); the host mapping of a deleted session is crates/lash/src/error.rs::deleted_sessions_are_terminal_in_direct_and_wrapped_store_shapes, and a close's runs end Cancelled(SessionDeleted) under planned L3S-CLOSE"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/turns/turn_lifecycle.rs"
+test = "fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_deferred_at_teardown"
+area = "turn-commit"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9b"
+laws = [
+  "fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_deferred_at_teardown",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/turn_phases.rs::a_cancel_while_streaming_ends_the_turn_and_a_crash_mid_cancel_finalizes_it"
+status = "deleted"
+note = "no row stays bound to an ended run, however it ended (the matrix's mailbox check); ADR 0132 §11 settles what a run that ends without a commit holds as cancelled (settle_held), in place of the re-deferral to next-turn input"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/turns/turn_lifecycle.rs"
+test = "dirty_execution_state_capture_failure_aborts_commit_and_keeps_the_prior_state"
+area = "turn-commit"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9b"
+laws = [
+  "dirty_execution_state_capture_failure_aborts_commit_and_keeps_the_prior_state",
+]
+disposition = "replaced-by:crates/lash-durable-test/tests/turn_execution_state.rs::a_failed_capture_commits_nothing_and_the_retried_pass_commits_the_turn"
+status = "deleted"
+note = "FIG-5309 re-wrote the law through a host's send() on the core's node: a capture that fails at turn.commit commits nothing and the pass retries from the turn's last commit"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/turns/turn_lifecycle.rs"
+test = "fig1123_caller_supplied_key_colliding_with_existing_frame_preserves_execution_state"
+area = "turn-commit"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9b"
+laws = [
+  "fig1123_caller_supplied_key_colliding_with_existing_frame_preserves_execution_state",
+]
+disposition = "covered-by:crates/lash-core/src/runtime/turn_boundary/tests.rs::reopening_a_previous_frame_refuses_and_keeps_the_current_frame"
+status = "deleted"
+note = "a switch to a frame the session already holds is refused before anything is staged, keeping the current frame and leaf, so nothing of the execution state moves; a host's open of a left frame is crates/lash-durable-test/tests/open_session_commands.rs::opening_a_historical_frame_is_refused_and_keeps_the_changed_config"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/turns/turn_lifecycle.rs"
+test = "fig1123_materialized_frame_switch_clears_checkpoint_and_resets_resident_executor"
+area = "turn-commit"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9b"
+laws = [
+  "fig1123_materialized_frame_switch_clears_checkpoint_and_resets_resident_executor",
+]
+disposition = "replaced-by:crates/lash-durable-test/tests/turn_execution_state.rs::a_committed_frame_switch_clears_the_execution_state"
+status = "deleted"
+note = "FIG-5309 re-wrote the law through a host's send(): the committed switch clears the head's execution state and the follow-on's runtime restores the fresh frame's"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/turns/turn_lifecycle.rs"
+test = "follow_on_capture_failure_returns_the_committed_frame_and_handoff_is_retry_safe"
+area = "turn-commit"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9b"
+laws = [
+  "follow_on_capture_failure_returns_the_committed_frame_and_handoff_is_retry_safe",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/frame_switch_crash_proof.rs::a_frame_switch_killed_at_every_label_runs_one_follow_on_on_sqlite_memory"
+status = "deleted"
+note = "the switch commits with its follow-on's mail in one turn.commit (ADR 0101 §3), and a follow-on whose pass fails at any label runs once, its failed pass committing nothing (crates/lash-durable-test/tests/turn_execution_state.rs::a_failed_capture_commits_nothing_and_the_retried_pass_commits_the_turn)"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/turns/turn_lifecycle.rs"
+test = "continue_as_frame_rotation_reconciles_newly_advertised_tool"
+area = "turn-commit"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9b"
+laws = [
+  "continue_as_frame_rotation_reconciles_newly_advertised_tool",
+]
+disposition = "replaced-by:crates/lash-durable-test/tests/turn_execution_state.rs::a_rotations_follow_on_is_offered_the_newly_advertised_tools"
+status = "deleted"
+note = "FIG-5309 re-wrote the law through a host's send(): the follow-on is offered the provider's new tool, never the session's hidden name nor the host's curated-out tool"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turns/withheld_frame_switch.rs"
@@ -8896,9 +9023,79 @@ laws = [
   "a_live_fault_retried_past_shift_head_keeps_the_recorded_ready",
   "a_refused_run_failed_before_its_end_write_replays_to_an_ended_run",
 ]
-disposition = "port"
-status = "todo"
-note = "RunStartNonce, executor generations and Restate purge are deleted machinery; turn.commit's head supersession needs the real head commit: blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
+disposition = "replaced-by:crates/lash-durable-test/tests/turn_terminal_refusals.rs"
+status = "deleted"
+note = "the file went with Restate (FIG-5190, 5ad9641f9e); each law has a row of its own"
+
+[[row]]
+path = "crates/lash/src/tests/commit_superseded.rs"
+test = "a_superseded_turn_commit_ends_its_run_typed_and_never_pauses"
+area = "turn-commit"
+needs = ["turn"]
+class = "semantic"
+lane = "L9c"
+laws = [
+  "a_superseded_turn_commit_ends_its_run_typed_and_never_pauses",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/turn_phases.rs::a_restore_after_the_head_moved_rebuilds_the_window_the_turn_started_from"
+status = "deleted"
+note = "a superseded turn.commit no longer ends its run: the owner evicts the head it cached and commits the turn over the moved head (FIG-5207), never pausing"
+
+[[row]]
+path = "crates/lash/src/tests/commit_superseded.rs"
+test = "the_send_after_a_refused_run_executes_a_new_run"
+area = "turn-commit"
+needs = ["turn"]
+class = "semantic"
+lane = "L9c"
+laws = [
+  "the_send_after_a_refused_run_executes_a_new_run",
+]
+disposition = "replaced-by:crates/lash-durable-test/tests/turn_terminal_refusals.rs::the_send_after_a_refused_run_executes_a_new_run"
+status = "deleted"
+note = "FIG-5309 re-wrote the law over an after-turn refusal through a host's send()"
+
+[[row]]
+path = "crates/lash/src/tests/commit_superseded.rs"
+test = "a_refused_run_crashed_before_its_outcome_converges_on_one_terminal"
+area = "turn-commit"
+needs = ["turn"]
+class = "semantic"
+lane = "L9c"
+laws = [
+  "a_refused_run_crashed_before_its_outcome_converges_on_one_terminal",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "the refused run's end and its outcome are one turn.commit (phases::refuse), so no crash falls between them; the engine outcome went with Restate (FIG-5190, 5ad9641f9e)"
+
+[[row]]
+path = "crates/lash/src/tests/commit_superseded.rs"
+test = "a_live_fault_retried_past_shift_head_keeps_the_recorded_ready"
+area = "turn-commit"
+needs = ["turn"]
+class = "semantic"
+lane = "L9c"
+laws = [
+  "a_live_fault_retried_past_shift_head_keeps_the_recorded_ready",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "the shift and its recorded head verdict were deleted with the store run admission (FIG-5196, 0cc1b81d98); a pass that faults resumes from the turn's last commit"
+
+[[row]]
+path = "crates/lash/src/tests/commit_superseded.rs"
+test = "a_refused_run_failed_before_its_end_write_replays_to_an_ended_run"
+area = "turn-commit"
+needs = ["turn"]
+class = "semantic"
+lane = "L9c"
+laws = [
+  "a_refused_run_failed_before_its_end_write_replays_to_an_ended_run",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "a refusal writes the run's end in its one turn.commit (phases::refuse): there is no separate end write to fail before, and a pass that fails before that commit meets the refusal again"
 
 [[row]]
 path = "crates/lash/src/tests/commit_superseded.rs"
@@ -9142,8 +9339,9 @@ laws = [
   "a_minted_finalize_refusal_ends_the_run_terminal_with_its_typed_failure",
   "a_refused_runs_outcome_is_refused_with_its_typed_refusal",
 ]
-disposition = "port"
-status = "todo"
+disposition = "replaced-by:crates/lash-durable-test/tests/turn_terminal_refusals.rs"
+status = "deleted"
+note = "FIG-5309 re-wrote the file's laws through a host's send() on the core's node: an after-turn refusal, the plugin's or one under a minted outcome code, ends the run Refused as typed data, once, and a redrive under its id or a handle attached by it answers the recorded refusal (an_after_turn_refusal_ends_the_run_with_its_typed_refusal, a_minted_after_turn_refusal_ends_the_run_with_its_typed_refusal). It exposed a bug: a terminal refusal met as the turn finished failed the activation pass on every retry until the session parked; FIG-5309 ends the run with it (SessionActivation's pass)"
 
 [[row]]
 path = "crates/lash/src/tests/harness.rs"

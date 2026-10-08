@@ -670,6 +670,27 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
+    name = "turn_execution_state__test",
+    crate_features = [],
+    crate_name = "turn_execution_state",
+    crate_root = "tests/turn_execution_state.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-durable-test", "turn_execution_state", "//crates/lash-durable-test:turn_execution_state__test"),
+    extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    library = ":lash-durable-test",
+    library_crate_name = "lash_durable_test",
+    manifest_dir = "crates/lash-durable-test",
+    package_name = "lash-internal-durable-test",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "turn_phases__test",
     crate_features = [],
     crate_name = "turn_phases",
@@ -705,6 +726,27 @@ lash_rust_integration_test(
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)", "RUST_TEST_THREADS": "1"},
+    library = ":lash-durable-test",
+    library_crate_name = "lash_durable_test",
+    manifest_dir = "crates/lash-durable-test",
+    package_name = "lash-internal-durable-test",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
+    name = "turn_terminal_refusals__test",
+    crate_features = [],
+    crate_name = "turn_terminal_refusals",
+    crate_root = "tests/turn_terminal_refusals.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-durable-test", "turn_terminal_refusals", "//crates/lash-durable-test:turn_terminal_refusals__test"),
+    extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-durable-test",
     library_crate_name = "lash_durable_test",
     manifest_dir = "crates/lash-durable-test",

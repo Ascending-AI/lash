@@ -424,10 +424,11 @@ pub async fn run_phases(
 }
 
 /// End `row`'s turn with `refusal`, the terminal error its preparation
-/// met (FIG-5246): the run's `Refused` terminal, which answers every input it
-/// took with the refusal's code and cause, in one `turn.commit`. Nothing ran,
-/// so the session head does not move; an open round's members settle
-/// `Cancelled` and the turn's scope ends, as a cancel's do.
+/// (FIG-5246) or its finish (an after-turn callback's refusal) met: the
+/// run's `Refused` terminal, which answers every input it took with the
+/// refusal's code and cause, in one `turn.commit`. No turn commits, so the
+/// session head does not move; an open round's members settle `Cancelled`
+/// and the turn's scope ends, as a cancel's do.
 ///
 /// # Errors
 ///
@@ -441,7 +442,7 @@ pub(super) async fn refuse(
         session = %row.session,
         run = %row.run,
         error = %refusal,
-        "the turn's preparation was refused; the turn ends with the refusal"
+        "the turn was refused; the turn ends with the refusal"
     );
     let mut tx = cx.begin().await?;
     tool_round::cancel_open_round(cx, &mut tx, row).await?;
