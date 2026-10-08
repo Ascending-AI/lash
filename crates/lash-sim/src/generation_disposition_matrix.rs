@@ -26,7 +26,10 @@ use lash_sansio::sync::MutexExt;
 use lash_sansio::{FailureCode, TurnFailureCode};
 use serde_json::{Value, json};
 
-use crate::provider::{ProviderWireEvent, ProviderWireScript, ScriptedLlmHttpTransport};
+use crate::provider::{
+    HeaderMatcher, ProviderWireEvent, ProviderWireRequestMatch, ProviderWireScript,
+    ScriptedLlmHttpTransport,
+};
 
 #[derive(Debug)]
 struct CapturingTransport {
@@ -812,7 +815,21 @@ async fn replay_of_generation_intent_has_the_same_body_and_receipt() {
 async fn route_headers_are_sent_or_refused_before_io() {
     for dialect in HTTP_DIALECTS {
         let cap = matches!(dialect, Dialect::Anthropic).then_some(4096);
-        let transport = Arc::new(ScriptedLlmHttpTransport::new(dialect.script()).expect("script"));
+        let mut script = dialect.script();
+        // Check the wire value before the exchange redacts sensitive host headers.
+        script.request_match = ProviderWireRequestMatch {
+            any: false,
+            headers: [(
+                "x-matrix-route".into(),
+                HeaderMatcher {
+                    equals: Some("selected".into()),
+                    ..Default::default()
+                },
+            )]
+            .into(),
+            ..Default::default()
+        };
+        let transport = Arc::new(ScriptedLlmHttpTransport::new(script).expect("script"));
         let mut provider = dialect.provider(
             transport.clone(),
             vec![("x-matrix-route".into(), "selected".into())],
@@ -833,9 +850,9 @@ async fn route_headers_are_sent_or_refused_before_io() {
         assert_eq!(exchanges.len(), 1, "{dialect:?}");
         assert!(
             exchanges[0].request.headers.iter().any(|header| {
-                header.name.eq_ignore_ascii_case("x-matrix-route") && header.value == "selected"
+                header.name.eq_ignore_ascii_case("x-matrix-route") && header.value == "[redacted]"
             }),
-            "{dialect:?}"
+            "{dialect:?} recorded a sensitive route header"
         );
 
         let transport = Arc::new(ScriptedLlmHttpTransport::new(dialect.script()).expect("script"));

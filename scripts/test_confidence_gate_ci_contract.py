@@ -2528,7 +2528,8 @@ derive_mutation_jobs() {{
         `Runtime feature boundary` legs were a matrix of Cargo commands; they
         are now one job building `//:feature_lane_compile`. The lane names are still
         the contract, so they are spelled out here rather than read out of the
-        table under test.
+        table under test. The facade-production lane checks the host library
+        graph without development feature unification.
         """
         lanes = feature_lane_table()
         self.assertEqual(
@@ -2537,6 +2538,7 @@ derive_mutation_jobs() {{
                 "otel-feature-chain",
                 "core-internal-features",
                 "figments-facade",
+                "facade-production",
                 "language-testing-features",
                 "llm-transport-features",
                 "store-features",
