@@ -121,7 +121,9 @@ pub const FIXTURE_AWAIT_EVENT_SIGNING_SECRET: [u8; 32] = [0x88; 32];
 pub const FIXTURE_ATTACHMENT_WRITE_ID: &str = "88888888888848888888888888888888";
 
 /// The attachment whose pending write carries [`FIXTURE_ATTACHMENT_WRITE_ID`].
-pub const FIXTURE_ATTACHMENT_ID: &str = "durable-read-attachment";
+pub fn fixture_attachment_id() -> AttachmentId {
+    lash_core::attachments::content_id(b"durable-read-attachment")
+}
 /// The seed registers its three processes in this order on a registry
 /// minting sequentially (`ProcessIdMint::sequential_for_testing`), so each id
 /// is fixed by its registration ordinal (ADR 0107).
@@ -280,7 +282,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .await
         .expect("commit identity-bearing fixture append");
 
-    let attachment_id = AttachmentId::parse(FIXTURE_ATTACHMENT_ID).expect("valid attachment id");
+    let attachment_id = fixture_attachment_id();
     let attachment_write = AttachmentWrite {
         attachment_id: attachment_id.clone(),
         claim: ReferrerClaim::unguarded(ArtifactReferrer::Session(SessionId::from(SESSION_ID)))
@@ -628,7 +630,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     assert_eq!(
         AttachmentReferrers::attachment_referrers(
             handles.store.as_ref(),
-            &AttachmentId::parse(FIXTURE_ATTACHMENT_ID).expect("valid attachment id"),
+            &fixture_attachment_id(),
         )
         .await
         .expect("read fixture attachment referrers"),

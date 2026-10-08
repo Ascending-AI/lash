@@ -269,7 +269,7 @@ async fn pin_attachment_write_token(storage: &PostgresStorage) {
         "UPDATE lash_attachment_pending_writes SET write_id = $1 WHERE attachment_id = $2",
     )
     .bind(fixture::FIXTURE_ATTACHMENT_WRITE_ID)
-    .bind(fixture::FIXTURE_ATTACHMENT_ID)
+    .bind(fixture::fixture_attachment_id().as_str())
     .execute(storage.pool())
     .await
     .expect("pin the Postgres fixture attachment write token")

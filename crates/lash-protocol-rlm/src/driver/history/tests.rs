@@ -109,7 +109,7 @@ fn step_output_text_derives_image_metadata_from_the_trajectory_entry() {
         code: "print chart".to_string(),
         output: Vec::new(),
         images: vec![lash_core::AttachmentRef {
-            id: "chart".parse().expect("valid attachment id"),
+            id: lash_core::attachments::content_id(&[0; 123]),
             media_type: "image/png".parse().expect("valid media type"),
             byte_len: 123,
             type_metadata: Some(lash_core::AttachmentTypeMetadata::image(
@@ -127,7 +127,10 @@ fn step_output_text_derives_image_metadata_from_the_trajectory_entry() {
 
     assert_eq!(
         rendered,
-        "Images:\n- history[7].images[0]: {\"id\":\"chart\",\"media_type\":\"image/png\",\"width\":800,\"height\":600,\"bytes\":123,\"label\":\"chart\"}"
+        format!(
+            "Images:\n- history[7].images[0]: {{\"id\":\"{}\",\"media_type\":\"image/png\",\"width\":800,\"height\":600,\"bytes\":123,\"label\":\"chart\"}}",
+            entry.images[0].id
+        )
     );
 }
 

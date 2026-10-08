@@ -464,17 +464,21 @@ async fn store_maintenance_refuses_an_empty_root_set() {
             .expect("open the empty-root-set session"),
     );
 
-    let Json(uploaded) = upload_attachment(
-        State(state.clone()),
-        Json(AttachmentUploadRequest {
-            name: "unreferenced.png".to_string(),
-            mime: "image/png".to_string(),
-            data_base64: STORE_MAINTENANCE_PNG_BASE64.to_string(),
-        }),
-    )
-    .await
-    .expect("upload a blob nothing references");
-    let blob_id = uploaded.attachment.id.clone();
+    // Put an orphan through the bytes port. The upload route creates a live
+    // upload holder, so a route upload would not leave the root set empty.
+    let orphan = attachment_store
+        .put(
+            STORE_MAINTENANCE_ORPHAN_BYTES.to_vec(),
+            lash::attachments::AttachmentCreateMeta::new(
+                lash::attachments::MediaType::parse("application/octet-stream")
+                    .expect("orphan media type"),
+                None,
+                Some("empty-root-set-orphan".to_string()),
+            ),
+        )
+        .await
+        .expect("put a blob nothing references");
+    let blob_id = orphan.id;
 
     let refused = run_store_maintenance(
         State(state.clone()),

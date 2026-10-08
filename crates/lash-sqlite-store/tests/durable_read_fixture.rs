@@ -122,7 +122,7 @@ fn pin_attachment_write_token(core_path: &Path) {
             "UPDATE attachment_pending_writes SET write_id = ?1 WHERE attachment_id = ?2",
             rusqlite::params![
                 fixture::FIXTURE_ATTACHMENT_WRITE_ID,
-                fixture::FIXTURE_ATTACHMENT_ID
+                fixture::fixture_attachment_id().as_str()
             ],
         )
         .expect("pin the SQLite fixture attachment write token");

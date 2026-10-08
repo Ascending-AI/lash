@@ -92,6 +92,7 @@ pub(crate) const BLAKE3_DOMAINS: &[&str] = &[
 #[cfg(test)]
 pub(crate) const RETIRED_BLAKE3_DOMAINS: &[&str] = &[
     "lash-build-generation/v1",
+    "lash-google-upload-credential-scope/v2",
     "lash-journal-payload/v1",
     "lash-lashlang-execution-site/v2",
     "lash-lashlang-program/v2",

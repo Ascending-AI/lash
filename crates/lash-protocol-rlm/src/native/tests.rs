@@ -1578,7 +1578,7 @@ fn native_user_stop_is_terminal_live_and_after_restore() {
 fn a_step_archive_survives_both_driver_checkpoint_paths() {
     let archive = lash_core::RetainedOutput {
         reference: lash_core::AttachmentRef {
-            id: "aggregate-prints".parse().expect("attachment id"),
+            id: lash_core::attachments::content_id(&vec![b'p'; 100_000]),
             media_type: "application/json".parse().expect("media type"),
             byte_len: 100_000,
             type_metadata: None,

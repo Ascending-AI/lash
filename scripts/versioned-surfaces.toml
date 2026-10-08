@@ -203,3 +203,7 @@ reason = "FIG-4379: session config is owner-namespaced and the protocol material
 [[retired_hash_domain]]
 name = "lashlang-dispatched-ordinals/v1"
 reason = "FIG-5224: a cell names its commands by the broker's admitted ordinal; the host keeps no ordinal state and seals no run"
+
+[[retired_hash_domain]]
+name = "lash-google-upload-credential-scope/v2"
+reason = "FIG-5444: provider-file scope uses the host credential identity directly, replacing the credential hash"
