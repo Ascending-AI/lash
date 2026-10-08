@@ -90,9 +90,12 @@ pub async fn open(
             let attachments = tempfile::tempdir().expect("an attachment directory");
             let stores = lash_postgres_store::PostgresStoreSet::with_clock_for_testing(
                 &storage,
-                Arc::new(lash_core_store::attachments::FileAttachmentStore::new(
-                    attachments.path(),
-                )),
+                lash_sqlite_store::SqliteStoreSet::open(
+                    (attachments.path()).join("attachments.db"),
+                )
+                .await
+                .expect("SQLite attachment store")
+                .attachment_store(),
                 clock,
             );
             lash_core_execution::testing::process_execution_env_fixture(

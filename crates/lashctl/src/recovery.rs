@@ -141,9 +141,10 @@ pub(super) async fn open_stores(
         .map_err(|error| CliError::new(Exit::Unexpected, error.to_string()))?;
         Arc::new(lash::postgres::PostgresStoreSet::new(
             &storage,
-            Arc::new(lash::persistence::FileAttachmentStore::new(
-                ".lashctl-attachments",
-            )),
+            lash::sqlite::SqliteStoreSet::open(std::path::Path::new(".lashctl-attachments.db"))
+                .await
+                .map_err(|error| CliError::new(Exit::Unexpected, error.to_string()))?
+                .attachment_store(),
         ))
     })
 }

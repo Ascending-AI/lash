@@ -719,7 +719,7 @@ enum BlobOperation {
 }
 
 #[tokio::test]
-#[ignore = "compares file and S3 blob stores; requires a live S3 server (`scripts/ci/with-service.sh s3`, or LASH_REQUIRE_S3=1 with --include-ignored)"]
+#[ignore = "compares SQLite and S3 blob stores; requires a live S3 server (`scripts/ci/with-service.sh s3`, or LASH_REQUIRE_S3=1 with --include-ignored)"]
 async fn attachment_blob_store_differential_agrees() {
     if std::env::var("LASH_REQUIRE_S3").as_deref() != Ok("1") {
         eprintln!("SKIPPED attachment blob-store differential: LASH_REQUIRE_S3 is not set");
@@ -728,7 +728,11 @@ async fn attachment_blob_store_differential_agrees() {
     let sqlite_memory_stores = lash_sqlite_store::SqliteStoreSet::memory().await.unwrap();
     let memory = sqlite_memory_stores.attachment_store();
     let root = tempfile::tempdir().unwrap();
-    let file = lash_core::facade_support::FileAttachmentStore::new(root.path());
+    let sqlite_file_stores =
+        lash_sqlite_store::SqliteStoreSet::open((root.path()).join("attachments.db"))
+            .await
+            .expect("SQLite attachment store");
+    let file = sqlite_file_stores.attachment_store();
     // The S3 server this runs against is named by the same LASH_S3_* settings
     // the lash-s3-store suite reads (`scripts/ci/s3-service.sh` owns them), so
     // no literal here pins the endpoint or the credentials to one deployment.
@@ -754,7 +758,7 @@ async fn attachment_blob_store_differential_agrees() {
     ];
     eprintln!(
         "attachment blob differential coverage is bounded: operations={operations:?}; \
-         backends=sqlite-memory,file,s3; omitted_operations=all other byte sequences and operation \
+         backends=sqlite-memory,sqlite-file,s3; omitted_operations=all other byte sequences and operation \
          sequences"
     );
     let mut first_id = None;
@@ -789,7 +793,7 @@ async fn attachment_blob_store_differential_agrees() {
             }
         }
         let memory_rows = raw_sqlite_blobs(&sqlite_memory_stores.database_uri());
-        let file_rows = raw_file_blobs(root.path());
+        let file_rows = raw_sqlite_blobs(&sqlite_file_stores.database_uri());
         let s3_rows = s3.raw_blobs_for_testing().await.unwrap();
         assert_eq!(
             memory_rows, file_rows,
@@ -797,7 +801,7 @@ async fn attachment_blob_store_differential_agrees() {
         );
         assert_eq!(
             file_rows, s3_rows,
-            "file/S3 attachment blobs diverged after {operation:?}"
+            "SQLite file/S3 attachment blobs diverged after {operation:?}"
         );
     }
 }
@@ -824,31 +828,4 @@ fn raw_sqlite_blobs(database_uri: &str) -> Vec<(lash_core::AttachmentId, Vec<u8>
             )
         })
         .collect()
-}
-
-#[expect(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-fn raw_file_blobs(root: &Path) -> Vec<(lash_core::AttachmentId, Vec<u8>)> {
-    let mut rows = Vec::new();
-    let content_root = root.join("blake3");
-    if !content_root.exists() {
-        return rows;
-    }
-    for prefix in fs::read_dir(content_root).unwrap() {
-        for entry in fs::read_dir(prefix.unwrap().path()).unwrap() {
-            let entry = entry.unwrap();
-            let name = entry.file_name().to_string_lossy().to_string();
-            if !name.contains(".staging.") {
-                rows.push((
-                    lash_core::AttachmentId::parse(name).expect("valid attachment id"),
-                    fs::read(entry.path()).unwrap(),
-                ));
-            }
-        }
-    }
-    rows.sort_by(|left, right| left.0.cmp(&right.0));
-    rows
 }

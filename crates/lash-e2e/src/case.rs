@@ -642,9 +642,11 @@ impl Case {
                 .await?;
                 Arc::new(lash::postgres::PostgresStoreSet::new(
                     &storage,
-                    Arc::new(lash::persistence::FileAttachmentStore::new(
-                        self.dir.join("reader-attachments"),
-                    )),
+                    lash::sqlite::SqliteStoreSet::open(
+                        (self.dir.join("reader-attachments")).join("attachments.db"),
+                    )
+                    .await?
+                    .attachment_store(),
                 ))
             }
             Store::SqliteMemory => bail!("a memory store is readable only through its node"),

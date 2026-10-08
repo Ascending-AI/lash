@@ -70,9 +70,10 @@ pub(crate) async fn postgres_store_parts() -> (
     let attachments = tempfile::tempdir().expect("PostgreSQL attachment directory");
     let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
         &storage,
-        Arc::new(lash_core::facade_support::FileAttachmentStore::new(
-            attachments.path(),
-        )),
+        lash_sqlite_store::SqliteStoreSet::open((attachments.path()).join("attachments.db"))
+            .await
+            .expect("SQLite attachment store")
+            .attachment_store(),
     ));
     (stores, database, attachments)
 }
@@ -114,9 +115,10 @@ pub(crate) async fn postgres_store_set() -> (Arc<dyn lash_core::StoreSet>, Box<d
     let attachments = tempfile::tempdir().expect("PostgreSQL attachment directory");
     let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
         &storage,
-        Arc::new(lash_core::facade_support::FileAttachmentStore::new(
-            attachments.path(),
-        )),
+        lash_sqlite_store::SqliteStoreSet::open((attachments.path()).join("attachments.db"))
+            .await
+            .expect("SQLite attachment store")
+            .attachment_store(),
     )) as Arc<dyn lash_core::StoreSet>;
     (stores, Box::new((database, attachments, storage)))
 }

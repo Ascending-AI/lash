@@ -462,28 +462,36 @@ mod tests {
         MissingTimestamp,
     }
 
-    /// The honest store a defect wraps: a filesystem backend in a tempdir the
-    /// wrapper keeps alive.
+    /// The honest backend used by the contract defect oracles.
     struct HonestStore {
-        store: crate::FileAttachmentStore,
-        _root: tempfile::TempDir,
+        store: Arc<dyn AttachmentStore>,
     }
 
     impl HonestStore {
         fn new() -> Self {
-            let root = tempfile::tempdir().expect("attachment root");
-            Self {
-                store: crate::FileAttachmentStore::new(root.path()),
-                _root: root,
-            }
+            let store = std::thread::spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("runtime")
+                    .block_on(async {
+                        lash_sqlite_store::SqliteStoreSet::memory()
+                            .await
+                            .expect("SQLite attachment store")
+                            .attachment_store()
+                    })
+            })
+            .join()
+            .expect("runtime thread");
+            Self { store }
         }
     }
 
     impl std::ops::Deref for HonestStore {
-        type Target = crate::FileAttachmentStore;
+        type Target = dyn AttachmentStore;
 
-        fn deref(&self) -> &crate::FileAttachmentStore {
-            &self.store
+        fn deref(&self) -> &Self::Target {
+            self.store.as_ref()
         }
     }
 

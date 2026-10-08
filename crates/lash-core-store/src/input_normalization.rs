@@ -12,16 +12,12 @@ use crate::InputItem;
 pub async fn normalize_input_items(
     items: &[InputItem],
     attachment_store: &crate::RuntimeAttachmentStore,
-    attachment_source_policy: &dyn crate::AttachmentSourcePolicy,
 ) -> Result<Vec<NormalizedItem>, String> {
     let mut out: Vec<NormalizedItem> = Vec::new();
     for item in items {
         match item {
             InputItem::Text { text } => push_text(&mut out, text.clone()),
             InputItem::Attachment { source } => {
-                attachment_source_policy
-                    .authorize(&crate::AttachmentProducer::TurnIngress, source)
-                    .map_err(|err| err.to_string())?;
                 let source = match source {
                     crate::AttachmentSource::Inline { media_type, bytes } => {
                         let reference = attachment_store

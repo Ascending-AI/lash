@@ -20,8 +20,6 @@ const DERIVED_START_KEYS: lash_core::core_internal::StartKeyDerivation =
     lash_core::core_internal::StartKeyDerivation::LASH_START_PATHS;
 #[cfg(test)]
 mod backend_assembly_tests;
-#[cfg(test)]
-mod file_attachment_store_tests;
 #[cfg(feature = "lashlang")]
 pub mod fused_artifact_store;
 #[cfg(test)]

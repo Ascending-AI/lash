@@ -169,7 +169,6 @@ pub mod facade_support {
     pub use crate::attachments::AttachmentReclamationPolicy;
     pub use crate::attachments::AttachmentReclamationReport;
     pub use crate::attachments::EmptyRootSetPolicy;
-    pub use crate::attachments::FileAttachmentStore;
     pub use crate::attachments::RuntimeAttachmentStore;
     pub use crate::attachments::reclaim_unreferenced_attachments;
     pub use crate::chronological::BorrowedChronologicalEntry;
@@ -470,7 +469,6 @@ pub(crate) use facade_support::*;
 // twelve had test-only consumers, so their public path is `test_support` and
 // only their crate-internal short path lives here: `test_support` is
 // feature-gated and `crate::X` has to resolve in every build.
-pub(crate) use crate::attachments::AttachmentProducer;
 pub(crate) use crate::plugin::RuntimeServices;
 
 pub mod sansio {

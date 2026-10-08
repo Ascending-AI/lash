@@ -75,9 +75,12 @@ pub async fn stores(tier: Tier) -> Option<(Arc<dyn StoreSet>, Keep)> {
             let attachments = tempfile::tempdir().expect("an attachment directory");
             let stores = lash_postgres_store::PostgresStoreSet::new(
                 &storage,
-                Arc::new(lash_core_store::attachments::FileAttachmentStore::new(
-                    attachments.path(),
-                )),
+                lash_sqlite_store::SqliteStoreSet::open(
+                    (attachments.path()).join("attachments.db"),
+                )
+                .await
+                .expect("SQLite attachment store")
+                .attachment_store(),
             );
             Some((
                 Arc::new(stores),

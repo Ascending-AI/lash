@@ -663,9 +663,12 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
         .await
         .expect("admit live root authority");
     let blobs = tempfile::tempdir().expect("attachment directory");
-    let backend = lash_core_execution::attachments::FileAttachmentStore::new(blobs.path());
+    let backend = lash_sqlite_store::SqliteStoreSet::open((blobs.path()).join("attachments.db"))
+        .await
+        .expect("SQLite attachment store")
+        .attachment_store();
     let attachment = lash_core_execution::AttachmentStore::put(
-        &backend,
+        backend.as_ref(),
         b"postgres-live-committed-blob".to_vec(),
         lash_sansio::AttachmentCreateMeta::new(
             lash_sansio::MediaType::parse("application/octet-stream").expect("media type"),
@@ -712,7 +715,7 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
 
     let result = lash_core_execution::attachments::reclaim_unreferenced_attachments(
         &wrong_factory,
-        &backend,
+        backend.as_ref(),
         lash_core_execution::AttachmentReclamationPolicy {
             grace_period_ms: 0,
             empty_root_set: lash_core_execution::EmptyRootSetPolicy::Refuse,
@@ -730,7 +733,7 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
         failure.partial.scanned_blob_count, 1,
         "the refusal must carry the report accumulated before it: {failure:?}"
     );
-    lash_core_execution::AttachmentStore::get(&backend, &attachment.id, 32 * 1024 * 1024)
+    lash_core_execution::AttachmentStore::get(backend.as_ref(), &attachment.id, 32 * 1024 * 1024)
         .await
         .expect("live committed blob survives the refused sweep");
 }

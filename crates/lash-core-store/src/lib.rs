@@ -198,7 +198,6 @@ pub(crate) mod runtime {
     }
 }
 
-pub(crate) use attachments::AttachmentSourcePolicy;
 pub(crate) use input_normalization::NormalizedItem;
 #[doc(hidden)]
 pub use lash_sansio as sansio;
@@ -264,7 +263,6 @@ pub(crate) mod plugin {
         LeafChange,
     };
 }
-pub(crate) use attachments::AttachmentProducer;
 pub(crate) use lash_sansio::attachment::AttachmentCreateMeta;
 
 pub(crate) use runtime_error::RuntimeErrorCause;

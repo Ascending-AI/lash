@@ -583,7 +583,6 @@ pub mod persistence {
     };
     /// The logical run reference a run store ends a run by.
     pub use lash_core::engine::RunRef;
-    pub use lash_core::facade_support::FileAttachmentStore;
     /// Durable session-store inputs and outputs exposed to storage integrators.
     pub use lash_core::runtime::{
         ActiveTurnIngress, AdmissionBoundary, AdmittedQueuedWork, AdmittedTurnInputs,
@@ -1216,9 +1215,6 @@ pub mod durability {
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::PreparedProcessRegistration;
     pub use lash_core::RecordedKeys;
-    pub use lash_core_store::attachments::{
-        AttachmentProducer, AttachmentSourcePolicy, AttachmentSourcePolicyError,
-    };
     pub use lash_core_store::effect_opener::EffectOpener;
     pub use lash_sansio::{CancelRequest, ToolCallAdmission};
 

@@ -561,7 +561,6 @@ impl<'run> TestExecutionContextBuilder<'run> {
             observer: Arc::new(crate::engine::NullObservationSink),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::clone(&self.attachment_store),
-            attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             turn_context: self.turn_context.clone(),
             clock: self.clock,
             process_lineage,

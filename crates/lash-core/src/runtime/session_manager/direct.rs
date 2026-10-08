@@ -214,14 +214,6 @@ impl DirectCompletionCapability {
     ) -> Result<(crate::LlmResponse, crate::TokenUsage, crate::LlmCallRecord), crate::PluginError>
     {
         let current = context.current;
-        for source in &request.attachments() {
-            current
-                .host
-                .core
-                .attachment_source_policy
-                .authorize(&crate::AttachmentProducer::Host, source)
-                .map_err(|err| crate::PluginError::Session(err.to_string()))?;
-        }
         let DirectReplayPosition {
             replay,
             caused_by,

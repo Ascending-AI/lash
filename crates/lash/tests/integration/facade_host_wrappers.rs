@@ -207,9 +207,12 @@ async fn backend(
             let attachments = tempfile::tempdir().expect("attachment directory");
             let stores = lash_postgres_store::PostgresStoreSet::new(
                 &storage,
-                Arc::new(lash::persistence::FileAttachmentStore::new(
-                    attachments.path(),
-                )),
+                lash_sqlite_store::SqliteStoreSet::open(
+                    (attachments.path()).join("attachments.db"),
+                )
+                .await
+                .expect("SQLite attachment store")
+                .attachment_store(),
             );
             (
                 Arc::new(stores),

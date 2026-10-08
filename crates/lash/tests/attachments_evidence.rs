@@ -115,12 +115,6 @@ fn drain_area_witnesses() {
             let _ = f0;
         }
     });
-    // W0023: lash::durability::RuntimeHostConfig::attachment_source_policy [field]
-    field_witness(|value: &lash::durability::RuntimeHostConfig| {
-        let _ = &value.attachment_source_policy;
-    });
-    // W0024: lash::durability::RuntimeHostConfig::with_attachment_source_policy [function]
-    let _ = lash::durability::RuntimeHostConfig::with_attachment_source_policy;
     // W0025: lash::persistence::AttachmentRootSet::has_live_attachment_ref [function]
     fn meth_0025<T: lash::persistence::AttachmentRootSet>(_: &T) {
         let _ = T::has_live_attachment_ref;
@@ -401,12 +395,6 @@ fn drain_area_witnesses() {
     });
     // W0117: lash::plugins::RuntimeExecutionContext::attachment_store [function]
     let _ = lash::plugins::RuntimeExecutionContext::attachment_store;
-    // W0118: lash_core::test_support::AttachmentProducer::Tool::tool_name [field]
-    field_witness(|value: &lash_core::test_support::AttachmentProducer| {
-        if let lash_core::test_support::AttachmentProducer::Tool { tool_name, .. } = value {
-            let _ = tool_name;
-        }
-    });
     // W0120: lash::persistence::AttachmentRootSet::arm_attachment_delete [function]
     fn meth_0120<T: lash::persistence::AttachmentRootSet>(_: &T) {
         let _ = T::arm_attachment_delete;

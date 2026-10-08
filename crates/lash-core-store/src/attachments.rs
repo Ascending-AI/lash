@@ -12,11 +12,8 @@ use crate::store::{
 use lash_sansio::sync::MutexExt;
 #[cfg(test)]
 use std::sync::Mutex;
-mod file_store;
 mod root_enumeration;
 pub use root_enumeration::{AttachmentRootPage, AttachmentRootSource, CompleteAttachmentRoots};
-
-pub use file_store::FileAttachmentStore;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -30,41 +27,6 @@ use crate::store::{
     AttachmentSettlementOutcome, AttachmentSweepGeneration, MAX_ATTACHMENT_DELETE_ATTEMPTS,
     StoreError,
 };
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum AttachmentProducer {
-    Host,
-    TurnIngress,
-    Tool { tool_name: String },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("attachment source policy denied {producer:?}: {reason}")]
-pub struct AttachmentSourcePolicyError {
-    pub producer: AttachmentProducer,
-    pub reason: String,
-}
-
-pub trait AttachmentSourcePolicy: Send + Sync {
-    fn authorize(
-        &self,
-        producer: &AttachmentProducer,
-        source: &crate::AttachmentSource,
-    ) -> Result<(), AttachmentSourcePolicyError>;
-}
-
-#[derive(Debug, Default)]
-pub struct OpenAttachmentSourcePolicy;
-
-impl AttachmentSourcePolicy for OpenAttachmentSourcePolicy {
-    fn authorize(
-        &self,
-        _producer: &AttachmentProducer,
-        _source: &crate::AttachmentSource,
-    ) -> Result<(), AttachmentSourcePolicyError> {
-        Ok(())
-    }
-}
 
 /// Why an attachment-store backend operation failed, as a property a caller can
 /// act on without parsing the message.
@@ -1565,10 +1527,6 @@ pub fn degrade_unmaterializable_request_attachments(
         .retain(|id, _| retained.contains(id));
     notices
 }
-
-#[cfg(test)]
-#[path = "attachments/fail_closed_tests.rs"]
-mod fail_closed_tests;
 
 #[cfg(test)]
 #[path = "attachments/referrer_failure_tests.rs"]

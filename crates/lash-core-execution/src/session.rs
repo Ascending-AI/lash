@@ -763,7 +763,6 @@ impl Session {
         chronological_projection: Arc<crate::ChronologicalProjection>,
         turn_context: crate::TurnContext,
         execution_env_spec: crate::ProcessExecutionEnvSpec,
-        attachment_source_policy: Arc<dyn crate::AttachmentSourcePolicy>,
     ) -> Result<RuntimeExecutionContext<'run>, crate::PluginError> {
         let tool_surface = self.active_tool_surface_entry()?;
         let dispatch = Arc::new(ToolDispatchContext {
@@ -794,7 +793,6 @@ impl Session {
             observer,
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::clone(&self.services.attachment_store),
-            attachment_source_policy,
             turn_context: turn_context.clone(),
             clock: Arc::clone(&self.services.clock),
             process_lineage: process_lineage_of(&turn_context),

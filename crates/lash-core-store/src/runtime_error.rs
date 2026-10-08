@@ -93,8 +93,6 @@ runtime_error_codes! {
     /// Codes serialize as the snake_case strings exposed in traces and host
     /// errors; callers match this type rather than parsing display text.
     pub enum RuntimeErrorCode {
-        // the attachment policy judges the recorded attachment, so it refuses it again.
-        AttachmentSourcePolicyDenied = "attachment_source_policy_denied" => Terminal,
         // a permanent fence already ended the referrer.
         /// An artifact publish or acquire named a referrer that has a fence
         /// (ADR 0113 §2.7). Store implementors return this code instead of

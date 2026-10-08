@@ -712,7 +712,7 @@ async fn recovery_refusal_causes_are_distinct_durable_values() {
             ctx.direct_completions =
                 lash_core::facade_support::DirectCompletionClient::from_llm_fn(|_, _| {
                     Err(PluginError::Runtime(lash_core::RuntimeError::new(
-                        lash_core::RuntimeErrorCode::AttachmentSourcePolicyDenied,
+                        lash_core::RuntimeErrorCode::ArtifactMissing,
                         "summary refused",
                     )))
                 });
@@ -723,8 +723,7 @@ async fn recovery_refusal_causes_are_distinct_durable_values() {
         let mut expected = json!({"kind": cause});
         if cause == "summarizer_refused" {
             expected["code"] =
-                serde_json::to_value(lash_core::RuntimeErrorCode::AttachmentSourcePolicyDenied)
-                    .unwrap();
+                serde_json::to_value(lash_core::RuntimeErrorCode::ArtifactMissing).unwrap();
         }
         assert_eq!(
             serde_json::to_value(&nodes).unwrap(),

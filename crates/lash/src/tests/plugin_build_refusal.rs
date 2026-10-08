@@ -49,9 +49,10 @@ async fn postgres_backend() -> (
     let attachments = tempfile::tempdir().expect("PostgreSQL attachment directory");
     let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
         &storage,
-        Arc::new(lash_core::facade_support::FileAttachmentStore::new(
-            attachments.path(),
-        )),
+        lash_sqlite_store::SqliteStoreSet::open((attachments.path()).join("attachments.db"))
+            .await
+            .expect("SQLite attachment store")
+            .attachment_store(),
     ));
     (
         lash_conformance::backend_over(stores),

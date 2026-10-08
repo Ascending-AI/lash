@@ -20,9 +20,12 @@ async fn attachment_owner_sweep_is_deterministic_across_memory_and_sqlite() {
                 .await
                 .expect("SQLite session store"),
         ),
-        std::sync::Arc::new(lash_core::facade_support::FileAttachmentStore::new(
-            tmp.path().join("attachments"),
-        )),
+        lash_sqlite_store::SqliteStoreSet::open(
+            (tmp.path().join("attachments")).join("attachments.db"),
+        )
+        .await
+        .expect("SQLite attachment store")
+        .attachment_store(),
     )
     .await;
 }

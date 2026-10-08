@@ -995,17 +995,11 @@ impl AdmittedTurnInputs {
         &self,
         turn_id: &crate::TurnId,
         attachment_store: &crate::RuntimeAttachmentStore,
-        attachment_source_policy: &dyn crate::AttachmentSourcePolicy,
     ) -> Result<QueuedCheckpointTurnInput, String> {
         let mut messages = Vec::new();
         for input in &self.inputs {
-            if let Some(message) = committed_message_from_pending_input(
-                input,
-                turn_id,
-                attachment_store,
-                attachment_source_policy,
-            )
-            .await?
+            if let Some(message) =
+                committed_message_from_pending_input(input, turn_id, attachment_store).await?
             {
                 messages.push(message);
             }
@@ -1060,14 +1054,10 @@ async fn committed_message_from_pending_input(
     pending: &PendingTurnInput,
     turn_id: &crate::TurnId,
     attachment_store: &crate::RuntimeAttachmentStore,
-    attachment_source_policy: &dyn crate::AttachmentSourcePolicy,
 ) -> Result<Option<crate::Message>, String> {
-    let normalized = crate::input_normalization::normalize_input_items(
-        &pending.input.items,
-        attachment_store,
-        attachment_source_policy,
-    )
-    .await?;
+    let normalized =
+        crate::input_normalization::normalize_input_items(&pending.input.items, attachment_store)
+            .await?;
     let message_id = ingress_message_id(&pending.input_id);
     let mut parts = Vec::new();
     for item in normalized {

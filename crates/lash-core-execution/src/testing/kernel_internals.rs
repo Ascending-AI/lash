@@ -13,9 +13,6 @@
 // that the root re-exports only to the crate. Each item is already public at
 // its own path; these re-exports keep the short path the tests were written
 // against.
-pub use crate::attachments::{
-    AttachmentProducer, AttachmentSourcePolicy, OpenAttachmentSourcePolicy,
-};
 pub use crate::plugin::{
     RuntimeServices, SessionObservedProcessOutcome, SessionObservedProcessReceipt,
     SessionObserverIntent,

@@ -334,9 +334,12 @@ async fn stores(root: &std::path::Path) -> Result<Arc<dyn lash::StoreSet>> {
             .context("open the PostgreSQL store")?;
             Arc::new(lash::postgres::PostgresStoreSet::new(
                 &storage,
-                Arc::new(lash::persistence::FileAttachmentStore::new(
-                    root.join("attachments"),
-                )),
+                lash::sqlite::SqliteStoreSet::open(
+                    (root.join("attachments")).join("attachments.db"),
+                )
+                .await
+                .context("open SQLite attachment storage")?
+                .attachment_store(),
             ))
         }
         store => anyhow::bail!("unsupported consumer store {store}"),

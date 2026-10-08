@@ -631,9 +631,10 @@ async fn prepared_registration_scope_matches_across_backends() {
         tempfile::tempdir().unwrap_or_else(|error| panic!("attachment root: {error}"));
     let pg = lash_postgres_store::PostgresStoreSet::new(
         &postgres,
-        Arc::new(lash_core::facade_support::FileAttachmentStore::new(
-            attachments.path(),
-        )),
+        lash_sqlite_store::SqliteStoreSet::open((attachments.path()).join("attachments.db"))
+            .await
+            .expect("SQLite attachment store")
+            .attachment_store(),
     );
     let nonce = run_nonce();
     lash_core::testing::process_execution_env_fixture(memory.process_env_store().as_ref()).await;

@@ -15,9 +15,6 @@ mod runtime_support;
 mod runtime {
     #[allow(unused_imports, dead_code)]
     pub(crate) mod tests {
-        pub(crate) use lash_core::attachments::{
-            AttachmentProducer, AttachmentSourcePolicy, OpenAttachmentSourcePolicy,
-        };
         pub(crate) use lash_core::facade_support::*;
         pub(crate) use lash_core::llm::types::{
             LlmOutputPart, LlmProviderTraceSender, LlmRequest, LlmResponse, LlmStreamEvent,

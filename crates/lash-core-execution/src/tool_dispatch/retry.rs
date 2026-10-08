@@ -158,16 +158,12 @@ pub(crate) async fn normalized_outcome(
     args: serde_json::Value,
     result: ToolOutcome,
 ) -> ToolDispatchOutcome {
-    let output = Box::pin(normalize_tool_result_attachments(
-        context, &tool_name, result,
-    ))
-    .await;
+    let output = Box::pin(normalize_tool_result_attachments(context, result)).await;
     super::context::outcome(ids, tool_name, args, output)
 }
 
 async fn normalize_tool_result_attachments(
     context: &ToolDispatchContext<'_>,
-    tool_name: &str,
     result: ToolOutcome,
 ) -> NormalizedToolOutput {
     let mut output = result.into_done_output().unwrap_or_else(|_| {
@@ -178,20 +174,6 @@ async fn normalize_tool_result_attachments(
         ))
     });
     let sources = output.attachments();
-    let producer = crate::AttachmentProducer::Tool {
-        tool_name: tool_name.to_string(),
-    };
-    for source in &sources {
-        if let Err(error) = context
-            .attachment_source_policy
-            .authorize(&producer, source)
-        {
-            return NormalizedToolOutput(attachment_failure(
-                "attachment_source_policy_denied",
-                error,
-            ));
-        }
-    }
     for source in sources {
         let crate::AttachmentSource::Inline { media_type, bytes } = &source else {
             continue;
@@ -382,7 +364,6 @@ mod panic_tests {
             observer: Arc::new(crate::engine::NullObservationSink),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::new(crate::RuntimeAttachmentStore::unavailable()),
-            attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             turn_context: crate::TurnContext::default(),
             clock: Arc::new(crate::SystemClock),
             process_lineage: None,

@@ -1,4 +1,5 @@
-use super::*;
+use lash_core_execution::attachments::*;
+use lash_core_execution::*;
 use lash_sansio::MediaType;
 
 struct UnsupportedAttachmentRoots;
@@ -7,14 +8,20 @@ struct UnsupportedAttachmentRoots;
 impl AttachmentRootSet for UnsupportedAttachmentRoots {
     async fn live_attachment_refs(
         &self,
-    ) -> Result<crate::attachments::CompleteAttachmentRoots, crate::StoreError> {
-        Err(crate::StoreError::UnsupportedStoreOperation {
+    ) -> Result<
+        lash_core_execution::attachments::CompleteAttachmentRoots,
+        lash_core_execution::StoreError,
+    > {
+        Err(lash_core_execution::StoreError::UnsupportedStoreOperation {
             operation: "live_attachment_refs",
         })
     }
 
-    async fn has_live_attachment_ref(&self, _id: &AttachmentId) -> Result<bool, crate::StoreError> {
-        Err(crate::StoreError::UnsupportedStoreOperation {
+    async fn has_live_attachment_ref(
+        &self,
+        _id: &AttachmentId,
+    ) -> Result<bool, lash_core_execution::StoreError> {
+        Err(lash_core_execution::StoreError::UnsupportedStoreOperation {
             operation: "has_live_attachment_ref",
         })
     }
@@ -23,7 +30,10 @@ impl AttachmentRootSet for UnsupportedAttachmentRoots {
 #[tokio::test]
 async fn unsupported_root_enumeration_aborts_sweep_and_preserves_blob() {
     let temp = tempfile::tempdir().expect("tempdir");
-    let backend = FileAttachmentStore::new(temp.path());
+    let backend = lash_sqlite_store::SqliteStoreSet::open((temp.path()).join("attachments.db"))
+        .await
+        .expect("SQLite attachment store")
+        .attachment_store();
     let reference = backend
         .put(
             b"fail-closed-live-blob".to_vec(),
@@ -34,7 +44,7 @@ async fn unsupported_root_enumeration_aborts_sweep_and_preserves_blob() {
 
     let error = reclaim_unreferenced_attachments(
         &UnsupportedAttachmentRoots,
-        &backend,
+        backend.as_ref(),
         AttachmentReclamationPolicy {
             grace_period_ms: 0,
             empty_root_set: EmptyRootSetPolicy::Refuse,
@@ -45,7 +55,7 @@ async fn unsupported_root_enumeration_aborts_sweep_and_preserves_blob() {
 
     assert!(matches!(
         &error.stop,
-        crate::store::MaintenanceStop::Failed(
+        lash_core_execution::store::MaintenanceStop::Failed(
             AttachmentStoreError::RootSetEnumerationFailed { source }
         ) if source.to_string().contains("live_attachment_refs")
     ));

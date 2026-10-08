@@ -67,7 +67,10 @@ lash_conformance::start_operation_staging_tests!({
     let attachments = tempfile::tempdir().expect("attachment directory");
     let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
         &storage,
-        Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(attachments.path())),
+        lash_sqlite_store::SqliteStoreSet::open((attachments.path()).join("attachments.db"))
+            .await
+            .expect("SQLite attachment store")
+            .attachment_store(),
     ));
     (
         (database, attachments),

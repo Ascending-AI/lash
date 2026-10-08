@@ -13,7 +13,6 @@ use serde_json::json;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-mod attachment_normalization;
 mod composition_laws;
 mod protocol_version_refusal;
 
@@ -161,7 +160,6 @@ async fn refusing_dispatch_context(plugins: Arc<PluginSession>) -> ToolDispatchC
                 .await
                 .attachment_store(),
         )),
-        attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: Arc::new(crate::SystemClock),
         process_lineage: None,

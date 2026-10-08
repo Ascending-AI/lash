@@ -66,7 +66,7 @@ cross-surface identity, not the quality of the model's image description.
    backend the workbench boots owns blob storage: SQLite keeps attachment bytes in the
    `attachment_blobs` table of the session catalog
    (`<data-dir>/lash-sessions.db`), while Postgres wires
-   `FileAttachmentStore` under `<data-dir>/attachments`.
+   `SqliteAttachmentStore` in `<data-dir>/attachments/attachments.db`.
 6. **The transcript image is the attachment contract.** The matching user row must contain
    exactly one `a.message-attachment[data-attachment-id]` wrapping exactly one `<img>` whose
    `src` equals the link's `href`; the id on the link and the URL on both must agree with the

@@ -55,6 +55,7 @@ tokio-util = { workspace = true }
 libc = { workspace = true }
 
 [dev-dependencies]
+lash-sqlite-store = { workspace = true }
 lashlang = { workspace = true, features = ["testing"] }
 lash-typescript = { workspace = true }
 lash-core = { workspace = true, features = ["testing"] }

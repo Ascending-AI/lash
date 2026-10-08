@@ -85,7 +85,6 @@ pub struct ToolDispatchContext<'run> {
     pub observer: Arc<dyn crate::engine::ObservationSink>,
     pub trigger_outcomes: ToolTriggerOutcomeBuffer,
     pub attachment_store: Arc<crate::RuntimeAttachmentStore>,
-    pub attachment_source_policy: Arc<dyn crate::AttachmentSourcePolicy>,
     pub turn_context: crate::TurnContext,
     pub clock: Arc<dyn crate::Clock>,
     /// The lineage of the process this dispatch runs inside, when it runs
@@ -203,7 +202,6 @@ impl<'run> ToolDispatchContext<'run> {
             observer: Arc::clone(&self.observer),
             trigger_outcomes: self.trigger_outcomes.clone(),
             attachment_store: Arc::clone(&self.attachment_store),
-            attachment_source_policy: Arc::clone(&self.attachment_source_policy),
             turn_context: self.turn_context.clone(),
             clock: Arc::clone(&self.clock),
             process_lineage: self.process_lineage.clone(),

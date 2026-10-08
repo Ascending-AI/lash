@@ -383,9 +383,10 @@ async fn stores(tier: Tier, clock: Arc<dyn lash_core::Clock>) -> Option<(Arc<dyn
             let attachments = tempfile::tempdir().expect("an attachment directory");
             let stores = lash_postgres_store::PostgresStoreSet::with_clock(
                 &storage,
-                Arc::new(lash::persistence::FileAttachmentStore::new(
-                    attachments.path(),
-                )),
+                lash::sqlite::SqliteStoreSet::open((attachments.path()).join("attachments.db"))
+                    .await
+                    .expect("SQLite attachment store")
+                    .attachment_store(),
                 clock,
             );
             Some((

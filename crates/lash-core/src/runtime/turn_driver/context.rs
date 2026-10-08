@@ -77,7 +77,6 @@ impl<'run> RuntimeTurnDriver<'run> {
                 chronological_projection,
                 self.turn_context.clone(),
                 execution_env_spec,
-                Arc::clone(&self.host.core.attachment_source_policy),
             )
             .map(|context| {
                 let context = context

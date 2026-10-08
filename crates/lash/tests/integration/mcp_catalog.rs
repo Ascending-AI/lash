@@ -390,9 +390,12 @@ async fn make_stores(
         ),
         Store::Postgres => Arc::new(PostgresStoreSet::new(
             storage.expect("PostgreSQL storage"),
-            Arc::new(lash::persistence::FileAttachmentStore::new(
-                root.join("attachments"),
-            )),
+            lash_sqlite_store::SqliteStoreSet::open(
+                (root.join("attachments")).join("attachments.db"),
+            )
+            .await
+            .expect("SQLite attachment store")
+            .attachment_store(),
         )),
     }
 }

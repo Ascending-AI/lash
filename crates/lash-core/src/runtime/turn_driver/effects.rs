@@ -492,7 +492,6 @@ impl RuntimeTurnDriver<'_> {
                     .materialize_checkpoint_turn_input(
                         &self.turn_id,
                         self.host.core.durability.attachment_store.as_ref(),
-                        self.host.core.attachment_source_policy.as_ref(),
                     )
                     .await
                     .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err))?;

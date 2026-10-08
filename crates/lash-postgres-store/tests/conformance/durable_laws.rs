@@ -96,7 +96,10 @@ macro_rules! session_store_factory_fixture {
                 reset(storage.pool()).await;
                 (
                     Arc::new(storage.session_store_factory()) as Arc<dyn ConformanceDeployment>,
-                    Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(root))
+                    lash_sqlite_store::SqliteStoreSet::open((root).join("attachments.db"))
+                        .await
+                        .expect("SQLite attachment store")
+                        .attachment_store()
                         as Arc<dyn lash_core_execution::AttachmentStore>,
                 )
             })

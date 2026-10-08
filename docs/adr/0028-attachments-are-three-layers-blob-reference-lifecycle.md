@@ -6,9 +6,9 @@ Attachments have three owners. Hosts supply flat blob storage, Lash tracks durab
 
 ## Blob storage
 
-`AttachmentStore` exposes `put`, `get`, `delete`, `head`, `list` and a persistence descriptor. Delivering a ref to a provider request (`deliver`, `invalidate_delivery`) is ADR 0135 §3. It has no session namespace or session ownership. Identical bytes share one digest and physical blob. File and S3 stores use `blake3/<prefix>/<digest>`. Missing reads return typed `NotFound`; list and head support reclamation.
+`AttachmentStore` exposes `put`, `get`, `delete`, `head`, `list` and a persistence descriptor. Delivering a ref to a provider request (`deliver`, `invalidate_delivery`) is ADR 0135 §3. It has no session namespace or session ownership. Identical bytes share one digest and physical blob. The S3 store uses `blake3/<prefix>/<digest>`. Missing reads return typed `NotFound`; list and head support reclamation.
 
-The file store stages to a unique pid/counter sibling, syncs bytes, renames it and syncs the parent directory. Unsupported directory syncing is tolerated; other I/O failures fail the write. Puts refresh blob modification time even on deduplication, so delete-time freshness checks observe recent writes.
+SQLite stores bytes in its catalog; S3 stores bytes as objects. Puts refresh the backend freshness signal even on deduplication, so delete-time freshness checks observe recent writes.
 
 ## Reference tracking
 
@@ -38,4 +38,4 @@ Deleted-session edges remain while graph nodes are retained by children, heads o
 
 Physical per-session copies are rejected because complete referrer tracking already permits safe shared blobs and keeps storage independent of sessions. Durable format admission follows the current format registry and reject-and-recreate policy; this ADR does not assign version numbers or migration defaults.
 
-[Blob and runtime ports and GC](../../crates/lash-core-store/src/attachments.rs), [write/referrer contract](../../crates/lash-core-store/src/store/attachment_referrers.rs), [file durability](../../crates/lash-core-store/src/attachments/file_store.rs) and [SQL referrer implementation](../../crates/lash-sqlite-store/src/attachments.rs) implement the layers.
+[Blob and runtime ports and GC](../../crates/lash-core-store/src/attachments.rs), [write/referrer contract](../../crates/lash-core-store/src/store/attachment_referrers.rs), [SQLite blobs](../../crates/lash-sqlite-store/src/attachment_store.rs) and [SQL referrer implementation](../../crates/lash-sqlite-store/src/attachments.rs) implement the layers.

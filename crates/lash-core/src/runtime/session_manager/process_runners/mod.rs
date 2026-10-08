@@ -113,7 +113,6 @@ impl RuntimeSessionServices {
             observer: crate::engine::NullObservationSink::arc(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::clone(&self.current.host.core.durability.attachment_store),
-            attachment_source_policy: Arc::clone(&self.current.host.core.attachment_source_policy),
             turn_context: crate::TurnContext::default(),
             clock: Arc::clone(&self.current.host.core.clock),
             process_lineage: None,

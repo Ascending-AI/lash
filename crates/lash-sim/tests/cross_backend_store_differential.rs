@@ -1695,9 +1695,12 @@ async fn runners_for_case_with_clock(
     let postgres_lifecycle: lash::Backend = lash_conformance::backend_over(Arc::new(
         lash_postgres_store::PostgresStoreSet::with_clock(
             postgres,
-            Arc::new(lash::persistence::FileAttachmentStore::new(
-                sqlite_case_root.join("postgres-attachments"),
-            )),
+            lash_sqlite_store::SqliteStoreSet::open(
+                (sqlite_case_root.join("postgres-attachments")).join("attachments.db"),
+            )
+            .await
+            .expect("SQLite attachment store")
+            .attachment_store(),
             Arc::clone(&clock),
         ),
     ));

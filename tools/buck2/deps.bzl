@@ -469,6 +469,7 @@ PACKAGE_DEPS = {
         "build": {},
         "dev": {
             "lash_core": "//crates/lash-core:lash-core",
+            "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
             "lash_typescript": "//crates/lash-typescript:lash-typescript",
             "lashlang": "//crates/lashlang:lashlang",
             "tempfile": "//third-party/rust:p0362",

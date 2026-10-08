@@ -302,9 +302,10 @@ pub(super) async fn compare_obligation_ledgers(
     let attachments = tempfile::tempdir().expect("attachment directory");
     let postgres_stores = lash_postgres_store::PostgresStoreSet::new(
         postgres,
-        Arc::new(lash_core::facade_support::FileAttachmentStore::new(
-            attachments.path(),
-        )),
+        lash_sqlite_store::SqliteStoreSet::open((attachments.path()).join("attachments.db"))
+            .await
+            .expect("SQLite attachment store")
+            .attachment_store(),
     );
     let backends: [(&str, &dyn StoreSet); 3] = [
         ("sqlite-memory", &memory),

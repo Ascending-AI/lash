@@ -49,9 +49,12 @@ impl Fixture {
             let attachments = tempfile::tempdir().expect("attachment directory");
             let stores = Arc::new(PostgresStoreSet::new(
                 &storage,
-                Arc::new(lash::persistence::FileAttachmentStore::new(
-                    attachments.path(),
-                )),
+                lash_sqlite_store::SqliteStoreSet::open(
+                    (attachments.path()).join("attachments.db"),
+                )
+                .await
+                .expect("SQLite attachment store")
+                .attachment_store(),
             )) as Arc<dyn StoreSet>;
             Self {
                 backend: lash_conformance::backend_over(stores),

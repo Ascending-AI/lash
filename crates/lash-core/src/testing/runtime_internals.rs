@@ -9,9 +9,6 @@
 //! widening the crate's shipped API.
 
 pub use crate::attachments::test_capability::attachment_test_acceptance;
-pub use crate::attachments::{
-    AttachmentProducer, AttachmentSourcePolicy, OpenAttachmentSourcePolicy,
-};
 pub use crate::plugin::{
     OpenAgentFrameRequest, RuntimeServices, SessionObservedProcessOutcome,
     SessionObservedProcessReceipt, SessionObserverIntent,

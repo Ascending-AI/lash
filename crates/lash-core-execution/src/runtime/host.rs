@@ -28,7 +28,6 @@ pub struct RuntimeHostConfig {
     /// Shared, unstable instrumentation resolved by served sessions and processes.
     #[doc(hidden)]
     pub turn_phase_probes: super::RuntimeTurnPhaseProbeSlot,
-    pub attachment_source_policy: Arc<dyn crate::AttachmentSourcePolicy>,
     /// Injected time source. Durable timestamps and timeout/backoff logic read
     /// this rather than the OS clock directly, so replay is reproducible and
     /// tests can advance time. Defaults to [`SystemClock`](super::SystemClock).
@@ -305,7 +304,6 @@ impl RuntimeHostConfig {
             },
             tracing: crate::trace::TraceRuntime::new(Arc::clone(&clock)),
             turn_phase_probes: super::RuntimeTurnPhaseProbeSlot::default(),
-            attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             clock,
         }
     }
@@ -411,14 +409,6 @@ impl RuntimeHostConfig {
                 .attachment_store
                 .reconfigured_output_retention(policy),
         );
-        self
-    }
-
-    pub fn with_attachment_source_policy(
-        mut self,
-        policy: Arc<dyn crate::AttachmentSourcePolicy>,
-    ) -> Self {
-        self.attachment_source_policy = policy;
         self
     }
 

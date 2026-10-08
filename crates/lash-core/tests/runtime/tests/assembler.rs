@@ -273,7 +273,6 @@ async fn normalize_items_merges_adjacent_text_items() {
     let out = normalize_input_items(
         &items,
         &lash_core::facade_support::RuntimeAttachmentStore::unavailable(),
-        &lash_core::attachments::OpenAttachmentSourcePolicy,
     )
     .await
     .expect("normalized");
@@ -284,50 +283,6 @@ async fn normalize_items_merges_adjacent_text_items() {
         }
         _ => panic!("expected merged text item"),
     }
-}
-
-#[derive(Debug)]
-struct DenyBorrowedIngress;
-
-impl lash_core::testing::runtime_internals::AttachmentSourcePolicy for DenyBorrowedIngress {
-    fn authorize(
-        &self,
-        producer: &lash_core::testing::runtime_internals::AttachmentProducer,
-        source: &lash_core::AttachmentSource,
-    ) -> Result<(), lash_core::test_support::AttachmentSourcePolicyError> {
-        if matches!(
-            producer,
-            lash_core::testing::runtime_internals::AttachmentProducer::TurnIngress
-        ) && matches!(source, lash_core::AttachmentSource::ExternalUrl { .. })
-        {
-            return Err(lash_core::test_support::AttachmentSourcePolicyError {
-                producer: producer.clone(),
-                reason: "borrowed ingress disabled".to_string(),
-            });
-        }
-        Ok(())
-    }
-}
-
-#[tokio::test]
-async fn attachment_source_policy_can_deny_borrowed_turn_ingress() {
-    let items = vec![InputItem::Attachment {
-        source: lash_core::AttachmentSource::external_url(
-            lash_core::MediaType::parse("application/pdf").unwrap(),
-            "https://example.test/document.pdf",
-        ),
-    }];
-
-    let error = normalize_input_items(
-        &items,
-        &lash_core::facade_support::RuntimeAttachmentStore::unavailable(),
-        &DenyBorrowedIngress,
-    )
-    .await
-    .expect_err("policy denial must stop ingress");
-
-    assert!(error.contains("TurnIngress"));
-    assert!(error.contains("borrowed ingress disabled"));
 }
 
 #[test]

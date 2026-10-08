@@ -44,7 +44,7 @@ impl std::ops::Deref for TestBackend {
 }
 
 /// Fresh, empty attachment byte stores for the root-set laws, each a
-/// filesystem store in its own directory under `root`.
+/// SQLite database in its own directory under `root`.
 pub(crate) fn attachment_bytes(
     root: &tempfile::TempDir,
 ) -> lash_conformance::AttachmentBytesFactory {
@@ -52,11 +52,13 @@ pub(crate) fn attachment_bytes(
     let next = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     Arc::new(move || {
         let ordinal = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Arc::new(
-            lash_core_execution::facade_support::FileAttachmentStore::new(
-                root.join(format!("bytes-{ordinal}")),
-            ),
-        ) as Arc<dyn lash_core_execution::AttachmentStore>
+        let path = (root.join(format!("bytes-{ordinal}"))).join("attachments.db");
+        sync_await(async move {
+            lash_sqlite_store::SqliteStoreSet::open(path)
+                .await
+                .expect("SQLite attachment store")
+                .attachment_store()
+        }) as Arc<dyn lash_core_execution::AttachmentStore>
     })
 }
 

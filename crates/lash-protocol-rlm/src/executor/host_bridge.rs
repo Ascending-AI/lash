@@ -1070,9 +1070,12 @@ mod mcp_media_tests {
     #[tokio::test]
     async fn printing_an_mcp_content_block_attaches_its_stored_media() {
         let directory = tempfile::tempdir().expect("attachment directory");
-        let store = lash_core::facade_support::RuntimeAttachmentStore::ephemeral(Arc::new(
-            lash_core::facade_support::FileAttachmentStore::new(directory.path()),
-        ));
+        let store = lash_core::facade_support::RuntimeAttachmentStore::ephemeral(
+            lash_sqlite_store::SqliteStoreSet::open((directory.path()).join("attachments.db"))
+                .await
+                .expect("SQLite attachment store")
+                .attachment_store(),
+        );
         let reference = store
             .put(
                 b"audio bytes".to_vec(),

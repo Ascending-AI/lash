@@ -24,14 +24,26 @@ pub(super) async fn cross_owner_attachment_adoption(
         Arc::new(postgres.session_store_factory()),
     ];
     for (index, factory) in factories.into_iter().enumerate() {
-        // Each backend's laws put bytes through fresh filesystem stores.
+        // Each backend's laws put bytes through fresh SQLite databases.
         let bytes_root = sqlite_root.join(format!("cross-owner-bytes-{index}"));
         let next = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let make_bytes: lash_conformance::AttachmentBytesFactory = Arc::new(move || {
             let ordinal = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Arc::new(lash_core::facade_support::FileAttachmentStore::new(
-                bytes_root.join(ordinal.to_string()),
-            )) as Arc<dyn lash_core::AttachmentStore>
+            let path = (bytes_root.join(ordinal.to_string())).join("attachments.db");
+            std::thread::spawn(move || {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("runtime")
+                    .block_on(async move {
+                        lash_sqlite_store::SqliteStoreSet::open(path)
+                            .await
+                            .expect("SQLite attachment store")
+                            .attachment_store()
+                    })
+            })
+            .join()
+            .expect("runtime thread") as Arc<dyn lash_core::AttachmentStore>
         });
         Box::pin(
             lash_conformance::cross_session_attachment_adoption_conformance(factory, make_bytes),

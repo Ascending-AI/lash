@@ -249,3 +249,8 @@ async fn fenced_process_and_trigger_registration_stays_typed() {
     .await;
     assert_eq!(snapshot(), before, "fenced writers changed rows");
 }
+
+#[path = "conformance/attachment_fail_closed.rs"]
+mod attachment_fail_closed;
+#[path = "conformance/attachment_read_budget.rs"]
+mod attachment_read_budget;

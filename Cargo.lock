@@ -2339,6 +2339,7 @@ dependencies = [
  "lash-internal-lashlang",
  "lash-internal-lashlang-runtime",
  "lash-internal-sansio",
+ "lash-internal-sqlite-store",
  "lash-internal-tool-support",
  "lash-internal-typescript",
  "libc",

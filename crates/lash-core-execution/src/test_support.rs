@@ -9,10 +9,6 @@
 //! This is internal test plumbing, not a downstream-facing fixture — the
 //! public `lash::testing` surface is a different promise and stays one.
 
-pub use crate::attachments::{
-    AttachmentProducer, AttachmentSourcePolicy, AttachmentSourcePolicyError,
-    OpenAttachmentSourcePolicy,
-};
 pub use crate::plugin::{
     PluginOperationFailure, RuntimeServices, SessionObservedProcessOutcome,
     SessionObservedProcessReceipt, SessionObserverIntent,

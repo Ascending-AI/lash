@@ -8,12 +8,7 @@ impl LashRuntime {
         &self,
         items: &[InputItem],
     ) -> Result<Vec<NormalizedItem>, String> {
-        normalize_input_items(
-            items,
-            self.host.core.durability.attachment_store.as_ref(),
-            self.host.core.attachment_source_policy.as_ref(),
-        )
-        .await
+        normalize_input_items(items, self.host.core.durability.attachment_store.as_ref()).await
     }
 }
 

@@ -47,9 +47,12 @@ impl WorkbenchStores {
         .context("open Postgres workbench storage")?;
         let stores = lash::postgres::PostgresStoreSet::new(
             &storage,
-            Arc::new(lash::persistence::FileAttachmentStore::new(
-                data_dir.join("attachments"),
-            )),
+            lash::sqlite::SqliteStoreSet::open(
+                (data_dir.join("attachments")).join("attachments.db"),
+            )
+            .await
+            .context("open SQLite attachment storage")?
+            .attachment_store(),
         );
         Ok(Self {
             stores: Arc::new(stores),

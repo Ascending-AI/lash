@@ -198,13 +198,6 @@ fn drain_area_witnesses() {
     let _ = lash::runtime::RuntimeError::is_retryable;
     // W0080: lash::runtime::RuntimeError::is_terminal [function]
     let _ = lash::runtime::RuntimeError::is_terminal;
-    // W0081: lash::runtime::RuntimeErrorCode::AttachmentSourcePolicyDenied [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::AttachmentSourcePolicyDenied
-        )
-    });
     // W0082: lash::runtime::RuntimeErrorCode::EffectPanicked [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(value, lash::runtime::RuntimeErrorCode::EffectPanicked)

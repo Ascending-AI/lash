@@ -10,7 +10,7 @@
 
 use lash_sansio::SessionId;
 
-// No attachment_store_*_tests!: those laws certify the separate FileAttachmentStore component.
+// Attachment-store laws certify SQLite and S3; PostgreSQL owns only referrers.
 // live_replay_tests! run in tests/live_replay.rs, against the facade's PostgreSQL live replay store.
 // No runtime_persistence_clock_tests!: the backend clock is PostgreSQL-owned and not controllable.
 // No queued-lane resolver macro: engine pacing belongs to the durable engine, not a persistence store.
@@ -32,18 +32,20 @@ lash_conformance::attachment_adoption_tests!({
 });
 
 /// Fresh, empty attachment byte stores for the run-set laws, each a
-/// filesystem store in its own directory under `run`: PostgreSQL keeps no
+/// SQLite database in its own directory under `run`: PostgreSQL keeps no
 /// attachment bytes of its own.
 fn attachment_bytes(root: &tempfile::TempDir) -> lash_conformance::AttachmentBytesFactory {
     let root = root.path().to_path_buf();
     let next = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     Arc::new(move || {
         let ordinal = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Arc::new(
-            lash_core_execution::facade_support::FileAttachmentStore::new(
-                root.join(format!("bytes-{ordinal}")),
-            ),
-        ) as Arc<dyn lash_core_execution::AttachmentStore>
+        let path = (root.join(format!("bytes-{ordinal}"))).join("attachments.db");
+        sync_await(async move {
+            lash_sqlite_store::SqliteStoreSet::open(path)
+                .await
+                .expect("SQLite attachment store")
+                .attachment_store()
+        }) as Arc<dyn lash_core_execution::AttachmentStore>
     })
 }
 
@@ -125,16 +127,20 @@ async fn storage() -> Option<(IsolatedDatabase, PostgresStorage)> {
     Some((database_fixture, storage))
 }
 
-/// The storage ports of a law over `storage`, with filesystem attachment
-/// bytes in a directory the caller keeps alive.
+/// The storage ports of a law over `storage`, with SQLite attachment
+/// bytes in a database the caller keeps alive.
 fn pg_law_stores(
     storage: &PostgresStorage,
 ) -> (tempfile::TempDir, Arc<dyn lash_core_execution::StoreSet>) {
     let attachments = tempfile::tempdir().expect("attachment directory");
-    let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
-        storage,
-        Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(attachments.path())),
-    ));
+    let path = attachments.path().join("attachments.db");
+    let bytes = sync_await(async move {
+        lash_sqlite_store::SqliteStoreSet::open(path)
+            .await
+            .expect("SQLite attachment store")
+            .attachment_store()
+    });
+    let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(storage, bytes));
     (attachments, stores)
 }
 
