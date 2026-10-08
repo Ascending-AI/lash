@@ -19,7 +19,7 @@ fn durable_host(stores: &Arc<dyn StoreSet>) -> ActorContext {
     ActorContext::detached(lash_conformance::backend_over(Arc::clone(stores)))
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn ingress_plugin_callbacks_publish_state_that_survives_a_checkpoint() {
     let (_database_fixture, storage) = storage()
         .await
