@@ -623,7 +623,7 @@ pub(super) async fn prove_openai_compatible_retry_exhaustion()
     let transport_for_assert = transport.clone();
     let retry_options = ProviderOptions {
         reliability: lash_core::provider::ProviderReliability::default()
-            .max_attempts(attempt_budget)
+            .max_attempts(Some(attempt_budget))
             .base_delay_ms(0)
             .max_delay_ms(0)
             .retry_after_cap_ms(Some(0))

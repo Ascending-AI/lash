@@ -667,7 +667,7 @@ async fn immediate_stop_after_a_checkpoint(id: &str) -> Result<ImmediateTail> {
             .generation_retry_guarantee(lash_core::provider::GenerationRetryGuarantee::Idempotent)
             .options(lash_core::facade_support::ProviderOptions {
                 reliability: lash_core::provider::ProviderReliability::default()
-                    .max_attempts(2)
+                    .max_attempts(Some(2))
                     .base_delay_ms(0)
                     .max_delay_ms(0),
                 ..lash_core::facade_support::ProviderOptions::default()

@@ -62,6 +62,10 @@ struct EchoBodies {
 }
 
 impl lash_core_execution::runtime::actor::round::lifecycle::MemberBodies for EchoBodies {
+    fn stop_grace(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(2)
+    }
+
     fn body(
         &self,
         execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,

@@ -131,11 +131,17 @@ impl ProcessEngine for DrainEngine {
             _ => serde_json::from_slice::<u64>(&state.bytes).map_err(infra)?,
         };
         let action = match event {
-            EngineEvent::Started { .. } => EngineAction::Steps(vec![step("first", FIRST)]),
+            EngineEvent::Started { .. } => EngineAction::Steps {
+                steps: vec![step("first", FIRST)],
+                wake: None,
+            },
             EngineEvent::StepSettled { .. } => {
                 settled += 1;
                 if settled == 1 {
-                    EngineAction::Steps(vec![step("second", SECOND)])
+                    EngineAction::Steps {
+                        steps: vec![step("second", SECOND)],
+                        wake: None,
+                    }
                 } else {
                     EngineAction::Terminal(ProcessOutcome::from_tool_output(
                         ToolCallOutput::success(json!({ "drained": true })),
@@ -204,6 +210,10 @@ struct DrainSteps {
 
 #[async_trait::async_trait]
 impl ProcessSteps for DrainSteps {
+    fn stop_grace(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(2)
+    }
+
     async fn admit(
         &self,
         _process: &ProcessRecord,

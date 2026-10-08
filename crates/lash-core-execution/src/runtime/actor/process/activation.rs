@@ -1019,7 +1019,10 @@ impl ProcessActivation {
         let deadline = |bound| ParkDeadline::admitted(bound, now).deadline();
         driver.blocked = None;
         match action {
-            EngineAction::Steps(requests) => {
+            EngineAction::Steps {
+                steps: requests,
+                wake,
+            } => {
                 let tools = requests
                     .iter()
                     .filter(|request| matches!(request, StepRequest::Tool { .. }))
@@ -1109,6 +1112,7 @@ impl ProcessActivation {
                 )
                 .map_err(|refusal| corrupt("a process step's admission", refusal))?;
                 fresh.extend(admitted.members().iter().cloned());
+                driver.blocked = wake.map(|until| Blocked::Sleep { until: until.0 });
             }
             EngineAction::PinKey { name, kind, bound } => {
                 let kind = match kind {
@@ -1422,6 +1426,10 @@ impl MemberBodies for StepBodies {
             // is never asked for. Answer as a stop rather than run anything.
             None => Box::new(|_| Box::pin(async { unknown_step().into() })),
         }
+    }
+
+    fn stop_grace(&self) -> std::time::Duration {
+        self.steps.stop_grace()
     }
 
     fn resolved(

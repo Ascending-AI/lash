@@ -14,7 +14,7 @@ fn requests_of(served: &Served, id: &str) -> Vec<LlmRequest> {
     served
         .lock_recover()
         .iter()
-        .filter(|request| request.scope.session_id.as_str() == id)
+        .filter(|request| request.session_id().map(crate::SessionId::as_str) == Some(id))
         .cloned()
         .collect()
 }

@@ -341,7 +341,7 @@ async fn slow_stream_start_uses_response_start_timeout_classification() {
     let mut provider = openrouter_provider()
         .with_options(ProviderOptions {
             reliability: ProviderReliability::default()
-                .request_timeout(Some(RequestTimeout::Millis(300_000)))
+                .request_timeout_ms(Some(300_000))
                 .response_start_timeout_ms(Some(20_000))
                 .stream_chunk_timeout_ms(Some(120_000)),
             ..ProviderOptions::default()
@@ -376,7 +376,7 @@ async fn slow_mid_stream_uses_chunk_timeout_classification() {
     let mut provider = openrouter_provider()
         .with_options(ProviderOptions {
             reliability: ProviderReliability::default()
-                .request_timeout(Some(RequestTimeout::Millis(300_000)))
+                .request_timeout_ms(Some(300_000))
                 .response_start_timeout_ms(Some(20_000))
                 .stream_chunk_timeout_ms(Some(1_000)),
             ..ProviderOptions::default()
@@ -543,7 +543,7 @@ async fn responses_handle_resumes_after_the_last_sequence_without_duplicate_outp
     let mut provider = OpenAiProvider::new("key")
         .with_options(ProviderOptions {
             reliability: ProviderReliability::default()
-                .max_attempts(2)
+                .max_attempts(Some(2))
                 .base_delay_ms(0)
                 .max_delay_ms(0),
             ..ProviderOptions::default()
@@ -684,7 +684,7 @@ async fn responses_checkpoint_does_not_resume_a_different_logical_call() {
     ]);
     let provider = OpenAiProvider::new("key")
         .with_options(ProviderOptions {
-            reliability: ProviderReliability::default().max_attempts(1),
+            reliability: ProviderReliability::default().max_attempts(Some(1)),
             ..ProviderOptions::default()
         })
         .with_transport(Arc::clone(&transport) as _);
@@ -742,7 +742,7 @@ async fn responses_resume_event_without_sequence_number_fails_closed() {
     let provider = OpenAiProvider::new("key")
         .with_options(ProviderOptions {
             reliability: ProviderReliability::default()
-                .max_attempts(2)
+                .max_attempts(Some(2))
                 .base_delay_ms(0)
                 .max_delay_ms(0),
             ..ProviderOptions::default()
@@ -794,7 +794,7 @@ async fn responses_resume_response_without_event_stream_fails_closed() {
     let provider = OpenAiProvider::new("key")
         .with_options(ProviderOptions {
             reliability: ProviderReliability::default()
-                .max_attempts(2)
+                .max_attempts(Some(2))
                 .base_delay_ms(0)
                 .max_delay_ms(0),
             ..ProviderOptions::default()
@@ -837,7 +837,7 @@ async fn retry_guarantee_stays_none_without_a_response_id_and_for_chat_completio
     let provider = OpenAiProvider::new("key")
         .with_options(ProviderOptions {
             reliability: ProviderReliability::default()
-                .max_attempts(2)
+                .max_attempts(Some(2))
                 .base_delay_ms(0)
                 .max_delay_ms(0),
             ..ProviderOptions::default()
@@ -929,7 +929,7 @@ async fn responses_resume_keeps_cumulative_usage_as_one_generation_bill() {
     let provider = OpenAiProvider::new("key")
         .with_options(ProviderOptions {
             reliability: ProviderReliability::default()
-                .max_attempts(2)
+                .max_attempts(Some(2))
                 .base_delay_ms(0)
                 .max_delay_ms(0),
             ..ProviderOptions::default()

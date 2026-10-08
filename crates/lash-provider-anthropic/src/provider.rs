@@ -51,7 +51,7 @@ impl Provider for AnthropicProvider {
                 serde_json::Value::String(base_url.clone()),
             );
         }
-        if self.stream_termination != StreamTermination::RequireTerminalEvidence {
+        if self.stream_termination != StreamTermination::default() {
             map.insert(
                 "stream_termination".to_string(),
                 serde_json::to_value(self.stream_termination).unwrap_or(Value::Null),
@@ -300,8 +300,12 @@ impl AnthropicProvider {
                 .map_err(replay_origin_conflict_error)?;
             return Err(error.with_partial_response(partial));
         }
-        if stream_termination == StreamTermination::RequireTerminalEvidence
-            && !state.message_stopped
+        // A stream that ended before `message_stop` completes when the route
+        // tolerates EOF and it produced output; one that produced none
+        // failed, whatever the route tolerates.
+        if !state.message_stopped
+            && (stream_termination == StreamTermination::RequireTerminalEvidence
+                || state.blocks.is_empty())
         {
             let mut partial = Self::partial_response(
                 state,

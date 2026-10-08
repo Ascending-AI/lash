@@ -699,7 +699,7 @@ async fn sqlite_memory_cancelled_model_keeps_sealed_attempts() {
     let clock = Arc::new(HeldBackoff::default());
     let calls = Arc::new(AtomicUsize::new(0));
     let mut options = lash_core::facade_support::ProviderOptions::default();
-    options.reliability.retry.max_attempts = 2;
+    options.reliability.retry.max_attempts = Some(2);
     options.reliability.retry.base_delay_ms = 7_000;
     options.reliability.retry.max_delay_ms = 7_000;
     options.reliability.retry.jitter_ms = 0;

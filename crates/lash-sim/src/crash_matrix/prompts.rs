@@ -173,7 +173,10 @@ fn model(world: Weak<World>) -> ProviderHandle {
                 if let Some(world) = world.upgrade() {
                     world.note(format!(
                         "{SENT} {} call={call} attempt={} body={:016x} :: {}",
-                        request.scope.session_id,
+                        request
+                            .session_id()
+                            .map(ToString::to_string)
+                            .unwrap_or_default(),
                         request.scope.attempt.unwrap_or(0),
                         body_digest(&body),
                         serde_json::to_string(&request).expect("record the received request")

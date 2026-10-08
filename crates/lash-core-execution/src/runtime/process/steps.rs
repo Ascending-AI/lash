@@ -3,8 +3,8 @@
 //! A [`StepRequest`] names a catalog tool or one of the engine's own bodies
 //! that its registration declares ([`EngineSteps`](super::EngineSteps)). The
 //! process actor admits it as an admitted execution (S4) under the tool's
-//! declared [`ExecutionPolicy`] (an engine body's is a pinned `Repeatable`)
-//! and an [`ExecutionLimit`] within the tool ceiling,
+//! declared [`ExecutionPolicy`] (an engine body's is the retry policy its
+//! kind declares) and an [`ExecutionLimit`] within the tool ceiling,
 //! commits that admission with the state that asked for it, and only then
 //! runs the body. A step runs the admitted-execution lifecycle a round
 //! member runs ([`lifecycle`](crate::runtime::actor::round::lifecycle)): a
@@ -42,17 +42,6 @@ use crate::runtime::actor::waits::{ParkDeadline, Resolution};
 use crate::{
     ActorContext, PluginError, ProcessId, ProcessRecord, RuntimeEffectControllerError, ToolCatalog,
 };
-
-/// The policy every engine step is admitted under: `Repeatable`, so a crash
-/// before its outcome commits runs the body again from the same input, at
-/// most this many attempts, with no backoff between them.
-#[must_use]
-pub fn engine_step_policy() -> ExecutionPolicy {
-    ExecutionPolicy::repeatable(ENGINE_STEP_ATTEMPTS, 0, 0)
-}
-
-/// The attempts an engine step's body may take.
-const ENGINE_STEP_ATTEMPTS: std::num::NonZeroU32 = std::num::NonZeroU32::MIN.saturating_add(2);
 
 /// A step's admission: what its tool's declaration pins before it runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -236,6 +225,11 @@ pub trait ProcessSteps: Send + Sync {
         step: &StepRequest,
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal>;
+
+    /// How long a step body whose token was cancelled may still answer:
+    /// the runtime's
+    /// [`ExecutionBudgets::stop_grace`](lash_sansio::ExecutionBudgets::stop_grace).
+    fn stop_grace(&self) -> std::time::Duration;
 
     /// The most catalog tool steps `process` may hold at once: the
     /// `max_tool_calls` its start's environment records (FIG-4546). A round

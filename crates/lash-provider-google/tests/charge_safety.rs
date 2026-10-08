@@ -73,7 +73,7 @@ fn request() -> LlmRequest {
 fn handle(body: &'static str) -> (ProviderHandle, Arc<AtomicUsize>) {
     let calls = Arc::new(AtomicUsize::new(0));
     let reliability = ProviderReliability::default()
-        .max_attempts(2)
+        .max_attempts(Some(2))
         .base_delay_ms(0)
         .max_delay_ms(0);
     let provider = GoogleOAuthProvider::new(std::sync::Arc::new(

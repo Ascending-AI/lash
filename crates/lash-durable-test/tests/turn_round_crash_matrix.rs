@@ -765,6 +765,10 @@ struct Catalog {
 }
 
 impl RoundTools for Catalog {
+    fn stop_grace(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(2)
+    }
+
     fn pin(&self, call: &PendingToolCall, now_ms: u64) -> MemberPin {
         let tool = Tool::named(&call.tool_name);
         MemberPin::admitted(

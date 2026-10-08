@@ -8,16 +8,16 @@ pub use lash_http_transport::{build_http_client, header_pairs, run_with_timeout}
 /// whole-request timeout. Non-streaming calls retain the whole-request bound.
 pub fn response_start_timeout(
     request_timeout: Option<Duration>,
-    response_start_timeout: Duration,
+    response_start_timeout: Option<Duration>,
     streaming: bool,
 ) -> Option<Duration> {
     if !streaming {
         return request_timeout;
     }
-    Some(match request_timeout {
-        Some(timeout) => timeout.min(response_start_timeout),
-        None => response_start_timeout,
-    })
+    match (request_timeout, response_start_timeout) {
+        (Some(request), Some(start)) => Some(request.min(start)),
+        (request, start) => request.or(start),
+    }
 }
 
 #[cfg(test)]
@@ -29,7 +29,7 @@ mod tests {
     fn streaming_response_start_timeout_honors_explicit_bound() {
         let timeout = response_start_timeout(
             Some(Duration::from_secs(300)),
-            Duration::from_secs(20),
+            Some(Duration::from_secs(20)),
             true,
         );
         assert_eq!(timeout, Some(Duration::from_secs(20)));
@@ -39,7 +39,7 @@ mod tests {
     fn non_stream_response_start_timeout_uses_request_deadline() {
         let timeout = response_start_timeout(
             Some(Duration::from_secs(300)),
-            Duration::from_secs(120),
+            Some(Duration::from_secs(120)),
             false,
         );
         assert_eq!(timeout, Some(Duration::from_secs(300)));
@@ -54,7 +54,7 @@ mod tests {
             },
             response_start_timeout(
                 Some(Duration::from_secs(300)),
-                Duration::from_secs(20),
+                Some(Duration::from_secs(20)),
                 true,
             ),
             "response start timed out",

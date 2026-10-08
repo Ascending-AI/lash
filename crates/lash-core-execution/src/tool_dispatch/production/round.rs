@@ -750,6 +750,14 @@ impl RoundTools for ProductionRoundTools {
         catalog_policies(&self.context)
     }
 
+    fn stop_grace(&self) -> std::time::Duration {
+        self.context
+            .dispatch()
+            .plugins
+            .execution_budgets()
+            .stop_grace()
+    }
+
     fn refusal(&self, calls: &[crate::sansio::PendingToolCall]) -> Option<Vec<CompletedCall>> {
         // A step's group is the count the session's `max_tool_calls` caps on
         // a protocol without cells: a group past it is refused whole, each

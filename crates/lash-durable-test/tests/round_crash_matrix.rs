@@ -231,6 +231,10 @@ struct Catalog {
 }
 
 impl MemberBodies for Catalog {
+    fn stop_grace(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(2)
+    }
+
     fn resolved(
         &self,
         execution: &round::AdmittedExecution,

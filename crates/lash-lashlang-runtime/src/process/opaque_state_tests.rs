@@ -131,7 +131,6 @@ async fn parent_state_decode_never_compiles_regexp() {
         )),
         runs: 1,
         operations: 1,
-        faults: 0,
         phase: Phase::Ended,
     })
     .expect("encode the engine state");

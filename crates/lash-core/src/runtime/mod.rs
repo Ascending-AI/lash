@@ -335,8 +335,6 @@ pub use queued_drain_policy::{
 pub use scenario_contracts::{RUNTIME_SCENARIO_CONTRACTS, ScenarioContractSpec};
 pub use state::{RuntimeCheckpointComponents, RuntimeSessionState};
 use state::{append_session_nodes_to_state_with_clock, open_agent_frame_in_state_with_clock};
-#[cfg(feature = "testing")]
-pub use turn_boundary::RecordedTurnAssembly;
 pub use turn_control::{
     QueueWithdrawalPublisher, TurnAddress, TurnAttach, TurnCancelAffectedInput,
     TurnCancelInputOutcome, TurnCancelMode, TurnCancelOutcome, TurnCancelReceipt,
@@ -375,7 +373,7 @@ pub use lash_core_llm::turn_vocabulary::{TurnExecutionMetrics, TurnIssue, TurnIs
 pub use lash_core_execution::runtime::{
     AgentFrameRun, AssembledTurn, CodeOutputRecord, DeploymentStore, DeploymentStoreDecorator,
     EventSink, NOOP_EVENT_SINK, NOOP_TURN_ACTIVITY_SINK, NoopEventSink, NoopTurnActivitySink,
-    ProtocolSessionExtension, TerminationPolicy, TurnActivity, TurnActivitySink, TurnEvent,
+    ProtocolSessionExtension, TurnActivity, TurnActivitySink, TurnEvent,
     admit_session_state_generation, admit_session_view, live_session_view, session_is_live,
 };
 

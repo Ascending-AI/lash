@@ -866,6 +866,10 @@ fn outside_writer_range(commit: TurnCommit) -> Result<TurnCommit, TurnError> {
 struct NoTools;
 
 impl RoundTools for NoTools {
+    fn stop_grace(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(2)
+    }
+
     fn pin(&self, _call: &PendingToolCall, _now_ms: u64) -> MemberPin {
         unreachable!("the L3 scenario calls no tool")
     }

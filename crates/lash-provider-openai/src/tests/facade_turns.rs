@@ -10,7 +10,7 @@ use lash::tools::{
     ToolOutcome,
 };
 use lash::{LashCore, TurnEvent, TurnInput};
-use lash_core::provider::{ProviderHandle, ProviderOptions, ProviderReliability, RequestTimeout};
+use lash_core::provider::{ProviderHandle, ProviderOptions};
 use lash_sansio::sync::MutexExt;
 use serde_json::{Value, json};
 
@@ -88,8 +88,8 @@ fn websocket_provider(server: &ScriptedWsServer) -> ProviderHandle {
         // loudly instead of silently passing.
         .with_endpoint_urls("http://127.0.0.1:9/unused-sse", server.url.clone())
         .with_options(ProviderOptions {
-            reliability: ProviderReliability::codex()
-                .request_timeout(Some(RequestTimeout::Millis(5_000)))
+            reliability: crate::CodexProvider::reliability()
+                .request_timeout_ms(Some(5_000))
                 .stream_chunk_timeout_ms(Some(2_000)),
             ..ProviderOptions::default()
         });

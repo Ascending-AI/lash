@@ -713,7 +713,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     //     .recovery_pass_budget(lash::RecoveryPassBudget {
     //         attempt: Duration::from_secs(30),
     //     })
-    //     .termination(lash::runtime::TerminationPolicy::default())
     //     .execution_budgets(lash::ExecutionBudgets::default())
     //     .process_observation_config(lash::process_observation::ProcessObservationConfig::default())
     //     .live_replay_store(Arc::new(lash::observe::InMemoryLiveReplayStore::new(

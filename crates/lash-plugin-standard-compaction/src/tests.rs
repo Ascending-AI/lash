@@ -847,7 +847,7 @@ async fn recovery_runs_unasked_elides_oversized_result_and_decides_a_recovery_fr
     let requests = direct.requests();
     assert_eq!(requests.len(), 1, "exactly one direct summarizer call");
     let request = &requests[0];
-    assert_eq!(request.scope.session_id, SessionId::from("root"));
+    assert_eq!(request.scope.session_id(), Some(&SessionId::from("root")));
     assert!(
         request.scope.request_id.contains("standard-compaction:"),
         "the replay key keeps the compaction attempt identity: {:?}",

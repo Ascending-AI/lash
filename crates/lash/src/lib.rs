@@ -1149,10 +1149,7 @@ pub mod durability {
     };
     /// Durable group and journal values returned by effect-host implementors.
     pub use lash_core::runtime::{JournalReplay, ProcessDriveStep, RecordedKeyRange};
-    pub use lash_core::{
-        facade_support::RuntimeEnvironment, facade_support::RuntimeHostConfig,
-        facade_support::TerminationPolicy,
-    };
+    pub use lash_core::{facade_support::RuntimeEnvironment, facade_support::RuntimeHostConfig};
     pub use lash_core_worker::{DurableProcessWorker, DurableProcessWorkerConfig};
     /// The session work a node runs `SessionTurn` processes with, which
     /// [`DurableProcessWorker`] implements (FIG-5208).
@@ -1365,7 +1362,7 @@ pub mod provider {
         CacheRetention, DefaultProviderFailureClassifier, LlmProfileRequestDefaults,
         ProviderCompletion, ProviderCompletionError, ProviderFailureClassifier,
         ProviderRateLimitPermit, ProviderRateLimitPolicy, ProviderRateLimiter, ProviderReliability,
-        ProviderRetryPolicy, RequestTimeout,
+        ProviderRetryPolicy, RouteBound, RouteBoundAboveBudget,
     };
     pub use lash_core::{
         AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,
@@ -1384,9 +1381,9 @@ pub mod provider {
     pub use lash_core::{
         AttemptOutcome, AttemptUsageOutcome, ChargeSafetyDecision, ExecutionEvidence,
         ExecutionEvidenceCollectionInterruption, ExecutionEvidenceMergeError, LlmRequest,
-        LlmRequestScope, LlmResponse, LlmStreamEvidence, LlmTurnScope, NormalizedError,
-        ProtocolPosition, ProviderEndpointError, RetryClass, RetryDecision, RetryDeclineCause,
-        RetryWait, facade_support::LlmTransportError,
+        LlmRequestOwner, LlmRequestScope, LlmResponse, LlmStreamEvidence, LlmTurnScope,
+        NormalizedError, ProtocolPosition, ProviderEndpointError, RetryClass, RetryDecision,
+        RetryDeclineCause, RetryWait, facade_support::LlmTransportError,
     };
     /// The namespaced failure code carried on
     /// [`LlmTransportError`](facade_support::LlmTransportError) and attempt

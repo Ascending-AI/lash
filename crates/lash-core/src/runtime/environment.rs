@@ -28,7 +28,7 @@ use lash_trace::{TraceContext, TraceLevel, TraceSink};
 
 use super::host::RuntimeWork;
 use super::process::ProcessRegistry;
-use super::{ProcessWorkWiring, RuntimeHostConfig, TerminationPolicy};
+use super::{ProcessWorkWiring, RuntimeHostConfig};
 
 /// Shared runtime infrastructure an embedder builds once and reuses
 /// across every `LashRuntime` it constructs.
@@ -186,11 +186,6 @@ impl RuntimeEnvironmentBuilder {
     /// See [`crate::ToolSourcePolicy`]; the default is `Tolerate`.
     pub fn with_tool_source_policy(mut self, policy: crate::ToolSourcePolicy) -> Self {
         self.env.core.control.tool_source_policy = policy;
-        self
-    }
-
-    pub fn with_termination(mut self, termination: TerminationPolicy) -> Self {
-        self.env.core.control.termination = termination;
         self
     }
 

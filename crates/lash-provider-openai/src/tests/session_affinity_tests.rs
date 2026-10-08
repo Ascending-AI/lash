@@ -12,7 +12,9 @@ async fn host_enabled_session_affinity_works_through_a_custom_proxy_url() {
         .with_transport(transport.clone());
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     let session_id = SessionId::fixture(format!("{}étrailing", "s".repeat(255)));
-    req.scope.session_id = session_id.clone();
+    req.scope.owner = lash_core::LlmRequestOwner::Session {
+        session_id: session_id.clone(),
+    };
     let expected = req.scope.provider_session_affinity_key();
 
     provider.complete(req).await.expect("request succeeds");
@@ -55,7 +57,9 @@ fn request_bodies_carry_only_hashed_session_identity() {
     let raw_session = "tenant:acme-corp:user:jane.doe@acme.com:chat:8f2c";
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.model.metadata_mut().request_defaults.cache_retention = CacheRetention::Short;
-    req.scope.session_id = SessionId::from(raw_session);
+    req.scope.owner = lash_core::LlmRequestOwner::Session {
+        session_id: SessionId::from(raw_session),
+    };
     let session_key = req.provider_session_affinity_key();
     let cache_key = req.provider_prompt_cache_key();
 

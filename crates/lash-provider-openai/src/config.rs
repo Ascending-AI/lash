@@ -185,7 +185,7 @@ impl OpenAiCompatibleProvider {
             CompletionEndpoint::ChatCompletions => OpenAiCompatMaxTokensField::MaxTokens,
         };
         let defaults = OpenAiResolvedCompat {
-            stream_termination: StreamTermination::RequireTerminalEvidence,
+            stream_termination: StreamTermination::default(),
             request_fields: true,
             max_tokens_field,
             reasoning: None,

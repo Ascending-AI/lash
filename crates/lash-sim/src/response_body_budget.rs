@@ -76,7 +76,7 @@ async fn witness(stores: Arc<dyn lash_core::StoreSet>, lane: &str, witness: Witn
                 let provider = OpenAiCompatibleProvider::new("key", "https://provider.test/v1")
                     .with_options(ProviderOptions {
                         reliability: lash_core::provider::ProviderReliability::default()
-                            .max_attempts(2)
+                            .max_attempts(Some(2))
                             .base_delay_ms(0)
                             .max_delay_ms(0),
                         response_body_bytes: Some((body.len() - usize::from(excess)) as u64),

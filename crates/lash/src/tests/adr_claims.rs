@@ -116,7 +116,7 @@ async fn multi_model_turn_keeps_per_call_evidence() -> Result<()> {
         .generation_retry_guarantee(lash_core::provider::GenerationRetryGuarantee::Idempotent)
         .options(lash_core::facade_support::ProviderOptions {
             reliability: lash_core::provider::ProviderReliability::default()
-                .max_attempts(2).base_delay_ms(0).max_delay_ms(0),
+                .max_attempts(Some(2)).base_delay_ms(0).max_delay_ms(0),
             ..Default::default()
         })
         .complete({

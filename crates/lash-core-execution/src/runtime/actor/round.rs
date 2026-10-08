@@ -73,7 +73,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use lash_core_store::tool_run::{CompletionSource, MaterialRef};
 use lash_durable::domain::{AdmittedId, Ordinal, RunRecordKind};
 use lash_durable::{ActorTx, DurableError};
-use lash_sansio::{ExecutionBudgets, ExecutionLimit, ExecutionPolicy, LimitCause};
+use lash_sansio::{ExecutionLimit, ExecutionPolicy, LimitCause};
 use tokio_util::sync::CancellationToken;
 
 use super::ActorContext;
@@ -759,7 +759,7 @@ pub(crate) enum Stop {
 }
 
 /// Run `admitted`'s body under its limit, the context's cancel token,
-/// `member_cancel` and the stop grace: the body's own answer, or why it
+/// `member_cancel` and `stop_grace`, the runtime's: the body's own answer, or why it
 /// stopped without one. Reports the body's entry to the context's probe.
 ///
 /// The body runs for at most one slice of what remains of its limit on the
@@ -774,6 +774,7 @@ pub(crate) async fn run_bounded(
     admitted: &AdmittedExecution,
     body: ToolBody,
     member_cancel: &CancellationToken,
+    stop_grace: std::time::Duration,
 ) -> Result<SettledOutput, Stop> {
     // The admission may have been acknowledged after the node paused past
     // its self-stop deadline: by then the actor's new owner may have
@@ -810,10 +811,9 @@ pub(crate) async fn run_bounded(
     if stopped == Stop::Activation {
         return Err(stopped);
     }
-    let grace = ExecutionBudgets::default().stop_grace();
     tokio::select! {
         output = running => Ok(output),
-        () = clock.sleep(grace) => Err(stopped),
+        () = clock.sleep(stop_grace) => Err(stopped),
     }
 }
 

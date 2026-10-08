@@ -427,6 +427,10 @@ struct LawBodies {
 }
 
 impl MemberBodies for LawBodies {
+    fn stop_grace(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(2)
+    }
+
     fn body(&self, execution: &AdmittedExecution) -> MemberBody {
         let shared = Arc::clone(&self.shared);
         let database = Arc::clone(&self.database);

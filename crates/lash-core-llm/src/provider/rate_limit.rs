@@ -542,7 +542,7 @@ mod admission_tests {
         let options = ProviderOptions {
             reliability: ProviderReliability {
                 retry: ProviderRetryPolicy {
-                    max_attempts: 2,
+                    max_attempts: Some(2),
                     base_delay_ms: 0,
                     max_delay_ms: 0,
                     jitter_ms: 0,

@@ -14,7 +14,7 @@ The runtime owns per-handle reliability: timeouts, retry accounting and local ra
 
 Retryable quota failures with `Retry-After` can defer without consuming ordinary attempts. Courtesy is bounded by cumulative `throttle_wait_budget_ms`, default 90 seconds, and eight courtesy calls. Zero disables the wait budget. After either bound is exhausted, throttles consume the ordinary retry ladder. Total calls are bounded by courtesy calls plus `max_attempts`.
 
-Decorators forward `close`, keep awaits cancellation-safe and re-wrap each construction site. Serialized provider configuration contains the underlying provider, so reconstruction does not recreate host wrapper state. Direct completions accept a host session id and otherwise use a fresh `direct:{uuid}` identity. Hosts can assign their own traffic classes from those ids.
+Decorators forward `close`, keep awaits cancellation-safe and re-wrap each construction site. Serialized provider configuration contains the underlying provider, so reconstruction does not recreate host wrapper state. Direct completions carry a typed owner (`LlmRequestOwner`: a session, a process or the host) and never fabricate a session id; a session or process owner keys the request by that owner, and a host or ownerless completion uses a fresh `direct:{uuid}` scope. Hosts can assign their own traffic classes from those owners.
 
 ## Alternatives and consequences
 

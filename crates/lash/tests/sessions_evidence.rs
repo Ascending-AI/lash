@@ -132,12 +132,6 @@ fn drain_area_witnesses() {
     });
     // W0047: lash::durability::RuntimeHostConfig::with_clock [function]
     let _ = lash::durability::RuntimeHostConfig::with_clock;
-    // W0049: lash::durability::TerminationPolicy [struct]
-    type_witness::<lash::durability::TerminationPolicy>();
-    // W0050: lash::durability::TerminationPolicy::treat_missing_done_as_failure [field]
-    field_witness(|value: &lash::durability::TerminationPolicy| {
-        let _ = &value.treat_missing_done_as_failure;
-    });
     // W0051: lash::messages::Message::is_transient [function]
     let _ = lash::messages::Message::is_transient;
     // W0052: lash::persistence::ChronologicalProjection::from_turn_view [function]
@@ -1156,10 +1150,6 @@ fn drain_area_witnesses() {
     // W0436: lash::runtime::RuntimeControlConfig::process_tool_visibility_filter [field]
     field_witness(|value: &lash::runtime::RuntimeControlConfig| {
         let _ = &value.process_tool_visibility_filter;
-    });
-    // W0437: lash::runtime::RuntimeControlConfig::termination [field]
-    field_witness(|value: &lash::runtime::RuntimeControlConfig| {
-        let _ = &value.termination;
     });
     // W0438: lash::runtime::RuntimeDurabilityConfig [struct]
     type_witness::<lash::runtime::RuntimeDurabilityConfig>();

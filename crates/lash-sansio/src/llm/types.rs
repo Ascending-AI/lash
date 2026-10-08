@@ -519,10 +519,24 @@ pub fn tool_call_input_replay_string(input_json: &str) -> String {
     }
 }
 
+/// Who a model call is made for (ADR 0015, ADR 0022): the session or
+/// process that owns it, or the host itself. A provider decorator attributes
+/// the call by it; lash never invents an owner's id.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "owner", rename_all = "snake_case", deny_unknown_fields)]
+pub enum LlmRequestOwner {
+    /// A session: its turns, and the tools and plugins its turns run.
+    Session { session_id: SessionId },
+    /// A process: the tools its steps run.
+    Process { process_id: crate::ProcessId },
+    /// The host's own direct call, made for no session or process.
+    Host,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LlmRequestScope {
-    /// Logical Lash session.
-    pub session_id: SessionId,
+    /// Who the call is made for.
+    pub owner: LlmRequestOwner,
     /// Durable agent frame/branch inside the session. Providers must use this
     /// when caching continuation state so frame switches do not inherit each
     /// other's provider-local response ids.
@@ -553,13 +567,29 @@ pub struct LlmTurnScope {
 }
 
 impl LlmRequestScope {
+    /// The scope of a call `session_id` makes.
     pub fn new(
         session_id: impl Into<SessionId>,
         agent_frame_id: impl Into<String>,
         request_id: impl Into<String>,
     ) -> Self {
+        Self::owned(
+            LlmRequestOwner::Session {
+                session_id: session_id.into(),
+            },
+            agent_frame_id,
+            request_id,
+        )
+    }
+
+    /// The scope of a call made for `owner`.
+    pub fn owned(
+        owner: LlmRequestOwner,
+        agent_frame_id: impl Into<String>,
+        request_id: impl Into<String>,
+    ) -> Self {
         Self {
-            session_id: session_id.into(),
+            owner,
             agent_frame_id: agent_frame_id.into(),
             request_id: request_id.into(),
             turn: None,
@@ -574,8 +604,27 @@ impl LlmRequestScope {
         self
     }
 
+    /// The session the call is made for, when a session owns it.
+    #[must_use]
+    pub fn session_id(&self) -> Option<&SessionId> {
+        match &self.owner {
+            LlmRequestOwner::Session { session_id } => Some(session_id),
+            LlmRequestOwner::Process { .. } | LlmRequestOwner::Host => None,
+        }
+    }
+
+    /// The owner's stable key: a session's id, or the kind and id of a
+    /// process or of the host's own call, so two owners never share one.
+    pub(crate) fn owner_key(&self) -> String {
+        match &self.owner {
+            LlmRequestOwner::Session { session_id } => session_id.to_string(),
+            LlmRequestOwner::Process { process_id } => format!("process:{process_id}"),
+            LlmRequestOwner::Host => format!("host:{}", self.request_id),
+        }
+    }
+
     pub fn continuation_key(&self) -> String {
-        format!("{}::{}", self.session_id, self.agent_frame_id)
+        format!("{}::{}", self.owner_key(), self.agent_frame_id)
     }
 }
 
@@ -1198,8 +1247,9 @@ impl LlmRequest {
         }
     }
 
-    pub fn session_id(&self) -> &SessionId {
-        &self.scope.session_id
+    /// The session the call is made for, when a session owns it.
+    pub fn session_id(&self) -> Option<&SessionId> {
+        self.scope.session_id()
     }
 
     pub fn agent_frame_id(&self) -> &str {

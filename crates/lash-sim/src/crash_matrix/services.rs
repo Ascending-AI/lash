@@ -787,6 +787,10 @@ impl lash::tracing::TraceAdmissionCandidate for Untold {
 }
 
 impl RoundTools for Catalog {
+    fn stop_grace(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(2)
+    }
+
     /// A [`TurnScript::Round`] turn's calls are traced, so its admission's
     /// exports are recorded under `round.traced`, which the matrix cuts
     /// (FIG-5452).

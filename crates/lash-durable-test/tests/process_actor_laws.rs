@@ -167,15 +167,16 @@ impl ProcessEngine for LawEngine {
             ("await", EngineEvent::ProcessWaitTimedOut { .. }) => {
                 success(json!({ "timed_out": true }))
             }
-            ("refused_step", EngineEvent::Started { .. }) => {
-                EngineAction::Steps(vec![StepRequest::Tool {
+            ("refused_step", EngineEvent::Started { .. }) => EngineAction::Steps {
+                steps: vec![StepRequest::Tool {
                     language_execution: None,
                     step: StepName("refused".to_owned()),
                     tool: ToolId::new(REFUSED_TOOL),
                     input: json!({}),
                     site: None,
-                }])
-            }
+                }],
+                wake: None,
+            },
             ("refused_step", EngineEvent::StepSettled { .. }) => success(json!({ "ran": true })),
             ("flaky", EngineEvent::Started { .. }) => success(json!({ "ran": true })),
             _ => EngineAction::Idle,
@@ -233,6 +234,10 @@ struct LawSteps;
 
 #[async_trait::async_trait]
 impl ProcessSteps for LawSteps {
+    fn stop_grace(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(2)
+    }
+
     async fn admit(
         &self,
         _process: &ProcessRecord,

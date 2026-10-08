@@ -445,7 +445,7 @@ fn retried_attempt_provider(superseded: &'static str, answer: &'static str) -> P
         .generation_retry_guarantee(GenerationRetryGuarantee::Idempotent)
         .options(ProviderOptions {
             reliability: ProviderReliability::default()
-                .max_attempts(2)
+                .max_attempts(Some(2))
                 .base_delay_ms(0)
                 .max_delay_ms(0),
             ..ProviderOptions::default()

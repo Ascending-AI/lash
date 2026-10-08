@@ -272,6 +272,9 @@ pub struct ProcessEngineRegistration {
     engine: Arc<dyn ProcessEngine>,
     admission: ProcessEngineAdmission,
     engine_steps: Option<Arc<dyn super::engine_state::EngineSteps>>,
+    /// The host's retry policies for engine step kinds, over the engine's.
+    engine_step_retries:
+        BTreeMap<super::engine_state::EngineStepKind, lash_sansio::ExecutionPolicy>,
 }
 
 impl ProcessEngineRegistration {
@@ -290,6 +293,7 @@ impl ProcessEngineRegistration {
             engine,
             admission,
             engine_steps: None,
+            engine_step_retries: BTreeMap::new(),
         })
     }
 
@@ -300,6 +304,7 @@ impl ProcessEngineRegistration {
             engine,
             admission,
             engine_steps: None,
+            engine_step_retries: BTreeMap::new(),
         }
     }
 
@@ -309,6 +314,19 @@ impl ProcessEngineRegistration {
     #[must_use]
     pub fn with_engine_steps(mut self, steps: Arc<dyn super::engine_state::EngineSteps>) -> Self {
         self.engine_steps = Some(steps);
+        self
+    }
+
+    /// Retry the engine's `kind` steps under `policy` instead of the policy
+    /// its [`EngineSteps`](super::engine_state::EngineSteps) declare: the
+    /// host's override of the engine author's default, for this deployment.
+    #[must_use]
+    pub fn with_engine_step_retry(
+        mut self,
+        kind: super::engine_state::EngineStepKind,
+        policy: lash_sansio::ExecutionPolicy,
+    ) -> Self {
+        self.engine_step_retries.insert(kind, policy);
         self
     }
 }
@@ -340,6 +358,38 @@ impl WeakProcessEngineRegistry {
             engine_steps: self.engine_steps.upgrade()?,
             artifact_ports: self.artifact_ports.clone(),
         })
+    }
+}
+
+/// An engine's steps under the host's per-kind retry overrides.
+struct RetriedEngineSteps {
+    steps: Arc<dyn super::engine_state::EngineSteps>,
+    retries: BTreeMap<super::engine_state::EngineStepKind, lash_sansio::ExecutionPolicy>,
+}
+
+#[async_trait::async_trait]
+impl super::engine_state::EngineSteps for RetriedEngineSteps {
+    fn kinds(&self) -> Vec<super::engine_state::EngineStepKind> {
+        self.steps.kinds()
+    }
+
+    fn execution(&self, kind: &super::engine_state::EngineStepKind) -> std::time::Duration {
+        self.steps.execution(kind)
+    }
+
+    fn retry(&self, kind: &super::engine_state::EngineStepKind) -> lash_sansio::ExecutionPolicy {
+        self.retries
+            .get(kind)
+            .copied()
+            .unwrap_or_else(|| self.steps.retry(kind))
+    }
+
+    async fn run(
+        &self,
+        run: super::engine_state::EngineStepRun,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> crate::runtime::actor::round::SettledOutput {
+        self.steps.run(run, cancel).await
     }
 }
 
@@ -377,9 +427,16 @@ impl ProcessEngineRegistry {
             engine,
             admission,
             engine_steps: steps,
+            engine_step_retries: retries,
         } = registration;
         match steps {
-            Some(steps) => engine_steps.insert(engine.kind().to_string(), steps),
+            Some(steps) if retries.is_empty() => {
+                engine_steps.insert(engine.kind().to_string(), steps)
+            }
+            Some(steps) => engine_steps.insert(
+                engine.kind().to_string(),
+                Arc::new(RetriedEngineSteps { steps, retries }),
+            ),
             None => engine_steps.remove(engine.kind()),
         };
         engines.insert(engine.kind().to_string(), engine);

@@ -108,6 +108,10 @@ struct LashlangSteps {
 
 #[async_trait::async_trait]
 impl ProcessSteps for LashlangSteps {
+    fn stop_grace(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(2)
+    }
+
     async fn admit(
         &self,
         _process: &ProcessRecord,

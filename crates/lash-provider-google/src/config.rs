@@ -133,7 +133,7 @@ impl GoogleOAuthProvider {
             resolved_project_id: Arc::new(OnceLock::new()),
             options: ProviderOptions::default(),
             extra_headers: Default::default(),
-            stream_termination: StreamTermination::EofTolerated,
+            stream_termination: StreamTermination::default(),
             transport: Arc::clone(&DEFAULT_HTTP_TRANSPORT),
         }
     }

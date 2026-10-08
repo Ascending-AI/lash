@@ -24,8 +24,7 @@ use lash_core_execution::runtime::actor::round::{
 };
 use lash_core_execution::runtime::actor::waits::Resolution;
 use lash_core_execution::runtime::process::steps::{
-    ProcessSteps, StepAdmission, StepRefusal, StepRuntime, engine_step_policy, tool_step_output,
-    tool_step_resolved,
+    ProcessSteps, StepAdmission, StepRefusal, StepRuntime, tool_step_output, tool_step_resolved,
 };
 use lash_core_execution::tool_run::CompletionSource;
 use lash_core_execution::{
@@ -167,6 +166,15 @@ pub fn process_steps(worker: &DurableProcessWorker) -> Arc<dyn ProcessSteps> {
 
 #[lash_core::async_trait]
 impl ProcessSteps for WorkerSteps {
+    fn stop_grace(&self) -> std::time::Duration {
+        self.0
+            .config
+            .runtime_host
+            .control
+            .execution_budgets
+            .stop_grace()
+    }
+
     async fn max_tool_calls(
         &self,
         process: &ProcessRecord,
@@ -200,15 +208,15 @@ impl ProcessSteps for WorkerSteps {
         match step {
             StepRequest::Engine { kind, .. } => {
                 let engine = engine_kind(process).unwrap_or_default();
-                let total = self
+                let steps = self
                     .0
                     .config
                     .runtime_host
                     .process_engines
-                    .engine_steps(engine, kind)?
-                    .execution(kind);
+                    .engine_steps(engine, kind)?;
+                let total = steps.execution(kind);
                 Ok(StepAdmission {
-                    policy: engine_step_policy(),
+                    policy: steps.retry(kind),
                     limit: ExecutionLimit::starting_at(now_ms, total, total),
                     park: None,
                 })

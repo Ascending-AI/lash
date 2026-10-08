@@ -19,7 +19,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use lash_core::tool_run::{AvailableEvidence, KnownFailureReason, MaterialOwner, MaterialRole};
+use lash_core::tool_run::{KnownFailureReason, MaterialOwner, MaterialRole};
 use lash_core::{EngineStepRun, Material, ProcessId, SettledOutput};
 use lash_sansio::sync::MutexExt;
 use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
@@ -28,7 +28,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::injection;
 use super::state::{BatchShape, EncodedOutcome, Injection, IssuedLeaf, IssuedOperation};
-use super::state::{TimerInput, VmRunInput, VmRunOutput};
+use super::state::{VmRunInput, VmRunOutput};
 use crate::bridge::{ExecutionCancellation, lashlang_value_to_json};
 use crate::process::{
     lashlang_program_hash, process_lashlang_execution_result, process_lashlang_failure,
@@ -59,25 +59,6 @@ pub(crate) async fn run_vm_step(
             Err(error) => failed(&process, &VmRunFault(error.to_string())),
         },
         Err(fault) => failed(&process, &fault),
-    }
-}
-
-/// Run a [`TIMER_STEP`](super::state::TIMER_STEP): settle at its deadline.
-/// Re-run after a crash, it settles at the same deadline.
-pub(crate) async fn run_timer_step(run: EngineStepRun, stop: CancellationToken) -> SettledOutput {
-    let process = run.process.clone();
-    let input: TimerInput = match serde_json::from_value(run.input) {
-        Ok(input) => input,
-        Err(error) => return failed(&process, &VmRunFault(error.to_string())),
-    };
-    let wait = u64::try_from(input.until_ms.saturating_sub(run.now.0)).unwrap_or(0);
-    tokio::select! {
-        () = run.clock.sleep(std::time::Duration::from_millis(wait)) => {
-            completed(&process, "null".to_owned())
-        }
-        () = stop.cancelled() => SettledOutput::Cancelled {
-            evidence: AvailableEvidence::default(),
-        },
     }
 }
 

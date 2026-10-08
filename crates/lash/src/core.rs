@@ -2,7 +2,7 @@ use crate::support::{
     Arc, DeploymentStore, EmbedError, InMemoryLiveReplayStore, LashRuntime, LashSession,
     LiveReplayStore, ParkedSession, PluginFactory, PluginHost, PluginSpec, PluginStack,
     ProcessRegistry, Result, RuntimeEnvironment, RuntimeHandle, RuntimeHostConfig, SessionBuilder,
-    SessionListFilter, SessionView, StaticPluginFactory, TerminationPolicy, ToolProvider,
+    SessionListFilter, SessionView, StaticPluginFactory, ToolProvider,
 };
 use lash_core::ActorContext;
 use lash_core::Backend;
@@ -641,7 +641,6 @@ pub struct LashCoreBuilder {
     telemetry: Option<lash_trace::otel::OtelTelemetry>,
     trace_level: Option<lash_trace::TraceLevel>,
     trace_context: Option<lash_trace::TraceContext>,
-    termination: Option<TerminationPolicy>,
     tool_source_policy: Option<lash_core::ToolSourcePolicy>,
     execution_budgets: Option<lash_core::ExecutionBudgets>,
     delta_coalescing: Option<crate::DeltaCoalescing>,
@@ -675,7 +674,6 @@ impl LashCoreBuilder {
             telemetry: None,
             trace_level: None,
             trace_context: None,
-            termination: None,
             tool_source_policy: None,
             execution_budgets: None,
             delta_coalescing: None,
@@ -859,14 +857,6 @@ impl LashCoreBuilder {
 
     pub fn trace_context(mut self, trace_context: lash_trace::TraceContext) -> Self {
         self.trace_context = Some(trace_context);
-        self
-    }
-
-    /// The termination policy each new run records when it first resolves.
-    /// A run assembles its terminal under the policy it recorded, so a
-    /// change here reaches only runs that start after it.
-    pub fn termination(mut self, termination: TerminationPolicy) -> Self {
-        self.termination = Some(termination);
         self
     }
 

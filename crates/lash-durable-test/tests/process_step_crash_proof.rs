@@ -161,13 +161,16 @@ impl ProcessEngine for WriteEngine {
         let action = match event {
             EngineEvent::Started { payload } => {
                 let step = lash_core_execution::StepName("write".to_owned());
-                EngineAction::Steps(vec![lash_core_execution::StepRequest::Tool {
-                    language_execution: None,
-                    step,
-                    tool: lash_sansio::ToolId::new(TOOL),
-                    input: payload,
-                    site: None,
-                }])
+                EngineAction::Steps {
+                    steps: vec![lash_core_execution::StepRequest::Tool {
+                        language_execution: None,
+                        step,
+                        tool: lash_sansio::ToolId::new(TOOL),
+                        input: payload,
+                        site: None,
+                    }],
+                    wake: None,
+                }
             }
             EngineEvent::StepSettled { outcome, .. } => {
                 EngineAction::Terminal(lash_core_execution::ProcessOutcome::from_tool_output(

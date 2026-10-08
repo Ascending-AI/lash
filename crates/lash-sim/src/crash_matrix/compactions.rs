@@ -152,7 +152,13 @@ fn model(world: Weak<World>) -> ProviderHandle {
             if summarizes(request)
                 && let Some(world) = lowering.upgrade()
             {
-                world.note(format!("{LOWERED} {} :: {body}", request.scope.session_id));
+                world.note(format!(
+                    "{LOWERED} {} :: {body}",
+                    request
+                        .session_id()
+                        .map(ToString::to_string)
+                        .unwrap_or_default()
+                ));
             }
             body
         })
@@ -163,7 +169,11 @@ fn model(world: Weak<World>) -> ProviderHandle {
                 if summary && let Some(world) = world.upgrade() {
                     world.note(format!(
                         "{SENT} {} :: {}",
-                        request.scope.session_id, body.body
+                        request
+                            .session_id()
+                            .map(ToString::to_string)
+                            .unwrap_or_default(),
+                        body.body
                     ));
                 }
                 let answer = |text: &str| LlmResponse {
@@ -174,7 +184,7 @@ fn model(world: Weak<World>) -> ProviderHandle {
                     ..LlmResponse::default()
                 };
                 if summary
-                    || TurnScript::of(&request.scope.session_id) != Some(TurnScript::Pressure)
+                    || request.session_id().and_then(TurnScript::of) != Some(TurnScript::Pressure)
                 {
                     return Ok(answer(SUMMARY));
                 }
@@ -191,7 +201,10 @@ fn model(world: Weak<World>) -> ProviderHandle {
                 if let Some(world) = world.upgrade() {
                     world.note(format!(
                         "{RECOVERED} {} :: summary={} ask={}",
-                        request.scope.session_id,
+                        request
+                            .session_id()
+                            .map(ToString::to_string)
+                            .unwrap_or_default(),
                         rendered.contains(SUMMARY),
                         rendered.contains(ASK)
                     ));

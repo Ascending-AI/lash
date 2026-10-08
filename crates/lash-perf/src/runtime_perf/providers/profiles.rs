@@ -43,7 +43,7 @@ finish({ len: result.value });"#,
         return text_profile(typescript_block("finish({ len: chunk.length });"));
     }
 
-    if request.output_spec.is_some() || request.session_id().ends_with("-llm-query") {
+    if request.output_spec.is_some() {
         if request.output_spec.as_ref().is_some_and(|spec| {
             matches!(spec, LlmOutputSpec::JsonSchema(schema) if schema.name == "runtime_perf_oblique_judge")
         }) {

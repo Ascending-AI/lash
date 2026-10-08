@@ -16,10 +16,7 @@
 //! config. Every physical turn of the run reuses the one record: commands
 //! apply only at turn boundaries. The record is the run's execution view
 //! only; commits keep writing the sticky session config, so a spec's
-//! overrides never become the session's. The record also carries the host's
-//! termination policy from the run's first execution, which terminal
-//! assembly reads, so a worker with another policy assembles the same
-//! terminal for the same recorded work (FIG-4389).
+//! overrides never become the session's.
 //!
 //! The record is data. The model binding it records is bound to a live
 //! provider handle after the step, on every execution: a handle is this
@@ -98,7 +95,6 @@ impl LashRuntime {
             run: run.clone(),
             snapshot: crate::store::persisted_session_config_from_state(&self.state),
             spec,
-            termination: self.host.core.control.termination.clone(),
             protocol_driver: self
                 .session
                 .as_ref()
@@ -183,9 +179,6 @@ struct ResolveTurnConfigRunner {
     run: TurnId,
     snapshot: PersistedSessionConfig,
     spec: Option<RecordedRunSpec>,
-    /// This worker's host termination policy, which a run records on its
-    /// first resolution (FIG-4389); a replay decodes the record instead.
-    termination: crate::runtime::TerminationPolicy,
     protocol_driver: Option<std::sync::Arc<dyn crate::plugin::ProtocolDriverPlugin>>,
     /// The session's config owners, which judge every namespace a spec's
     /// overrides changed (FIG-4379).
@@ -203,14 +196,13 @@ struct RecordedRunSpec {
 }
 
 impl RecordedRunSpec {
-    /// Resolve this spec against `snapshot` under `termination`; `owners`
-    /// apply the protocol options it states.
+    /// Resolve this spec against `snapshot`; `owners` apply the protocol
+    /// options it states.
     /// A fault a redeploy or a retry repairs is marked so it never becomes
     /// the step's recorded outcome.
     async fn resolve(
         self,
         snapshot: &PersistedSessionConfig,
-        termination: crate::runtime::TerminationPolicy,
         owners: &dyn crate::RunOptionsOwner,
     ) -> Result<crate::ResolvedRun, RuntimeEffectControllerError> {
         let repairable = |code: RuntimeErrorCode, message: String| {
@@ -258,14 +250,8 @@ impl RecordedRunSpec {
                 )
             }
         };
-        spec.resolve(
-            snapshot,
-            definition,
-            termination,
-            self.models.as_ref(),
-            owners,
-        )
-        .map_err(|error| run_resolve_fault(&self.hash, error))
+        spec.resolve(snapshot, definition, self.models.as_ref(), owners)
+            .map_err(|error| run_resolve_fault(&self.hash, error))
     }
 }
 
@@ -308,14 +294,13 @@ impl RuntimeEffectLocalRunner for ResolveTurnConfigRunner {
             ));
         }
         let mut resolved = match self.spec {
-            None => crate::ResolvedRun::snapshot(self.snapshot, self.termination),
+            None => crate::ResolvedRun::snapshot(self.snapshot),
             Some(spec) => {
                 let owners: &dyn crate::RunOptionsOwner = match self.config_registry.as_deref() {
                     Some(registry) => registry,
                     None => &crate::NoRunOptionsOwner,
                 };
-                spec.resolve(&self.snapshot, self.termination, owners)
-                    .await?
+                spec.resolve(&self.snapshot, owners).await?
             }
         };
         // Native execution config is part of this recorded resolution. Cold

@@ -914,7 +914,7 @@ async fn a_replay_after_the_key_left_the_catalog_completes_with_zero_resolver_ca
             .generation_retry_guarantee(lash::provider::GenerationRetryGuarantee::Idempotent)
             .options(lash::provider::ProviderOptions {
                 reliability: lash::provider::ProviderReliability::default()
-                    .max_attempts(2)
+                    .max_attempts(Some(2))
                     .base_delay_ms(0)
                     .max_delay_ms(0),
                 ..Default::default()

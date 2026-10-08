@@ -1064,7 +1064,7 @@ async fn drive_streaming_response(
     provider: &mut OpenAiCompatibleProvider,
     endpoint: CompletionEndpoint,
     body: LlmHttpBody,
-    chunk_timeout: std::time::Duration,
+    chunk_timeout: Option<std::time::Duration>,
     stream_bounds: SseStreamBounds,
     context: ResponseContext,
     capture: &mut ResponseMetadataCapture,
@@ -1090,7 +1090,7 @@ async fn drive_streaming_response(
 async fn drive_streaming_responses(
     provider: &mut OpenAiCompatibleProvider,
     body: LlmHttpBody,
-    chunk_timeout: std::time::Duration,
+    chunk_timeout: Option<std::time::Duration>,
     stream_bounds: SseStreamBounds,
     context: ResponseContext,
     capture: &mut ResponseMetadataCapture,
@@ -1208,8 +1208,12 @@ async fn drive_streaming_responses(
         ));
     }
 
-    if stream_termination == StreamTermination::RequireTerminalEvidence
-        && !state.terminal_event_seen
+    // A stream that ended without its terminal event completes when its
+    // route tolerates EOF and it produced output; one that produced none
+    // failed before it began, whatever the route tolerates.
+    if !state.terminal_event_seen
+        && (stream_termination == StreamTermination::RequireTerminalEvidence
+            || !state.output_started())
     {
         seal_open_blocks(&mut state);
         return Err(responses_stream_failure(
@@ -1261,7 +1265,7 @@ async fn drive_streaming_responses(
 
 async fn drive_streaming_chat(
     body: LlmHttpBody,
-    chunk_timeout: std::time::Duration,
+    chunk_timeout: Option<std::time::Duration>,
     stream_bounds: SseStreamBounds,
     context: ResponseContext,
     capture: &mut ResponseMetadataCapture,
@@ -1334,12 +1338,13 @@ async fn drive_streaming_chat(
         return Err(error.with_partial_response(chat_response_from_state(state, &url)));
     }
 
-    if stream_termination == StreamTermination::RequireTerminalEvidence
-        && state
-            .execution_evidence
-            .as_ref()
-            .and_then(|evidence| evidence.provider_finish_reason.as_ref())
-            .is_none()
+    if state
+        .execution_evidence
+        .as_ref()
+        .and_then(|evidence| evidence.provider_finish_reason.as_ref())
+        .is_none()
+        && (stream_termination == StreamTermination::RequireTerminalEvidence
+            || state.parts().is_empty())
     {
         seal_open_blocks(&mut state);
         return Err(LlmTransportError::new("Stream ended without finish_reason")

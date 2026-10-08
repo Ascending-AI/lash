@@ -594,7 +594,7 @@ impl Provider for GoogleOAuthProvider {
                 serde_json::Value::String(project_id.clone()),
             );
         }
-        if self.stream_termination != StreamTermination::EofTolerated {
+        if self.stream_termination != StreamTermination::default() {
             map.insert(
                 "stream_termination".to_string(),
                 serde_json::to_value(self.stream_termination).unwrap_or(Value::Null),

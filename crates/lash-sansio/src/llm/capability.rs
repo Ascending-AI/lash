@@ -202,12 +202,17 @@ impl SamplingCapability {
 }
 
 /// Host-supplied policy for interpreting a clean EOF on a provider stream.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+/// A route or model capability that states none tolerates EOF: a stream
+/// that ends without its terminal event completes as stopped, as most
+/// provider SDKs complete it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum StreamTermination {
-    /// EOF is successful only after the dialect's semantic terminal event.
+    /// EOF is successful only after the dialect's semantic terminal event;
+    /// a stream that ends before it fails typed, its partial output kept.
     RequireTerminalEvidence,
     /// Clean EOF is a valid completion boundary for this route.
+    #[default]
     EofTolerated,
 }
 

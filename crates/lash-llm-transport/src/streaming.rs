@@ -219,7 +219,7 @@ fn timeout_error(message: &str) -> LlmTransportError {
 
 pub async fn drive_sse_response<F>(
     body: LlmHttpBody,
-    chunk_timeout: Duration,
+    chunk_timeout: Option<Duration>,
     bounds: SseStreamBounds,
     read_timeout_message: &str,
     request_timeout_message: &str,
@@ -248,14 +248,18 @@ where
         LlmHttpBody::Streamed(stream) => stream,
     };
     loop {
-        let chunk_deadline = Instant::now() + chunk_timeout;
-        let (read_deadline, absolute_deadline_wins) = match bounds.absolute_deadline {
-            Some(absolute_deadline) if absolute_deadline <= chunk_deadline => {
-                (absolute_deadline, true)
-            }
-            _ => (chunk_deadline, false),
+        let chunk_deadline = chunk_timeout.map(|timeout| Instant::now() + timeout);
+        let (read_deadline, absolute_deadline_wins) =
+            match (bounds.absolute_deadline, chunk_deadline) {
+                (Some(absolute), Some(chunk)) if absolute <= chunk => (Some(absolute), true),
+                (Some(absolute), None) => (Some(absolute), true),
+                (_, chunk) => (chunk, false),
+            };
+        let read = match read_deadline {
+            Some(deadline) => tokio::time::timeout_at(deadline, stream.next_chunk()).await,
+            None => Ok(stream.next_chunk().await),
         };
-        let chunk_result = match tokio::time::timeout_at(read_deadline, stream.next_chunk()).await {
+        let chunk_result = match read {
             Ok(result) => result,
             Err(_) => {
                 // Read timed out: flush whatever event is already buffered so a
@@ -394,7 +398,7 @@ mod tests {
             LlmHttpBody::streamed(SlowMidStream {
                 delivered_first_chunk: false,
             }),
-            Duration::from_millis(1),
+            Some(Duration::from_millis(1)),
             bounds(1024, 4096),
             "stream chunk timed out",
             "request timed out",
@@ -436,7 +440,7 @@ mod tests {
         stream_bounds.absolute_deadline = Some(Instant::now() + Duration::from_secs(300));
         let result = drive_sse_response(
             LlmHttpBody::streamed(SlowKeepaliveStream { remaining: 4 }),
-            Duration::from_secs(120),
+            Some(Duration::from_secs(120)),
             stream_bounds,
             "stream chunk timed out",
             "request timed out",

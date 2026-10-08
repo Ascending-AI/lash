@@ -1364,19 +1364,23 @@ impl lash_core_execution::ProcessEngine for StateEngine {
             serde_json::from_slice(&state.bytes).map_err(engine_failure)?
         };
         let action = match event {
-            EngineEvent::Started { .. } => EngineAction::Steps(match self.steps {
-                Steps::Sequence => vec![tool_step("set", STATE_SET, "P")],
-                Steps::Pair => vec![
-                    tool_step("set", STATE_SET, "A"),
-                    tool_step("observe", STATE_OBSERVE, "B"),
-                ],
-            }),
+            EngineEvent::Started { .. } => EngineAction::Steps {
+                steps: match self.steps {
+                    Steps::Sequence => vec![tool_step("set", STATE_SET, "P")],
+                    Steps::Pair => vec![
+                        tool_step("set", STATE_SET, "A"),
+                        tool_step("observe", STATE_OBSERVE, "B"),
+                    ],
+                },
+                wake: None,
+            },
             EngineEvent::StepSettled { step, outcome } => {
                 settled.insert(step.0.clone(), step_answer(&outcome));
                 match (self.steps, step.0.as_str()) {
-                    (Steps::Sequence, "set") => {
-                        EngineAction::Steps(vec![tool_step("observe", STATE_OBSERVE, "Q")])
-                    }
+                    (Steps::Sequence, "set") => EngineAction::Steps {
+                        steps: vec![tool_step("observe", STATE_OBSERVE, "Q")],
+                        wake: None,
+                    },
                     _ if settled.len() == 2 => EngineAction::Terminal(
                         lash_core_execution::ProcessOutcome::from_tool_output(
                             lash_core_execution::ToolCallOutput::success(serde_json::json!({

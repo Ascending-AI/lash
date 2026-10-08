@@ -152,11 +152,10 @@ impl CodexProvider {
         let timeouts = self.options.llm_timeouts();
         // WebSocket connection policy is separate from the response-start
         // wait. Preserve its existing request/chunk-derived bound here.
-        let connect_timeout = timeouts
-            .request_timeout
-            .map_or(timeouts.chunk_timeout, |timeout| {
-                timeout.min(timeouts.chunk_timeout)
-            });
+        let connect_timeout = match (timeouts.request_timeout, timeouts.chunk_timeout) {
+            (Some(request), Some(chunk)) => Some(request.min(chunk)),
+            (request, chunk) => request.or(chunk),
+        };
         let mut retry_state = CodexWebsocketRetryState::default();
         let mut allow_cached_context = self.websocket_continuation_enabled();
         loop {
@@ -230,7 +229,7 @@ impl CodexProvider {
             .metadata()
             .capability
             .stream_termination
-            .unwrap_or(StreamTermination::RequireTerminalEvidence);
+            .unwrap_or_default();
         let websocket_body = Self::websocket_create_request(&plan.body);
         let request_body = match serde_json::to_string(&websocket_body) {
             Ok(request_body) => request_body,
@@ -278,13 +277,12 @@ impl CodexProvider {
         }
 
         let expose_thinking = req.model.metadata().request_defaults.expose_thinking;
-        let stream_start_timeout = response_start_timeout(
+        let response_start_deadline = response_start_timeout(
             timeouts.request_timeout,
             timeouts.response_start_timeout,
             true,
         )
-        .unwrap_or(timeouts.response_start_timeout);
-        let response_start_deadline = tokio::time::Instant::now() + stream_start_timeout;
+        .map(|timeout| tokio::time::Instant::now() + timeout);
         // One absolute cap for the whole request, as SSE keeps: once output
         // starts, the per-frame idle window must not let a steadily producing
         // stream outlive the configured request timeout.
@@ -293,18 +291,23 @@ impl CodexProvider {
             .map(|timeout| tokio::time::Instant::now() + timeout);
         loop {
             let idle_deadline = if events_seen {
-                tokio::time::Instant::now() + timeouts.chunk_timeout
+                timeouts
+                    .chunk_timeout
+                    .map(|timeout| tokio::time::Instant::now() + timeout)
             } else {
                 response_start_deadline
             };
-            let (read_deadline, absolute_deadline_wins) = match absolute_deadline {
-                Some(absolute_deadline) if absolute_deadline <= idle_deadline => {
-                    (absolute_deadline, true)
-                }
-                _ => (idle_deadline, false),
+            let (read_deadline, absolute_deadline_wins) = match (absolute_deadline, idle_deadline) {
+                (Some(absolute), Some(idle)) if absolute <= idle => (Some(absolute), true),
+                (Some(absolute), None) => (Some(absolute), true),
+                (_, idle) => (idle, false),
             };
-            let next_message =
-                tokio::time::timeout_at(read_deadline, attempt.lease_mut().websocket.next()).await;
+            let next_message = match read_deadline {
+                Some(deadline) => {
+                    tokio::time::timeout_at(deadline, attempt.lease_mut().websocket.next()).await
+                }
+                None => Ok(attempt.lease_mut().websocket.next().await),
+            };
             let Some(message) = (match next_message {
                 Ok(message) => message,
                 Err(_) => {
@@ -436,8 +439,13 @@ impl CodexProvider {
         }
 
         let terminal_response_seen = state.terminal_event_seen;
+        // A socket that closed before its terminal event completes when the
+        // route tolerates EOF and the response produced output; one that
+        // produced none (a dead reused socket) failed, whatever the route
+        // tolerates.
         if !terminal_response_seen
-            && stream_termination == StreamTermination::RequireTerminalEvidence
+            && (stream_termination == StreamTermination::RequireTerminalEvidence
+                || !state.output_started())
         {
             let mut partial = shared::response_from_stream_state(
                 state.clone(),
@@ -489,7 +497,7 @@ impl CodexProvider {
             .metadata()
             .capability
             .stream_termination
-            .unwrap_or(StreamTermination::RequireTerminalEvidence);
+            .unwrap_or_default();
         if !matches!(self.transport, CodexTransport::Sse) {
             let fallback_reason = matches!(self.transport, CodexTransport::Auto)
                 .then(|| self.websocket_fallback_reason(req))
@@ -921,8 +929,9 @@ impl CodexProvider {
                 .with_partial_response(partial));
         }
 
-        if stream_termination == StreamTermination::RequireTerminalEvidence
-            && !state.terminal_event_seen
+        if !state.terminal_event_seen
+            && (stream_termination == StreamTermination::RequireTerminalEvidence
+                || !state.output_started())
         {
             seal_open_blocks(&mut state);
             let output_started = state.output_started();

@@ -13,8 +13,8 @@ impl ToolDirectCompletionClient<'_> {
     ///
     /// Tool implementors use this capability for provider calls that must
     /// retain the owner and causal attribution supplied by the runtime. A
-    /// call inside a process names the process as its cause: a process has
-    /// no session to attribute the call to.
+    /// call inside a process is made for the process and names it as its
+    /// cause: a process has no session to attribute the call to.
     pub async fn complete(
         &self,
         mut request: crate::DirectRequest,
@@ -22,8 +22,10 @@ impl ToolDirectCompletionClient<'_> {
     ) -> Result<DirectCompletion, PluginError> {
         match &self.owner {
             crate::RuntimeOwner::Session(session_id) => {
-                if request.session_id.is_none() {
-                    request.session_id = Some(session_id.clone());
+                if request.owner.is_none() {
+                    request.owner = Some(crate::LlmRequestOwner::Session {
+                        session_id: session_id.clone(),
+                    });
                 }
                 if request.caused_by.is_none() {
                     request.caused_by = Some(crate::CausalRef::ToolCall {
@@ -33,6 +35,11 @@ impl ToolDirectCompletionClient<'_> {
                 }
             }
             crate::RuntimeOwner::Process(process_id) => {
+                if request.owner.is_none() {
+                    request.owner = Some(crate::LlmRequestOwner::Process {
+                        process_id: process_id.clone(),
+                    });
+                }
                 if request.caused_by.is_none() {
                     request.caused_by = Some(crate::CausalRef::Process {
                         process_id: process_id.clone(),

@@ -660,8 +660,8 @@ async fn complete_websocket_with_events_and_capture(
         .force_websocket_transport()
         .with_endpoint_urls("http://127.0.0.1:9/unused-sse", server.url.clone())
         .with_options(ProviderOptions {
-            reliability: ProviderReliability::codex()
-                .max_attempts(3)
+            reliability: lash_provider_openai::CodexProvider::reliability()
+                .max_attempts(Some(3))
                 .base_delay_ms(0)
                 .max_delay_ms(0)
                 .stream_chunk_timeout_ms(Some(2_000)),
@@ -834,7 +834,7 @@ async fn complete_http_with_events(
     let mut provider = http_provider(dialect, transport);
     let mut options = provider.options();
     options.reliability = ProviderReliability::default()
-        .max_attempts(3)
+        .max_attempts(Some(3))
         .base_delay_ms(0)
         .max_delay_ms(0);
     provider.set_options(options);

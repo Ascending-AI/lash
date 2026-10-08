@@ -127,7 +127,7 @@ impl DevProviderScenario {
             calls: Arc::new(AtomicUsize::new(0)),
             options: ProviderOptions {
                 reliability: ProviderReliability::default()
-                    .max_attempts(2)
+                    .max_attempts(Some(2))
                     .base_delay_ms(retry_delay_ms)
                     .max_delay_ms(retry_delay_ms),
                 ..ProviderOptions::default()

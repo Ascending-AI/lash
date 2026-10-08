@@ -556,7 +556,6 @@ fn a_persisted_initial_frame_keeps_the_config_it_opened_under() {
 fn install_view(state: &mut RuntimeSessionState, config: &crate::PersistedSessionConfig) {
     let mut run = crate::run_spec::ResolvedRun::snapshot(
         crate::store::persisted_session_config_from_state(state),
-        crate::run_spec::TerminationPolicy::default(),
     );
     run.resolved = (*config != run.base).then(|| Box::new(config.clone()));
     state.install_run_view(&run);
@@ -965,7 +964,6 @@ fn a_redriven_run_executes_under_its_admitted_plugin_config_revision() {
         .resolve(
             &admitted,
             None,
-            crate::run_spec::TerminationPolicy::default(),
             &crate::provider::EmptyLlmProfiles,
             &crate::run_spec::NoRunOptionsOwner,
         )

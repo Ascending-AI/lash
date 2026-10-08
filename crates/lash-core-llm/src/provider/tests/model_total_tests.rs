@@ -1,8 +1,11 @@
 //! L-C2: the model total is a hard cap over throttle, backoff and every
 //! provider attempt, and a nested call is clipped to the time its enclosing
-//! stretch has left (spec v3 Part C, FIG-5171).
+//! stretch has left (spec v3 Part C, FIG-5171). A route's bounds are the
+//! runtime's provider attempt limits unless it states its own within them
+//! (FIG-5441).
 
 use super::*;
+use crate::provider::{LlmTimeouts, RouteBound};
 
 const SECOND: Duration = Duration::from_secs(1);
 
@@ -126,7 +129,7 @@ async fn complete_under(
     let attempts = Arc::new(AtomicUsize::new(0));
     let provider = StallingProvider {
         options: ProviderOptions {
-            reliability: ProviderReliability::default().max_attempts(16),
+            reliability: ProviderReliability::default(),
             ..ProviderOptions::default()
         },
         attempts: Arc::clone(&attempts),
@@ -240,4 +243,166 @@ async fn a_nested_model_call_is_cut_at_its_enclosing_limit() {
     assert_model_total_exceeded(&settled, 20 * SECOND);
     assert_eq!(settled.attempts, 1);
     assert_eq!(settled.elapsed, 20 * SECOND);
+}
+
+/// Every attempt fails retryably at once, recording the timeouts it was
+/// sent with.
+#[derive(Clone, Debug)]
+struct RecordingProvider {
+    options: ProviderOptions,
+    sent: Arc<Mutex<Vec<LlmTimeouts>>>,
+}
+
+#[async_trait::async_trait]
+impl Provider for RecordingProvider {
+    fn kind(&self) -> &'static str {
+        "recording"
+    }
+
+    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+        ProviderRouteIdentity::new(self.kind(), self.kind(), model)
+    }
+
+    fn options(&self) -> ProviderOptions {
+        self.options.clone()
+    }
+
+    fn set_options(&mut self, options: ProviderOptions) {
+        self.options = options;
+    }
+
+    fn serialize_config(&self) -> serde_json::Value {
+        serde_json::Value::Object(Default::default())
+    }
+
+    async fn send(
+        &mut self,
+        _request: LlmRequest,
+        _body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
+        self.sent.lock_recover().push(self.options.llm_timeouts());
+        Err(LlmTransportError::new("temporarily unavailable")
+            .with_kind(ProviderFailureKind::Transport)
+            .with_retry_verdict(TransportRetryVerdict::RetryableTransient))
+    }
+
+    fn clone_boxed(&self) -> Box<dyn Provider> {
+        Box::new(self.clone())
+    }
+}
+
+/// Complete one call on a route of `reliability` under budgets whose
+/// provider limits are 40 s per request, 15 s to start, 10 s of chunk
+/// silence and 3 attempts: the error it settles with and the timeouts each
+/// attempt was sent with.
+async fn complete_route(
+    reliability: ProviderReliability,
+) -> (ProviderCompletionError, Vec<LlmTimeouts>) {
+    let budgets = lash_sansio::ExecutionBudgets::new(lash_sansio::ExecutionBudgetsConfig {
+        model_total: 600 * SECOND,
+        provider: lash_sansio::ProviderAttemptLimits::new(40 * SECOND, 15 * SECOND, 10 * SECOND, 3)
+            .expect("valid provider limits"),
+        ..lash_sansio::ExecutionBudgetsConfig::default()
+    })
+    .expect("valid budgets");
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let provider = RecordingProvider {
+        options: ProviderOptions {
+            reliability,
+            ..ProviderOptions::default()
+        },
+        sent: Arc::clone(&sent),
+    };
+    let mut handle = ProviderHandle::new(ProviderComponents::new(Box::new(provider)))
+        .with_clock(PausedClock::new());
+    let mut request = empty_request();
+    let sideband = handle.prepare_completion(&mut request);
+    let body = handle.lower(&request).await.expect("the request lowers");
+    let error = handle
+        .complete_prepared(
+            request,
+            &body,
+            sideband,
+            crate::ChargeSafetyPolicy::default(),
+            &lash_trace::telemetry::metrics::TelemetryMetrics::default(),
+            None,
+            ModelCallBounds {
+                budgets,
+                enclosing: None,
+            },
+        )
+        .await
+        .err()
+        .unwrap_or_else(|| panic!("a provider that always fails cannot complete"));
+    let sent = sent.lock_recover().clone();
+    (error, sent)
+}
+
+/// A route that states no timeout or attempt count runs every attempt
+/// under the runtime's provider attempt limits, as many attempts as they
+/// allow; a route bound above its limit refuses the call before any
+/// attempt, typed, instead of running under a clipped bound.
+#[tokio::test(start_paused = true)]
+async fn an_unset_route_bound_is_the_runtimes_and_one_above_it_is_refused() {
+    let (_, sent) = complete_route(
+        ProviderReliability::default()
+            .base_delay_ms(0)
+            .max_delay_ms(0),
+    )
+    .await;
+    let runtime = LlmTimeouts {
+        request_timeout: Some(40 * SECOND),
+        response_start_timeout: Some(15 * SECOND),
+        chunk_timeout: Some(10 * SECOND),
+    };
+    assert_eq!(
+        sent,
+        vec![runtime; 3],
+        "three attempts under the runtime's limits"
+    );
+
+    let (_, sent) = complete_route(
+        ProviderReliability::default()
+            .request_timeout_ms(Some(30_000))
+            .base_delay_ms(0)
+            .max_delay_ms(0),
+    )
+    .await;
+    assert_eq!(
+        sent[0].request_timeout,
+        Some(30 * SECOND),
+        "a route bound within the limit is its own"
+    );
+
+    for (route, bound) in [
+        (
+            ProviderReliability::default().request_timeout_ms(Some(41_000)),
+            RouteBound::RequestTimeout,
+        ),
+        (
+            ProviderReliability::default().response_start_timeout_ms(Some(16_000)),
+            RouteBound::ResponseStartTimeout,
+        ),
+        (
+            ProviderReliability::default().stream_chunk_timeout_ms(Some(11_000)),
+            RouteBound::ChunkTimeout,
+        ),
+        (
+            ProviderReliability::default().max_attempts(Some(4)),
+            RouteBound::MaxAttempts,
+        ),
+    ] {
+        let (error, sent) = complete_route(route).await;
+        assert!(sent.is_empty(), "{bound}: no attempt was sent: {sent:?}");
+        assert_eq!(
+            error.error.code,
+            Some(FailureCode::lash(TurnFailureCode::ProviderRouteAboveBudget)),
+            "{bound}: {error:?}"
+        );
+        assert!(
+            error.error.message.contains(&bound.to_string()),
+            "{bound}: {}",
+            error.error.message
+        );
+    }
 }

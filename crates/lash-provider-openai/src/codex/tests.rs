@@ -10,7 +10,7 @@ use lash_core::llm::types::{
 };
 use lash_core::provider::{
     CacheRetention, LlmProfileCapability, Provider, ProviderHandle, ProviderOptions,
-    ReasoningCapability, RequestTimeout, StreamTermination,
+    ReasoningCapability, StreamTermination,
 };
 use lash_llm_transport::openai_terminal_reason_from_response_value;
 use lash_sansio::sync::MutexExt;
@@ -154,8 +154,8 @@ fn websocket_test_provider_with_timeouts(
     ))
     .with_transport(transport)
     .with_options(ProviderOptions {
-        reliability: ProviderReliability::codex()
-            .request_timeout(Some(RequestTimeout::Millis(request_timeout_ms)))
+        reliability: crate::CodexProvider::reliability()
+            .request_timeout_ms(Some(request_timeout_ms))
             .stream_chunk_timeout_ms(chunk_timeout_ms),
         ..ProviderOptions::default()
     })
@@ -1602,8 +1602,7 @@ async fn codex_sse_stream_evidence_carries_allowlisted_response_headers() {
         "ws://127.0.0.1:9/unused".to_string(),
     )
     .with_options(ProviderOptions {
-        reliability: ProviderReliability::codex()
-            .request_timeout(Some(RequestTimeout::Millis(5_000))),
+        reliability: crate::CodexProvider::reliability().request_timeout_ms(Some(5_000)),
         ..ProviderOptions::default()
     });
     let events = Arc::new(Mutex::new(Vec::new()));
@@ -1674,10 +1673,10 @@ async fn codex_websocket_output_started_forced_delay_pins_hardened_ordering() {
     let provider =
         websocket_test_provider(CodexTransport::Websocket, http.url.clone(), ws.url.clone())
             .with_options(ProviderOptions {
-                reliability: ProviderReliability::codex()
-                    .request_timeout(Some(RequestTimeout::Millis(5_000)))
+                reliability: crate::CodexProvider::reliability()
+                    .request_timeout_ms(Some(5_000))
                     .stream_chunk_timeout_ms(Some(50))
-                    .max_attempts(2)
+                    .max_attempts(Some(2))
                     .base_delay_ms(0)
                     .max_delay_ms(0),
                 ..ProviderOptions::default()
@@ -1702,8 +1701,12 @@ async fn codex_websocket_output_started_forced_delay_pins_hardened_ordering() {
     assert_eq!(http.captured_len(), 0);
 }
 
+/// A WebSocket that closes after output but before `response.completed`
+/// completes by default; a model that requires terminal evidence refuses it
+/// typed, its partial output and usage kept (FIG-5441).
 #[tokio::test]
-async fn codex_websocket_clean_eof_requires_terminal_event_unless_explicitly_tolerated() {
+async fn codex_websocket_clean_eof_completes_by_default_and_fails_when_terminal_evidence_is_required()
+ {
     let action = ScriptedWsAction::CloseAfterStart {
         response_id: "resp_partial",
         message_id: "msg_partial",
@@ -1717,10 +1720,16 @@ async fn codex_websocket_clean_eof_requires_terminal_event_unless_explicitly_tol
         strict_ws.url.clone(),
     );
 
+    let mut strict_request = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    strict_request
+        .model
+        .metadata_mut()
+        .capability
+        .stream_termination = Some(StreamTermination::RequireTerminalEvidence);
     let error = strict
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(strict_request)
         .await
-        .expect_err("clean EOF without a terminal event must fail");
+        .expect_err("required terminal evidence refuses a clean EOF without it");
 
     assert_eq!(
         error.code.as_ref().map(|code| code.to_string()),
@@ -1739,16 +1748,10 @@ async fn codex_websocket_clean_eof_requires_terminal_event_unless_explicitly_tol
         http.url.clone(),
         tolerant_ws.url.clone(),
     );
-    let mut tolerant_request = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    tolerant_request
-        .model
-        .metadata_mut()
-        .capability
-        .stream_termination = Some(StreamTermination::EofTolerated);
     let response = tolerant
-        .complete(tolerant_request)
+        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
         .await
-        .expect("explicit EOF tolerance accepts clean close");
+        .expect("a clean close after output completes by default");
     assert_eq!(response.full_text(), "partial");
     assert_eq!(http.captured_len(), 0);
 }

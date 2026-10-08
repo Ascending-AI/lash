@@ -310,7 +310,6 @@ pub mod facade_support {
 
     pub use crate::runtime::QueueWithdrawalPublisher;
     pub use crate::runtime::SystemClock;
-    pub use crate::runtime::TerminationPolicy;
     pub use crate::runtime::TurnActivitySink;
     pub use crate::runtime::TurnAddress;
     pub use crate::runtime::TurnAttach;
@@ -450,11 +449,11 @@ pub use lash_sansio::llm::types::{
     AttachmentSource, AttemptOutcome, AttemptRecord, AttemptUsageOutcome, ChargeSafetyDecision,
     ChargeSafetyDenialReason, ExecutionEvidence, ExecutionEvidenceCollectionInterruption,
     ExecutionEvidenceMergeError, GenerationOptionOutcome, GenerationOptions, GenerationReceipt,
-    LlmCallId, LlmCallRecord, LlmOutputPart, LlmRequest, LlmRequestScope, LlmResponse,
-    LlmStreamEvidence, LlmTerminalReason, LlmTurnScope, NonNegativeFiniteF64, NormalizedError,
-    ProtocolPosition, ProviderEndpointError, ProviderFileScope, ProviderReplayDrop,
-    ProviderReplayDropReason, ProviderReplayKind, ProviderRequestBody, ProviderRouteIdentity,
-    RetryClass, RetryDecision, RetryDeclineCause, RetryWait,
+    LlmCallId, LlmCallRecord, LlmOutputPart, LlmRequest, LlmRequestOwner, LlmRequestScope,
+    LlmResponse, LlmStreamEvidence, LlmTerminalReason, LlmTurnScope, NonNegativeFiniteF64,
+    NormalizedError, ProtocolPosition, ProviderEndpointError, ProviderFileScope,
+    ProviderReplayDrop, ProviderReplayDropReason, ProviderReplayKind, ProviderRequestBody,
+    ProviderRouteIdentity, RetryClass, RetryDecision, RetryDeclineCause, RetryWait,
 };
 pub use lash_sansio::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, Backoff, BatchId,

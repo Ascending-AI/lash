@@ -220,13 +220,16 @@ const LAW_FLAKY: &str = "law_flaky";
 const LAW_PARK: &str = "law_park";
 
 fn law_step(step: &str, tool: &str) -> EngineAction {
-    EngineAction::Steps(vec![StepRequest::Tool {
-        language_execution: None,
-        step: StepName(step.to_owned()),
-        tool: lash_sansio::ToolId::new(tool),
-        input: json!({}),
-        site: None,
-    }])
+    EngineAction::Steps {
+        steps: vec![StepRequest::Tool {
+            language_execution: None,
+            step: StepName(step.to_owned()),
+            tool: lash_sansio::ToolId::new(tool),
+            input: json!({}),
+            site: None,
+        }],
+        wake: None,
+    }
 }
 
 fn settled_name(outcome: &SettledOutput) -> &'static str {
@@ -298,13 +301,16 @@ impl ProcessEngine for LawEngine {
         let act = script["act"].as_str().unwrap_or("hold").to_owned();
         let action = match event {
             EngineEvent::Started { .. } => match act.as_str() {
-                "stuck" => EngineAction::Steps(vec![StepRequest::Tool {
-                    language_execution: None,
-                    step: StepName("stuck".to_owned()),
-                    tool: lash_sansio::ToolId::new("law_stuck"),
-                    input: json!({}),
-                    site: None,
-                }]),
+                "stuck" => EngineAction::Steps {
+                    steps: vec![StepRequest::Tool {
+                        language_execution: None,
+                        step: StepName("stuck".to_owned()),
+                        tool: lash_sansio::ToolId::new("law_stuck"),
+                        input: json!({}),
+                        site: None,
+                    }],
+                    wake: None,
+                },
                 "await" => await_action(&script)?,
                 "await_key" => EngineAction::PinKey {
                     name: KeyName(PEER_KEY.to_owned()),
@@ -442,6 +448,10 @@ fn step_output(process: &ProcessId, text: &str) -> Material {
 
 #[async_trait::async_trait]
 impl ProcessSteps for LawSteps {
+    fn stop_grace(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(2)
+    }
+
     async fn admit(
         &self,
         _process: &ProcessRecord,

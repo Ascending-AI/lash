@@ -98,7 +98,7 @@ async fn probe_session(
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let mut options = provider_handle.options();
     options.reliability = lash_core::provider::ProviderReliability::default()
-        .max_attempts(2)
+        .max_attempts(Some(2))
         .base_delay_ms(0)
         .max_delay_ms(0);
     options.reliability.retry.jitter_ms = 0;

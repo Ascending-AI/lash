@@ -60,13 +60,6 @@ share the ceiling check and refuse `UnsafeRetriesAboveCeiling` before
 publishing a configuration. The provider handle applies the admitted retry
 limit without a separate clamp (FIG-4480).
 
-A run's `ResolvedRun` also carries the host's termination policy
-(`TerminationPolicy`) as it stood at the run's first execution. Terminal
-assembly reads the record,
-so a worker with another policy assembles the same terminal for a turn whose
-stream ended without `Done`. The policy stays host configuration: a change
-reaches runs that start after it.
-
 The system prompt is recorded the same way as the rest of the configuration.
 It is the protocol plugin's: core has no prompt type. A session's protocol
 namespace records its prompt config when the session is created, from the

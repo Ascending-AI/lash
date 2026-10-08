@@ -17,13 +17,9 @@ use lash_core::{
 
 use super::state::{
     BatchShape, Decision, Injection, IssuedLeaf, IssuedOperation, LASHLANG_SEGMENT_STATE_VERSION,
-    LashlangEngineState, Leaf, Phase, TIMER_STEP, TimerInput, VM_RUN_STEP, VmRunInput, VmRunOutput,
-    Wait,
+    LashlangEngineState, Leaf, Phase, VM_RUN_STEP, VmRunInput, VmRunOutput, Wait,
 };
 use crate::{LASHLANG_ENGINE_KIND, LashlangProcessFailureCode};
-
-/// How many `vm_run` steps in a row may fail before the process ends.
-const VM_RUN_FAULT_BUDGET: u32 = 3;
 
 /// The engine's state format.
 pub(crate) fn state_format() -> lash_core::EngineStateFormat {
@@ -73,7 +69,6 @@ pub(crate) fn advance(
             vm: None,
             runs: 0,
             operations: 0,
-            faults: 0,
             phase: Phase::Ended,
         };
         let action = run_vm(&mut state, None)?;
@@ -106,6 +101,10 @@ fn transition(
                 let operation = *operation;
                 run_vm(state, Some(Injection::Woke { operation }))
             }
+            Phase::Parked {
+                wait: Wait::Leaves { .. },
+                ..
+            } => timers_woke(state),
             _ => standing(state),
         },
         EngineEvent::ProcessEnded { process, outcome } => match &state.phase {
@@ -152,11 +151,14 @@ fn standing(state: &LashlangEngineState) -> Result<EngineAction, ProcessInfraErr
             // lasts until the awaited process ends or this one's scope does.
             bound: lash_core::ParkBound::UntilScopeEnd,
         },
-        Phase::Running { .. }
-        | Phase::Parked {
-            wait: Wait::Leaves { .. },
+        Phase::Parked {
+            wait: Wait::Leaves { leaves, .. },
             ..
-        } => EngineAction::Idle,
+        } => match next_timer(leaves) {
+            Some(until) => EngineAction::Sleep { until },
+            None => EngineAction::Idle,
+        },
+        Phase::Running { .. } => EngineAction::Idle,
         Phase::Ended => return Err(infra("an ended process has no standing action")),
     })
 }
@@ -199,12 +201,71 @@ fn step_settled(
                         }),
                     )
                 }
-                None => Ok(EngineAction::Idle),
+                None => standing(state),
             }
         }
         // A step this engine no longer waits on: a loser of a decided
         // aggregate.
         _ => standing(state),
+    }
+}
+
+/// The earliest deadline of the parked operation's timers that have not
+/// fired: what the process sleeps until while it waits on its leaves.
+fn next_timer(leaves: &[Leaf]) -> Option<lash_core::durable_port::DurableInstant> {
+    leaves
+        .iter()
+        .filter_map(|leaf| match leaf {
+            Leaf::Timer {
+                until_ms,
+                fired: false,
+            } => Some(*until_ms),
+            _ => None,
+        })
+        .min()
+        .map(lash_core::durable_port::DurableInstant)
+}
+
+/// The sleep the parked operation's leaves asked for ended: its earliest
+/// timers fire, in leaf order, and decide the operation if they can.
+fn timers_woke(state: &mut LashlangEngineState) -> Result<EngineAction, ProcessInfraError> {
+    let Phase::Parked {
+        operation,
+        wait: Wait::Leaves {
+            batch,
+            leaves,
+            settled,
+        },
+    } = &mut state.phase
+    else {
+        return standing(state);
+    };
+    let Some(due) = next_timer(leaves) else {
+        return standing(state);
+    };
+    for (index, leaf) in leaves.iter_mut().enumerate() {
+        if let Leaf::Timer { until_ms, fired } = leaf
+            && !*fired
+            && *until_ms <= due.0
+        {
+            *fired = true;
+            settled.push(index);
+        }
+    }
+    let operation = *operation;
+    match decide(*batch, leaves, settled) {
+        Some(decision) => {
+            let leaves = leaves.clone();
+            run_vm(
+                state,
+                Some(Injection::Leaves {
+                    operation,
+                    decision,
+                    leaves,
+                }),
+            )
+        }
+        None => standing(state),
     }
 }
 
@@ -227,31 +288,23 @@ fn vm_run_settled(
                 ),
             ));
         }
-        // A failed, interrupted or stopped run left nothing: the snapshot it started
-        // from is still the committed one, so the same run is asked again.
-        _ => {
-            state.faults += 1;
-            if state.faults >= VM_RUN_FAULT_BUDGET {
-                state.phase = Phase::Ended;
-                return Ok(EngineAction::Terminal(
-                    crate::process::process_lashlang_failure(
-                        LashlangProcessFailureCode::ProcessSegmentResumeFailed,
-                        format!(
-                            "the VM failed to reach a quiet point {} times in a row",
-                            state.faults
-                        ),
-                        None,
+        // A failed, interrupted or stopped run reached no quiet point, after
+        // every retry its step kind's policy allowed (`vm_run`'s
+        // declaration, which the host may override): the process ends.
+        unsettled => {
+            state.phase = Phase::Ended;
+            return Ok(EngineAction::Terminal(
+                crate::process::process_lashlang_failure(
+                    LashlangProcessFailureCode::ProcessSegmentResumeFailed,
+                    format!(
+                        "the VM reached no quiet point: its run settled {:?}",
+                        unsettled.outcome()
                     ),
-                ));
-            }
-            let inject = match &state.phase {
-                Phase::Running { inject, .. } => inject.clone(),
-                _ => None,
-            };
-            return run_vm(state, inject);
+                    None,
+                ),
+            ));
         }
     };
-    state.faults = 0;
     match output {
         VmRunOutput::Ended { outcome } => {
             state.phase = Phase::Ended;
@@ -302,23 +355,15 @@ fn park(
                             });
                             Ok(Leaf::Step {
                                 step,
-                                timer: false,
                                 outcome: None,
                             })
                         }
-                        IssuedLeaf::Timer { until_ms } => {
-                            steps.push(StepRequest::Engine {
-                                step: step.clone(),
-                                kind: EngineStepKind::new(TIMER_STEP),
-                                input: serde_json::to_value(TimerInput { until_ms })
-                                    .map_err(|error| infra(error.to_string()))?,
-                            });
-                            Ok(Leaf::Step {
-                                step,
-                                timer: true,
-                                outcome: None,
-                            })
-                        }
+                        // A timer runs no step: the process sleeps until
+                        // it on a durable wake ([`next_timer`]).
+                        IssuedLeaf::Timer { until_ms } => Ok(Leaf::Timer {
+                            until_ms,
+                            fired: false,
+                        }),
                         IssuedLeaf::Settled { fulfilled, outcome } => {
                             Ok(Leaf::Settled { fulfilled, outcome })
                         }
@@ -344,13 +389,14 @@ fn park(
                             leaves,
                         }),
                     )?;
-                    if let EngineAction::Steps(run) = &mut action {
+                    if let EngineAction::Steps { steps: run, .. } = &mut action {
                         steps.append(run);
                         *run = steps;
                     }
                     Ok(action)
                 }
                 None => {
+                    let wake = next_timer(&leaves);
                     state.phase = Phase::Parked {
                         operation,
                         wait: Wait::Leaves {
@@ -359,7 +405,11 @@ fn park(
                             settled,
                         },
                     };
-                    Ok(EngineAction::Steps(steps))
+                    if steps.is_empty() {
+                        standing(state)
+                    } else {
+                        Ok(EngineAction::Steps { steps, wake })
+                    }
                 }
             }
         }
@@ -397,11 +447,14 @@ fn run_vm(
         step: step.clone(),
         inject,
     };
-    Ok(EngineAction::Steps(vec![StepRequest::Engine {
-        step,
-        kind: EngineStepKind::new(VM_RUN_STEP),
-        input: serde_json::to_value(input).map_err(|error| infra(error.to_string()))?,
-    }]))
+    Ok(EngineAction::Steps {
+        steps: vec![StepRequest::Engine {
+            step,
+            kind: EngineStepKind::new(VM_RUN_STEP),
+            input: serde_json::to_value(input).map_err(|error| infra(error.to_string()))?,
+        }],
+        wake: None,
+    })
 }
 
 /// Whether the leaves settled so far decide the operation (ADR 0099 §10):

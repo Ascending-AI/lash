@@ -19,9 +19,9 @@ pub(crate) use lash_core::{
     RuntimeErrorCode, SessionCursor, SessionError, SessionReadView, SessionScope, SessionSnapshot,
     ToolCallRecord, ToolManifest, ToolProvider, ToolState, facade_support::PluginFactory,
     facade_support::SessionObservation, facade_support::SessionObservationSubscription,
-    facade_support::SessionResume, facade_support::TerminationPolicy,
-    facade_support::ToolRestoreReport, facade_support::TurnActivitySink,
-    facade_support::TurnExecutionMetrics, facade_support::TurnOutcome,
+    facade_support::SessionResume, facade_support::ToolRestoreReport,
+    facade_support::TurnActivitySink, facade_support::TurnExecutionMetrics,
+    facade_support::TurnOutcome,
 };
 pub(crate) use lash_core::{InputItem, TokenUsage};
 pub(crate) use lash_core::{TurnActivity, TurnInput};

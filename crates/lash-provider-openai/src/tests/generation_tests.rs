@@ -154,7 +154,7 @@ async fn every_retry_attempt_reapplies_the_sampling_controls() {
     let provider = openrouter_provider()
         .with_options(ProviderOptions {
             reliability: ProviderReliability::default()
-                .max_attempts(2)
+                .max_attempts(Some(2))
                 .base_delay_ms(0)
                 .max_delay_ms(0),
             ..ProviderOptions::default()

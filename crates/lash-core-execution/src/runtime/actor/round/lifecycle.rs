@@ -138,6 +138,11 @@ pub trait MemberBodies: Send + Sync {
     /// The body of `execution`'s attempt, for its call and request.
     fn body(&self, execution: &AdmittedExecution) -> MemberBody;
 
+    /// How long a body whose token was cancelled may still answer before it
+    /// is dropped: the runtime's
+    /// [`ExecutionBudgets::stop_grace`](lash_sansio::ExecutionBudgets::stop_grace).
+    fn stop_grace(&self) -> std::time::Duration;
+
     /// The final answer of `execution`, which parked as `parked`, once one
     /// of its waits ended with `resolution`. Runs no body.
     fn resolved(
@@ -779,6 +784,7 @@ impl Lifecycle {
 
     fn spawn(&mut self, execution: AdmittedExecution) {
         let body = self.bodies.body(&execution);
+        let stop_grace = self.bodies.stop_grace();
         let cx = self.cx.clone();
         let cancel = self.token(execution.id().run);
         self.in_flight.insert(execution.id().clone());
@@ -794,7 +800,7 @@ impl Lifecycle {
                     result.output
                 })
             });
-            let result = run_bounded(&cx, &execution, tool_body, &cancel)
+            let result = run_bounded(&cx, &execution, tool_body, &cancel, stop_grace)
                 .await
                 .map(|output| {
                     let (store_local, terminal) = std::mem::take(

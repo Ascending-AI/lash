@@ -319,7 +319,7 @@ async fn responses_handle_retries_allocation_only_stream_failure() {
     let provider = OpenAiProvider::new("key")
         .with_options(ProviderOptions {
             reliability: ProviderReliability::default()
-                .max_attempts(2)
+                .max_attempts(Some(2))
                 .base_delay_ms(0)
                 .max_delay_ms(0),
             ..ProviderOptions::default()
@@ -343,7 +343,7 @@ async fn assert_streamed_output_stops_retry(first: &'static str) {
     let provider = OpenAiProvider::new("key")
         .with_options(ProviderOptions {
             reliability: ProviderReliability::default()
-                .max_attempts(2)
+                .max_attempts(Some(2))
                 .base_delay_ms(0)
                 .max_delay_ms(0),
             ..ProviderOptions::default()
@@ -352,9 +352,9 @@ async fn assert_streamed_output_stops_retry(first: &'static str) {
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let failure = handle
-        .complete(streamed_request(Arc::new(
+        .complete(requiring_terminal_evidence(streamed_request(Arc::new(
             std::sync::Mutex::new(Vec::new()),
-        )))
+        ))))
         .await
         .expect_err("observed stream output must stop the retry ladder");
 
@@ -434,7 +434,7 @@ async fn responses_handle_retries_canonical_empty_failed_response() {
     let provider = OpenAiProvider::new("key")
         .with_options(ProviderOptions {
             reliability: ProviderReliability::default()
-                .max_attempts(2)
+                .max_attempts(Some(2))
                 .base_delay_ms(0)
                 .max_delay_ms(0),
             ..ProviderOptions::default()
@@ -464,7 +464,7 @@ async fn responses_handle_retries_after_ping_and_response_debug() {
     let provider = OpenAiProvider::new("key")
         .with_options(ProviderOptions {
             reliability: ProviderReliability::default()
-                .max_attempts(2)
+                .max_attempts(Some(2))
                 .base_delay_ms(0)
                 .max_delay_ms(0),
             ..ProviderOptions::default()

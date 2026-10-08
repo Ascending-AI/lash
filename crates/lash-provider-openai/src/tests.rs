@@ -11,7 +11,7 @@ use lash_core::llm::types::{
 };
 use lash_core::provider::{
     CacheControlDialect, CacheRetention, LlmProfileCapability, ProviderHandle, ProviderReliability,
-    ReasoningCapability, ReasoningEncoding, RequestTimeout,
+    ReasoningCapability, ReasoningEncoding,
 };
 use lash_sansio::sync::MutexExt;
 use runtime_feedback::request_with_instructions;
@@ -1536,7 +1536,7 @@ async fn openrouter_handle_records_failed_request_id_then_served_model_evidence(
     let provider = openrouter_provider()
         .with_options(ProviderOptions {
             reliability: ProviderReliability::default()
-                .max_attempts(2)
+                .max_attempts(Some(2))
                 .base_delay_ms(0)
                 .max_delay_ms(0),
             ..ProviderOptions::default()
@@ -1734,6 +1734,14 @@ fn two_responses_streams(first: &'static str) -> Arc<ScriptedHttpTransport> {
     })
 }
 
+/// `request` on a model whose streams must end with their terminal event:
+/// a stream cut before it fails, its output kept.
+fn requiring_terminal_evidence(mut request: LlmRequest) -> LlmRequest {
+    request.model.metadata_mut().capability.stream_termination =
+        Some(StreamTermination::RequireTerminalEvidence);
+    request
+}
+
 #[tokio::test]
 async fn responses_handle_does_not_retry_unfinished_tool_arguments() {
     let first = concat!(
@@ -1745,7 +1753,7 @@ async fn responses_handle_does_not_retry_unfinished_tool_arguments() {
     let provider = OpenAiProvider::new("key")
         .with_options(ProviderOptions {
             reliability: ProviderReliability::default()
-                .max_attempts(2)
+                .max_attempts(Some(2))
                 .base_delay_ms(0)
                 .max_delay_ms(0),
             ..ProviderOptions::default()
@@ -1754,9 +1762,9 @@ async fn responses_handle_does_not_retry_unfinished_tool_arguments() {
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let result = handle
-        .complete(streamed_request(Arc::new(
+        .complete(requiring_terminal_evidence(streamed_request(Arc::new(
             std::sync::Mutex::new(Vec::new()),
-        )))
+        ))))
         .await;
 
     assert_eq!(
@@ -1782,7 +1790,7 @@ async fn responses_handle_does_not_retry_opaque_reasoning_output() {
     let provider = OpenAiProvider::new("key")
         .with_options(ProviderOptions {
             reliability: ProviderReliability::default()
-                .max_attempts(2)
+                .max_attempts(Some(2))
                 .base_delay_ms(0)
                 .max_delay_ms(0),
             ..ProviderOptions::default()
@@ -1791,9 +1799,9 @@ async fn responses_handle_does_not_retry_opaque_reasoning_output() {
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let result = handle
-        .complete(streamed_request(Arc::new(
+        .complete(requiring_terminal_evidence(streamed_request(Arc::new(
             std::sync::Mutex::new(Vec::new()),
-        )))
+        ))))
         .await;
 
     assert_eq!(
@@ -1819,7 +1827,7 @@ async fn chat_stream_ending_without_finish_reason_is_retryable_truncation_with_p
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     let mut provider = openrouter_provider()
         .with_options(ProviderOptions {
-            reliability: ProviderReliability::default().max_attempts(1),
+            reliability: ProviderReliability::default().max_attempts(Some(1)),
             ..ProviderOptions::default()
         })
         .with_transport(single_stream_transport(body));
@@ -1887,20 +1895,37 @@ async fn chat_stream_with_finish_reason_succeeds_and_eof_tolerated_preserves_com
     assert_eq!(response.full_text(), "legacy");
 }
 
+/// A Responses stream that ends without its terminal event completes as
+/// stopped on a route that states no stream termination (FIG-5441); a route
+/// whose model requires terminal evidence refuses it typed, keeping the
+/// partial output and usage. `response.incomplete` is terminal evidence.
 #[tokio::test]
-async fn responses_stream_requires_terminal_event_and_accepts_incomplete_terminal() {
+async fn responses_stream_without_terminal_event_completes_by_default_and_fails_typed_when_required()
+ {
     let partial_body = concat!(
         "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":5,\"output_tokens\":2}}}\n\n",
         "data: [DONE]\n\n"
     );
-    let mut strict =
+    let mut tolerant =
         OpenAiProvider::new("key").with_transport(single_stream_transport(partial_body));
-    let error = strict
+    let response = tolerant
         .complete(streamed_request(Arc::new(
             std::sync::Mutex::new(Vec::new()),
         )))
         .await
-        .expect_err("Responses requires a terminal event");
+        .expect("a stream without its terminal event completes by default");
+    assert_eq!(response.full_text(), "partial");
+    assert_eq!(response.terminal_reason, LlmTerminalReason::Stop);
+
+    let mut strict =
+        OpenAiProvider::new("key").with_transport(single_stream_transport(partial_body));
+    let mut required = streamed_request(Arc::new(std::sync::Mutex::new(Vec::new())));
+    required.model.metadata_mut().capability.stream_termination =
+        Some(StreamTermination::RequireTerminalEvidence);
+    let error = strict
+        .complete(required)
+        .await
+        .expect_err("required terminal evidence refuses the stream");
     assert_eq!(
         error.code.as_ref().map(|code| code.to_string()),
         Some("lash:stream_ended_before_terminal_response".to_string())

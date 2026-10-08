@@ -332,7 +332,7 @@ impl CodexProvider {
     async fn connect_websocket(
         &self,
         req: &LlmRequest,
-        connect_timeout: Duration,
+        connect_timeout: Option<Duration>,
         lease: &TokenLease,
     ) -> Result<CodexWsStream, CodexWebSocketAttemptError> {
         let mut ws_request =
@@ -407,16 +407,19 @@ impl CodexProvider {
             headers.insert(name, value);
         }
 
-        let connect = tokio::time::timeout(connect_timeout, connect_async(ws_request))
-            .await
-            .map_err(|_| {
-                CodexWebSocketAttemptError::before_send(
-                    LlmTransportError::new("Codex WebSocket connect timed out")
-                        .with_kind(ProviderFailureKind::Timeout)
-                        .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-                        .with_lash_code(TurnFailureCode::WebsocketConnectTimeout),
-                )
-            })?;
+        let connecting = connect_async(ws_request);
+        let connect = match connect_timeout {
+            Some(timeout) => tokio::time::timeout(timeout, connecting).await,
+            None => Ok(connecting.await),
+        }
+        .map_err(|_| {
+            CodexWebSocketAttemptError::before_send(
+                LlmTransportError::new("Codex WebSocket connect timed out")
+                    .with_kind(ProviderFailureKind::Timeout)
+                    .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
+                    .with_lash_code(TurnFailureCode::WebsocketConnectTimeout),
+            )
+        })?;
         connect.map(|(websocket, _)| websocket).map_err(|error| {
             let status = match &error {
                 tokio_tungstenite::tungstenite::Error::Http(response) => {
@@ -442,7 +445,7 @@ impl CodexProvider {
     pub(super) async fn acquire_websocket(
         &self,
         req: &LlmRequest,
-        connect_timeout: Duration,
+        connect_timeout: Option<Duration>,
         lease: &TokenLease,
     ) -> Result<CodexWebsocketLease, CodexWebSocketAttemptError> {
         let scope_key = req.continuation_key();

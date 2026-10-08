@@ -1,11 +1,9 @@
 use super::*;
 
 impl RuntimeTurnDriver<'_> {
-    /// Record an event's committed content, then publish it. Every event the
-    /// machine emits, and every terminal event the driver writes itself, goes
-    /// through here, in program order.
+    /// Publish an event. Every event the machine emits, and every terminal
+    /// event the driver writes itself, goes through here, in program order.
     pub(super) fn emit_recorded(&mut self, event_tx: &TurnObserver, event: SessionStreamEvent) {
-        self.recorded_assembly.record(&event);
         // A stop publishes after the commit that records it: a host never
         // sees `Stopped` for a turn whose commit failed.
         if matches!(

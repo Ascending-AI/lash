@@ -1282,13 +1282,16 @@ impl crate::ProcessEngine for LawEngine {
             )),
             (LawEngineMode::RunForever, crate::EngineEvent::Started { .. }) => Ok((
                 state,
-                crate::EngineAction::Steps(vec![crate::StepRequest::Tool {
-                    language_execution: None,
-                    step: crate::StepName("forever".into()),
-                    tool: lash_sansio::ToolId::new(HANGING_TOOL),
-                    input: serde_json::Value::Null,
-                    site: None,
-                }]),
+                crate::EngineAction::Steps {
+                    steps: vec![crate::StepRequest::Tool {
+                        language_execution: None,
+                        step: crate::StepName("forever".into()),
+                        tool: lash_sansio::ToolId::new(HANGING_TOOL),
+                        input: serde_json::Value::Null,
+                        site: None,
+                    }],
+                    wake: None,
+                },
             )),
             // It ignores its cancel: only lash's forced terminal, at its
             // grace, ends it.
@@ -1365,6 +1368,10 @@ struct HangingSteps;
 
 #[async_trait::async_trait]
 impl ProcessSteps for HangingSteps {
+    fn stop_grace(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(2)
+    }
+
     async fn admit(
         &self,
         _process: &crate::ProcessRecord,

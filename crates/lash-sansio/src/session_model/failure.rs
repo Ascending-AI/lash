@@ -189,10 +189,6 @@ pub enum TurnFailureCode {
     TokenUsageOverflow,
     /// Refreshing the live execution environment failed.
     ReconfigureFailed,
-    /// The turn stream ended without a `Done` event.
-    MissingDone,
-    /// Assistant output was recovered from persisted messages because none was assembled.
-    AssistantOutputRecoveredFromState,
     /// Turn input failed normalization.
     InvalidTurnInput,
     /// The turn exceeded its agent-frame-switch limit.
@@ -205,6 +201,9 @@ pub enum TurnFailureCode {
     // ─── provider adapters and transports ────────────────────────────────
     /// The provider endpoint configuration is not a usable URL or socket.
     InvalidProviderEndpoint,
+    /// A provider route states a timeout or an attempt count above the
+    /// runtime's provider attempt limits: refused, never clipped.
+    ProviderRouteAboveBudget,
     /// The request used an attachment capability the provider does not offer.
     UnsupportedAttachmentCapability,
     /// A message attachment could not be encoded for the request.
@@ -343,13 +342,12 @@ impl TurnFailureCode {
             Self::HttpResponseBodyTooLarge => "http_response_body_too_large",
             Self::TokenUsageOverflow => "token_usage_overflow",
             Self::ReconfigureFailed => "reconfigure_failed",
-            Self::MissingDone => "missing_done",
-            Self::AssistantOutputRecoveredFromState => "assistant_output_recovered_from_state",
             Self::InvalidTurnInput => "invalid_turn_input",
             Self::AgentFrameSwitchLimit => "agent_frame_switch_limit",
             Self::ProtocolRestoreSession => "protocol_restore_session",
             Self::LifecycleHookFailed => "lifecycle_hook_failed",
             Self::InvalidProviderEndpoint => "invalid_provider_endpoint",
+            Self::ProviderRouteAboveBudget => "provider_route_above_budget",
             Self::UnsupportedAttachmentCapability => "unsupported_attachment_capability",
             Self::AttachmentSourceNotEncodable => "attachment_source_not_encodable",
             Self::StoredAttachmentNotResolved => "stored_attachment_not_resolved",
@@ -450,13 +448,12 @@ impl TurnFailureCode {
             "http_response_body_too_large" => Self::HttpResponseBodyTooLarge,
             "token_usage_overflow" => Self::TokenUsageOverflow,
             "reconfigure_failed" => Self::ReconfigureFailed,
-            "missing_done" => Self::MissingDone,
-            "assistant_output_recovered_from_state" => Self::AssistantOutputRecoveredFromState,
             "invalid_turn_input" => Self::InvalidTurnInput,
             "agent_frame_switch_limit" => Self::AgentFrameSwitchLimit,
             "protocol_restore_session" => Self::ProtocolRestoreSession,
             "lifecycle_hook_failed" => Self::LifecycleHookFailed,
             "invalid_provider_endpoint" => Self::InvalidProviderEndpoint,
+            "provider_route_above_budget" => Self::ProviderRouteAboveBudget,
             "unsupported_attachment_capability" => Self::UnsupportedAttachmentCapability,
             "attachment_source_not_encodable" => Self::AttachmentSourceNotEncodable,
             "stored_attachment_not_resolved" => Self::StoredAttachmentNotResolved,
@@ -537,13 +534,12 @@ impl TurnFailureCode {
         Self::HttpResponseBodyTooLarge,
         Self::TokenUsageOverflow,
         Self::ReconfigureFailed,
-        Self::MissingDone,
-        Self::AssistantOutputRecoveredFromState,
         Self::InvalidTurnInput,
         Self::AgentFrameSwitchLimit,
         Self::ProtocolRestoreSession,
         Self::LifecycleHookFailed,
         Self::InvalidProviderEndpoint,
+        Self::ProviderRouteAboveBudget,
         Self::UnsupportedAttachmentCapability,
         Self::AttachmentSourceNotEncodable,
         Self::StoredAttachmentNotResolved,

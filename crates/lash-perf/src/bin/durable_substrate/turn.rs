@@ -639,6 +639,10 @@ struct EchoTools {
 }
 
 impl RoundTools for EchoTools {
+    fn stop_grace(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(2)
+    }
+
     fn pin(&self, _call: &PendingToolCall, now_ms: u64) -> MemberPin {
         // The echo answers at once: its host sets it a short body bound.
         MemberPin::admitted(

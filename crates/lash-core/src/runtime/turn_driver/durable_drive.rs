@@ -486,7 +486,6 @@ impl TurnDrive for RuntimeDrive {
         id: crate::EffectId,
         cell: CodeCell,
     ) -> Result<CellExit, TurnError> {
-        self.driver.recorded_assembly.note_code_execution();
         Box::pin(self.driver.handle_exec_code_effect(
             &mut self.machine,
             id,

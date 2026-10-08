@@ -15,8 +15,8 @@ use tokio_util::sync::CancellationToken;
 
 use super::advance::{advance, decode_for_tests, state_format};
 use super::state::{
-    BatchShape, Decision, EncodedOutcome, Injection, IssuedLeaf, IssuedOperation, Phase,
-    TIMER_STEP, VM_RUN_STEP, VmRunInput, VmRunOutput,
+    BatchShape, Decision, EncodedOutcome, Injection, IssuedLeaf, IssuedOperation, Leaf, Phase,
+    VM_RUN_STEP, VmRunInput, VmRunOutput,
 };
 use super::vm_run::{VmRunFault, completed, failed};
 
@@ -163,7 +163,7 @@ impl Driven {
 
 /// The one `vm_run` an action asks for, decoded.
 fn vm_run(action: &EngineAction) -> (StepName, VmRunInput) {
-    let EngineAction::Steps(steps) = action else {
+    let EngineAction::Steps { steps, .. } = action else {
         panic!("expected steps, got {action:?}");
     };
     let runs: Vec<_> = steps
@@ -181,7 +181,7 @@ fn vm_run(action: &EngineAction) -> (StepName, VmRunInput) {
 }
 
 fn step_names(action: &EngineAction) -> Vec<String> {
-    let EngineAction::Steps(steps) = action else {
+    let EngineAction::Steps { steps, .. } = action else {
         panic!("expected steps, got {action:?}");
     };
     steps
@@ -231,7 +231,7 @@ fn a_parked_operation_is_one_step_and_its_outcome_feeds_the_next_vm_run() {
         batch: None,
         leaves: vec![tool("lookup")],
     });
-    let EngineAction::Steps(steps) = &action else {
+    let EngineAction::Steps { steps, .. } = &action else {
         panic!("expected the tool step, got {action:?}");
     };
     assert!(
@@ -421,29 +421,56 @@ fn an_aggregate_decided_at_issue_still_admits_its_pending_leaves() {
     ));
 }
 
-/// An aggregate's timer leaf is the engine's own `timer` step, settling at
-/// its deadline; the timer settles to a fulfilment.
+/// An aggregate's timer leaf runs no step: the process runs the other
+/// leaves' steps and sleeps until the timer's deadline on a durable wake,
+/// a settled step re-answers that wake, and the wake fires the timer,
+/// which settles to a fulfilment (`undefined`).
 #[test]
-fn a_timer_leaf_is_an_engine_timer_step() {
+fn an_aggregates_timer_leaf_sleeps_on_a_durable_wake_until_it_fires() {
+    let wake = lash_core::durable_port::DurableInstant(900);
     let (mut driven, action) = Driven::parked_on(batch(
-        AggregateConsumer::Race,
-        vec![tool("slow"), IssuedLeaf::Timer { until_ms: 900 }],
+        AggregateConsumer::All,
+        vec![tool("quick"), IssuedLeaf::Timer { until_ms: 900 }],
     ));
-    let EngineAction::Steps(steps) = &action else {
+    let EngineAction::Steps { steps, wake: armed } = &action else {
         panic!("expected steps, got {action:?}");
     };
-    assert!(
-        matches!(
-            &steps[1],
-            StepRequest::Engine { step, kind, input }
-                if step.0 == "op.0.1"
-                    && *kind == EngineStepKind::new(TIMER_STEP)
-                    && *input == serde_json::json!({"until_ms": 900})
-        ),
-        "{steps:?}"
+    assert_eq!(step_names(&action), vec!["op.0.0"], "only the tool runs");
+    assert!(matches!(&steps[0], StepRequest::Tool { .. }), "{steps:?}");
+    assert_eq!(*armed, Some(wake), "the timer's deadline is the wake");
+    assert_eq!(
+        driven.on(step("op.0.0", success(serde_json::json!("done")))),
+        EngineAction::Sleep { until: wake },
+        "a settled step leaves the process asleep until the timer"
     );
+    let woke = injected(&driven.on(EngineEvent::Woke));
+    let Injection::Leaves {
+        decision: Decision::AllResults,
+        leaves,
+        ..
+    } = woke
+    else {
+        panic!("the timer decides the aggregate: {woke:?}");
+    };
+    assert_eq!(
+        leaves[1],
+        Leaf::Timer {
+            until_ms: 900,
+            fired: true
+        }
+    );
+
+    // Timers alone run no step at all: the earliest fires first.
+    let (mut driven, action) = Driven::parked_on(batch(
+        AggregateConsumer::Race,
+        vec![
+            IssuedLeaf::Timer { until_ms: 2_000 },
+            IssuedLeaf::Timer { until_ms: 900 },
+        ],
+    ));
+    assert_eq!(action, EngineAction::Sleep { until: wake });
     assert!(matches!(
-        injected(&driven.on(step("op.0.1", completed(&process(), "null".to_owned())))),
+        injected(&driven.on(EngineEvent::Woke)),
         Injection::Leaves {
             decision: Decision::Selected { leaf: 1 },
             ..
@@ -502,43 +529,19 @@ fn an_await_stands_until_its_process_ends() {
     ));
 }
 
-/// A `vm_run` that reached no quiet point left nothing: the same run is
-/// asked again from the same snapshot with the same injection, up to the
-/// fault budget, and then the process ends with a typed failure.
+/// A `vm_run` that settles without a quiet point, after every retry its
+/// step kind's policy allowed, ends the process with a typed failure:
+/// `advance` never asks for the same run again.
 #[test]
-fn a_faulted_vm_run_is_asked_again_from_the_same_snapshot_within_its_budget() {
+fn a_failed_vm_run_ends_the_process_typed() {
     let (mut driven, _) = Driven::parked_on(IssuedOperation::Sleep { until_ms: 10 });
-    let first = driven.on(EngineEvent::Woke);
-    let (_, first_input) = vm_run(&first);
-
-    let again = driven.on(step("vm_run.1", fault()));
-    let (name, input) = vm_run(&again);
-    assert_eq!(name.0, "vm_run.2", "a fresh step name");
-    assert_eq!(input, first_input, "the same input");
-    let again = driven.on(step("vm_run.2", fault()));
-    assert_eq!(vm_run(&again).1, first_input);
-    let EngineAction::Terminal(outcome) = driven.on(step("vm_run.3", fault())) else {
-        panic!("the budget is spent");
+    driven.on(EngineEvent::Woke);
+    let EngineAction::Terminal(outcome) = driven.on(step("vm_run.1", fault())) else {
+        panic!("the process ends");
     };
     assert_eq!(failure_code(&outcome), "process_segment_resume_failed");
     assert_eq!(driven.phase(), Phase::Ended);
     driven.refuses(EngineEvent::Woke);
-}
-
-/// A quiet point resets the fault budget.
-#[test]
-fn a_quiet_point_resets_the_fault_budget() {
-    let (mut driven, _) = Driven::start();
-    driven.on(step("vm_run.0", fault()));
-    driven.on(step("vm_run.1", fault()));
-    driven.on(step(
-        "vm_run.2",
-        parked("first", IssuedOperation::Sleep { until_ms: 10 }),
-    ));
-    driven.on(EngineEvent::Woke);
-    driven.on(step("vm_run.3", fault()));
-    driven.on(step("vm_run.4", fault()));
-    assert!(matches!(driven.phase(), Phase::Running { .. }));
 }
 
 /// A `vm_run` past its limit ends the process with the bound's failure.

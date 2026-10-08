@@ -102,8 +102,9 @@ pub enum StepRequest {
         language_execution: Option<Box<lash_trace::TraceLanguageExecution>>,
     },
     /// A body of the process's own engine, run through the [`EngineSteps`]
-    /// its registration declares, under a pinned `Repeatable` policy. It is
-    /// neither model-visible nor host-invocable. A registration that
+    /// its registration declares, under the retry policy its kind declares
+    /// (or its registration overrides), pinned at admission. It is neither
+    /// model-visible nor host-invocable. A registration that
     /// declares no engine steps, or not this kind, is refused before
     /// admission ([`EngineStepRefusal`]).
     Engine {
@@ -209,9 +210,12 @@ pub struct EngineStepRun {
 
 /// An engine's own step bodies, declared at registration
 /// ([`ProcessEngineRegistration::with_engine_steps`](super::ProcessEngineRegistration::with_engine_steps)).
-/// Each runs under a pinned `Repeatable` policy: a crash before its outcome
-/// commits runs it again from the same input, so a body must be a
-/// recomputation from that input, with no effect of its own.
+/// Each runs under the retry policy its kind declares, pinned at admission:
+/// under `Repeatable`, a crash before its outcome commits runs it again from
+/// the same input and a failure is retried within the policy's attempts, so
+/// such a body must be a recomputation from that input, with no effect of
+/// its own; under `Once`, a crash settles it `Interrupted` and a failure is
+/// its outcome.
 #[async_trait::async_trait]
 pub trait EngineSteps: Send + Sync {
     /// The kinds of body this engine runs.
@@ -220,6 +224,13 @@ pub trait EngineSteps: Send + Sync {
     /// How long one run of a `kind` body may take: the engine's own bound,
     /// as a host sets a tool's. Lash holds no step default.
     fn execution(&self, kind: &EngineStepKind) -> Duration;
+
+    /// How a `kind` body is retried after a failure or a crash: the engine
+    /// author's default, which the host may override per kind when it
+    /// registers the engine
+    /// ([`ProcessEngineRegistration::with_engine_step_retry`](super::ProcessEngineRegistration::with_engine_step_retry)).
+    /// Lash holds no retry default.
+    fn retry(&self, kind: &EngineStepKind) -> lash_sansio::ExecutionPolicy;
 
     /// Run one body to its outcome, observing `cancel`.
     async fn run(
@@ -258,8 +269,16 @@ pub enum EngineStepRefusal {
 #[derive(Clone, Debug, PartialEq)]
 pub enum EngineAction {
     /// Run these steps; non-empty. Each completion is one
-    /// [`EngineEvent::StepSettled`].
-    Steps(Vec<StepRequest>),
+    /// [`EngineEvent::StepSettled`]. With a `wake`, the process also sleeps
+    /// until that instant while they run, as [`Sleep`](Self::Sleep) does:
+    /// [`EngineEvent::Woke`] arrives once it passes, unless a transition
+    /// before then answered another action.
+    Steps {
+        /// The steps to run.
+        steps: Vec<StepRequest>,
+        /// When the process wakes while they run, if it sleeps at all.
+        wake: Option<DurableInstant>,
+    },
     /// Pin a host-resolvable key, minted before any step submits it.
     PinKey {
         /// The wait's name.

@@ -24,7 +24,7 @@ impl std::fmt::Debug for Capture {
 pub(crate) fn retry_policy(retries: u32) -> ProviderRetryPolicy {
     ProviderRetryPolicy {
         enabled: retries > 0,
-        max_attempts: retries.saturating_add(1),
+        max_attempts: Some(retries.saturating_add(1)),
         base_delay_ms: 1_000,
         max_delay_ms: 10_000,
         // Courtesy throttle waits otherwise allow eight EXTRA provider calls.

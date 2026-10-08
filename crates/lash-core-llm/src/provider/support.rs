@@ -2,8 +2,7 @@ pub(super) use std::sync::{Arc, Mutex};
 pub(super) use std::time::Duration;
 
 pub(super) use async_trait::async_trait;
-pub(super) use serde::de::{self, Visitor};
-pub(super) use serde::{Deserialize, Deserializer, Serialize, Serializer};
+pub(super) use serde::{Deserialize, Serialize};
 
 pub(super) use crate::llm::transport::{
     LlmTransportError, ProviderFailureKind, TransportRetryVerdict,

@@ -138,54 +138,10 @@ fn the_default_spec_is_no_spec_and_resolves_to_the_snapshot() {
         serde_json::json!({})
     );
     let resolved = spec
-        .resolve(
-            &snapshot(),
-            None,
-            TerminationPolicy::default(),
-            &catalog(),
-            &MapOwner,
-        )
+        .resolve(&snapshot(), None, &catalog(), &MapOwner)
         .expect("resolve");
-    assert_eq!(
-        resolved,
-        ResolvedRun::snapshot(snapshot(), TerminationPolicy::default())
-    );
+    assert_eq!(resolved, ResolvedRun::snapshot(snapshot()));
     assert_eq!(resolved.base.config_revision, 7);
-}
-
-/// FIG-4389: a run records the termination policy it resolved under, the
-/// record round-trips it, and a record without it does not decode: no
-/// worker's live policy fills the gap.
-#[test]
-fn a_resolved_run_records_its_termination_policy() {
-    let finishes = TerminationPolicy {
-        treat_missing_done_as_failure: false,
-    };
-    let resolved = RunSpec::default()
-        .resolve(&snapshot(), None, finishes.clone(), &catalog(), &MapOwner)
-        .expect("resolve");
-    assert_eq!(resolved.termination, finishes);
-
-    let mut encoded = serde_json::to_value(&resolved).expect("encode run");
-    assert_eq!(
-        encoded["termination"],
-        serde_json::json!({ "treat_missing_done_as_failure": false })
-    );
-    let decoded: ResolvedRun = serde_json::from_value(encoded.clone()).expect("decode run");
-    assert_eq!(decoded.termination, finishes);
-
-    encoded
-        .as_object_mut()
-        .expect("a run encodes as an object")
-        .remove("termination");
-    assert!(
-        serde_json::from_value::<ResolvedRun>(encoded).is_err(),
-        "a run record without its termination policy is refused"
-    );
-    assert!(
-        serde_json::from_value::<TerminationPolicy>(serde_json::json!({})).is_err(),
-        "a termination policy states its fallback explicitly"
-    );
 }
 
 #[test]
@@ -199,7 +155,7 @@ fn recorded_render_survives_run_and_detached_environment_round_trip() {
             "preview": lash_render::RenderParams::preview(),
         }),
     };
-    let mut resolved = ResolvedRun::snapshot(snapshot(), TerminationPolicy::default());
+    let mut resolved = ResolvedRun::snapshot(snapshot());
     resolved.render = Some(record.clone());
     let encoded = serde_json::to_vec(&resolved).expect("encode run");
     let decoded: ResolvedRun = serde_json::from_slice(&encoded).expect("decode run");
@@ -292,13 +248,7 @@ fn capabilities_are_durable_refs_recorded_on_the_resolution() {
     );
     assert!(spec.hash().expect("hash").is_some());
     let resolved = spec
-        .resolve(
-            &snapshot(),
-            None,
-            TerminationPolicy::default(),
-            &catalog(),
-            &MapOwner,
-        )
+        .resolve(&snapshot(), None, &catalog(), &MapOwner)
         .expect("resolve");
     assert_eq!(resolved.capabilities, spec.capabilities);
     assert_eq!(
@@ -340,13 +290,7 @@ fn a_model_only_override_mints_the_key_once_and_keeps_the_snapshot_reasoning() {
     });
     let catalog = catalog();
     let resolved = spec
-        .resolve(
-            &snapshot(),
-            None,
-            TerminationPolicy::default(),
-            &catalog,
-            &MapOwner,
-        )
+        .resolve(&snapshot(), None, &catalog, &MapOwner)
         .expect("resolve");
     assert_eq!(catalog.snapshots(), 1, "the key is minted exactly once");
     let model = resolved.config().model.clone().expect("model");
@@ -368,13 +312,7 @@ fn a_reasoning_only_override_keeps_the_snapshot_model_without_minting() {
     });
     let catalog = catalog();
     let resolved = spec
-        .resolve(
-            &snapshot(),
-            None,
-            TerminationPolicy::default(),
-            &catalog,
-            &MapOwner,
-        )
+        .resolve(&snapshot(), None, &catalog, &MapOwner)
         .expect("resolve");
     assert_eq!(catalog.snapshots(), 0, "no key, no mint");
     let model = resolved.config().model.clone().expect("model");
@@ -391,13 +329,7 @@ fn an_override_naming_an_unserved_key_fails_typed_and_never_falls_back() {
         model: Some(LlmProfileKey::new("retired-model")),
         ..RunOverrides::default()
     });
-    match spec.resolve(
-        &snapshot(),
-        None,
-        TerminationPolicy::default(),
-        &catalog(),
-        &MapOwner,
-    ) {
+    match spec.resolve(&snapshot(), None, &catalog(), &MapOwner) {
         Err(RunResolveError::Model(unavailable)) => {
             assert_eq!(unavailable.key, LlmProfileKey::new("retired-model"));
             assert_eq!(unavailable.reason, LlmProfileUnavailableReason::UnknownKey);
@@ -417,13 +349,7 @@ fn an_override_whose_reasoning_the_model_refuses_is_refused_typed() {
         model: Some(LlmProfileKey::new("plain-model")),
         ..RunOverrides::default()
     });
-    match onto_plain.resolve(
-        &snapshot(),
-        None,
-        TerminationPolicy::default(),
-        &catalog(),
-        &MapOwner,
-    ) {
+    match onto_plain.resolve(&snapshot(), None, &catalog(), &MapOwner) {
         Err(RunResolveError::Refused(RunShapeRefusal::Reasoning { refusal: refused })) => {
             assert_eq!(refused.key, LlmProfileKey::new("plain-model"));
             assert_eq!(
@@ -438,13 +364,7 @@ fn an_override_whose_reasoning_the_model_refuses_is_refused_typed() {
         reasoning: Some(ReasoningSelection::Effort("extreme".to_string())),
         ..RunOverrides::default()
     });
-    match unadvertised.resolve(
-        &snapshot(),
-        None,
-        TerminationPolicy::default(),
-        &catalog(),
-        &MapOwner,
-    ) {
+    match unadvertised.resolve(&snapshot(), None, &catalog(), &MapOwner) {
         Err(RunResolveError::Refused(RunShapeRefusal::Reasoning { refusal: refused })) => {
             assert_eq!(refused.key, LlmProfileKey::new("session-model"));
         }
@@ -458,13 +378,7 @@ fn an_override_whose_reasoning_the_model_refuses_is_refused_typed() {
         ..RunOverrides::default()
     });
     accepted
-        .resolve(
-            &snapshot(),
-            None,
-            TerminationPolicy::default(),
-            &catalog(),
-            &MapOwner,
-        )
+        .resolve(&snapshot(), None, &catalog(), &MapOwner)
         .expect("the provider's default reasoning fits a model with no controls");
 }
 
@@ -477,13 +391,7 @@ fn a_reasoning_override_for_a_session_without_a_profile_is_refused() {
     let bare =
         PersistedSessionConfig::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
     assert!(matches!(
-        spec.resolve(
-            &bare,
-            None,
-            TerminationPolicy::default(),
-            &catalog(),
-            &MapOwner
-        ),
+        spec.resolve(&bare, None, &catalog(), &MapOwner),
         Err(RunResolveError::Refused(
             RunShapeRefusal::ReasoningWithoutLlmProfile
         ))
@@ -511,13 +419,7 @@ fn explicit_overrides_win_over_the_definition_which_wins_over_the_snapshot() {
         ..RunOverrides::default()
     };
     let resolved = spec
-        .resolve(
-            &snapshot(),
-            Some(definition),
-            TerminationPolicy::default(),
-            &catalog(),
-            &MapOwner,
-        )
+        .resolve(&snapshot(), Some(definition), &catalog(), &MapOwner)
         .expect("resolve");
     assert_eq!(
         resolved.config().model.clone().expect("model").model,

@@ -46,6 +46,9 @@ fn scenario_core(
 
 /// A process body's `llm.query` with a typed output runs as one structured,
 /// non-streaming model call, and the process answers its decoded value.
+/// Each `llm.query` names its real owner on its provider request (ADR
+/// 0022, FIG-5441): the cell's call its session, the process body's call
+/// its process, never an id lash made up.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn agent_scenario_process_llm_query_with_typed_output() -> Result<()> {
     let requests = Arc::new(StdMutex::new(Vec::new()));
@@ -55,6 +58,7 @@ async fn agent_scenario_process_llm_query_with_typed_output() -> Result<()> {
             vec![
                 typescript_block(
                     r#"
+const label = await llm.query({ task: "Name the event", output: { name: "str" } });
 const enrich = async (event) => {
   const enriched = await llm.query({
     task: "Classify the supplied email",
@@ -66,6 +70,7 @@ const enrich = async (event) => {
 const handle = await processes.start({ definition: enrich, args: { event: { email: "hello@example.com" } } });
 finish(await handle);"#,
                 ),
+                r#"{"kind":"value","value":{"name":"email"},"error":null}"#.to_owned(),
                 r#"{"kind":"value","value":{"category":"personal","confidence":0.98},"error":null}"#
                     .to_owned(),
             ],
@@ -74,11 +79,10 @@ finish(await handle);"#,
     )
     .plugin(Arc::new(lash_llm_tools::LlmToolsPluginFactory::default()))
     .build(crate::testing::runtime_lease_owner())?;
+    let session_id = crate::SessionId::parse("agent-scenario-process-llm-query")
+        .expect("nonblank host identity");
     let session = core
-        .session(
-            crate::SessionId::parse("agent-scenario-process-llm-query")
-                .expect("nonblank host identity"),
-        )
+        .session(session_id.clone())
         .created()
         .await
         .open()
@@ -92,12 +96,35 @@ finish(await handle);"#,
         Some(&serde_json::json!({ "category": "personal", "confidence": 0.98 }))
     );
     let requests = requests.lock_recover().clone();
-    assert_eq!(requests.len(), 2, "outer turn plus one llm_query call");
-    assert!(requests[1].stream_events.is_none());
+    assert_eq!(requests.len(), 3, "outer turn plus two llm_query calls");
+    assert!(requests[2].stream_events.is_none());
     assert!(matches!(
-        requests[1].output_spec,
+        requests[2].output_spec,
         Some(lash_core::llm::types::LlmOutputSpec::JsonSchema(_))
     ));
+    assert_eq!(
+        requests[1].scope.owner,
+        lash_core::LlmRequestOwner::Session { session_id },
+        "the cell's llm.query is its session's"
+    );
+    let processes = core
+        .backend()
+        .process_registry()
+        .list_processes(&lash_core::ProcessListFilter {
+            status: lash_core::ProcessStatusFilter::Any,
+            ..lash_core::ProcessListFilter::default()
+        })
+        .await?;
+    let [process] = processes.as_slice() else {
+        panic!("one process ran: {processes:?}");
+    };
+    assert_eq!(
+        requests[2].scope.owner,
+        lash_core::LlmRequestOwner::Process {
+            process_id: process.id.clone()
+        },
+        "the process body's llm.query is its process's"
+    );
     core.shutdown().await?;
     Ok(())
 }

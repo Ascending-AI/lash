@@ -24,7 +24,7 @@ fn committed_contents(output: &crate::TurnOutput) -> Vec<String> {
 fn reliability(attempts: u32) -> lash_core::facade_support::ProviderOptions {
     lash_core::facade_support::ProviderOptions {
         reliability: lash_core::provider::ProviderReliability::default()
-            .max_attempts(attempts)
+            .max_attempts(Some(attempts))
             .base_delay_ms(0)
             .max_delay_ms(0),
         ..lash_core::facade_support::ProviderOptions::default()

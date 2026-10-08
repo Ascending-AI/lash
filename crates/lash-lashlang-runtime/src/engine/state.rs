@@ -15,9 +15,6 @@ use serde::{Deserialize, Serialize};
 /// quiet point.
 pub const VM_RUN_STEP: &str = "vm_run";
 
-/// The engine step that settles an aggregate's timer leaf at its deadline.
-pub const TIMER_STEP: &str = "timer";
-
 /// The version of a lashlang process's engine state: [`LashlangEngineState`]
 /// with the VM snapshot it holds, declared as the engine's state format and
 /// part of the process's program identity. Re-exported by the facade's
@@ -48,8 +45,6 @@ pub(crate) struct LashlangEngineState {
     pub(crate) runs: u64,
     /// How many operations the VM issued: the next operation's number.
     pub(crate) operations: u64,
-    /// How many `vm_run` steps in a row failed without a quiet point.
-    pub(crate) faults: u32,
     /// What the process is doing.
     pub(crate) phase: Phase,
 }
@@ -73,7 +68,8 @@ pub(crate) enum Phase {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "wait", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum Wait {
-    /// A resource operation, or an aggregate's leaves: one step each.
+    /// A resource operation, or an aggregate's leaves: a step each, or a
+    /// durable wake for a timer.
     Leaves {
         batch: Option<BatchShape>,
         leaves: Vec<Leaf>,
@@ -98,12 +94,15 @@ pub(crate) struct BatchShape {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "leaf", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum Leaf {
-    /// A step: a catalog tool or a timer.
+    /// A step: a catalog tool or a host operation.
     Step {
         step: StepName,
-        timer: bool,
         outcome: Option<Box<SettledOutput>>,
     },
+    /// A timer: the process sleeps until `until_ms` (epoch milliseconds)
+    /// on a durable wake, as a plain sleep does, and the timer fulfils
+    /// when it wakes. No step body runs for it.
+    Timer { until_ms: i64, fired: bool },
     /// Settled when the operation was issued, without a step: a leaf
     /// refused before dispatch, or a language runtime value.
     Settled {
@@ -118,10 +117,10 @@ impl Leaf {
         match self {
             Self::Step {
                 outcome: Some(outcome),
-                timer,
                 ..
-            } => Some(*timer || super::injection::fulfilled(outcome)),
+            } => Some(super::injection::fulfilled(outcome)),
             Self::Step { outcome: None, .. } => None,
+            Self::Timer { fired, .. } => fired.then_some(true),
             Self::Settled { fulfilled, .. } => Some(*fulfilled),
         }
     }
@@ -229,13 +228,6 @@ pub(crate) enum IssuedLeaf {
         fulfilled: bool,
         outcome: EncodedOutcome,
     },
-}
-
-/// The input of a [`TIMER_STEP`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct TimerInput {
-    pub(crate) until_ms: i64,
 }
 
 /// A VM outcome settled at issue, in the effect-value codec's MessagePack

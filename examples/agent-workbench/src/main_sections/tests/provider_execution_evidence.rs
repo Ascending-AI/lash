@@ -106,7 +106,7 @@ async fn provider_execution_evidence_reaches_the_record_surfaces() {
         let mut options = provider.options();
         options.reliability = options
             .reliability
-            .max_attempts(2)
+            .max_attempts(Some(2))
             .base_delay_ms(0)
             .max_delay_ms(0);
         provider.set_options(options);

@@ -283,7 +283,7 @@ impl Provider for PartialStreamFailureProvider {
 
     fn options(&self) -> ProviderOptions {
         ProviderOptions {
-            reliability: ProviderReliability::default().max_attempts(1),
+            reliability: ProviderReliability::default().max_attempts(Some(1)),
             ..ProviderOptions::default()
         }
     }
@@ -343,7 +343,7 @@ impl Provider for CountedPartialStreamFailureProvider {
 
     fn options(&self) -> ProviderOptions {
         ProviderOptions {
-            reliability: ProviderReliability::default().max_attempts(1),
+            reliability: ProviderReliability::default().max_attempts(Some(1)),
             ..ProviderOptions::default()
         }
     }
@@ -988,45 +988,6 @@ async fn partial_response_origin_conflict_retains_original_provider_failure_evid
     );
 }
 
-#[test]
-fn provider_reliability_resolves_response_start_timeout_independently() {
-    let explicit = ProviderReliability::default()
-        .request_timeout(Some(RequestTimeout::Millis(300_000)))
-        .response_start_timeout_ms(Some(20_000))
-        .stream_chunk_timeout_ms(Some(120_000))
-        .llm_timeouts();
-    assert_eq!(
-        explicit.response_start_timeout,
-        Duration::from_secs(20),
-        "an explicit response-start timeout must not inherit the chunk timeout"
-    );
-    assert_eq!(explicit.chunk_timeout, Duration::from_secs(120));
-}
-
-#[test]
-fn provider_reliability_without_response_start_timeout_preserves_derived_bound() {
-    let defaults = ProviderReliability::default().llm_timeouts();
-    assert_eq!(
-        defaults.response_start_timeout,
-        lash_sansio::ProviderAttemptLimits::default().chunk_idle()
-    );
-
-    let request_wins = ProviderReliability::default()
-        .request_timeout(Some(RequestTimeout::Millis(5_000)))
-        .stream_chunk_timeout_ms(Some(7_500))
-        .llm_timeouts();
-    assert_eq!(request_wins.response_start_timeout, Duration::from_secs(5));
-
-    let chunk_wins = ProviderReliability::default()
-        .request_timeout(Some(RequestTimeout::Disabled))
-        .stream_chunk_timeout_ms(Some(7_500))
-        .llm_timeouts();
-    assert_eq!(
-        chunk_wins.response_start_timeout,
-        Duration::from_millis(7_500)
-    );
-}
-
 /// Request behaviour is recorded with the model (FIG-4374), response-metadata
 /// capture included (FIG-4397): provider options hold only a transport's live
 /// concerns and refuse the retired fields.
@@ -1287,7 +1248,7 @@ pub(super) fn paid_partial_handle(
         PaidPartialThenSuccessProvider {
             options: ProviderOptions {
                 reliability: ProviderReliability::default()
-                    .max_attempts(max_attempts)
+                    .max_attempts(Some(max_attempts))
                     .base_delay_ms(0)
                     .max_delay_ms(0),
                 ..ProviderOptions::default()
@@ -1460,7 +1421,7 @@ async fn provider_handle_retries_retryable_failures_in_shared_executor() {
     let provider = FailingProvider {
         options: ProviderOptions {
             reliability: ProviderReliability::default()
-                .max_attempts(3)
+                .max_attempts(Some(3))
                 .base_delay_ms(0)
                 .max_delay_ms(0),
             ..ProviderOptions::default()
@@ -1534,7 +1495,7 @@ impl Provider for ReportingProvider {
 
     fn options(&self) -> ProviderOptions {
         ProviderOptions {
-            reliability: ProviderReliability::default().max_attempts(1),
+            reliability: ProviderReliability::default().max_attempts(Some(1)),
             ..ProviderOptions::default()
         }
     }
@@ -1687,7 +1648,7 @@ async fn provider_handle_stops_on_non_retryable_failure() {
     let provider = FailingProvider {
         options: ProviderOptions {
             reliability: ProviderReliability::default()
-                .max_attempts(3)
+                .max_attempts(Some(3))
                 .base_delay_ms(0)
                 .max_delay_ms(0),
             ..ProviderOptions::default()
@@ -1715,7 +1676,7 @@ async fn provider_handle_throttle_with_retry_after_does_not_consume_attempts() {
     let provider = StatusFailingProvider {
         options: ProviderOptions {
             reliability: ProviderReliability::default()
-                .max_attempts(2)
+                .max_attempts(Some(2))
                 .base_delay_ms(0)
                 .max_delay_ms(0),
             ..ProviderOptions::default()
@@ -1777,7 +1738,7 @@ async fn provider_handle_retry_after_beyond_cap_fails_without_sleeping() {
     let provider = StatusFailingProvider {
         options: ProviderOptions {
             reliability: ProviderReliability::default()
-                .max_attempts(1)
+                .max_attempts(Some(1))
                 .base_delay_ms(0)
                 .max_delay_ms(0),
             ..ProviderOptions::default()
@@ -1850,7 +1811,7 @@ async fn provider_handle_throttle_budget_exhaustion_degrades_to_attempt_counting
     let provider = StatusFailingProvider {
         options: ProviderOptions {
             reliability: ProviderReliability::default()
-                .max_attempts(2)
+                .max_attempts(Some(2))
                 .base_delay_ms(0)
                 .max_delay_ms(0)
                 // Room for exactly two 4s deferences; the third throttle
@@ -1928,7 +1889,7 @@ async fn provider_handle_throttle_without_retry_after_uses_counted_backoff_retry
     let provider = StatusFailingProvider {
         options: ProviderOptions {
             reliability: ProviderReliability::default()
-                .max_attempts(2)
+                .max_attempts(Some(2))
                 .base_delay_ms(0)
                 .max_delay_ms(0),
             ..ProviderOptions::default()
@@ -1959,7 +1920,7 @@ async fn provider_handle_throttle_with_malformed_retry_after_uses_counted_backof
     let provider = StatusFailingProvider {
         options: ProviderOptions {
             reliability: ProviderReliability::default()
-                .max_attempts(2)
+                .max_attempts(Some(2))
                 .base_delay_ms(0)
                 .max_delay_ms(0),
             ..ProviderOptions::default()
@@ -1990,7 +1951,7 @@ async fn provider_handle_server_error_with_retry_after_is_not_retried() {
     let provider = StatusFailingProvider {
         options: ProviderOptions {
             reliability: ProviderReliability::default()
-                .max_attempts(2)
+                .max_attempts(Some(2))
                 .base_delay_ms(0)
                 .max_delay_ms(0),
             ..ProviderOptions::default()
@@ -2020,7 +1981,7 @@ async fn provider_handle_attachment_413_remains_plain_non_retryable_validation()
     let attempts = Arc::new(AtomicUsize::new(0));
     let provider = StatusFailingProvider {
         options: ProviderOptions {
-            reliability: ProviderReliability::default().max_attempts(3),
+            reliability: ProviderReliability::default().max_attempts(Some(3)),
             ..ProviderOptions::default()
         },
         attempts: Arc::clone(&attempts),
@@ -2103,7 +2064,7 @@ async fn admission_decorator_observes_all_retry_requests_with_session_identity()
     let components = FailingProvider {
         options: ProviderOptions {
             reliability: ProviderReliability::default()
-                .max_attempts(3)
+                .max_attempts(Some(3))
                 .base_delay_ms(0)
                 .max_delay_ms(0),
             ..Default::default()

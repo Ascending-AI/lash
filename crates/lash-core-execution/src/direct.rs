@@ -1,5 +1,4 @@
 use crate::SchemaContract;
-use crate::SessionId;
 use crate::llm::transport::LlmTransportError;
 use crate::llm::types::{
     AttachmentSource, LlmContentBlock, LlmEventSender, LlmJsonSchema, LlmMessage, LlmOutputSpec,
@@ -65,8 +64,11 @@ pub struct DirectRequest {
     pub generation: crate::GenerationOptions,
     #[serde(default, skip)]
     pub stream_events: Option<LlmEventSender>,
+    /// Who the call is made for. `None` lets the runtime fill the owner it
+    /// runs the call for (a tool's session or process); a call nobody
+    /// fills is the host's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<SessionId>,
+    pub owner: Option<crate::LlmRequestOwner>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub caused_by: Option<crate::CausalRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -105,7 +107,7 @@ impl DirectRequest {
             output: DirectOutputSpec::Text,
             generation: crate::GenerationOptions::default(),
             stream_events: None,
-            session_id: None,
+            owner: None,
             caused_by: None,
             replay: None,
         }
@@ -375,7 +377,7 @@ pub fn build_llm_request(
         output,
         generation,
         stream_events,
-        session_id,
+        owner,
         caused_by: _,
         replay: _,
     } = request;
@@ -422,20 +424,29 @@ pub fn build_llm_request(
         }
     }
 
-    let scope = match session_id {
-        // This request id is transport metadata for the DirectRequest path;
-        // its durable position was selected from replay/ordinal before
-        // normalization. Callers of direct_llm_completion must instead supply
-        // their own per-logical-call request id.
-        Some(session_id) => LlmRequestScope::new(
-            session_id.clone(),
+    // This request id is transport metadata for the DirectRequest path; its
+    // durable position was selected from replay/ordinal before normalization.
+    // Callers of direct_llm_completion must instead supply their own
+    // per-logical-call request id.
+    let scope = match owner {
+        Some(crate::LlmRequestOwner::Session { session_id }) => LlmRequestScope::owned(
+            crate::LlmRequestOwner::Session {
+                session_id: session_id.clone(),
+            },
             format!("{session_id}:frame:direct"),
             format!("{session_id}:direct"),
         ),
-        None => {
+        Some(crate::LlmRequestOwner::Process { process_id }) => LlmRequestScope::owned(
+            crate::LlmRequestOwner::Process {
+                process_id: process_id.clone(),
+            },
+            format!("process:{process_id}:frame:direct"),
+            format!("process:{process_id}:direct"),
+        ),
+        Some(crate::LlmRequestOwner::Host) | None => {
             let request_id = uuid::Uuid::new_v4().to_string();
-            LlmRequestScope::new(
-                SessionId::prefixed("direct:", &request_id),
+            LlmRequestScope::owned(
+                crate::LlmRequestOwner::Host,
                 format!("direct:{request_id}:frame"),
                 request_id,
             )

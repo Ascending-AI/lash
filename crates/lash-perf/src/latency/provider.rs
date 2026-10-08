@@ -149,7 +149,10 @@ pub(crate) fn latency_provider(
             let holds = holds.clone();
             async move {
                 let started = Instant::now();
-                let session = request.session_id().to_string();
+                let session = request
+                    .session_id()
+                    .map(ToString::to_string)
+                    .unwrap_or_default();
                 let mut held = false;
                 let hold = holds
                     .as_ref()
@@ -198,7 +201,13 @@ fn answer(
 }
 
 fn response_text(request: &LlmRequest) -> String {
-    format!("latency gate reply for {}", request.session_id())
+    format!(
+        "latency gate reply for {}",
+        request
+            .session_id()
+            .map(ToString::to_string)
+            .unwrap_or_default()
+    )
 }
 
 fn request_has_tool_result(request: &LlmRequest) -> bool {

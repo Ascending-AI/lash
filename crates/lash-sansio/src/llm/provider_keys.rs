@@ -21,12 +21,13 @@ use super::types::{LlmRequest, LlmRequestScope};
 use crate::core_support::blake3_domain_hash_hex;
 
 impl LlmRequestScope {
-    /// Provider-facing affinity identity for this session: the lowercase hex
-    /// domain hash of the session id.
+    /// Provider-facing affinity identity for this call's owner: the
+    /// lowercase hex domain hash of its session id, or of its process's or
+    /// the host call's key.
     pub fn provider_session_affinity_key(&self) -> String {
         blake3_domain_hash_hex(
             LASH_PROVIDER_SESSION_AFFINITY_DOMAIN_VERSION,
-            self.session_id.as_str(),
+            self.owner_key(),
         )
     }
 

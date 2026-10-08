@@ -377,6 +377,15 @@ impl MemberBodies for CellMembers {
         }
     }
 
+    fn stop_grace(&self) -> std::time::Duration {
+        self.tools
+            .context
+            .dispatch()
+            .plugins
+            .execution_budgets()
+            .stop_grace()
+    }
+
     fn resolved(
         &self,
         execution: &AdmittedExecution,

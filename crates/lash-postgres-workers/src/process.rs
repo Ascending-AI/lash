@@ -114,7 +114,13 @@ impl ProcessEngine for WorkerEngine {
         script["n"] = json!(script["n"].as_u64().unwrap_or(0) + 1);
         let phase = script["phase"].as_str().unwrap_or_default().to_owned();
         let (next, action) = match event {
-            EngineEvent::Started { .. } => ("step-before", EngineAction::Steps(vec![step(BEFORE)])),
+            EngineEvent::Started { .. } => (
+                "step-before",
+                EngineAction::Steps {
+                    steps: vec![step(BEFORE)],
+                    wake: None,
+                },
+            ),
             EngineEvent::StepSettled { .. } if phase == "step-before" => (
                 "pin",
                 EngineAction::PinKey {
@@ -126,9 +132,13 @@ impl ProcessEngine for WorkerEngine {
                 },
             ),
             EngineEvent::KeyPinned { name, .. } => ("await", EngineAction::AwaitExternal { name }),
-            EngineEvent::ExternalTimedOut { .. } | EngineEvent::ExternalResolved { .. } => {
-                ("step-after", EngineAction::Steps(vec![step(AFTER)]))
-            }
+            EngineEvent::ExternalTimedOut { .. } | EngineEvent::ExternalResolved { .. } => (
+                "step-after",
+                EngineAction::Steps {
+                    steps: vec![step(AFTER)],
+                    wake: None,
+                },
+            ),
             EngineEvent::StepSettled { .. } if phase == "step-after" => (
                 "ended",
                 EngineAction::Terminal(ProcessOutcome::from_tool_output(ToolCallOutput::success(
@@ -210,6 +220,10 @@ impl WorkerSteps {
 
 #[async_trait::async_trait]
 impl ProcessSteps for WorkerSteps {
+    fn stop_grace(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(2)
+    }
+
     async fn admit(
         &self,
         _process: &ProcessRecord,

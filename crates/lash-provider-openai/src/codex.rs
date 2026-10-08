@@ -95,7 +95,7 @@ impl CodexProvider {
         Self {
             tokens: Arc::new(TokenGate::new(tokens, "codex")),
             options: ProviderOptions {
-                reliability: ProviderReliability::codex(),
+                reliability: Self::reliability(),
                 ..ProviderOptions::default()
             },
             extra_headers: Default::default(),
@@ -104,6 +104,25 @@ impl CodexProvider {
             responses_url: Self::CODEX_RESPONSES_URL.to_string(),
             websocket_url: Self::CODEX_RESPONSES_WS_URL.to_string(),
             http_transport: DEFAULT_HTTP_TRANSPORT.clone(),
+        }
+    }
+
+    /// The Codex route's reliability: shorter backoff with no jitter, a
+    /// one-minute `Retry-After` cap and a 90 s throttle-wait budget, and the
+    /// runtime's own timeouts and attempt count.
+    #[must_use]
+    pub fn reliability() -> ProviderReliability {
+        ProviderReliability {
+            retry: lash_core::provider::ProviderRetryPolicy {
+                enabled: true,
+                max_attempts: None,
+                base_delay_ms: 1_000,
+                max_delay_ms: 4_000,
+                jitter_ms: 0,
+                retry_after_cap_ms: Some(60_000),
+                throttle_wait_budget_ms: lash_core::provider::DEFAULT_THROTTLE_WAIT_BUDGET_MS,
+            },
+            ..ProviderReliability::default()
         }
     }
 

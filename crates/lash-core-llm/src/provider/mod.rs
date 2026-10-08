@@ -45,8 +45,8 @@ pub use models::{
 pub use options::{
     DEFAULT_THROTTLE_WAIT_BUDGET_MS, GenerationEmission, GenerationWire, LlmTimeouts,
     OutputCapWire, ProviderOptions, ProviderRateLimitPolicy, ProviderReliability,
-    ProviderRetryPolicy, RequestTimeout, ResolvedGenerationPolicy, ThinkingSummaryWire,
-    resolve_generation_policy,
+    ProviderRetryPolicy, ResolvedGenerationPolicy, RouteBound, RouteBoundAboveBudget,
+    ThinkingSummaryWire, resolve_generation_policy,
 };
 pub use rate_limit::{ProviderRateLimitPermit, ProviderRateLimiter};
 pub use traits::{

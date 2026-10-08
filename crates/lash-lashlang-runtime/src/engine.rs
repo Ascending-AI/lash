@@ -21,12 +21,13 @@ use std::sync::Arc;
 use lash_core::{EngineStepKind, EngineStepRun, SettledOutput};
 use tokio_util::sync::CancellationToken;
 
-pub use state::{LASHLANG_SEGMENT_STATE_VERSION, TIMER_STEP, VM_RUN_STEP};
+pub use state::{LASHLANG_SEGMENT_STATE_VERSION, VM_RUN_STEP};
 
 use crate::LashlangProcessEngine;
 
-/// The lashlang engine's own step bodies: `vm_run` and an aggregate's
-/// `timer`.
+/// The lashlang engine's own step body: `vm_run`. A sleep, alone or as an
+/// aggregate's timer leaf, runs no body: the process sleeps on a durable
+/// wake.
 #[derive(Clone)]
 pub struct LashlangEngineSteps {
     engine: Arc<LashlangProcessEngine>,
@@ -41,29 +42,30 @@ impl LashlangEngineSteps {
 }
 
 /// The lashlang engine's bound on one run of a step it issues, a VM run
-/// segment or a timer: the engine sets it, as a host
-/// sets its tools' bounds.
+/// segment: the engine sets it, as a host sets its tools' bounds.
 const LASHLANG_STEP_EXECUTION: std::time::Duration = std::time::Duration::from_secs(2 * 60);
+
+/// How many times a `vm_run` may run before its failure ends the process:
+/// a VM segment is a recomputation from the committed snapshot with no
+/// effect of its own, so a worker fault or a crash runs it again at once.
+const VM_RUN_ATTEMPTS: std::num::NonZeroU32 = std::num::NonZeroU32::MIN.saturating_add(2);
 
 #[async_trait::async_trait]
 impl lash_core::EngineSteps for LashlangEngineSteps {
     fn kinds(&self) -> Vec<EngineStepKind> {
-        vec![
-            EngineStepKind::new(VM_RUN_STEP),
-            EngineStepKind::new(TIMER_STEP),
-        ]
+        vec![EngineStepKind::new(VM_RUN_STEP)]
     }
 
     fn execution(&self, _kind: &EngineStepKind) -> std::time::Duration {
         LASHLANG_STEP_EXECUTION
     }
 
+    fn retry(&self, _kind: &EngineStepKind) -> lash_core::ExecutionPolicy {
+        lash_core::ExecutionPolicy::repeatable(VM_RUN_ATTEMPTS, 0, 0)
+    }
+
     async fn run(&self, run: EngineStepRun, cancel: CancellationToken) -> SettledOutput {
-        if run.kind.0 == TIMER_STEP {
-            vm_run::run_timer_step(run, cancel).await
-        } else {
-            vm_run::run_vm_step(&self.engine, run, cancel).await
-        }
+        vm_run::run_vm_step(&self.engine, run, cancel).await
     }
 }
 

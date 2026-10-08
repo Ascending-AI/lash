@@ -75,7 +75,8 @@ async fn deploy(
     let provider = crate::testing::TestProvider::builder()
         .kind("session-turn-child")
         .complete(move |request| {
-            let on_child = (request.session_id().as_str() == CHILD).then(|| child.clone());
+            let on_child = (request.session_id().map(lash_core::SessionId::as_str) == Some(CHILD))
+                .then(|| child.clone());
             async move {
                 match on_child {
                     None => {}

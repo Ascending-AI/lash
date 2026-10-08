@@ -110,6 +110,11 @@ pub trait RoundTools: Send + Sync {
     /// stored repeat against.
     fn policies(&self) -> PolicyView;
 
+    /// How long a call's body whose token was cancelled may still answer:
+    /// the runtime's
+    /// [`ExecutionBudgets::stop_grace`](lash_sansio::ExecutionBudgets::stop_grace).
+    fn stop_grace(&self) -> std::time::Duration;
+
     /// The body of `execution`, an attempt of `call`: the call's admission
     /// checks, its attempt and its decision, run in memory. Its answer is
     /// the attempt's outcome, the journal-local material it names and the
@@ -295,6 +300,10 @@ impl MemberBodies for RoundCalls {
                 self.tools.observe(call, member);
             }
         }
+    }
+
+    fn stop_grace(&self) -> std::time::Duration {
+        self.tools.stop_grace()
     }
 
     fn resolved(

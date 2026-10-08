@@ -334,13 +334,24 @@ impl ProviderHandle {
             _ => {}
         }
         let call_id = call_id_for_scope(&request.scope);
+        // Every bound the route leaves unset is the runtime's; one it sets
+        // above the runtime's is refused, never clipped.
         let provider_limits = bounds.budgets.provider();
-        let mut reliability = self.options().reliability;
-        reliability.retry.max_attempts = reliability
+        let route = self.options().reliability;
+        let reliability = match route.within(&provider_limits) {
+            Ok(reliability) => reliability,
+            Err(refused) => {
+                let error = LlmTransportError::new(refused.to_string())
+                    .with_kind(ProviderFailureKind::Validation)
+                    .with_lash_code(TurnFailureCode::ProviderRouteAboveBudget)
+                    .with_retry_verdict(TransportRetryVerdict::Forbidden);
+                return Err(unsent(&request, &sideband, error));
+            }
+        };
+        let attempts = reliability
             .retry
             .max_attempts
-            .min(provider_limits.max_attempts());
-        let attempts = reliability.retry.attempts();
+            .unwrap_or_else(|| provider_limits.max_attempts());
         // The model total is a hard cap over throttle, backoff and every
         // attempt (spec v3 L-C2). The limit is minted on lash's clock; the
         // granted remainder is then enforced on the monotonic clock.
@@ -382,12 +393,13 @@ impl ProviderHandle {
                 .attempt_clock
                 .as_ref()
                 .map(|clock| clock.timestamp_ms());
-            // Every provider sublimit of this attempt is clipped to what
-            // remains of the total; the route's own bounds come back after.
-            let route = self.options().reliability;
+            // Every bound of this attempt is clipped to what remains of the
+            // total; the route's own bounds come back after.
+            let window = reliability.for_window(remaining(clock.as_ref()));
             let mut attempt_options = self.options();
-            attempt_options.reliability =
-                route.clipped(&provider_limits, remaining(clock.as_ref()));
+            attempt_options.reliability.request_timeout = window.request_timeout;
+            attempt_options.reliability.response_start_timeout = window.response_start_timeout;
+            attempt_options.reliability.chunk_timeout = window.chunk_timeout;
             self.components.provider.set_options(attempt_options);
             let attempt = {
                 // The call is built inside the caught future: a provider
@@ -526,6 +538,7 @@ impl ProviderHandle {
                         protocol_position,
                         retry_guarantee,
                         &reliability.retry,
+                        attempts,
                         &charge_safety,
                         &budget,
                     );
@@ -836,6 +849,7 @@ fn retry_verdict(
     position: ProtocolPosition,
     guarantee: GenerationRetryGuarantee,
     policy: &ProviderRetryPolicy,
+    attempts: u32,
     charge_safety: &crate::ChargeSafetyPolicy,
     budget: &RetryBudget,
 ) -> (RetryVerdict, Option<ChargeSafetyDecision>) {
@@ -905,7 +919,7 @@ fn retry_verdict(
     if let Some(wait) = budget.throttle_wait(policy, failure.retry_verdict) {
         return (RetryVerdict::Throttle { wait, class }, charge);
     }
-    if budget.attempt + 1 >= policy.attempts() {
+    if budget.attempt + 1 >= attempts {
         return (
             RetryVerdict::Declined(RetryDeclineCause::RetryBudgetExhausted),
             charge,
@@ -1420,10 +1434,7 @@ mod retry_verdict_tests {
 
     #[test]
     fn retry_verdict_table_needs_no_provider() {
-        let policy = ProviderRetryPolicy {
-            max_attempts: 2,
-            ..Default::default()
-        };
+        let policy = ProviderRetryPolicy::default();
         let failure = LlmTransportError::new("failure")
             .with_retry_verdict(TransportRetryVerdict::RetryableTransient);
         for position in [
@@ -1447,6 +1458,7 @@ mod retry_verdict_tests {
                         position,
                         guarantee,
                         &policy,
+                        2,
                         &crate::ChargeSafetyPolicy::RequireGuarantee,
                         &budget,
                     );

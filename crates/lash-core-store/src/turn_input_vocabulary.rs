@@ -20,7 +20,6 @@ pub use crate::run_spec::{
     BindingId, CapabilityRef, ContractRef, DefinitionRef, NoRunOptionsOwner, RecordedRender,
     RenderFault, RenderRefusal, ResolvedRun, RunDefinition, RunDefinitionRefusal, RunDefinitions,
     RunOptionsOwner, RunOverrides, RunResolveError, RunShapeRefusal, RunSpec, RunSpecHash, SlotId,
-    TerminationPolicy,
 };
 use crate::{CheckpointKind, PluginMessage, SessionId, TurnId};
 use std::any::Any;

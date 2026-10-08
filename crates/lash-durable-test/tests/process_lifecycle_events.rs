@@ -328,16 +328,19 @@ fn write_tool(world: &Arc<World>) -> Arc<dyn lash_core::ToolProvider> {
 
 /// A write step for `x`, run for `site` when it names one.
 fn write(step: &str, x: u64, site: Option<(&str, u64)>) -> lash_core::EngineAction {
-    lash_core::EngineAction::Steps(vec![lash_core::StepRequest::Tool {
-        language_execution: None,
-        step: lash_core::StepName(step.to_owned()),
-        tool: lash_core::ToolId::new(WRITE_TOOL),
-        input: serde_json::json!({ "x": x }),
-        site: site.map(|(node_id, occurrence)| lash_core::StepEffectSite {
-            node_id: node_id.to_owned(),
-            occurrence,
-        }),
-    }])
+    lash_core::EngineAction::Steps {
+        steps: vec![lash_core::StepRequest::Tool {
+            language_execution: None,
+            step: lash_core::StepName(step.to_owned()),
+            tool: lash_core::ToolId::new(WRITE_TOOL),
+            input: serde_json::json!({ "x": x }),
+            site: site.map(|(node_id, occurrence)| lash_core::StepEffectSite {
+                node_id: node_id.to_owned(),
+                occurrence,
+            }),
+        }],
+        wake: None,
+    }
 }
 
 // --- the host's side --------------------------------------------------------------
@@ -530,6 +533,10 @@ struct NoSteps;
 
 #[async_trait::async_trait]
 impl lash_core_execution::runtime::process::steps::ProcessSteps for NoSteps {
+    fn stop_grace(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(2)
+    }
+
     async fn admit(
         &self,
         _process: &lash_core::ProcessRecord,

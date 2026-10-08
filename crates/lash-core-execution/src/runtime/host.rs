@@ -6,7 +6,7 @@ use std::sync::Arc;
 use super::process::{
     ArtifactReferrerPorts, ProcessEngineRegistry, ProcessExecutionEnvStore, ProcessRegistry,
 };
-use super::{DeploymentStore, ProcessWorkSubstrate, ProcessWorkWiring, TerminationPolicy};
+use super::{DeploymentStore, ProcessWorkSubstrate, ProcessWorkWiring};
 
 /// Required host configuration for all runtimes.
 ///
@@ -188,9 +188,6 @@ impl Default for DeltaCoalescing {
 #[derive(Clone)]
 pub struct RuntimeControlConfig {
     pub effect_host: ActorContext,
-    /// The termination policy a run records on its first execution. Terminal
-    /// assembly reads the run's record, never this field (FIG-4389).
-    pub termination: TerminationPolicy,
     /// Every execution bound this runtime enforces (spec v3 Part C): the
     /// tool default and inline ceiling, the model call's hard total, the
     /// control-phase bound, the stop grace, the wait bounds and the provider
@@ -289,7 +286,6 @@ impl RuntimeHostConfig {
                 run_definitions: crate::RunDefinitions::default(),
             },
             control: RuntimeControlConfig {
-                termination: TerminationPolicy::default(),
                 execution_budgets: crate::ExecutionBudgets::default(),
                 delta_coalescing: DeltaCoalescing::default(),
                 effect_host,

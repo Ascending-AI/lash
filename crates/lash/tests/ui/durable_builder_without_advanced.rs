@@ -37,7 +37,6 @@ async fn durable_core_without_advanced(
         ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .termination(lash::durability::TerminationPolicy::default())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "durable-builder-test-worker",
             "durable-builder-test-boot",

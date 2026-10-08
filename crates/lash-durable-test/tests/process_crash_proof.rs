@@ -169,9 +169,10 @@ impl ProcessEngine for ProofEngine {
         script["n"] = json!(script["n"].as_u64().unwrap_or(0) + 1);
         let root = script["act"] == "root";
         let action = match event {
-            EngineEvent::Started { .. } if root => {
-                EngineAction::Steps(vec![step("once", ONCE), step("again", AGAIN)])
-            }
+            EngineEvent::Started { .. } if root => EngineAction::Steps {
+                steps: vec![step("once", ONCE), step("again", AGAIN)],
+                wake: None,
+            },
             EngineEvent::StepSettled { step, .. } if root => {
                 let settled = script["settled"].as_u64().unwrap_or(0) + 1;
                 script["settled"] = json!(settled);
@@ -288,6 +289,10 @@ fn policy(tool: &ToolId) -> ExecutionPolicy {
 
 #[async_trait::async_trait]
 impl ProcessSteps for ProofSteps {
+    fn stop_grace(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(2)
+    }
+
     async fn admit(
         &self,
         _process: &ProcessRecord,

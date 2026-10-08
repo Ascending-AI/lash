@@ -9,7 +9,7 @@ use lash_core::llm::types::{
 };
 use lash_core::provider::{
     DefaultProviderFailureClassifier, Provider, ProviderFailureClassifier, ProviderOptions,
-    ProviderReliability, RequestTimeout,
+    ProviderReliability,
 };
 use lash_llm_transport::LlmHttpBody;
 use lash_provider_openai::{OpenAiCompatibleProvider, OpenAiProvider};
@@ -195,7 +195,7 @@ async fn scripted_transport_response_start_gate_timeout_uses_production_timeout_
     let mut provider = OpenAiCompatibleProvider::new("test-key", "https://provider.test")
         .with_options(ProviderOptions {
             reliability: ProviderReliability::default()
-                .request_timeout(Some(RequestTimeout::Millis(1)))
+                .request_timeout_ms(Some(1))
                 .stream_chunk_timeout_ms(Some(1)),
             ..ProviderOptions::default()
         })
@@ -253,7 +253,7 @@ async fn scripted_transport_buffers_scheduler_releases_before_provider_parks() {
     let mut provider = OpenAiCompatibleProvider::new("test-key", "https://provider.test")
         .with_options(ProviderOptions {
             reliability: ProviderReliability::default()
-                .request_timeout(Some(RequestTimeout::Millis(1)))
+                .request_timeout_ms(Some(1))
                 .stream_chunk_timeout_ms(Some(1)),
             ..ProviderOptions::default()
         })

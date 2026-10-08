@@ -51,12 +51,10 @@ pub(crate) fn fulfilled(outcome: &SettledOutput) -> bool {
 /// every reader gives an interruption, a limit or a cancel.
 fn step_result(
     key: &str,
-    timer: bool,
     outcome: &SettledOutput,
     cancellation: &ExecutionCancellation,
 ) -> Result<Result<Value, ExecutionHostError>, InjectionFault> {
     let output = match outcome {
-        SettledOutput::Completed(_) if timer => return Ok(Ok(Value::Undefined)),
         SettledOutput::Completed(output) => decode_output(output.payload())?,
         SettledOutput::Failed(failure) => decode_output(failure.payload())?,
         // A step settles once its park ends: a park is never its settlement.
@@ -78,14 +76,17 @@ fn leaf_result(
     match leaf {
         Leaf::Step {
             step,
-            timer,
             outcome: Some(outcome),
         } => Ok(ResourceOperationOutcome::from_result(step_result(
             &step.0,
-            *timer,
             outcome,
             cancellation,
         )?)),
+        // A timer that fired is `undefined`, as `await sleep(ms)` is.
+        Leaf::Timer { fired: true, .. } => Ok(ResourceOperationOutcome::Value(Value::Undefined)),
+        Leaf::Timer { fired: false, .. } => Ok(ResourceOperationOutcome::Error(
+            ExecutionHostError::new("an aggregate's timer was answered before it fired"),
+        )),
         Leaf::Step {
             step,
             outcome: None,
@@ -226,7 +227,6 @@ mod tests {
     fn an_interrupted_step_is_answered_as_a_turn_presents_an_interrupted_call() {
         let answer = step_result(
             "charge",
-            false,
             &SettledOutput::Interrupted,
             &ExecutionCancellation::new(),
         )
@@ -252,7 +252,6 @@ mod tests {
         let process = lash_core::ProcessId::fixture("leaf-law");
         let leaf = Leaf::Step {
             step: lash_core::StepName("op.0.0".to_owned()),
-            timer: false,
             outcome: Some(Box::new(super::super::vm_run::completed(
                 &process,
                 "\"alpha\"".to_owned(),

@@ -50,7 +50,7 @@ impl AnthropicProvider {
             base_url: None,
             options: ProviderOptions::default(),
             extra_headers: Default::default(),
-            stream_termination: StreamTermination::RequireTerminalEvidence,
+            stream_termination: StreamTermination::default(),
             transport: Arc::clone(&DEFAULT_HTTP_TRANSPORT),
         }
     }

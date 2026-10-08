@@ -18,113 +18,59 @@ pub(crate) const MIN_FREE_THROTTLE_WAIT: Duration = Duration::from_secs(1);
 /// provider calls independently of the server's `Retry-After` duration.
 pub(crate) const MAX_COURTESY_THROTTLE_CALLS: usize = 8;
 
+/// One attempt's transport timeouts, read from the attempt's
+/// [`ProviderReliability`]. [`ProviderHandle`](super::ProviderHandle)
+/// resolves every one against the runtime's provider attempt limits before
+/// an attempt is sent ([`ProviderReliability::within`]); a bound still unset
+/// (a provider driven outside a handle) is unbounded.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LlmTimeouts {
     pub request_timeout: Option<Duration>,
     /// The whole-request timeout still wins when it is shorter.
-    pub response_start_timeout: Duration,
-    pub chunk_timeout: Duration,
+    pub response_start_timeout: Option<Duration>,
+    pub chunk_timeout: Option<Duration>,
 }
 
-impl Default for LlmTimeouts {
-    /// The default [`ProviderAttemptLimits`](lash_sansio::ProviderAttemptLimits).
-    fn default() -> Self {
-        let limits = lash_sansio::ProviderAttemptLimits::default();
-        Self {
-            request_timeout: Some(limits.per_request()),
-            response_start_timeout: limits.response_start(),
-            chunk_timeout: limits.chunk_idle(),
-        }
-    }
-}
-
-impl LlmTimeouts {
-    /// These timeouts with every bound clipped to `limits` and to `window`,
-    /// what remains of the model call's total for this attempt.
-    #[must_use]
-    pub fn clipped(self, limits: &lash_sansio::ProviderAttemptLimits, window: Duration) -> Self {
-        let request = self
-            .request_timeout
-            .map_or(limits.per_request(), |timeout| {
-                timeout.min(limits.per_request())
-            })
-            .min(window);
-        Self {
-            request_timeout: Some(request),
-            response_start_timeout: self
-                .response_start_timeout
-                .min(limits.response_start())
-                .min(request),
-            chunk_timeout: self.chunk_timeout.min(limits.chunk_idle()).min(request),
-        }
-    }
-}
-
+/// The route bound [`RouteBoundAboveBudget`] names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RequestTimeout {
-    Disabled,
-    Millis(u64),
+pub enum RouteBound {
+    /// [`ProviderReliability::request_timeout`], against
+    /// [`ProviderAttemptLimits::per_request`](lash_sansio::ProviderAttemptLimits::per_request).
+    RequestTimeout,
+    /// [`ProviderReliability::response_start_timeout`], against
+    /// [`ProviderAttemptLimits::response_start`](lash_sansio::ProviderAttemptLimits::response_start).
+    ResponseStartTimeout,
+    /// [`ProviderReliability::chunk_timeout`], against
+    /// [`ProviderAttemptLimits::chunk_idle`](lash_sansio::ProviderAttemptLimits::chunk_idle).
+    ChunkTimeout,
+    /// [`ProviderRetryPolicy::max_attempts`], against
+    /// [`ProviderAttemptLimits::max_attempts`](lash_sansio::ProviderAttemptLimits::max_attempts).
+    MaxAttempts,
 }
 
-impl Serialize for RequestTimeout {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match self {
-            Self::Disabled => serializer.serialize_bool(false),
-            Self::Millis(value) => serializer.serialize_u64(*value),
-        }
+impl std::fmt::Display for RouteBound {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::RequestTimeout => "request timeout (ms)",
+            Self::ResponseStartTimeout => "response-start timeout (ms)",
+            Self::ChunkTimeout => "chunk timeout (ms)",
+            Self::MaxAttempts => "max attempts",
+        })
     }
 }
 
-impl<'de> Deserialize<'de> for RequestTimeout {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct RequestTimeoutVisitor;
-
-        impl Visitor<'_> for RequestTimeoutVisitor {
-            type Value = RequestTimeout;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                formatter.write_str("a positive timeout in milliseconds or false")
-            }
-
-            fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                if value {
-                    return Err(E::custom("timeout must be a positive integer or false"));
-                }
-                Ok(RequestTimeout::Disabled)
-            }
-
-            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                if value == 0 {
-                    return Err(E::custom("timeout must be greater than 0"));
-                }
-                Ok(RequestTimeout::Millis(value))
-            }
-
-            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                if value <= 0 {
-                    return Err(E::custom("timeout must be greater than 0"));
-                }
-                Ok(RequestTimeout::Millis(value as u64))
-            }
-        }
-
-        deserializer.deserialize_any(RequestTimeoutVisitor)
-    }
+/// A provider route states a bound above the runtime's provider attempt
+/// limit for it: the call is refused, never run under a silently clipped
+/// bound.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("the provider route's {bound} of {route} is above the runtime's limit of {budget}")]
+pub struct RouteBoundAboveBudget {
+    /// Which bound.
+    pub bound: RouteBound,
+    /// What the route states.
+    pub route: u64,
+    /// The runtime's limit for it.
+    pub budget: u64,
 }
 
 /// A provider route's operational options: its reliability policy and its
@@ -461,26 +407,27 @@ impl ResolvedGenerationPolicy {
     }
 }
 
+/// A provider route's reliability. Every unset bound is the runtime's: its
+/// [`ExecutionBudgets`](lash_sansio::ExecutionBudgets)' provider attempt
+/// limits. A set bound above its limit refuses the call
+/// ([`RouteBoundAboveBudget`]); it is never clipped.
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ProviderReliability {
-    /// Whole-request timeout. `None` applies the default provider attempt
-    /// limits' per-request bound. [`RequestTimeout::Disabled`] leaves the
-    /// route unbounded, so only the runtime's provider attempt limits and the
-    /// model call's remaining total bound it.
+    /// Whole-request timeout in milliseconds. `None` (or `0`) is the
+    /// runtime's per-request limit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub request_timeout: Option<RequestTimeout>,
-    /// Streaming response-start timeout in milliseconds. `None` (or `0`)
-    /// preserves the legacy bound derived as the minimum of the whole-request
-    /// and inter-chunk timeouts. Once the response starts, only the
-    /// whole-request and inter-chunk timeouts apply. "Start" is the response
-    /// headers on HTTP/SSE providers and the first response frame on the
-    /// Codex WebSocket path: an HTTP provider that returns headers promptly
-    /// and then stalls before the first body byte is bounded by the
-    /// inter-chunk timeout, not this one.
+    pub request_timeout: Option<u64>,
+    /// Streaming response-start timeout in milliseconds. `None` (or `0`) is
+    /// the runtime's response-start limit. Once the response starts, only
+    /// the whole-request and inter-chunk timeouts apply. "Start" is the
+    /// response headers on HTTP/SSE providers and the first response frame
+    /// on the Codex WebSocket path: an HTTP provider that returns headers
+    /// promptly and then stalls before the first body byte is bounded by
+    /// the inter-chunk timeout, not this one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_start_timeout: Option<u64>,
-    /// Inter-chunk stream timeout in milliseconds. `None` (or `0`) applies
-    /// the default provider attempt limits' chunk-idle bound.
+    /// Inter-chunk stream timeout in milliseconds. `None` (or `0`) is the
+    /// runtime's chunk-idle limit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chunk_timeout: Option<u64>,
     #[serde(default)]
@@ -489,22 +436,13 @@ pub struct ProviderReliability {
     pub rate_limits: ProviderRateLimitPolicy,
 }
 
-impl ProviderReliability {
-    pub fn codex() -> Self {
-        Self {
-            retry: ProviderRetryPolicy {
-                max_attempts: 4,
-                base_delay_ms: 1_000,
-                max_delay_ms: 4_000,
-                jitter_ms: 0,
-                retry_after_cap_ms: Some(60_000),
-                throttle_wait_budget_ms: DEFAULT_THROTTLE_WAIT_BUDGET_MS,
-                enabled: true,
-            },
-            ..Self::default()
-        }
-    }
+fn whole_millis(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis())
+        .unwrap_or(u64::MAX)
+        .max(1)
+}
 
+impl ProviderReliability {
     pub fn disabled() -> Self {
         Self {
             retry: ProviderRetryPolicy::disabled(),
@@ -512,61 +450,95 @@ impl ProviderReliability {
         }
     }
 
-    pub fn llm_timeouts(&self) -> LlmTimeouts {
-        let defaults = lash_sansio::ProviderAttemptLimits::default();
-        let request_timeout = match self.request_timeout {
-            Some(RequestTimeout::Disabled) => None,
-            Some(RequestTimeout::Millis(ms)) => Some(Duration::from_millis(ms)),
-            None => Some(defaults.per_request()),
-        };
-        let chunk_timeout = self
-            .chunk_timeout
+    /// This route under the runtime's provider attempt `limits`: every unset
+    /// bound and attempt count is the limit's own, and every set one is
+    /// kept.
+    ///
+    /// # Errors
+    ///
+    /// [`RouteBoundAboveBudget`] for the first set bound above its limit.
+    pub fn within(
+        &self,
+        limits: &lash_sansio::ProviderAttemptLimits,
+    ) -> Result<Self, RouteBoundAboveBudget> {
+        let bound = |bound: RouteBound, route: Option<u64>, limit: u64| match route
             .filter(|value| *value > 0)
-            .map_or(defaults.chunk_idle(), Duration::from_millis);
-        let derived_response_start_timeout = match request_timeout {
-            Some(timeout) => timeout.min(chunk_timeout),
-            None => chunk_timeout,
+        {
+            None => Ok(limit),
+            Some(route) if route <= limit => Ok(route),
+            Some(route) => Err(RouteBoundAboveBudget {
+                bound,
+                route,
+                budget: limit,
+            }),
         };
-        let response_start_timeout = self
-            .response_start_timeout
-            .filter(|value| *value > 0)
-            .map(Duration::from_millis)
-            .unwrap_or(derived_response_start_timeout);
-        LlmTimeouts {
-            request_timeout,
-            response_start_timeout,
-            chunk_timeout,
-        }
+        let mut resolved = self.clone();
+        resolved.request_timeout = Some(bound(
+            RouteBound::RequestTimeout,
+            self.request_timeout,
+            whole_millis(limits.per_request()),
+        )?);
+        resolved.response_start_timeout = Some(bound(
+            RouteBound::ResponseStartTimeout,
+            self.response_start_timeout,
+            whole_millis(limits.response_start()),
+        )?);
+        resolved.chunk_timeout = Some(bound(
+            RouteBound::ChunkTimeout,
+            self.chunk_timeout,
+            whole_millis(limits.chunk_idle()),
+        )?);
+        resolved.retry.max_attempts = Some(if self.retry.enabled {
+            let attempts = bound(
+                RouteBound::MaxAttempts,
+                self.retry.max_attempts.map(u64::from),
+                u64::from(limits.max_attempts()),
+            )?;
+            u32::try_from(attempts).unwrap_or(u32::MAX)
+        } else {
+            1
+        });
+        Ok(resolved)
     }
 
-    /// This route's reliability for one attempt: every timeout clipped to
-    /// the runtime's provider attempt limits and to `window`, what remains
-    /// of the model call's total.
+    /// This route's timeouts for one attempt, each clipped to `window`: what
+    /// remains of the model call's total.
     #[must_use]
-    pub fn clipped(&self, limits: &lash_sansio::ProviderAttemptLimits, window: Duration) -> Self {
-        let clipped = self.llm_timeouts().clipped(limits, window);
-        let millis = |duration: Duration| {
-            u64::try_from(duration.as_millis())
-                .unwrap_or(u64::MAX)
-                .max(1)
+    pub fn for_window(&self, window: Duration) -> Self {
+        let window = whole_millis(window);
+        let clip = |bound: Option<u64>| {
+            Some(
+                bound
+                    .filter(|value| *value > 0)
+                    .map_or(window, |value| value.min(window)),
+            )
         };
         Self {
-            request_timeout: clipped
-                .request_timeout
-                .map(|timeout| RequestTimeout::Millis(millis(timeout))),
-            response_start_timeout: Some(millis(clipped.response_start_timeout)),
-            chunk_timeout: Some(millis(clipped.chunk_timeout)),
+            request_timeout: clip(self.request_timeout),
+            response_start_timeout: clip(self.response_start_timeout),
+            chunk_timeout: clip(self.chunk_timeout),
             ..self.clone()
         }
     }
 
-    pub fn request_timeout(mut self, timeout: Option<RequestTimeout>) -> Self {
-        self.request_timeout = timeout;
+    /// The transport timeouts this reliability states.
+    pub fn llm_timeouts(&self) -> LlmTimeouts {
+        let bound =
+            |value: Option<u64>| value.filter(|value| *value > 0).map(Duration::from_millis);
+        LlmTimeouts {
+            request_timeout: bound(self.request_timeout),
+            response_start_timeout: bound(self.response_start_timeout),
+            chunk_timeout: bound(self.chunk_timeout),
+        }
+    }
+
+    pub fn request_timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
+        self.request_timeout = timeout_ms;
         self
     }
 
-    /// `None` (or `0`) restores the legacy derived bound; this does not change the inter-chunk
-    /// timeout after the response starts.
+    /// `None` (or `0`) is the runtime's response-start limit; this does not
+    /// change the inter-chunk timeout after the response starts.
     pub fn response_start_timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
         self.response_start_timeout = timeout_ms;
         self
@@ -577,8 +549,9 @@ impl ProviderReliability {
         self
     }
 
-    pub fn max_attempts(mut self, attempts: u32) -> Self {
-        self.retry.max_attempts = attempts.max(1);
+    /// `None` is the runtime's attempt limit.
+    pub fn max_attempts(mut self, attempts: Option<u32>) -> Self {
+        self.retry.max_attempts = attempts.map(|attempts| attempts.max(1));
         self
     }
 
@@ -623,7 +596,10 @@ impl ProviderReliability {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderRetryPolicy {
     pub enabled: bool,
-    pub max_attempts: u32,
+    /// Attempts one model call may make, the first included. `None` is the
+    /// runtime's attempt limit; a count above it refuses the call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_attempts: Option<u32>,
     pub base_delay_ms: u64,
     pub max_delay_ms: u64,
     /// Upper bound for uniform random jitter added to ordinary retry backoff
@@ -664,7 +640,7 @@ impl Default for ProviderRetryPolicy {
     fn default() -> Self {
         Self {
             enabled: true,
-            max_attempts: lash_sansio::ProviderAttemptLimits::default().max_attempts(),
+            max_attempts: None,
             base_delay_ms: 2_000,
             max_delay_ms: 10_000,
             jitter_ms: 500,
@@ -678,20 +654,12 @@ impl ProviderRetryPolicy {
     pub fn disabled() -> Self {
         Self {
             enabled: false,
-            max_attempts: 1,
+            max_attempts: Some(1),
             base_delay_ms: 0,
             max_delay_ms: 0,
             jitter_ms: 0,
             retry_after_cap_ms: None,
             throttle_wait_budget_ms: 0,
-        }
-    }
-
-    pub(crate) fn attempts(&self) -> u32 {
-        if self.enabled {
-            self.max_attempts.max(1)
-        } else {
-            1
         }
     }
 

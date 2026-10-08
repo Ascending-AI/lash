@@ -55,9 +55,6 @@ impl LashCoreBuilder {
         if let Some(context) = self.trace_context.take() {
             core.tracing = core.tracing.clone().with_base_context(context);
         }
-        if let Some(termination) = self.termination.take() {
-            core.control.termination = termination;
-        }
         if let Some(policy) = self.tool_source_policy.take() {
             core.control.tool_source_policy = policy;
         }

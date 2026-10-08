@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use lash_core::plugin::{PluginError, PluginFactory, PluginSessionContext};
 use lash_core::{
-    AttemptContext, SessionId, ToolCall, ToolDefinition, ToolOutcome, ToolProvider,
+    AttemptContext, ToolCall, ToolDefinition, ToolOutcome, ToolProvider,
     facade_support::DirectJsonSchema, facade_support::DirectMessage,
     facade_support::DirectOutputSpec, facade_support::DirectPart, facade_support::DirectRequest,
     facade_support::DirectRole,
@@ -154,14 +154,9 @@ impl LlmToolsProvider {
                     output,
                     stream_events: None,
                     generation,
-                    session_id: Some(match context.owner().runtime_owner() {
-                        lash_core::RuntimeOwner::Session(session_id) => {
-                            session_id.with_suffix("-llm-query")
-                        }
-                        lash_core::RuntimeOwner::Process(process_id) => {
-                            SessionId::prefixed("process:", format_args!("{process_id}-llm-query"))
-                        }
-                    }),
+                    // The runtime names the call's real owner: the
+                    // session or process this tool runs for.
+                    owner: None,
                     caused_by: None,
                     replay: None,
                 },
@@ -392,7 +387,7 @@ mod tests {
     };
     use lash_core::plugin::{PluginError, SessionHandle};
     use lash_core::runtime::RuntimeSessionState;
-    use lash_core::{SessionCreateRequest, SessionSnapshot, ToolCall};
+    use lash_core::{SessionCreateRequest, SessionId, SessionSnapshot, ToolCall};
 
     async fn run_llm_query(
         provider: &StaticToolProvider<LlmToolsProvider>,

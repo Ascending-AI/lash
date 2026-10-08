@@ -20,7 +20,7 @@ fn frame_events(body: LlmHttpBody) -> Vec<String> {
         .expect("test runtime")
         .block_on(drive_sse_response(
             body,
-            Duration::from_secs(5),
+            Some(Duration::from_secs(5)),
             SseStreamBounds::new(None, &lash_core::provider::ProviderOptions::default()),
             "test stream chunk timed out",
             "test request timed out",

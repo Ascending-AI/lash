@@ -312,8 +312,9 @@ mod tests {
         req.stream_events = Some(LlmEventSender::new(move |event| {
             event_sink.lock_recover().push(event);
         }));
-        let mut provider =
-            AnthropicProvider::new("key").with_transport(Arc::new(StaticSseTransport(body)));
+        let mut provider = AnthropicProvider::new("key")
+            .with_stream_termination(StreamTermination::RequireTerminalEvidence)
+            .with_transport(Arc::new(StaticSseTransport(body)));
 
         let error = provider
             .complete(req)
@@ -414,8 +415,9 @@ mod tests {
         req.stream_events = Some(LlmEventSender::new(move |event| {
             event_sink.lock_recover().push(event);
         }));
-        let mut provider =
-            AnthropicProvider::new("key").with_transport(Arc::new(StaticSseTransport(body)));
+        let mut provider = AnthropicProvider::new("key")
+            .with_stream_termination(StreamTermination::RequireTerminalEvidence)
+            .with_transport(Arc::new(StaticSseTransport(body)));
 
         let error = provider
             .complete(req)
@@ -490,7 +492,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn anthropic_accepts_message_stop_and_explicit_eof_tolerance() {
+    async fn anthropic_accepts_message_stop_and_eof_by_default() {
         let terminal_body = concat!(
             "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}\n\n",
             "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\n",
@@ -518,11 +520,6 @@ mod tests {
         );
         let mut tolerant_req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
         tolerant_req.stream_events = Some(LlmEventSender::new(|_| {}));
-        tolerant_req
-            .model
-            .metadata_mut()
-            .capability
-            .stream_termination = Some(StreamTermination::EofTolerated);
         let mut tolerant =
             AnthropicProvider::new("key").with_transport(Arc::new(StaticSseTransport(eof_body)));
         assert_eq!(
