@@ -145,6 +145,11 @@ pub enum TurnFailureCode {
     // ─── provider call and stream ────────────────────────────────────────
     /// A message attachment could not be resolved for the request.
     AttachmentResolutionFailed,
+    /// The host store could not deliver an admitted call's attachment for
+    /// an attempt (a transient store fault that outlasted the call's
+    /// retries, or a fault the store marks permanent). Nothing was sent and
+    /// history is unchanged (ADR 0135 §4).
+    AttachmentDeliveryUnavailable,
     /// A plugin's assistant-stream contribution failed.
     PluginAssistantStream,
     /// The provider implementation panicked.
@@ -318,6 +323,7 @@ impl TurnFailureCode {
             Self::InvalidTurnOptions => "invalid_turn_options",
             Self::BeforeLlmCallFailed => "before_llm_call_failed",
             Self::AttachmentResolutionFailed => "attachment_resolution_failed",
+            Self::AttachmentDeliveryUnavailable => "attachment_delivery_unavailable",
             Self::PluginAssistantStream => "plugin_assistant_stream",
             Self::ProviderPanicked => "provider_panicked",
             Self::ProviderReplayOriginConflict => "provider_replay_origin_conflict",
@@ -424,6 +430,7 @@ impl TurnFailureCode {
             "invalid_turn_options" => Self::InvalidTurnOptions,
             "before_llm_call_failed" => Self::BeforeLlmCallFailed,
             "attachment_resolution_failed" => Self::AttachmentResolutionFailed,
+            "attachment_delivery_unavailable" => Self::AttachmentDeliveryUnavailable,
             "plugin_assistant_stream" => Self::PluginAssistantStream,
             "provider_panicked" => Self::ProviderPanicked,
             "provider_replay_origin_conflict" => Self::ProviderReplayOriginConflict,
@@ -516,6 +523,7 @@ impl TurnFailureCode {
         Self::InvalidTurnOptions,
         Self::BeforeLlmCallFailed,
         Self::AttachmentResolutionFailed,
+        Self::AttachmentDeliveryUnavailable,
         Self::PluginAssistantStream,
         Self::ProviderPanicked,
         Self::ProviderReplayOriginConflict,
