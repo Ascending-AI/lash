@@ -260,10 +260,7 @@ impl PostgresLashlangArtifactStore {
         }
         lock_artifact_tx(&mut tx, namespace, artifact_ref).await?;
         if let Some(cleanup) = claim.guard_cleanup() {
-            let now = crate::support::postgres_transaction_epoch_ms(&mut tx)
-                .await
-                .map_err(ArtifactStoreError::from)?;
-            crate::obligation_ledger::arm_cleanup_tx(&mut tx, &cleanup, now)
+            crate::obligation_ledger::arm_cleanup_tx(&mut tx, &cleanup, self.clock.timestamp_ms())
                 .await
                 .map_err(ArtifactStoreError::from)?;
         }
@@ -402,10 +399,7 @@ impl PostgresLashlangArtifactStore {
             }
         }
         if let Some(cleanup) = claim.guard_cleanup() {
-            let now = crate::support::postgres_transaction_epoch_ms(&mut tx)
-                .await
-                .map_err(ArtifactStoreError::from)?;
-            crate::obligation_ledger::arm_cleanup_tx(&mut tx, &cleanup, now)
+            crate::obligation_ledger::arm_cleanup_tx(&mut tx, &cleanup, self.clock.timestamp_ms())
                 .await
                 .map_err(ArtifactStoreError::from)?;
         }
@@ -430,7 +424,7 @@ impl PostgresLashlangArtifactStore {
         let mut tx = begin_guarded(&self.pool, &self.fence)
             .await
             .map_err(ArtifactStoreError::from)?;
-        Self::end_namespaced_tx(&mut tx, namespace, cleanup).await?;
+        Self::end_namespaced_tx(&mut tx, namespace, cleanup, self.clock.timestamp_ms()).await?;
         tx.commit().await.map_err(backend)
     }
 
@@ -438,6 +432,7 @@ impl PostgresLashlangArtifactStore {
         tx: &mut Transaction<'_, Postgres>,
         namespace: &str,
         cleanup: &ResolvedArtifactCleanup,
+        now_ms: u64,
     ) -> Result<(), ArtifactStoreError> {
         for carry in &cleanup.carries {
             if !carry.to.kind().holds_artifacts() {
@@ -495,13 +490,10 @@ impl PostgresLashlangArtifactStore {
         for artifact_ref in &all_refs {
             lock_artifact_tx(tx, namespace, artifact_ref).await?;
         }
-        let now = crate::support::postgres_transaction_epoch_ms(tx)
-            .await
-            .map_err(ArtifactStoreError::from)?;
         sqlx::query(artifact_sql().fences.insert_fence.sql())
             .bind(cleanup.referrer.kind().as_str())
             .bind(cleanup.referrer.canonical_id())
-            .bind(crate::support::clamp_epoch_ms(now))
+            .bind(crate::support::clamp_epoch_ms(now_ms))
             .execute(&mut **tx)
             .await
             .map_err(backend)?;

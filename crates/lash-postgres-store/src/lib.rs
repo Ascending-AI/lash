@@ -228,6 +228,16 @@ impl PostgresTriggerStore {
 pub struct PostgresLashlangArtifactStore {
     pool: PgPool,
     fence: guarded_tx::WriterFence,
+    /// The store set's clock: the instant a guard's cleanup is due and a
+    /// referrer's fence is stamped, read on the clock the relay claims by.
+    clock: Arc<dyn lash_core_execution::Clock>,
+}
+
+impl PostgresLashlangArtifactStore {
+    pub fn with_clock(mut self, clock: Arc<dyn lash_core_execution::Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
 }
 
 impl PostgresStorage {
@@ -747,6 +757,7 @@ impl PostgresStorage {
         PostgresLashlangArtifactStore {
             pool: self.pool.clone(),
             fence: self.fence.clone(),
+            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
         }
     }
 
@@ -754,6 +765,7 @@ impl PostgresStorage {
         PostgresLashlangArtifactStore {
             pool: self.pool.clone(),
             fence: self.fence.clone(),
+            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
         }
     }
 
@@ -763,6 +775,7 @@ impl PostgresStorage {
         PostgresLashlangArtifactStore {
             pool: self.pool.clone(),
             fence: self.fence.clone(),
+            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
         }
     }
 

@@ -70,7 +70,9 @@ impl PostgresStoreSet {
                     storage.process_registry().with_clock(Arc::clone(&clock)),
                 ),
                 trigger_store: Arc::new(storage.trigger_store().with_clock(Arc::clone(&clock))),
-                process_env_store: Arc::new(storage.process_env_store()),
+                process_env_store: Arc::new(
+                    storage.process_env_store().with_clock(Arc::clone(&clock)),
+                ),
                 attachment_store,
                 clock,
                 #[cfg(any(test, feature = "testing"))]

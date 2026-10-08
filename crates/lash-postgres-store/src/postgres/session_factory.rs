@@ -167,15 +167,22 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             .await
             .map_err(lash_core_execution::MaintenanceFailure::failed_before_any_work)?;
         let mut report = lash_core_execution::SessionBlobReclaimReport::default();
-        let deleted =
-            match delete_session_tx(&mut tx, session_id, &mut report, self.fence.fleet()).await {
-                Ok(Some(terminal)) => tx
-                    .stage_turn_change(terminal)
-                    .await
-                    .map_err(store_sqlx_error),
-                Ok(None) => Ok(()),
-                Err(error) => Err(error),
-            };
+        let deleted = match delete_session_tx(
+            &mut tx,
+            session_id,
+            &mut report,
+            self.fence.fleet(),
+            self.clock.timestamp_ms(),
+        )
+        .await
+        {
+            Ok(Some(terminal)) => tx
+                .stage_turn_change(terminal)
+                .await
+                .map_err(store_sqlx_error),
+            Ok(None) => Ok(()),
+            Err(error) => Err(error),
+        };
         match deleted {
             Ok(()) => {}
             Err(error) => {
@@ -840,6 +847,7 @@ async fn fence_deleted_session_frames_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_ids: &[SessionId],
     fleet_format: lash_core_execution::FleetFormat,
+    now: u64,
 ) -> Result<(), StoreError> {
     let mut referrers = Vec::new();
     for session_id in session_ids {
@@ -862,7 +870,6 @@ async fn fence_deleted_session_frames_tx(
             referrer.canonical_id()
         )
     });
-    let now = crate::support::postgres_transaction_epoch_ms(tx).await?;
     for referrer in &referrers {
         crate::artifact_store::lock_referrer_tx(tx, referrer)
             .await
@@ -901,6 +908,7 @@ pub(crate) async fn delete_session_tx(
     session_id: &SessionId,
     report: &mut lash_core_execution::SessionBlobReclaimReport,
     fleet_format: lash_core_execution::FleetFormat,
+    now: u64,
 ) -> Result<Option<crate::change_feed::TurnChange>, StoreError> {
     crate::runtime_persistence::lock_session_history_mutation_tx(tx, session_id).await?;
     let materialized =
@@ -910,7 +918,8 @@ pub(crate) async fn delete_session_tx(
             .await
             .map_err(store_sqlx_error)?;
     if materialized {
-        fence_deleted_session_frames_tx(tx, std::slice::from_ref(session_id), fleet_format).await?;
+        fence_deleted_session_frames_tx(tx, std::slice::from_ref(session_id), fleet_format, now)
+            .await?;
         // Permanent identity evidence for host-facing session ids.
         sqlx::query(session_sql().deleted_postgres.insert_from_meta.sql())
             .bind(session_id.as_str())
