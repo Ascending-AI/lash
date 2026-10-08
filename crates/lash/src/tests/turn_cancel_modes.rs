@@ -1186,3 +1186,69 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     core.shutdown().await?;
     Ok(())
 }
+
+/// L03: the durable cancel request, not a live owner's flag, decides a
+/// retry after the owner dies with the call's backoff still pending. The
+/// owner is lost while the `Repeatable` call waits out its backoff, the host
+/// then cancels the turn, and the next deployment over the same stores ends
+/// it cancelled: no second attempt runs, even past the retry's due time.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_accepted_cancel_survives_its_owners_loss_in_a_retry_backoff_without_a_second_body()
+-> Result<()> {
+    const ID: &str = "cancel-across-owner-loss-in-backoff";
+    let backend = sqlite_memory_store_backend().await;
+    let tool = RetryOnceTool::default();
+    let (calls, seen) = (Arc::default(), Arc::<StdMutex<Vec<String>>>::default());
+    let deploy = || -> Result<LashCore> {
+        Ok(
+            explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+                .serve_test_llm_profile(
+                    tool_calling_model(RETRY, &calls, &seen),
+                    mock_llm_profile_spec(),
+                )
+                .tools(Arc::new(tool.clone()))
+                .build(crate::testing::runtime_lease_owner())?,
+        )
+    };
+    let core = deploy()?;
+    let session_id = crate::SessionId::parse(ID).expect("nonblank host identity");
+    let session = core
+        .session(session_id.clone())
+        .create(crate::SessionCreation::root(mock_session_spec()))
+        .await?;
+    let run = crate::TurnId::parse("turn-in-backoff").expect("nonblank host identity");
+    let handle = session
+        .send(TurnInput::text("use the tool"))
+        .id(run.clone())
+        .await?;
+    tool.failed.notified().await;
+    // The owner dies with the call's backoff pending.
+    core.shutdown().await?;
+    let requested = outcome(
+        handle
+            .cancel()
+            .request_id("abort-after-owner-loss")
+            .mode(TurnCancelMode::Immediate)
+            .await?,
+    );
+    assert!(
+        matches!(requested, TurnCancelOutcome::Requested(_)),
+        "{requested:?}"
+    );
+    drop((handle, session));
+
+    let core = deploy()?;
+    let session = core.session(session_id).open().await?;
+    let evidence = cancelled(session.attach_id(run)).await?;
+    assert_eq!(evidence.request_id, "abort-after-owner-loss");
+    tokio::time::sleep(std::time::Duration::from_millis(RETRY_AFTER_MS * 2)).await;
+    assert_eq!(
+        tool.attempts.load(Ordering::SeqCst),
+        1,
+        "no second body runs after the accepted cancel"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "no model call after it");
+    drop(session);
+    core.shutdown().await?;
+    Ok(())
+}
