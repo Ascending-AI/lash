@@ -38,6 +38,7 @@ pub async fn a_turn_counts_the_model_calls_it_admitted(store: &dyn DurableStore)
             attempt,
             request_ref: format!("request-{call}"),
             deadline: DurableInstant(1_000),
+            stream_from: format!("stream-{call}"),
         },
         checkpoint: format!("checkpoint-{call}-{attempt}"),
     };

@@ -113,20 +113,6 @@ impl Mirror {
         self.incarnation.cursor(session_id, revision, position)
     }
 
-    /// The cursor before the first retained position this replica knows of
-    /// the session. A trim it has not learned yet makes its replay answer
-    /// `Trimmed`.
-    pub(super) fn earliest_cursor(&self, session_id: &SessionId) -> SessionCursor {
-        let position = self
-            .sessions
-            .get(session_id)
-            .map_or(self.incarnation.watermark, |session| {
-                session.first_retained.max(session.floor + 1) - 1
-            });
-        self.incarnation
-            .cursor(session_id, SessionRevision::new(0), position)
-    }
-
     /// Adopt `incarnation`, forgetting every session when it is new.
     pub(super) fn adopt(&mut self, incarnation: Incarnation) {
         if incarnation.id != self.incarnation.id {

@@ -447,13 +447,6 @@ impl LiveReplayStore for PostgresLiveReplayStore {
             .current_cursor(session_id, revision)
     }
 
-    fn earliest_cursor(&self, session_id: &SessionId) -> SessionCursor {
-        self.shared
-            .mirror
-            .lock_recover()
-            .earliest_cursor(session_id)
-    }
-
     async fn invalidate_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
         let doorbells = schema::invalidate(&self.shared.pool, &self.shared.sql, session_id).await?;
         self.shared.ring_mirror(&doorbells);

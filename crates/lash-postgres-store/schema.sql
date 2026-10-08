@@ -1071,6 +1071,7 @@ CREATE TABLE IF NOT EXISTS lash_turn_phases (
     checkpoint_ref TEXT,
     model_request_ref TEXT,
     model_deadline_ms BIGINT,
+    model_stream_from TEXT,
     turn_deadline_ms BIGINT,
     written_epoch BIGINT NOT NULL,
     model_calls BIGINT NOT NULL DEFAULT 0,
@@ -1079,7 +1080,8 @@ CREATE TABLE IF NOT EXISTS lash_turn_phases (
     CONSTRAINT ck_turn_phases_checkpoint CHECK ((phase = 'admitted') = (checkpoint_ref IS NULL)),
     CONSTRAINT ck_turn_phases_model CHECK (
         (phase = 'model') = (model_request_ref IS NOT NULL)
-        AND (phase = 'model') = (model_deadline_ms IS NOT NULL))
+        AND (phase = 'model') = (model_deadline_ms IS NOT NULL)
+        AND (phase = 'model') = (model_stream_from IS NOT NULL))
 );
 
 -- The plugin namespaces an unfinished turn's run changed (FIG-5301): the

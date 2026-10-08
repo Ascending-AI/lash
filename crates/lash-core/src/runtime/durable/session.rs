@@ -229,13 +229,22 @@ pub trait TurnDrive: Send {
     /// [`run_changes`](Self::run_changes) named.
     fn run_changes_committed(&self, _written: &[lash_durable::domain::TurnNamespace]) {}
 
-    /// Restart the session's live stream before attempt `attempt` of the
-    /// call `id` is re-sent, so no one sees an abandoned attempt's partial
-    /// text joined to the new attempt's: the stream retracts what the
-    /// call's earlier attempts streamed (a `ModelAttemptReset`), and the
-    /// re-sent attempt streams under ids of its own. Observers keep their
-    /// cursors; only when the live replay no longer holds what the earlier
-    /// attempts streamed does the stream restart with a gap (the live
+    /// Where the session's live replay stands now, encoded for a model
+    /// pin: a fresh call pins it before its first attempt streams, and a
+    /// re-send reads back what the earlier attempts streamed after it
+    /// (FIG-5399). Empty for a drive that streams to no live replay.
+    fn live_stream_cursor(&self) -> String {
+        String::new()
+    }
+
+    /// Restart the session's live stream before attempt `pin.attempt` of
+    /// the call `id` is re-sent, so no one sees an abandoned attempt's
+    /// partial text joined to the new attempt's: the stream retracts what
+    /// the call's earlier attempts streamed (a `ModelAttemptReset`), and
+    /// the re-sent attempt streams under ids of its own. Observers keep
+    /// their cursors only while the live replay still holds everything
+    /// after the pin's `stream_from`, the boundary pinned before the first
+    /// attempt streamed; otherwise the stream restarts with a gap (the live
     /// replay store's `invalidate_session`).
     ///
     /// # Errors
@@ -246,7 +255,7 @@ pub trait TurnDrive: Send {
         &mut self,
         cx: &ActorContext,
         id: EffectId,
-        attempt: u32,
+        pin: &ModelPin,
     ) -> Result<(), TurnError>;
 
     /// The tools the turn's rounds run: the turn's catalog, which pins each

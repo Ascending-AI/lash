@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS turn_phases (
     checkpoint_ref TEXT,
     model_request_ref TEXT,
     model_deadline_ms INTEGER,
+    model_stream_from TEXT,
     turn_deadline_ms INTEGER,
     written_epoch INTEGER NOT NULL,
     model_calls INTEGER NOT NULL DEFAULT 0,
@@ -48,7 +49,8 @@ CREATE TABLE IF NOT EXISTS turn_phases (
     CONSTRAINT ck_turn_phases_checkpoint CHECK ((phase = 'admitted') = (checkpoint_ref IS NULL)),
     CONSTRAINT ck_turn_phases_model CHECK (
         (phase = 'model') = (model_request_ref IS NOT NULL)
-        AND (phase = 'model') = (model_deadline_ms IS NOT NULL))
+        AND (phase = 'model') = (model_deadline_ms IS NOT NULL)
+        AND (phase = 'model') = (model_stream_from IS NOT NULL))
 );
 
 -- The plugin namespaces an unfinished turn's run changed (FIG-5301): the
@@ -146,6 +148,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &TurnWrite)
                         pin.map(|pin| pin.deadline.0),
                         commit.epoch.0,
                         pin.map(|pin| i64::from(pin.call)),
+                        pin.map(|pin| pin.stream_from.as_str()),
                     ],
                     |_| Ok(()),
                 )
@@ -480,6 +483,7 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
         turn_deadline: Option<i64>,
         epoch: i64,
         model_calls: i64,
+        stream_from: Option<String>,
     }
     let stored = tx
         .prepare_cached(SQL.unfinished.sql())?
@@ -496,6 +500,7 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
                 turn_deadline: row.get(8)?,
                 epoch: row.get(9)?,
                 model_calls: row.get(10)?,
+                stream_from: row.get(11)?,
             })
         })
         .optional()?;
@@ -512,7 +517,11 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
     let argument = stored.argument.map(integer::<u64>).transpose()?;
     let iteration = integer::<u32>(stored.iteration)?;
     let model_calls = integer::<u32>(stored.model_calls)?;
-    let pin = stored.request.zip(stored.deadline.map(DurableInstant));
+    let pin = stored
+        .request
+        .zip(stored.deadline.map(DurableInstant))
+        .zip(stored.stream_from)
+        .map(|((request, deadline), stream_from)| (request, deadline, stream_from));
     let Some(phase) =
         UnfinishedPhase::parse(&stored.phase, argument, stored.checkpoint, pin, model_calls)
     else {
@@ -561,15 +570,17 @@ mod ddl_tests {
     ) -> rusqlite::Result<usize> {
         conn.execute(
             "INSERT INTO turn_phases (session_id, run, phase, phase_arg, iteration,
-                 checkpoint_ref, model_request_ref, model_deadline_ms, written_epoch)
-             VALUES ('s', ?1, ?2, ?3, 0, ?4, ?5, ?6, 1)",
+                 checkpoint_ref, model_request_ref, model_deadline_ms, model_stream_from,
+                 written_epoch)
+             VALUES ('s', ?1, ?2, ?3, 0, ?4, ?5, ?6, ?7, 1)",
             params![
                 run,
                 phase,
                 argument,
                 checkpoint,
                 pin.map(|(request, _)| request),
-                pin.map(|(_, deadline)| deadline)
+                pin.map(|(_, deadline)| deadline),
+                pin.map(|_| "stream-cursor")
             ],
         )
     }

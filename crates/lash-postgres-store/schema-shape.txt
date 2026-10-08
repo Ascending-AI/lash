@@ -581,6 +581,7 @@ table lash_turn_phases
   column model_calls bigint not-null default
   column model_deadline_ms bigint nullable
   column model_request_ref text nullable
+  column model_stream_from text nullable
   column phase text not-null
   column phase_arg bigint nullable
   column run text not-null

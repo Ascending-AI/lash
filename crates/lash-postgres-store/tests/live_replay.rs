@@ -405,8 +405,9 @@ async fn invalidation_closes_subscriptions_on_every_replica() {
 
 /// A takeover across replicas (FIG-5366): replica B streams a session and
 /// dies with a batch in flight; replica A, which took the turn over, reads
-/// back everything B published from its earliest cursor, so a re-sent call
-/// can retract B's abandoned attempt, and its own publication continues the
+/// back everything B published after the cursor B pinned with the call
+/// before streaming (FIG-5399), so a re-sent call can retract B's abandoned
+/// attempt, and its own publication continues the
 /// sequence: a subscriber on A follows B's events and A's in one order,
 /// without a gap.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -420,6 +421,7 @@ async fn a_takeover_replica_reads_back_a_dead_replicas_stream_and_continues_it()
     let session = SessionId::from("taken-over");
     let start = a.current_cursor(&session, SessionRevision::new(0));
     let mut on_a = subscribed(a.subscribe_after_cursor(&start).await);
+    let pinned = b.current_cursor(&session, SessionRevision::new(1));
     publish(&b, &session, "attempt-1#0", "abandoned one").await;
     publish(&b, &session, "attempt-1#1", "abandoned two").await;
     let in_flight = {
@@ -440,13 +442,9 @@ async fn a_takeover_replica_reads_back_a_dead_replicas_stream_and_continues_it()
     in_flight.abort();
     drop(b);
 
-    let window = match a
-        .replay_after_cursor(&a.earliest_cursor(&session))
-        .await
-        .expect("replay on A")
-    {
+    let window = match a.replay_after_cursor(&pinned).await.expect("replay on A") {
         LiveReplayOutcome::Replayed(events) => events,
-        LiveReplayOutcome::Gap(reason) => panic!("A's earliest cursor gapped: {reason:?}"),
+        LiveReplayOutcome::Gap(reason) => panic!("B's pinned cursor gapped on A: {reason:?}"),
     };
     let labels: Vec<String> = window.iter().map(|event| label(event)).collect();
     assert_eq!(

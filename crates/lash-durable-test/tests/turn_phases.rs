@@ -79,9 +79,9 @@ use std::time::Duration;
 use lash_core::facade_support::{EffectId, Response};
 use lash_core::runtime::durable::head::{HeadCache, SessionHead};
 use lash_core::runtime::durable::session::{
-    AdmittedInputs, CellExit, CodeCell, ComposedCall, OpenTurn, PhaseCheckpoint, PreparedCall,
-    SessionActivation, SessionParkReason, TurnCancelRequest, TurnCommit, TurnDone, TurnDrive,
-    TurnError, TurnRestore, TurnRow, TurnServices, UnfinishedPhase, request_turn_cancel,
+    AdmittedInputs, CellExit, CodeCell, ComposedCall, ModelPin, OpenTurn, PhaseCheckpoint,
+    PreparedCall, SessionActivation, SessionParkReason, TurnCancelRequest, TurnCommit, TurnDone,
+    TurnDrive, TurnError, TurnRestore, TurnRow, TurnServices, UnfinishedPhase, request_turn_cancel,
 };
 use lash_core::sansio::PendingToolCall;
 use lash_core::sansio::{ChatContextProjector, PendingWork, ProtocolDriverHandle};
@@ -741,7 +741,7 @@ impl TurnDrive for L3Drive {
         &mut self,
         _cx: &ActorContext,
         _id: EffectId,
-        _attempt: u32,
+        _pin: &ModelPin,
     ) -> Result<(), TurnError> {
         let mut seen = self.services.seen.lock_recover();
         let next = seen.calls.last().map_or(0, |call| call.attempt);
@@ -1979,6 +1979,7 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
                 attempt: 1,
                 request_ref: "pinned".to_owned(),
                 deadline: lash_durable::DurableInstant(i64::MAX),
+                stream_from: "pinned-stream".to_owned(),
             },
             checkpoint,
         },

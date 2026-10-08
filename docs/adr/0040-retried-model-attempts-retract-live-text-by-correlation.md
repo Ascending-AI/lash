@@ -19,16 +19,19 @@ any visible output. Empty correlation lists mean no retraction; they never
 mean retract-all.
 
 A call re-sent after a takeover ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md)
-§4) is a re-generation too, by another owner. The new owner reads the call's
-earlier attempts back from the session's live replay, after the store's
-`earliest_cursor`, and publishes one reset naming their prose and reasoning
+§4) is a re-generation too, by another owner. The call's pin records where
+the session's live replay stood before its first attempt streamed. The new
+owner reads the call's earlier attempts back from the live replay after that
+pinned cursor, and publishes one reset naming their prose and reasoning
 before the re-sent attempt streams. The re-sent attempt streams under an
 observation key of its own (`{call}:stream@{attempt}`), so the store's
 redelivery deduplication never takes it for the abandoned attempt's. When the
-replay no longer reaches back to a marker of the turn (`TurnStarted` or a
-`CheckpointRecorded`) before the call's stream, the abandoned text cannot all
-be named: the new owner invalidates the session's continuity instead, and
-observers recover through a gap (FIG-5366).
+replay from the pinned cursor gaps (retention dropped some of it, or the
+session's continuity restarted), the abandoned text cannot all be named: the
+new owner invalidates the session's continuity instead, and observers recover
+through a gap (FIG-5366). Nothing in the window proves completeness on its
+own: a turn marker can be republished by the resume itself after retention
+dropped the original (FIG-5399).
 
 The reset shares the session observation activity path with deltas. Retained
 replay re-applies both; a cursor after the reset needs no old retraction. A gap

@@ -19,7 +19,9 @@
 //!   restarts the session's live stream first: the stream retracts what the
 //!   earlier attempts streamed and the re-sent attempt streams under ids of
 //!   its own, so an observer follows on without old partial text joined to
-//!   new.
+//!   new. The pin holds where the live replay stood before the first
+//!   attempt streamed: the retraction is read back from there, or the
+//!   stream restarts with a gap (FIG-5399).
 
 use std::time::Duration;
 
@@ -87,7 +89,8 @@ pub(super) fn request_ref(
 /// resent under its own identity; otherwise the call is new and its pin
 /// takes `call`, the next ordinal of the turn's model calls.
 /// `turn_deadline` is the turn's own deadline, which a fresh call's deadline
-/// never outlives.
+/// never outlives. `stream_from` is where the session's live replay stands
+/// now, which a fresh call pins and a resend keeps from its first attempt.
 ///
 /// # Errors
 ///
@@ -100,6 +103,7 @@ pub(super) fn start(
     pinned: Option<ModelPin>,
     call: u32,
     reference: String,
+    stream_from: String,
 ) -> Result<ModelStart, TurnError> {
     let now_ms = millis(now);
     match pinned {
@@ -141,6 +145,7 @@ pub(super) fn start(
                 attempt: 1,
                 request_ref: reference,
                 deadline: DurableInstant(i64::try_from(limit.expires_at).unwrap_or(i64::MAX)),
+                stream_from,
             };
             if now >= pin.deadline {
                 return Ok(ModelStart::Expired { pin });
@@ -179,7 +184,7 @@ pub(super) async fn send(
         ModelStart::Send { pin, limit, resent } => (pin, *limit, *resent),
     };
     if resent {
-        drive.restart_live_stream(cx, id, pin.attempt).await?;
+        drive.restart_live_stream(cx, id, pin).await?;
     }
     cx.note_due(DueSource::ModelDeadline, pin.deadline);
     let now = cx.durable_now().await?;
@@ -237,9 +242,16 @@ mod tests {
     #[test]
     fn a_fresh_call_pins_its_digest_and_a_deadline_clipped_to_the_turn() {
         let now = DurableInstant(10_000);
-        let ModelStart::Send { pin, resent, .. } =
-            start(&budgets(), now, None, None, 1, reference("hi")).expect("starts")
-        else {
+        let ModelStart::Send { pin, resent, .. } = start(
+            &budgets(),
+            now,
+            None,
+            None,
+            1,
+            reference("hi"),
+            "before".to_owned(),
+        )
+        .expect("starts") else {
             panic!("a fresh call is sent");
         };
         let total = i64::try_from(budgets().model_total().as_millis()).expect("millis");
@@ -247,20 +259,29 @@ mod tests {
         assert_eq!(pin.attempt, 1);
         assert_eq!(pin.deadline, DurableInstant(10_000 + total));
         assert_eq!(pin.request_ref, reference("hi"));
+        assert_eq!(pin.stream_from, "before");
         assert!(!resent);
 
         let turn_ends = DurableInstant(10_500);
-        let ModelStart::Send { pin, limit, .. } =
-            start(&budgets(), now, Some(turn_ends), None, 1, reference("hi")).expect("starts")
-        else {
+        let ModelStart::Send { pin, limit, .. } = start(
+            &budgets(),
+            now,
+            Some(turn_ends),
+            None,
+            1,
+            reference("hi"),
+            "before".to_owned(),
+        )
+        .expect("starts") else {
             panic!("a fresh call inside its turn is sent");
         };
         assert_eq!(pin.deadline, turn_ends, "nested in the turn, clipped to it");
         assert_eq!(limit.expires_at, 10_500);
     }
 
-    /// L-C1: a resumed call keeps its pinned deadline, and an expired one
-    /// settles at once.
+    /// L-C1: a resumed call keeps its pinned deadline and the live replay
+    /// boundary its first attempt streamed after, and an expired one settles
+    /// at once.
     #[test]
     fn a_resumed_call_keeps_its_deadline_and_an_expired_one_settles_unsent() {
         let pinned = ModelPin {
@@ -268,6 +289,7 @@ mod tests {
             attempt: 1,
             request_ref: reference("hi"),
             deadline: DurableInstant(20_000),
+            stream_from: "before".to_owned(),
         };
         let ModelStart::Send { pin, limit, resent } = start(
             &budgets(),
@@ -276,6 +298,7 @@ mod tests {
             Some(pinned.clone()),
             3,
             reference("hi"),
+            "after the first attempt".to_owned(),
         )
         .expect("starts") else {
             panic!("a pinned call inside its deadline is re-sent");
@@ -285,6 +308,10 @@ mod tests {
         assert_eq!(
             pin.deadline, pinned.deadline,
             "the deadline is never refreshed"
+        );
+        assert_eq!(
+            pin.stream_from, pinned.stream_from,
+            "the live replay boundary is never refreshed"
         );
         assert_eq!(limit.expires_at, 20_000);
         assert!(resent);
@@ -296,6 +323,7 @@ mod tests {
             Some(pinned.clone()),
             3,
             reference("hi"),
+            "after the first attempt".to_owned(),
         )
         .expect("starts");
         assert_eq!(expired, ModelStart::Expired { pin: pinned });
@@ -308,6 +336,7 @@ mod tests {
             attempt: 1,
             request_ref: reference("hi"),
             deadline: DurableInstant(20_000),
+            stream_from: "before".to_owned(),
         };
         assert!(matches!(
             start(
@@ -317,6 +346,7 @@ mod tests {
                 Some(pinned),
                 3,
                 reference("something else"),
+                "after the first attempt".to_owned(),
             ),
             Err(TurnError::ModelPinBroken { .. })
         ));

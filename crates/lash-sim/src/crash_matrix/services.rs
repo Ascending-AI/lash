@@ -16,9 +16,9 @@ use std::time::Duration;
 use lash_core::facade_support::{EffectId, Response};
 use lash_core::runtime::durable::head::SessionHead;
 use lash_core::runtime::durable::session::{
-    AdmittedInputs, CellExit, CodeCell, ComposedCall, OpenTurn, PreparedCall, TurnCancelRequest,
-    TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore, TurnRow, TurnServices,
-    request_turn_cancel,
+    AdmittedInputs, CellExit, CodeCell, ComposedCall, ModelPin, OpenTurn, PreparedCall,
+    TurnCancelRequest, TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore, TurnRow,
+    TurnServices, request_turn_cancel,
 };
 use lash_core::sansio::{ChatContextProjector, PendingToolCall, PendingWork, ProtocolDriverHandle};
 use lash_core::{
@@ -686,7 +686,7 @@ impl TurnDrive for SimDrive {
         &mut self,
         _cx: &ActorContext,
         _id: EffectId,
-        _attempt: u32,
+        _pin: &ModelPin,
     ) -> Result<(), TurnError> {
         Ok(())
     }

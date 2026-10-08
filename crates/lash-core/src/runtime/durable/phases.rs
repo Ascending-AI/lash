@@ -262,7 +262,8 @@ pub async fn run_phases(
                     }
                 };
                 // The checkpoint `model.start` commits names the request by
-                // content digest; its pin reuses that digest.
+                // content digest; its pin reuses that digest, beside where
+                // the live replay stands before the call streams.
                 let saved = drive.machine().checkpoint();
                 let start = model_call::start(
                     &services.execution_budgets(&session),
@@ -271,6 +272,7 @@ pub async fn run_phases(
                     pinned,
                     calls.saturating_add(1),
                     model_call::request_ref(&saved.checkpoint)?,
+                    drive.live_stream_cursor(),
                 )?;
                 if let model_call::ModelStart::Send { pin, resent, .. } = &start {
                     // `model.start` admits the call: its identity and pin,

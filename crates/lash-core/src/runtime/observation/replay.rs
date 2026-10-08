@@ -629,10 +629,6 @@ pub enum SessionObservationSubscription {
 ///   every event at a revision past `N` that the store holds or will hold,
 ///   so a feed whose snapshot raced a newer commit replays that commit.
 ///   Revisions are stamped by publishers and need not grow with position.
-/// - **The earliest cursor reaches the whole window.**
-///   [`earliest_cursor`](Self::earliest_cursor) sits before every event the
-///   store retains for the session, whatever its revision, so a replay after
-///   it reads the whole window, or answers the gap that says it cannot.
 ///
 /// A subscription's tail is any stream ([`LiveReplaySubscription::new`]), and
 /// [`subscribe_after_cursor`](Self::subscribe_after_cursor) may take its time
@@ -682,13 +678,6 @@ pub trait LiveReplayStore: Send + Sync {
     /// store holds locally: a cursor earlier than the true tail only
     /// replays more.
     fn current_cursor(&self, session_id: &SessionId, revision: SessionRevision) -> SessionCursor;
-
-    /// The cursor before every event the store retains for the session: a
-    /// re-sent model call reads back what its earlier attempts streamed
-    /// after it. Synchronous, as
-    /// [`current_cursor`](Self::current_cursor) is: a store that has not
-    /// learned the window's start answers a cursor whose replay gaps.
-    fn earliest_cursor(&self, session_id: &SessionId) -> SessionCursor;
 
     /// Mark this session's replay continuity unavailable without inventing a
     /// revision. Existing cursors must return `Gap(Unavailable)` and active
@@ -1248,46 +1237,6 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
             })
             .unwrap_or_else(|| {
                 SessionCursor::new(uuid::Uuid::new_v4().to_string(), session_id, revision, 0)
-            })
-    }
-
-    fn earliest_cursor(&self, session_id: &SessionId) -> SessionCursor {
-        let now = self.clock.now();
-        let mut sessions = self.sessions.lock_recover();
-        sessions.touch(session_id, now);
-        sessions.expire(&self.config, now, EXPIRY_WORK_PER_CALL);
-        if sessions
-            .ensure_session(&self.config, session_id, now, &self.replay_incarnation_id)
-            .is_err()
-        {
-            return SessionCursor::new(
-                uuid::Uuid::new_v4().to_string(),
-                session_id,
-                SessionRevision(0),
-                0,
-            );
-        }
-        sessions
-            .update(session_id, |buffer| {
-                Self::trim_locked(&self.config, buffer, now);
-                let live_position = buffer
-                    .events
-                    .front()
-                    .map_or(buffer.tail_position, |first| first.position - 1);
-                SessionCursor::new(
-                    &buffer.replay_incarnation_id,
-                    session_id,
-                    SessionRevision(0),
-                    live_position,
-                )
-            })
-            .unwrap_or_else(|| {
-                SessionCursor::new(
-                    uuid::Uuid::new_v4().to_string(),
-                    session_id,
-                    SessionRevision(0),
-                    0,
-                )
             })
     }
 

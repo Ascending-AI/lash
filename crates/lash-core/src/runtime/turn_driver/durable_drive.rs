@@ -393,16 +393,27 @@ impl TurnDrive for RuntimeDrive {
         self.driver.session.plugins().run_changes_committed(written);
     }
 
+    fn live_stream_cursor(&self) -> String {
+        self.live
+            .current_cursor(&self.driver.session_id, self.revision)
+            .as_str()
+            .to_owned()
+    }
+
     /// The call's earlier attempts streamed into the session's live replay
-    /// (on this node or a dead owner's): the replay names their prose and
+    /// (on this node or a dead owner's) after the cursor the call pinned
+    /// before its first attempt: a replay from there names their prose and
     /// reasoning, which one `ModelAttemptReset` retracts before the re-sent
-    /// attempt streams under its own key. A replay that no longer holds all
-    /// of it, or that cannot be read, restarts the stream with a gap.
+    /// attempt streams under its own key. A replay that gaps from there
+    /// (retention dropped some of it, or the stream restarted since), or
+    /// that cannot be read, restarts the stream with a gap: nothing
+    /// published after the pin can prove what was dropped before it
+    /// (FIG-5399).
     async fn restart_live_stream(
         &mut self,
         _cx: &ActorContext,
         id: crate::EffectId,
-        attempt: u32,
+        pin: &crate::runtime::durable::session::ModelPin,
     ) -> Result<(), TurnError> {
         let invocation = self
             .driver
@@ -410,11 +421,18 @@ impl TurnDrive for RuntimeDrive {
             .map_err(|error| TurnError::Exec(format!("the model call's identity: {error}")))?;
         let base = invocation.effect_replay_key().to_owned();
         let session = &self.driver.session_id;
-        let from = self.live.earliest_cursor(session);
-        let reset = match self.live.replay_after_cursor(&from).await {
-            Ok(crate::LiveReplayOutcome::Replayed(events)) => {
-                super::abandoned_stream::attempt_reset(&events, &self.driver.turn_id, &base)
-            }
+        let replayed = match crate::SessionCursor::from_store_token(pin.stream_from.as_str()) {
+            Ok(from) => self
+                .live
+                .replay_after_cursor(&from)
+                .await
+                .map_err(|error| error.to_string()),
+            Err(error) => Err(error.to_string()),
+        };
+        let reset = match replayed {
+            Ok(crate::LiveReplayOutcome::Replayed(events)) => Some(
+                super::abandoned_stream::attempt_reset(&events, &self.driver.turn_id, &base),
+            ),
             Ok(crate::LiveReplayOutcome::Gap(_)) => None,
             Err(error) => {
                 tracing::warn!(%session, %error, "the live replay of a re-sent call's earlier attempts did not read");
@@ -433,7 +451,7 @@ impl TurnDrive for RuntimeDrive {
         let id = crate::TurnActivityId::observed(
             format!(
                 "{}:reset",
-                super::abandoned_stream::model_stream_key(&base, attempt)
+                super::abandoned_stream::model_stream_key(&base, pin.attempt)
             ),
             0,
         );

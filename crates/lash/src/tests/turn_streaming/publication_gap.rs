@@ -64,10 +64,6 @@ impl lash_core::LiveReplayStore for PublicationFailureStore {
         self.inner.current_cursor(session, revision)
     }
 
-    fn earliest_cursor(&self, session: &lash_core::SessionId) -> lash_core::SessionCursor {
-        self.inner.earliest_cursor(session)
-    }
-
     async fn invalidate_session(
         &self,
         session: &lash_core::SessionId,

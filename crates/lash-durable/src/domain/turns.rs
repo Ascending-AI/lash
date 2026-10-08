@@ -75,24 +75,26 @@ impl UnfinishedPhase {
         stored: &str,
         argument: Option<u64>,
         checkpoint: Option<String>,
-        pin: Option<(String, DurableInstant)>,
+        pin: Option<(String, DurableInstant, String)>,
         model_calls: u32,
     ) -> Option<Self> {
         Some(match (stored, argument, checkpoint, pin) {
             ("admitted", None, None, None) => Self::Admitted,
-            ("model", Some(attempt), Some(checkpoint), Some((request_ref, deadline)))
-                if model_calls > 0 =>
-            {
-                Self::Model {
-                    pin: ModelPin {
-                        call: model_calls,
-                        attempt: u32::try_from(attempt).ok()?,
-                        request_ref,
-                        deadline,
-                    },
-                    checkpoint,
-                }
-            }
+            (
+                "model",
+                Some(attempt),
+                Some(checkpoint),
+                Some((request_ref, deadline, stream_from)),
+            ) if model_calls > 0 => Self::Model {
+                pin: ModelPin {
+                    call: model_calls,
+                    attempt: u32::try_from(attempt).ok()?,
+                    request_ref,
+                    deadline,
+                    stream_from,
+                },
+                checkpoint,
+            },
             ("tools", Some(run), Some(checkpoint), None) => Self::Tools {
                 run: RunSeq(run),
                 checkpoint,
@@ -137,6 +139,12 @@ pub struct ModelPin {
     pub request_ref: String,
     /// The `model_total` deadline.
     pub deadline: DurableInstant,
+    /// Where the session's live replay stood before the call's first
+    /// attempt streamed, encoded by its owner: a re-sent attempt reads back
+    /// what the earlier attempts streamed after it, so its completeness is
+    /// proven against a boundary they cannot have re-created (FIG-5399).
+    /// Pinned with the first attempt and never refreshed.
+    pub stream_from: String,
 }
 
 /// One turn's row.

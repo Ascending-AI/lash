@@ -104,6 +104,7 @@ pub(super) async fn apply(
                 .bind(pin.map(|pin| pin.deadline.0))
                 .bind(commit.epoch.0)
                 .bind(pin.map(|pin| i64::from(pin.call)))
+                .bind(pin.map(|pin| pin.stream_from.as_str()))
                 .fetch_optional(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
@@ -414,7 +415,11 @@ pub(super) async fn turn(
     let checkpoint: Option<String> = row.try_get(5).map_err(decode)?;
     let request: Option<String> = row.try_get(6).map_err(decode)?;
     let deadline: Option<i64> = row.try_get(7).map_err(decode)?;
-    let pin = request.zip(deadline.map(DurableInstant));
+    let stream_from: Option<String> = row.try_get(11).map_err(decode)?;
+    let pin = request
+        .zip(deadline.map(DurableInstant))
+        .zip(stream_from)
+        .map(|((request, deadline), stream_from)| (request, deadline, stream_from));
     let model_calls: i64 = row.try_get(10).map_err(decode)?;
     let model_calls = integer::<u32>(model_calls)?;
     let phase = UnfinishedPhase::parse(&stored_phase, argument, checkpoint, pin, model_calls)
@@ -485,8 +490,9 @@ mod ddl_tests {
     ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
         sqlx::query(
             "INSERT INTO lash_turn_phases (session_id, run, phase, phase_arg, iteration,
-                 checkpoint_ref, model_request_ref, model_deadline_ms, written_epoch)
-             VALUES ('s', $1, $2, $3, 0, $4, $5, $6, 1)",
+                 checkpoint_ref, model_request_ref, model_deadline_ms, model_stream_from,
+                 written_epoch)
+             VALUES ('s', $1, $2, $3, 0, $4, $5, $6, $7, 1)",
         )
         .bind(run)
         .bind(phase)
@@ -494,6 +500,7 @@ mod ddl_tests {
         .bind(checkpoint)
         .bind(pin.map(|(request, _)| request))
         .bind(pin.map(|(_, deadline)| deadline))
+        .bind(pin.map(|_| "stream-cursor"))
         .execute(crate::observed_sql::executor(connection))
         .await
     }

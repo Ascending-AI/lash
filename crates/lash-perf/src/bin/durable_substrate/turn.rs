@@ -16,8 +16,8 @@ use lash_core::facade_support::{CommitBudget, EffectId, Response};
 use lash_core::llm::types::LlmContentBlock;
 use lash_core::runtime::durable::head::SessionHead;
 use lash_core::runtime::durable::session::{
-    AdmittedInputs, CellExit, CodeCell, ComposedCall, OpenTurn, PreparedCall, TurnCommit, TurnDone,
-    TurnDrive, TurnError, TurnRestore, TurnRow, TurnServices,
+    AdmittedInputs, CellExit, CodeCell, ComposedCall, ModelPin, OpenTurn, PreparedCall, TurnCommit,
+    TurnDone, TurnDrive, TurnError, TurnRestore, TurnRow, TurnServices,
 };
 use lash_core::sansio::{ChatContextProjector, PendingToolCall, PendingWork, ProtocolDriverHandle};
 use lash_core::{
@@ -576,7 +576,7 @@ impl TurnDrive for BenchDrive {
         &mut self,
         _cx: &ActorContext,
         _id: EffectId,
-        _attempt: u32,
+        _pin: &ModelPin,
     ) -> Result<(), TurnError> {
         Ok(())
     }

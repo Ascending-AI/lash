@@ -98,6 +98,7 @@ async fn a_model_start_commit_stays_within_its_round_trip_budget() {
                     attempt: 1,
                     request_ref: "request".to_owned(),
                     deadline,
+                    stream_from: "stream".to_owned(),
                 },
                 checkpoint: "{}".to_owned(),
             },
