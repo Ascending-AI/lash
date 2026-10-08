@@ -38,8 +38,8 @@ pub const WATCHDOG: Duration = Duration::from_secs(240);
 /// The model key every law's session runs on.
 pub const MODEL: &str = "tool-semantics-model";
 
-/// What a database must outlive: a temporary directory, an isolated
-/// PostgreSQL database.
+/// What a store set must outlive: its temporary database or attachment
+/// directory, and its isolated PostgreSQL database.
 pub type Keep = Vec<Box<dyn std::any::Any + Send>>;
 
 /// A fresh store set of `tier`, or `None` for a PostgreSQL leg the run was
@@ -70,11 +70,19 @@ pub async fn stores(tier: Tier) -> Option<(Arc<dyn StoreSet>, Keep)> {
             let storage = lash_postgres_store::testing::connect(isolated.url())
                 .await
                 .expect("the isolated database opens");
+            // PostgreSQL stores attachment references, while the host supplies
+            // the bytes port. Keep it alive beside the isolated database.
+            let attachments = tempfile::tempdir().expect("an attachment directory");
             let stores = lash_postgres_store::PostgresStoreSet::new(
                 &storage,
-                Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
+                Arc::new(lash_core_store::attachments::FileAttachmentStore::new(
+                    attachments.path(),
+                )),
             );
-            Some((Arc::new(stores), vec![Box::new(isolated)]))
+            Some((
+                Arc::new(stores),
+                vec![Box::new(isolated), Box::new(attachments)],
+            ))
         }
     }
 }

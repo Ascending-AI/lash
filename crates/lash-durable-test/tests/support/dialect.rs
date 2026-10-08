@@ -44,8 +44,9 @@ fn isolated_database(url: String) -> lash_postgres_store::testing::IsolatedDatab
 }
 
 /// The store set and the durable store on `clock` over a fresh database of
-/// `dialect`. What must outlive the scenario's database (a temporary
-/// directory, an isolated PostgreSQL database) is pushed onto `keep`.
+/// `dialect`. What must outlive the scenario's store set (a temporary
+/// database or attachment directory, an isolated PostgreSQL database) is
+/// pushed onto `keep`.
 pub async fn open(
     dialect: Dialect,
     postgres_url: Option<&str>,
@@ -83,13 +84,19 @@ pub async fn open(
             );
             // Every port reads the virtual clock, the durable store's
             // included: a host's mail is due when the nodes' clock says.
+            let attachments = tempfile::tempdir().expect("an attachment directory");
             let stores = lash_postgres_store::PostgresStoreSet::with_clock_for_testing(
                 &storage,
-                Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
+                Arc::new(lash_core_store::attachments::FileAttachmentStore::new(
+                    attachments.path(),
+                )),
                 clock,
             );
             let database = lash_core_execution::StoreSet::durable_store(&stores);
-            keep.lock_recover().push(Box::new(isolated));
+            keep.lock_recover().extend([
+                Box::new(isolated) as Box<dyn std::any::Any + Send>,
+                Box::new(attachments),
+            ]);
             (Arc::new(stores), database)
         }
     }

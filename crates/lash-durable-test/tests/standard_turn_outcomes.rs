@@ -502,8 +502,8 @@ async fn standard_runtime_prefers_final_usage_over_streamed_usage(tier: Tier) {
 }
 
 /// A turn whose second model call overflows the turn's cumulative usage
-/// counter does not answer, and commits nothing: the session's head holds
-/// no message of the turn and no usage.
+/// counter refuses without a settled report: no turn commits, and the
+/// session's head publishes neither the overflowing answer nor usage.
 async fn cumulative_usage_overflow_publishes_no_turn_terminal_or_usage(tier: Tier) {
     let Some(world) = world(
         tier,
@@ -534,19 +534,39 @@ async fn cumulative_usage_overflow_publishes_no_turn_terminal_or_usage(tier: Tie
         return;
     };
     let session = world.session("usage-overflow", served::spec(8)).await;
-    let output = world.send(&session, "use the tool, then answer").await;
-
-    assert!(
-        !output.is_success(),
-        "a turn whose usage overflowed must not answer: {:?}",
-        output.result.outcome
-    );
-    assert!(
-        output.assistant_message().is_none(),
-        "{:?}",
-        output.result.outcome
+    let error = tokio::time::timeout(
+        served::WATCHDOG,
+        session
+            .send(lash::TurnInput::text("use the tool, then answer"))
+            .output(),
+    )
+    .await
+    .expect("deadlock watchdog: the overflowing turn settles")
+    .expect_err("overflow refuses the run instead of publishing a turn report");
+    let lash::EmbedError::Runtime(refusal) = error else {
+        panic!("expected the runtime's overflow refusal, got {error:?}");
+    };
+    assert_eq!(refusal.code, lash_core::RuntimeErrorCode::StoreRefused);
+    assert_eq!(
+        refusal.message,
+        "token usage counter `input_tokens` overflowed while accumulating (turn, tool-semantics-model)"
     );
     let view = session.read().await.expect("the session reads");
+    assert_eq!(
+        view.as_ref()
+            .expect("the created session has a head")
+            .token_usage(),
+        &lash_core::TokenUsage::default(),
+        "the overflowing turn publishes no durable usage"
+    );
+    let turns = session
+        .committed_turns(None, std::num::NonZeroU32::new(1).unwrap())
+        .await
+        .expect("read committed turns");
+    assert!(
+        turns.turns.is_empty(),
+        "no turn terminal commits: {turns:?}"
+    );
     let committed = view
         .as_ref()
         .map(|view| view.messages().to_vec())
