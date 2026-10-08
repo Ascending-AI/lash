@@ -13,7 +13,7 @@ mod executor;
 mod feedback;
 mod native;
 mod plugin;
-pub use native::{NATIVE_EXECUTE_TOOL_NAME, NATIVE_TRANSPORT_VERSION, RlmNativeToolPlugin};
+pub use native::{NATIVE_EXECUTE_TOOL_NAME, RlmNativeToolPlugin};
 mod projection;
 mod prompt_sections;
 mod protocol;

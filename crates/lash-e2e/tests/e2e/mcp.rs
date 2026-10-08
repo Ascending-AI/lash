@@ -425,7 +425,8 @@ async fn s28(case: &mut Case) -> Result<()> {
             ensure!(
                 cells.len() == 1
                     && cells[0]["tool_call_ids"].as_array().map(Vec::len) == Some(1)
-                    && cells[0]["error"]["message"]
+                    && cells[0]["result"]["kind"] == "failed"
+                    && cells[0]["result"]["value"]["message"]
                         .as_str()
                         .is_some_and(|message| {
                             message.contains("tool was interrupted by a runtime restart")

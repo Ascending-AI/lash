@@ -1,9 +1,8 @@
 use super::*;
 use lash::SessionId;
 use lash::transcript::{
-    CellResult, EntryId, EntryProvenance, SuppressionReason, TerminalValue, ToolResultBlock,
-    TranscriptBlock, TranscriptCell, TranscriptEntry, TranscriptItem, TranscriptMessage,
-    TranscriptRole,
+    CellRecord, CellResult, EntryId, EntryProvenance, SuppressionReason, ToolResultBlock,
+    TranscriptBlock, TranscriptEntry, TranscriptItem, TranscriptMessage, TranscriptRole,
 };
 
 /// How the workbench lays out one committed transcript entry. Lash hands the
@@ -56,6 +55,31 @@ impl ChatRow {
         let (kind, content, suppressed) = match &entry.item {
             TranscriptItem::Suppressed(reason) => {
                 (ChatRowKind::Event, ChatContent::default(), Some(*reason))
+            }
+            // A cell's assistant context is shown as its reasoning: the cell
+            // row beside it already shows the program the reply ran.
+            TranscriptItem::Message(message) if entry.provenance.cell_id.is_some() => {
+                let reasoning = message
+                    .blocks
+                    .iter()
+                    .filter_map(|block| match block {
+                        TranscriptBlock::Reasoning { text } => Some(text.clone()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                if reasoning.is_empty() {
+                    (
+                        ChatRowKind::Event,
+                        ChatContent::default(),
+                        Some(SuppressionReason::SupersededByCommittedReply),
+                    )
+                } else {
+                    let content = ChatContent {
+                        reasoning,
+                        ..ChatContent::default()
+                    };
+                    (ChatRowKind::Reasoning, content, None)
+                }
             }
             TranscriptItem::Message(message) => {
                 let (kind, content) = message_row(message, entry.provenance.is_turn_reply);
@@ -143,7 +167,7 @@ fn message_row(message: &TranscriptMessage, is_turn_reply: bool) -> (ChatRowKind
     (kind, content)
 }
 
-fn cell_row(cell: &TranscriptCell) -> ChatContent {
+fn cell_row(cell: &CellRecord) -> ChatContent {
     let mut output = match &cell.prints_retained {
         Some(archive) => archive.witness.clone(),
         None => cell
@@ -155,10 +179,10 @@ fn cell_row(cell: &TranscriptCell) -> ChatContent {
     };
     if let CellResult::Finished(value) = &cell.result {
         let terminal = match value {
-            TerminalValue::Inline(value) => {
+            lash::attachments::OutputValue::Inline(value) => {
                 serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
             }
-            TerminalValue::Retained(value) => value.witness.clone(),
+            lash::attachments::OutputValue::Retained(value) => value.witness.clone(),
         };
         if !output.is_empty() {
             output.push('\n');

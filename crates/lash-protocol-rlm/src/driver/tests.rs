@@ -4,8 +4,9 @@ use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
 use super::*;
+use lash_core::CellRecord;
 use lash_core::session_model::{ConversationRecord, MessageRole, Part, SessionHistoryRecord};
-use lash_rlm_types::{RlmProtocolEvent, RlmTrajectoryEntry};
+use lash_rlm_types::RlmProtocolEvent;
 
 fn user_event(id: &str, text: &str) -> SessionHistoryRecord {
     SessionHistoryRecord::Conversation(ConversationRecord {
@@ -19,12 +20,13 @@ fn user_event(id: &str, text: &str) -> SessionHistoryRecord {
 
 fn step_event(protocol_iteration: usize, code: &str, output: &str) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(rlm_protocol_event(
-        RlmProtocolEvent::RlmTrajectoryEntry(RlmTrajectoryEntry {
-            output_archive: None,
+        RlmProtocolEvent::RlmTrajectoryEntry(Box::new(CellRecord {
+            language: "typescript".to_string(),
+            prints_retained: None,
             id: format!("lashlang_step_{protocol_iteration}"),
             protocol_iteration,
             code: code.to_string(),
-            output: if output.is_empty() {
+            prints: if output.is_empty() {
                 Vec::new()
             } else {
                 vec![output.to_string().into()]
@@ -32,8 +34,8 @@ fn step_event(protocol_iteration: usize, code: &str, output: &str) -> SessionHis
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            outcome: lash_rlm_types::CellOutcome::Running,
-        }),
+            result: lash_core::CellResult::Completed,
+        })),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
             crate::RLM_PROTOCOL_EVENT_VERSION
         )),
@@ -48,17 +50,18 @@ fn terminal_step_event(
     final_output: serde_json::Value,
 ) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(rlm_protocol_event(
-        RlmProtocolEvent::RlmTrajectoryEntry(RlmTrajectoryEntry {
-            output_archive: None,
+        RlmProtocolEvent::RlmTrajectoryEntry(Box::new(CellRecord {
+            language: "typescript".to_string(),
+            prints_retained: None,
             id: format!("lashlang_step_{protocol_iteration}"),
             protocol_iteration,
             code: code.to_string(),
-            output: output.into_iter().map(Into::into).collect(),
+            prints: output.into_iter().map(Into::into).collect(),
             images,
             calls: Vec::new(),
             calls_omitted: 0,
-            outcome: lash_rlm_types::CellOutcome::Finished(final_output.into()),
-        }),
+            result: lash_core::CellResult::Finished(final_output.into()),
+        })),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
             crate::RLM_PROTOCOL_EVENT_VERSION
         )),
@@ -578,12 +581,13 @@ fn plugin_origin_is_not_rendered_in_history() {
 fn printed_images_render_as_llm_image_blocks() {
     let projector = projector(1000);
     let event = SessionHistoryRecord::Protocol(rlm_protocol_event(
-        RlmProtocolEvent::RlmTrajectoryEntry(RlmTrajectoryEntry {
-            output_archive: None,
+        RlmProtocolEvent::RlmTrajectoryEntry(Box::new(CellRecord {
+            language: "typescript".to_string(),
+            prints_retained: None,
             id: "lashlang_step_1".to_string(),
             protocol_iteration: 1,
             code: "print img".to_string(),
-            output: vec![r#"{"type":"image","id":"img"}"#.to_string().into()],
+            prints: vec![r#"{"type":"image","id":"img"}"#.to_string().into()],
             images: vec![lash_core::AttachmentRef {
                 id: lash_core::AttachmentId::parse(
                     "8f9e0cfb92cb165ce6277b3b26a453fd81ac949a6ab9afba49d348483e8f7c78",
@@ -596,8 +600,8 @@ fn printed_images_render_as_llm_image_blocks() {
             }],
             calls: Vec::new(),
             calls_omitted: 0,
-            outcome: lash_rlm_types::CellOutcome::Running,
-        }),
+            result: lash_core::CellResult::Completed,
+        })),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
             crate::RLM_PROTOCOL_EVENT_VERSION
         )),

@@ -16,14 +16,12 @@ use lash_core::session_model::{
     TurnFailureKind, make_error_event,
 };
 use lash_core::{
-    CheckpointKind, DriverAction, DriverContextView, ExecResponse, LlmOutputPart, LlmResponse,
-    LlmTerminalReason, ToolCallOutcome, ToolCallRecord, facade_support::TurnFinish,
-    facade_support::TurnOutcome, facade_support::TurnStop,
+    CellRecord, CellResult, CheckpointKind, DriverAction, DriverContextView, ExecResponse,
+    LlmOutputPart, LlmResponse, LlmTerminalReason, ToolCallOutcome, ToolCallRecord,
+    facade_support::TurnFinish, facade_support::TurnOutcome, facade_support::TurnStop,
     facade_support::append_assistant_text_part, facade_support::normalized_response_parts,
 };
-use lash_rlm_types::{
-    CellOutcome, RlmDiagnosticEvent, RlmProtocolEvent, RlmTermination, RlmTrajectoryEntry,
-};
+use lash_rlm_types::{RlmDiagnosticEvent, RlmProtocolEvent, RlmTermination};
 use serde_json::Value;
 
 #[cfg(feature = "testing")]
@@ -41,7 +39,7 @@ use super::cell::{
 #[cfg(feature = "testing")]
 use super::finish::internal_assistant_prose_message;
 use super::finish::{
-    finish_required_reminder_message, finish_schema_mismatch_message,
+    cell_context_message, finish_required_reminder_message, finish_schema_mismatch_message,
     internal_assistant_prose_message_for_turn, invalid_cell_message, no_progress_stop_message,
     output_limit_retry_message, validate_finish_value,
 };
@@ -508,7 +506,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         driver_state: lash_core::ProtocolDriverState,
         result: Result<ExecResponse, lash_core::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
-        let mut state = match decode_rlm_driver_state(
+        let state = match decode_rlm_driver_state(
             driver_state,
             lash_core::driver_writer_version!(ctx, RLM_DRIVER_STATE_VERSION),
         ) {
@@ -527,16 +525,30 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             }];
         }
 
-        // The retention history records in place of a terminal value too
-        // long for it (FIG-1643); the value itself stays the turn's answer.
-        let mut finish_retained = None;
+        // The cell's committed record: the executor's prints and result as
+        // it reported them. Only an adjudication below changes the result.
+        let mut record = CellRecord {
+            id: super::stall::cell_id(ctx.turn_id(), ctx.protocol_iteration()),
+            protocol_iteration: ctx.protocol_iteration(),
+            language: self.dialect.language_id().to_string(),
+            code: state.code,
+            ..CellRecord::default()
+        };
+        let commit = |record: CellRecord| {
+            cell_events(
+                ctx.turn_id(),
+                record,
+                &state.reasoning,
+                &state.assistant_parts,
+                lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
+            )
+        };
+        // The finish value itself: the turn's answer, also when history
+        // records only its retention (FIG-1643).
+        let mut finish_value = None;
         match result {
             Ok(response) => {
-                // Fold the executor's `error` / `terminal_finish` pair into the
-                // one outcome it describes; a pair carrying both resolves to
-                // the failure rather than discarding it.
-                let outcome = CellOutcome::from_parts(response.error, response.terminal_finish);
-                finish_retained = response.terminal_finish_retained;
+                finish_value = response.finish_value().cloned();
                 if !response.degraded_bindings.is_empty() {
                     actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
                         lash_rlm_types::RlmDiagnosticPhase::ProjectionRehydration,
@@ -565,28 +577,19 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         summary,
                     }));
                 }
-                (state.calls, state.calls_omitted) =
+                (record.calls, record.calls_omitted) =
                     bounded_executed_calls(response.calls, &self.dialect.presentation());
-                state.images.extend(response.printed_images);
-                state.output_archive = response.output_archive;
-                for observation in response.observations {
-                    state.output.push(lash_rlm_types::RlmPrint {
-                        text: observation.text,
-                        value: observation.value,
-                    });
-                }
-                match outcome {
-                    CellOutcome::Running => {}
-                    outcome => state.outcome = outcome,
-                }
+                record.images = response.printed_images;
+                record.prints = response.prints;
+                record.prints_retained = response.prints_retained;
+                record.result = response.result;
                 if let Some(outcome) = terminal_outcome {
-                    actions.push(DriverAction::AppendEvents(trajectory_events(
-                        ctx.turn_id(),
-                        ctx.protocol_iteration(),
-                        &state,
-                        None,
-                        lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
-                    )));
+                    // A tool ended the turn: the cell's own finish never
+                    // took effect, so it is not the cell's result.
+                    if !record.result.is_failed() {
+                        record.result = CellResult::Completed;
+                    }
+                    actions.push(DriverAction::AppendEvents(commit(record)));
                     actions.push(DriverAction::Start(PendingWork::Checkpoint {
                         checkpoint: CheckpointKind::BeforeCompletion,
                         on_empty: CheckpointResumeAction::Finish(outcome),
@@ -596,10 +599,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             }
             // The effect failed before the executor answered: a host
             // failure that keeps its closed reason.
-            Err(failure) => state.outcome = CellOutcome::Failed(failure.into()),
+            Err(failure) => record.result = CellResult::Failed(failure.into()),
         }
 
-        if let Some(finish_value) = state.outcome.terminal_value() {
+        if let Some(finish_value) = finish_value {
             // Typed-RLM: validate against the declared schema, under either
             // termination (FIG-5104). If it fails, surface the error to the
             // model and loop; otherwise fall through to the shared
@@ -609,26 +612,21 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 Err(err) => return invalid_turn_options_actions(err),
             };
             if let Some(schema) = termination.finish_schema()
-                && let Err(error_text) = validate_finish_value(finish_value, schema)
+                && let Err(error_text) = validate_finish_value(&finish_value, schema)
             {
+                // The program finished with a value its declared schema
+                // refuses: a defect in the program.
+                record.result = CellResult::Failed(
+                    lash_core::CellFailure::new(
+                        lash_core::CellFailureKind::Program,
+                        error_text.to_string(),
+                    )
+                    .with_value_mismatch(error_text),
+                );
                 if let Err(err) = continue_or_stop_after_nonterminal(
                     &ctx,
                     &mut actions,
-                    trajectory_events(
-                        ctx.turn_id(),
-                        ctx.protocol_iteration(),
-                        &state,
-                        // The program finished with a value its declared
-                        // schema refuses: a defect in the program.
-                        Some(CellOutcome::Failed(
-                            lash_core::CellFailure::new(
-                                lash_core::CellFailureKind::Program,
-                                error_text.to_string(),
-                            )
-                            .with_value_mismatch(error_text),
-                        )),
-                        lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
-                    ),
+                    commit(record),
                     vec![conversation_event(finish_schema_mismatch_message(
                         self.dialect.as_ref(),
                         rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "schema_mismatch"),
@@ -640,43 +638,29 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 return actions;
             }
 
-            actions.push(DriverAction::AppendEvents(trajectory_events(
-                ctx.turn_id(),
-                ctx.protocol_iteration(),
-                &state,
-                Some(CellOutcome::Finished(match finish_retained {
-                    Some(retained) => lash_core::OutputValue::Retained(retained),
-                    None => lash_core::OutputValue::Inline(finish_value.clone()),
-                })),
-                lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
-            )));
+            actions.push(DriverAction::AppendEvents(commit(record)));
             actions.push(DriverAction::Start(PendingWork::Checkpoint {
                 checkpoint: CheckpointKind::BeforeCompletion,
                 on_empty: CheckpointResumeAction::Finish(TurnOutcome::Finished(
                     TurnFinish::FinalValue {
-                        value: finish_value.clone(),
+                        value: finish_value,
                     },
                 )),
             }));
             return actions;
         }
 
+        let progress = if record.result.is_failed() {
+            AttemptProgress::Stalled
+        } else {
+            AttemptProgress::Executed
+        };
         if let Err(err) = continue_or_stop_after_nonterminal(
             &ctx,
             &mut actions,
-            trajectory_events(
-                ctx.turn_id(),
-                ctx.protocol_iteration(),
-                &state,
-                None,
-                lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
-            ),
+            commit(record),
             Vec::new(),
-            if state.outcome.is_failed() {
-                AttemptProgress::Stalled
-            } else {
-                AttemptProgress::Executed
-            },
+            progress,
         ) {
             return invalid_turn_options_actions(err);
         }
@@ -904,89 +888,47 @@ fn tool_call_event(record: ToolCallRecord) -> SessionStreamEvent {
     }
 }
 
-fn trajectory_entry(
-    turn_id: &TurnId,
-    protocol_iteration: usize,
-    state: &RlmDriverState,
-    entry_outcome: Option<lash_rlm_types::HistoryCellOutcome>,
-) -> RlmTrajectoryEntry {
-    // A step the driver adjudicated on the spot (schema-mismatch failure,
-    // validated finish) names its outcome explicitly; otherwise the entry
-    // records the state's failure, and a pending finish never leaks in.
-    let outcome = entry_outcome.unwrap_or_else(|| match &state.outcome {
-        CellOutcome::Failed(failure) => CellOutcome::Failed(failure.clone()),
-        CellOutcome::Running | CellOutcome::Finished(_) => CellOutcome::Running,
-    });
-    RlmTrajectoryEntry {
-        id: format!("lashlang_step_{turn_id}_{protocol_iteration}"),
-        protocol_iteration,
-        code: state.code.clone(),
-        output: state.output.clone(),
-        output_archive: state.output_archive.clone().map(Box::new),
-        images: state.images.clone(),
-        calls: state.calls.clone(),
-        calls_omitted: state.calls_omitted,
-        outcome,
-    }
-}
-
 fn rlm_message_id(turn_id: &TurnId, protocol_iteration: usize, purpose: &str) -> String {
     format!("m_rlm_{turn_id}_{protocol_iteration}_{purpose}")
 }
 
-fn trajectory_events(
+/// A cell's committed history: the reply's reasoning and the prose around
+/// the cell, as the assistant message that names the cell, then the cell's
+/// record.
+fn cell_events(
     turn_id: &TurnId,
-    protocol_iteration: usize,
-    state: &RlmDriverState,
-    entry_outcome: Option<lash_rlm_types::HistoryCellOutcome>,
+    record: CellRecord,
+    reasoning: &[RlmReasoningPart],
+    assistant_parts: &[lash_core::Part],
     schema_version: u32,
 ) -> Vec<SessionHistoryRecord> {
-    let mut events = Vec::new();
-    if let Some(event) = assistant_content_event(
-        turn_id,
-        protocol_iteration,
-        &state.reasoning,
-        &state
-            .assistant_parts
-            .iter()
-            .filter_map(lash_core::Part::text_content)
-            .collect::<Vec<_>>()
-            .join(""),
-    ) {
-        events.push(event);
-    }
-    events.push(trajectory_event(
-        trajectory_entry(turn_id, protocol_iteration, state, entry_outcome),
-        schema_version,
-    ));
-    events
-}
-
-fn assistant_content_event(
-    turn_id: &TurnId,
-    protocol_iteration: usize,
-    reasoning: &[RlmReasoningPart],
-    prose: &str,
-) -> Option<SessionHistoryRecord> {
-    let id = rlm_message_id(turn_id, protocol_iteration, "assistant_content");
+    let prose = assistant_parts
+        .iter()
+        .filter_map(lash_core::Part::text_content)
+        .collect::<Vec<_>>()
+        .join("");
     let prose = prose.trim();
-    (!reasoning.is_empty() || !prose.is_empty()).then(|| {
-        conversation_event(internal_assistant_prose_message_for_turn(
+    let mut events = Vec::new();
+    if !reasoning.is_empty() || !prose.is_empty() {
+        events.push(conversation_event(cell_context_message(
             turn_id,
-            id,
+            rlm_message_id(turn_id, record.protocol_iteration, "assistant_content"),
+            record.id.clone(),
             prose.to_string(),
             reasoning,
-        ))
-    })
+        )));
+    }
+    events.push(trajectory_event(record, schema_version));
+    events
 }
 
 fn conversation_event(message: Message) -> SessionHistoryRecord {
     SessionHistoryRecord::Conversation(ConversationRecord::from_message(message))
 }
 
-fn trajectory_event(entry: RlmTrajectoryEntry, schema_version: u32) -> SessionHistoryRecord {
+fn trajectory_event(entry: CellRecord, schema_version: u32) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(rlm_protocol_event(
-        RlmProtocolEvent::RlmTrajectoryEntry(entry),
+        RlmProtocolEvent::RlmTrajectoryEntry(Box::new(entry)),
         schema_version,
     ))
 }
@@ -1369,30 +1311,6 @@ mod tests {
         assert_eq!(
             calls.last().expect("retained tail").outcome,
             lash_core::ExecutedCallOutcome::Err
-        );
-    }
-
-    /// The durable entry keeps the cell's typed failure as the executor
-    /// reported it; recovery guidance is rendered when a prompt is projected
-    /// and never stored (FIG-4658 F21).
-    #[test]
-    fn trajectory_capture_keeps_the_typed_failure_and_no_guidance() {
-        let raw_error = "read failed at /workspace/private/secret.txt";
-        let failure = lash_core::CellFailure::new(lash_core::CellFailureKind::Host, raw_error);
-        let state = RlmDriverState {
-            code: "read()".to_string(),
-            outcome: CellOutcome::Failed(failure.clone()),
-            ..RlmDriverState::default()
-        };
-
-        let entry = trajectory_entry(&TurnId::from("turn"), 0, &state, None);
-
-        assert_eq!(entry.code, "read()");
-        assert_eq!(entry.outcome.error(), Some(&failure));
-        let encoded = serde_json::to_value(&entry).expect("entry serializes");
-        assert_eq!(
-            encoded["error"],
-            serde_json::json!({"kind": "host", "message": raw_error})
         );
     }
 }

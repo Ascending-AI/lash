@@ -35,10 +35,15 @@ impl RecordedTurnAssembly {
     pub fn note_code_outputs(&mut self, response: &crate::ExecResponse) {
         self.retained_outputs.extend(
             response
-                .output_archive
+                .prints_retained
                 .as_ref()
                 .into_iter()
-                .chain(response.terminal_finish_retained.as_ref())
+                .chain(
+                    response
+                        .result
+                        .finish()
+                        .and_then(crate::OutputValue::retained),
+                )
                 .cloned(),
         );
     }

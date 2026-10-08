@@ -174,7 +174,7 @@ fn a_cell_module_is_published_under_its_execution_then_held_by_its_frame() {
         let store = Arc::new(RecordingArtifactStore::default());
         let mut state = RlmExecutionState::for_engine("typescript");
         let first = run_cell(&mut state, &store, PROCESS_CELL).await;
-        assert!(first.error.is_none(), "{:?}", first.error);
+        assert!(first.error().is_none(), "{:?}", first.error());
         let writes = store.writes();
         let Some(ArtifactWrite::Publish(lash_core::ArtifactReferrerKind::Execution, published)) =
             writes.first()
@@ -185,7 +185,7 @@ fn a_cell_module_is_published_under_its_execution_then_held_by_its_frame() {
 
         // The frame already holds it: the same cell again writes nothing.
         let second = run_cell(&mut state, &store, PROCESS_CELL).await;
-        assert!(second.error.is_none(), "{:?}", second.error);
+        assert!(second.error().is_none(), "{:?}", second.error());
         assert_eq!(store.writes(), writes);
     });
 }
@@ -197,7 +197,7 @@ fn a_switched_frame_refusing_its_edge_is_a_replay_and_the_cell_goes_on() {
         store.frames_ended.store(true, Ordering::SeqCst);
         let mut state = RlmExecutionState::for_engine("typescript");
         let response = run_cell(&mut state, &store, PROCESS_CELL).await;
-        assert!(response.error.is_none(), "{:?}", response.error);
+        assert!(response.error().is_none(), "{:?}", response.error());
         assert!(
             matches!(
                 store.writes().first(),
@@ -226,7 +226,7 @@ fn a_bare_module_reference_does_not_acquire_a_definition() {
             .await
             .expect("bind bare module refs");
         let response = run_cell(&mut state, &store, "finish(1);").await;
-        assert!(response.error.is_none(), "{:?}", response.error);
+        assert!(response.error().is_none(), "{:?}", response.error());
         assert!(
             store.writes().is_empty(),
             "bare module refs are not definition holders"
@@ -245,7 +245,7 @@ fn a_definition_held_only_inside_a_map_is_held_by_the_frame() {
             "const q = async () => 2; const m = new Map([['q', q]]); finish(1);",
         )
         .await;
-        assert!(bound.error.is_none(), "{:?}", bound.error);
+        assert!(bound.error().is_none(), "{:?}", bound.error());
         let module_ref = state
             .frame_held_module_refs()
             .next()
@@ -280,7 +280,7 @@ fn a_definition_held_only_inside_a_map_is_held_by_the_frame() {
         );
         let before = store.writes().len();
         let response = run_cell(&mut restored, &store, "finish(2);").await;
-        assert!(response.error.is_none(), "{:?}", response.error);
+        assert!(response.error().is_none(), "{:?}", response.error());
         assert!(
             store.writes()[before..].is_empty(),
             "SQL owns the descriptor and its module closure acquisition"

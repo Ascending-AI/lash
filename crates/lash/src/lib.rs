@@ -770,9 +770,9 @@ pub mod plugins {
     pub use lash_sansio::{
         AttachmentMaterializationNotice, CheckpointResumeAction, DegradedBinding, DriverAction,
         DriverContextView, EffectId, ExpandedRow, ExpandedWrapper, ModelToolCalls, ModelToolReturn,
-        Observation, PendingWork, ProjectorContext, ResponseToolCalls, SessionStreamEvent,
-        StreamMessageKind, ToolCatalogBuildError, ToolContractResolver, ToolExpansionPlan,
-        TurnMachineConfig, TurnProtocol, UnitTurnProtocol, WriterFormats,
+        PendingWork, ProjectorContext, ResponseToolCalls, SessionStreamEvent, StreamMessageKind,
+        ToolCatalogBuildError, ToolContractResolver, ToolExpansionPlan, TurnMachineConfig,
+        TurnProtocol, UnitTurnProtocol, WriterFormats,
     };
     /// The protocol-generic forms [`TurnDriverConfig`] and
     /// [`TurnDriverPreamble`] specialize to the host's turn protocol.
@@ -1477,11 +1477,14 @@ pub use lash_core::{RetainedRevision, Retention, Target};
 /// host renders however it likes.
 pub mod transcript {
     pub use lash_core::transcript::{
-        CellPrint, CellResult, CommittedTurn, CommittedTurnsPage, EntryId, EntryProvenance,
-        SessionTranscript, SuppressionReason, TerminalValue, ToolResultBlock, TranscriptBlock,
-        TranscriptCell, TranscriptDecoders, TranscriptEntry, TranscriptItem, TranscriptMessage,
-        TranscriptRole,
+        CommittedTurn, CommittedTurnsPage, EntryId, EntryProvenance, SessionTranscript,
+        SuppressionReason, ToolResultBlock, TranscriptBlock, TranscriptDecoders, TranscriptEntry,
+        TranscriptItem, TranscriptMessage, TranscriptRole,
     };
+    /// One executed code cell: the record its protocol committed, which a
+    /// [`TranscriptItem::Cell`] returns, a code executor's response reports
+    /// the prints and result of, and a completion activity carries.
+    pub use lash_core::{CellPrint, CellRecord, CellResult};
 }
 
 /// Presentation cuts for runtime value replies and raw transcript errors.

@@ -12,7 +12,6 @@ use super::{RLM_SNAPSHOT_VERSION, RlmExecutionState, RlmSnapshotRoot};
 use crate::driver_state::{
     RLM_DRIVER_STATE_VERSION, RlmDriverState, decode_rlm_driver_state, rlm_driver_state,
 };
-use crate::native::transport::{NATIVE_TRANSPORT_VERSION, decode_payload, execution_event};
 
 fn run<T>(future: impl std::future::Future<Output = T>) -> T {
     tokio::runtime::Builder::new_current_thread()
@@ -68,34 +67,6 @@ fn restamp_root(bytes: &[u8], version: u32) -> Vec<u8> {
     let mut root: RlmSnapshotRoot = rmp_serde::from_slice(bytes).expect("a root");
     root.version = version;
     rmp_serde::to_vec_named(&root).expect("encode")
-}
-
-// --- NATIVE_TRANSPORT_VERSION: a provider call's envelope in history. ---
-
-fn write_transport(fleet: FleetFormat) -> Vec<u8> {
-    let lash_core::SessionHistoryRecord::Protocol(event) = execution_event(
-        "step".to_owned(),
-        Vec::new(),
-        fleet.writer_version(lash_core::surface_format!(NATIVE_TRANSPORT_VERSION)),
-        fleet.writer_version(lash_core::surface_format!(
-            crate::RLM_PROTOCOL_EVENT_VERSION
-        )),
-    ) else {
-        panic!("a transport envelope is a protocol event");
-    };
-    let Some(lash_rlm_types::RlmProtocolEvent::RlmDiagnostic(diagnostic)) =
-        crate::projection::decode_rlm_protocol_event(&event).expect("valid history fixture")
-    else {
-        panic!("a transport envelope is an RLM diagnostic");
-    };
-    serde_json::to_vec(&diagnostic.payload).expect("encode the envelope")
-}
-
-fn read_transport(bytes: &[u8], _fleet: FleetFormat) -> Result<String, String> {
-    let payload = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
-    decode_payload(payload)
-        .map_err(|error| error.to_string())
-        .and_then(|transport| serde_json::to_string(&transport).map_err(|e| e.to_string()))
 }
 
 // --- RLM_DRIVER_STATE_VERSION: the parked native driver state. ---
@@ -163,13 +134,6 @@ fn probes() -> Vec<SurfaceProbe> {
             write: write_root,
             read: read_root,
             restamp: restamp_root,
-        },
-        SurfaceProbe {
-            constant: "NATIVE_TRANSPORT_VERSION",
-            newest: NATIVE_TRANSPORT_VERSION,
-            write: write_transport,
-            read: read_transport,
-            restamp: restamp_schema_version,
         },
         SurfaceProbe {
             constant: "RLM_DRIVER_STATE_VERSION",

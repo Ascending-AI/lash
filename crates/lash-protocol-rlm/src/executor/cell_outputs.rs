@@ -10,10 +10,10 @@ use super::*;
 #[serde(deny_unknown_fields)]
 struct RecordedCellOutputs {
     policy: lash_core::OutputRetentionPolicy,
-    observations: Vec<lash_core::Observation>,
-    output_archive: Option<lash_core::RetainedOutput>,
+    prints: Vec<lash_core::CellPrint>,
+    prints_retained: Option<lash_core::RetainedOutput>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    terminal_finish_retained: Option<lash_core::RetainedOutput>,
+    finish_retained: Option<lash_core::RetainedOutput>,
 }
 
 /// Renders the cell's prints and retains their aggregate when too long for history,
@@ -80,7 +80,8 @@ pub(super) async fn record_cell_outputs(
         .to_string();
     let key = format!("{namespace}:outputs");
     let attachments = ctx.attachment_store();
-    let terminal_finish = response.terminal_finish.clone();
+    let finish_value = response.finish_value().cloned();
+    let recorded_finish = finish_value.clone();
     let outcome = ctx
         .journaled_language_value_with(
             key.clone(),
@@ -101,7 +102,7 @@ pub(super) async fn record_cell_outputs(
                         observations.push(observation);
                     }
                 }
-                let output_archive = if observations.is_empty() {
+                let prints_retained = if observations.is_empty() {
                     None
                 } else {
                     retain_oversized_value(
@@ -117,10 +118,10 @@ pub(super) async fn record_cell_outputs(
                     )
                     .await?
                 };
-                if output_archive.is_some() {
+                if prints_retained.is_some() {
                     observations.clear();
                 }
-                let terminal_finish_retained = match &terminal_finish {
+                let finish_retained = match &recorded_finish {
                     Some(value) => {
                         retain_oversized_value(&attachments, policy, value, &format!("{key}:final"))
                             .await?
@@ -129,9 +130,9 @@ pub(super) async fn record_cell_outputs(
                 };
                 serde_json::to_value(RecordedCellOutputs {
                     policy,
-                    observations,
-                    output_archive,
-                    terminal_finish_retained,
+                    prints: observations,
+                    prints_retained,
+                    finish_retained,
                 })
                 .map_err(|error| {
                     lash_core::RuntimeEffectControllerError::new(
@@ -145,16 +146,20 @@ pub(super) async fn record_cell_outputs(
     match outcome {
         Ok(value) => match serde_json::from_value::<RecordedCellOutputs>(value) {
             Ok(recorded) => {
-                response.observations = recorded.observations;
-                response.output_archive = recorded.output_archive;
-                response.terminal_finish_retained = recorded.terminal_finish_retained;
+                response.prints = recorded.prints;
+                response.prints_retained = recorded.prints_retained;
+                // History records the retention in a too-long finish value's
+                // place; the value itself stays the turn's answer.
+                if let Some(retained) = recorded.finish_retained {
+                    response.result =
+                        lash_core::CellResult::Finished(lash_core::OutputValue::Retained(retained));
+                    response.retained_finish_value = finish_value;
+                }
             }
-            Err(error) => {
-                response.error = Some(lash_core::CellFailure::new(
-                    lash_core::CellFailureKind::Host,
-                    error.to_string(),
-                ))
-            }
+            Err(error) => fail_cell(
+                response,
+                lash_core::CellFailure::new(lash_core::CellFailureKind::Host, error.to_string()),
+            ),
         },
         Err(error) => fail_cell_on_nested_error(ctx, response, error),
     }

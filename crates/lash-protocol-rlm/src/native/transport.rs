@@ -1,250 +1,192 @@
-//! Transport envelopes are stored separately from the channel-independent trajectory.
-//! Each projection emits a complete call/result exchange or neither side.
+//! A native reply's provider exchange is ordinary committed history: the
+//! assistant message that carried the reply's parts, and for a call that ran
+//! nothing the tool results that answered it. A reply whose `execute_code`
+//! call ran names its cell in the message's origin; the cell's own record is
+//! the channel-independent trajectory entry. The prompt projects each
+//! exchange as a complete call/result pair or not at all.
 use lash_core::llm::types::{LlmContentBlock, LlmMessage, LlmRole};
-use lash_core::{Part, PartKind, SessionHistoryRecord};
-use lash_rlm_types::{RlmDiagnosticEvent, RlmProtocolEvent};
+use lash_core::session_model::{Message, MessageRole, shared_parts};
+use lash_core::{MessageOrigin, Part, PartKind};
 use lash_sansio::TurnId;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-/// Schema version of the native RLM provider-call and repair envelopes
-/// recorded in session history.
-///
-/// version_guard(
-///     shapes(cover(Envelope, Transport)),
-/// )
-#[cfg(not(feature = "synthetic-next"))]
-/// version_surface = "migrate"
-/// format_manifest = "NativeRlmTransport"
-pub const NATIVE_TRANSPORT_VERSION: u32 = 1;
-
-/// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
-/// with version 1's shape; its `Lift::Decoder` row admits N's
-/// envelopes, which decode natively.
-#[cfg(feature = "synthetic-next")]
-/// version_surface = "migrate"
-/// format_manifest = "NativeRlmTransport"
-pub const NATIVE_TRANSPORT_VERSION: u32 = 2;
-
-const PHASE: lash_rlm_types::RlmDiagnosticPhase =
-    lash_rlm_types::RlmDiagnosticPhase::NativeTransport;
-
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub(crate) enum Transport {
-    Execution {
-        step_id: String,
-        parts: Vec<Part>,
-    },
-    Repair {
-        turn_id: TurnId,
-        protocol_iteration: usize,
-        parts: Vec<Part>,
-        text: String,
-    },
-}
-
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum DecodeError {
-    #[error("native transport version {found} is newer than supported version {supported}")]
-    NewerVersion { found: u32, supported: u32 },
-    #[error(
-        "native transport version {found} is older than any version this build reads (newest {supported})"
-    )]
-    OlderVersion { found: u32, supported: u32 },
-    #[error("malformed native transport envelope: {0}")]
-    Malformed(#[from] serde_json::Error),
-    #[error(transparent)]
-    History(#[from] lash_core::StoredDataCorruption),
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct Envelope {
-    #[serde(default)]
-    schema_version: u32,
-    #[serde(flatten)]
-    transport: Transport,
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "the envelope carries a u32 schema version and crate-owned transport data, so serde_json encoding cannot fail"
-)]
-fn event(transport: Transport, schema_version: u32, history_version: u32) -> SessionHistoryRecord {
-    SessionHistoryRecord::Protocol(crate::projection::rlm_protocol_event(
-        RlmProtocolEvent::RlmDiagnostic(RlmDiagnosticEvent {
-            phase: PHASE,
-            payload: serde_json::to_value(Envelope {
-                schema_version,
-                transport,
-            })
-            .expect("native envelope serializes"),
-        }),
-        history_version,
-    ))
-}
-
-pub(crate) fn execution_event(
-    step_id: String,
-    parts: Vec<Part>,
-    schema_version: u32,
-    history_version: u32,
-) -> SessionHistoryRecord {
-    event(
-        Transport::Execution { step_id, parts },
-        schema_version,
-        history_version,
-    )
-}
-pub(super) fn repair_event(
+/// The assistant message of a reply whose `execute_code` call ran as the cell
+/// `cell_id`: the reply's parts, unchanged, so provider replay material
+/// survives.
+pub(super) fn cell_context_message(
     turn_id: &TurnId,
-    protocol_iteration: usize,
+    message_id: String,
+    cell_id: String,
+    parts: Vec<Part>,
+) -> Message {
+    Message {
+        id: message_id,
+        role: MessageRole::Assistant,
+        parts: shared_parts(parts),
+        origin: Some(MessageOrigin::TurnOutput {
+            turn_id: turn_id.clone(),
+            source: lash_core::TurnOutputSource::Plugin {
+                plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+            },
+            cell_id: Some(cell_id),
+        }),
+        reply_marker: None,
+    }
+}
+
+/// The exchange of a reply whose calls ran nothing: the assistant message
+/// with the reply's parts, and one tool result per call carrying `text`, the
+/// correction the model reads. The results pair with their calls by
+/// `call_id` and speak in the user role, where every tool result does,
+/// under the protocol's own origin.
+pub(super) fn refused_call_messages(
+    turn_id: &TurnId,
+    call_message_id: String,
+    result_message_id: String,
     parts: Vec<Part>,
     text: String,
-    schema_version: u32,
-    history_version: u32,
-) -> SessionHistoryRecord {
-    event(
-        Transport::Repair {
-            turn_id: turn_id.clone(),
-            protocol_iteration,
-            parts,
-            text,
+) -> [Message; 2] {
+    let results = parts
+        .iter()
+        .filter(|part| part.kind() == PartKind::ToolCall)
+        .enumerate()
+        .filter_map(|(index, part)| {
+            Some(Part::tool_result(
+                format!("{result_message_id}.p{index}"),
+                vec![lash_core::facade_support::ModelToolReturnPart::text(&text)],
+                part.call_id()?.clone(),
+                part.tool_name().unwrap_or_default().to_string(),
+            ))
+        })
+        .collect::<Vec<_>>();
+    [
+        Message {
+            id: call_message_id,
+            role: MessageRole::Assistant,
+            parts: shared_parts(parts),
+            origin: Some(MessageOrigin::TurnOutput {
+                turn_id: turn_id.clone(),
+                source: lash_core::TurnOutputSource::Plugin {
+                    plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+                },
+                cell_id: None,
+            }),
+            reply_marker: None,
         },
-        schema_version,
-        history_version,
-    )
-}
-fn decode(event: &lash_core::ProtocolEvent) -> Result<Option<Transport>, DecodeError> {
-    let Some(RlmProtocolEvent::RlmDiagnostic(diagnostic)) =
-        crate::projection::decode_rlm_protocol_event(event)?
-    else {
-        return Ok(None);
-    };
-    if diagnostic.phase != PHASE {
-        return Ok(None);
-    }
-    decode_payload(diagnostic.payload).map(Some)
+        Message {
+            id: result_message_id,
+            role: MessageRole::User,
+            parts: shared_parts(results),
+            origin: Some(MessageOrigin::Plugin {
+                plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+                transient: false,
+            }),
+            reply_marker: None,
+        },
+    ]
 }
 
-pub(crate) fn decode_payload(payload: serde_json::Value) -> Result<Transport, DecodeError> {
-    #[derive(serde::Deserialize)]
-    struct Version {
-        #[serde(default)]
-        schema_version: u32,
+/// The cell a protocol-authored assistant message is the context of.
+fn context_cell_id(origin: Option<&MessageOrigin>) -> Option<&str> {
+    match origin {
+        Some(MessageOrigin::TurnOutput {
+            source: lash_core::TurnOutputSource::Plugin { plugin_id },
+            cell_id: Some(cell_id),
+            ..
+        }) if plugin_id == crate::plugin::RLM_PROTOCOL_PLUGIN_ID => Some(cell_id),
+        _ => None,
     }
-    let version: Version = serde_json::from_value(payload.clone())?;
-    if version.schema_version > NATIVE_TRANSPORT_VERSION {
-        return Err(DecodeError::NewerVersion {
-            found: version.schema_version,
-            supported: NATIVE_TRANSPORT_VERSION,
-        });
-    }
-    // History reads every version the surface's `Lift::Decoder` rows admit
-    // (FIG-3802): an envelope keeps its shape across them. An envelope with
-    // no stamp predates it, keeps the same shape, and stays readable.
-    if version.schema_version != 0
-        && !lash_core::store::upcast_chain_covers(
-            lash_core::surface_format!(NATIVE_TRANSPORT_VERSION),
-            version.schema_version,
-            NATIVE_TRANSPORT_VERSION,
-        )
-    {
-        return Err(DecodeError::OlderVersion {
-            found: version.schema_version,
-            supported: NATIVE_TRANSPORT_VERSION,
-        });
-    }
-    let envelope: Envelope = serde_json::from_value(payload)?;
-    Ok(envelope.transport)
 }
 
-/// One render's native envelopes, shared by execution lookup, chronological
-/// repair rendering and failure scrubbing. Refusals stay at their own entries.
-pub(super) struct NativeTransportIndex {
-    envelopes: HashMap<usize, Result<Transport, DecodeError>>,
-    executions: HashMap<String, usize>,
+fn has_part(parts: &[Part], kind: PartKind) -> bool {
+    parts.iter().any(|part| part.kind() == kind)
 }
 
-impl NativeTransportIndex {
-    pub(super) fn new(chronological: &lash_core::facade_support::ChronologicalProjection) -> Self {
+/// The correction a refused call's results carry.
+fn refusal_text(parts: &[Part]) -> Option<&str> {
+    parts
+        .iter()
+        .filter_map(Part::tool_result_content)
+        .flatten()
+        .find_map(|block| match block {
+            lash_core::facade_support::ModelToolReturnPart::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+}
+
+/// Whether a committed message is part of a native provider exchange: a
+/// protocol-authored message carrying a tool call or a tool result. Such a
+/// message is replayed as its call/result pair and is never prose.
+pub(crate) fn is_exchange_message(origin: Option<&MessageOrigin>, parts: &[Part]) -> bool {
+    crate::projection::is_rlm_protocol_output(origin)
+        && (has_part(parts, PartKind::ToolCall) || has_part(parts, PartKind::ToolResult))
+}
+
+/// One render's native exchanges, shared by execution lookup, chronological
+/// refusal rendering and failure scrubbing.
+pub(super) struct NativeExchangeIndex<'a> {
+    /// Every exchange message, by chronological index.
+    messages: HashSet<usize>,
+    /// The reply parts of each executed cell, by cell id.
+    cells: HashMap<&'a str, &'a [Part]>,
+    /// Each refused call, at its assistant message: the reply's parts and
+    /// the correction that answered them.
+    refusals: HashMap<usize, (&'a [Part], &'a str)>,
+}
+
+impl<'a> NativeExchangeIndex<'a> {
+    pub(super) fn new(
+        chronological: &'a lash_core::facade_support::ChronologicalProjection,
+    ) -> Self {
         let mut index = Self {
-            envelopes: HashMap::new(),
-            executions: HashMap::new(),
+            messages: HashSet::new(),
+            cells: HashMap::new(),
+            refusals: HashMap::new(),
         };
+        // A refused call waits for the results that answer it; anything else
+        // between them means it has none.
+        let mut unanswered: Option<(usize, &'a [Part])> = None;
         for entry in chronological.entries() {
-            let lash_core::facade_support::ChronologicalPayload::ProtocolEvent(event) =
-                &entry.payload
+            let lash_core::facade_support::ChronologicalPayload::Message(message) = &entry.payload
             else {
                 continue;
             };
-            let diagnostic = match crate::projection::decode_rlm_protocol_event(event) {
-                Ok(Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))) => diagnostic,
-                Ok(_) => continue,
-                Err(error) => {
-                    index
-                        .envelopes
-                        .insert(entry.index, Err(DecodeError::History(error)));
-                    continue;
-                }
-            };
-            if diagnostic.phase != PHASE {
+            let call = unanswered.take();
+            if !is_exchange_message(message.origin.as_ref(), &message.parts) {
                 continue;
             }
-            let step_id = diagnostic
-                .payload
-                .get("step_id")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string);
-            let envelope = decode_payload(diagnostic.payload);
-            // A valid repair never claims execution authority, even with a raw
-            // step_id. A refusal with that id does block later executions.
-            if !matches!(&envelope, Ok(Transport::Repair { .. }))
-                && let Some(step_id) = step_id
-            {
-                index.executions.entry(step_id).or_insert(entry.index);
+            index.messages.insert(entry.index);
+            match message.role {
+                MessageRole::Assistant => match context_cell_id(message.origin.as_ref()) {
+                    Some(cell_id) => {
+                        index.cells.entry(cell_id).or_insert(&message.parts);
+                    }
+                    None => unanswered = Some((entry.index, &message.parts)),
+                },
+                _ => {
+                    if let (Some((call_index, parts)), Some(text)) =
+                        (call, refusal_text(&message.parts))
+                    {
+                        index.refusals.insert(call_index, (parts, text));
+                    }
+                }
             }
-            index.envelopes.insert(entry.index, envelope);
         }
         index
     }
 
-    pub(super) fn execution_parts(&self, id: &str) -> Result<Option<&[Part]>, &DecodeError> {
-        match self
-            .executions
-            .get(id)
-            .and_then(|entry| self.envelopes.get(entry))
-        {
-            Some(Ok(Transport::Execution { parts, .. })) => Ok(Some(parts)),
-            Some(Err(error)) => Err(error),
-            _ => Ok(None),
-        }
+    /// Whether the entry is an exchange message, rendered only as its pair.
+    pub(super) fn contains(&self, entry: usize) -> bool {
+        self.messages.contains(&entry)
     }
 
-    pub(super) fn repair_parts(
-        &self,
-        entry: usize,
-    ) -> Result<Option<(&[Part], &str)>, &DecodeError> {
-        match self.envelopes.get(&entry) {
-            Some(Ok(Transport::Repair { parts, text, .. })) => Ok(Some((parts, text))),
-            Some(Err(error)) => Err(error),
-            _ => Ok(None),
-        }
+    pub(super) fn execution_parts(&self, cell_id: &str) -> Option<&'a [Part]> {
+        self.cells.get(cell_id).copied()
     }
-}
 
-pub(super) fn repair_parts(
-    event: &lash_core::ProtocolEvent,
-) -> Result<Option<(Vec<Part>, String)>, DecodeError> {
-    Ok(match decode(event)? {
-        Some(Transport::Repair { parts, text, .. }) => Some((parts, text)),
-        _ => None,
-    })
-}
-
-pub(super) fn degraded_binding(error: impl std::fmt::Display) -> lash_core::DegradedBinding {
-    lash_core::DegradedBinding {
-        name: "native_transport".to_string(),
-        reason: error.to_string(),
+    /// The refused call whose assistant message is `entry`.
+    pub(super) fn refusal(&self, entry: usize) -> Option<(&'a [Part], &'a str)> {
+        self.refusals.get(&entry).copied()
     }
 }
 
@@ -293,59 +235,5 @@ pub(super) fn append_pair(messages: &mut Vec<LlmMessage>, parts: &[Part], output
     if !results.is_empty() {
         messages.push(LlmMessage::new(LlmRole::Assistant, assistant));
         messages.push(LlmMessage::new(LlmRole::User, results));
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    fn recorded(payload: serde_json::Value) -> lash_core::ProtocolEvent {
-        crate::projection::rlm_protocol_event(
-            RlmProtocolEvent::RlmDiagnostic(RlmDiagnosticEvent {
-                phase: PHASE,
-                payload,
-            }),
-            lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
-                crate::RLM_PROTOCOL_EVENT_VERSION
-            )),
-        )
-    }
-    #[test]
-    fn envelope_version_pin_and_refusal_witness() {
-        let SessionHistoryRecord::Protocol(event) = execution_event(
-            "step".into(),
-            Vec::new(),
-            NATIVE_TRANSPORT_VERSION,
-            crate::RLM_PROTOCOL_EVENT_VERSION,
-        ) else {
-            panic!()
-        };
-        let Some(RlmProtocolEvent::RlmDiagnostic(d)) =
-            crate::projection::decode_rlm_protocol_event(&event).expect("valid history fixture")
-        else {
-            panic!()
-        };
-        assert_eq!(d.payload["schema_version"], NATIVE_TRANSPORT_VERSION);
-        assert_eq!(d.payload["kind"], "execution");
-        assert!(decode(&event).unwrap().is_some());
-        let newer = NATIVE_TRANSPORT_VERSION + 1;
-        assert!(matches!(
-            decode(&recorded(serde_json::json!({"schema_version":newer}))),
-            Err(DecodeError::NewerVersion {
-                found,
-                supported: NATIVE_TRANSPORT_VERSION
-            }) if found == newer
-        ));
-        assert!(matches!(
-            decode(&recorded(serde_json::json!("malformed bytes"))),
-            Err(DecodeError::Malformed(_))
-        ));
-        assert!(
-            decode(&recorded(
-                serde_json::json!({"kind":"execution","step_id":"legacy","parts":[]})
-            ))
-            .unwrap()
-            .is_some()
-        );
     }
 }

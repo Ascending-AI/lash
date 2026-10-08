@@ -338,7 +338,11 @@ fn push_message_origin(
             identity.string(turn_id);
             identity.optional(input_id.as_ref(), |identity, value| identity.string(value));
         }
-        crate::MessageOrigin::TurnOutput { turn_id, source } => {
+        crate::MessageOrigin::TurnOutput {
+            turn_id,
+            source,
+            cell_id,
+        } => {
             identity.tag(3);
             identity.string(turn_id);
             match source {
@@ -348,6 +352,7 @@ fn push_message_origin(
                     identity.string(plugin_id);
                 }
             }
+            identity.optional(cell_id.as_ref(), |identity, value| identity.string(value));
         }
         unprojected => {
             return Err(StoreError::Backend(format!(

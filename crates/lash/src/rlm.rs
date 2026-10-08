@@ -200,8 +200,8 @@ pub use lash_render::{RenderParams, RenderParamsPatch};
 /// The committed RLM event variants the protocol owns and
 /// the record types their fields name.
 pub use lash_rlm_types::{
-    CellOutcome, HistoryCellOutcome, RlmAssistantContent, RlmDiagnosticEvent, RlmDiagnosticPhase,
-    RlmGlobalsPatchPluginBody, RlmPrint, RlmProtocolEvent, RlmTrajectoryEntry,
+    RlmAssistantContent, RlmDiagnosticEvent, RlmDiagnosticPhase, RlmGlobalsPatchPluginBody,
+    RlmProtocolEvent,
 };
 pub use lash_rlm_types::{
     RlmCreateExtras, RlmRenderPatch, RlmSessionConfig, RlmTermination, RlmTurnOptions,

@@ -7,10 +7,11 @@ use lash::{
     provider::{ProviderHandle, ProviderOptions, ProviderReliability},
     runtime::SessionSnapshot,
 };
+use lash_core::CellRecord;
 use lash_core::SessionHistoryRecord;
 use lash_llm_tools::LlmToolsPluginFactory;
 use lash_provider_openai::OpenAiCompatibleProvider;
-use lash_rlm_types::{RlmProtocolEvent, RlmTrajectoryEntry};
+use lash_rlm_types::RlmProtocolEvent;
 
 use super::openai_compat::OpenAiCompatBenchServer;
 use super::plugin_stack::runtime_perf_plugin_stack;
@@ -601,19 +602,19 @@ pub(crate) fn validate_runtime_perf_turn(
     }
 }
 
-fn rlm_trajectory_errors(turn: &lash::TurnReport) -> Vec<RlmTrajectoryEntry> {
+fn rlm_trajectory_errors(turn: &lash::TurnReport) -> Vec<CellRecord> {
     rlm_trajectory_entries(turn)
         .into_iter()
         .filter(|entry| {
             entry
-                .outcome
-                .error()
+                .result
+                .failure()
                 .is_some_and(|failure| !failure.message.trim().is_empty())
         })
         .collect()
 }
 
-fn rlm_trajectory_entries(turn: &lash::TurnReport) -> Vec<RlmTrajectoryEntry> {
+fn rlm_trajectory_entries(turn: &lash::TurnReport) -> Vec<CellRecord> {
     turn.state
         .read_view()
         .active_events()
@@ -623,7 +624,7 @@ fn rlm_trajectory_entries(turn: &lash::TurnReport) -> Vec<RlmTrajectoryEntry> {
                 return None;
             };
             match lash_protocol_rlm::decode_rlm_protocol_event(event) {
-                Ok(Some(RlmProtocolEvent::RlmTrajectoryEntry(entry))) => Some(entry),
+                Ok(Some(RlmProtocolEvent::RlmTrajectoryEntry(entry))) => Some(*entry),
                 Ok(Some(
                     RlmProtocolEvent::RlmAssistantContent(_)
                     | RlmProtocolEvent::RlmDiagnostic(_)
@@ -661,8 +662,8 @@ fn runtime_perf_turn_diagnostics(turn: &lash::TurnReport) -> String {
         .iter()
         .filter(|entry| {
             entry
-                .outcome
-                .error()
+                .result
+                .failure()
                 .is_some_and(|failure| !failure.message.trim().is_empty())
         })
         .collect::<Vec<_>>();
@@ -675,8 +676,8 @@ fn runtime_perf_turn_diagnostics(turn: &lash::TurnReport) -> String {
                 entry.protocol_iteration,
                 preview(
                     entry
-                        .outcome
-                        .error()
+                        .result
+                        .failure()
                         .map_or("", |failure| failure.message.as_str()),
                     900,
                 )
@@ -690,7 +691,7 @@ fn runtime_perf_turn_diagnostics(turn: &lash::TurnReport) -> String {
             out,
             "last_rlm_step: iteration={} final_output={}",
             entry.protocol_iteration,
-            entry.outcome.terminal_value().map_or_else(
+            entry.result.finish().map_or_else(
                 || "none".to_string(),
                 |value| serde_json::json!(lash_rlm_types::HistoryValue::from(value)).to_string()
             )

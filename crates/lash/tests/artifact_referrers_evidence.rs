@@ -304,7 +304,10 @@ fn last_cell_finish(output: &TurnOutput) -> Option<serde_json::Value> {
                 .payload
                 .get("event")?
                 .get("RlmTrajectoryEntry")?
-                .get("final_output")
+                .get("result")
+                .filter(|result| result["kind"] == "finished")?
+                .get("value")?
+                .get("inline")
                 .cloned(),
             _ => None,
         })

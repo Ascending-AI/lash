@@ -561,7 +561,10 @@ mod tests {
                     execute_cell(&state, cell("let persisted = 4815; finish(persisted);"))
                         .await
                         .expect("cell");
-                assert_eq!(response.terminal_finish, Some(serde_json::json!(4815)));
+                assert_eq!(
+                    response.finish_value().cloned(),
+                    Some(serde_json::json!(4815))
+                );
                 state
                     .settle_code_execution(lash_core::plugin::CodeExecutionOutcome::Accepted)
                     .await
@@ -792,8 +795,11 @@ mod tests {
             .settle_code_execution(lash_core::plugin::CodeExecutionOutcome::Accepted)
             .await
             .expect("settle the baton cell");
-        assert_eq!(response.error, None);
-        response.terminal_finish.expect("the baton cell finishes")
+        assert_eq!(response.error(), None);
+        response
+            .finish_value()
+            .cloned()
+            .expect("the baton cell finishes")
     }
 
     fn projected_seed_nodes(label: &str) -> Vec<lash_core::SessionAppendNode> {
@@ -1017,8 +1023,8 @@ mod tests {
                     )
                     .await
                     .expect("the session survives a cell cancelled mid-flight");
-                assert_eq!(next.error, None);
-                assert_eq!(next.terminal_finish, Some(serde_json::json!(1)));
+                assert_eq!(next.error(), None);
+                assert_eq!(next.finish_value().cloned(), Some(serde_json::json!(1)));
             });
     }
 
@@ -1066,7 +1072,7 @@ mod tests {
                 resolver.release();
                 let first = running.await.expect("the parked cell completes");
                 assert!(
-                    first.error.is_some(),
+                    first.error().is_some(),
                     "`web.fetch` resolves to nothing, so the parked cell ends in a link error"
                 );
                 state
@@ -1083,7 +1089,7 @@ mod tests {
                     )
                     .await
                     .expect("the cell that waited now runs");
-                assert_eq!(second.error, None);
+                assert_eq!(second.error(), None);
                 state
                     .settle_code_execution(lash_core::plugin::CodeExecutionOutcome::Accepted)
                     .await
@@ -1097,8 +1103,8 @@ mod tests {
                     )
                     .await
                     .expect("execute code");
-                assert_eq!(total.error, None);
-                assert_eq!(total.terminal_finish, Some(serde_json::json!(2)));
+                assert_eq!(total.error(), None);
+                assert_eq!(total.finish_value().cloned(), Some(serde_json::json!(2)));
             });
     }
 
@@ -1235,7 +1241,7 @@ mod tests {
                         .await
                         .expect("the mutating cell runs");
                 assert_eq!(
-                    mutated.terminal_finish,
+                    mutated.finish_value().cloned(),
                     Some(serde_json::json!("uncommitted"))
                 );
                 state
@@ -1289,7 +1295,7 @@ mod tests {
                         .await
                         .expect("the mutating cell runs");
                 assert_eq!(
-                    mutated.terminal_finish,
+                    mutated.finish_value().cloned(),
                     Some(serde_json::json!("uncommitted"))
                 );
                 state

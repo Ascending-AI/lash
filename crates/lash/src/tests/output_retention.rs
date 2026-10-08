@@ -328,7 +328,7 @@ finish({ rows });"#,
         serde_json::to_string(&value).expect("encode the final value")
     );
     assert_eq!(
-        serde_json::from_str::<Vec<lash_core::Observation>>(
+        serde_json::from_str::<Vec<lash_core::CellPrint>>(
             &stored_text(&backend, &print.reference).await
         )
         .expect("the retained archive is JSON")[0]
@@ -341,8 +341,8 @@ finish({ rows });"#,
     Ok(())
 }
 
-/// Every step archive (`output_archive`) and final value (`final_output_retained`)
-/// anywhere in `value`, the committed frame.
+/// Every cell's retained prints (`prints_retained`) and retained finish value
+/// (a `finished` result's `retained`) anywhere in `value`, the committed frame.
 #[cfg(feature = "rlm")]
 fn collect_retained(
     value: &serde_json::Value,
@@ -352,13 +352,18 @@ fn collect_retained(
     match value {
         serde_json::Value::Object(entries) => {
             for (key, entry) in entries {
-                let decoded = || {
-                    serde_json::from_value::<lash_core::RetainedOutput>(entry.clone())
+                let decoded = |retained: &serde_json::Value| {
+                    serde_json::from_value::<lash_core::RetainedOutput>(retained.clone())
                         .expect("a retained output decodes")
                 };
                 match key.as_str() {
-                    "output_archive" => prints.push(decoded()),
-                    "final_output_retained" => finals.push(decoded()),
+                    "prints_retained" if !entry.is_null() => prints.push(decoded(entry)),
+                    "result"
+                        if entry["kind"] == "finished"
+                            && entry["value"]["retained"].is_object() =>
+                    {
+                        finals.push(decoded(&entry["value"]["retained"]));
+                    }
                     _ => collect_retained(entry, prints, finals),
                 }
             }
@@ -453,7 +458,7 @@ for (let i = 0; i < 200; i++) {
         match value {
             serde_json::Value::Object(fields) => {
                 for (key, value) in fields {
-                    if key == "output_archive" && !value.is_null() {
+                    if key == "prints_retained" && !value.is_null() {
                         found.push(value.clone());
                     } else {
                         archives(value, found);
@@ -483,7 +488,7 @@ for (let i = 0; i < 200; i++) {
         serde_json::from_value(found.pop().unwrap()).expect("archive");
     assert!(retained.witness.len() <= POLICY.witness_bytes as usize);
     sweep_without_grace(&backend).await;
-    let observations: Vec<lash_core::Observation> =
+    let observations: Vec<lash_core::CellPrint> =
         serde_json::from_str(&stored_text(&backend, &retained.reference).await)
             .expect("full observations");
     assert_eq!(observations.len(), 200);
@@ -647,7 +652,7 @@ for (let i = 0; i < history.length; i++) {
         .await?;
     assert_eq!(continued.final_value(), Some(&serde_json::json!(expected)));
     sweep_without_grace(&backend).await;
-    let observations: Vec<lash_core::Observation> =
+    let observations: Vec<lash_core::CellPrint> =
         serde_json::from_str(&stored_text(&backend, &archive.reference).await)
             .expect("archive survives frame switch");
     assert_eq!(
@@ -667,7 +672,7 @@ for (let i = 0; i < history.length; i++) {
         "a surviving branch protects the source-owned archive edge"
     );
     sweep_without_grace(&backend).await;
-    let shared: Vec<lash_core::Observation> =
+    let shared: Vec<lash_core::CellPrint> =
         serde_json::from_str(&stored_text(&backend, &archive.reference).await)
             .expect("branch-protected archive");
     assert_eq!(

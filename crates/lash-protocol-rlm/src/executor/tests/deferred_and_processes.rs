@@ -246,7 +246,7 @@ pub(super) fn deferred_link_is_scoped_to_the_exec_code_link() {
             None,
         )
         .await;
-        assert!(first.error.is_some(), "mystery.x must remain unresolved");
+        assert!(first.error().is_some(), "mystery.x must remain unresolved");
         assert_eq!(calls.load(Ordering::SeqCst), 1, "one batch per link");
         assert_eq!(installed.load(Ordering::SeqCst), 1);
         assert!(matches!(
@@ -311,7 +311,7 @@ pub(super) fn deferred_link_is_scoped_to_the_exec_code_link() {
             None,
         )
         .await;
-        assert!(second_link.error.is_some());
+        assert!(second_link.error().is_some());
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         assert_eq!(installed.load(Ordering::SeqCst), 2);
         assert!(second_ctx.tool_catalog().tools.is_empty());
@@ -340,7 +340,7 @@ pub(super) fn deferred_link_is_scoped_to_the_exec_code_link() {
             None,
         )
         .await;
-        assert!(next_turn.error.is_some());
+        assert!(next_turn.error().is_some());
         assert_eq!(calls.load(Ordering::SeqCst), 3);
         assert_eq!(installed.load(Ordering::SeqCst), 3);
         assert!(next_turn_ctx.tool_catalog().tools.is_empty());
@@ -414,9 +414,9 @@ pub(super) fn deferred_call_executes_through_grant_without_mutating_catalog() {
         )
         .await;
 
-        assert!(response.error.is_none(), "{:?}", response.error);
+        assert!(response.error().is_none(), "{:?}", response.error());
         assert_eq!(
-            response.terminal_finish,
+            response.finish_value().cloned(),
             Some(serde_json::json!("deferred ok"))
         );
         assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
@@ -521,20 +521,18 @@ pub(super) fn runtime_failure_after_prints_and_tool_calls_retains_collected_outp
         .await;
 
         assert!(
-            response.error.is_some(),
+            response.error().is_some(),
             "execution should report runtime failure"
         );
-        let error = response.error.as_ref().unwrap();
+        let error = response.error().unwrap();
         assert!(
             error.message.contains("JSON") || error.message.contains("invalid_int"),
             "expected runtime error diagnostic, got: {}",
             error.message,
         );
-        assert_eq!(response.observations.len(), 1);
+        assert_eq!(response.prints.len(), 1);
         assert!(
-            response.observations[0]
-                .text
-                .contains("printed before failure"),
+            response.prints[0].text.contains("printed before failure"),
             "observation should be retained despite runtime failure"
         );
         assert_eq!(

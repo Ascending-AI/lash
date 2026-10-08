@@ -455,11 +455,6 @@ pub const GUARDED_SURFACES: &[GuardedSurface] = &[
         reads: SurfaceReads::History { floor: 1 },
     },
     GuardedSurface {
-        constant: "NATIVE_TRANSPORT_VERSION",
-        owner: "lash-protocol-rlm",
-        reads: SurfaceReads::History { floor: 1 },
-    },
-    GuardedSurface {
         constant: "RLM_DRIVER_STATE_VERSION",
         owner: "lash-protocol-rlm",
         reads: SurfaceReads::Mutable,

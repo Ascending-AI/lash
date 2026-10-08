@@ -72,8 +72,7 @@ pub use lash_core::{
 pub use lash_lashlang_runtime::LASHLANG_SEGMENT_STATE_VERSION;
 #[cfg(feature = "rlm")]
 pub use lash_protocol_rlm::{
-    NATIVE_TRANSPORT_VERSION, RLM_DRIVER_STATE_VERSION, RLM_PROTOCOL_EVENT_VERSION,
-    RLM_SNAPSHOT_VERSION,
+    RLM_DRIVER_STATE_VERSION, RLM_PROTOCOL_EVENT_VERSION, RLM_SNAPSHOT_VERSION,
 };
 pub use lash_sansio::{LASHLANG_SEMANTIC_HASH_VERSION, TURN_CHECKPOINT_SCHEMA_VERSION};
 #[cfg(feature = "rlm")]
@@ -152,9 +151,6 @@ pub enum DurableFormat {
     WorkflowTypeFacet,
     /// The RLM driver state parked in the protocol driver-state slot.
     RlmDriverState,
-    /// The native RLM provider-call and repair envelopes recorded in session
-    /// history.
-    NativeRlmTransport,
     /// A durable format the build's effect engine registers of its own
     /// (ADR 0104 §2). The facade names no engine: a format whose bytes and
     /// version are the engine's own — its journal, its object state — is
@@ -217,7 +213,6 @@ impl DurableFormat {
             DurableFormat::WorkflowGraphSchema => "workflow graph schema",
             DurableFormat::WorkflowTypeFacet => "workflow type facet",
             DurableFormat::RlmDriverState => "RLM driver state",
-            DurableFormat::NativeRlmTransport => "native RLM transport",
             DurableFormat::Engine(format) => format.name,
             DurableFormat::VmAbi => "Lashlang VM ABI",
         }
@@ -259,7 +254,6 @@ impl DurableFormat {
             DurableFormat::WorkflowGraphSchema => UpgradePolicy::Migrate,
             DurableFormat::WorkflowTypeFacet => UpgradePolicy::Migrate,
             DurableFormat::RlmDriverState => UpgradePolicy::Migrate,
-            DurableFormat::NativeRlmTransport => UpgradePolicy::Migrate,
             DurableFormat::Engine(format) => format.upgrade_policy,
             DurableFormat::VmAbi => UpgradePolicy::Drain,
         }
@@ -524,14 +518,6 @@ pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
             version: FormatVersion::Counter(RLM_DRIVER_STATE_VERSION),
             owning_crate: "lash-protocol-rlm",
             constant: "RLM_DRIVER_STATE_VERSION",
-            probe: FormatProbe::Comparable,
-        },
-        #[cfg(feature = "rlm")]
-        DurableFormatEntry {
-            format: DurableFormat::NativeRlmTransport,
-            version: FormatVersion::Counter(NATIVE_TRANSPORT_VERSION),
-            owning_crate: "lash-protocol-rlm",
-            constant: "NATIVE_TRANSPORT_VERSION",
             probe: FormatProbe::Comparable,
         },
         #[cfg(feature = "rlm")]

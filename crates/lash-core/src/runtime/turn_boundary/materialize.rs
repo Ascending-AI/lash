@@ -96,6 +96,7 @@ pub(super) fn materialize_turn_reply(
             origin: Some(crate::MessageOrigin::TurnOutput {
                 turn_id: turn_id.clone(),
                 source: crate::TurnOutputSource::Runtime,
+                cell_id: None,
             }),
             reply_marker: Some(crate::TurnReply::mint(turn_id.clone(), part_id)),
         }],
@@ -243,6 +244,7 @@ mod tests {
                     source: crate::TurnOutputSource::Plugin {
                         plugin_id: "proto".to_string(),
                     },
+                    cell_id: None,
                 }),
             ),
             message(
@@ -278,6 +280,7 @@ mod tests {
             Some(crate::MessageOrigin::TurnOutput {
                 turn_id: TurnId::fixture(TURN_ID.to_string()),
                 source: crate::TurnOutputSource::Runtime,
+                cell_id: None,
             })
         );
         assert_eq!(terminal.parts[0].content(), "first response");
@@ -294,6 +297,7 @@ mod tests {
                 Some(crate::MessageOrigin::TurnOutput {
                     turn_id: TurnId::fixture(TURN_ID.to_string()),
                     source: crate::TurnOutputSource::Runtime,
+                    cell_id: None,
                 }),
             ),
             message(
@@ -384,6 +388,7 @@ mod tests {
             Some(crate::MessageOrigin::TurnOutput {
                 turn_id: turn(),
                 source: crate::TurnOutputSource::Runtime,
+                cell_id: None,
             })
         );
         let marker = reply.reply_marker.as_ref().expect("the reply is marked");

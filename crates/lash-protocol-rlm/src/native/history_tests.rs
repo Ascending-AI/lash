@@ -1,53 +1,65 @@
 use super::*;
+use lash_core::{CellRecord, CellResult};
 use lash_core::{Part, SessionHistoryRecord};
-use lash_rlm_types::{CellOutcome, RlmProtocolEvent, RlmTrajectoryEntry};
+use lash_rlm_types::RlmProtocolEvent;
 use lash_sansio::TurnId;
 
-fn step(id: &str, error: Option<&str>, terminal: bool) -> RlmTrajectoryEntry {
-    RlmTrajectoryEntry {
-        output_archive: None,
+fn step(id: &str, error: Option<&str>, terminal: bool) -> CellRecord {
+    CellRecord {
         id: id.to_string(),
-        protocol_iteration: 0,
+        language: "typescript".to_string(),
         code: "finish 1".to_string(),
-        output: vec!["observed".to_string().into()],
-        images: Vec::new(),
-        calls: Vec::new(),
-        calls_omitted: 0,
-        outcome: CellOutcome::from_parts(
-            error.map(|message| {
-                lash_core::CellFailure::new(lash_core::CellFailureKind::Program, message)
-            }),
-            terminal.then(|| serde_json::json!(1).into()),
-        ),
+        prints: vec!["observed".to_string().into()],
+        result: match (error, terminal) {
+            (Some(message), _) => CellResult::Failed(lash_core::CellFailure::new(
+                lash_core::CellFailureKind::Program,
+                message,
+            )),
+            (None, true) => CellResult::Finished(serde_json::json!(1).into()),
+            (None, false) => CellResult::Completed,
+        },
+        ..CellRecord::default()
     }
 }
-fn pair(step: RlmTrajectoryEntry) -> Vec<SessionHistoryRecord> {
-    let parts = vec![Part::tool_call(
+/// The reply parts of a native `execute_code` call under `call`.
+fn call_parts(call: &str) -> Vec<Part> {
+    vec![Part::tool_call(
         "p0".to_string(),
         r#"{"code":"finish 1"}"#.to_string(),
-        lash_core::ToolCallId::fixture(&step.id),
-        step.id.clone(),
+        lash_core::ToolCallId::fixture(call),
+        call.to_string(),
         "execute_code".to_string(),
         Some(lash_core::llm::types::ProviderReplayMeta {
             opaque: Some("never-reconstruct-this".to_string()),
             item_id: Some("item".to_string()),
             origin: None,
         }),
-    )];
-    vec![
-        crate::native::transport::execution_event(
-            step.id.clone(),
-            parts,
-            crate::native::transport::NATIVE_TRANSPORT_VERSION,
-            crate::RLM_PROTOCOL_EVENT_VERSION,
-        ),
-        SessionHistoryRecord::Protocol(crate::projection::rlm_protocol_event(
-            RlmProtocolEvent::RlmTrajectoryEntry(step),
-            lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
-                crate::RLM_PROTOCOL_EVENT_VERSION
-            )),
+    )]
+}
+fn conversation(message: lash_core::Message) -> SessionHistoryRecord {
+    SessionHistoryRecord::Conversation(lash_core::session_model::ConversationRecord::from_message(
+        message,
+    ))
+}
+/// The assistant message of the reply `call` that ran the cell `cell_id`.
+fn context(cell_id: &str, call: &str) -> SessionHistoryRecord {
+    conversation(crate::native::transport::cell_context_message(
+        &TurnId::from("turn"),
+        format!("m_{call}"),
+        cell_id.to_string(),
+        call_parts(call),
+    ))
+}
+fn trajectory(step: CellRecord) -> SessionHistoryRecord {
+    SessionHistoryRecord::Protocol(crate::projection::rlm_protocol_event(
+        RlmProtocolEvent::RlmTrajectoryEntry(Box::new(step)),
+        lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
+            crate::RLM_PROTOCOL_EVENT_VERSION
         )),
-    ]
+    ))
+}
+fn pair(step: CellRecord) -> Vec<SessionHistoryRecord> {
+    vec![context(&step.id, &step.id), trajectory(step)]
 }
 fn render(events: &[SessionHistoryRecord]) -> Vec<LlmMessage> {
     let dialect = crate::dialect::SessionDialect::prompt_only(
@@ -167,6 +179,7 @@ fn terminal_suppression_is_atomic_only_after_transcript_commit() {
         origin: Some(lash_core::MessageOrigin::TurnOutput {
             turn_id: TurnId::from("turn"),
             source: lash_core::TurnOutputSource::Runtime,
+            cell_id: None,
         }),
         reply_marker: None,
     };
@@ -187,142 +200,59 @@ fn frame_switch_does_not_reconstruct_old_provider_calls() {
     assert!(serde_json::to_string(&seed).unwrap().contains("observed"));
 }
 
-fn native_envelope(payload: serde_json::Value) -> SessionHistoryRecord {
-    SessionHistoryRecord::Protocol(crate::projection::rlm_protocol_event(
-        RlmProtocolEvent::RlmDiagnostic(lash_rlm_types::RlmDiagnosticEvent {
-            phase: lash_rlm_types::RlmDiagnosticPhase::NativeTransport,
-            payload,
-        }),
-        lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
-            crate::RLM_PROTOCOL_EVENT_VERSION
-        )),
-    ))
-}
-
-fn envelope_payload(event: &SessionHistoryRecord) -> serde_json::Value {
-    let SessionHistoryRecord::Protocol(event) = event else {
-        panic!("expected protocol event");
-    };
-    let Some(RlmProtocolEvent::RlmDiagnostic(diagnostic)) =
-        decode_rlm_protocol_event(event).expect("valid history fixture")
-    else {
-        panic!("expected diagnostic");
-    };
-    diagnostic.payload
-}
-
 #[test]
-fn duplicate_execution_ids_keep_the_first_binding() {
-    let first = pair(step("first-call", None, false));
-    let second = pair(step("second-call", None, false));
-    let mut first_payload = envelope_payload(&first[0]);
-    first_payload["step_id"] = "shared".into();
-    let mut second_payload = envelope_payload(&second[0]);
-    second_payload["step_id"] = "shared".into();
-    for later in [
-        second_payload,
-        serde_json::json!({"schema_version": 2, "step_id": "shared"}),
-    ] {
-        let mut events = vec![
-            native_envelope(first_payload.clone()),
-            native_envelope(later),
-        ];
-        events.push(pair(step("shared", None, false)).remove(1));
-        assert_eq!(ids(&render(&events)).0, ["first-call"]);
-    }
+fn duplicate_cell_contexts_keep_the_first_binding() {
+    let events = vec![
+        context("shared", "first-call"),
+        context("shared", "second-call"),
+        trajectory(step("shared", None, false)),
+    ];
+    assert_eq!(ids(&render(&events)).0, ["first-call"]);
 }
 
+/// A reply whose call ran nothing is committed as the assistant message it
+/// was and the tool result that corrected it (FIG-5527): the prompt replays
+/// them as one complete pair, and a later successful cell in the turn scrubs
+/// both sides.
 #[test]
-fn matching_corruption_refuses_a_later_execution_without_harming_other_steps() {
-    for corrupt in [
-        serde_json::json!({"kind": "execution", "step_id": "bad", "parts": "invalid"}),
-        serde_json::json!({"schema_version": 2, "step_id": "bad"}),
-    ] {
-        let mut events = pair(step("before", None, false));
-        events.push(native_envelope(corrupt));
-        events.extend(pair(step("bad", None, false)));
-        events.extend(pair(step("after", None, false)));
-        let messages = render(&events);
-        assert_eq!(ids(&messages).0, ["before", "after"]);
-        let text = serde_json::to_string(&messages).unwrap();
-        assert_eq!(text.matches("degraded binding").count(), 2);
-        assert!(matches!(messages[2].role, LlmRole::User));
-        assert!(matches!(messages[3].role, LlmRole::User));
-    }
-}
-
-#[test]
-fn repair_with_raw_step_id_is_skipped_only_when_valid() {
-    let execution = pair(step("execution", None, false));
-    let repair = crate::native::transport::repair_event(
+fn a_refused_call_replays_as_its_pair_until_a_later_cell_supersedes_it() {
+    let [call, result] = crate::native::transport::refused_call_messages(
         &TurnId::from("turn"),
-        0,
-        serde_json::from_value(envelope_payload(&execution[0])["parts"].clone()).unwrap(),
-        "repair feedback".into(),
-        crate::native::transport::NATIVE_TRANSPORT_VERSION,
-        crate::RLM_PROTOCOL_EVENT_VERSION,
+        "m_refused".to_string(),
+        "m_refused_result".to_string(),
+        call_parts("refused"),
+        "repair feedback".to_string(),
     );
-    let mut payload = envelope_payload(&repair);
-    payload["step_id"] = "execution".into();
-    let current = crate::native::transport::NATIVE_TRANSPORT_VERSION;
-    for version in [current, current + 1] {
-        let mut payload = payload.clone();
-        payload["schema_version"] = version.into();
-        let mut events = vec![native_envelope(payload)];
-        events.extend(execution.clone());
-        let messages = render(&events);
-        if version == current {
-            // The later successful trajectory scrubs the earlier repair pair.
-            assert_eq!(ids(&messages).0, ["execution"]);
-        } else {
-            assert!(ids(&messages).0.is_empty());
-            assert_eq!(
-                serde_json::to_string(&messages)
-                    .unwrap()
-                    .matches("degraded binding")
-                    .count(),
-                2
-            );
-        }
-    }
-    let mut malformed = envelope_payload(&repair);
-    malformed["step_id"] = "execution".into();
-    malformed["parts"] = "invalid".into();
-    let mut events = vec![native_envelope(malformed)];
-    events.extend(execution);
-    assert!(ids(&render(&events)).0.is_empty());
-}
-
-#[test]
-fn unbound_malformed_envelopes_degrade_at_their_chronological_positions() {
-    let mut events = pair(step("before", None, false));
-    for payload in [
-        serde_json::json!("malformed"),
-        serde_json::json!({"schema_version": 2}),
-        serde_json::json!({"kind": "execution", "parts": []}),
-        serde_json::json!({"kind": "execution", "step_id": 42, "parts": []}),
-    ] {
-        events.push(native_envelope(payload));
-    }
-    events.extend(pair(step("after", None, false)));
-    let messages = render(&events);
-    assert_eq!(ids(&messages).0, ["before", "after"]);
-    assert_eq!(messages.len(), 8);
-    for message in &messages[2..6] {
-        assert!(matches!(message.role, LlmRole::User));
-        assert!(
-            serde_json::to_string(message)
-                .unwrap()
-                .contains("degraded binding")
-        );
-    }
+    let mut events = vec![conversation(call), conversation(result)];
+    let events_after_reload =
+        serde_json::from_str::<Vec<SessionHistoryRecord>>(&serde_json::to_string(&events).unwrap())
+            .unwrap();
+    let messages = render(&events_after_reload);
+    assert_eq!(ids(&messages).0, ["refused"]);
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    let correction = messages
+        .iter()
+        .flat_map(|message| message.blocks.iter())
+        .find_map(|block| match block {
+            LlmContentBlock::ToolResult { content, .. } => Some(content),
+            _ => None,
+        })
+        .expect("the refused call is answered");
+    assert_eq!(
+        correction,
+        &vec![lash_core::facade_support::ModelToolReturnPart::text(
+            "repair feedback"
+        )]
+    );
+    events.extend(pair(step("execution", None, false)));
+    assert_eq!(ids(&render(&events)).0, ["execution"]);
 }
 
 #[test]
 fn reloaded_null_finish_remains_terminal_in_reconstructed_history() {
     let mut entry = step("null-finish", None, false);
     entry.code = "finish(null)".into();
-    entry.outcome = CellOutcome::Finished(serde_json::Value::Null.into());
+    entry.result = CellResult::Finished(serde_json::Value::Null.into());
     let events = pair(entry);
     let mut reloaded =
         serde_json::from_str::<Vec<SessionHistoryRecord>>(&serde_json::to_string(&events).unwrap())
@@ -336,7 +266,7 @@ fn reloaded_null_finish_remains_terminal_in_reconstructed_history() {
         panic!("decoded trajectory")
     };
     assert_eq!(
-        restored.outcome.terminal_value(),
+        restored.result.finish(),
         Some(&serde_json::Value::Null.into())
     );
     assert_eq!(ids(&render(&reloaded)).0, ["null-finish"]);
@@ -348,6 +278,7 @@ fn reloaded_null_finish_remains_terminal_in_reconstructed_history() {
             origin: Some(lash_core::MessageOrigin::TurnOutput {
                 turn_id: TurnId::from("turn"),
                 source: lash_core::TurnOutputSource::Runtime,
+                cell_id: None,
             }),
             reply_marker: None,
         }),

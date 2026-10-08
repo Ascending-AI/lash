@@ -153,8 +153,8 @@ impl Session {
     pub(crate) fn run(&mut self, code: &str) -> CellOutcome {
         let response = self.run_observed(code);
         CellOutcome {
-            error: response.error,
-            finish: response.terminal_finish,
+            error: response.error().cloned(),
+            finish: response.finish_value().cloned(),
         }
     }
 

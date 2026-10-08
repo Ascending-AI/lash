@@ -20,6 +20,7 @@ pub(super) fn internal_assistant_prose_message_for_turn(
             source: lash_core::TurnOutputSource::Plugin {
                 plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             },
+            cell_id: None,
         }),
     )
 }

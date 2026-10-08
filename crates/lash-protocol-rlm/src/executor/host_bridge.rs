@@ -4,7 +4,7 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 
 use lash_core::{
-    AttachmentRef, Observation, RuntimeExecutionContext, ToolExecutionGrant, TraceEvent,
+    AttachmentRef, CellPrint, RuntimeExecutionContext, ToolExecutionGrant, TraceEvent,
     facade_support::ToolInvocation, facade_support::ToolInvocationReply,
     facade_support::TraceBranchSelection, facade_support::TraceRuntimeSubject,
 };
@@ -614,9 +614,9 @@ impl HostBridge<'_> {
                             .map_err(|error| ExecutionHostError::new(error.to_string()))?
                     {
                         admitted.extend(step.images);
-                        admitted.extend(step.output_archive.map(|archive| archive.reference));
+                        admitted.extend(step.prints_retained.map(|archive| archive.reference));
                         if let Some(lash_core::OutputValue::Retained(retained)) =
-                            step.outcome.terminal_value()
+                            step.result.finish()
                         {
                             admitted.push(retained.reference.clone());
                         }
@@ -1013,7 +1013,7 @@ fn flow_record_json(record: &FlowRecord) -> Value {
 }
 
 pub(super) struct CollectedExecutionOutput {
-    pub(super) observations: Vec<Observation>,
+    pub(super) observations: Vec<CellPrint>,
     pub(super) printed_images: Vec<AttachmentRef>,
     pub(super) calls: Vec<lash_core::ExecutedCall>,
     pub(super) tool_calls: Vec<lash_core::ToolCallRecord>,

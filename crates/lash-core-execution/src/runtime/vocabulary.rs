@@ -274,11 +274,16 @@ pub enum TurnEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         graph_key: Option<String>,
     },
+    /// A cell's execution settled. `prints`, `prints_retained` and `result`
+    /// are the executor's response values, the same ones the protocol
+    /// commits in the cell's [`crate::CellRecord`]; `duration_ms` is measured
+    /// around the invocation and is in no record.
     CodeBlockCompleted {
         language: String,
-        output: String,
+        prints: Vec<crate::CellPrint>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        error: Option<crate::CellFailure>,
+        prints_retained: Option<crate::RetainedOutput>,
+        result: crate::CellResult,
         duration_ms: u64,
         tool_call_ids: Vec<crate::ToolCallId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]

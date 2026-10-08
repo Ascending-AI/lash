@@ -208,10 +208,7 @@ fn run(
     termination: RlmTermination,
     prose: Option<&str>,
     exec: Option<Result<lash_core::ExecResponse, lash_core::ExecCodeFailure>>,
-) -> (
-    Vec<serde_json::Value>,
-    Vec<lash_rlm_types::RlmTrajectoryEntry>,
-) {
+) -> (Vec<serde_json::Value>, Vec<lash_core::CellRecord>) {
     let mut machine = TurnMachine::new(
         config(native, termination.clone()),
         Vec::new(),
@@ -235,7 +232,7 @@ fn run(
         None => vec![text("<typescript>\nfinish(1);\n</typescript>")],
     };
     let attempted_finish =
-        matches!(&exec, Some(Ok(response)) if response.terminal_finish.is_some());
+        matches!(&exec, Some(Ok(response)) if response.finish_value().cloned().is_some());
     let mut effects = reply(&mut machine, &initial, parts);
     if let Some(result) = exec {
         let id = effects
@@ -279,7 +276,7 @@ fn run(
         });
         effects = drain(&mut machine);
     }
-    let trajectory: Vec<lash_rlm_types::RlmTrajectoryEntry> = machine
+    let trajectory: Vec<lash_core::CellRecord> = machine
         .events()
         .iter()
         .filter_map(|record| {
@@ -289,7 +286,7 @@ fn run(
             match crate::projection::decode_rlm_protocol_event(event)
                 .expect("valid history fixture")
             {
-                Some(RlmProtocolEvent::RlmTrajectoryEntry(step)) => Some(step),
+                Some(RlmProtocolEvent::RlmTrajectoryEntry(step)) => Some(*step),
                 _ => None,
             }
         })
@@ -316,9 +313,7 @@ fn run(
                         "prose"
                     } else if trajectory
                         .iter()
-                        .any(|step: &lash_rlm_types::RlmTrajectoryEntry| {
-                            step.outcome.is_failed()
-                        })
+                        .any(|step: &lash_core::CellRecord| { step.result.is_failed() })
                     {
                         if attempted_finish {
                             "schema_mismatch"
@@ -341,15 +336,16 @@ fn run(
 }
 fn response(finish: Option<serde_json::Value>) -> lash_core::ExecResponse {
     lash_core::ExecResponse {
-        output_archive: None,
-        observations: Vec::new(),
+        prints_retained: None,
+        prints: Vec::new(),
         calls: Vec::new(),
         tool_calls: Vec::new(),
         printed_images: Vec::new(),
-        error: None,
+        result: finish.map_or(lash_core::CellResult::Completed, |value| {
+            lash_core::CellResult::Finished(value.into())
+        }),
+        retained_finish_value: None,
         degraded_bindings: Vec::new(),
-        terminal_finish: finish,
-        terminal_finish_retained: None,
         suspended: false,
     }
 }
@@ -864,10 +860,30 @@ fn multiple_calls_spend_one_stall_attempt_and_answer_every_id() {
         }
     }
     let mut pairs = Vec::new();
+    let mut refused_call = None;
     for event in machine.events().iter() {
-        if let lash_core::SessionHistoryRecord::Protocol(event) = event
-            && let Some((parts, text)) = super::transport::repair_parts(event).unwrap()
+        let lash_core::SessionHistoryRecord::Conversation(record) = event else {
+            continue;
+        };
+        if !super::transport::is_exchange_message(record.origin.as_ref(), &record.parts) {
+            continue;
+        }
+        if record.role == lash_core::MessageRole::Assistant {
+            refused_call = Some(record.parts.clone());
+            continue;
+        }
+        let text = record
+            .parts
+            .iter()
+            .filter_map(lash_core::Part::tool_result_content)
+            .flatten()
+            .find_map(|block| match block {
+                lash_core::facade_support::ModelToolReturnPart::Text { text } => Some(text.clone()),
+                _ => None,
+            })
+            .expect("a refused call's results carry the correction");
         {
+            let parts = refused_call.take().expect("results answer a refused call");
             let mut messages = Vec::new();
             super::transport::append_pair(&mut messages, &parts, &text);
             let outputs = messages
@@ -1604,7 +1620,7 @@ fn a_step_archive_survives_both_driver_checkpoint_paths() {
     };
     for native in [false, true] {
         let mut exec = response(Some(serde_json::json!(1)));
-        exec.output_archive = Some(archive.clone());
+        exec.prints_retained = Some(archive.clone());
         let (_, steps) = run(
             native,
             RlmTermination::Natural { schema: None },
@@ -1614,8 +1630,8 @@ fn a_step_archive_survives_both_driver_checkpoint_paths() {
         let [step] = steps.as_slice() else {
             panic!("one trajectory step: {steps:?}");
         };
-        assert!(step.output.is_empty());
-        assert_eq!(step.output_archive.as_deref(), Some(&archive));
+        assert!(step.prints.is_empty());
+        assert_eq!(step.prints_retained.as_ref(), Some(&archive));
     }
 }
 
@@ -1904,7 +1920,7 @@ fn a_natural_text_schema_refuses_a_record_finish_and_accepts_text() {
                 match crate::projection::decode_rlm_protocol_event(event)
                     .expect("valid history fixture")
                 {
-                    Some(RlmProtocolEvent::RlmTrajectoryEntry(step)) => Some(step.outcome),
+                    Some(RlmProtocolEvent::RlmTrajectoryEntry(step)) => Some(step.result),
                     _ => None,
                 }
             })
@@ -1912,16 +1928,16 @@ fn a_natural_text_schema_refuses_a_record_finish_and_accepts_text() {
         let [refusal, accepted] = steps.as_slice() else {
             panic!("native={native}: two trajectory steps: {steps:?}");
         };
-        let lash_rlm_types::CellOutcome::Failed(failure) = refusal else {
+        let lash_core::CellResult::Failed(failure) = refusal else {
             panic!("native={native}: the record finish fails its cell: {refusal:?}");
         };
         assert_eq!(failure.kind, lash_core::CellFailureKind::Program);
         assert!(failure.value_mismatch.is_some(), "native={native}");
         assert_eq!(
             accepted,
-            &lash_rlm_types::CellOutcome::Finished(lash_core::OutputValue::Inline(
-                serde_json::json!("Order 7 has shipped.")
-            )),
+            &lash_core::CellResult::Finished(lash_core::OutputValue::Inline(serde_json::json!(
+                "Order 7 has shipped."
+            ))),
             "native={native}"
         );
     }

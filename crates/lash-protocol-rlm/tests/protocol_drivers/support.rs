@@ -17,9 +17,8 @@ pub(crate) use lash_protocol_rlm::{RlmDriver, RlmProtocolPluginConfig, RlmProtoc
 /// Actor name pinned on every RLM Protocol Scenario transcript. The harness executes
 /// one sans-io machine for one session.
 pub(crate) const RLM_TRANSCRIPT_ACTOR: &str = "rlm";
-pub(crate) use lash_rlm_types::{
-    RlmProtocolEvent, RlmTermination, RlmTrajectoryEntry, RlmTurnOptions,
-};
+use lash_core::CellRecord;
+pub(crate) use lash_rlm_types::{RlmProtocolEvent, RlmTermination, RlmTurnOptions};
 pub(crate) use lash_sansio::llm::types::{
     LlmContentBlock, LlmOutputPart, LlmRequest, LlmResponse, LlmRole,
 };
@@ -174,13 +173,13 @@ pub(crate) fn roundtrip_turn_checkpoint(
     serde_json::from_str(&encoded).expect("deserialize checkpoint")
 }
 
-pub(crate) fn machine_trajectory(machine: &TurnMachine) -> Vec<RlmTrajectoryEntry> {
+pub(crate) fn machine_trajectory(machine: &TurnMachine) -> Vec<CellRecord> {
     machine
         .events()
         .iter()
         .filter_map(|event| match event {
             lash_core::SessionHistoryRecord::Protocol(event) => match recorded_rlm_event(event) {
-                Some(RlmProtocolEvent::RlmTrajectoryEntry(entry)) => Some(entry),
+                Some(RlmProtocolEvent::RlmTrajectoryEntry(entry)) => Some(*entry),
                 _ => None,
             },
             _ => None,
@@ -365,10 +364,10 @@ pub(crate) fn exec_response(
     final_output: Option<serde_json::Value>,
 ) -> lash_sansio::ExecResponse {
     lash_sansio::ExecResponse {
-        output_archive: None,
-        observations: output
+        prints_retained: None,
+        prints: output
             .iter()
-            .map(|item| lash_sansio::Observation {
+            .map(|item| lash_sansio::CellPrint {
                 text: (*item).to_string(),
                 value: serde_json::json!(*item),
                 projection: Default::default(),
@@ -377,12 +376,16 @@ pub(crate) fn exec_response(
         calls: Vec::new(),
         tool_calls: Vec::new(),
         printed_images: Vec::new(),
-        error: error.map(|message| {
-            lash_sansio::CellFailure::new(lash_sansio::CellFailureKind::Program, message)
-        }),
+        result: match (error, final_output) {
+            (Some(message), _) => lash_sansio::CellResult::Failed(lash_sansio::CellFailure::new(
+                lash_sansio::CellFailureKind::Program,
+                message,
+            )),
+            (None, Some(value)) => lash_sansio::CellResult::Finished(value.into()),
+            (None, None) => lash_sansio::CellResult::Completed,
+        },
+        retained_finish_value: None,
         degraded_bindings: Vec::new(),
-        terminal_finish: final_output,
-        terminal_finish_retained: None,
         suspended: false,
     }
 }
@@ -936,7 +939,7 @@ impl RlmProtocolExpectations {
             assert_eq!(entry.code, expected.code, "{scenario_name} trajectory code");
             assert_eq!(
                 entry
-                    .output
+                    .prints
                     .iter()
                     .map(|print| &print.text)
                     .collect::<Vec<_>>(),
@@ -944,7 +947,7 @@ impl RlmProtocolExpectations {
                 "{scenario_name} trajectory output"
             );
             assert_eq!(
-                entry.outcome, expected.outcome,
+                entry.result, expected.outcome,
                 "{scenario_name} trajectory outcome"
             );
         }
@@ -968,7 +971,7 @@ impl RlmProtocolExpectations {
 pub(crate) struct RlmTrajectoryExpectation {
     pub(crate) code: &'static str,
     pub(crate) output: Vec<String>,
-    pub(crate) outcome: lash_rlm_types::HistoryCellOutcome,
+    pub(crate) outcome: lash_core::CellResult,
 }
 
 #[derive(Default)]

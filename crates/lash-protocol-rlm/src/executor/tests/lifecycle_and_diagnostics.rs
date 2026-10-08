@@ -555,9 +555,9 @@ pub(super) fn every_host_setup_failure_is_classified_as_host() {
         ];
 
         for (site, expected_message) in cases {
-            let error = Box::pin(inject_host_setup_failure(site))
-                .await
-                .error
+            let response = Box::pin(inject_host_setup_failure(site)).await;
+            let error = response
+                .error()
                 .unwrap_or_else(|| panic!("{site:?}: injected setup failure must be observed"));
             assert!(
                 error.message.contains(expected_message),
@@ -603,7 +603,7 @@ pub(super) fn spinning_code_observes_a_mid_execution_host_stop() {
             crate::plugin::RlmChannel::Cell,
         )
         .await;
-        assert_eq!(first.error, None);
+        assert_eq!(first.error(), None);
 
         let stop = lash_core::CancellationToken::new();
         let execution = execute_code_with_test_render(
@@ -635,7 +635,7 @@ pub(super) fn spinning_code_observes_a_mid_execution_host_stop() {
 
         assert_eq!(
             response
-                .error
+                .error()
                 .expect("the stopped cell reports an error")
                 .kind,
             lash_core::CellFailureKind::Host
@@ -687,7 +687,7 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                     crate::plugin::RlmChannel::Cell,
                 )
                 .await;
-                assert_eq!(first.error, None, "{language}: large first cell");
+                assert_eq!(first.error(), None, "{language}: large first cell");
                 let first_snapshot = state
                     .snapshot_execution_state(lash_core::FleetFormat::current())
                     .await
@@ -714,7 +714,7 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                     crate::plugin::RlmChannel::Cell,
                 )
                 .await;
-                assert_eq!(tail.error, None, "{language}: tail cell");
+                assert_eq!(tail.error(), None, "{language}: tail cell");
                 state.terminate_code_execution();
 
                 let final_snapshot = state
@@ -823,7 +823,7 @@ pub(super) async fn execute_continue_as_with_trace_sink(
         crate::plugin::RlmChannel::Cell,
     )
     .await;
-    assert_eq!(response.error, None);
+    assert_eq!(response.error(), None);
     assert_eq!(response.calls.len(), 1);
     response
         .tool_calls
@@ -974,7 +974,7 @@ fn typed_worker_size_limits_are_recorded_cell_failures_across_the_plugin_boundar
                 crate::plugin::RlmChannel::Cell,
             )
             .await;
-            let failure = result.error.expect("recorded run limit");
+            let failure = result.error().expect("recorded run limit");
             assert_eq!(
                 failure.kind,
                 lash_core::CellFailureKind::Program,

@@ -828,10 +828,10 @@ fn rlm_exec_response(
     terminal_finish: Option<Value>,
 ) -> lash_core::ExecResponse {
     lash_core::ExecResponse {
-        output_archive: None,
-        observations: output
+        prints_retained: None,
+        prints: output
             .iter()
-            .map(|value| lash_core::Observation {
+            .map(|value| lash_core::CellPrint {
                 text: (*value).to_string(),
                 value: serde_json::json!(value),
                 projection: Default::default(),
@@ -840,12 +840,16 @@ fn rlm_exec_response(
         calls: Vec::new(),
         tool_calls: Vec::new(),
         printed_images: Vec::new(),
-        error: error.map(|message| {
-            lash_core::CellFailure::new(lash_core::CellFailureKind::Program, message)
-        }),
+        result: match (error, terminal_finish) {
+            (Some(message), _) => lash_core::CellResult::Failed(lash_core::CellFailure::new(
+                lash_core::CellFailureKind::Program,
+                message,
+            )),
+            (None, Some(value)) => lash_core::CellResult::Finished(value.into()),
+            (None, None) => lash_core::CellResult::Completed,
+        },
+        retained_finish_value: None,
         degraded_bindings: Vec::new(),
-        terminal_finish,
-        terminal_finish_retained: None,
         suspended: false,
     }
 }
@@ -869,10 +873,10 @@ fn rlm_exec_response_with_tool_calls(
         })
         .collect();
     lash_core::ExecResponse {
-        output_archive: None,
-        observations: output
+        prints_retained: None,
+        prints: output
             .iter()
-            .map(|value| lash_core::Observation {
+            .map(|value| lash_core::CellPrint {
                 text: (*value).to_string(),
                 value: serde_json::json!(value),
                 projection: Default::default(),
@@ -881,12 +885,16 @@ fn rlm_exec_response_with_tool_calls(
         calls,
         tool_calls,
         printed_images: Vec::new(),
-        error: error.map(|message| {
-            lash_core::CellFailure::new(lash_core::CellFailureKind::Program, message)
-        }),
+        result: match (error, terminal_finish) {
+            (Some(message), _) => lash_core::CellResult::Failed(lash_core::CellFailure::new(
+                lash_core::CellFailureKind::Program,
+                message,
+            )),
+            (None, Some(value)) => lash_core::CellResult::Finished(value.into()),
+            (None, None) => lash_core::CellResult::Completed,
+        },
+        retained_finish_value: None,
         degraded_bindings: Vec::new(),
-        terminal_finish,
-        terminal_finish_retained: None,
         suspended: false,
     }
 }

@@ -38,6 +38,30 @@ pub(super) fn internal_assistant_prose_message_for_turn(
             source: lash_core::TurnOutputSource::Plugin {
                 plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             },
+            cell_id: None,
+        }),
+    )
+}
+
+/// The assistant message of a reply whose cell ran as `cell_id`: the reply's
+/// reasoning and the prose around the cell, naming the cell in its origin.
+pub(super) fn cell_context_message(
+    turn_id: &TurnId,
+    message_id: String,
+    cell_id: String,
+    content: String,
+    reasoning: &[RlmReasoningPart],
+) -> Message {
+    prose_message(
+        message_id,
+        content,
+        reasoning,
+        Some(lash_core::MessageOrigin::TurnOutput {
+            turn_id: turn_id.clone(),
+            source: lash_core::TurnOutputSource::Plugin {
+                plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+            },
+            cell_id: Some(cell_id),
         }),
     )
 }

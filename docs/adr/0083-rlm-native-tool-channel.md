@@ -27,14 +27,18 @@ control tools, bindings, and checkpoint identity. Drivers, projectors, response
 normalization, and transport prompt copy are channel-specific. Native results
 use the common observation renderer.
 
-Ordered assistant parts and opaque replay metadata travel in `native_transport`
-envelopes keyed by semantic step. The projector retains complete call/result
+Ordered assistant parts and opaque replay metadata are ordinary committed
+history (FIG-5527): the reply that ran a cell is an assistant message whose
+`MessageOrigin::TurnOutput` names the cell in `cell_id`, the `CellRecord::id` of
+its trajectory entry, as the cell channel's assistant message does. A reply
+whose calls ran nothing is an assistant message followed by one tool result per
+call carrying the correction. The projector retains complete call/result
 exchanges. Terminal suppression and failure scrubbing remove complete exchanges;
 it cannot reconstruct provider signatures from semantic history. A semantic-only
 frame seed is user context, rather than permission to invent provider calls.
 
-Native parked-driver and transport data use their declared format guards and
-fleet read windows. Durable formats follow ADRs 0106 and 0115; current version
+Native parked-driver data uses its declared format guard and fleet read
+window. Durable formats follow ADRs 0106 and 0115; current version
 identities live in the format registry.
 
 A nonempty prose-only native response ends a Natural turn. FinishRequired

@@ -303,10 +303,6 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
         DurableFormat::RlmDriverState => SurfaceRelation::Unwalkable(
             "no bounded surface: carried by TurnCheckpoint; refused when either RLM channel resumes",
         ),
-        DurableFormat::NativeRlmTransport => SurfaceRelation::Unwalkable(
-            "no bounded surface: one session-history record per provider exchange, refused at \
-             decode rather than at rest",
-        ),
         DurableFormat::Engine(format) => SurfaceRelation::Unwalkable(format.unwalkable_reason),
         DurableFormat::VmAbi => SurfaceRelation::NotPersisted,
     }

@@ -276,8 +276,8 @@ impl RuntimeBoundaryHarness {
             RuntimeEffectCommand::ExecCode { code },
         );
         let response = ExecResponse {
-            output_archive: None,
-            observations: vec![lash_core::Observation {
+            prints_retained: None,
+            prints: vec![lash_core::CellPrint {
                 text: output.clone(),
                 value: json!(output),
                 projection: Default::default(),
@@ -285,18 +285,22 @@ impl RuntimeBoundaryHarness {
             calls: Vec::new(),
             tool_calls: Vec::new(),
             printed_images: Vec::new(),
-            error: (exit_code != 0).then(|| {
-                lash_core::CellFailure::new(
+            result: if exit_code != 0 {
+                lash_core::CellResult::Failed(lash_core::CellFailure::new(
                     lash_core::CellFailureKind::Program,
                     format!("exit code {exit_code}"),
+                ))
+            } else {
+                lash_core::CellResult::Finished(
+                    json!({
+                        "output": output,
+                        "exit_code": exit_code,
+                    })
+                    .into(),
                 )
-            }),
+            },
+            retained_finish_value: None,
             degraded_bindings: Vec::new(),
-            terminal_finish: Some(json!({
-                "output": output,
-                "exit_code": exit_code,
-            })),
-            terminal_finish_retained: None,
             suspended: false,
         };
         let (outcome, execution_count) = self

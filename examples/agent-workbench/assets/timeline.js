@@ -398,9 +398,20 @@ function patchToolView(view, event) {
   view.payload = payload;
 }
 
+/* A code row reads two sources: a committed row carries the host's `output`
+   and `error`; a live completion carries the cell's own `prints` and
+   `result`. */
+function codeBlockFailure(event) {
+  return event.result?.kind === "failed" ? event.result.value : event.error;
+}
+
+function codeBlockOutput(event) {
+  return Array.isArray(event.prints) ? event.prints.map(print => print.text).join("\n") : event.output;
+}
+
 function codeBlockStateLabel(event) {
   if (event.phase === "running") return "running";
-  return event.error ? "failed" : "completed";
+  return codeBlockFailure(event) ? "failed" : "completed";
 }
 // END WORKBENCH_TOOL_CODE_PROJECTION
 
@@ -815,8 +826,9 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
         const event = committed
           ? { ...committed, phase: "completed", duration_ms: view.liveEvent?.duration_ms, graph_key: view.liveEvent?.graph_key }
           : (live?.event || { phase: "running" });
-        view.node.classList.toggle("fail", Boolean(event.error));
-        const output = [event.output, typeof event.error === "string" ? event.error : event.error?.message]
+        const failure = codeBlockFailure(event);
+        view.node.classList.toggle("fail", Boolean(failure));
+        const output = [codeBlockOutput(event), typeof failure === "string" ? failure : failure?.message]
           .filter(Boolean).join("\n");
         if (view.source.textContent !== (event.code || "")) view.source.textContent = event.code || "";
         if (view.output.textContent !== output) view.output.textContent = output;

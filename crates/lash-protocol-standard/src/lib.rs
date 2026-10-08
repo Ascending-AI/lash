@@ -1220,6 +1220,7 @@ fn standard_message_origin(turn_id: &TurnId) -> lash_core::MessageOrigin {
         source: lash_core::TurnOutputSource::Plugin {
             plugin_id: STANDARD_PROTOCOL_PLUGIN_ID.to_string(),
         },
+        cell_id: None,
     }
 }
 

@@ -1,6 +1,6 @@
 use lash_sansio::{
-    AttachmentRef, CellFailure, CellFailureKind, ExecutedCall, ExecutedCallOutcome, OutputValue,
-    RetainedOutput, SchemaShape, ShapeKind, TurnProtocol,
+    CellFailure, CellFailureKind, CellRecord, CellResult, ExecutedCall, ExecutedCallOutcome,
+    OutputValue, RetainedOutput, SchemaShape, ShapeKind, TurnProtocol,
 };
 
 /// Read-only legacy protocol-owned assistant context paired with an RLM
@@ -16,214 +16,6 @@ pub struct RlmAssistantContent {
     pub reasoning: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub prose: String,
-}
-
-/// What an RLM cell resolved to: still running, failed, or finished with a
-/// driver-adjudicated value. One of three — a cell can never carry an error
-/// and a terminal value at once.
-///
-/// `E` is each layer's own error representation: the typed [`CellFailure`]
-/// inside a parked driver state and in a durable trajectory entry, and its
-/// `{kind, message}` view ([`HistoryCellError`]) in the history a cell reads.
-/// `V` is the terminal value's: the value itself inside the driver, an
-/// [`OutputValue`] — the value, or its retention — in a trajectory entry
-/// ([`HistoryCellOutcome`]), and a [`HistoryValue`] in the cell's view.
-///
-/// Parked state stores the tagged enum directly. Trajectory entries and
-/// history items use flat encodings, where key presence distinguishes a null
-/// terminal value from a running cell.
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(
-    tag = "kind",
-    content = "value",
-    rename_all = "snake_case",
-    deny_unknown_fields
-)]
-pub enum CellOutcome<E, V = serde_json::Value> {
-    /// The cell produced neither an error nor a terminal value.
-    #[default]
-    Running,
-    /// The cell failed.
-    Failed(E),
-    /// The cell produced a driver-adjudicated terminal value.
-    Finished(V),
-}
-
-/// A cell outcome as a trajectory entry records it: a failed cell keeps its
-/// typed [`CellFailure`], and a finished cell's value is inline, or retained
-/// out of history when it was too long (FIG-1643). Guidance for the model is
-/// rendered from the failure when a prompt is projected and is never stored.
-///
-/// The durable spelling is the `error` / `final_output` key pair, with
-/// `final_output_retained` in place of `final_output` for a retained value —
-/// the outcome flattens into the entry's object, writes at most one of the
-/// three keys, and refuses to decode a record that sets more than one.
-pub type HistoryCellOutcome = CellOutcome<CellFailure, OutputValue>;
-
-impl<E, V> CellOutcome<E, V> {
-    /// Fold an `error` / `terminal value` pair into the single outcome it
-    /// A pair carrying both resolves to the failure: a finished cell must not silently discard
-    /// its error.
-    pub fn from_parts(error: Option<E>, terminal: Option<V>) -> Self {
-        match (error, terminal) {
-            (Some(error), _) => Self::Failed(error),
-            (None, Some(value)) => Self::Finished(value),
-            (None, None) => Self::Running,
-        }
-    }
-
-    /// The failure, when the cell failed.
-    pub fn error(&self) -> Option<&E> {
-        match self {
-            Self::Failed(error) => Some(error),
-            _ => None,
-        }
-    }
-
-    pub fn is_failed(&self) -> bool {
-        matches!(self, Self::Failed(_))
-    }
-
-    /// The terminal value, when the cell finished.
-    pub fn terminal_value(&self) -> Option<&V> {
-        match self {
-            Self::Finished(value) => Some(value),
-            _ => None,
-        }
-    }
-
-    /// A borrowed view, for remapping the error without cloning.
-    pub fn as_ref(&self) -> CellOutcome<&E, V>
-    where
-        V: Clone,
-    {
-        match self {
-            Self::Running => CellOutcome::Running,
-            Self::Failed(error) => CellOutcome::Failed(error),
-            Self::Finished(value) => CellOutcome::Finished(value.clone()),
-        }
-    }
-
-    pub fn map_error<F>(self, op: impl FnOnce(E) -> F) -> CellOutcome<F, V> {
-        match self {
-            Self::Running => CellOutcome::Running,
-            Self::Failed(error) => CellOutcome::Failed(op(error)),
-            Self::Finished(value) => CellOutcome::Finished(value),
-        }
-    }
-}
-
-mod history_outcome {
-    use super::{CellFailure, CellOutcome, HistoryCellOutcome, OutputValue, RetainedOutput};
-    use serde::{Deserialize, Serialize};
-
-    pub fn serialize<S: serde::Serializer>(
-        outcome: &HistoryCellOutcome,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        #[derive(serde::Serialize)]
-        struct Fields<'a> {
-            #[serde(skip_serializing_if = "Option::is_none")]
-            error: Option<&'a CellFailure>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            final_output: Option<&'a serde_json::Value>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            final_output_retained: Option<&'a RetainedOutput>,
-        }
-        let (error, final_output, final_output_retained) = match outcome {
-            CellOutcome::Running => (None, None, None),
-            CellOutcome::Failed(error) => (Some(error), None, None),
-            CellOutcome::Finished(OutputValue::Inline(value)) => (None, Some(value), None),
-            CellOutcome::Finished(OutputValue::Retained(retained)) => (None, None, Some(retained)),
-        };
-        Fields {
-            error,
-            final_output,
-            final_output_retained,
-        }
-        .serialize(serializer)
-    }
-
-    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<HistoryCellOutcome, D::Error> {
-        fn present<'de, T: Deserialize<'de>, D: serde::Deserializer<'de>>(
-            deserializer: D,
-        ) -> Result<Option<T>, D::Error> {
-            T::deserialize(deserializer).map(Some)
-        }
-
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(default, deserialize_with = "present")]
-            error: Option<CellFailure>,
-            #[serde(default, deserialize_with = "present")]
-            final_output: Option<serde_json::Value>,
-            #[serde(default, deserialize_with = "present")]
-            final_output_retained: Option<RetainedOutput>,
-        }
-        let fields = Fields::deserialize(deserializer)?;
-        let terminal = match (fields.final_output, fields.final_output_retained) {
-            (Some(_), Some(_)) => {
-                return Err(serde::de::Error::custom(
-                    "a cell outcome cannot carry both `final_output` and `final_output_retained`",
-                ));
-            }
-            (Some(value), None) => Some(OutputValue::Inline(value)),
-            (None, Some(retained)) => Some(OutputValue::Retained(retained)),
-            (None, None) => None,
-        };
-        match (fields.error, terminal) {
-            (Some(_), Some(_)) => Err(serde::de::Error::custom(
-                "a cell outcome cannot carry both `error` and `final_output`",
-            )),
-            (error, terminal) => Ok(CellOutcome::from_parts(error, terminal)),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq)]
-pub struct RlmTrajectoryEntry {
-    pub id: String,
-    pub protocol_iteration: usize,
-    pub code: String,
-    /// Complete inline prints below the aggregate retention limit.
-    pub output: Vec<RlmPrint>,
-    /// One archive for all prints in this step; `output` is empty when present.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_archive: Option<Box<RetainedOutput>>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub images: Vec<AttachmentRef>,
-    /// The dispatches the cell executed. An entry's `call_id` is the id of
-    /// the host tool call's own [`lash_sansio::ToolCallRecord`]; the model
-    /// reads them as [`HistoryExecutedCall`].
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub calls: Vec<ExecutedCall>,
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub calls_omitted: usize,
-    /// What the cell resolved to. Serialized flat as the `error` /
-    /// `final_output` key pair stored trajectories already carry, or
-    /// `final_output_retained` for a retained value; at most one key is ever
-    /// written, and decoding refuses a record that sets more.
-    #[serde(flatten, with = "history_outcome")]
-    pub outcome: HistoryCellOutcome,
-}
-
-/// One inline print. Oversized steps retain the complete array in one archive.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RlmPrint {
-    pub text: String,
-    pub value: serde_json::Value,
-}
-
-impl From<String> for RlmPrint {
-    fn from(text: String) -> Self {
-        Self {
-            value: serde_json::Value::String(text.clone()),
-            text,
-        }
-    }
 }
 
 /// One executed call as a cell's `history` shows it: the operation and how
@@ -246,15 +38,6 @@ impl From<&ExecutedCall> for HistoryExecutedCall {
 
 fn is_zero(value: &usize) -> bool {
     *value == 0
-}
-
-impl RlmTrajectoryEntry {
-    pub fn output_chars(&self) -> usize {
-        self.output
-            .iter()
-            .map(|print| print.text.chars().count())
-            .sum()
-    }
 }
 
 #[derive(
@@ -394,27 +177,26 @@ impl From<&CellFailure> for HistoryCellError {
     }
 }
 
-/// The keys a step's outcome flattens into: at most one is ever written. A
-/// finished cell whose value is `null` writes `final_output: null`.
-#[derive(serde::Serialize, schemars::JsonSchema)]
-struct HistoryStepOutcomeFields<'a> {
+/// What a step resolved to, as a later cell reads it: `error` for a failed
+/// cell, `final_output` for a finished one, neither for a cell that ran to
+/// its end. At most one key is ever written, and a finished cell whose value
+/// is `null` writes `final_output: null`. A view derived from the cell
+/// record's [`CellResult`], never a stored shape.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, schemars::JsonSchema)]
+pub struct HistoryStepOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<&'a HistoryCellError>,
+    pub error: Option<HistoryCellError>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    final_output: Option<&'a HistoryValue>,
+    pub final_output: Option<HistoryValue>,
 }
 
-fn serialize_history_step_outcome<S: serde::Serializer>(
-    outcome: &CellOutcome<HistoryCellError, HistoryValue>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    serde::Serialize::serialize(
-        &HistoryStepOutcomeFields {
-            error: outcome.error(),
-            final_output: outcome.terminal_value(),
-        },
-        serializer,
-    )
+impl From<&CellResult> for HistoryStepOutcome {
+    fn from(result: &CellResult) -> Self {
+        Self {
+            error: result.failure().map(HistoryCellError::from),
+            final_output: result.finish().map(HistoryValue::from),
+        }
+    }
 }
 
 /// One item of the `history` a cell reads. This serialized shape is the
@@ -443,44 +225,37 @@ pub enum RlmHistoryItem {
         calls: Vec<HistoryExecutedCall>,
         #[serde(skip_serializing_if = "is_zero")]
         calls_omitted: usize,
-        /// What the cell resolved to: `error` for a failed cell,
-        /// `final_output` for a finished one, neither for a running one.
-        #[serde(flatten, serialize_with = "serialize_history_step_outcome")]
-        #[schemars(with = "HistoryStepOutcomeFields<'static>")]
-        outcome: CellOutcome<HistoryCellError, HistoryValue>,
+        #[serde(flatten)]
+        outcome: Box<HistoryStepOutcome>,
     },
 }
 
 impl RlmHistoryItem {
-    /// The image representations intentionally remain distinct: persisted
-    /// entries retain attachment references, while history items expose the
-    /// compact image metadata used by the model.
-    pub fn from_trajectory_entry(entry: &RlmTrajectoryEntry) -> Self {
+    /// The model-visible view of a committed cell record: prints as their
+    /// values, the failure as its kind and message, and images as compact
+    /// metadata instead of the attachment references the record holds.
+    pub fn from_cell_record(record: &CellRecord) -> Self {
         Self::LashlangStep {
-            id: entry.id.clone(),
-            protocol_iteration: entry.protocol_iteration,
-            code: entry.code.clone(),
-            output: entry
-                .output
+            id: record.id.clone(),
+            protocol_iteration: record.protocol_iteration,
+            code: record.code.clone(),
+            output: record
+                .prints
                 .iter()
                 .map(|print| print.value.clone())
                 .collect(),
-            output_archive: entry
-                .output_archive
-                .as_deref()
+            output_archive: record
+                .prints_retained
+                .as_ref()
                 .map(RetainedHistoryValue::from),
-            images: entry
+            images: record
                 .images
                 .iter()
                 .map(RlmImageRef::from_attachment)
                 .collect(),
-            calls: entry.calls.iter().map(HistoryExecutedCall::from).collect(),
-            calls_omitted: entry.calls_omitted,
-            outcome: match &entry.outcome {
-                CellOutcome::Running => CellOutcome::Running,
-                CellOutcome::Failed(failure) => CellOutcome::Failed(failure.into()),
-                CellOutcome::Finished(value) => CellOutcome::Finished(value.into()),
-            },
+            calls: record.calls.iter().map(HistoryExecutedCall::from).collect(),
+            calls_omitted: record.calls_omitted,
+            outcome: Box::new((&record.result).into()),
         }
     }
 }
@@ -513,15 +288,18 @@ mod rlm_step_serde_tests {
 
     use lash_sansio::{CellFailure, CellFailureKind, ShapeKind};
 
-    use super::{CellOutcome, RlmHistoryItem, RlmTrajectoryEntry};
+    use lash_sansio::{CellRecord, CellResult};
 
-    fn populated_entry() -> RlmTrajectoryEntry {
-        RlmTrajectoryEntry {
-            output_archive: None,
+    use super::RlmHistoryItem;
+
+    fn populated_entry() -> CellRecord {
+        CellRecord {
+            prints_retained: None,
             id: "step-1".to_string(),
             protocol_iteration: 3,
+            language: "typescript".to_string(),
             code: "print('hello')".to_string(),
-            output: vec!["hello".to_string().into()],
+            prints: vec!["hello".to_string().into()],
             images: vec![lash_sansio::AttachmentRef {
                 id: ("a".repeat(64)).parse().expect("valid attachment id"),
                 media_type: "image/png".parse().expect("valid media type"),
@@ -538,7 +316,7 @@ mod rlm_step_serde_tests {
                 call_id: Some(lash_sansio::ToolCallId::fixture("math-add")),
             }],
             calls_omitted: 2,
-            outcome: CellOutcome::Finished(serde_json::json!({"answer": 42}).into()),
+            result: CellResult::Finished(serde_json::json!({"answer": 42}).into()),
         }
     }
 
@@ -562,8 +340,8 @@ mod rlm_step_serde_tests {
         )
     }
 
-    fn history(entry: &RlmTrajectoryEntry) -> serde_json::Value {
-        serde_json::to_value(RlmHistoryItem::from_trajectory_entry(entry)).expect("item encodes")
+    fn history(entry: &CellRecord) -> serde_json::Value {
+        serde_json::to_value(RlmHistoryItem::from_cell_record(entry)).expect("item encodes")
     }
 
     /// A retained value has one cell-visible spelling (FIG-4658 F66): an archive
@@ -571,10 +349,10 @@ mod rlm_step_serde_tests {
     /// `attachment` is a value a tool that reads attachments accepts.
     #[test]
     fn a_step_archive_and_retained_final_value_share_the_attachment_record() {
-        let entry = RlmTrajectoryEntry {
-            output_archive: Some(Box::new(retained("[{\"value\": {\"rows\":["))),
-            output: Vec::new(),
-            outcome: CellOutcome::Finished(super::OutputValue::Retained(retained("{\"rows\":["))),
+        let entry = CellRecord {
+            prints_retained: Some(retained("[{\"value\": {\"rows\":[")),
+            prints: Vec::new(),
+            result: CellResult::Finished(super::OutputValue::Retained(retained("{\"rows\":["))),
             ..populated_entry()
         };
         let item = history(&entry);
@@ -598,131 +376,43 @@ mod rlm_step_serde_tests {
     }
 
     #[test]
-    fn a_print_refuses_both_or_neither_value_key_and_keeps_a_printed_null() {
-        let both = serde_json::json!({
-            "text": "x", "value": 1, "retained": serde_json::to_value(retained("w")).expect("encode")
-        });
-        assert!(serde_json::from_value::<super::RlmPrint>(both).is_err());
-        assert!(
-            serde_json::from_value::<super::RlmPrint>(serde_json::json!({"text": "x"})).is_err()
-        );
-        let null: super::RlmPrint =
-            serde_json::from_value(serde_json::json!({"text": "null", "value": null}))
-                .expect("decode");
-        assert_eq!(null.value, serde_json::Value::Null);
-    }
-
-    /// A durable trajectory entry keeps its cell failure typed (FIG-4658
-    /// F21): the `error` key holds the failure's closed kind and its own
-    /// message, limits included, and no rendered guidance.
-    #[test]
-    fn a_failed_trajectory_entry_records_the_typed_failure() {
-        for failure in [
-            program_failure(),
-            CellFailure::new(CellFailureKind::Policy, "top-level await is not allowed"),
-            CellFailure::from(lash_sansio::ExecCodeFailure::new(
-                lash_sansio::ExecCodeFailureReason::RuntimeStopped,
-                "code execution runtime exited unexpectedly",
-            )),
-        ] {
-            let entry = RlmTrajectoryEntry {
-                output_archive: None,
-                outcome: CellOutcome::Failed(failure.clone()),
-                ..populated_entry()
-            };
-            let encoded = serde_json::to_value(&entry).expect("encode");
-            assert_eq!(
-                encoded["error"],
-                serde_json::to_value(&failure).expect("failure encodes")
-            );
-            assert_eq!(encoded["error"]["message"], failure.message.as_str());
-            assert!(encoded.get("final_output").is_none());
-            let decoded: RlmTrajectoryEntry = serde_json::from_value(encoded).expect("decode");
-            assert_eq!(decoded.outcome, CellOutcome::Failed(failure));
-        }
-    }
-
-    #[test]
-    fn an_exec_failure_keeps_its_closed_reason_in_the_trajectory() {
-        let entry = RlmTrajectoryEntry {
-            output_archive: None,
-            outcome: CellOutcome::Failed(CellFailure::from(lash_sansio::ExecCodeFailure::new(
-                lash_sansio::ExecCodeFailureReason::ExecutorUnavailable,
-                "code execution is not available in this session",
-            ))),
-            ..populated_entry()
-        };
-        let encoded = serde_json::to_value(&entry).expect("encode");
-        assert_eq!(
-            encoded["error"],
-            serde_json::json!({
-                "kind": "host",
-                "message": "code execution is not available in this session",
-                "exec_failure": "executor_unavailable",
-            })
-        );
-    }
-
-    #[test]
-    fn a_null_finish_is_distinct_from_a_running_cell() {
-        for (outcome, expected) in [
+    fn a_null_finish_is_distinct_from_a_cell_that_ran_to_its_end() {
+        for (result, expected) in [
             (
-                CellOutcome::Finished(serde_json::Value::Null.into()),
+                CellResult::Finished(serde_json::Value::Null.into()),
                 Some(serde_json::Value::Null),
             ),
-            (CellOutcome::Running, None),
+            (CellResult::Completed, None),
             (
-                CellOutcome::Finished(serde_json::json!({"answer": 42}).into()),
+                CellResult::Finished(serde_json::json!({"answer": 42}).into()),
                 Some(serde_json::json!({"answer": 42})),
             ),
         ] {
-            let entry = RlmTrajectoryEntry {
-                outcome,
+            let item = history(&CellRecord {
+                result,
                 ..populated_entry()
-            };
-            let encoded = serde_json::to_value(&entry).expect("encode");
-            assert!(encoded.get("error").is_none());
-            assert_eq!(encoded.get("final_output"), expected.as_ref());
-            assert_eq!(history(&entry).get("final_output"), expected.as_ref());
-            assert_eq!(
-                serde_json::from_value::<RlmTrajectoryEntry>(encoded).expect("decode"),
-                entry
-            );
+            });
+            assert!(item.get("error").is_none());
+            assert_eq!(item.get("final_output"), expected.as_ref());
         }
     }
 
+    /// A failed step reads back as the failure's closed kind and its own
+    /// message, with no rendered guidance and no host detail.
     #[test]
-    fn malformed_outcome_presence_is_refused_in_a_trajectory_entry() {
-        let failure = serde_json::to_value(program_failure()).expect("failure encodes");
-        for fields in [
-            serde_json::json!({"error": failure, "final_output": null}),
-            serde_json::json!({"error": failure, "final_output": {"answer": 42}}),
-            serde_json::json!({"error": null}),
-            serde_json::json!({"error": null, "final_output": null}),
-            serde_json::json!({"error": null, "final_output": 42}),
-            serde_json::json!({"final_output_retained": null}),
-            // The rendered-guidance string the entry once stored.
-            serde_json::json!({"error": "boom\n\nNext: fix the cause named above."}),
-        ] {
-            let mut entry = serde_json::to_value(RlmTrajectoryEntry {
-                output_archive: None,
-                outcome: CellOutcome::Running,
-                ..populated_entry()
+    fn a_failed_step_reads_back_as_its_kind_and_message() {
+        let item = history(&CellRecord {
+            result: CellResult::Failed(program_failure()),
+            ..populated_entry()
+        });
+        assert_eq!(
+            item["error"],
+            serde_json::json!({
+                "kind": "program",
+                "message": "ReferenceError: rows is not defined",
             })
-            .expect("encode");
-            entry
-                .as_object_mut()
-                .expect("an entry is an object")
-                .extend(fields.as_object().expect("fields").clone());
-            assert!(
-                serde_json::from_value::<RlmTrajectoryEntry>(entry.clone()).is_err(),
-                "{entry}"
-            );
-            assert!(
-                serde_json::from_str::<RlmTrajectoryEntry>(&entry.to_string()).is_err(),
-                "{entry}"
-            );
-        }
+        );
+        assert!(item.get("final_output").is_none());
     }
 
     /// Every history item this build can serialize, with every optional key
@@ -753,23 +443,22 @@ mod rlm_step_serde_tests {
             serde_json::to_value(message).expect("message encodes"),
             serde_json::to_value(bare_message).expect("message encodes"),
             history(&populated_entry()),
-            history(&RlmTrajectoryEntry {
-                output_archive: None,
+            history(&CellRecord {
                 id: "step-0".to_string(),
                 code: "1".to_string(),
-                ..RlmTrajectoryEntry::default()
+                ..CellRecord::default()
             }),
         ];
-        for outcome in [
-            CellOutcome::Finished(serde_json::json!({"answer": 42}).into()),
-            CellOutcome::Finished(super::OutputValue::Retained(retained("{\"answer\""))),
-            CellOutcome::Failed(program_failure()),
-            CellOutcome::Running,
+        for result in [
+            CellResult::Finished(serde_json::json!({"answer": 42}).into()),
+            CellResult::Finished(super::OutputValue::Retained(retained("{\"answer\""))),
+            CellResult::Failed(program_failure()),
+            CellResult::Completed,
         ] {
-            items.push(history(&RlmTrajectoryEntry {
-                output_archive: Some(Box::new(retained("ordered step observations"))),
-                output: Vec::new(),
-                outcome,
+            items.push(history(&CellRecord {
+                prints_retained: Some(retained("ordered step observations")),
+                prints: Vec::new(),
+                result,
                 ..populated_entry()
             }));
         }
@@ -863,7 +552,8 @@ impl RlmGlobalsPatchPluginBody {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub enum RlmProtocolEvent {
     RlmAssistantContent(RlmAssistantContent),
-    RlmTrajectoryEntry(RlmTrajectoryEntry),
+    /// One executed cell: the record the transcript returns.
+    RlmTrajectoryEntry(Box<CellRecord>),
     RlmGlobalsPatch(RlmGlobalsPatchPluginBody),
     RlmSeed(RlmSeedPluginBody),
     RlmDiagnostic(RlmDiagnosticEvent),
@@ -879,8 +569,6 @@ pub enum RlmDiagnosticPhase {
     NativeExtraction,
     /// The turn's no-progress budget ran out.
     NoProgressBudget,
-    /// Native transport material kept for the next request.
-    NativeTransport,
     /// Bindings that degraded while a projection was rehydrated.
     ProjectionRehydration,
 }

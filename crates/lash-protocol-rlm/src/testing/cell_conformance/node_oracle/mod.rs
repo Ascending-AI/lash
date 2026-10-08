@@ -252,16 +252,20 @@ fn observe_cell(session: &mut Session, source: &str) -> Observation {
         finish: None,
         diagnostic: None,
         prints: response
-            .observations
+            .prints
             .iter()
             .map(|observation| observation.text.clone())
             .collect(),
         probes: BTreeMap::new(),
-        detail: response.error.as_ref().map(|failed| failed.message.clone()),
-        failure: response.error.clone(),
+        detail: response.error().map(|failed| failed.message.clone()),
+        failure: response.error().cloned(),
         closures: Vec::new(),
     };
-    match (rejection, &response.error, &response.terminal_finish) {
+    match (
+        rejection,
+        &response.error(),
+        &response.finish_value().cloned(),
+    ) {
         (Some((code, message)), Some(_), _) => {
             observation.outcome = "rejected".to_string();
             observation.diagnostic = Some(code);
@@ -325,17 +329,17 @@ fn probes(session: &mut Session, names: &[String]) -> BTreeMap<String, String> {
         .collect::<Vec<_>>()
         .join("\n");
     let response = session.run_observed(&batch);
-    if response.error.is_none() && response.observations.len() == bound.len() {
-        for (name, line) in bound.into_iter().zip(&response.observations) {
+    if response.error().is_none() && response.prints.len() == bound.len() {
+        for (name, line) in bound.into_iter().zip(&response.prints) {
             answers.insert(name, line.text.clone());
         }
         return answers;
     }
     for name in bound {
         let response = session.run_observed(&probe_source(&name));
-        let answer = match &response.error {
+        let answer = match &response.error() {
             None => response
-                .observations
+                .prints
                 .iter()
                 .map(|observation| observation.text.clone())
                 .collect::<Vec<_>>()

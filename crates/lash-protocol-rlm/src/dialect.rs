@@ -1058,9 +1058,10 @@ mod tests {
                 .await
                 .expect("report the extension's parse failure");
             let feedback = response
-                .error
+                .error()
                 .expect("the fixture refuses the source")
-                .message;
+                .message
+                .clone();
             assert!(feedback.contains("fixture syntax error"), "{feedback}");
             assert!(!feedback.contains("</typescript>"), "{feedback}");
             match channel {
@@ -1103,9 +1104,10 @@ mod tests {
                 .await
                 .expect("the cell runs and reports its own failure");
             response
-                .error
+                .error()
                 .expect("an unterminated template literal fails to parse")
                 .message
+                .clone()
         }
 
         let native = Box::pin(parse_failure_feedback(

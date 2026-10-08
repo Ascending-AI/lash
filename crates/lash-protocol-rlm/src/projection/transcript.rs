@@ -1,17 +1,46 @@
 use lash_core::transcript::{
-    CellPrint, CellResult, SuppressionReason, TranscriptBlock, TranscriptCell,
-    TranscriptDecoderPlugin, TranscriptItem, TranscriptMessage, TranscriptRole,
+    SuppressionReason, TranscriptBlock, TranscriptDecoderPlugin, TranscriptItem, TranscriptMessage,
+    TranscriptRole,
 };
 use lash_rlm_types::RlmProtocolEvent;
 
-/// Decodes the RLM protocol's stored shapes into typed transcript items:
-/// its reasoning into assistant reasoning blocks and each trajectory step
-/// into a code cell with its typed outcome.
+/// Decodes the RLM protocol's stored shapes into typed transcript items, the
+/// same way for both channels: a cell's assistant context and a refused
+/// call's exchange as the committed messages they are, other protocol output
+/// as its reasoning, and each trajectory step as the cell record it stores.
 pub(crate) struct RlmTranscriptDecoder;
 impl TranscriptDecoderPlugin for RlmTranscriptDecoder {
     fn decode_message(&self, message: &lash_core::Message) -> Option<TranscriptItem> {
         if !super::context::is_rlm_protocol_output(message.origin.as_ref()) {
             return None;
+        }
+        let cell_context = matches!(
+            message.origin,
+            Some(lash_core::MessageOrigin::TurnOutput {
+                cell_id: Some(_),
+                ..
+            })
+        );
+        if cell_context
+            || crate::native::transport::is_exchange_message(
+                message.origin.as_ref(),
+                &message.parts,
+            )
+        {
+            let blocks = lash_core::transcript::message_blocks(message);
+            let role = if blocks
+                .iter()
+                .any(|block| matches!(block, TranscriptBlock::ToolResult { .. }))
+            {
+                TranscriptRole::Tool
+            } else {
+                TranscriptRole::Assistant
+            };
+            return Some(if blocks.is_empty() {
+                TranscriptItem::Suppressed(SuppressionReason::EmptyContent)
+            } else {
+                TranscriptItem::Message(TranscriptMessage { role, blocks })
+            });
         }
         let reasoning = message
             .parts
@@ -40,34 +69,10 @@ impl TranscriptDecoderPlugin for RlmTranscriptDecoder {
                 {
                     reasoning_item(vec![content.reasoning])
                 }
-                Some(RlmProtocolEvent::RlmTrajectoryEntry(step))
-                    if !step.code.trim().is_empty() =>
+                Some(RlmProtocolEvent::RlmTrajectoryEntry(cell))
+                    if !cell.code.trim().is_empty() =>
                 {
-                    TranscriptItem::Cell(Box::new(TranscriptCell {
-                        language: "typescript".into(),
-                        code: step.code,
-                        prints: step
-                            .output
-                            .into_iter()
-                            .map(|print| CellPrint {
-                                text: print.text,
-                                value: print.value,
-                            })
-                            .collect(),
-                        prints_retained: step.output_archive.map(|archive| *archive),
-                        result: match step.outcome {
-                            lash_rlm_types::CellOutcome::Running => CellResult::Completed,
-                            lash_rlm_types::CellOutcome::Failed(failure) => {
-                                CellResult::Failed(failure)
-                            }
-                            lash_rlm_types::CellOutcome::Finished(value) => {
-                                CellResult::Finished(value.into())
-                            }
-                        },
-                        calls: step.calls,
-                        calls_omitted: step.calls_omitted,
-                        images: step.images,
-                    }))
+                    TranscriptItem::Cell(cell)
                 }
                 Some(
                     RlmProtocolEvent::RlmAssistantContent(_)

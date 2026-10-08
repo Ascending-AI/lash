@@ -70,12 +70,23 @@ pub(super) fn render_history_messages(
         input.events,
         input.turn_messages,
     );
-    let transport = super::transport::NativeTransportIndex::new(&chronological);
+    let exchanges = super::transport::NativeExchangeIndex::new(&chronological);
     let history_projection = rlm_history_projection(&chronological)?;
     let mut pending: Option<PendingProse> = None;
-    let superseded = superseded_failure_indices(input.events, input.turn_messages, &transport);
+    let superseded = superseded_failure_indices(input.events, input.turn_messages, &exchanges);
 
     lash_core::facade_support::visit_turn_view(input.events, input.turn_messages, |entry| {
+        // An exchange message renders only as its pair: a cell's at the
+        // cell's semantic step, a refused call's where the call stands.
+        if exchanges.contains(entry.index) {
+            if superseded.contains(&entry.index) {
+                pending = None;
+            } else if let Some((parts, correction)) = exchanges.refusal(entry.index) {
+                flush_pending_prose(&mut messages, &mut pending);
+                super::transport::append_pair(&mut messages, parts, correction);
+            }
+            return;
+        }
         if history_projection.suppresses_chronological(entry.index)
             || superseded.contains(&entry.index)
         {
@@ -97,19 +108,6 @@ pub(super) fn render_history_messages(
                 });
             }
             BorrowedChronologicalPayload::ProtocolEvent(event) => {
-                let repair = match transport.repair_parts(entry.index) {
-                    Ok(repair) => repair,
-                    Err(error) => {
-                        flush_pending_prose(&mut messages, &mut pending);
-                        append_decode_failure(&mut messages, error);
-                        return;
-                    }
-                };
-                if let Some((parts, repair)) = repair {
-                    flush_pending_prose(&mut messages, &mut pending);
-                    super::transport::append_pair(&mut messages, parts, repair);
-                    return;
-                }
                 let Some(event) = decode_rlm_protocol_event(event)
                     .expect("history projection validated every RLM event")
                 else {
@@ -136,14 +134,7 @@ pub(super) fn render_history_messages(
                         .unwrap_or(entry.index),
                     &step,
                 );
-                let parts = match transport.execution_parts(&step.id) {
-                    Ok(parts) => parts,
-                    Err(error) => {
-                        append_decode_failure(&mut messages, error);
-                        return;
-                    }
-                };
-                if let Some(parts) = parts {
+                if let Some(parts) = exchanges.execution_parts(&step.id) {
                     super::transport::append_pair(&mut messages, parts, &observation);
                 } else {
                     // Frame seeds carry semantic history, not authority to mint
@@ -192,8 +183,8 @@ pub(super) fn render_history_messages(
     Ok(messages)
 }
 
-/// Failed semantic steps and repair envelopes superseded by a later success
-/// in the same turn. Execution envelopes render only at their semantic step,
+/// Failed semantic steps and refused calls superseded by a later success
+/// in the same turn. A cell's exchange renders only at its semantic step,
 /// so removing that step removes its entire provider exchange atomically.
 /// Host-authored system messages are preserved by provenance.
 #[expect(
@@ -203,7 +194,7 @@ pub(super) fn render_history_messages(
 fn superseded_failure_indices(
     events: &[lash_core::SessionHistoryRecord],
     turn_messages: &lash_core::facade_support::MessageSequence,
-    transport: &super::transport::NativeTransportIndex,
+    exchanges: &super::transport::NativeExchangeIndex<'_>,
 ) -> HashSet<usize> {
     let mut superseded = HashSet::new();
     // Entries belonging to failures not yet repaired, oldest first.
@@ -216,10 +207,24 @@ fn superseded_failure_indices(
     lash_core::facade_support::visit_turn_view(events, turn_messages, |entry| {
         match entry.payload {
             BorrowedChronologicalPayload::Message(message) => match message.role {
+                // A refused call's results go with their call.
+                lash_core::MessageRole::User if exchanges.contains(entry.index) => {
+                    if any_failure_pending {
+                        pending_failure_entries.push(entry.index);
+                    }
+                }
                 lash_core::MessageRole::User | lash_core::MessageRole::Event => {
                     pending_failure_entries.clear();
                     prose_entries.clear();
                     any_failure_pending = false;
+                }
+                // A refused call is a failure of its own; a cell's exchange
+                // goes with the cell's step.
+                lash_core::MessageRole::Assistant if exchanges.contains(entry.index) => {
+                    if exchanges.refusal(entry.index).is_some() {
+                        pending_failure_entries.push(entry.index);
+                        any_failure_pending = true;
+                    }
                 }
                 lash_core::MessageRole::Assistant => prose_entries.push(entry.index),
                 // Protocol feedback is repair instruction for the failure it
@@ -239,10 +244,6 @@ fn superseded_failure_indices(
                 }
             },
             BorrowedChronologicalPayload::ProtocolEvent(event) => {
-                if matches!(transport.repair_parts(entry.index), Ok(Some(_))) {
-                    pending_failure_entries.push(entry.index);
-                    any_failure_pending = true;
-                }
                 match decode_rlm_protocol_event(event)
                     .expect("history projection validated every RLM event")
                 {
@@ -250,7 +251,7 @@ fn superseded_failure_indices(
                         prose_entries.push(entry.index);
                     }
                     Some(lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step)) => {
-                        if step.outcome.is_failed() {
+                        if step.result.is_failed() {
                             pending_failure_entries.append(&mut prose_entries);
                             pending_failure_entries.push(entry.index);
                             any_failure_pending = true;
@@ -344,10 +345,7 @@ fn append_borrowed_entry_image_blocks(
     }
 }
 
-fn append_step_image_blocks(
-    step: &lash_rlm_types::RlmTrajectoryEntry,
-    blocks: &mut Vec<LlmContentBlock>,
-) {
+fn append_step_image_blocks(step: &lash_core::CellRecord, blocks: &mut Vec<LlmContentBlock>) {
     for image in &step.images {
         blocks.push(LlmContentBlock::Attachment {
             reference: Box::new(image.clone()),
@@ -453,14 +451,3 @@ pub(crate) fn preview_retained_copy(
 #[cfg(test)]
 #[path = "history_tests.rs"]
 mod tests;
-
-fn append_decode_failure(messages: &mut Vec<LlmMessage>, error: &super::transport::DecodeError) {
-    let binding = super::transport::degraded_binding(error);
-    messages.push(LlmMessage::text(
-        LlmRole::User,
-        format!(
-            "Projection rehydration degraded binding `{}`: {}",
-            binding.name, binding.reason
-        ),
-    ));
-}

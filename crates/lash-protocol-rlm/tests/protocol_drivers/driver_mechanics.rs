@@ -630,8 +630,8 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
     restored.handle_response(Response::ExecResult {
         id: restored_exec_id,
         result: Ok(lash_sansio::ExecResponse {
-            output_archive: None,
-            observations: vec![lash_sansio::Observation {
+            prints_retained: None,
+            prints: vec![lash_sansio::CellPrint {
                 text: "hi\n".to_string(),
                 value: serde_json::json!("hi\n"),
                 projection: Default::default(),
@@ -662,10 +662,9 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
                 ),
             }],
             printed_images: Vec::new(),
-            error: None,
+            result: lash_core::CellResult::Completed,
+            retained_finish_value: None,
             degraded_bindings: Vec::new(),
-            terminal_finish: None,
-            terminal_finish_retained: None,
             suspended: false,
         }),
     });
@@ -699,8 +698,8 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
     let entry = trajectory.last().expect("rlm trajectory entry");
     assert_eq!(entry.code, "print(\"hi\");");
     assert_eq!(assistant_visible_texts(&restored), vec!["Reason first."]);
-    assert_eq!(entry.output[0].text, "hi\n");
-    assert_eq!(entry.output[0].value, serde_json::json!("hi\n"));
+    assert_eq!(entry.prints[0].text, "hi\n");
+    assert_eq!(entry.prints[0].value, serde_json::json!("hi\n"));
     let (_, checkpoint) = find_checkpoint(&effects).expect("after-work checkpoint");
     assert_eq!(checkpoint, CheckpointKind::AfterWork);
 }
@@ -858,7 +857,7 @@ fn host_failure_without_cancellation_evidence_retries_without_fabricating_cancel
         })
         .expect("cell execution");
     let mut response = exec_response(&[], None, None);
-    response.error = Some(lash_sansio::CellFailure::new(
+    response.result = lash_sansio::CellResult::Failed(lash_sansio::CellFailure::new(
         lash_sansio::CellFailureKind::Host,
         "execution token failed without host cancellation evidence",
     ));
@@ -976,8 +975,8 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
     machine.handle_response(Response::ExecResult {
         id: exec_id,
         result: Ok(lash_sansio::ExecResponse {
-            output_archive: None,
-            observations: vec![lash_sansio::Observation {
+            prints_retained: None,
+            prints: vec![lash_sansio::CellPrint {
                 text: "fanout done".to_string(),
                 value: serde_json::json!("fanout done"),
                 projection: Default::default(),
@@ -1029,10 +1028,9 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
                 },
             ],
             printed_images: Vec::new(),
-            error: None,
+            result: lash_core::CellResult::Completed,
+            retained_finish_value: None,
             degraded_bindings: Vec::new(),
-            terminal_finish: None,
-            terminal_finish_retained: None,
             suspended: false,
         }),
     });
@@ -1081,8 +1079,8 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
             .get("tool_call_ids")
             .is_none()
     );
-    assert_eq!(entry.output[0].text, "fanout done");
-    assert_eq!(entry.output[0].value, serde_json::json!("fanout done"));
+    assert_eq!(entry.prints[0].text, "fanout done");
+    assert_eq!(entry.prints[0].value, serde_json::json!("fanout done"));
     assert_eq!(
         entry.calls,
         vec![
@@ -1820,20 +1818,17 @@ fn a_repair_iteration_carries_no_accumulation_from_the_failed_one() {
     assert_eq!(trajectory.len(), 2, "one entry per executed cell");
 
     let failed = &trajectory[0];
-    assert_eq!(failed.output[0].text, "partial output before the failure");
-    assert!(
-        failed.outcome.is_failed(),
-        "the failure keeps its own error"
-    );
+    assert_eq!(failed.prints[0].text, "partial output before the failure");
+    assert!(failed.result.is_failed(), "the failure keeps its own error");
 
     let repaired = &trajectory[1];
     assert_eq!(
-        repaired.output[0].text, "repaired output",
+        repaired.prints[0].text, "repaired output",
         "the repair iteration must not inherit the failed cell's output"
     );
     assert_eq!(
-        repaired.outcome,
-        lash_rlm_types::CellOutcome::Running,
+        repaired.result,
+        lash_core::CellResult::Completed,
         "a clean cell must not inherit the previous iteration's error"
     );
     assert_eq!(repaired.code, "print \"repaired\"");
@@ -2028,11 +2023,14 @@ fn an_exec_failure_reaches_the_trajectory_with_its_closed_reason() {
             )),
         );
         assert_eq!(
-            last_trajectory_entry_json(&machine)["error"],
+            last_trajectory_entry_json(&machine)["result"],
             serde_json::json!({
-                "kind": "host",
-                "message": "the executor did not answer",
-                "exec_failure": spelling,
+                "kind": "failed",
+                "value": {
+                    "kind": "host",
+                    "message": "the executor did not answer",
+                    "exec_failure": spelling,
+                },
             })
         );
     }
@@ -2052,10 +2050,13 @@ fn a_failed_cell_is_recorded_typed_and_its_guidance_is_rendered_at_projection() 
         )),
     );
     assert_eq!(
-        last_trajectory_entry_json(&machine)["error"],
+        last_trajectory_entry_json(&machine)["result"],
         serde_json::json!({
-            "kind": "program",
-            "message": "unknown binding `missing_name`",
+            "kind": "failed",
+            "value": {
+                "kind": "program",
+                "message": "unknown binding `missing_name`",
+            },
         })
     );
 

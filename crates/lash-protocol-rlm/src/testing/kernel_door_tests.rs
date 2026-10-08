@@ -94,8 +94,7 @@ async fn an_empty_aggregate_fails_the_cell_as_a_program_defect() {
         );
         let response = run_cell(&host, context, cell).await;
         let failure = response
-            .error
-            .as_ref()
+            .error()
             .unwrap_or_else(|| panic!("{aggregate}: the empty aggregate fails the cell"));
         assert_eq!(
             failure.kind,
@@ -104,7 +103,7 @@ async fn an_empty_aggregate_fails_the_cell_as_a_program_defect() {
              not a host failure to retry: {failure:?}"
         );
         assert_ne!(
-            response.terminal_finish,
+            response.finish_value().cloned(),
             Some(serde_json::json!("caught")),
             "{aggregate}: the empty-aggregate failure stays uncatchable"
         );

@@ -31,12 +31,12 @@ fn printed_cell_refuses_missing_or_mismatched_recorded_renderer() {
             .await;
             assert!(
                 response
-                    .error
+                    .error()
                     .as_ref()
                     .is_some_and(|error| error.message.contains("recorded_renderer_unavailable")),
                 "{response:?}"
             );
-            assert!(response.observations.is_empty());
+            assert!(response.prints.is_empty());
         }
     });
 }
@@ -90,9 +90,9 @@ fn bounded_test_entry_uses_the_recorded_params_and_supplied_renderer() {
             })),
         )
         .await;
-        assert_eq!(response.error, None, "{response:?}");
+        assert_eq!(response.error(), None, "{response:?}");
         assert_eq!(calls.load(Ordering::SeqCst), 1);
-        let [print] = response.observations.as_slice() else {
+        let [print] = response.prints.as_slice() else {
             panic!("expected one print: {response:?}");
         };
         assert_eq!(print.projection.limit_chars, 3);
@@ -206,9 +206,9 @@ fn typescript_cell_can_branch_on_policy_tool_failure_fields() {
         )
         .await;
 
-        assert_eq!(response.error, None);
+        assert_eq!(response.error(), None);
         assert_eq!(
-            response.terminal_finish,
+            response.finish_value().cloned(),
             Some(serde_json::json!({
                 "caught": true,
                 "name": "EffectError",
@@ -264,7 +264,7 @@ fn scalar_and_batch_tool_failures_keep_recorded_provenance_on_node_failed() {
                 lashlang::ExecutionBounds::unbounded(),
                 crate::plugin::RlmChannel::Cell,
             ).await;
-            assert!(response.error.is_some(), "the effect must fail: {code}");
+            assert!(response.error().is_some(), "the effect must fail: {code}");
             let records = sink.0.lock().expect("trace sink lock");
             let failed = records
                 .iter()
@@ -379,12 +379,12 @@ fn typescript_console_observations_describe_the_value() {
             let state = RlmExecutionState::for_engine("typescript");
             let (_, response) = execute_typescript_test_cell(state, cell).await;
             assert!(
-                response.error.is_none(),
+                response.error().is_none(),
                 "cell `{cell}`: {:?}",
-                response.error
+                response.error()
             );
             let observations = response
-                .observations
+                .prints
                 .iter()
                 .map(|observation| observation.text.as_str())
                 .collect::<Vec<_>>();
@@ -420,12 +420,13 @@ fn only_finish_closes_a_typescript_cells_turn() {
         )
         .await;
         assert!(
-            reporting.error.is_none(),
+            reporting.error().is_none(),
             "reporting cell failed: {:?}",
-            reporting.error
+            reporting.error()
         );
         assert_eq!(
-            reporting.terminal_finish, None,
+            reporting.finish_value().cloned(),
+            None,
             "a cell that only reports must leave the turn open for the next provider call"
         );
 
@@ -435,12 +436,12 @@ fn only_finish_closes_a_typescript_cells_turn() {
         )
         .await;
         assert!(
-            finishing.error.is_none(),
+            finishing.error().is_none(),
             "finishing cell failed: {:?}",
-            finishing.error
+            finishing.error()
         );
         assert_eq!(
-            finishing.terminal_finish,
+            finishing.finish_value().cloned(),
             Some(serde_json::json!("journal prefix committed")),
             "a cell that calls finish must close the turn with its value"
         );
@@ -520,12 +521,12 @@ fn fig_4545_obvious_unawaited_shapes_issue_no_effects() {
             let code = format!("await echo.say({{text:'committed'}});\n{shape}\nfinish(42);");
             let (response, calls) = pending_handle_cell(&code).await;
             assert_eq!(calls, 0, "{shape}: {response:?}");
-            let error = response.error.as_ref().expect("lowering refusal");
+            let error = response.error().expect("lowering refusal");
             assert_eq!(error.kind, lash_core::CellFailureKind::Policy);
             assert!(error.message.contains("TS_UNAWAITED_TOOL"), "{response:?}");
             assert!(error.message.contains("line 2"), "{response:?}");
             assert!(error.message.contains("Promise.allSettled"), "{response:?}");
-            assert_eq!(response.terminal_finish, None);
+            assert_eq!(response.finish_value().cloned(), None);
         }
     });
 }
@@ -556,8 +557,8 @@ fn fig_4545_awaiting_shapes_execute_each_tool_once() {
             ),
         ] {
             let (response, calls) = pending_handle_cell(code).await;
-            assert_eq!(response.error, None, "{code}: {response:?}");
-            assert!(response.terminal_finish.is_some(), "{response:?}");
+            assert_eq!(response.error(), None, "{code}: {response:?}");
+            assert!(response.finish_value().cloned().is_some(), "{response:?}");
             assert_eq!(calls, count, "{code}");
         }
     });
@@ -570,10 +571,7 @@ fn fig_4545_runtime_only_handles_reach_feedback_with_paths_and_lines() {
         for code in [code, code.strip_suffix("finish(42);").unwrap()] {
             let (response, calls) = pending_handle_cell(code).await;
             assert_eq!(calls, 0);
-            let failure = response
-                .error
-                .as_ref()
-                .expect("runtime pending handle failure");
+            let failure = response.error().expect("runtime pending handle failure");
             let feedback = crate::feedback::render(failure, "cell");
             for detail in [
                 "TS_PENDING_TOOL",
@@ -584,7 +582,7 @@ fn fig_4545_runtime_only_handles_reach_feedback_with_paths_and_lines() {
             ] {
                 assert!(feedback.contains(detail), "{feedback}");
             }
-            assert_eq!(response.terminal_finish, None);
+            assert_eq!(response.finish_value().cloned(), None);
         }
     });
 }
@@ -646,9 +644,9 @@ fn code_mode_receives_the_structured_tool_value_and_ignores_its_view() {
             crate::plugin::RlmChannel::Cell,
         )
         .await;
-        assert_eq!(response.error, None, "{response:?}");
+        assert_eq!(response.error(), None, "{response:?}");
         assert_eq!(
-            response.terminal_finish,
+            response.finish_value().cloned(),
             Some(serde_json::json!("structured"))
         );
     });
@@ -704,9 +702,9 @@ fn identical_aggregates_in_one_cell_mint_distinct_leaf_identities() {
         )
         .await;
 
-        assert_eq!(response.error, None);
+        assert_eq!(response.error(), None);
         assert_eq!(
-            response.terminal_finish,
+            response.finish_value().cloned(),
             Some(serde_json::json!({ "first": ["a", "b"], "second": ["a", "b"] }))
         );
 
@@ -738,7 +736,7 @@ fn ambient_effects_remain_unavailable_after_restore() {
             "const kept = { answer: 42 }; const sparse = [,2];",
         )
         .await;
-        assert!(seeded.error.is_none(), "{seeded:?}");
+        assert!(seeded.error().is_none(), "{seeded:?}");
         let snapshot = hydrate_snapshot(
             state
                 .snapshot_execution_state(lash_core::FleetFormat::current())
@@ -767,12 +765,12 @@ fn ambient_effects_remain_unavailable_after_restore() {
                         "const kept = { answer: 42 }; const sparse = [,2];",
                     )
                     .await;
-                    assert!(first.error.is_none());
+                    assert!(first.error().is_none());
                     candidate
                 };
                 let (candidate, response) = execute_typescript_test_cell(candidate, code).await;
                 assert!(
-                    response.error.is_some(),
+                    response.error().is_some(),
                     "ambient capability admitted: {restore}/{code}"
                 );
                 if code.starts_with("eval(") {
@@ -781,18 +779,15 @@ fn ambient_effects_remain_unavailable_after_restore() {
                         "the eval boundary remains explicit: {response:?}"
                     );
                 }
-                assert_eq!(response.terminal_finish, None);
-                assert!(
-                    response.observations.is_empty(),
-                    "rejected code emits nothing"
-                );
+                assert_eq!(response.finish_value().cloned(), None);
+                assert!(response.prints.is_empty(), "rejected code emits nothing");
                 let (_, control) = execute_typescript_test_cell(
                     candidate,
                     "finish({ answer: kept.answer, hole: 0 in sparse });",
                 )
                 .await;
                 assert_eq!(
-                    control.terminal_finish,
+                    control.finish_value().cloned(),
                     Some(serde_json::json!({"answer":42,"hole":false})),
                     "{restore}/{code}: {control:?}"
                 );
@@ -897,9 +892,9 @@ fn runtime_schema_validation_uses_declared_contract_after_inference_widens() {
                 crate::plugin::RlmChannel::Cell,
             )
             .await;
-            assert_eq!(response.error, None, "{arguments}: {response:?}");
+            assert_eq!(response.error(), None, "{arguments}: {response:?}");
             assert_eq!(
-                response.terminal_finish,
+                response.finish_value().cloned(),
                 Some(serde_json::json!(expected)),
                 "{arguments}: {response:?}"
             );
@@ -954,9 +949,9 @@ fn l21_scalar_and_aggregate_record_attempts_in_the_opener() {
             crate::plugin::RlmChannel::Cell,
         )
         .await;
-        assert_eq!(response.error, None, "{response:?}");
+        assert_eq!(response.error(), None, "{response:?}");
         assert_eq!(
-            response.terminal_finish,
+            response.finish_value().cloned(),
             Some(serde_json::json!({
                 "scalar": "scalar", "values": ["batch", "batch", "immediate"]
             }))

@@ -155,8 +155,8 @@ A code cell's executed calls are such records. Each `ExecutedCall` carries the
 source `operation` the cell ran, its `outcome`, and `call_id:
 Option<ToolCallId>`, the id of the host tool call the dispatch resolved to. It
 is `None` only for a dispatch lash handled itself, with no host tool call. The
-cell's result (`ExecResponse`), the committed RLM trajectory entry and the
-transcript's `TranscriptCell` all hold that one type, so a host joins its own
+cell's result (`ExecResponse`) and its committed `CellRecord`, which the RLM
+trajectory entry stores and the transcript returns, hold that one type, so a host joins its own
 ledger, keyed on `AttemptContext::call_id()`, to the cell that made the call.
 The model's view of a cell's calls (operation and outcome, no arguments and no
 identity) is derived from those entries and is not stored.

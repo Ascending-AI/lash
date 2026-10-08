@@ -205,45 +205,180 @@ impl<'de> serde::Deserialize<'de> for ExecCodeFailure {
     }
 }
 
-/// One inline print, or one member of a step's attachment archive.
+/// One print of an executed cell: the text the model read, the value
+/// printed, and how the text was projected from it. The one shape a print
+/// has in the executor's response, in a cell's committed record, in a step's
+/// attachment archive and in the completion activity.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Observation {
+pub struct CellPrint {
     pub text: String,
     pub value: serde_json::Value,
     pub projection: TextProjectionMetadata,
 }
 
+/// A print of the text itself, shown whole.
+impl From<String> for CellPrint {
+    fn from(text: String) -> Self {
+        let chars = text.chars().count();
+        Self {
+            value: serde_json::Value::String(text.clone()),
+            text,
+            projection: TextProjectionMetadata {
+                truncated: false,
+                original_chars: chars,
+                projected_chars: chars,
+                limit_chars: chars,
+            },
+        }
+    }
+}
+
+/// What an executed cell resolved to. One of three: a cell never carries a
+/// failure and a finish value at once, and a cell that finished with `null`
+/// is distinct from one that ran to its end without finishing.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum CellResult {
+    /// The cell ran to its end without a finish value.
+    #[default]
+    Completed,
+    /// The cell failed.
+    Failed(CellFailure),
+    /// The cell finished its turn with this value: inline, or retained out
+    /// of history when its encoding was too long for it (FIG-1643).
+    #[serde(with = "finish_value")]
+    Finished(crate::OutputValue),
+}
+
+impl CellResult {
+    /// The failure, when the cell failed.
+    pub fn failure(&self) -> Option<&CellFailure> {
+        match self {
+            Self::Failed(failure) => Some(failure),
+            Self::Completed | Self::Finished(_) => None,
+        }
+    }
+
+    pub fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed(_))
+    }
+
+    /// The finish value as history records it, when the cell finished.
+    pub fn finish(&self) -> Option<&crate::OutputValue> {
+        match self {
+            Self::Finished(value) => Some(value),
+            Self::Completed | Self::Failed(_) => None,
+        }
+    }
+}
+
+/// [`crate::OutputValue`] as a cell result spells it: `{"inline": value}` or
+/// `{"retained": retention}`.
+mod finish_value {
+    use crate::{OutputValue, RetainedOutput};
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "snake_case")]
+    enum Borrowed<'a> {
+        Inline(&'a serde_json::Value),
+        Retained(&'a RetainedOutput),
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    enum Owned {
+        Inline(serde_json::Value),
+        Retained(RetainedOutput),
+    }
+
+    pub fn serialize<S: serde::Serializer>(
+        value: &OutputValue,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match value {
+            OutputValue::Inline(value) => Borrowed::Inline(value),
+            OutputValue::Retained(retained) => Borrowed::Retained(retained),
+        }
+        .serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<OutputValue, D::Error> {
+        Ok(match Owned::deserialize(deserializer)? {
+            Owned::Inline(value) => OutputValue::Inline(value),
+            Owned::Retained(retained) => OutputValue::Retained(retained),
+        })
+    }
+}
+
+/// One executed code cell, as committed history records it and a transcript
+/// returns it: the protocol that ran the cell appends this record, and a
+/// reader decodes the same record back. Its prints and result are the
+/// executor's [`ExecResponse`] values, unconverted; the result differs from
+/// the response's only where the protocol adjudicated it (a finish value its
+/// declared schema refuses is recorded as the failure it is).
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CellRecord {
+    /// The cell's identity within its session. A committed message that
+    /// carries the cell's assistant context names it in its origin.
+    pub id: String,
+    pub protocol_iteration: usize,
+    pub language: String,
+    pub code: String,
+    /// Inline prints, in order; empty when `prints_retained` holds them.
+    pub prints: Vec<CellPrint>,
+    /// One archive of every print, when they exceeded the inline limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prints_retained: Option<crate::RetainedOutput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<AttachmentRef>,
+    /// The dispatches the cell executed. An entry's `call_id` is the id of
+    /// the host tool call's own [`ToolCallRecord`]; `None` for a dispatch
+    /// lash handled with no host tool call.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub calls: Vec<ExecutedCall>,
+    /// Calls the cell made beyond the recorded `calls`.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub calls_omitted: usize,
+    pub result: CellResult,
+}
+
+fn is_zero(value: &usize) -> bool {
+    *value == 0
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ExecResponse {
-    pub observations: Vec<Observation>,
-    /// The complete ordered observations when their aggregate exceeds the
-    /// history limit. Inline observations are empty whenever this is present.
+    /// Inline prints, in order; empty when `prints_retained` holds them.
+    pub prints: Vec<CellPrint>,
+    /// The complete ordered prints when their aggregate exceeds the history
+    /// limit. Inline prints are empty whenever this is present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_archive: Option<crate::RetainedOutput>,
+    pub prints_retained: Option<crate::RetainedOutput>,
     /// Every source-level dispatch the cell executed, in execution order.
     pub calls: Vec<ExecutedCall>,
     /// The record of each host tool call the cell made, in execution order.
     /// A `calls` entry references its record by `call_id`.
     pub tool_calls: Vec<ToolCallRecord>,
     pub printed_images: Vec<AttachmentRef>,
-    pub error: Option<CellFailure>,
+    /// What the cell resolved to, as history records it. A finish value is
+    /// the surrounding protocol's terminal value: the dispatch loop uses it
+    /// as the terminal result of the session.
+    pub result: CellResult,
+    /// The finish value itself when `result` records only its retention
+    /// (FIG-1643): history keeps the retention, and the value stays the
+    /// turn's answer. `None` for every other result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retained_finish_value: Option<serde_json::Value>,
     /// Bindings that could not be restored to a live host reference during
     /// executor setup. The executor leaves each binding loudly unavailable;
     /// the host decides whether to warn, repair, or abort.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub degraded_bindings: Vec<DegradedBinding>,
-    /// When the surrounding session uses protocol-specific finish behavior,
-    /// this carries the protocol's terminal value. The dispatch loop uses it
-    /// as the terminal result of the session. `None` for chat-style sessions
-    /// and for typed sessions whose step continued without finishing.
-    pub terminal_finish: Option<serde_json::Value>,
-    /// The retention of `terminal_finish` when its encoding was too long for
-    /// history (FIG-1643): history records this in the value's place, and the
-    /// value itself is the turn's answer. `None` whenever `terminal_finish`
-    /// is, and for a value history keeps inline.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub terminal_finish_retained: Option<crate::RetainedOutput>,
     /// The cell stopped at a segment boundary inside it (FIG-4739): a durable
     /// wait it issued was handed to the Run's successor segment, and the
     /// executor holds the cell's state for the execution that resumes it. A
@@ -251,6 +386,24 @@ pub struct ExecResponse {
     /// history, and the turn that receives it ends at the boundary.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub suspended: bool,
+}
+
+impl ExecResponse {
+    /// The failure, when the cell failed.
+    pub fn error(&self) -> Option<&CellFailure> {
+        self.result.failure()
+    }
+
+    /// The finish value itself, whether history keeps it inline or retained.
+    pub fn finish_value(&self) -> Option<&serde_json::Value> {
+        match &self.result {
+            CellResult::Finished(crate::OutputValue::Inline(value)) => Some(value),
+            CellResult::Finished(crate::OutputValue::Retained(_)) => {
+                self.retained_finish_value.as_ref()
+            }
+            CellResult::Completed | CellResult::Failed(_) => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -279,90 +432,71 @@ mod tests {
         assert_eq!(round_trip.reason, ExecCodeFailureReason::RuntimeStopped);
     }
 
-    #[test]
-    fn legacy_exec_response_payload_with_images_field_still_decodes() {
-        let legacy_json = serde_json::json!({
-            "observations": [{
-                "text": "step output",
-                "value": "step output",
-                "projection": {
-                    "truncated": false,
-                    "original_chars": 11,
-                    "projected_chars": 11,
-                    "limit_chars": 51200
-                }
-            }],
-            "calls": [],
-            "tool_calls": [],
-            "images": [
-                {
-                    "mime": "image/png",
-                    "label": "legacy_image",
-                    "data": [1, 2, 3]
-                }
-            ],
-            "printed_images": [],
-            "error": null,
-            "duration_ms": 42,
-            "terminal_finish": null
-        });
-
-        let response: ExecResponse = serde_json::from_value(legacy_json)
-            .expect("legacy ExecResponse payload with images field should decode");
-        assert_eq!(response.observations[0].text, "step output");
+    fn retained(witness: &str) -> crate::RetainedOutput {
+        crate::RetainedOutput {
+            reference: AttachmentRef {
+                id: ("b".repeat(64)).parse().expect("valid attachment id"),
+                media_type: "application/json".parse().expect("valid media type"),
+                byte_len: 90_000,
+                type_metadata: None,
+                label: None,
+            },
+            witness: witness.to_string(),
+        }
     }
 
+    /// A cell record spells its result as one tagged value (FIG-5527): a
+    /// `null` finish, a retained finish, a typed failure and a cell that ran
+    /// to its end each read back as themselves, and a result carrying a
+    /// failure beside a finish value has no spelling.
     #[test]
-    fn paired_observation_lists_are_rejected() {
-        let mut paired_json = serde_json::json!({
-            "observations": ["step output"],
-            "calls": [],
-            "tool_calls": [],
-            "printed_images": [],
-            "error": null,
-            "duration_ms": 42,
-            "terminal_finish": null
-        });
-        paired_json.as_object_mut().unwrap().insert(
-            "observation_truncation".to_string(),
-            serde_json::json!([{
-                "truncated": false,
-                "original_chars": 11,
-                "projected_chars": 11,
-                "original_lines": 1,
-                "projected_lines": 1,
-                "limit": 51200,
-                "limit_mode": "bytes",
-                "max_lines": 2000
-            }]),
+    fn a_cell_record_reads_back_each_result_as_itself() {
+        let failure = CellFailure::from(ExecCodeFailure::new(
+            ExecCodeFailureReason::ExecutorUnavailable,
+            "code execution is not available in this session",
+        ));
+        for result in [
+            CellResult::Completed,
+            CellResult::Finished(serde_json::Value::Null.into()),
+            CellResult::Finished(serde_json::json!({"answer": 42}).into()),
+            CellResult::Finished(crate::OutputValue::Retained(retained("{\"rows\":["))),
+            CellResult::Failed(failure.clone()),
+        ] {
+            let record = CellRecord {
+                id: "step-1".to_string(),
+                protocol_iteration: 3,
+                language: "typescript".to_string(),
+                code: "print('hello')".to_string(),
+                prints: vec!["hello".to_string().into()],
+                result: result.clone(),
+                ..CellRecord::default()
+            };
+            let encoded = serde_json::to_value(&record).expect("encode");
+            let decoded: CellRecord = serde_json::from_value(encoded.clone()).expect("decode");
+            assert_eq!(decoded, record, "{encoded}");
+        }
+        assert_eq!(
+            serde_json::to_value(CellResult::Failed(failure)).expect("encode"),
+            serde_json::json!({"kind": "failed", "value": {
+                "kind": "host",
+                "message": "code execution is not available in this session",
+                "exec_failure": "executor_unavailable",
+            }})
         );
-
-        let error = serde_json::from_value::<ExecResponse>(paired_json)
-            .expect_err("paired observation lists must not decode after the hard cutover");
-        assert!(
-            error.to_string().contains("expected struct Observation"),
-            "unexpected decode error: {error}"
+        assert_eq!(
+            serde_json::to_value(CellResult::Finished(serde_json::Value::Null.into()))
+                .expect("encode"),
+            serde_json::json!({"kind": "finished", "value": {"inline": null}})
         );
-    }
-
-    #[test]
-    fn two_list_exec_response_payload_is_rejected() {
-        let legacy_json = serde_json::json!({
-            "observations": [],
-            "tool_calls": [],
-            "executed_calls": [],
-            "printed_images": [],
-            "error": null,
-            "duration_ms": 42,
-            "degraded_bindings": [],
-            "terminal_finish": null
-        });
-
-        let error = serde_json::from_value::<ExecResponse>(legacy_json)
-            .expect_err("the pre-cutover two-list ExecResponse must be refused");
-        assert!(
-            error.to_string().contains("missing field `calls`"),
-            "unexpected decode error: {error}"
-        );
+        for malformed in [
+            serde_json::json!({"kind": "finished"}),
+            serde_json::json!({"kind": "finished", "value": {"inline": 1, "retained": null}}),
+            serde_json::json!({"kind": "running"}),
+        ] {
+            assert!(
+                serde_json::from_value::<CellResult>(malformed.clone()).is_err(),
+                "{malformed}"
+            );
+        }
     }
 }

@@ -662,8 +662,8 @@ impl ModelStore {
                     .and_then(Value::as_i64)
                     .unwrap_or(0);
                 let response = lash_core::ExecResponse {
-                    output_archive: None,
-                    observations: vec![lash_core::Observation {
+                    prints_retained: None,
+                    prints: vec![lash_core::CellPrint {
                         text: output.clone(),
                         value: serde_json::json!(output),
                         projection: Default::default(),
@@ -671,18 +671,22 @@ impl ModelStore {
                     calls: Vec::new(),
                     tool_calls: Vec::new(),
                     printed_images: Vec::new(),
-                    error: (exit_code != 0).then(|| {
-                        lash_core::CellFailure::new(
+                    result: if exit_code != 0 {
+                        lash_core::CellResult::Failed(lash_core::CellFailure::new(
                             lash_core::CellFailureKind::Program,
                             format!("exit code {exit_code}"),
+                        ))
+                    } else {
+                        lash_core::CellResult::Finished(
+                            json!({
+                                "output": output,
+                                "exit_code": exit_code,
+                            })
+                            .into(),
                         )
-                    }),
+                    },
+                    retained_finish_value: None,
                     degraded_bindings: Vec::new(),
-                    terminal_finish: Some(json!({
-                        "output": output,
-                        "exit_code": exit_code,
-                    })),
-                    terminal_finish_retained: None,
                     suspended: false,
                 };
                 let outcome = lash_core::RuntimeEffectOutcome::ExecCode {

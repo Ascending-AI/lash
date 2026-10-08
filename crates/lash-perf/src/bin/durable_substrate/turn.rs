@@ -315,7 +315,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for Protocol {
     ) -> Vec<DriverAction> {
         let text = match result {
             Ok(response) => response
-                .observations
+                .prints
                 .iter()
                 .map(|observation| observation.text.clone())
                 .collect::<Vec<_>>()

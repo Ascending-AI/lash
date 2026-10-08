@@ -581,7 +581,7 @@ pub(super) async fn execute_test_code(
         crate::plugin::RlmChannel::Cell,
     ))
     .await;
-    assert_eq!(response.error, None, "test TypeScript execution failed");
+    assert_eq!(response.error(), None, "test TypeScript execution failed");
     state
 }
 
@@ -1102,7 +1102,7 @@ pub(super) fn bound_variables_prompt_degrades_large_live_globals() {
             crate::plugin::RlmChannel::Cell,
         )
         .await;
-        assert_eq!(response.error, None);
+        assert_eq!(response.error(), None);
 
         let globals = state.bound_variable_values(&BTreeSet::new());
         let mut cache = crate::rlm_support::BoundVariableRenderCache::default();
@@ -1181,7 +1181,7 @@ pub(super) fn a_projected_scalar_read_reaches_a_tool_as_its_plain_value() {
             crate::plugin::RlmChannel::Cell,
         )
         .await;
-        assert_eq!(response.error, None);
+        assert_eq!(response.error(), None);
         let record = response
             .tool_calls
             .into_iter()

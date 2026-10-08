@@ -116,7 +116,7 @@ async fn run_step_with_sink(
 fn real_foreground_sleep_reduces_waiting_then_completed() {
     block_on(async {
         let (response, records) = Box::pin(run_step("await sleep(0); finish(null);")).await;
-        assert!(response.error.is_none(), "{:?}", response.error);
+        assert!(response.error().is_none(), "{:?}", response.error());
         let store = lash_lashlang_runtime::TraceLashlangGraphStore::default();
         let mut awaited_node = None;
         for record in &records {
@@ -241,7 +241,7 @@ fn oversized_link_failure_diagnostic_is_bounded_without_changing_feedback() {
     block_on(async {
         let code = format!("finish(missing_{});", "x".repeat(8000));
         let (response, records) = Box::pin(run_step(&code)).await;
-        let diagnostic = response.error.expect("unknown name must fail").message;
+        let diagnostic = &response.error().expect("unknown name must fail").message;
         assert!(diagnostic.chars().count() > 4000);
         let steps: Vec<_> = records
             .iter()
@@ -253,7 +253,7 @@ fn oversized_link_failure_diagnostic_is_bounded_without_changing_feedback() {
         assert_eq!(
             event["diagnostic"],
             lash_sansio::session_model::truncate_raw_error(
-                &diagnostic,
+                diagnostic,
                 lash_sansio::session_model::RuntimeOutputCuts::standard().raw_error_max_chars
             )
         );

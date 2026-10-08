@@ -108,7 +108,7 @@ pub(crate) fn rendered_print(
     history_index: usize,
     print_index: usize,
     typed: serde_json::Value,
-) -> lash_sansio::Observation {
+) -> lash_sansio::CellPrint {
     let rendered = truncate_chars(renderer.print(value, params), params.max_chars);
     let projected_chars = rendered.body.chars().count();
     let projection = lash_sansio::TextProjectionMetadata {
@@ -133,7 +133,7 @@ pub(crate) fn rendered_print(
             rendered.cuts.original_chars, params.max_chars, counts, rendered.body
         )
     };
-    lash_sansio::Observation {
+    lash_sansio::CellPrint {
         text,
         value: typed,
         projection,

@@ -161,12 +161,15 @@ pub(crate) async fn execute_code_with_channel_and_bounds(
     if !seal_ctx.is_cancelled() {
         let _phase = seal_ctx.named_phase("rlm_lashlang.hold_frame_definitions");
         if let Err(err) = hold_global_definitions(state, &seal_ctx).await
-            && response.error.is_none()
+            && !response.result.is_failed()
         {
-            response.error = Some(lash_core::CellFailure::new(
-                lash_core::CellFailureKind::Host,
-                format!("failed to retain definition artifacts for this frame: {err}"),
-            ));
+            fail_cell(
+                &mut response,
+                lash_core::CellFailure::new(
+                    lash_core::CellFailureKind::Host,
+                    format!("failed to retain definition artifacts for this frame: {err}"),
+                ),
+            );
         }
     }
     if let Ok(cell) = cell.as_ref()
@@ -177,7 +180,7 @@ pub(crate) async fn execute_code_with_channel_and_bounds(
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
-        if !values.is_empty() || response.terminal_finish.is_some() {
+        if !values.is_empty() || response.finish_value().is_some() {
             record_cell_outputs(&seal_ctx, cell, &code_renderer, values, &mut response).await;
         }
     }
@@ -193,10 +196,17 @@ fn fail_cell_on_nested_error(
 ) {
     let message = error.to_string();
     ctx.record_nested_runtime_effect_error(error);
-    response.error = Some(lash_core::CellFailure::new(
-        lash_core::CellFailureKind::Host,
-        message,
-    ));
+    fail_cell(
+        response,
+        lash_core::CellFailure::new(lash_core::CellFailureKind::Host, message),
+    );
+}
+
+/// Resolves the cell to `failure`, whatever it had resolved to: a cell that
+/// finished and then failed is a failed cell, and keeps no finish value.
+fn fail_cell(response: &mut ExecResponse, failure: lash_core::CellFailure) {
+    response.result = lash_core::CellResult::Failed(failure);
+    response.retained_finish_value = None;
 }
 
 /// Feature-gated fixture that lets the repository's performance harness shift
@@ -297,7 +307,7 @@ impl RlmCheckpointPerfFixture {
             crate::render::CodeRendererSlot::default(),
         )
         .await;
-        if let Some(error) = response.error {
+        if let Some(error) = response.error() {
             return Err(SessionError::Protocol(format!(
                 "RLM checkpoint perf assignment failed: {}",
                 error.message,
@@ -935,11 +945,10 @@ async fn execute_code_in_worker_scope(
                     );
                     return exec_response_from(
                         host.into_collected(),
-                        Some(lash_core::CellFailure::new(
+                        lash_core::CellResult::Failed(lash_core::CellFailure::new(
                             lash_core::CellFailureKind::Host,
                             error.to_string(),
                         )),
-                        None,
                     );
                 }
             };
@@ -954,9 +963,9 @@ async fn execute_code_in_worker_scope(
         Ok(lash_vm_broker::BrokeredEnd::Suspended { checkpoint }) => {
             return match hold_continuation_definitions(&ctx, &checkpoint.vm).await {
                 Ok(()) => ExecResponse {
-                    output_archive: None,
+                    prints_retained: None,
                     suspended: true,
-                    ..exec_response_from(host.into_collected(), None, None)
+                    ..exec_response_from(host.into_collected(), lash_core::CellResult::Completed)
                 },
                 Err(error) => {
                     let error = format!("the cell's continuation was not held: {error}");
@@ -966,11 +975,10 @@ async fn execute_code_in_worker_scope(
                     ));
                     exec_response_from(
                         host.into_collected(),
-                        Some(lash_core::CellFailure::new(
+                        lash_core::CellResult::Failed(lash_core::CellFailure::new(
                             lash_core::CellFailureKind::Host,
                             error,
                         )),
-                        None,
                     )
                 }
             };
@@ -1012,11 +1020,10 @@ async fn execute_code_in_worker_scope(
                 );
                 return exec_response_from(
                     host.into_collected(),
-                    Some(
+                    lash_core::CellResult::Failed(
                         lash_core::CellFailure::new(lash_core::CellFailureKind::Program, message)
                             .with_worker_limit(limit),
                     ),
-                    None,
                 );
             }
             let deployment = match &error {
@@ -1037,39 +1044,38 @@ async fn execute_code_in_worker_scope(
             }
             return exec_response_from(
                 host.into_collected(),
-                Some(lash_core::CellFailure::new(
+                lash_core::CellResult::Failed(lash_core::CellFailure::new(
                     lash_core::CellFailureKind::Host,
                     error.to_string(),
                 )),
-                None,
             );
         }
     };
     if let Some(trace) = &lashlang_execution_trace {
         emit_foreground_execution_finished(trace, &result, runtime_failure.as_ref());
     }
-    let terminal_finish = match result {
-        Ok(ExecutionOutcome::Finished(value)) => Some(flow_to_json_value(&value)),
-        Ok(ExecutionOutcome::Continued) => None,
+    let result = match result {
+        Ok(ExecutionOutcome::Finished(value)) => {
+            lash_core::CellResult::Finished(flow_to_json_value(&value).into())
+        }
+        Ok(ExecutionOutcome::Continued) => lash_core::CellResult::Completed,
         Ok(ExecutionOutcome::Failed(value)) if host.cancellation_observed() => {
             state.rollback_code_execution();
             return exec_response_from(
                 host.into_collected(),
-                Some(lash_core::CellFailure::new(
+                lash_core::CellResult::Failed(lash_core::CellFailure::new(
                     lash_core::CellFailureKind::Host,
                     format!("foreground execution stopped while returning failure: {value}"),
                 )),
-                None,
             );
         }
         Ok(ExecutionOutcome::Failed(value)) => {
             return exec_response_from(
                 host.into_collected(),
-                Some(lash_core::CellFailure::new(
+                lash_core::CellResult::Failed(lash_core::CellFailure::new(
                     lash_core::CellFailureKind::Program,
                     format!("process failed in foreground execution: {value}"),
                 )),
-                None,
             );
         }
         Err(error) => {
@@ -1107,10 +1113,13 @@ async fn execute_code_in_worker_scope(
             if tool_call_limit.is_some() {
                 cell_failure.tool_call_limit = ctx.tool_call_limit_refusal();
             }
-            return exec_response_from(host.into_collected(), Some(cell_failure), None);
+            return exec_response_from(
+                host.into_collected(),
+                lash_core::CellResult::Failed(cell_failure),
+            );
         }
     };
-    exec_response_from(host.into_collected(), None, terminal_finish)
+    exec_response_from(host.into_collected(), result)
 }
 
 /// The environment of the frame this execution was admitted on: the
@@ -1184,15 +1193,14 @@ fn lashlang_runtime_feedback_kind(
 
 fn exec_setup_failure(error: lash_core::CellFailure) -> ExecResponse {
     ExecResponse {
-        output_archive: None,
-        observations: Vec::new(),
+        prints_retained: None,
+        prints: Vec::new(),
         calls: Vec::new(),
         tool_calls: Vec::new(),
         printed_images: Vec::new(),
-        error: Some(error),
+        result: lash_core::CellResult::Failed(error),
+        retained_finish_value: None,
         degraded_bindings: Vec::new(),
-        terminal_finish: None,
-        terminal_finish_retained: None,
         suspended: false,
     }
 }
@@ -1236,7 +1244,7 @@ fn worker_setup_failure(
             lash_core::CellFailureKind::Program,
             limit.to_string(),
         );
-        if let Some(failure) = &mut response.error {
+        if let lash_core::CellResult::Failed(failure) = &mut response.result {
             failure.worker_limit = Some(*limit);
         }
         return response;
@@ -1280,19 +1288,17 @@ fn fail_attempt_on_host_verdict(
 
 fn exec_response_from(
     collected: CollectedExecutionOutput,
-    error: Option<lash_core::CellFailure>,
-    terminal_finish: Option<serde_json::Value>,
+    result: lash_core::CellResult,
 ) -> ExecResponse {
     ExecResponse {
-        output_archive: None,
-        observations: collected.observations,
+        prints_retained: None,
+        prints: collected.observations,
         calls: collected.calls,
         tool_calls: collected.tool_calls,
         printed_images: collected.printed_images,
-        error,
+        result,
+        retained_finish_value: None,
         degraded_bindings: Vec::new(),
-        terminal_finish,
-        terminal_finish_retained: None,
         suspended: false,
     }
 }

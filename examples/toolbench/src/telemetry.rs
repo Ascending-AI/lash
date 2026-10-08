@@ -282,6 +282,15 @@ fn has_unsealed_request(activities: &[TurnActivity]) -> bool {
 
 // ModelCallRecorded precedes execution; only the completed provider attempt
 // owns the activities before the next call. Retries never inherit its cell.
+/// A cell's inline prints as the one text block the model read.
+pub(crate) fn printed_text(prints: &[lash::transcript::CellPrint]) -> String {
+    prints
+        .iter()
+        .map(|print| print.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn execution_fields(activities: &[TurnActivity], standard: bool) -> Value {
     let mut code = Vec::new();
     let mut observations = Vec::new();
@@ -291,14 +300,15 @@ fn execution_fields(activities: &[TurnActivity], standard: bool) -> Value {
             TurnEvent::CodeBlockStarted { code: source, .. } if !standard => {
                 code.push(source.as_str())
             }
-            TurnEvent::CodeBlockCompleted { output, error, .. } if !standard => {
-                observations.push(output.clone());
-                if let Some(error) = error {
-                    // Runtime errors can be separate from the rendered stdout.
-                    if !output.contains(&error.message) {
-                        observations.push(error.message.clone());
-                    }
-                }
+            TurnEvent::CodeBlockCompleted { prints, result, .. } if !standard => {
+                let output = printed_text(prints);
+                // Runtime errors can be separate from the rendered stdout.
+                let error = result
+                    .failure()
+                    .filter(|error| !output.contains(&error.message))
+                    .map(|error| error.message.clone());
+                observations.push(output);
+                observations.extend(error);
             }
             TurnEvent::ToolCallStarted { name, args, .. } if standard => {
                 tool_calls.push(serde_json::json!({"name":name,"arguments":args}));
@@ -351,8 +361,9 @@ mod tests {
                 }),
                 activity(TurnEvent::CodeBlockCompleted {
                     language: "typescript".into(),
-                    output: "é".repeat(2_001),
-                    error: None,
+                    prints: vec!["é".repeat(2_001).into()],
+                    prints_retained: None,
+                    result: lash::transcript::CellResult::Completed,
 
                     duration_ms: 1,
                     tool_call_ids: vec![],

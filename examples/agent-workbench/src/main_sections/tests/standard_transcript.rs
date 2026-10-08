@@ -152,6 +152,7 @@ async fn every_standard_message_names_its_turn() {
                 source: TurnOutputSource::Plugin {
                     plugin_id: "standard_protocol".into()
                 },
+                cell_id: None,
             }),
             "the committed message {} must name its turn",
             message.id

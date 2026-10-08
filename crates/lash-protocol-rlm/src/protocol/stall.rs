@@ -83,7 +83,7 @@ pub(crate) fn stalled_attempts_in_phase(
             }
             // An earlier turn's execution, or this turn's last progress point.
             Some(RlmProtocolEvent::RlmTrajectoryEntry(entry))
-                if !entry.id.starts_with(&trajectory_prefix) || entry.outcome.error().is_none() =>
+                if !entry.id.starts_with(&trajectory_prefix) || !entry.result.is_failed() =>
             {
                 break;
             }
@@ -112,8 +112,7 @@ fn count_pending_attempts(
             };
             match crate::projection::decode_rlm_protocol_event(event)? {
                 Some(RlmProtocolEvent::RlmTrajectoryEntry(entry))
-                    if entry.outcome.error().is_none()
-                        && entry.id.starts_with(trajectory_prefix) =>
+                    if !entry.result.is_failed() && entry.id.starts_with(trajectory_prefix) =>
                 {
                     *attempts = 0;
                 }
@@ -131,6 +130,15 @@ fn count_pending_attempts(
 
 fn trajectory_entry_turn_prefix(turn_id: &TurnId) -> String {
     format!("lashlang_step_{turn_id}_")
+}
+
+/// The id of the cell a turn ran at one protocol iteration: its record's
+/// identity, and the correlation its assistant context names.
+pub(crate) fn cell_id(turn_id: &TurnId, protocol_iteration: usize) -> String {
+    format!(
+        "{}{protocol_iteration}",
+        trajectory_entry_turn_prefix(turn_id)
+    )
 }
 
 /// A stable short digest of one model reply's assistant text.

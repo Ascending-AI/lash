@@ -40,7 +40,7 @@ fn rlm_prompt_history_text_only_cell_records_code_without_reasoning_or_prose() {
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "print(\"hi\");",
                 output: vec!["hi\n".to_string()],
-                outcome: lash_rlm_types::CellOutcome::Running,
+                outcome: lash_core::CellResult::Completed,
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -64,7 +64,7 @@ fn rlm_prompt_history_markdown_code_block_remains_visible_prose_before_real_lash
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "print \"done\"",
                 output: vec!["done\n".to_string()],
-                outcome: lash_rlm_types::CellOutcome::Running,
+                outcome: lash_core::CellResult::Completed,
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -95,7 +95,7 @@ fn rlm_prompt_history_exec_error_keeps_reasoning_prose_and_code_exact() {
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "missing_name",
                 output: Vec::new(),
-                outcome: lash_rlm_types::CellOutcome::Failed(program_failure(
+                outcome: lash_core::CellResult::Failed(program_failure(
                     "unknown binding `missing_name`",
                 )),
             }),
@@ -124,7 +124,7 @@ fn rlm_prompt_history_finish_final_value_keeps_reasoning_prose_and_code_exact() 
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "finish(\"done\");",
                 output: Vec::new(),
-                outcome: lash_rlm_types::CellOutcome::Finished(serde_json::json!("done").into()),
+                outcome: lash_core::CellResult::Finished(serde_json::json!("done").into()),
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -149,7 +149,7 @@ fn rlm_prompt_history_reasoning_part_is_preserved_in_trajectory() {
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "finish(\"Hi.\");",
                 output: Vec::new(),
-                outcome: lash_rlm_types::CellOutcome::Finished(serde_json::json!("Hi.").into()),
+                outcome: lash_core::CellResult::Finished(serde_json::json!("Hi.").into()),
             }),
             ..RlmProtocolExpectations::default()
         })

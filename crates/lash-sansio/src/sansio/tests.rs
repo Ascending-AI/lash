@@ -251,15 +251,14 @@ fn current_checkpoint_decoder_refuses_unknown_fields_as_incompatible_format() {
 
 fn empty_exec_response() -> crate::ExecResponse {
     crate::ExecResponse {
-        output_archive: None,
-        observations: Vec::new(),
+        prints_retained: None,
+        prints: Vec::new(),
         calls: Vec::new(),
         tool_calls: Vec::new(),
         printed_images: Vec::new(),
-        error: None,
+        result: crate::CellResult::Completed,
+        retained_finish_value: None,
         degraded_bindings: Vec::new(),
-        terminal_finish: None,
-        terminal_finish_retained: None,
         suspended: false,
     }
 }

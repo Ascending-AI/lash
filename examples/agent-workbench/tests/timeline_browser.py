@@ -342,7 +342,8 @@ def page_laws(browser, page_file: Path, artifacts: Path | None) -> Laws:
         bench.activity(turn, {"type": "tool_call_started", "call_id": "tc_1", "name": "mcp__parallel__web_search_x", "args": {"q": "weather"}})
         bench.activity(turn, {"type": "tool_call_completed", "call_id": "tc_1", "name": "mcp__parallel__web_search_x", "args": {"q": "weather"},
                               "output": {"outcome": {"status": "success", "payload": {"results": [1, 2]}}}, "duration_ms": 12})
-        bench.activity(turn, {"type": "code_block_completed", "language": "typescript", "output": "sunny", "duration_ms": 30,
+        bench.activity(turn, {"type": "code_block_completed", "language": "typescript", "prints": [{"text": "sunny", "value": "sunny", "projection": {}}],
+                              "result": {"kind": "completed"}, "duration_ms": 30,
                               "tool_call_ids": ["tc_1"]})
         page.wait_for_function("() => document.querySelector('#timeline .code-block .tool:not(.pending)')")
         happened = datetime.now(timezone.utc)

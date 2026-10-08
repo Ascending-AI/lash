@@ -200,14 +200,14 @@ async fn run_task_with_shutdown_witness(
         .iter()
         .filter_map(|activity| match &activity.event {
             TurnEvent::CodeBlockCompleted {
-                error: Some(error),
-                output,
+                result: lash::transcript::CellResult::Failed(error),
+                prints,
                 ..
             } => Some(
                 if error.message.trim().is_empty() {
-                    output
+                    crate::telemetry::printed_text(prints)
                 } else {
-                    &error.message
+                    error.message.clone()
                 }
                 .trim()
                 .to_string(),

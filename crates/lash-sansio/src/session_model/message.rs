@@ -194,6 +194,11 @@ pub enum MessageOrigin {
         turn_id: TurnId,
         /// The runtime or plugin that authored the output.
         source: TurnOutputSource,
+        /// The executed cell this output is the assistant context of: the
+        /// [`crate::CellRecord::id`] of the cell the reply ran. `None` for
+        /// output that ran no cell.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cell_id: Option<String>,
     },
 }
 
@@ -1461,6 +1466,18 @@ pub fn messages_are_prompt_resume_safe<'a>(
     let mut completed_tool_calls = HashSet::new();
 
     for message in messages {
+        // A cell's assistant context is answered by its cell record, the
+        // protocol event committed with it, so its call awaits no tool
+        // result.
+        if matches!(
+            message.origin,
+            Some(MessageOrigin::TurnOutput {
+                cell_id: Some(_),
+                ..
+            })
+        ) {
+            continue;
+        }
         for part in message.parts.iter() {
             // Reasoning parts don't participate in tool pairing and are
             // always safe to resume through.

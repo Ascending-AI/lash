@@ -1,32 +1,18 @@
-use lash_core::AttachmentRef;
-
-use lash_rlm_types::CellOutcome;
-
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct RlmReasoningPart {
     pub(crate) text: String,
     pub(crate) replay: Option<lash_core::llm::types::ProviderReasoningReplay>,
 }
 
+/// What a reply's driver parks while its cell executes: the reply itself.
+/// The cell's prints and result arrive with the executor's response and go
+/// straight into the cell's record; nothing of them is parked.
 #[derive(Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct RlmDriverState {
     #[serde(default)]
     pub(crate) reasoning: Vec<RlmReasoningPart>,
     pub(crate) assistant_parts: Vec<lash_core::Part>,
-    pub(crate) images: Vec<AttachmentRef>,
-    #[serde(default)]
-    pub(crate) calls: Vec<lash_core::ExecutedCall>,
-    #[serde(default)]
-    pub(crate) calls_omitted: usize,
-    /// One entry per `print` from the executed lashlang block (plus any
-    /// raw stdout-style emission). Replaces the old split between a
-    /// concatenated `combined_output: String` and a sibling
-    /// `observations: Vec<String>` — the two carried the same content.
-    pub(crate) output: Vec<lash_rlm_types::RlmPrint>,
-    pub(crate) output_archive: Option<lash_core::RetainedOutput>,
-    /// The tagged outcome preserves null terminal values. Ambiguous parked
-    /// states with the old optional pair must be recreated before 1.0.
-    pub(crate) outcome: CellOutcome<lash_core::CellFailure>,
     pub(crate) code: String,
 }
 

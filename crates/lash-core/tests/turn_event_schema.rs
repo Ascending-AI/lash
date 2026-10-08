@@ -243,11 +243,12 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
             }),
         ),
         (
-            "code_block_completed (error + graph_key present)",
+            "code_block_completed (failed + graph_key present)",
             TurnEvent::CodeBlockCompleted {
                 language: "python".to_string(),
-                output: "1".to_string(),
-                error: Some(lash_core::CellFailure::new(
+                prints: vec!["1".to_string().into()],
+                prints_retained: None,
+                result: lash_core::CellResult::Failed(lash_core::CellFailure::new(
                     lash_core::CellFailureKind::Program,
                     "boom",
                 )),
@@ -258,19 +259,32 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
             json!({
                 "type": "code_block_completed",
                 "language": "python",
-                "output": "1",
-                "error": { "kind": "program", "message": "boom" },
+                "prints": [{
+                    "text": "1",
+                    "value": "1",
+                    "projection": {
+                        "truncated": false,
+                        "original_chars": 1,
+                        "projected_chars": 1,
+                        "limit_chars": 1,
+                    },
+                }],
+                "result": {
+                    "kind": "failed",
+                    "value": { "kind": "program", "message": "boom" },
+                },
                 "duration_ms": 5,
                 "tool_call_ids": [lash_core::ToolCallId::fixture("call-1").as_str()],
                 "graph_key": "effect:s:e",
             }),
         ),
         (
-            "code_block_completed (error + graph_key absent)",
+            "code_block_completed (finished + graph_key absent)",
             TurnEvent::CodeBlockCompleted {
                 language: "python".to_string(),
-                output: "1".to_string(),
-                error: None,
+                prints: Vec::new(),
+                prints_retained: None,
+                result: lash_core::CellResult::Finished(json!(null).into()),
                 duration_ms: 5,
                 tool_call_ids: vec![],
                 graph_key: None,
@@ -278,7 +292,8 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
             json!({
                 "type": "code_block_completed",
                 "language": "python",
-                "output": "1",
+                "prints": [],
+                "result": { "kind": "finished", "value": { "inline": null } },
                 "duration_ms": 5,
                 "tool_call_ids": [],
             }),

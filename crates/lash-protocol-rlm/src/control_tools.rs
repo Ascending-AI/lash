@@ -93,7 +93,7 @@ async fn read_output(call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
 pub(crate) fn decode_output_archive(
     bytes: &[u8],
 ) -> Result<Vec<Value>, lash_core::RuntimeEffectControllerError> {
-    serde_json::from_slice::<Vec<lash_core::Observation>>(bytes)
+    serde_json::from_slice::<Vec<lash_core::CellPrint>>(bytes)
         .map(|observations| {
             observations
                 .into_iter()

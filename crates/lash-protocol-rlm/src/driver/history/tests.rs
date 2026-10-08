@@ -52,17 +52,18 @@ fn assistant_reasoning_event(
 
 fn step_event(code: &str) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(rlm_protocol_event(
-        lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(lash_rlm_types::RlmTrajectoryEntry {
-            output_archive: None,
+        lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(Box::new(lash_core::CellRecord {
+            language: "typescript".to_string(),
+            prints_retained: None,
             id: "lashlang_step_0".to_string(),
             protocol_iteration: 0,
             code: code.to_string(),
-            output: vec!["ok".to_string().into()],
+            prints: vec!["ok".to_string().into()],
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            outcome: lash_rlm_types::CellOutcome::Running,
-        }),
+            result: lash_core::CellResult::Completed,
+        })),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
             crate::RLM_PROTOCOL_EVENT_VERSION
         )),
@@ -102,12 +103,13 @@ fn step_output_text_derives_image_metadata_from_the_trajectory_entry() {
         std::sync::Arc::new(crate::dialect::TypescriptDialect),
         lash_lashlang_runtime::LashlangSurface::default(),
     );
-    let entry = lash_rlm_types::RlmTrajectoryEntry {
-        output_archive: None,
+    let entry = lash_core::CellRecord {
+        language: "typescript".to_string(),
+        prints_retained: None,
         id: "lashlang_step_image".to_string(),
         protocol_iteration: 0,
         code: "print chart".to_string(),
-        output: Vec::new(),
+        prints: Vec::new(),
         images: vec![lash_core::AttachmentRef {
             id: lash_core::attachments::content_id(&[0; 123]),
             media_type: "image/png".parse().expect("valid media type"),
@@ -120,7 +122,7 @@ fn step_output_text_derives_image_metadata_from_the_trajectory_entry() {
         }],
         calls: Vec::new(),
         calls_omitted: 0,
-        outcome: lash_rlm_types::CellOutcome::Running,
+        result: lash_core::CellResult::Completed,
     };
 
     let rendered = step_output_text(dialect.prompt_vocabulary(), 7, &entry);
@@ -202,13 +204,14 @@ fn ordered_reasoning_replay_precedes_cell_in_folded_history_message() {
 #[test]
 fn failed_observation_lists_executed_calls_and_frames_retry() {
     let event = SessionHistoryRecord::Protocol(rlm_protocol_event(
-        lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(lash_rlm_types::RlmTrajectoryEntry {
-            output_archive: None,
+        lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(Box::new(lash_core::CellRecord {
+            language: "typescript".to_string(),
+            prints_retained: None,
             id: "lashlang_step_failed".to_string(),
             protocol_iteration: 0,
             code: "first = await module.ok({ secret: 1 })\nsecond = await module.fail({})"
                 .to_string(),
-            output: Vec::new(),
+            prints: Vec::new(),
             images: Vec::new(),
             calls: vec![
                 lash_core::ExecutedCall {
@@ -223,11 +226,11 @@ fn failed_observation_lists_executed_calls_and_frames_retry() {
                 },
             ],
             calls_omitted: 0,
-            outcome: lash_rlm_types::CellOutcome::Failed(lash_core::CellFailure::new(
+            result: lash_core::CellResult::Failed(lash_core::CellFailure::new(
                 lash_core::CellFailureKind::Program,
                 "read failed at secret.txt; cache failed at .cache/lash/state",
             )),
-        }),
+        })),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
             crate::RLM_PROTOCOL_EVENT_VERSION
         )),
@@ -255,12 +258,13 @@ fn failed_observation_lists_executed_calls_and_frames_retry() {
 #[test]
 fn successful_observation_keeps_calls_and_exact_earlier_omission_marker() {
     let event = SessionHistoryRecord::Protocol(rlm_protocol_event(
-        lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(lash_rlm_types::RlmTrajectoryEntry {
-            output_archive: None,
+        lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(Box::new(lash_core::CellRecord {
+            language: "typescript".to_string(),
+            prints_retained: None,
             id: "lashlang_step_success".to_string(),
             protocol_iteration: 0,
             code: "value = module.ok()".to_string(),
-            output: Vec::new(),
+            prints: Vec::new(),
             images: Vec::new(),
             calls: vec![lash_core::ExecutedCall {
                 operation: "module.ok".to_string(),
@@ -268,8 +272,8 @@ fn successful_observation_keeps_calls_and_exact_earlier_omission_marker() {
                 call_id: None,
             }],
             calls_omitted: 3,
-            outcome: lash_rlm_types::CellOutcome::Running,
-        }),
+            result: lash_core::CellResult::Completed,
+        })),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
             crate::RLM_PROTOCOL_EVENT_VERSION
         )),
@@ -294,17 +298,18 @@ fn failed_step_event(id: &str, code: &str, error: &str) -> SessionHistoryRecord 
 
 fn step_failed_with(id: &str, code: &str, failure: lash_core::CellFailure) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(rlm_protocol_event(
-        lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(lash_rlm_types::RlmTrajectoryEntry {
-            output_archive: None,
+        lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(Box::new(lash_core::CellRecord {
+            language: "typescript".to_string(),
+            prints_retained: None,
             id: id.to_string(),
             protocol_iteration: 0,
             code: code.to_string(),
-            output: Vec::new(),
+            prints: Vec::new(),
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            outcome: lash_rlm_types::CellOutcome::Failed(failure),
-        }),
+            result: lash_core::CellResult::Failed(failure),
+        })),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
             crate::RLM_PROTOCOL_EVENT_VERSION
         )),

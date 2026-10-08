@@ -1,7 +1,7 @@
 //! The typed, decoded history of retained committed nodes (ADR 0129). Live
 //! observations are provisional; only these entries describe committed
 //! history. Lash decodes facts here: roles, content blocks, tool calls and
-//! results, code cells and their outcomes, the sealed reply and omission
+//! results, code cells and their results, the sealed reply and omission
 //! counts. It renders nothing: hosts own every presentation decision.
 
 use crate::{
@@ -9,7 +9,7 @@ use crate::{
     SessionHistoryRecord, SessionNodePayload, SessionNodeRecord, TurnId,
 };
 use lash_sansio::tool_output::ModelToolReturnPart;
-use lash_sansio::{CellFailure, ExecutedCall, OutputValue, RetainedOutput, ToolCallId};
+use lash_sansio::{CellRecord, RetainedOutput, ToolCallId};
 use std::sync::Arc;
 
 /// Opaque entry identity. Equality and transport do not expose its spelling.
@@ -35,6 +35,10 @@ pub struct EntryProvenance {
     pub turn_id: Option<TurnId>,
     pub input_id: Option<InputId>,
     pub plugin_id: Option<String>,
+    /// The executed cell the entry belongs to: a cell entry's own
+    /// [`CellRecord::id`], and the same id on the message that carries the
+    /// cell's assistant context.
+    pub cell_id: Option<String>,
     /// The entry is its turn's sealed reply: the runtime minted its marker.
     pub is_turn_reply: bool,
 }
@@ -105,65 +109,13 @@ pub struct TranscriptMessage {
     pub blocks: Vec<TranscriptBlock>,
 }
 
-/// One code cell a protocol executed, with its typed outcome.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct TranscriptCell {
-    pub language: String,
-    pub code: String,
-    /// Inline prints, in order; empty when `prints_retained` holds them.
-    pub prints: Vec<CellPrint>,
-    /// One archive of every print, when they exceeded the inline limit.
-    pub prints_retained: Option<RetainedOutput>,
-    pub result: CellResult,
-    /// The dispatches the cell executed. An entry's `call_id` is the id of
-    /// the host tool call's own record; `None` for a dispatch lash handled
-    /// with no host tool call.
-    pub calls: Vec<ExecutedCall>,
-    /// Calls the cell made beyond the recorded `calls`.
-    pub calls_omitted: usize,
-    pub images: Vec<AttachmentRef>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct CellPrint {
-    pub text: String,
-    pub value: serde_json::Value,
-}
-
-/// What a cell resolved to.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
-pub enum CellResult {
-    /// The cell ran to its end without a terminal value.
-    Completed,
-    Failed(CellFailure),
-    /// The cell finished its turn with this value.
-    Finished(TerminalValue),
-}
-
-/// A cell's terminal value: inline, or retained with its witness.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
-pub enum TerminalValue {
-    Inline(serde_json::Value),
-    Retained(RetainedOutput),
-}
-
-impl From<OutputValue> for TerminalValue {
-    fn from(value: OutputValue) -> Self {
-        match value {
-            OutputValue::Inline(value) => Self::Inline(value),
-            OutputValue::Retained(value) => Self::Retained(value),
-        }
-    }
-}
-
 /// What a committed node decodes to.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum TranscriptItem {
     Message(TranscriptMessage),
-    Cell(Box<TranscriptCell>),
+    /// One code cell a protocol executed: the record its protocol committed.
+    Cell(Box<CellRecord>),
     Suppressed(SuppressionReason),
 }
 
@@ -275,8 +227,13 @@ impl SessionTranscript {
                                 provenance.turn_id = Some(turn_id.clone());
                                 provenance.input_id = input_id.clone();
                             }
-                            Some(MessageOrigin::TurnOutput { turn_id, source }) => {
+                            Some(MessageOrigin::TurnOutput {
+                                turn_id,
+                                source,
+                                cell_id,
+                            }) => {
                                 provenance.turn_id = Some(turn_id.clone());
+                                provenance.cell_id = cell_id.clone();
                                 if let crate::TurnOutputSource::Plugin { plugin_id } = source {
                                     provenance.plugin_id = Some(plugin_id.clone());
                                 }
@@ -304,6 +261,9 @@ impl SessionTranscript {
                         }
                     }
                 };
+                if let TranscriptItem::Cell(cell) = &item {
+                    provenance.cell_id = Some(cell.id.clone());
+                }
                 Ok(TranscriptEntry {
                     entry_id: EntryId(node.node_id.clone()),
                     provenance,
@@ -420,6 +380,17 @@ fn decode_message(message: &Message) -> TranscriptItem {
         return TranscriptItem::Suppressed(SuppressionReason::NoCommittedReply);
     };
     TranscriptItem::Message(TranscriptMessage { role, blocks })
+}
+
+/// Every part of a committed message as its content block, in part order:
+/// what a protocol's decoder returns for a message it knows is content, such
+/// as the assistant context of a cell it ran.
+pub fn message_blocks(message: &Message) -> Vec<TranscriptBlock> {
+    message
+        .parts
+        .iter()
+        .filter_map(|part| decode_part(part, None))
+        .collect()
 }
 
 /// The part kinds, folded exhaustively inside their owning crate.

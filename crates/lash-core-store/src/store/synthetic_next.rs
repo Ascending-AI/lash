@@ -193,7 +193,6 @@ pub(super) const RECORD_UPCASTERS: &[RecordUpcaster] = &[
     owner_tree("SCOPE_STORAGE_PAYLOAD_VERSION", lift_scope_storage_payload),
     owner_decoder("LASHLANG_SNAPSHOT_VERSION"),
     owner_decoder("RLM_SNAPSHOT_VERSION"),
-    owner_decoder("NATIVE_TRANSPORT_VERSION"),
     owner_tree("RLM_DRIVER_STATE_VERSION", lift_native_driver_state),
     owner_decoder("SQLITE_BLOB_ENVELOPE_VERSION"),
 ];
@@ -247,7 +246,6 @@ pub(super) const WRITER_PINS: &[WriterPin] = &[
     owner_pin("LASHLANG_SNAPSHOT_VERSION"),
     owner_pin("WORKFLOW_GRAPH_SCHEMA_VERSION"),
     owner_pin("RLM_SNAPSHOT_VERSION"),
-    owner_pin("NATIVE_TRANSPORT_VERSION"),
     owner_pin("RLM_DRIVER_STATE_VERSION"),
     owner_pin("SQLITE_BLOB_ENVELOPE_VERSION"),
     pin(

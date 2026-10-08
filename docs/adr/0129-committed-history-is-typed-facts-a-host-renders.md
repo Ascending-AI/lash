@@ -18,13 +18,20 @@ timestamp, its typed turn/input provenance, and a `TranscriptItem`:
 - `Message`: a `TranscriptRole` and the message's `TranscriptBlock`s in part
   order (text, reasoning, attachments, tool calls with their arguments, tool
   results with their typed blocks, and code, output and error parts);
-- `Cell`: a code cell a protocol executed, with its code, its prints (or
-  their retained archive), its typed `CellResult` (completed, failed with its
-  `CellFailure`, or finished with its `TerminalValue`), its executed calls
+- `Cell`: a code cell a protocol executed, as the one `CellRecord` its
+  protocol committed (FIG-5527): its id, its code, its prints (each a
+  `CellPrint`, or their retained archive), its typed `CellResult` (completed,
+  failed with its `CellFailure`, or finished with its `OutputValue`), its
+  executed calls
   (each an `ExecutedCall`: the operation, its outcome and the `call_id` of
   the host tool call's `ToolCallRecord`, absent only for a dispatch lash
   handled itself; [ADR 0117](0117-lash-names-every-tool-call.md) §7),
-  `calls_omitted` (the calls beyond the recorded bound) and its images;
+  `calls_omitted` (the calls beyond the recorded bound) and its images. The
+  executor's `ExecResponse` reports the same `CellPrint` and `CellResult`
+  values and the `CodeBlockCompleted` activity carries them, so a cell has
+  one print shape and one result shape from execution to the transcript. The
+  message that carries a cell's assistant context names the cell in
+  `EntryProvenance::cell_id`, on either RLM channel;
 - `Suppressed`: a named `SuppressionReason`.
 
 Lash keeps the interpretation a host cannot do itself. Core owns node-backed

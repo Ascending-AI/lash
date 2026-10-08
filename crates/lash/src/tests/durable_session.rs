@@ -2033,3 +2033,177 @@ async fn a_cells_recorded_tool_calls_are_bounded_by_the_recorded_presentation() 
     reopened.shutdown().await?;
     Ok(())
 }
+
+/// An executed cell is one typed record, and its assistant context is
+/// ordinary history, on both RLM channels (FIG-5527). The reply that ran the
+/// cell reads back from the durable transcript after a reopen as an
+/// assistant message naming the cell, with the native channel's
+/// `execute_code` call beside its prose; the cell reads back as the record
+/// its protocol committed, whose prints and result are the values the
+/// executor reported in the cell's completion activity. One decoder reads
+/// both channels.
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cells_assistant_context_and_record_read_back_from_the_transcript_after_a_reopen()
+-> Result<()> {
+    use crate::transcript::{CellResult, TranscriptBlock, TranscriptItem, TranscriptRole};
+    use lash_protocol_rlm::RlmChannel;
+
+    const PROGRAM: &str = "print(\"counted\");\nfinish(\"three\");";
+    const PROSE: &str = "Counting first.";
+
+    fn native_arguments() -> String {
+        serde_json::json!({ "code": PROGRAM }).to_string()
+    }
+    fn core(backend: lash_core::Backend, channel: RlmChannel) -> Result<LashCore> {
+        let provider = crate::testing::TestProvider::builder()
+            .kind("cell-record")
+            .complete(move |_request| async move {
+                Ok(match channel {
+                    RlmChannel::NativeTool => LlmResponse {
+                        parts: vec![
+                            LlmOutputPart::Text {
+                                text: PROSE.to_string(),
+                                response_meta: None,
+                            },
+                            LlmOutputPart::ToolCall {
+                                call_id: "provider-call-1".to_string(),
+                                tool_name: "execute_code".to_string(),
+                                input_json: native_arguments(),
+                                replay: None,
+                            },
+                        ],
+                        ..LlmResponse::default()
+                    },
+                    RlmChannel::Cell => {
+                        text_response(&format!("{PROSE}\n{}", typescript_block(PROGRAM)))
+                    }
+                })
+            })
+            .build()
+            .into_handle();
+        let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+            lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+                .channel(channel)
+                .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+                .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+                .build(),
+            Arc::new(lash_protocol_rlm::TypescriptDialect),
+            &backend,
+        )
+        .with_worker_service(untimed_fixture_workers());
+        explicit_ephemeral_facets(LashCore::rlm_builder(backend, factory))
+            .serve_test_llm_profile(provider, mock_llm_profile_spec())
+            .build(crate::testing::runtime_lease_owner())
+    }
+
+    for (channel, name) in [
+        (RlmChannel::NativeTool, "cell-record-native"),
+        (RlmChannel::Cell, "cell-record-fenced"),
+    ] {
+        let backend = sqlite_memory_store_backend().await;
+        let session_id = id(name);
+        let running = core(backend.clone(), channel)?;
+        let session = running
+            .session(session_id.clone())
+            .created()
+            .await
+            .open()
+            .await?;
+        let events = RecordingEvents::default();
+        session
+            .send(crate::TurnInput::text("count"))
+            .output_into(&events)
+            .await?;
+        // What the executor reported when the cell settled.
+        let completed = events
+            .snapshot()
+            .await
+            .into_iter()
+            .find_map(|activity| match activity.event {
+                crate::TurnEvent::CodeBlockCompleted {
+                    prints,
+                    prints_retained,
+                    result,
+                    ..
+                } => Some((prints, prints_retained, result)),
+                _ => None,
+            })
+            .expect("the cell's completion activity");
+        drop(session);
+        running.shutdown().await?;
+
+        let reopened = core(backend, channel)?;
+        let transcript = reopened
+            .session(session_id)
+            .open()
+            .await?
+            .durable()
+            .transcript()
+            .await?;
+        let cells = transcript
+            .visible()
+            .filter_map(|entry| match &entry.item {
+                TranscriptItem::Cell(cell) => Some((entry, cell)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(cells.len(), 1, "{name}: the turn ran one cell");
+        let (cell_entry, cell) = cells[0];
+        assert_eq!(cell.code, PROGRAM, "{name}");
+        assert_eq!(cell.language, "typescript", "{name}");
+        assert_eq!(cell_entry.provenance.cell_id.as_ref(), Some(&cell.id));
+        // The record's prints and result are the executor's, unconverted.
+        assert_eq!(cell.prints.len(), 1, "{name}: {cell:?}");
+        assert_eq!(cell.prints[0].value, serde_json::json!("counted"));
+        assert_eq!(
+            cell.result,
+            CellResult::Finished(serde_json::json!("three").into()),
+            "{name}"
+        );
+        assert_eq!(
+            (&cell.prints, &cell.prints_retained, &cell.result),
+            (&completed.0, &completed.1, &completed.2),
+            "{name}: the record holds what the completion activity reported"
+        );
+
+        // The reply that ran the cell is an assistant message naming it.
+        let contexts = transcript
+            .visible()
+            .filter(|entry| entry.provenance.cell_id.as_ref() == Some(&cell.id))
+            .filter_map(|entry| match &entry.item {
+                TranscriptItem::Message(message) => Some(message),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(contexts.len(), 1, "{name}: one assistant context");
+        let context = contexts[0];
+        assert_eq!(context.role, TranscriptRole::Assistant, "{name}");
+        assert!(
+            context.blocks.contains(&TranscriptBlock::Text {
+                text: PROSE.to_string()
+            }),
+            "{name}: {context:?}"
+        );
+        let calls = context
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                TranscriptBlock::ToolCall {
+                    tool_name,
+                    arguments,
+                    ..
+                } => Some((tool_name.as_str(), arguments.clone())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        match channel {
+            RlmChannel::NativeTool => {
+                assert_eq!(calls, [("execute_code", native_arguments())], "{name}");
+            }
+            RlmChannel::Cell => assert!(calls.is_empty(), "{name}: {calls:?}"),
+        }
+        reopened.shutdown().await?;
+    }
+    Ok(())
+}

@@ -58,17 +58,17 @@ pub(super) fn print_observation_preserves_typed_value_and_records_cut_metadata()
         )
         .await;
 
-        assert!(response.error.is_none(), "{:?}", response.error);
-        assert!(response.observations.is_empty());
+        assert!(response.error().is_none(), "{:?}", response.error());
+        assert!(response.prints.is_empty());
         let archive = response
-            .output_archive
+            .prints_retained
             .as_ref()
             .expect("aggregate is archived");
         let bytes = attachments
             .read(&archive.reference)
             .await
             .expect("exact archive");
-        let observations: Vec<lash_core::Observation> =
+        let observations: Vec<lash_core::CellPrint> =
             serde_json::from_slice(&bytes).expect("observations");
         assert_eq!(observations.len(), 1);
         assert_eq!(observations[0].value["output"], large);
@@ -94,13 +94,13 @@ pub(super) fn console_log_of_a_large_record_stops_at_the_char_cap() {
         let (response, attachments) =
             execute_with_host_environment_and_archives(&code, lashlang::LashlangHostCatalog::new())
                 .await;
-        assert!(response.error.is_none(), "{:?}", response.error);
-        let archive = response.output_archive.as_ref().expect("archive");
+        assert!(response.error().is_none(), "{:?}", response.error());
+        let archive = response.prints_retained.as_ref().expect("archive");
         let bytes = attachments
             .read(&archive.reference)
             .await
             .expect("archive bytes");
-        let observations: Vec<lash_core::Observation> =
+        let observations: Vec<lash_core::CellPrint> =
             serde_json::from_slice(&bytes).expect("observations");
         let metadata = &observations[0].projection;
         assert!(metadata.truncated, "{metadata:?}");
@@ -119,11 +119,11 @@ pub(super) fn subcap_prints_stay_fully_inline_including_empty_and_null_values() 
             lashlang::LashlangHostCatalog::new(),
         )
         .await;
-        assert!(response.error.is_none(), "{:?}", response.error);
-        assert!(response.output_archive.is_none());
+        assert!(response.error().is_none(), "{:?}", response.error());
+        assert!(response.prints_retained.is_none());
         assert_eq!(
             response
-                .observations
+                .prints
                 .iter()
                 .map(|print| print.value.clone())
                 .collect::<Vec<_>>(),

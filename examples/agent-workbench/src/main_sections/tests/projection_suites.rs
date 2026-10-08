@@ -106,11 +106,11 @@ async fn durable_transcript_projection_fixture() -> Vec<crate::ChatRow> {
             }),
         ));
     }
-    let trajectory = lash::rlm::RlmTrajectoryEntry {
+    let trajectory = lash::transcript::CellRecord {
         id: "durable-tool-trajectory".to_string(),
         protocol_iteration: 1,
         code: "durable.tool_projection()".to_string(),
-        output_archive: Some(Box::new(lash::attachments::RetainedOutput {
+        prints_retained: Some(lash::attachments::RetainedOutput {
             reference: lash::attachments::AttachmentRef {
                 id: lash::attachments::content_id(b"durable-print-archive"),
                 media_type: "application/json".parse().expect("media type"),
@@ -119,7 +119,7 @@ async fn durable_transcript_projection_fixture() -> Vec<crate::ChatRow> {
                 label: None,
             },
             witness: "durable projection".to_string(),
-        })),
+        }),
         calls: vec![
             lash::persistence::ExecutedCall {
                 operation: "durable.success".to_string(),
@@ -134,7 +134,7 @@ async fn durable_transcript_projection_fixture() -> Vec<crate::ChatRow> {
         ],
         calls_omitted: 3,
         images: printed_images,
-        ..lash::rlm::RlmTrajectoryEntry::default()
+        ..lash::transcript::CellRecord::default()
     };
     let outcome = session
         .admin()
@@ -144,7 +144,7 @@ async fn durable_transcript_projection_fixture() -> Vec<crate::ChatRow> {
             nodes: vec![
                 lash::plugins::SessionAppendNode::message(committed),
                 lash::plugins::SessionAppendNode::protocol_event(lash::rlm::rlm_protocol_event(
-                    lash::rlm::RlmProtocolEvent::RlmTrajectoryEntry(trajectory),
+                    lash::rlm::RlmProtocolEvent::RlmTrajectoryEntry(Box::new(trajectory)),
                     lash::formats::RLM_PROTOCOL_EVENT_VERSION,
                 )),
             ],

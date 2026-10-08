@@ -79,7 +79,7 @@ function streamTurn(view, time, turnId, { nonce = "nonce-1", text = "what is the
     output: { outcome: { status: "success", payload: { results: [1] } } }, duration_ms: 12
   }));
   timeline.applyObservation(activity(turnId, {
-    type: "code_block_completed", language: "typescript", output: "sunny", duration_ms: 30, tool_call_ids: [`tc-${turnId}`]
+    type: "code_block_completed", language: "typescript", prints: [{ text: "sunny", value: "sunny", projection: {} }], result: { kind: "completed" }, duration_ms: 30, tool_call_ids: [`tc-${turnId}`]
   }));
   time.advance(500);
   beforeReply?.();
@@ -135,7 +135,7 @@ export const laws = [
         view.timeline.applyObservation(activity(turn, { type: "code_block_started", language: "typescript", code: `await greeting(${index})` }));
         view.timeline.applyObservation(activity(turn, { type: "tool_call_started", call_id: `tc-${index}`, name: "greeting", args: { index } }));
         view.timeline.applyObservation(activity(turn, { type: "tool_call_completed", call_id: `tc-${index}`, name: "greeting", output: {}, duration_ms: 1 }));
-        view.timeline.applyObservation(activity(turn, { type: "code_block_completed", language: "typescript", output: "hello", tool_call_ids: [`tc-${index}`] }));
+        view.timeline.applyObservation(activity(turn, { type: "code_block_completed", language: "typescript", prints: [{ text: "hello", value: "hello", projection: {} }], result: { kind: "completed" }, tool_call_ids: [`tc-${index}`] }));
       }
       const expected = [`input:${turn}`, `thinking:${turn}:0`, `code:${turn}:0`, `code:${turn}:1`, `reply:${turn}`];
       env.assert.deepEqual(rowKeys(view.list), expected, "live execution renders below the reply");

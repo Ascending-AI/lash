@@ -558,6 +558,38 @@ fn reasoning_parts_survive_snapshot_but_never_reach_the_model() {
     assert!(rendered_only.messages.is_empty());
 }
 
+/// A cell's assistant context carries the call that ran the cell and no
+/// tool result: the cell record answers it (FIG-5527). The same call in a
+/// message that names no cell is unanswered.
+#[test]
+fn prompt_resume_safety_accepts_a_cell_contexts_call_without_a_result() {
+    let context = |cell_id: Option<&str>| {
+        vec![Message {
+            id: "m0".to_string(),
+            role: MessageRole::Assistant,
+            parts: vec![Part::tool_call(
+                "m0.p0".to_string(),
+                r#"{"code":"finish(1)"}"#.to_string(),
+                crate::ToolCallId::fixture("tc1"),
+                "provider-call-1".to_string(),
+                "execute_code".to_string(),
+                None,
+            )]
+            .into(),
+            origin: Some(MessageOrigin::TurnOutput {
+                turn_id: crate::TurnId::from("turn-1"),
+                source: crate::TurnOutputSource::Plugin {
+                    plugin_id: "rlm_protocol".to_string(),
+                },
+                cell_id: cell_id.map(str::to_string),
+            }),
+            reply_marker: None,
+        }]
+    };
+    assert!(messages_are_prompt_resume_safe(&context(Some("cell-1"))));
+    assert!(!messages_are_prompt_resume_safe(&context(None)));
+}
+
 #[test]
 fn prompt_resume_safety_rejects_unmatched_tool_calls() {
     let msgs = vec![Message {

@@ -391,8 +391,9 @@ impl RuntimeTurnDriver<'_> {
                         correlation_id: Some(code_correlation_id.clone()),
                         event: TurnEvent::CodeBlockCompleted {
                             language: language.clone(),
-                            output: String::new(),
-                            error: Some(crate::CellFailure::new(
+                            prints: Vec::new(),
+                            prints_retained: None,
+                            result: crate::CellResult::Failed(crate::CellFailure::new(
                                 crate::CellFailureKind::Host,
                                 message,
                             )),
@@ -444,8 +445,9 @@ impl RuntimeTurnDriver<'_> {
                         correlation_id: Some(code_correlation_id.clone()),
                         event: TurnEvent::CodeBlockCompleted {
                             language: language.clone(),
-                            output: String::new(),
-                            error: Some(crate::CellFailure::new(
+                            prints: Vec::new(),
+                            prints_retained: None,
+                            result: crate::CellResult::Failed(crate::CellFailure::new(
                                 crate::CellFailureKind::Host,
                                 message,
                             )),
@@ -515,8 +517,9 @@ impl RuntimeTurnDriver<'_> {
                         correlation_id: Some(code_correlation_id.clone()),
                         event: TurnEvent::CodeBlockCompleted {
                             language: language.clone(),
-                            output: join_observations(&output.observations),
-                            error: output.error.clone(),
+                            prints: output.prints.clone(),
+                            prints_retained: output.prints_retained.clone(),
+                            result: output.result.clone(),
                             duration_ms: cell_duration_ms,
                             tool_call_ids: output
                                 .tool_calls
@@ -535,8 +538,9 @@ impl RuntimeTurnDriver<'_> {
                         correlation_id: Some(code_correlation_id.clone()),
                         event: TurnEvent::CodeBlockCompleted {
                             language: language.clone(),
-                            output: String::new(),
-                            error: Some(crate::CellFailure::new(
+                            prints: Vec::new(),
+                            prints_retained: None,
+                            result: crate::CellResult::Failed(crate::CellFailure::new(
                                 crate::CellFailureKind::Host,
                                 error.message.clone(),
                             )),
@@ -550,9 +554,9 @@ impl RuntimeTurnDriver<'_> {
         }
         if let Ok(output) = &result {
             if self.trace.is_observed() {
-                let observations_text = join_observations(&output.observations);
+                let observations_text = join_prints(&output.prints);
                 let observation_projections = output
-                    .observations
+                    .prints
                     .iter()
                     .map(|observation| observation.projection.clone())
                     .collect::<Vec<_>>();
@@ -580,10 +584,10 @@ impl RuntimeTurnDriver<'_> {
                     duration_ms: cell_duration_ms,
                     output: content.capture(|| observations_text.clone()),
                     output_chars: observations_text.chars().count(),
-                    observation_count: output.observations.len(),
+                    observation_count: output.prints.len(),
                     observation_projections: observation_projections.clone(),
-                    error: output.error.clone(),
-                    terminal_finish: content.capture(|| output.terminal_finish.clone()),
+                    error: output.error().cloned(),
+                    terminal_finish: content.capture(|| output.finish_value().cloned()),
                     tool_calls,
                 });
                 if !observation_projections.is_empty() {
@@ -632,10 +636,10 @@ impl RuntimeTurnDriver<'_> {
     }
 }
 
-fn join_observations(observations: &[crate::Observation]) -> String {
-    observations
+fn join_prints(prints: &[crate::CellPrint]) -> String {
+    prints
         .iter()
-        .map(|observation| observation.text.as_str())
+        .map(|print| print.text.as_str())
         .collect::<Vec<_>>()
         .join("\n")
 }

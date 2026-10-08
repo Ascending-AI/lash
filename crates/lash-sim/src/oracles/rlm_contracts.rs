@@ -844,10 +844,11 @@ pub(super) fn require_rlm_trajectory_error(
         return Err(format!("{contract} missing RLM trajectory entry"));
     };
     let recorded = last
-        .get("error")
-        .map(|error| serde_json::from_value::<lash_core::CellFailure>(error.clone()))
+        .get("result")
+        .map(|result| serde_json::from_value::<lash_core::CellResult>(result.clone()))
         .transpose()
-        .map_err(|error| format!("{contract} trajectory error is not a typed failure: {error}"))?;
+        .map_err(|error| format!("{contract} trajectory result is not a typed result: {error}"))?
+        .and_then(|result| result.failure().cloned());
     match (expected, recorded) {
         (Some((kind, message)), Some(failure))
             if failure.kind == kind && failure.message == message =>
@@ -873,7 +874,7 @@ pub(super) fn require_rlm_trajectory_output_contains(
         return Err(format!("{contract} missing RLM trajectory entry"));
     };
     if last
-        .get("output")
+        .get("prints")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()

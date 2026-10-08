@@ -3,9 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use lash_core::{
     Message, MessageRole, PartKind, RuntimeExecutionContext, facade_support::ChronologicalPayload,
 };
-use lash_rlm_types::{
-    RlmAttachmentRef, RlmHistoryItem, RlmHistoryRole, RlmProtocolEvent, RlmTrajectoryEntry,
-};
+use lash_rlm_types::{RlmAttachmentRef, RlmHistoryItem, RlmHistoryRole, RlmProtocolEvent};
 use lashlang::{ProjectedBindings, Value as FlowValue};
 
 #[cfg(test)]
@@ -186,6 +184,13 @@ fn completed_turn_internal_indices(
     for entry in entries {
         match &entry.payload {
             ChronologicalPayload::Message(message) => match message.role {
+                // A refused call's results are protocol output inside the
+                // turn, not the next turn's input.
+                MessageRole::User
+                    if crate::native::transport::is_exchange_message(
+                        message.origin.as_ref(),
+                        &message.parts,
+                    ) => {}
                 MessageRole::User | MessageRole::Event => {
                     assistant_content_indices.clear();
                     terminal_step = None;
@@ -208,11 +213,11 @@ fn completed_turn_internal_indices(
                 }
                 Some(RlmProtocolEvent::RlmTrajectoryEntry(step)) => {
                     terminal_step = step
-                        .outcome
-                        .terminal_value()
+                        .result
+                        .finish()
                         .is_some()
                         .then_some(entry.index)
-                        .filter(|_| step.output_archive.is_none());
+                        .filter(|_| step.prints_retained.is_none());
                 }
                 _ => {}
             },
@@ -341,6 +346,11 @@ pub(crate) fn prune_projected_binding_names<'a>(
 }
 
 fn history_item_from_message(message: &Message) -> Option<RlmHistoryItem> {
+    // A native provider exchange is replayed as its call/result pair and is
+    // the cell's own step in `history`, never a message beside it.
+    if crate::native::transport::is_exchange_message(message.origin.as_ref(), &message.parts) {
+        return None;
+    }
     let content = message_history_text(message);
     let attachments = message
         .parts
@@ -365,8 +375,8 @@ fn history_item_from_message(message: &Message) -> Option<RlmHistoryItem> {
     })
 }
 
-fn history_item_from_lashlang_step(entry: &RlmTrajectoryEntry) -> RlmHistoryItem {
-    RlmHistoryItem::from_trajectory_entry(entry)
+fn history_item_from_lashlang_step(entry: &lash_core::CellRecord) -> RlmHistoryItem {
+    RlmHistoryItem::from_cell_record(entry)
 }
 
 fn message_history_text(message: &Message) -> String {
@@ -394,6 +404,7 @@ fn history_role(role: MessageRole) -> RlmHistoryRole {
 mod tests {
     use super::*;
     use crate::projection::history_provider::answer;
+    use lash_core::CellRecord;
     use lashlang::{ProjectedReadRequest, ProjectedReadResponse, ProjectionProvider};
     use std::sync::Arc;
 
@@ -449,20 +460,21 @@ mod tests {
     }
 
     fn step_projection(output: &str) -> lash_core::facade_support::ChronologicalProjection {
-        let entry = RlmTrajectoryEntry {
-            output_archive: None,
+        let entry = CellRecord {
+            language: "typescript".to_string(),
+            prints_retained: None,
             id: "lashlang_step_0".to_string(),
             protocol_iteration: 0,
             code: "print big".to_string(),
-            output: vec![output.to_string().into()],
+            prints: vec![output.to_string().into()],
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            outcome: lash_rlm_types::CellOutcome::Running,
+            result: lash_core::CellResult::Completed,
         };
         let events = [lash_core::SessionHistoryRecord::Protocol(
             rlm_protocol_event(
-                RlmProtocolEvent::RlmTrajectoryEntry(entry),
+                RlmProtocolEvent::RlmTrajectoryEntry(Box::new(entry)),
                 lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
                     crate::RLM_PROTOCOL_EVENT_VERSION
                 )),
@@ -495,7 +507,7 @@ mod tests {
             host.backend().attachment_store(),
             lash_core::facade_support::AttachmentPolicy::standard(),
         );
-        let observations = vec![lash_core::Observation {
+        let observations = vec![lash_core::CellPrint {
             text: "bounded preview".to_string(),
             value: serde_json::json!(full),
             projection: Default::default(),
@@ -512,18 +524,18 @@ mod tests {
             )
             .await
             .expect("store archive");
-        let entry = RlmTrajectoryEntry {
+        let entry = CellRecord {
             id: "archived-step".to_string(),
-            output_archive: Some(Box::new(lash_core::RetainedOutput {
+            prints_retained: Some(lash_core::RetainedOutput {
                 reference: reference.clone(),
                 witness: "bounded preview".to_string(),
-            })),
+            }),
             ..Default::default()
         };
         let projection = lash_core::facade_support::ChronologicalProjection::from_turn_view(
             &[lash_core::SessionHistoryRecord::Protocol(
                 rlm_protocol_event(
-                    RlmProtocolEvent::RlmTrajectoryEntry(entry),
+                    RlmProtocolEvent::RlmTrajectoryEntry(Box::new(entry)),
                     lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
                         crate::RLM_PROTOCOL_EVENT_VERSION
                     )),
@@ -791,29 +803,29 @@ mod tests {
 
     #[test]
     fn completed_turn_projection_keeps_only_transcript_and_compacts_indices() {
-        let terminal = RlmTrajectoryEntry {
-            output_archive: None,
+        let terminal = CellRecord {
+            language: "typescript".to_string(),
+            prints_retained: None,
             id: "terminal".to_string(),
             protocol_iteration: 1,
             code: "finish { answer: 42 }".to_string(),
-            output: vec!["terminal output".to_string().into()],
+            prints: vec!["terminal output".to_string().into()],
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            outcome: lash_rlm_types::CellOutcome::Finished(
-                serde_json::json!({ "answer": 42 }).into(),
-            ),
+            result: lash_core::CellResult::Finished(serde_json::json!({ "answer": 42 }).into()),
         };
-        let retained = RlmTrajectoryEntry {
-            output_archive: None,
+        let retained = CellRecord {
+            language: "typescript".to_string(),
+            prints_retained: None,
             id: "retained".to_string(),
             protocol_iteration: 0,
             code: "print \"next\"".to_string(),
-            output: vec!["next".to_string().into()],
+            prints: vec!["next".to_string().into()],
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            outcome: lash_rlm_types::CellOutcome::Running,
+            result: lash_core::CellResult::Completed,
         };
         let events = [
             lash_core::SessionHistoryRecord::Conversation(
@@ -834,7 +846,7 @@ mod tests {
                 )),
             )),
             lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
-                RlmProtocolEvent::RlmTrajectoryEntry(terminal),
+                RlmProtocolEvent::RlmTrajectoryEntry(Box::new(terminal)),
                 lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
                     crate::RLM_PROTOCOL_EVENT_VERSION
                 )),
@@ -854,7 +866,7 @@ mod tests {
                 )),
             ),
             lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
-                RlmProtocolEvent::RlmTrajectoryEntry(retained),
+                RlmProtocolEvent::RlmTrajectoryEntry(Box::new(retained)),
                 lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
                     crate::RLM_PROTOCOL_EVENT_VERSION
                 )),
@@ -883,30 +895,32 @@ mod tests {
 
     #[test]
     fn completed_turn_projection_keeps_intermediate_steps_without_duplicate_prose() {
-        let intermediate = RlmTrajectoryEntry {
-            output_archive: None,
+        let intermediate = CellRecord {
+            language: "typescript".to_string(),
+            prints_retained: None,
             id: "intermediate".to_string(),
             protocol_iteration: 0,
             code: "missing_name".to_string(),
-            output: Vec::new(),
+            prints: Vec::new(),
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            outcome: lash_rlm_types::CellOutcome::Failed(lash_core::CellFailure::new(
+            result: lash_core::CellResult::Failed(lash_core::CellFailure::new(
                 lash_core::CellFailureKind::Program,
                 "unknown name",
             )),
         };
-        let terminal = RlmTrajectoryEntry {
-            output_archive: None,
+        let terminal = CellRecord {
+            language: "typescript".to_string(),
+            prints_retained: None,
             id: "terminal".to_string(),
             protocol_iteration: 1,
             code: "finish \"done\"".to_string(),
-            output: Vec::new(),
+            prints: Vec::new(),
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            outcome: lash_rlm_types::CellOutcome::Finished(serde_json::json!("done").into()),
+            result: lash_core::CellResult::Finished(serde_json::json!("done").into()),
         };
         let events = [
             lash_core::SessionHistoryRecord::Conversation(
@@ -927,13 +941,13 @@ mod tests {
                 )),
             )),
             lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
-                RlmProtocolEvent::RlmTrajectoryEntry(intermediate),
+                RlmProtocolEvent::RlmTrajectoryEntry(Box::new(intermediate)),
                 lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
                     crate::RLM_PROTOCOL_EVENT_VERSION
                 )),
             )),
             lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
-                RlmProtocolEvent::RlmTrajectoryEntry(terminal),
+                RlmProtocolEvent::RlmTrajectoryEntry(Box::new(terminal)),
                 lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
                     crate::RLM_PROTOCOL_EVENT_VERSION
                 )),
@@ -960,7 +974,7 @@ mod tests {
             &projection.history()[1],
             RlmHistoryItem::LashlangStep { id, outcome, .. }
                 if id == "intermediate"
-                    && outcome.error().map(|error| error.message.as_str()) == Some("unknown name")
+                    && outcome.error.as_ref().map(|error| error.message.as_str()) == Some("unknown name")
         ));
         assert!(matches!(
             &projection.history()[2],

@@ -10,7 +10,7 @@
 //!   `--- history[N] ---` meta-format: what the model sees as history is exactly
 //!   the grammar it must emit, so a continuation lands in that grammar.
 //! - **Folding.** A step is stored as two consecutive entries — an assistant
-//!   prose `Message` then a `RlmTrajectoryEntry`. They fold into one assistant
+//!   prose `Message` then a `CellRecord`. They fold into one assistant
 //!   message. `visit_turn_view` is a push visitor with no lookahead, so the
 //!   prose is buffered (`PendingProse`) and either folded into the next step or
 //!   flushed as a standalone assistant message (a prose-only finish).
@@ -129,6 +129,13 @@ pub(super) fn render_history_messages(
     let superseded = superseded_failure_indices(input.events, input.turn_messages);
 
     lash_core::facade_support::visit_turn_view(input.events, input.turn_messages, |entry| {
+        // A native provider exchange is not prose: this channel shows its
+        // cell as the semantic step alone.
+        if let BorrowedChronologicalPayload::Message(message) = entry.payload
+            && crate::native::transport::is_exchange_message(message.origin, message.parts)
+        {
+            return;
+        }
         if history_projection.suppresses_chronological(entry.index)
             || superseded.contains(&entry.index)
         {
@@ -303,7 +310,7 @@ fn superseded_failure_indices(
                         prose_entries.push(entry.index);
                     }
                     Some(lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step)) => {
-                        if step.outcome.is_failed() {
+                        if step.result.is_failed() {
                             pending_failure_entries.append(&mut prose_entries);
                             pending_failure_entries.push(entry.index);
                             any_failure_pending = true;
@@ -397,10 +404,7 @@ fn append_borrowed_entry_image_blocks(
     }
 }
 
-fn append_step_image_blocks(
-    step: &lash_rlm_types::RlmTrajectoryEntry,
-    blocks: &mut Vec<LlmContentBlock>,
-) {
+fn append_step_image_blocks(step: &lash_core::CellRecord, blocks: &mut Vec<LlmContentBlock>) {
     for image in &step.images {
         blocks.push(LlmContentBlock::Attachment {
             reference: Box::new(image.clone()),
@@ -447,10 +451,10 @@ fn message_text(
 pub(crate) fn step_output_text(
     vocabulary: crate::dialect::DialectPromptVocabulary,
     index: usize,
-    entry: &lash_rlm_types::RlmTrajectoryEntry,
+    entry: &lash_core::CellRecord,
 ) -> String {
     let mut out = String::new();
-    for (output_index, item) in entry.output.iter().enumerate() {
+    for (output_index, item) in entry.prints.iter().enumerate() {
         if !out.is_empty() {
             out.push_str("\n\n");
         }
@@ -460,7 +464,7 @@ pub(crate) fn step_output_text(
             item.text
         );
     }
-    if let Some(archive) = &entry.output_archive {
+    if let Some(archive) = &entry.prints_retained {
         let _ = write!(
             out,
             "{}\nFull outputs: await control.read_output({{ archive: history[{index}].output_archive.attachment }})",
@@ -502,16 +506,16 @@ pub(crate) fn step_output_text(
             let _ = write!(out, "\n- {} → {}", call.operation, call.outcome.as_str());
         }
     }
-    match &entry.outcome {
+    match &entry.result {
         // The entry records the typed failure; its recovery guidance is
         // prompt text, rendered here in this dialect's words.
-        lash_rlm_types::CellOutcome::Failed(failure) => {
+        lash_core::CellResult::Failed(failure) => {
             if !out.is_empty() {
                 out.push_str("\n\n");
             }
             out.push_str(&crate::feedback::render(failure, vocabulary.cell_noun));
         }
-        lash_rlm_types::CellOutcome::Finished(lash_core::OutputValue::Inline(final_output)) => {
+        lash_core::CellResult::Finished(lash_core::OutputValue::Inline(final_output)) => {
             if !out.is_empty() {
                 out.push_str("\n\n");
             }
@@ -523,14 +527,14 @@ pub(crate) fn step_output_text(
         }
         // A final value too long for history is shown as its witness, never
         // expanded (FIG-1643).
-        lash_rlm_types::CellOutcome::Finished(lash_core::OutputValue::Retained(retained)) => {
+        lash_core::CellResult::Finished(lash_core::OutputValue::Retained(retained)) => {
             if !out.is_empty() {
                 out.push_str("\n\n");
             }
             out.push_str("Final output:\n");
             out.push_str(&retained.witness);
         }
-        lash_rlm_types::CellOutcome::Running => {}
+        lash_core::CellResult::Completed => {}
     }
     if out.is_empty() {
         out.push_str("(no printed output)");

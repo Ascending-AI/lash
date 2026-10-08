@@ -134,8 +134,8 @@ impl lash_core::plugin::CodeExecutorPlugin for EffectControllerTestCodeExecutor 
         _request: lash_core::ExecRequest,
     ) -> Result<lash_core::ExecResponse, lash_core::SessionError> {
         Ok(lash_core::ExecResponse {
-            output_archive: None,
-            observations: vec![lash_core::Observation {
+            prints_retained: None,
+            prints: vec![lash_core::CellPrint {
                 text: "exec output".to_string(),
                 value: serde_json::json!("exec output"),
                 projection: Default::default(),
@@ -143,10 +143,9 @@ impl lash_core::plugin::CodeExecutorPlugin for EffectControllerTestCodeExecutor 
             calls: Vec::new(),
             tool_calls: Vec::new(),
             printed_images: Vec::new(),
-            error: None,
+            result: lash_core::CellResult::Completed,
+            retained_finish_value: None,
             degraded_bindings: Vec::new(),
-            terminal_finish: None,
-            terminal_finish_retained: None,
             suspended: false,
         })
     }
@@ -223,7 +222,7 @@ impl lash_sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol> for EffectCo
                 TurnFinish::FinalValue {
                     value: serde_json::json!(
                         response
-                            .observations
+                            .prints
                             .iter()
                             .map(|observation| observation.text.as_str())
                             .collect::<Vec<_>>()
