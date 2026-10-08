@@ -145,6 +145,35 @@ pub async fn request_session_close(
     }
 }
 
+/// Ask `session`, a live session with no actor yet (its first work was
+/// never sent), to close: one mailbox transaction creates its actor and
+/// appends the close request. An actor a concurrent producer created first
+/// takes the request as [`request_session_close`] appends it.
+///
+/// # Errors
+///
+/// The store's refusal other than an existing, absent or ended actor.
+pub async fn request_first_session_close(
+    backend: &Backend,
+    session: &SessionId,
+) -> Result<SessionCloseRequested, DurableError> {
+    let actor = session_actor(session);
+    let mut tx = MailTx::new();
+    tx.create_actor(actor.clone(), lash_durable::FormatSet::unstarted_session());
+    tx.append(actor, MailKind::new(SESSION_CLOSE_MAIL), String::new());
+    match backend
+        .durable()
+        .commit_mail(tx, CommitLabel::MAIL_SESSION)
+        .await
+    {
+        Ok(_) => Ok(SessionCloseRequested::Requested),
+        Err(DurableError::MailRefused(MailRefusal::ActorExists(_))) => {
+            request_session_close(backend, session).await
+        }
+        Err(error) => Err(error),
+    }
+}
+
 /// The session's actor key. A session id is never blank, so it always makes
 /// one.
 #[expect(

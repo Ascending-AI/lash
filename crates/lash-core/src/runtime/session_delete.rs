@@ -11,11 +11,14 @@
 //! transaction, so a crash resumes at the step it interrupted, and nothing
 //! about the delete is owed by the caller or by a relay.
 //!
-//! **No close, no delete.** An id with no session actor has nothing to
-//! close, so its deletion is a no-op (ADR 0049): nothing is written and the
-//! id stays creatable.
+//! **No close, no delete.** An id with no session has nothing to close, so
+//! its deletion is a no-op (ADR 0049): nothing is written and the id stays
+//! creatable. A created session whose first work was never sent has no
+//! actor yet: its close request creates the actor with its mail.
 
-use crate::runtime::durable::session_close::{SessionCloseRequested, request_session_close};
+use crate::runtime::durable::session_close::{
+    SessionCloseRequested, request_first_session_close, request_session_close,
+};
 use crate::{SessionDeleteContext, SessionId};
 use lash_durable::DurableError;
 
@@ -42,7 +45,29 @@ pub async fn delete_session(
 ) -> Result<SessionDeletion, DurableError> {
     let session_id = context.session_id().clone();
     let backend = context.controller().backend();
-    Ok(match request_session_close(backend, &session_id).await? {
+    let requested = match request_session_close(backend, &session_id).await? {
+        // No actor: a live session whose first work was never sent has
+        // none yet, and its close creates it.
+        SessionCloseRequested::Absent => match backend
+            .session_store_factory()
+            .lookup_session(&session_id)
+            .await
+            .map_err(|error| {
+                DurableError::Store(lash_durable::StoreFailure {
+                    kind: lash_durable::StoreFailureKind::Unavailable,
+                    message: format!("the session catalog's lookup of {session_id}: {error}"),
+                })
+            })? {
+            crate::store::SessionLookup::Live(_) => {
+                request_first_session_close(backend, &session_id).await?
+            }
+            crate::store::SessionLookup::Absent | crate::store::SessionLookup::Deleted => {
+                SessionCloseRequested::Absent
+            }
+        },
+        requested => requested,
+    };
+    Ok(match requested {
         SessionCloseRequested::Requested => SessionDeletion::Requested { session_id },
         SessionCloseRequested::AlreadyClosed => SessionDeletion::AlreadyDeleted { session_id },
         SessionCloseRequested::Absent => SessionDeletion::Absent { session_id },

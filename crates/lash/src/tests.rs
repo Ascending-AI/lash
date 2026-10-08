@@ -407,6 +407,7 @@ fn untimed_fixture_workers() -> crate::rlm::WorkerService {
 }
 
 mod absent_session_delete;
+mod assistant_hook_faults;
 mod config_transactions;
 mod core_session_builder;
 mod crashed_create_drain;
@@ -465,6 +466,7 @@ mod session_create;
 mod standard_compaction_persistence;
 mod standard_protocol_turns;
 mod stream_evidence;
+mod store_faults;
 mod tool_intent_ingress;
 mod tool_restore_report;
 mod turn_checkpoints;
