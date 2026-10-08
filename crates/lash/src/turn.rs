@@ -27,6 +27,8 @@ pub struct TurnReport {
     pub assistant_output: AssistantOutput,
     /// This session's own LLM tokens for the turn. Every session owns its
     /// usage; child-session tokens live on each child's own turn report.
+    /// A durable report sums reported usage from the attempts in `llm_calls`;
+    /// observation gaps can leave this sum incomplete.
     pub usage: TokenUsage,
     /// Provider calls made by the parent session during this turn, in protocol
     /// order. Child-session calls remain on each child's result. This is the
@@ -81,12 +83,12 @@ pub enum ReportSource {
     /// turn's own account.
     #[default]
     Live,
-    /// Rebuilt from the session's durable state because the turn ran in
-    /// another process (or its live report was no longer held): the outcome,
-    /// the session state after it and the acceptance are the store's; the
-    /// usage, tool records and execution metrics are read from the session's
-    /// usage report and observation instead. Model calls retain the sealed
-    /// records this follower observed, with unavailable history reported as gaps.
+    /// Assembled from the stored outcome, session state and input acceptance.
+    /// Tool records are read from the run's recorded calls. Model calls retain
+    /// the sealed records this follower observed, and usage sums the reported
+    /// usage of their attempts. Unavailable history is reported as gaps, so
+    /// the model-call ledger and its usage sum can be incomplete. Execution
+    /// metrics are left at their default values.
     Durable,
 }
 

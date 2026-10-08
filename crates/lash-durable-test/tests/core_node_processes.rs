@@ -925,6 +925,15 @@ async fn a_childs_model_usage_stays_on_the_childs_own_turn(tier: Tier) {
         vec![parent_spawns, parent_answers],
         "the parent records its own two calls and none of its child's"
     );
+    assert_eq!(
+        parent.result.usage,
+        lash_core::TokenUsage {
+            input_tokens: 16,
+            output_tokens: 4,
+            ..lash_core::TokenUsage::default()
+        },
+        "the parent report excludes its child's usage"
+    );
     let child = SessionId::from("usage-linked-child");
     deployment
         .core
@@ -950,6 +959,14 @@ async fn a_childs_model_usage_stays_on_the_childs_own_turn(tier: Tier) {
         call_usage(&cached),
         vec![cached_child],
         "the child's cache-read-only call is its own turn's"
+    );
+    assert_eq!(
+        cached.result.usage,
+        lash_core::TokenUsage {
+            cache_read_input_tokens: 9,
+            ..lash_core::TokenUsage::default()
+        },
+        "the linked child report includes its own cache-only usage"
     );
     drop(deployment.backend);
 }
@@ -982,11 +999,64 @@ async fn a_turn_report_sums_its_own_model_calls_usage(tier: Tier) {
     drop(deployment.backend);
 }
 
+/// A tool round makes two model calls, and the report sums every usage bucket.
+async fn a_turn_report_sums_two_model_calls_usage(tier: Tier) {
+    let first = LlmUsage {
+        cache_write_input_tokens: 2,
+        ..usage(11, 3, 7, 1)
+    };
+    let second = LlmUsage {
+        cache_write_input_tokens: 4,
+        ..usage(5, 2, 9, 1)
+    };
+    let model = {
+        let (first, second) = (first.clone(), second.clone());
+        scripted(move |request, _| {
+            if results(request).is_empty() {
+                reporting(
+                    call(
+                        "report-usage-tool",
+                        "write_attachment",
+                        serde_json::json!({}),
+                    ),
+                    &first,
+                )
+            } else {
+                reporting(text(request, CHILD_REPLY), &second)
+            }
+        })
+    };
+    let deployment = deploy(tier, Vec::new(), |builder| {
+        builder
+            .serve_test_llm_profile(model, metadata())
+            .tools(write_attachment_tool())
+    })
+    .await;
+    let output = settle(&deployment.core, "report-two-calls", "write the attachment").await;
+    assert_eq!(call_usage(&output), vec![first, second], "{output:?}");
+    assert_eq!(
+        output.result.usage,
+        lash_core::TokenUsage {
+            input_tokens: 16,
+            output_tokens: 5,
+            cache_read_input_tokens: 16,
+            cache_write_input_tokens: 6,
+            reasoning_output_tokens: 2,
+        },
+        "the report sums both calls, including cache and reasoning tokens"
+    );
+    drop(deployment.backend);
+}
+
 mod sqlite_memory_report_usage {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "FIG-5328: a turn read through send() reports zero usage"]
     async fn a_turn_report_sums_its_own_model_calls_usage() {
         super::a_turn_report_sums_its_own_model_calls_usage(super::Tier::SqliteMemory).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_turn_report_sums_two_model_calls_usage() {
+        super::a_turn_report_sums_two_model_calls_usage(super::Tier::SqliteMemory).await;
     }
 }
 

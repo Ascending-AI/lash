@@ -1227,7 +1227,7 @@ laws = [
 ]
 disposition = "replaced-by:crates/lash-durable-test/tests/core_node_processes.rs::a_childs_model_usage_stays_on_the_childs_own_turn"
 status = "deleted"
-note = "FIG-5309 re-wrote the law over a spawn_agent child and a linked child's send(), on each turn's call ledger; TurnReport::usage reads zero through send() and its law (sqlite_memory_report_usage) is #[ignore]d against FIG-5328"
+note = "FIG-5309 re-wrote the law over a spawn_agent child and a linked child's send(), on each turn's call ledger; FIG-5328 derives TurnReport::usage from those call attempts and enables the single-call and two-call report-usage laws in sqlite_memory_report_usage"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/child_sessions.rs"

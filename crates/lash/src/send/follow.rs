@@ -22,8 +22,8 @@ use lash_core::runtime::TurnInputAcceptanceReceipt;
 use lash_core::store::PhysicalTurn;
 use lash_core::{
     InputId, LiveReplayGapReason, LiveReplayOutcome, LiveReplaySubscribeOutcome,
-    LiveReplaySubscription, SessionCursor, SessionObservationEvent, SessionObservationEventPayload,
-    SessionRevision, TurnActivity, TurnEvent, TurnId,
+    LiveReplaySubscription, LlmCallRecord, SessionCursor, SessionObservationEvent,
+    SessionObservationEventPayload, SessionRevision, TokenUsage, TurnActivity, TurnEvent, TurnId,
 };
 use tokio::sync::mpsc;
 
@@ -677,17 +677,17 @@ async fn finish_settled(
         Subject::Input(receipt) => Some(receipt.clone()),
         Subject::Run(_) => None,
     };
-    let mut result = durable_report(ctx, &run, outcome, acceptance).await?;
     // The terminal is durable. Preserve the sealed calls this follower
     // actually observed beside their activities; unavailable history stays a
     // reported gap. Retain duplicates and contradictions for validation.
-    result.llm_calls = activities
+    let llm_calls = activities
         .iter()
         .filter_map(|activity| match &activity.event {
             TurnEvent::ModelCallRecorded { record } => Some(record.clone()),
             _ => None,
         })
         .collect();
+    let result = durable_report(ctx, &run, outcome, acceptance, llm_calls).await?;
     Ok(SendOutcome::Settled {
         run,
         output: Box::new(TurnOutput { result, activities }),
@@ -702,7 +702,27 @@ pub(super) async fn durable_report(
     run: &TurnId,
     outcome: TurnOutcome,
     acceptance: Option<TurnInputAcceptanceReceipt>,
+    llm_calls: Vec<LlmCallRecord>,
 ) -> Result<TurnReport> {
+    let usage = llm_calls
+        .iter()
+        .flat_map(|call| &call.attempts)
+        .filter_map(|attempt| attempt.usage.as_ref())
+        .try_fold(TokenUsage::default(), |total, usage| {
+            total.checked_add(&TokenUsage {
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                cache_read_input_tokens: usage.cache_read_input_tokens,
+                cache_write_input_tokens: usage.cache_write_input_tokens,
+                reasoning_output_tokens: usage.reasoning_output_tokens,
+            })
+        })
+        .map_err(|overflow| {
+            EmbedError::Runtime(lash_core::RuntimeError::new(
+                lash_core::RuntimeErrorCode::QueuedWork,
+                format!("turn report token usage overflows {}", overflow.counter()),
+            ))
+        })?;
     let state = ctx.session_snapshot().await?;
     let (tool_calls, omitted) =
         lash_core::runtime::durable::services::RuntimeTurnServices::recorded_tool_calls(
@@ -730,8 +750,8 @@ pub(super) async fn durable_report(
         state,
         outcome,
         assistant_output,
-        usage: Default::default(),
-        llm_calls: Vec::new(),
+        usage,
+        llm_calls,
         failure_evidence: Vec::new(),
         tool_calls,
         omitted,
